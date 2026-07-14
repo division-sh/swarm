@@ -12725,7 +12725,7 @@ agent_identity_model:
       status: not_supported_for_duplicate_agent_slugs
       rule: >
         bundle_hash and RuntimeContextManager BundleContext selection identify runtime bundle context, not an immutable
-        agent identity. Current agent.* reads/control, conversation.current_for_agent, CLI agent commands, dashboard
+        agent identity. Current agent.* reads/control, conversation.list, conversation.list_turns, conversation.get_turn, CLI agent commands, dashboard
         read models, delivery/session/timer owners, and replay subscriber selection do not promise disambiguation of the
         same authored agent_id across multiple live bundles.
     historical_agent_reference:
@@ -17596,6 +17596,14 @@ cli_specification:
             normalization: trim only; case-sensitive
             display_projection: full
             display_shortening_eligible: false
+          turn:
+            candidate_source: /v1/rpc conversation.list_turns
+            scope_mode: full_session_required
+            scope_rule: full session ID required for prefix resolution
+            normalization_mode: trim_case_sensitive
+            normalization: trim only; case-sensitive
+            display_projection: full
+            display_shortening_eligible: false
           fork:
             candidate_source: /v1/rpc conversation.fork_list
             scope_mode: unpromoted_full_only
@@ -17688,8 +17696,11 @@ cli_specification:
           forkchat_new_event: {command: swarm forkchat new, selector: 'flag:event-id', family: event, mode: full_only, safety: mutating}
           event_publish_source_event: {command: swarm event publish, selector: 'flag:source-event-id', family: event, mode: full_only, safety: mutating}
           conversation_view_session: {command: swarm conversation view, selector: 'arg:session-id', family: session, mode: full_only}
+          conversation_view_cursor: {command: swarm conversation view, selector: 'flag:cursor', family: none, mode: different_concept, scope_rule: opaque pagination cursor}
           conversation_turn_session: {command: swarm conversation turn, selector: 'arg:session-id', family: session, mode: full_only}
+          conversation_turn_turn: {command: swarm conversation turn, selector: 'arg:turn-id-or-prefix', family: turn, mode: resolver_scoped, scope_rule: full session ID required}
           forkchat_new_session: {command: swarm forkchat new, selector: 'arg:source-session-id', family: session, mode: full_only, safety: mutating}
+          forkchat_new_turn: {command: swarm forkchat new, selector: 'flag:turn-id', family: turn, mode: full_only, safety: mutating}
           forkchat_list_session: {command: swarm forkchat list, selector: 'flag:source-session-id', family: session, mode: full_only}
           logs_session: {command: swarm logs, selector: 'flag:session-id', family: session, mode: full_only}
           forkchat_view_fork: {command: swarm forkchat view, selector: 'arg:fork-id', family: fork, mode: split}
@@ -18296,8 +18307,8 @@ cli_specification:
             conversation_view:
               command: swarm conversation view
               classification: shared_output
-              fact_owner: /v1/rpc conversation.get
-              json_shape: conversation.get result object
+              fact_owner: /v1/rpc conversation.list_turns
+              json_shape: conversation.list_turns result object
               quiet_values:
               - session_id
             conversation_turn:
@@ -18306,7 +18317,7 @@ cli_specification:
               fact_owner: /v1/rpc conversation.get_turn
               json_shape: conversation.get_turn result object
               quiet_values:
-              - session_id, turn_index, and outcome/status summary
+              - session_id, full turn_id, and outcome/status summary
             bundle:
               command: swarm bundle
               classification: exception
@@ -21088,10 +21099,10 @@ cli_specification:
       group: observe_debug
       tier: should_have
       implementation_status: implemented
-      owner: /v1/rpc conversation.get
-      behavior: Read-only conversation detail CLI consumer. The CLI validates the required session_id locally, calls /v1/rpc conversation.get through the shared v1 API client, and renders server-owned ConversationDetail metadata and shallow Turn rows. Turn rows use the server-owned 1-based turn_index selector promoted by #877/#895.
+      owner: /v1/rpc conversation.list_turns
+      behavior: Read-only paginated conversation ledger consumer. It renders the closed author-safe turn projection newest first. Ordinal is display-only; full turn ID is the identity.
       output:
-        success_detail: Conversation header with session_id, agent_id, run_id, status, counts, started/ended timestamps, followed by a turn table with turn_index, turn_id, trigger_event_id, trigger_event_type, parse_ok, latency_ms, and error.
+        success_detail: Conversation header followed by TURN, '#', TIME, TRIGGER, ACTIVITY, TOKENS, DURATION, and OUTCOME columns, plus next_cursor when present.
         empty_turns: No turns recorded.
       exit_codes:
         success: 0
@@ -21102,37 +21113,30 @@ cli_specification:
         not_found_errors:
         - SESSION_NOT_FOUND
       proof_expectations:
-      - exact /v1/rpc conversation.get call with session_id param only
+      - exact /v1/rpc conversation.list_turns call with session_id and optional limit/cursor
       - missing/blank/invalid session id and missing explicit token for non-loopback API targets make zero API calls
-      - success output renders only ConversationDetail and shallow Turn fields returned by the server, including turn_index
+      - success output renders only ConversationTurnListPage facts; ordinal remains display-only
       - SESSION_NOT_FOUND, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, conversation.get_turn reconstruction, or forkchat usage
     conversation_turn:
-      command: swarm conversation turn <session-id> <turn-index>
+      command: swarm conversation turn <session-id> <turn-id-or-prefix>
       group: observe_debug
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc conversation.get_turn
-      behavior: Read-only deep turn drilldown CLI consumer. The CLI validates session_id and a 1-based integer turn_index locally, calls /v1/rpc conversation.get_turn through the shared v1 API client, omits include_logs to accept the API default of true, and renders only the server-owned ConversationTurnDetail. The CLI MUST NOT accept turn_id as an alternate selector and MUST NOT reconstruct the turn by joining conversation.get, runtime.logs, run.trace, or dashboard audit tables.
+      behavior: Read-only safe turn drilldown. It attempts exact full turn ID first; after TURN_NOT_FOUND only, it resolves an unambiguous prefix by exhaustively paging conversation.list_turns within the full session, then retries exact conversation.get_turn. It never joins logs or raw evidence.
       params:
       - name: session_id
         arg: <session-id>
         required: true
         api_param: session_id
-      - name: turn_index
-        arg: <turn-index>
+      - name: turn_id
+        arg: <turn-id-or-prefix>
         required: true
-        api_param: turn_index
-        validation: CLI validates integer range 1 through 1000000, matching the v1 handler bound.
+        api_param: turn_id
+        validation: OpaqueId; prefix resolution is read-only, session-scoped, exact-first, and exhaustively paged.
       output:
-        success_detail: Conversation/turn header with session_id, turn_index, turn_id, timing, parse_ok, dispatch metadata, advertised tool summary, runtime_log_entries count, raw turn-block summary, optional assistant_visible_output, and compact runtime log lines when returned by the API.
-        runtime_log_line: log_id=<id> ts=<full timestamp> level=<level> component=<component> [action=<details.action>] source=<source> [failure=<class-without-platform-prefix>/<detail>] [message=<message>]
-        runtime_log_projection: >
-          Embedded runtime_log_entries consume the same raw-retaining semantic projection owner as swarm logs for
-          action, MESSAGE disposition, canonical failure class/detail, and malformed failure evidence. The exact
-          redundant-message registry may omit only message=; component= and action= remain visible. Unknown or
-          near-match messages remain exact. A malformed top-level failure emits one warning with compact raw evidence,
-          fails closed with exit 3, and produces no successful human or JSON document.
+        success_detail: Conversation and display ordinal header, canonical full turn ID, timing, trigger/entity/task, token fact when known, outcome, ordered author-safe activity, and assistant-visible output when present.
       exit_codes:
         success: 0
         cli_validation: 2
@@ -21143,9 +21147,10 @@ cli_specification:
         - SESSION_NOT_FOUND
         - TURN_NOT_FOUND
       proof_expectations:
-      - exact /v1/rpc conversation.get_turn call with session_id and turn_index params only; include_logs is omitted so the API default remains authoritative
-      - missing/blank/invalid session id, invalid turn_index, turn_id-shaped selector attempts, and missing explicit token for non-loopback API targets make zero API calls
-      - success output renders only ConversationTurnDetail fields returned by the server; runtime logs are consumed from the API result, not independently queried
+      - exact-first /v1/rpc conversation.get_turn with session_id and turn_id; prefix fallback pages conversation.list_turns completely and retries one canonical full ID
+      - missing/blank/invalid identifiers and missing explicit token for non-loopback API targets make zero API calls
+      - exact, unique-prefix, no-match, ambiguity, repeated-cursor, and list-failure paths are fail-closed
+      - success output renders only ConversationTurnDetail; no raw blocks, payloads, capability telemetry, private reasoning, progress, or runtime logs
       - SESSION_NOT_FOUND, TURN_NOT_FOUND, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, runtime.logs, run.trace, or forkchat usage
     bundle:
@@ -21240,10 +21245,11 @@ cli_specification:
         - command: swarm forkchat new <source-session-id>
           owner_call: /v1/rpc conversation.fork
           optional_second_call: /v1/rpc conversation.fork_chat when --message is supplied
-          required_selector_rule: exactly one of --turn-index, --event-id, or --at
+          required_selector_rule: exactly one of --turn-id, --event-id, or --at
           params:
-          - flag: --turn-index <1-1000000>
-            api_param: fork_point.kind=turn, fork_point.turn_index
+          - flag: --turn-id <canonical-full-turn-id>
+            api_param: fork_point.kind=turn, fork_point.turn_id
+            behavior: Full-only opaque exact input; no prefix resolution, UUID-shape inference, or ordinal compatibility.
           - flag: --event-id <opaque-id>
             api_param: fork_point.kind=event, fork_point.event_id
           - flag: --at <RFC3339 timestamp>
@@ -21276,7 +21282,7 @@ cli_specification:
           - --idempotency-key <key>
           result_owner: ConversationForkDeleteResult
       validation:
-      - CLI validates required args, OpaqueId envelope, required selector exclusivity, --turn-index range, --at RFC3339 parsing, non-empty message/key/cursor values, and --limit range before opening an API request.
+      - CLI validates required args, OpaqueId envelope, required selector exclusivity, --turn-id nonempty opaque shape, --at RFC3339 parsing, non-empty message/key/cursor values, and --limit range before opening an API request.
       - Validation failures are no-call failures and exit with the standard CLI validation code.
       output:
         human: Renders server-owned fork lifecycle fields, fork point, turn summaries, sandbox/snapshot owners, next_cursor, and delete idempotency state.
@@ -21464,7 +21470,6 @@ cli_specification:
           consumers:
           - swarm logs snapshot
           - swarm logs --follow
-          - swarm conversation turn embedded runtime_log_entries
           exact_redundant_message_tuples:
           - component: eventbus
             action: published
@@ -21614,7 +21619,7 @@ cli_specification:
   blocker_state:
     '#748':
       state: stale_method_blocker
-      current_openrpc_reality: 'event.publish, event.replay, agent.replay, conversation.get_turn, runtime.subscribe_logs, and runtime.nuke are present in current OpenRPC/API.'
+      current_openrpc_reality: 'event.publish, event.replay, agent.replay, conversation.list_turns, conversation.get_turn, runtime.subscribe_logs, and runtime.nuke are present in current OpenRPC/API.'
       remaining_role: 'Track deprecations/ratification cleanup only if kept open; do not block those CLI commands solely on method existence.'
     '#749':
       state: cli_consumer_promoted
@@ -24289,10 +24294,6 @@ api_specification:
           ok:
             type: boolean
             description: Selected latest agent_turns.parse_ok; not a per-tool execution status.
-          result:
-            type: object
-            additionalProperties: true
-            description: Optional validated JSON object from the selected canonical tool_results entry.
       AgentDiagnosis:
         type: object
         additionalProperties: false
@@ -24597,52 +24598,24 @@ api_specification:
         type: object
         additionalProperties: false
         required:
-        - turn_index
         - turn_id
-        - trigger_event_id
-        - trigger_event_type
+        - ordinal
+        - completed_at
+        - duration_ms
+        - activity
         - parse_ok
-        - latency_ms
         properties:
-          turn_index:
-            type: integer
-            minimum: 1
           turn_id:
             $ref: '#/components/schemas/OpaqueId'
-          trigger_event_id:
-            $ref: '#/components/schemas/OpaqueId'
-          trigger_event_type:
-            type: string
-          request_payload:
-            type: object
-            additionalProperties: true
-          response_payload:
-            type: object
-            additionalProperties: true
-          tool_calls:
-            type: array
-            description: Sandbox-observed tool calls requested during this fork-local turn. Entries may include
-              snapshot-read evidence and requested side-effect tool results stubbed as fork-local facts; they are
-              not synthesized for unrequested tools and are not live runtime side effects.
-            items:
-              type: object
-              additionalProperties: true
-          turn_blocks:
-            type: array
-            items:
-              type: object
-              additionalProperties: true
-          parse_ok:
-            type: boolean
-          latency_ms:
+          ordinal:
+            type: integer
+            minimum: 1
+            description: Stable 1-based display position in canonical ascending order; never accepted as identity.
+          completed_at:
+            $ref: '#/components/schemas/Timestamp'
+          duration_ms:
             type: integer
             minimum: 0
-          failure:
-            $ref: '#/components/schemas/FailureEnvelope'
-      ConversationTurnDispatchMetadata:
-        type: object
-        additionalProperties: false
-        properties:
           trigger_event_id:
             $ref: '#/components/schemas/OpaqueId'
           trigger_event_type:
@@ -24651,143 +24624,81 @@ api_specification:
             $ref: '#/components/schemas/OpaqueId'
           task_id:
             type: string
-          run_id:
-            $ref: '#/components/schemas/OpaqueId'
-      ConversationTurnProviderMetadata:
-        type: object
-        additionalProperties: false
-        required:
-        - latency_ms
-        properties:
-          latency_ms:
-            type: integer
-            minimum: 0
-      ConversationDeepTurn:
-        type: object
-        additionalProperties: false
-        required:
-        - turn_index
-        - turn_id
-        - started_at
-        - completed_at
-        - duration_ms
-        - parse_ok
-        - dispatch_metadata
-        - advertised_tools
-        - runtime_log_entries
-        - provider_metadata
-        - full_prompt_context
-        - full_prompt_context_v2_reserved
-        - raw_llm_response
-        - raw_llm_response_v2_reserved
-        properties:
-          turn_index:
-            type: integer
-            minimum: 1
-          turn_id:
-            $ref: '#/components/schemas/OpaqueId'
-          scope:
-            type: string
-          started_at:
-            $ref: '#/components/schemas/Timestamp'
-          completed_at:
-            $ref: '#/components/schemas/Timestamp'
-          duration_ms:
-            type: integer
-            minimum: 0
+          activity:
+            type: array
+            items:
+              $ref: '#/components/schemas/ConversationActivity'
+          tokens:
+            $ref: '#/components/schemas/ConversationTokenUsage'
           outcome:
             type: string
           parse_ok:
             type: boolean
           failure:
             $ref: '#/components/schemas/FailureEnvelope'
+          assistant_visible_output:
+            type: string
           retry_count:
             type: integer
             minimum: 0
-          dispatch_metadata:
-            $ref: '#/components/schemas/ConversationTurnDispatchMetadata'
-          advertised_tools:
-            type: array
-            items:
-              type: string
-          mcp_tools_listed:
-            type: array
-            items:
-              type: string
-          mcp_tools_visible:
-            type: array
-            items:
-              type: string
-          reasoning_blocks:
-            type: array
-            items:
-              type: string
-          progress_updates:
-            type: array
-            items:
-              type: string
-          tool_calls:
-            type: array
-            items:
-              type: object
-              additionalProperties: true
-          tool_results:
-            type: array
-            items:
-              type: object
-              additionalProperties: true
-          emitted_events:
-            type: array
-            items:
-              type: string
-          runtime_log_entries:
-            type: array
-            items:
-              $ref: '#/components/schemas/LogEntry'
-          provider_metadata:
-            $ref: '#/components/schemas/ConversationTurnProviderMetadata'
-          request_payload:
-            type: object
-            additionalProperties: true
-          response_payload:
-            type: object
-            additionalProperties: true
-          full_prompt_context:
-            oneOf:
-            - type: object
-              additionalProperties: true
-            - type: 'null'
-          full_prompt_context_v2_reserved:
-            type: boolean
-            const: true
-          raw_llm_response:
-            oneOf:
-            - type: object
-              additionalProperties: true
-            - type: 'null'
-          raw_llm_response_v2_reserved:
-            type: boolean
-            const: true
-          assistant_visible_output:
+      ConversationActivity:
+        type: object
+        additionalProperties: false
+        required:
+        - kind
+        properties:
+          kind:
             type: string
+            enum:
+            - dispatch
+            - tool
+            - tool_result
+            - publish
+            - output
+            - failure
+          tool_name:
+            type: string
+          tool_use_id:
+            type: string
+          event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          event_type:
+            type: string
+          text:
+            type: string
+          ok:
+            type: boolean
+      ConversationTokenUsage:
+        type: object
+        additionalProperties: false
+        required:
+        - input
+        - output
+        - exactness
+        properties:
+          input:
+            type: integer
+            minimum: 0
+          output:
+            type: integer
+            minimum: 0
+          exactness:
+            type: string
+            enum:
+            - exact
+            - estimated
       ConversationTurnDetail:
         type: object
         additionalProperties: false
         required:
         - session
         - turn
-        - turn_blocks_raw
         properties:
           session:
             $ref: '#/components/schemas/ConversationSummary'
           turn:
-            $ref: '#/components/schemas/ConversationDeepTurn'
-          turn_blocks_raw:
-            type: array
-            items:
-              type: object
-              additionalProperties: true
-      ConversationDetail:
+            $ref: '#/components/schemas/Turn'
+      ConversationTurnListPage:
         type: object
         additionalProperties: false
         required:
@@ -24800,11 +24711,14 @@ api_specification:
             type: array
             items:
               $ref: '#/components/schemas/Turn'
+          next_cursor:
+            $ref: '#/components/schemas/Cursor'
       ConversationForkPointSelector:
-        description: "Selector for the source conversation fork point. Exactly one selector kind is accepted. For `turn`,\
-          \ turn_index is the canonical 1-based conversation order used by conversation.get_turn. For `event`, event_id must\
-          \ be the trigger_event_id for exactly one turn in the source session. For `time`, at resolves to the latest source\
-          \ turn with agent_turns.created_at <= at, using created_at ASC then turn_id ASC as the canonical order."
+        description: >
+          Selector for the source conversation fork point. Exactly one selector
+          kind is accepted. For turn, turn_id is an opaque canonical full ID and
+          is resolved by exact session plus turn lookup; prefixes and ordinals
+          are not accepted. Event and time use the same coordinate owner.
         type: object
         additionalProperties: false
         required:
@@ -24816,9 +24730,8 @@ api_specification:
             - turn
             - event
             - time
-          turn_index:
-            type: integer
-            minimum: 1
+          turn_id:
+            $ref: '#/components/schemas/OpaqueId'
           event_id:
             $ref: '#/components/schemas/OpaqueId'
           at:
@@ -26019,13 +25932,12 @@ api_specification:
         additionalProperties: false
         required:
         - session_id
-        - turn_index
+        - turn_id
         properties:
           session_id:
             $ref: '#/components/schemas/OpaqueId'
-          turn_index:
-            type: integer
-            minimum: 1
+          turn_id:
+            $ref: '#/components/schemas/OpaqueId'
       FORK_NOT_FOUND:
         type: object
         additionalProperties: false
@@ -27951,9 +27863,13 @@ api_specification:
             next_cursor:
               $ref: '#/components/schemas/Cursor'
       errors: []
-    conversation.get:
+    conversation.list_turns:
       tier: should_have
-      description: "Read one conversation in full \u2014 session metadata plus all turns and turn blocks."
+      description: >
+        List the closed author-safe turn projection for one conversation. Pages
+        are newest first, bounded to 500 rows, and use an opaque cursor over the
+        canonical persisted created_at plus turn_id order. Ordinal is a stable
+        display projection and is never an input identity.
       scope:
         required:
         - read:conversations
@@ -27962,39 +27878,43 @@ api_specification:
         required: true
         schema:
           $ref: '#/components/schemas/OpaqueId'
+      - name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 50
+      - name: cursor
+        required: false
+        schema:
+          $ref: '#/components/schemas/Cursor'
       result:
         name: result
         required: true
         schema:
-          $ref: '#/components/schemas/ConversationDetail'
+          $ref: '#/components/schemas/ConversationTurnListPage'
       errors:
       - SESSION_NOT_FOUND
     conversation.get_turn:
       tier: should_have
-      description: "Read one deep single-turn diagnosis record for an existing conversation session.\nThis method composes\
-        \ the canonical conversation/session/turn owner with the canonical persisted runtime log owner; clients MUST NOT\
-        \ reconstruct this shape by independently joining conversation.get, runtime.logs, run.trace, or dashboard audit tables.\n"
+      description: >
+        Read one closed author-safe turn projection by exact canonical full turn
+        ID within a conversation. Raw provider payloads, private reasoning,
+        unmarked progress, tool payloads, capability telemetry, and automatic
+        runtime-log joins are not part of this contract.
       scope:
         required:
         - read:conversations
-        - read:runtime
       params:
       - name: session_id
         required: true
         schema:
           $ref: '#/components/schemas/OpaqueId'
-      - name: turn_index
+      - name: turn_id
         required: true
-        description: "1-based position in the session's canonical turn order, matching the `conversation.get` turns array\
-          \ order (`agent_turns.created_at ASC, turn_id ASC`)."
         schema:
-          type: integer
-          minimum: 1
-      - name: include_logs
-        required: false
-        schema:
-          type: boolean
-          default: true
+          $ref: '#/components/schemas/OpaqueId'
       result:
         name: result
         required: true
@@ -28003,28 +27923,6 @@ api_specification:
       errors:
       - SESSION_NOT_FOUND
       - TURN_NOT_FOUND
-    conversation.current_for_agent:
-      tier: should_have
-      description: "Read the agent's current (most-recent active) session. Replaces the\nownership-violating agent.get_session\
-        \ that earlier drafts proposed \u2014\nagent.* doesn't own sessions; conversation.* does.\n"
-      scope:
-        required:
-        - read:conversations
-      params:
-      - name: agent_id
-        required: true
-        schema:
-          $ref: '#/components/schemas/OpaqueId'
-      result:
-        name: result
-        required: true
-        description: Returns null if the agent has no active session.
-        schema:
-          oneOf:
-          - $ref: '#/components/schemas/ConversationDetail'
-          - type: 'null'
-      errors:
-      - AGENT_NOT_FOUND
     conversation.fork:
       tier: should_have
       description: |
@@ -28588,7 +28486,7 @@ api_specification:
       - "POST /api/agents/{id}/actions/restart \u2192 agent.restart"
       - "POST /api/agents/{id}/actions/replay \u2192 agent.replay_backlog"
       - "GET /api/conversations \u2192 conversation.list"
-      - "GET /api/conversations/{sessionID} \u2192 conversation.get"
+      - "GET /api/conversations/{sessionID} \u2192 conversation.list_turns"
       - "GET /api/events \u2192 event.list"
       - "GET /api/events/{id} \u2192 event.get"
       - "GET /api/events/flow \u2192 event.subscribe"

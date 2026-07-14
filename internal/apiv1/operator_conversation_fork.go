@@ -49,7 +49,7 @@ type conversationForkDeleteResult struct {
 type conversationForkErrorDetails struct {
 	SessionID string
 	ForkID    string
-	TurnIndex int
+	TurnID    string
 	EventID   string
 }
 
@@ -134,7 +134,7 @@ func executeConversationForkCreate(ctx context.Context, req Request, opts Operat
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, conversationForkError(err, conversationForkErrorDetails{
 				SessionID: sourceSessionID,
-				TurnIndex: forkPoint.TurnIndex,
+				TurnID:    forkPoint.TurnID,
 				EventID:   forkPoint.EventID,
 			})
 		}
@@ -150,7 +150,7 @@ func executeConversationForkCreate(ctx context.Context, req Request, opts Operat
 	if err != nil {
 		return nil, conversationForkError(err, conversationForkErrorDetails{
 			SessionID: sourceSessionID,
-			TurnIndex: forkPoint.TurnIndex,
+			TurnID:    forkPoint.TurnID,
 			EventID:   forkPoint.EventID,
 		})
 	}
@@ -369,7 +369,7 @@ func conversationForkPointSelectorFromParams(params map[string]any) (store.Conve
 	}
 	for key := range obj {
 		switch key {
-		case "kind", "turn_index", "event_id", "at":
+		case "kind", "turn_id", "event_id", "at":
 		default:
 			return store.ConversationForkPointSelector{}, NewInvalidParamsError(map[string]any{"field": "fork_point." + key, "reason": "unknown field"})
 		}
@@ -379,12 +379,10 @@ func conversationForkPointSelectorFromParams(params map[string]any) (store.Conve
 		return store.ConversationForkPointSelector{}, err
 	}
 	selector := store.ConversationForkPointSelector{Kind: strings.ToLower(strings.TrimSpace(kind))}
-	if rawTurnIndex, ok := obj["turn_index"]; ok && !isEmptyParam(rawTurnIndex) {
-		turnIndex, ok := integerParam(rawTurnIndex)
-		if !ok || turnIndex < 1 {
-			return store.ConversationForkPointSelector{}, NewInvalidParamsError(map[string]any{"field": "fork_point.turn_index", "reason": "must be an integer from 1 to 1000000"})
-		}
-		selector.TurnIndex = turnIndex
+	if turnID, present, err := optionalStringParam(obj, "turn_id"); err != nil {
+		return store.ConversationForkPointSelector{}, err
+	} else if present {
+		selector.TurnID = turnID
 	}
 	if eventID, present, err := optionalStringParam(obj, "event_id"); err != nil {
 		return store.ConversationForkPointSelector{}, err
@@ -421,8 +419,8 @@ func conversationForkError(err error, details conversationForkErrorDetails) erro
 	}
 	if errors.Is(err, store.ErrTurnNotFound) {
 		errorDetails := map[string]any{"session_id": details.SessionID}
-		if details.TurnIndex > 0 {
-			errorDetails["turn_index"] = details.TurnIndex
+		if strings.TrimSpace(details.TurnID) != "" {
+			errorDetails["turn_id"] = details.TurnID
 		}
 		return NewApplicationError(TurnNotFoundCode, false, errorDetails)
 	}

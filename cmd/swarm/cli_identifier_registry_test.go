@@ -298,8 +298,8 @@ func TestCLIIdentifierResolverCallsitesUseRegisteredReadRows(t *testing.T) {
 			return true
 		})
 	}
-	if count != 6 {
-		t.Fatalf("literal production resolver callsites=%d, want 6", count)
+	if count != 7 {
+		t.Fatalf("literal production resolver callsites=%d, want 7", count)
 	}
 }
 
@@ -317,7 +317,7 @@ func TestCLIIdentifierDisplayColumnsUseFamilyAwareOwner(t *testing.T) {
 		"conversations.go\x00SESSION_ID":   cliIdentifierFamilySession,
 		"conversations.go\x00AGENT":        cliIdentifierFamilyAgent,
 		"conversations.go\x00RUN":          cliIdentifierFamilyRun,
-		"conversations.go\x00EVENT_ID":     cliIdentifierFamilyEvent,
+		"conversations.go\x00TURN":         cliIdentifierFamilyTurn,
 		"diagnostics.go\x00RUN ID":         cliIdentifierFamilyRun,
 		"diagnostics.go\x00ID":             cliIdentifierFamilyEvent,
 		"diagnostics.go\x00SUBSCRIBER":     cliIdentifierFamilySubscriber,
@@ -977,7 +977,6 @@ func cliIdentifierStructuralRowCovers(command, selector string) bool {
 var cliIdentifierNonResourcePositionals = map[string]bool{
 	cliIdentifierRegistryKey("swarm agent directive", "arg:message"):                    true,
 	cliIdentifierRegistryKey("swarm bundle register", "arg:registration-envelope-yaml"): true,
-	cliIdentifierRegistryKey("swarm conversation turn", "arg:turn-index"):               true,
 	cliIdentifierRegistryKey("swarm event publish", "arg:event-name"):                   true,
 	cliIdentifierRegistryKey("swarm help", "arg:command"):                               true,
 	cliIdentifierRegistryKey("swarm incidents", "arg:filters"):                          true,

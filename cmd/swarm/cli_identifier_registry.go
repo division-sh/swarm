@@ -15,6 +15,7 @@ const (
 	cliIdentifierFamilyEntity       cliIdentifierFamily = "entity"
 	cliIdentifierFamilyEvent        cliIdentifierFamily = "event"
 	cliIdentifierFamilySession      cliIdentifierFamily = "session"
+	cliIdentifierFamilyTurn         cliIdentifierFamily = "turn"
 	cliIdentifierFamilyFork         cliIdentifierFamily = "fork"
 	cliIdentifierFamilyMailbox      cliIdentifierFamily = "mailbox"
 	cliIdentifierFamilyFlowInstance cliIdentifierFamily = "flow_instance"
@@ -50,6 +51,7 @@ const (
 	cliIdentifierSourceEntityList   cliIdentifierCandidateSource = "/v1/rpc entity.list"
 	cliIdentifierSourceEventList    cliIdentifierCandidateSource = "/v1/rpc event.list"
 	cliIdentifierSourceConversation cliIdentifierCandidateSource = "/v1/rpc conversation.list"
+	cliIdentifierSourceTurnList     cliIdentifierCandidateSource = "/v1/rpc conversation.list_turns"
 	cliIdentifierSourceForkList     cliIdentifierCandidateSource = "/v1/rpc conversation.fork_list"
 	cliIdentifierSourceMailboxList  cliIdentifierCandidateSource = "/v1/rpc mailbox.list"
 	cliIdentifierSourceUnpromoted   cliIdentifierCandidateSource = "unpromoted"
@@ -60,13 +62,14 @@ const (
 type cliIdentifierScopeMode string
 
 const (
-	cliIdentifierScopeGlobalBounded   cliIdentifierScopeMode = "global_bounded"
-	cliIdentifierScopeBoundedCatalog  cliIdentifierScopeMode = "bounded_catalog"
-	cliIdentifierScopeUnboundedFull   cliIdentifierScopeMode = "unbounded_full_only"
-	cliIdentifierScopeFullRunRequired cliIdentifierScopeMode = "full_run_required"
-	cliIdentifierScopeUnpromoted      cliIdentifierScopeMode = "unpromoted_full_only"
-	cliIdentifierScopeLocalBounded    cliIdentifierScopeMode = "local_bounded"
-	cliIdentifierScopePolymorphicFull cliIdentifierScopeMode = "polymorphic_full_only"
+	cliIdentifierScopeGlobalBounded       cliIdentifierScopeMode = "global_bounded"
+	cliIdentifierScopeBoundedCatalog      cliIdentifierScopeMode = "bounded_catalog"
+	cliIdentifierScopeUnboundedFull       cliIdentifierScopeMode = "unbounded_full_only"
+	cliIdentifierScopeFullRunRequired     cliIdentifierScopeMode = "full_run_required"
+	cliIdentifierScopeFullSessionRequired cliIdentifierScopeMode = "full_session_required"
+	cliIdentifierScopeUnpromoted          cliIdentifierScopeMode = "unpromoted_full_only"
+	cliIdentifierScopeLocalBounded        cliIdentifierScopeMode = "local_bounded"
+	cliIdentifierScopePolymorphicFull     cliIdentifierScopeMode = "polymorphic_full_only"
 )
 
 type cliIdentifierNormalizationMode string
@@ -151,6 +154,15 @@ var cliIdentifierFamilyRegistry = map[cliIdentifierFamily]cliIdentifierFamilyPol
 		CandidateSource:   cliIdentifierSourceConversation,
 		ScopeMode:         cliIdentifierScopeUnpromoted,
 		ScopeRule:         "global boundedness not promoted; full ID",
+		NormalizationMode: cliIdentifierNormalizeCaseSensitive,
+		NormalizationRule: "trim only; case-sensitive",
+		DisplayProjection: cliIdentifierDisplayFull,
+	},
+	cliIdentifierFamilyTurn: {
+		Family:            cliIdentifierFamilyTurn,
+		CandidateSource:   cliIdentifierSourceTurnList,
+		ScopeMode:         cliIdentifierScopeFullSessionRequired,
+		ScopeRule:         "full session ID required for prefix resolution",
 		NormalizationMode: cliIdentifierNormalizeCaseSensitive,
 		NormalizationRule: "trim only; case-sensitive",
 		DisplayProjection: cliIdentifierDisplayFull,
@@ -261,8 +273,11 @@ var cliIdentifierInputRegistry = []cliIdentifierInputRegistration{
 	{Command: "swarm event publish", Selector: "flag:source-event-id", Family: cliIdentifierFamilyEvent, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 
 	{Command: "swarm conversation view", Selector: "arg:session-id", Family: cliIdentifierFamilySession, Mode: cliIdentifierModeFullOnly},
+	{Command: "swarm conversation view", Selector: "flag:cursor", Family: cliIdentifierFamilyNone, Mode: cliIdentifierModeDifferent, ScopeRule: "opaque pagination cursor"},
 	{Command: "swarm conversation turn", Selector: "arg:session-id", Family: cliIdentifierFamilySession, Mode: cliIdentifierModeFullOnly},
+	{Command: "swarm conversation turn", Selector: "arg:turn-id-or-prefix", Family: cliIdentifierFamilyTurn, Mode: cliIdentifierModeResolverScoped, ScopeRule: "full session ID required"},
 	{Command: "swarm forkchat new", Selector: "arg:source-session-id", Family: cliIdentifierFamilySession, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
+	{Command: "swarm forkchat new", Selector: "flag:turn-id", Family: cliIdentifierFamilyTurn, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm forkchat list", Selector: "flag:source-session-id", Family: cliIdentifierFamilySession, Mode: cliIdentifierModeFullOnly},
 	{Command: "swarm logs", Selector: "flag:session-id", Family: cliIdentifierFamilySession, Mode: cliIdentifierModeFullOnly},
 
@@ -325,6 +340,8 @@ func expectedCLIIdentifierFamilyPolicyModes(family cliIdentifierFamily) (cliIden
 		return cliIdentifierSourceEventList, cliIdentifierScopeUnboundedFull, cliIdentifierNormalizeCaseSensitive, true
 	case cliIdentifierFamilySession:
 		return cliIdentifierSourceConversation, cliIdentifierScopeUnpromoted, cliIdentifierNormalizeCaseSensitive, true
+	case cliIdentifierFamilyTurn:
+		return cliIdentifierSourceTurnList, cliIdentifierScopeFullSessionRequired, cliIdentifierNormalizeCaseSensitive, true
 	case cliIdentifierFamilyFork:
 		return cliIdentifierSourceForkList, cliIdentifierScopeUnpromoted, cliIdentifierNormalizeCaseSensitive, true
 	case cliIdentifierFamilyMailbox:
@@ -405,7 +422,7 @@ func validateCLIIdentifierRegistry() error {
 				return fmt.Errorf("bounded resolver input %s %s uses family scope %s", row.Command, row.Selector, policy.ScopeMode)
 			}
 		case cliIdentifierModeResolverScoped:
-			if policy.ScopeMode != cliIdentifierScopeFullRunRequired {
+			if policy.ScopeMode != cliIdentifierScopeFullRunRequired && policy.ScopeMode != cliIdentifierScopeFullSessionRequired {
 				return fmt.Errorf("scoped resolver input %s %s uses family scope %s", row.Command, row.Selector, policy.ScopeMode)
 			}
 		case cliIdentifierModeFullOnly, cliIdentifierModeSplit:

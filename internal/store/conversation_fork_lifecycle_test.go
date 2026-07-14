@@ -24,7 +24,7 @@ func TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete(t *test
 
 	created, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
-		ForkPoint:       ConversationForkPointSelector{Kind: "turn", TurnIndex: 1},
+		ForkPoint:       ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
 		CreatedBy:       "actor-token",
 		Now:             now,
 	})
@@ -160,7 +160,7 @@ func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testi
 
 	_, err = s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
-		ForkPoint:       ConversationForkPointSelector{Kind: "turn", TurnIndex: 1, EventID: source.event1ID},
+		ForkPoint:       ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID, EventID: source.event1ID},
 		CreatedBy:       "actor-token",
 		Now:             now,
 	})
@@ -237,7 +237,7 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 
 	fork, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
-		ForkPoint:       ConversationForkPointSelector{Kind: "turn", TurnIndex: 1},
+		ForkPoint:       ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
 		CreatedBy:       "actor-token",
 		Now:             now,
 	})
@@ -416,7 +416,7 @@ func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T
 	source := seedConversationForkSource(t, db, now)
 	fork, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
-		ForkPoint:       ConversationForkPointSelector{Kind: "turn", TurnIndex: 1},
+		ForkPoint:       ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
 		CreatedBy:       "actor-token",
 		Now:             now,
 	})

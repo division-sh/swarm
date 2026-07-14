@@ -50,7 +50,7 @@ func TestAgentDiagnoseUsesAgentDiagnoseAndRendersOwnedFields(t *testing.T) {
 		"watchdog     no output, session execution, session produced no output, warning emitted",
 		"observed     2026-05-18T03:02:00Z",
 		"active       turn turn-1, task task-1, entity entity-1",
-		`latest tool  read_file on turn turn-1, ok true, use toolu-1, result {"summary":"ok"}`,
+		`latest tool  read_file on turn turn-1, ok true, use toolu-1`,
 		"pending deliveries",
 		"platform.agent_directive (event-1), queued 2026-05-18T03:01:00Z, 1 attempt",
 	} {
@@ -324,16 +324,16 @@ func TestAgentDiagnoseFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 			wantStderr: "malformed agent.diagnose result: runtime_state.watchdog.last_output_at is required for healthy_long_running state",
 		},
 		{
-			name: "malformed last tool result",
+			name: "malformed last tool name",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
 				result := validAgentDiagnosisResult()
-				result["last_tool_outcome"] = map[string]any{"turn_id": "turn-1", "tool_name": "read_file", "ok": true, "result": "not-object"}
+				result["last_tool_outcome"] = map[string]any{"turn_id": "turn-1", "ok": true}
 				writeJSONRPCResult(t, w, req.ID, result)
 			},
 			wantCode:   cliExitRuntime,
-			wantStderr: "malformed agent.diagnose result: last_tool_outcome.result must be a JSON object",
+			wantStderr: "malformed agent.diagnose result: last_tool_outcome.tool_name is required",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -378,7 +378,7 @@ func validAgentDiagnosisResult() map[string]any {
 			},
 		},
 		"active":            map[string]any{"turn_id": "turn-1", "task_id": "task-1", "entity_id": "entity-1"},
-		"last_tool_outcome": map[string]any{"turn_id": "turn-1", "tool_name": "read_file", "tool_use_id": "toolu-1", "ok": true, "result": map[string]any{"summary": "ok"}},
+		"last_tool_outcome": map[string]any{"turn_id": "turn-1", "tool_name": "read_file", "tool_use_id": "toolu-1", "ok": true},
 	}
 }
 

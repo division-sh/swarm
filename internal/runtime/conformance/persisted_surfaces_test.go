@@ -116,9 +116,9 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 		SessionID:   sessionID,
 		ScopeKey:    "global",
 		TurnBlocks: []runtimellm.TurnBlock{
-			{Kind: "dispatch", Title: "task.run"},
+			{Kind: "dispatch", Title: "task.run", Data: json.RawMessage(`{"trigger_event_id":"event-1","trigger_event_type":"task.run"}`)},
 			{Kind: "tool_use", ToolName: "schedule", Input: json.RawMessage(`{"delay_seconds":1209600}`), Data: json.RawMessage(`{"tool_use_id":"toolu_1"}`)},
-			{Kind: "tool_result", Output: json.RawMessage(`{"status":"scheduled"}`), Data: json.RawMessage(`{"tool_use_id":"toolu_1"}`)},
+			{Kind: "tool_result", ToolName: "schedule", Output: json.RawMessage(`{"status":"scheduled"}`), Data: json.RawMessage(`{"tool_use_id":"toolu_1"}`)},
 			{Kind: "assistant_text", Text: "Parking for manual review."},
 			{Kind: "outcome", Text: "14-day review scheduled."},
 		},
@@ -145,20 +145,26 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 		t.Fatalf("conversation turns = %d, want 1", len(item.Turns))
 	}
 	turn := item.Turns[0]
-	if got := countTurnSummaryBlocks(turn.TurnBlocks); got != 1 {
-		t.Fatalf("turn_summary block count = %d, want 1 in %#v", got, turn.TurnBlocks)
-	}
 	if turn.AssistantVisibleOutput != "Parking for manual review." {
 		t.Fatalf("assistant_visible_output = %q, want %q", turn.AssistantVisibleOutput, "Parking for manual review.")
 	}
 	if turn.Outcome != "14-day review scheduled." {
 		t.Fatalf("outcome = %q, want %q", turn.Outcome, "14-day review scheduled.")
 	}
-	if len(turn.ToolResults) != 1 {
-		t.Fatalf("tool_results = %#v, want 1 canonical summary tool result", turn.ToolResults)
+	if len(turn.Activity) != 4 {
+		t.Fatalf("public activity = %#v, want dispatch/tool/tool_result/output", turn.Activity)
 	}
-	if strings.TrimSpace(turn.ToolResults[0].ToolName) != "schedule" {
-		t.Fatalf("tool_result.tool_name = %#v, want schedule", turn.ToolResults[0].ToolName)
+	if turn.Activity[2].Kind != "tool_result" || strings.TrimSpace(turn.Activity[2].ToolName) != "schedule" || turn.Activity[2].ToolUseID != "toolu_1" {
+		t.Fatalf("public tool result activity = %#v", turn.Activity[2])
+	}
+	raw, err := json.Marshal(turn)
+	if err != nil {
+		t.Fatalf("marshal public turn: %v", err)
+	}
+	for _, forbidden := range []string{"delay_seconds", `"scheduled"`, "stale fallback text", "request_payload", "response_payload", "turn_blocks"} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("public turn leaked %q: %s", forbidden, raw)
+		}
 	}
 }
 
@@ -215,11 +221,11 @@ func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *
 	if !ok {
 		t.Fatalf("conversation %s not found", sessionID)
 	}
-	if item.RuntimeState.Watchdog == nil {
+	if item.Conversation.Metadata.Watchdog == nil {
 		t.Fatal("expected runtime_state.watchdog to round-trip")
 	}
-	if item.RuntimeState.Watchdog.State != "no_output" || item.RuntimeState.Watchdog.Action != "session_no_output" {
-		t.Fatalf("unexpected runtime_state.watchdog: %+v", item.RuntimeState.Watchdog)
+	if item.Conversation.Metadata.Watchdog.State != "no_output" || item.Conversation.Metadata.Watchdog.Action != "session_no_output" {
+		t.Fatalf("unexpected runtime_state.watchdog: %+v", item.Conversation.Metadata.Watchdog)
 	}
 	items, err := reader.List(ctx, 10)
 	if err != nil {
@@ -688,8 +694,15 @@ func TestTaskConversationReader_HidesLegacyTaskRowsWithoutCanonicalAudit(t *test
 	if !ok {
 		t.Fatalf("canonical conversation %s not found", sessionID)
 	}
-	if len(item.Messages) != 1 || item.Messages[0].Content != "canonical task" || item.TurnCount != 2 {
+	if item.Conversation.Summary != "canonical task" || item.Conversation.TurnCount != 2 || len(item.Turns) != 0 {
 		t.Fatalf("unexpected canonical detail: %+v", item)
+	}
+	raw, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("marshal canonical detail: %v", err)
+	}
+	if strings.Contains(string(raw), `"messages"`) {
+		t.Fatalf("canonical detail exposed raw conversation transcript: %s", raw)
 	}
 }
 
@@ -1913,7 +1926,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	}
 }
 
-func TestCanonicalRuntimeLogTurnBlockSurface_RoundTripsThroughConversationReader(t *testing.T) {
+func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProjection(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
@@ -1975,20 +1988,18 @@ func TestCanonicalRuntimeLogTurnBlockSurface_RoundTripsThroughConversationReader
 	if len(item.Turns) != 1 {
 		t.Fatalf("conversation turns = %d, want 1", len(item.Turns))
 	}
-	blocks := item.Turns[0].TurnBlocks
-	if len(blocks) != 1 || blocks[0].Kind != "runtime_log" {
-		t.Fatalf("runtime_log turn blocks = %#v", blocks)
+	turn := item.Turns[0]
+	if len(turn.Activity) != 0 {
+		t.Fatalf("public activity exposed runtime log block: %#v", turn.Activity)
 	}
-	var data map[string]any
-	if err := json.Unmarshal(blocks[0].Data, &data); err != nil {
-		t.Fatalf("decode runtime_log turn block data: %v", err)
+	raw, err := json.Marshal(turn)
+	if err != nil {
+		t.Fatalf("marshal public turn: %v", err)
 	}
-	if readString(data["log_level"]) != "warn" || readString(data["message"]) != "Tool execution was denied for save_entity_field" {
-		t.Fatalf("runtime_log turn block data = %#v", data)
-	}
-	details, _ := data["details"].(map[string]any)
-	if readString(details["component"]) != "tool-executor" || readString(details["action"]) != "tool_execution_denied" {
-		t.Fatalf("runtime_log turn block details = %#v", details)
+	for _, forbidden := range []string{"runtime_log", "tool-executor", "tool_execution_denied", "save_entity_field"} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("public turn leaked private runtime evidence %q: %s", forbidden, raw)
+		}
 	}
 }
 
@@ -2223,16 +2234,6 @@ func seedConformanceRunningAgent(t *testing.T, ctx context.Context, pg *store.Po
 		AgentID:      result.AgentID,
 		Generation:   result.Generation,
 	}
-}
-
-func countTurnSummaryBlocks(blocks []dashboardserver.ConversationTurnBlock) int {
-	count := 0
-	for _, block := range blocks {
-		if strings.TrimSpace(block.Kind) == "turn_summary" {
-			count++
-		}
-	}
-	return count
 }
 
 func trackedMutationStateMatchesEntityState(db *sql.DB, runID, entityID string) error {

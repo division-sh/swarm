@@ -92,268 +92,85 @@ func TestConversationsListEmptyResultOmitsUnsetParams(t *testing.T) {
 	}
 }
 
-func TestConversationViewUsesConversationGetAndRendersTurns(t *testing.T) {
-	setCLIAPITestToken(t, "test-token")
-	var captured jsonRPCRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-		writeJSONRPCResult(t, w, captured.ID, validConversationDetail("sess-1"))
-	}))
-	defer server.Close()
-
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"conversation", "view", "sess-1"}, &stdout, &stderr, testRootCommandOptions(server))
-	if code != 0 {
-		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
-	}
-	if captured.Method != conversationGetMethod {
-		t.Fatalf("method = %q, want %s", captured.Method, conversationGetMethod)
-	}
-	if !reflect.DeepEqual(captured.Params, map[string]any{"session_id": "sess-1"}) {
-		t.Fatalf("params = %#v", captured.Params)
-	}
-	for _, want := range []string{
-		"Conversation sess-1",
-		"agent_id=agent-1 run_id=run-1 status=active turns=1 messages=2",
-		"TURN  TURN_ID",
-		"1     turn-1",
-		"task.started  true      150",
-	} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
-		}
-	}
-	if strings.TrimSpace(stderr.String()) != "" {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
-	}
-}
-
-func TestConversationTurnUsesConversationGetTurnAndRendersDeepTurn(t *testing.T) {
-	setCLIAPITestToken(t, "test-token")
-	var captured jsonRPCRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-		writeJSONRPCResult(t, w, captured.ID, validConversationTurnDetail("sess-1", 2))
-	}))
-	defer server.Close()
-
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"conversation", "turn", "sess-1", "2"}, &stdout, &stderr, testRootCommandOptions(server))
-	if code != 0 {
-		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
-	}
-	if captured.Method != conversationGetTurnMethod {
-		t.Fatalf("method = %q, want %s", captured.Method, conversationGetTurnMethod)
-	}
-	wantParams := map[string]any{"session_id": "sess-1", "turn_index": float64(2)}
-	if !reflect.DeepEqual(captured.Params, wantParams) {
-		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
-	}
-	for _, want := range []string{
-		"Conversation sess-1 turn 2",
-		"turn_id=turn-2",
-		"dispatch.trigger_event_id=event-2 dispatch.trigger_event_type=task.completed",
-		"advertised_tools=emit_done,read_state runtime_log_entries=1",
-		"assistant_visible_output=done",
-		"log_id=log-1",
-	} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
-		}
-	}
-	if strings.TrimSpace(stderr.String()) != "" {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
-	}
-}
-
-func TestConversationTurnRuntimeLogProjection(t *testing.T) {
-	_, failureValue := runtimeLogTestFailure(t)
-
+func TestConversationTurnIdentifierResolutionUsesCanonicalSessionScopedPages(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		configure func(map[string]any)
-		want      []string
-		doNotWant []string
+		name        string
+		input       string
+		wantCode    int
+		wantMethods string
+		wantStderr  string
 	}{
-		{
-			name: "exact redundant message keeps action visible",
-			configure: func(log map[string]any) {
-				log["component"] = "eventbus"
-				log["message"] = "Event was published to the event bus"
-				log["details"] = map[string]any{"action": "published"}
-			},
-			want:      []string{"component=eventbus action=published source=runtime"},
-			doNotWant: []string{"message=Event was published to the event bus"},
-		},
-		{
-			name: "near match remains visible",
-			configure: func(log map[string]any) {
-				log["component"] = "eventbus"
-				log["message"] = "Event was published to the event bus."
-				log["details"] = map[string]any{"action": "published"}
-			},
-			want: []string{"component=eventbus action=published source=runtime", "message=Event was published to the event bus."},
-		},
-		{
-			name: "valid failure uses canonical class and detail",
-			configure: func(log map[string]any) {
-				log["component"] = "connector"
-				log["message"] = "Connector request failed"
-				log["failure"] = failureValue
-				log["details"] = map[string]any{"action": "request_failed", "failure": failureValue}
-			},
-			want: []string{"component=connector action=request_failed source=runtime failure=connector_failure/waiting message=Connector request failed"},
-		},
+		{name: "exact", input: "turn-alpha", wantCode: cliExitOK, wantMethods: "conversation.get_turn"},
+		{name: "unique prefix across pages", input: "turn-al", wantCode: cliExitOK, wantMethods: "conversation.get_turn,conversation.list_turns,conversation.list_turns,conversation.get_turn"},
+		{name: "no match", input: "turn-no", wantCode: cliExitValidation, wantMethods: "conversation.get_turn,conversation.list_turns", wantStderr: `no turn ID matches "turn-no"`},
+		{name: "ambiguous", input: "turn-al", wantCode: cliExitValidation, wantMethods: "conversation.get_turn,conversation.list_turns", wantStderr: `turn ID prefix "turn-al" is ambiguous`},
+		{name: "repeated cursor", input: "turn-al", wantCode: cliExitRuntime, wantMethods: "conversation.get_turn,conversation.list_turns,conversation.list_turns", wantStderr: `repeated next_cursor "same-page"`},
+		{name: "list failure", input: "turn-al", wantCode: cliExitRuntime, wantMethods: "conversation.get_turn,conversation.list_turns", wantStderr: "RUNTIME_UNAVAILABLE"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setCLIAPITestToken(t, "test-token")
+			methods := []string{}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				result := validConversationTurnDetail("sess-1", 2)
-				turn := result["turn"].(map[string]any)
-				log := turn["runtime_log_entries"].([]map[string]any)[0]
-				tc.configure(log)
-				writeJSONRPCResult(t, w, req.ID, result)
+				var request jsonRPCRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				methods = append(methods, request.Method)
+				switch request.Method {
+				case conversationGetTurnMethod:
+					turnID, _ := request.Params["turn_id"].(string)
+					if turnID != "turn-alpha" {
+						writeIdentifierRPCError(t, w, request.ID, "TURN_NOT_FOUND")
+						return
+					}
+					result := validConversationTurnDetail("sess-1", 1)
+					result["turn"].(map[string]any)["turn_id"] = turnID
+					writeJSONRPCResult(t, w, request.ID, result)
+				case conversationListTurnsMethod:
+					if request.Params["session_id"] != "sess-1" || request.Params["limit"] != float64(500) {
+						t.Fatalf("conversation.list_turns params = %#v", request.Params)
+					}
+					page := map[string]any{"conversation": validConversationSummary("sess-1"), "turns": []map[string]any{}}
+					switch tc.name {
+					case "unique prefix across pages":
+						if request.Params["cursor"] == nil {
+							page["turns"] = []map[string]any{validConversationTurn(2, "turn-beta", "event-2", "task.progress")}
+							page["next_cursor"] = "page-2"
+						} else {
+							page["turns"] = []map[string]any{validConversationTurn(1, "turn-alpha", "event-1", "task.started")}
+						}
+					case "ambiguous":
+						page["turns"] = []map[string]any{
+							validConversationTurn(1, "turn-alpha", "event-1", "task.started"),
+							validConversationTurn(2, "turn-alpine", "event-2", "task.progress"),
+						}
+					case "repeated cursor":
+						page["turns"] = []map[string]any{validConversationTurn(1, "turn-beta", "event-1", "task.started")}
+						page["next_cursor"] = "same-page"
+					case "list failure":
+						writeIdentifierRPCError(t, w, request.ID, "RUNTIME_UNAVAILABLE")
+						return
+					}
+					writeJSONRPCResult(t, w, request.ID, page)
+				default:
+					t.Fatalf("unexpected method %q", request.Method)
+				}
 			}))
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"conversation", "turn", "sess-1", "2"}, &stdout, &stderr, testRootCommandOptions(server))
-			if code != 0 {
-				t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"conversation", "turn", "sess-1", tc.input}, &stdout, &stderr, testRootCommandOptions(server))
+			if code != tc.wantCode {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
 			}
-			for _, want := range tc.want {
-				if !strings.Contains(stdout.String(), want) {
-					t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
-				}
+			if got := strings.Join(methods, ","); got != tc.wantMethods {
+				t.Fatalf("methods = %s, want %s", got, tc.wantMethods)
 			}
-			for _, unwanted := range tc.doNotWant {
-				if strings.Contains(stdout.String(), unwanted) {
-					t.Fatalf("stdout contains %q:\n%s", unwanted, stdout.String())
-				}
+			if tc.wantCode == cliExitOK && !strings.Contains(stdout.String(), "turn-alpha") {
+				t.Fatalf("stdout = %q, want canonical turn id", stdout.String())
 			}
-		})
-	}
-}
-
-func TestConversationTurnJSONPreservesCanonicalRuntimeLogShape(t *testing.T) {
-	setCLIAPITestToken(t, "test-token")
-	failureRaw := runtimeLogDataLimitFailure(t, "9007199254740991")
-	failureValue, err := runtimeLogDecodeJSONValue(failureRaw)
-	if err != nil {
-		t.Fatalf("decode failure fixture: %v", err)
-	}
-	const (
-		fullLogID     = "log-1234567890abcdef"
-		fullRunID     = "run-1234567890abcdef"
-		fullEntityID  = "entity-1234567890abcdef"
-		fullSessionID = "session-1234567890abcdef"
-		fullTimestamp = "2026-05-20T01:01:01.123456789-03:00"
-		exactMessage  = "Event was published to the event bus"
-	)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req jsonRPCRequest
-		_ = json.NewDecoder(r.Body).Decode(&req)
-		result := validConversationTurnDetail("sess-1", 2)
-		turn := result["turn"].(map[string]any)
-		log := turn["runtime_log_entries"].([]map[string]any)[0]
-		log["log_id"] = fullLogID
-		log["ts"] = fullTimestamp
-		log["component"] = "eventbus"
-		log["run_id"] = fullRunID
-		log["entity_id"] = fullEntityID
-		log["session_id"] = fullSessionID
-		log["failure"] = failureValue
-		log["message"] = exactMessage
-		log["details"] = map[string]any{
-			"action":   "published",
-			"run_id":   fullRunID,
-			"failure":  failureValue,
-			"evidence": json.Number("9007199254740991"),
-		}
-		writeJSONRPCResult(t, w, req.ID, result)
-	}))
-	defer server.Close()
-
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"conversation", "turn", "sess-1", "2", "--json"}, &stdout, &stderr, testRootCommandOptions(server))
-	if code != 0 {
-		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
-	}
-	decoded, err := runtimeLogDecodeJSONValue(stdout.Bytes())
-	if err != nil {
-		t.Fatalf("decode CLI JSON: %v\n%s", err, stdout.String())
-	}
-	result := decoded.(map[string]any)
-	turn := result["turn"].(map[string]any)
-	logs := turn["runtime_log_entries"].([]any)
-	if len(logs) != 1 {
-		t.Fatalf("runtime_log_entries = %#v", logs)
-	}
-	log := logs[0].(map[string]any)
-	for key, want := range map[string]string{
-		"log_id": fullLogID, "ts": fullTimestamp, "run_id": fullRunID,
-		"entity_id": fullEntityID, "session_id": fullSessionID, "message": exactMessage,
-	} {
-		if got := log[key]; got != want {
-			t.Errorf("runtime log %s = %#v, want %q", key, got, want)
-		}
-	}
-	if !reflect.DeepEqual(log["failure"], failureValue) {
-		t.Errorf("top-level failure changed:\ngot:  %#v\nwant: %#v", log["failure"], failureValue)
-	}
-	details := log["details"].(map[string]any)
-	if details["action"] != "published" || details["run_id"] != fullRunID || !reflect.DeepEqual(details["failure"], failureValue) {
-		t.Errorf("machine details were projected or elided: %#v", details)
-	}
-	if evidence, ok := details["evidence"].(json.Number); !ok || evidence.String() != "9007199254740991" {
-		t.Errorf("details.evidence = %#v, want exact safe-boundary json.Number", details["evidence"])
-	}
-	failure := log["failure"].(map[string]any)
-	if failure["class"] != "platform.data_limit_exceeded" {
-		t.Errorf("failure.class = %#v, want canonical machine class", failure["class"])
-	}
-	if strings.Contains(stdout.String(), `"failure":"data_limit_exceeded/limit"`) {
-		t.Fatalf("human failure projection leaked into JSON: %s", stdout.String())
-	}
-}
-
-func TestConversationTurnMalformedRuntimeLogFailureIsVisibleAndFailsClosed(t *testing.T) {
-	for _, args := range [][]string{
-		{"conversation", "turn", "sess-1", "2"},
-		{"conversation", "turn", "sess-1", "2", "--json"},
-	} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			setCLIAPITestToken(t, "test-token")
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				result := validConversationTurnDetail("sess-1", 2)
-				turn := result["turn"].(map[string]any)
-				log := turn["runtime_log_entries"].([]map[string]any)[0]
-				log["failure"] = map[string]any{"schema_version": "platform.failure/v1", "class": "platform.unknown"}
-				writeJSONRPCResult(t, w, req.ID, result)
-			}))
-			defer server.Close()
-
-			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
-			if code != 3 {
-				t.Fatalf("code = %d, want 3 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-			}
-			for _, want := range []string{"WARNING:", "log-1", "platform.failure/v1", "platform.unknown"} {
-				if !strings.Contains(stderr.String(), want) {
-					t.Fatalf("stderr missing %q: %s", want, stderr.String())
-				}
-			}
-			if strings.TrimSpace(stdout.String()) != "" {
-				t.Fatalf("stdout = %q, want no successful document", stdout.String())
+			if tc.wantStderr != "" && !strings.Contains(stderr.String(), tc.wantStderr) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.wantStderr)
 			}
 		})
 	}
@@ -380,11 +197,10 @@ func TestConversationCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "view missing session", args: []string{"conversation", "view"}, wantStderr: "requires <session-id>"},
 		{name: "view blank session", args: []string{"conversation", "view", " "}, wantStderr: "session id is required"},
 		{name: "view invalid session", args: []string{"conversation", "view", "bad id!"}, wantStderr: "session id must match OpaqueId pattern"},
-		{name: "turn missing index", args: []string{"conversation", "turn", "sess-1"}, wantStderr: "requires <turn-index> (got <session-id>)"},
-		{name: "turn invalid session", args: []string{"conversation", "turn", "bad id!", "1"}, wantStderr: "session id must match OpaqueId pattern"},
-		{name: "turn index zero", args: []string{"conversation", "turn", "sess-1", "0"}, wantStderr: "turn index must be an integer from 1 to 1000000"},
-		{name: "turn index not integer", args: []string{"conversation", "turn", "sess-1", "first"}, wantStderr: "turn index must be an integer from 1 to 1000000"},
-		{name: "turn index too high", args: []string{"conversation", "turn", "sess-1", "1000001"}, wantStderr: "turn index must be an integer from 1 to 1000000"},
+		{name: "turn missing id", args: []string{"conversation", "turn", "sess-1"}, wantStderr: "requires <turn-id-or-prefix> (got <session-id>)"},
+		{name: "turn invalid session", args: []string{"conversation", "turn", "bad id!", "turn-1"}, wantStderr: "session id must match OpaqueId pattern"},
+		{name: "turn blank id", args: []string{"conversation", "turn", "sess-1", " "}, wantStderr: "turn id or prefix is required"},
+		{name: "turn invalid id", args: []string{"conversation", "turn", "sess-1", "bad id!"}, wantStderr: "turn id or prefix must match OpaqueId pattern"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls.Store(0)
@@ -415,7 +231,7 @@ func TestConversationCommandsFailClosedWithoutTokenBeforeRequest(t *testing.T) {
 	for _, args := range [][]string{
 		{"conversation", "list"},
 		{"conversation", "view", "sess-1"},
-		{"conversation", "turn", "sess-1", "1"},
+		{"conversation", "turn", "sess-1", "turn-1"},
 	} {
 		var stdout, stderr bytes.Buffer
 		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
@@ -428,139 +244,6 @@ func TestConversationCommandsFailClosedWithoutTokenBeforeRequest(t *testing.T) {
 	}
 	if calls.Load() != 0 {
 		t.Fatalf("RPC calls = %d, want 0", calls.Load())
-	}
-}
-
-func TestConversationCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		args       []string
-		handler    http.HandlerFunc
-		wantCode   int
-		wantStderr string
-	}{
-		{
-			name: "list http auth exits four",
-			args: []string{"conversation", "list"},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-			},
-			wantCode:   4,
-			wantStderr: "rejected the request with status 401",
-		},
-		{
-			name: "list missing conversations exits three",
-			args: []string{"conversation", "list"},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				writeJSONRPCResult(t, w, req.ID, map[string]any{})
-			},
-			wantCode:   3,
-			wantStderr: "conversations is required",
-		},
-		{
-			name: "list malformed summary exits three",
-			args: []string{"conversation", "list"},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				item := validConversationSummary("sess-1")
-				delete(item, "status")
-				writeJSONRPCResult(t, w, req.ID, map[string]any{"conversations": []map[string]any{item}})
-			},
-			wantCode:   3,
-			wantStderr: "status is required",
-		},
-		{
-			name: "view session not found exits five",
-			args: []string{"conversation", "view", "missing"},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				writeConversationJSONRPCError(t, w, req.ID, "SESSION_NOT_FOUND")
-			},
-			wantCode:   5,
-			wantStderr: "SESSION_NOT_FOUND",
-		},
-		{
-			name: "view missing turns exits three",
-			args: []string{"conversation", "view", "sess-1"},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				result := validConversationDetail("sess-1")
-				delete(result, "turns")
-				writeJSONRPCResult(t, w, req.ID, result)
-			},
-			wantCode:   3,
-			wantStderr: "turns is required",
-		},
-		{
-			name: "turn missing turn exits five",
-			args: []string{"conversation", "turn", "sess-1", "99"},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				writeConversationJSONRPCError(t, w, req.ID, "TURN_NOT_FOUND")
-			},
-			wantCode:   5,
-			wantStderr: "TURN_NOT_FOUND",
-		},
-		{
-			name: "turn missing advertised tools exits three",
-			args: []string{"conversation", "turn", "sess-1", "1"},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				result := validConversationTurnDetail("sess-1", 1)
-				turn := result["turn"].(map[string]any)
-				delete(turn, "advertised_tools")
-				writeJSONRPCResult(t, w, req.ID, result)
-			},
-			wantCode:   3,
-			wantStderr: "advertised_tools is required",
-		},
-		{
-			name: "turn negative retry count exits three",
-			args: []string{"conversation", "turn", "sess-1", "1"},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				result := validConversationTurnDetail("sess-1", 1)
-				turn := result["turn"].(map[string]any)
-				turn["retry_count"] = -1
-				writeJSONRPCResult(t, w, req.ID, result)
-			},
-			wantCode:   3,
-			wantStderr: "retry_count must be non-negative",
-		},
-		{
-			name: "turn unknown rpc exits three",
-			args: []string{"conversation", "turn", "sess-1", "1"},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				writeConversationJSONRPCError(t, w, req.ID, "METHOD_UNAVAILABLE")
-			},
-			wantCode:   3,
-			wantStderr: "METHOD_UNAVAILABLE",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			setCLIAPITestToken(t, "test-token")
-			server := httptest.NewServer(tc.handler)
-			defer server.Close()
-
-			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRootCommandOptions(server))
-			if code != tc.wantCode {
-				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
-			}
-			if !strings.Contains(stderr.String(), tc.wantStderr) {
-				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tc.wantStderr)
-			}
-		})
 	}
 }
 
@@ -588,58 +271,22 @@ func validConversationDetail(sessionID string) map[string]any {
 
 func validConversationTurn(index int, turnID, eventID, eventType string) map[string]any {
 	return map[string]any{
-		"turn_index":         index,
-		"turn_id":            turnID,
-		"trigger_event_id":   eventID,
-		"trigger_event_type": eventType,
-		"parse_ok":           true,
-		"latency_ms":         150,
-		"request_payload":    map[string]any{"prompt": "go"},
-		"response_payload":   map[string]any{"ok": true},
-		"tool_calls":         []map[string]any{},
-		"turn_blocks":        []map[string]any{{"kind": "assistant", "text": "done"}},
+		"ordinal":                  index,
+		"turn_id":                  turnID,
+		"completed_at":             "2026-05-20T01:01:01Z",
+		"duration_ms":              150,
+		"trigger_event_id":         eventID,
+		"trigger_event_type":       eventType,
+		"parse_ok":                 true,
+		"activity":                 []map[string]any{{"kind": "output", "text": "done"}},
+		"assistant_visible_output": "done",
 	}
 }
 
 func validConversationTurnDetail(sessionID string, index int) map[string]any {
 	return map[string]any{
 		"session": validConversationSummary(sessionID),
-		"turn": map[string]any{
-			"turn_index":   index,
-			"turn_id":      "turn-2",
-			"scope":        "global",
-			"started_at":   "2026-05-20T01:01:00Z",
-			"completed_at": "2026-05-20T01:01:01Z",
-			"duration_ms":  1000,
-			"outcome":      "completed",
-			"parse_ok":     true,
-			"retry_count":  0,
-			"dispatch_metadata": map[string]any{
-				"trigger_event_id":   "event-2",
-				"trigger_event_type": "task.completed",
-				"entity_id":          "entity-1",
-				"task_id":            "task-1",
-				"run_id":             "run-1",
-			},
-			"advertised_tools":                []any{"emit_done", "read_state"},
-			"mcp_tools_listed":                []any{},
-			"mcp_tools_visible":               []any{},
-			"reasoning_blocks":                []any{},
-			"progress_updates":                []any{},
-			"tool_calls":                      []map[string]any{},
-			"tool_results":                    []map[string]any{},
-			"emitted_events":                  []any{"event-3"},
-			"runtime_log_entries":             []map[string]any{validConversationRuntimeLog()},
-			"provider_metadata":               map[string]any{"latency_ms": 1000},
-			"request_payload":                 map[string]any{"prompt": "go"},
-			"response_payload":                map[string]any{"ok": true},
-			"full_prompt_context":             nil,
-			"full_prompt_context_v2_reserved": true,
-			"raw_llm_response":                nil,
-			"raw_llm_response_v2_reserved":    true,
-			"assistant_visible_output":        "done",
-		},
-		"turn_blocks_raw": []map[string]any{{"kind": "assistant", "text": "done"}},
+		"turn":    validConversationTurn(index, "turn-2", "event-2", "task.completed"),
 	}
 }
 

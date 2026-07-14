@@ -1131,9 +1131,6 @@ func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelect
 				"agent.diagnose",
 				"agent.get",
 				"agent.list",
-				"conversation.current_for_agent",
-				"conversation.get",
-				"conversation.get_turn",
 				"conversation.list",
 			},
 		},
@@ -1155,7 +1152,11 @@ func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelect
 		},
 		"TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs": {
 			Backends: []string{"explicit_postgres"},
-			Methods:  []string{"agent.get", "conversation.current_for_agent", "conversation.get", "conversation.get_turn"},
+			Methods:  []string{"agent.get"},
+		},
+		"TestOperatorConversationProjectionBackendParity": {
+			Backends: []string{"default_sqlite", "explicit_postgres"},
+			Methods:  []string{"conversation.get_turn", "conversation.list_turns"},
 		},
 		"TestOperatorAgentReadSurfaceListAgentsDoesNotDeriveStatusFromActiveLease": {
 			Backends: []string{"explicit_postgres"},

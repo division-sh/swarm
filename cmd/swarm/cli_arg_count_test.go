@@ -40,12 +40,12 @@ func TestCLIArgCountDiagnosticExactExtraQuotesReceivedTokens(t *testing.T) {
 }
 
 func TestCLIArgCountDiagnosticExactMissingSecondNamesPosition(t *testing.T) {
-	cmd := cliArgCountTestCommand("conversation", "turn <session-id> <turn-index>", cliExactArgs(2))
+	cmd := cliArgCountTestCommand("conversation", "turn <session-id> <turn-id-or-prefix>", cliExactArgs(2))
 	err := cmd.Args(cmd, []string{"sess-1"})
 	if err == nil {
 		t.Fatal("Args returned nil, want diagnostic")
 	}
-	want := "ERROR: 'swarm conversation turn' requires <turn-index> (got <session-id>)."
+	want := "ERROR: 'swarm conversation turn' requires <turn-id-or-prefix> (got <session-id>)."
 	if got := strings.Split(err.Error(), "\n")[0]; got != want {
 		t.Fatalf("problem line = %q, want %q", got, want)
 	}
@@ -122,7 +122,7 @@ func TestCLIArgCountPromotedCommandsUseSharedDiagnostic(t *testing.T) {
 		{name: "event replay missing id", args: []string{"event", "replay"}, want: "'swarm event replay' requires <event-id>."},
 		{name: "event publish missing name", args: []string{"event", "publish", "--payload-json", "{}"}, want: "'swarm event publish' requires <event-name>."},
 		{name: "conversation view missing session", args: []string{"conversation", "view"}, want: "'swarm conversation view' requires <session-id>."},
-		{name: "conversation turn missing index", args: []string{"conversation", "turn", "sess-1"}, want: "'swarm conversation turn' requires <turn-index> (got <session-id>)."},
+		{name: "conversation turn missing id", args: []string{"conversation", "turn", "sess-1"}, want: "'swarm conversation turn' requires <turn-id-or-prefix> (got <session-id>)."},
 		{name: "entity view missing id", args: []string{"entity", "view"}, want: "'swarm entity view' requires <entity-id>."},
 		{name: "mailbox view missing id", args: []string{"mailbox", "view"}, want: "'swarm mailbox view' requires <mailbox-id>."},
 		{name: "mailbox defer missing id", args: []string{"mailbox", "defer"}, want: "'swarm mailbox defer' requires <card-id>."},

@@ -198,7 +198,7 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 		{name: "run connect start", args: []string{"run", "start", "--connect", "http://192.0.2.10:1", "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}},
 		{name: "run connect reattach", args: []string{"run", "start", "--connect", "http://192.0.2.10:1", "--reattach", "run-1"}},
 		{name: "fork", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111"}},
-		{name: "forkchat new", args: []string{"forkchat", "new", "session-1", "--turn-index", "1"}},
+		{name: "forkchat new", args: []string{"forkchat", "new", "session-1", "--turn-id", "turn-1"}},
 		{name: "forkchat resume", args: []string{"forkchat", "resume", "fork-1", "--message", "continue"}},
 		{name: "forkchat list", args: []string{"forkchat", "list"}},
 		{name: "forkchat view", args: []string{"forkchat", "view", "fork-1"}},

@@ -503,16 +503,16 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Reason: "control command action is command input, not a registered human-code family",
 	},
 	"conversations.go\x00writeConversationDetailResult": {
-		Names:  []string{"status"},
-		Reason: "conversation status is a separate conversation-detail taxonomy owned by #1820",
+		Names:  []string{"outcome", "status"},
+		Reason: "conversation status and safe projected turn outcome are separate conversation-detail taxonomies owned by #1820",
 	},
 	"conversations.go\x00writeConversationListResult": {
 		Names:  []string{"status"},
 		Reason: "conversation status is a separate conversation-detail taxonomy owned by #1820",
 	},
 	"conversations.go\x00writeConversationTurnDetailResult": {
-		Names:  []string{"action", "outcome", "status"},
-		Reason: "runtime-log action is exact LogEntry evidence; conversation session status and turn outcome are separate detail taxonomies owned by #1820",
+		Names:  []string{"outcome"},
+		Reason: "safe projected turn outcome is a separate conversation-detail taxonomy owned by #1820",
 	},
 	"forkchat.go\x00writeForkChatSessionHeader": {
 		Names:  []string{"state"},

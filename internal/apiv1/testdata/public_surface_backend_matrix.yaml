@@ -373,14 +373,6 @@ operator_read_api_parity_ledger:
       - {kind: go_test, name: TestSQLiteBundleCatalogOwnerBacksSupportedAPISurface, backends: [default_sqlite]}
       - {kind: go_test, name: TestBundleCatalogReadSurfaceListGetAgentsAndCursor, backends: [explicit_postgres]}
       - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
-  - method: conversation.current_for_agent
-    classification: dual_backend_api_proof
-    backends: [default_sqlite, explicit_postgres]
-    proof_refs:
-      - {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}
-      - {kind: go_test, name: TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs, backends: [explicit_postgres]}
-      - {kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface, backends: [default_sqlite]}
-      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
   - method: conversation.fork_list
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]
@@ -401,23 +393,12 @@ operator_read_api_parity_ledger:
     notes: >
       The segregated read capability consumes the shared semantic owner on both
       selected stores; served proof covers fork-local transcript projection.
-  - method: conversation.get
-    classification: dual_backend_api_proof
-    backends: [default_sqlite, explicit_postgres]
-    proof_refs:
-      - {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}
-      - {kind: go_test, name: TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs, backends: [explicit_postgres]}
-      - {kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface, backends: [default_sqlite]}
-      - {kind: go_test, name: TestOperatorConversationQuerySourcesRunIDCapabilityMatrix}
-      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
   - method: conversation.get_turn
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]
     proof_refs:
       - {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}
-      - {kind: go_test, name: TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs, backends: [explicit_postgres]}
-      - {kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface, backends: [default_sqlite]}
-      - {kind: go_test, name: TestOperatorConversationQuerySourcesRunIDCapabilityMatrix}
+      - {kind: go_test, name: TestOperatorConversationProjectionBackendParity, backends: [default_sqlite, explicit_postgres]}
       - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
   - method: conversation.list
     classification: dual_backend_api_proof
@@ -427,6 +408,13 @@ operator_read_api_parity_ledger:
       - {kind: go_test, name: TestOperatorAgentReadSurfaceListAgentsDoesNotDeriveStatusFromActiveLease, backends: [explicit_postgres]}
       - {kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface, backends: [default_sqlite]}
       - {kind: go_test, name: TestOperatorConversationQuerySourcesRunIDCapabilityMatrix}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: conversation.list_turns
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}
+      - {kind: go_test, name: TestOperatorConversationProjectionBackendParity, backends: [default_sqlite, explicit_postgres]}
       - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
   - method: entity.aggregate
     classification: dual_backend_api_proof

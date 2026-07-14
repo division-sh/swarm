@@ -216,7 +216,7 @@ func newForkChatCompletionAuthorityFixture(t *testing.T, sqlite bool) forkChatCo
 		source = seedConversationForkSource(t, db, now)
 	}
 	fork, err := store.CreateOperatorConversationFork(context.Background(), ConversationForkCreateRequest{
-		SourceSessionID: source.sessionID, ForkPoint: ConversationForkPointSelector{Kind: "turn", TurnIndex: 1},
+		SourceSessionID: source.sessionID, ForkPoint: ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
 		CreatedBy: "actor-token", Now: now,
 	})
 	if err != nil {

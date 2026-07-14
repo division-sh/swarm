@@ -142,7 +142,7 @@ var cliOutputSharedDisplayProofs = map[string][]string{
 	"writeContextListText":                   {"writeCLITable"},
 	"writeConversationDetailResult":          {"writeCLITable", "writeCLIFieldLine"},
 	"writeConversationListResult":            {"writeCLITable"},
-	"writeConversationTurnDetailResult":      {"writeCLIFieldLine"},
+	"writeConversationTurnDetailResult":      {"writeCLILabeledDetail"},
 	"writeDiagnosticRunList":                 {"writeCLITable"},
 	"writeDiagnosticRunHeader":               {"writeCLILabeledDetail"},
 	"writeDiagnosticRunDiagnosis":            {"writeCLILabeledDetail"},

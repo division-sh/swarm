@@ -28,12 +28,10 @@ type fakeAgentConversationReadStore struct {
 	agentDeliveryDiagnosticsErr         error
 	listConversationsResult             store.OperatorConversationListResult
 	listConversationsErr                error
-	conversationResult                  store.OperatorConversationDetail
-	conversationErr                     error
-	conversationTurnResult              store.OperatorConversationTurnDetail
+	conversationTurnsResult             store.OperatorConversationTurnListResult
+	conversationTurnsErr                error
+	conversationTurnResult              store.OperatorPublicConversationTurnDetail
 	conversationTurnErr                 error
-	currentConversationResult           *store.OperatorConversationDetail
-	currentConversationErr              error
 	lastAgentList                       store.OperatorAgentListOptions
 	lastConversationList                store.OperatorConversationListOptions
 	lastAgentID                         string
@@ -45,10 +43,9 @@ type fakeAgentConversationReadStore struct {
 	lastAgentDeliveryLifecycleOptions   store.OperatorAgentDeliveryLifecycleOptions
 	lastAgentDeliveryDiagnosticsID      string
 	lastAgentDeliveryDiagnosticsOptions store.OperatorAgentDeliveryDiagnosticsOptions
-	lastConversationSessionID           string
+	lastConversationTurns               store.OperatorConversationTurnListOptions
 	lastConversationTurnSessionID       string
-	lastConversationTurnIndex           int
-	lastCurrentConversationFor          string
+	lastConversationTurnID              string
 }
 
 func (s *fakeAgentConversationReadStore) ListOperatorAgents(_ context.Context, opts store.OperatorAgentListOptions) (store.OperatorAgentListResult, error) {
@@ -90,20 +87,15 @@ func (s *fakeAgentConversationReadStore) ListOperatorConversations(_ context.Con
 	return s.listConversationsResult, s.listConversationsErr
 }
 
-func (s *fakeAgentConversationReadStore) LoadOperatorConversation(_ context.Context, sessionID string) (store.OperatorConversationDetail, error) {
-	s.lastConversationSessionID = sessionID
-	return s.conversationResult, s.conversationErr
+func (s *fakeAgentConversationReadStore) ListOperatorConversationTurns(_ context.Context, opts store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error) {
+	s.lastConversationTurns = opts
+	return s.conversationTurnsResult, s.conversationTurnsErr
 }
 
-func (s *fakeAgentConversationReadStore) LoadOperatorConversationTurn(_ context.Context, sessionID string, turnIndex int) (store.OperatorConversationTurnDetail, error) {
+func (s *fakeAgentConversationReadStore) LoadOperatorPublicConversationTurn(_ context.Context, sessionID, turnID string) (store.OperatorPublicConversationTurnDetail, error) {
 	s.lastConversationTurnSessionID = sessionID
-	s.lastConversationTurnIndex = turnIndex
+	s.lastConversationTurnID = turnID
 	return s.conversationTurnResult, s.conversationTurnErr
-}
-
-func (s *fakeAgentConversationReadStore) LoadCurrentOperatorConversationForAgent(_ context.Context, agentID string) (*store.OperatorConversationDetail, error) {
-	s.lastCurrentConversationFor = agentID
-	return s.currentConversationResult, s.currentConversationErr
 }
 
 type apiConversationCapabilitySource struct {
@@ -120,6 +112,7 @@ func apiConversationReadCaps(sessionRunID, auditRunID bool) store.StoreSchemaCap
 			Sessions:     store.SchemaFlavorCanonical,
 			Audits:       store.SchemaFlavorCanonical,
 			Turns:        store.SchemaFlavorCanonical,
+			TurnBlocks:   true,
 			SessionRunID: sessionRunID,
 			AuditRunID:   auditRunID,
 		},
@@ -167,7 +160,6 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				ToolName:  "selected_tool",
 				ToolUseID: "toolu-selected",
 				OK:        true,
-				Result:    []byte(`{"status":"selected"}`),
 			},
 			RuntimeState: &store.OperatorAgentDiagnosisRuntimeState{
 				Watchdog: &store.OperatorAgentDiagnosisWatchdog{
@@ -300,29 +292,21 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 			}},
 			NextCursor: "next",
 		},
-		conversationResult: store.OperatorConversationDetail{
+		conversationTurnsResult: store.OperatorConversationTurnListResult{
 			Conversation: store.OperatorConversationSummary{SessionID: "sess-1", AgentID: "agent-1", StartedAt: now, Status: "active"},
-			Turns:        []store.OperatorConversationTurn{{TurnIndex: 1, TurnID: "turn-1", TriggerEventID: "evt-1", TriggerEventType: "task.started", ParseOK: true}},
+			Turns: []store.OperatorPublicConversationTurn{{
+				TurnID: "turn-1", Ordinal: 1, CompletedAt: now, DurationMS: 25,
+				TriggerEventID: "evt-1", TriggerEventType: "task.started", ParseOK: true,
+				Activity: []store.OperatorConversationActivity{{Kind: "tool", ToolName: "read_file", ToolUseID: "toolu-1"}},
+			}},
+			NextCursor: "turn-cursor-2",
 		},
-		conversationTurnResult: store.OperatorConversationTurnDetail{
+		conversationTurnResult: store.OperatorPublicConversationTurnDetail{
 			Session: store.OperatorConversationSummary{SessionID: "sess-1", AgentID: "agent-1", StartedAt: now, Status: "active"},
-			Turn: store.OperatorConversationDeepTurn{
-				TurnIndex:                   1,
-				TurnID:                      "turn-1",
-				StartedAt:                   now,
-				CompletedAt:                 now.Add(time.Second),
-				ParseOK:                     true,
-				AdvertisedTools:             []string{},
-				RuntimeLogEntries:           []store.OperatorRuntimeLogEntry{},
-				FullPromptContextV2Reserved: true,
-				RawLLMResponseV2Reserved:    true,
+			Turn: store.OperatorPublicConversationTurn{
+				TurnID: "turn-1", Ordinal: 1, CompletedAt: now.Add(time.Second), ParseOK: true,
+				Activity: []store.OperatorConversationActivity{},
 			},
-			RuntimeLogWindowStart: now,
-			RuntimeLogWindowEnd:   ptrTime(now.Add(time.Second)),
-		},
-		currentConversationResult: &store.OperatorConversationDetail{
-			Conversation: store.OperatorConversationSummary{SessionID: "sess-current", AgentID: "agent-1", StartedAt: now, Status: "active"},
-			Turns:        []store.OperatorConversationTurn{{TurnIndex: 1, TurnID: "turn-current-1", TriggerEventID: "evt-current-1", TriggerEventType: "task.started", ParseOK: true}},
 		},
 	}
 	handler := testHandler(t, Options{
@@ -413,9 +397,8 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	if lastTool["turn_id"] != "22222222-2222-2222-2222-222222222222" || lastTool["tool_name"] != "selected_tool" || lastTool["tool_use_id"] != "toolu-selected" || lastTool["ok"] != true {
 		t.Fatalf("agent.diagnose last_tool_outcome = %#v", lastTool)
 	}
-	lastToolResult := asMap(t, lastTool["result"])
-	if lastToolResult["status"] != "selected" {
-		t.Fatalf("agent.diagnose last_tool_outcome.result = %#v", lastToolResult)
+	if _, ok := lastTool["result"]; ok {
+		t.Fatalf("agent.diagnose leaked raw last_tool_outcome.result: %#v", lastTool)
 	}
 	for _, splitField := range []string{"bundle_version", "watchdog", "token_usage", "failures_recent", "dead_letters_recent"} {
 		if _, ok := diagnosis[splitField]; ok {
@@ -538,36 +521,24 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 		t.Fatalf("conversation.list options = %#v", reads.lastConversationList)
 	}
 
-	getConversation := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"conv","method":"conversation.get","params":{"session_id":"sess-1"}}`)
-	if getConversation.Error != nil {
-		t.Fatalf("conversation.get error = %#v", getConversation.Error)
+	listTurns := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"turns","method":"conversation.list_turns","params":{"session_id":"sess-1","limit":25,"cursor":"turn-cursor-1"}}`)
+	if listTurns.Error != nil {
+		t.Fatalf("conversation.list_turns error = %#v", listTurns.Error)
 	}
-	if reads.lastConversationSessionID != "sess-1" {
-		t.Fatalf("conversation.get session = %q", reads.lastConversationSessionID)
+	if reads.lastConversationTurns.SessionID != "sess-1" || reads.lastConversationTurns.Limit != 25 || reads.lastConversationTurns.Cursor != "turn-cursor-1" {
+		t.Fatalf("conversation.list_turns options = %#v", reads.lastConversationTurns)
 	}
-	conversationTurns, _ := asMap(t, getConversation.Result)["turns"].([]any)
-	if len(conversationTurns) != 1 || asMap(t, conversationTurns[0])["turn_index"] != float64(1) {
-		t.Fatalf("conversation.get turns = %#v, want turn_index 1", asMap(t, getConversation.Result)["turns"])
+	conversationTurns, _ := asMap(t, listTurns.Result)["turns"].([]any)
+	if len(conversationTurns) != 1 || asMap(t, conversationTurns[0])["ordinal"] != float64(1) {
+		t.Fatalf("conversation.list_turns turns = %#v, want ordinal 1", asMap(t, listTurns.Result)["turns"])
 	}
 
-	getTurn := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"turn","method":"conversation.get_turn","params":{"session_id":"sess-1","turn_index":1,"include_logs":false}}`)
+	getTurn := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"turn","method":"conversation.get_turn","params":{"session_id":"sess-1","turn_id":"turn-1"}}`)
 	if getTurn.Error != nil {
 		t.Fatalf("conversation.get_turn error = %#v", getTurn.Error)
 	}
-	if reads.lastConversationTurnSessionID != "sess-1" || reads.lastConversationTurnIndex != 1 {
-		t.Fatalf("conversation.get_turn owner args = %q/%d", reads.lastConversationTurnSessionID, reads.lastConversationTurnIndex)
-	}
-
-	current := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"current","method":"conversation.current_for_agent","params":{"agent_id":"agent-1"}}`)
-	if current.Error != nil {
-		t.Fatalf("conversation.current_for_agent error = %#v", current.Error)
-	}
-	if reads.lastCurrentConversationFor != "agent-1" {
-		t.Fatalf("current_for_agent id = %q", reads.lastCurrentConversationFor)
-	}
-	currentTurns, _ := asMap(t, current.Result)["turns"].([]any)
-	if len(currentTurns) != 1 || asMap(t, currentTurns[0])["turn_index"] != float64(1) {
-		t.Fatalf("conversation.current_for_agent turns = %#v, want turn_index 1", asMap(t, current.Result)["turns"])
+	if reads.lastConversationTurnSessionID != "sess-1" || reads.lastConversationTurnID != "turn-1" {
+		t.Fatalf("conversation.get_turn owner args = %q/%q", reads.lastConversationTurnSessionID, reads.lastConversationTurnID)
 	}
 }
 
@@ -651,26 +622,6 @@ func TestOperatorAgentConversationHandlersSanitizeRunIDProjectionFailures(t *tes
 			},
 		},
 		{
-			name: "conversation get raw projection error",
-			body: `{"jsonrpc":"2.0","id":"conv","method":"conversation.get","params":{"session_id":"sess-1"}}`,
-			caps: apiConversationReadCaps(true, true),
-			expect: func(mock sqlmock.Sqlmock) {
-				mock.ExpectQuery("(?s)SELECT\\s+session_id,\\s+agent_id,\\s+run_id,.*FROM \\(.*\\) conversations\\s+WHERE session_id = \\$1").
-					WithArgs("sess-1").
-					WillReturnError(rawRunIDColumnErr)
-			},
-		},
-		{
-			name: "conversation get_turn raw projection error",
-			body: `{"jsonrpc":"2.0","id":"turn","method":"conversation.get_turn","params":{"session_id":"sess-1","turn_index":1,"include_logs":true}}`,
-			caps: apiConversationReadCaps(true, true),
-			expect: func(mock sqlmock.Sqlmock) {
-				mock.ExpectQuery("(?s)SELECT\\s+session_id,\\s+agent_id,\\s+run_id,.*FROM \\(.*\\) conversations\\s+WHERE session_id = \\$1").
-					WithArgs("sess-1").
-					WillReturnError(rawRunIDColumnErr)
-			},
-		},
-		{
 			name: "conversation list run_id filter without any run_id capability",
 			body: `{"jsonrpc":"2.0","id":"convs","method":"conversation.list","params":{"run_id":"11111111-1111-1111-1111-111111111111"}}`,
 			caps: apiConversationReadCaps(false, false),
@@ -718,68 +669,6 @@ func assertConversationRunIDErrorSanitized(t *testing.T, resp rpcResponse) {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("error data leaked %q: %s", forbidden, text)
 		}
-	}
-}
-
-func TestOperatorConversationGetTurnComposesRuntimeLogOwner(t *testing.T) {
-	start := time.Unix(1700000100, 0).UTC()
-	end := start.Add(2 * time.Second)
-	reads := &fakeAgentConversationReadStore{
-		conversationTurnResult: store.OperatorConversationTurnDetail{
-			Session: store.OperatorConversationSummary{SessionID: "sess-1", AgentID: "agent-1", RunID: "run-1", StartedAt: start, Status: "terminated"},
-			Turn: store.OperatorConversationDeepTurn{
-				TurnIndex:                   2,
-				TurnID:                      "turn-2",
-				StartedAt:                   start,
-				CompletedAt:                 end,
-				ParseOK:                     true,
-				AdvertisedTools:             []string{"emit_done"},
-				RuntimeLogEntries:           []store.OperatorRuntimeLogEntry{},
-				FullPromptContextV2Reserved: true,
-				RawLLMResponseV2Reserved:    true,
-			},
-			RuntimeLogWindowStart: start,
-			RuntimeLogWindowEnd:   &end,
-		},
-	}
-	observability := &fakeObservabilityReadStore{logs: []store.OperatorRuntimeLogEntry{{
-		LogID:     "log-1",
-		TS:        start.Add(time.Second),
-		Level:     "error",
-		Component: "agent",
-		Source:    "agent-1",
-		SessionID: "sess-1",
-		Message:   "turn failed",
-	}}}
-	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			AgentConversations: reads,
-			Observability:      observability,
-		}),
-	})
-
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"turn","method":"conversation.get_turn","params":{"session_id":"sess-1","turn_index":2}}`)
-	if resp.Error != nil {
-		t.Fatalf("conversation.get_turn error = %#v", resp.Error)
-	}
-	result := asMap(t, resp.Result)
-	turn := asMap(t, result["turn"])
-	logs, _ := turn["runtime_log_entries"].([]any)
-	if len(logs) != 1 || asMap(t, logs[0])["log_id"] != "log-1" {
-		t.Fatalf("runtime_log_entries = %#v", turn["runtime_log_entries"])
-	}
-	if observability.lastRuntimeLogs.SessionID != "sess-1" {
-		t.Fatalf("runtime log session filter = %#v", observability.lastRuntimeLogs)
-	}
-	if observability.lastRuntimeLogs.Since == nil || !observability.lastRuntimeLogs.Since.Equal(start) {
-		t.Fatalf("runtime log since = %#v, want %s", observability.lastRuntimeLogs.Since, start)
-	}
-	if observability.lastRuntimeLogs.Until == nil || !observability.lastRuntimeLogs.Until.Equal(end) {
-		t.Fatalf("runtime log until = %#v, want %s", observability.lastRuntimeLogs.Until, end)
-	}
-	if observability.lastRuntimeLogs.Order != "asc" || observability.lastRuntimeLogs.Limit != 1000 {
-		t.Fatalf("runtime log options = %#v", observability.lastRuntimeLogs)
 	}
 }
 
@@ -831,32 +720,25 @@ func TestOperatorAgentConversationHandlersTypedErrors(t *testing.T) {
 			wantApp: AgentNotFoundCode,
 		},
 		{
-			name:    "conversation missing",
-			method:  "conversation.get",
-			body:    `{"jsonrpc":"2.0","id":"conv","method":"conversation.get","params":{"session_id":"missing"}}`,
-			reads:   &fakeAgentConversationReadStore{conversationErr: store.ErrSessionNotFound},
+			name:    "conversation turn list missing session",
+			method:  "conversation.list_turns",
+			body:    `{"jsonrpc":"2.0","id":"turns","method":"conversation.list_turns","params":{"session_id":"missing"}}`,
+			reads:   &fakeAgentConversationReadStore{conversationTurnsErr: store.ErrSessionNotFound},
 			wantApp: SessionNotFoundCode,
 		},
 		{
 			name:    "conversation turn missing session",
 			method:  "conversation.get_turn",
-			body:    `{"jsonrpc":"2.0","id":"turn","method":"conversation.get_turn","params":{"session_id":"missing","turn_index":1,"include_logs":false}}`,
+			body:    `{"jsonrpc":"2.0","id":"turn","method":"conversation.get_turn","params":{"session_id":"missing","turn_id":"turn-1"}}`,
 			reads:   &fakeAgentConversationReadStore{conversationTurnErr: store.ErrSessionNotFound},
 			wantApp: SessionNotFoundCode,
 		},
 		{
 			name:    "conversation turn missing turn",
 			method:  "conversation.get_turn",
-			body:    `{"jsonrpc":"2.0","id":"turn","method":"conversation.get_turn","params":{"session_id":"sess-1","turn_index":99,"include_logs":false}}`,
+			body:    `{"jsonrpc":"2.0","id":"turn","method":"conversation.get_turn","params":{"session_id":"sess-1","turn_id":"missing-turn"}}`,
 			reads:   &fakeAgentConversationReadStore{conversationTurnErr: store.ErrTurnNotFound},
 			wantApp: TurnNotFoundCode,
-		},
-		{
-			name:    "current unknown agent",
-			method:  "conversation.current_for_agent",
-			body:    `{"jsonrpc":"2.0","id":"current","method":"conversation.current_for_agent","params":{"agent_id":"missing"}}`,
-			reads:   &fakeAgentConversationReadStore{currentConversationErr: store.ErrAgentNotFound},
-			wantApp: AgentNotFoundCode,
 		},
 	}
 	for _, tc := range tests {
@@ -1099,16 +981,6 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedLastToolOutcomeOwnerData(t *
 			name: "missing tool name",
 			item: &store.OperatorAgentLastToolOutcome{TurnID: "turn-1", OK: true},
 			want: "last_tool_outcome.tool_name",
-		},
-		{
-			name: "non object result",
-			item: &store.OperatorAgentLastToolOutcome{TurnID: "turn-1", ToolName: "read_file", OK: true, Result: []byte(`"ok"`)},
-			want: "last_tool_outcome.result must be a JSON object",
-		},
-		{
-			name: "null result",
-			item: &store.OperatorAgentLastToolOutcome{TurnID: "turn-1", ToolName: "read_file", OK: true, Result: []byte(`null`)},
-			want: "last_tool_outcome.result must be a JSON object",
 		},
 		{
 			name: "without active selected turn",

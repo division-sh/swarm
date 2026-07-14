@@ -88,12 +88,12 @@ func TestCLILoggingForSharedOutputConsumers(t *testing.T) {
 		{
 			name:   "conversation view",
 			args:   func(*testing.T) []string { return []string{"conversation", "view", "sess-1"} },
-			method: conversationGetMethod,
+			method: conversationListTurnsMethod,
 			result: validConversationDetail("sess-1"),
 		},
 		{
 			name:   "conversation turn",
-			args:   func(*testing.T) []string { return []string{"conversation", "turn", "sess-1", "2"} },
+			args:   func(*testing.T) []string { return []string{"conversation", "turn", "sess-1", "turn-2"} },
 			method: conversationGetTurnMethod,
 			result: validConversationTurnDetail("sess-1", 2),
 		},

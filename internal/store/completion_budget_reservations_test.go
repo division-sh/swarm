@@ -170,7 +170,7 @@ func completionBudgetRaceAuthority(t *testing.T, fixture completionBudgetRaceFix
 			source = seedConversationForkSource(t, fixture.db, now)
 		}
 		fork, err := fixture.primary.CreateOperatorConversationFork(context.Background(), ConversationForkCreateRequest{
-			SourceSessionID: source.sessionID, ForkPoint: ConversationForkPointSelector{Kind: "turn", TurnIndex: 1}, CreatedBy: "budget-actor", Now: now,
+			SourceSessionID: source.sessionID, ForkPoint: ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID}, CreatedBy: "budget-actor", Now: now,
 		})
 		if err != nil {
 			t.Fatalf("create budget-race forkchat fork: %v", err)

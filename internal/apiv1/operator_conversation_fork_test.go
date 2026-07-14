@@ -284,7 +284,7 @@ func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *test
 		}),
 	})
 
-	create := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"create","method":"conversation.fork","params":{"source_session_id":"`+sourceSessionID+`","fork_point":{"kind":"turn","turn_index":2},"idempotency_key":"create-1"}}`)
+	create := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"create","method":"conversation.fork","params":{"source_session_id":"`+sourceSessionID+`","fork_point":{"kind":"turn","turn_id":"`+turnID+`"},"idempotency_key":"create-1"}}`)
 	if create.Error != nil {
 		t.Fatalf("conversation.fork error = %#v", create.Error)
 	}
@@ -295,11 +295,11 @@ func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *test
 	if got := asMap(t, createResult["fork"])["fork_id"]; got != forkID {
 		t.Fatalf("conversation.fork fork_id = %#v, want %s", got, forkID)
 	}
-	if forks.createCalls != 1 || forks.lastCreate.SourceSessionID != sourceSessionID || forks.lastCreate.ForkPoint.Kind != "turn" || forks.lastCreate.ForkPoint.TurnIndex != 2 {
+	if forks.createCalls != 1 || forks.lastCreate.SourceSessionID != sourceSessionID || forks.lastCreate.ForkPoint.Kind != "turn" || forks.lastCreate.ForkPoint.TurnID != turnID {
 		t.Fatalf("create owner call = calls %d req %#v", forks.createCalls, forks.lastCreate)
 	}
 
-	replay := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"replay","method":"conversation.fork","params":{"source_session_id":"`+sourceSessionID+`","fork_point":{"kind":"turn","turn_index":2},"idempotency_key":"create-1"}}`)
+	replay := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"replay","method":"conversation.fork","params":{"source_session_id":"`+sourceSessionID+`","fork_point":{"kind":"turn","turn_id":"`+turnID+`"},"idempotency_key":"create-1"}}`)
 	if replay.Error != nil {
 		t.Fatalf("conversation.fork replay error = %#v", replay.Error)
 	}
@@ -399,7 +399,7 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 		{
 			name:   "create missing source session",
 			method: "conversation.fork",
-			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork","params":{"source_session_id":"` + sourceSessionID + `","fork_point":{"kind":"turn","turn_index":1}}}`,
+			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork","params":{"source_session_id":"` + sourceSessionID + `","fork_point":{"kind":"turn","turn_id":"00000000-0000-0000-0000-000000000401"}}}`,
 			mutate: func(s *fakeConversationForkLifecycleStore) { s.createErr = store.ErrSessionNotFound },
 			code:   SessionNotFoundCode,
 			detail: map[string]any{"session_id": sourceSessionID},
@@ -407,10 +407,10 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 		{
 			name:   "create missing turn",
 			method: "conversation.fork",
-			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork","params":{"source_session_id":"` + sourceSessionID + `","fork_point":{"kind":"turn","turn_index":99}}}`,
+			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork","params":{"source_session_id":"` + sourceSessionID + `","fork_point":{"kind":"turn","turn_id":"00000000-0000-0000-0000-000000000999"}}}`,
 			mutate: func(s *fakeConversationForkLifecycleStore) { s.createErr = store.ErrTurnNotFound },
 			code:   TurnNotFoundCode,
-			detail: map[string]any{"session_id": sourceSessionID, "turn_index": float64(99)},
+			detail: map[string]any{"session_id": sourceSessionID, "turn_id": "00000000-0000-0000-0000-000000000999"},
 		},
 		{
 			name:   "create missing event",
@@ -717,12 +717,12 @@ func TestOperatorConversationForkRejectsInvalidForkPointBeforeOwner(t *testing.T
 		},
 		{
 			name:      "unknown entity snapshot",
-			forkPoint: `{"kind":"turn","turn_index":1,"entity_snapshot":{}}`,
+			forkPoint: `{"kind":"turn","turn_id":"00000000-0000-0000-0000-000000000401","entity_snapshot":{}}`,
 			wantField: "fork_point.entity_snapshot",
 		},
 		{
 			name:      "unknown include original",
-			forkPoint: `{"kind":"turn","turn_index":1,"include_original":true}`,
+			forkPoint: `{"kind":"turn","turn_id":"00000000-0000-0000-0000-000000000401","include_original":true}`,
 			wantField: "fork_point.include_original",
 		},
 	}
@@ -776,11 +776,11 @@ func TestOperatorConversationForkIdempotencyConflict(t *testing.T) {
 			Idempotency:               newMutatingProbeIdempotencyStore(),
 		}),
 	})
-	first := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"first","method":"conversation.fork","params":{"source_session_id":"`+sourceSessionID+`","fork_point":{"kind":"turn","turn_index":1},"idempotency_key":"fork-key"}}`)
+	first := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"first","method":"conversation.fork","params":{"source_session_id":"`+sourceSessionID+`","fork_point":{"kind":"turn","turn_id":"00000000-0000-0000-0000-000000000401"},"idempotency_key":"fork-key"}}`)
 	if first.Error != nil {
 		t.Fatalf("conversation.fork first error = %#v", first.Error)
 	}
-	conflict := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"conflict","method":"conversation.fork","params":{"source_session_id":"`+sourceSessionID+`","fork_point":{"kind":"turn","turn_index":2},"idempotency_key":"fork-key"}}`)
+	conflict := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"conflict","method":"conversation.fork","params":{"source_session_id":"`+sourceSessionID+`","fork_point":{"kind":"turn","turn_id":"00000000-0000-0000-0000-000000000402"},"idempotency_key":"fork-key"}}`)
 	if conflict.Error == nil {
 		t.Fatal("conversation.fork conflict error = nil")
 	}

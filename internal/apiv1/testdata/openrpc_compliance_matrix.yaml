@@ -243,10 +243,10 @@ methods:
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
     service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
     gap_classification: []
-  - method: conversation.current_for_agent
+  - method: conversation.get_turn
     transport: http
-    required_params: [agent_id]
-    declared_errors: [AGENT_NOT_FOUND]
+    required_params: [session_id, turn_id]
+    declared_errors: [SESSION_NOT_FOUND, TURN_NOT_FOUND]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
@@ -258,7 +258,7 @@ methods:
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
     service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
     gap_classification: []
-  - method: conversation.get
+  - method: conversation.list_turns
     transport: http
     required_params: [session_id]
     declared_errors: [SESSION_NOT_FOUND]
@@ -269,21 +269,6 @@ methods:
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersTypedErrors}]}
     idempotency: {status: not_applicable}
     result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}]}
-    notification_schema: {status: not_applicable}
-    examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
-    service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
-    gap_classification: []
-  - method: conversation.get_turn
-    transport: http
-    required_params: [session_id, turn_index]
-    declared_errors: [SESSION_NOT_FOUND, TURN_NOT_FOUND]
-    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}, {kind: go_test, name: TestOperatorConversationGetTurnComposesRuntimeLogOwner}]}
-    required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
-    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
-    auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
-    declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersTypedErrors}]}
-    idempotency: {status: not_applicable}
-    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}, {kind: go_test, name: TestOperatorConversationGetTurnComposesRuntimeLogOwner}]}
     notification_schema: {status: not_applicable}
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
     service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}

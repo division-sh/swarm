@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,9 +77,8 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 		{method: "agent.diagnose", params: fmt.Sprintf(`{"agent_id":%q,"queue_limit":10}`, agentID)},
 		{method: "agent.delivery_diagnostics", params: fmt.Sprintf(`{"agent_id":%q,"failure_limit":10,"dead_letter_limit":10}`, agentID)},
 		{method: "conversation.list", params: `{}`},
-		{method: "conversation.get", params: fmt.Sprintf(`{"session_id":%q}`, sessionID)},
-		{method: "conversation.get_turn", params: fmt.Sprintf(`{"session_id":%q,"turn_index":1,"include_logs":false}`, sessionID)},
-		{method: "conversation.current_for_agent", params: fmt.Sprintf(`{"agent_id":%q}`, agentID)},
+		{method: "conversation.list_turns", params: fmt.Sprintf(`{"session_id":%q}`, sessionID)},
+		{method: "conversation.get_turn", params: fmt.Sprintf(`{"session_id":%q,"turn_id":%q}`, sessionID, turnID)},
 	} {
 		t.Run(tc.method, func(t *testing.T) {
 			resp := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":%q,"method":%q,"params":%s}`, tc.method, tc.method, tc.params))
@@ -89,7 +89,7 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	}
 }
 
-func TestSQLiteConversationListSupportsLegacyTurnsWithoutTurnBlocks(t *testing.T) {
+func TestSQLiteConversationProjectionRejectsLegacyTurnsWithoutTurnBlocks(t *testing.T) {
 	ctx := context.Background()
 	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
 	if _, err := sqliteStore.DB.ExecContext(ctx, `ALTER TABLE agent_turns DROP COLUMN turn_blocks`); err != nil {
@@ -134,15 +134,9 @@ func TestSQLiteConversationListSupportsLegacyTurnsWithoutTurnBlocks(t *testing.T
 		t.Fatalf("seed sqlite legacy turn: %v", err)
 	}
 
-	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			AgentConversations: sqliteStore,
-		}),
-	})
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"conversation.list","method":"conversation.list","params":{}}`)
-	if resp.Error != nil {
-		t.Fatalf("conversation.list sqlite legacy turn_blocks error = %#v", resp.Error)
+	_, err := sqliteStore.ListOperatorConversationTurns(ctx, storepkg.OperatorConversationTurnListOptions{SessionID: sessionID})
+	if err == nil || !strings.Contains(err.Error(), "canonical agent_turns.turn_blocks") {
+		t.Fatalf("ListOperatorConversationTurns error = %v, want canonical turn_blocks requirement", err)
 	}
 }
 

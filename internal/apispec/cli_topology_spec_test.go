@@ -142,16 +142,17 @@ func TestCLIOutputConformanceRegistryPromotedAsCurrentStateOwner(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, color, "consumer_registry"), "output_conformance_registry")
 }
 
-func TestCLIRuntimeLogSemanticProjectionOwnsAllPublicCLIConsumers(t *testing.T) {
+func TestCLIRuntimeLogSemanticProjectionOwnsDedicatedLogConsumers(t *testing.T) {
 	catalog := mustMappingValue(t, cliSpecification(t), "command_catalog")
 	logs := mustMappingValue(t, catalog, "logs")
 	projection := mustMappingValue(t, mustMappingValue(t, logs, "output"), "semantic_projection")
 
 	assertScalarValue(t, mustMappingValue(t, projection, "canonical_owner"), "cmd/swarm/runtime_log_projection.go projectRuntimeLogEntry")
 	consumers := mustMappingValue(t, projection, "consumers")
-	for _, want := range []string{"swarm logs snapshot", "swarm logs --follow", "swarm conversation turn embedded runtime_log_entries"} {
+	for _, want := range []string{"swarm logs snapshot", "swarm logs --follow"} {
 		assertSequenceContainsSubstring(t, consumers, want)
 	}
+	assertSequenceOmitsSubstring(t, consumers, "swarm conversation turn")
 
 	tuples := mustMappingValue(t, projection, "exact_redundant_message_tuples")
 	if tuples.Kind != yaml.SequenceNode || len(tuples.Content) != 1 {
@@ -166,8 +167,10 @@ func TestCLIRuntimeLogSemanticProjectionOwnsAllPublicCLIConsumers(t *testing.T) 
 
 	conversation := mustMappingValue(t, catalog, "conversation_turn")
 	conversationOutput := mustMappingValue(t, conversation, "output")
-	assertScalarContains(t, mustMappingValue(t, conversationOutput, "runtime_log_projection"), "same raw-retaining semantic projection owner")
-	assertScalarContains(t, mustMappingValue(t, conversationOutput, "runtime_log_projection"), "component= and action= remain visible")
+	if mappingValue(conversationOutput, "runtime_log_projection") != nil {
+		t.Fatal("conversation_turn output must not compose runtime logs")
+	}
+	assertScalarContains(t, mustMappingValue(t, conversationOutput, "success_detail"), "ordered author-safe activity")
 
 	outputContract := mustMappingValue(t, mustMappingValue(t, cliSpecification(t), "foundations"), "output_contract")
 	rows := mustMappingValue(t, mustMappingValue(t, mustMappingValue(t, outputContract, "command_support"), "output_conformance_registry"), "rows")
@@ -359,6 +362,7 @@ func TestCLIIdentifierResolutionPromotedToOutputContract(t *testing.T) {
 		"entity":        {candidateSource: "/v1/rpc entity.list", scopeMode: "full_run_required", normalizationMode: "trim_case_sensitive"},
 		"event":         {candidateSource: "/v1/rpc event.list", scopeMode: "unbounded_full_only", normalizationMode: "trim_case_sensitive"},
 		"session":       {candidateSource: "/v1/rpc conversation.list", scopeMode: "unpromoted_full_only", normalizationMode: "trim_case_sensitive"},
+		"turn":          {candidateSource: "/v1/rpc conversation.list_turns", scopeMode: "full_session_required", normalizationMode: "trim_case_sensitive"},
 		"fork":          {candidateSource: "/v1/rpc conversation.fork_list", scopeMode: "unpromoted_full_only", normalizationMode: "trim_case_sensitive"},
 		"mailbox":       {candidateSource: "/v1/rpc mailbox.list", scopeMode: "unpromoted_full_only", normalizationMode: "trim_case_sensitive"},
 		"flow_instance": {candidateSource: "unpromoted", scopeMode: "unpromoted_full_only", normalizationMode: "existing_flow_path"},
@@ -606,4 +610,16 @@ func assertSequenceContainsSubstring(t *testing.T, node *yaml.Node, want string)
 		}
 	}
 	t.Fatalf("sequence missing substring %q", want)
+}
+
+func assertSequenceOmitsSubstring(t *testing.T, node *yaml.Node, forbidden string) {
+	t.Helper()
+	if node == nil || node.Kind != yaml.SequenceNode {
+		t.Fatalf("node kind = %d, want sequence", nodeKind(node))
+	}
+	for _, item := range node.Content {
+		if strings.Contains(scalarValue(item), forbidden) {
+			t.Fatalf("sequence contains forbidden substring %q", forbidden)
+		}
+	}
 }

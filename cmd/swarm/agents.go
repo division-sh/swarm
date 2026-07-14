@@ -129,11 +129,10 @@ type agentDiagnosisActive struct {
 }
 
 type agentDiagnosisLastToolOutcome struct {
-	TurnID    string          `json:"turn_id"`
-	ToolName  string          `json:"tool_name"`
-	ToolUseID *string         `json:"tool_use_id,omitempty"`
-	OK        *bool           `json:"ok"`
-	Result    json.RawMessage `json:"result,omitempty"`
+	TurnID    string  `json:"turn_id"`
+	ToolName  string  `json:"tool_name"`
+	ToolUseID *string `json:"tool_use_id,omitempty"`
+	OK        *bool   `json:"ok"`
 }
 
 type agentSummary struct {
@@ -795,15 +794,7 @@ func validateAgentDiagnosisLastToolOutcome(outcome *agentDiagnosisLastToolOutcom
 	if outcome.OK == nil {
 		return fmt.Errorf("malformed agent.diagnose result: last_tool_outcome.ok is required")
 	}
-	if len(outcome.Result) > 0 && !jsonRawMessageIsObject(outcome.Result) {
-		return fmt.Errorf("malformed agent.diagnose result: last_tool_outcome.result must be a JSON object")
-	}
 	return nil
-}
-
-func jsonRawMessageIsObject(raw json.RawMessage) bool {
-	var decoded map[string]any
-	return json.Unmarshal(raw, &decoded) == nil && decoded != nil
 }
 
 func validateAgentSummary(agent agentSummary) error {
@@ -1005,9 +996,6 @@ func writeAgentDiagnosisResult(out io.Writer, result agentDiagnosisResult) {
 		value := fmt.Sprintf("%s on turn %s, ok %t", outcome.ToolName, outcome.TurnID, *outcome.OK)
 		if outcome.ToolUseID != nil {
 			value += ", use " + strings.TrimSpace(*outcome.ToolUseID)
-		}
-		if len(outcome.Result) > 0 {
-			value += ", result " + agentJSONRawMessageDash(outcome.Result)
 		}
 		rows = append(rows, cliLabeledDetailRow{Label: "latest tool", Value: value})
 	}
