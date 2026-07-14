@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -123,6 +124,9 @@ func ensureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
 		return nil
+	}
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return fmt.Errorf("ensure run row: %w", err)
 	}
 	triggerEventID = strings.TrimSpace(triggerEventID)
 	triggerEventType = strings.TrimSpace(triggerEventType)
@@ -241,9 +245,24 @@ func ensureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 			trigger_event_id = COALESCE(runs.trigger_event_id, NULLIF($2,'')::uuid),
 			trigger_event_type = COALESCE(NULLIF(runs.trigger_event_type, ''), NULLIF($3, ''))`
 	}
+	var existed bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = $1::uuid)`, runID).Scan(&existed); err != nil {
+		return fmt.Errorf("ensure run row: inspect existing run: %w", err)
+	}
 	_, err = db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("ensure run row: %w", err)
+	}
+	if !existed {
+		occurredAt := time.Now().UTC()
+		return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+			Kind: runtimeauthoractivity.KindRunLifecycle, Transition: "started",
+			SourceOwner: "runs", SourceIdentity: runID, DedupKey: "run-created:" + runID,
+			OccurredAt: occurredAt, RunID: runID,
+			Projection: runtimeauthoractivity.Projection{
+				SubjectType: "run", SubjectID: runID, TriggerEventType: triggerEventType,
+			},
+		})
 	}
 	return nil
 }
@@ -443,6 +462,9 @@ func MarkTerminal(ctx context.Context, db DBTX, runID, status string, failure *r
 	if runID == "" {
 		return Snapshot{}, fmt.Errorf("run_id is required")
 	}
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return Snapshot{}, fmt.Errorf("mark run terminal: %w", err)
+	}
 	var err error
 	status, err = CanonicalTerminalStatus(status)
 	if err != nil {
@@ -513,7 +535,23 @@ func MarkTerminal(ctx context.Context, db DBTX, runID, status string, failure *r
 		}
 		return current, nil
 	}
-	return LoadSnapshot(ctx, db, runID, opts)
+	snapshot, err := LoadSnapshot(ctx, db, runID, opts)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	occurredAt := endedAt.UTC()
+	if snapshot.EndedAt != nil {
+		occurredAt = snapshot.EndedAt.UTC()
+	}
+	if err := runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+		Kind: runtimeauthoractivity.KindRunLifecycle, Transition: status,
+		SourceOwner: "runs", SourceIdentity: runID + ":" + status, DedupKey: "run-terminal:" + runID + ":" + status,
+		OccurredAt: occurredAt, RunID: runID, Failure: failure,
+		Projection: runtimeauthoractivity.Projection{SubjectType: "run", SubjectID: runID},
+	}); err != nil {
+		return Snapshot{}, err
+	}
+	return snapshot, nil
 }
 
 func ValidateStatusFailure(status string, failure *runtimefailures.Envelope) error {

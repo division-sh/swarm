@@ -31,7 +31,7 @@ func (s *SQLiteRuntimeStore) CreateHumanTaskCard(ctx context.Context, card decis
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		return insertHumanTaskCard(ctx, tx, card, continuation, false)
 	}
-	return s.runRuntimeMutation(ctx, "sqlite create human-task card", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runDecisionCardMutation(ctx, "sqlite create human-task card", func(txctx context.Context, tx *sql.Tx) error {
 		return insertHumanTaskCard(txctx, tx, card, continuation, false)
 	})
 }
@@ -171,7 +171,7 @@ func (s *PostgresStore) ExpireHumanTaskCards(ctx context.Context, now time.Time,
 
 func (s *SQLiteRuntimeStore) ExpireHumanTaskCards(ctx context.Context, now time.Time, limit int) (int, error) {
 	count := 0
-	err := s.runRuntimeMutation(ctx, "sqlite expire human-task cards", func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runDecisionCardMutation(ctx, "sqlite expire human-task cards", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		count, err = expireHumanTaskCards(txctx, tx, now, limit, false)
 		return err

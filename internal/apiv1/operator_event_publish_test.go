@@ -22,7 +22,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -1722,24 +1721,11 @@ func (s *failCommittedReplayScopeStore) RunEventMutation(ctx context.Context, fn
 	if fn == nil {
 		return nil
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	postCommit := make([]func(), 0, 4)
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
-	mutation := &failCommittedReplayScopeMutation{tx: tx, store: s}
-	mutation.ctx = runtimebus.WithEventMutationContext(txctx, mutation)
-	if err := fn(mutation); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	return nil
+	return s.PostgresStore.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		mutation := &failCommittedReplayScopeMutation{tx: tx, store: s}
+		mutation.ctx = runtimebus.WithEventMutationContext(txctx, mutation)
+		return fn(mutation)
+	})
 }
 
 func (m *failCommittedReplayScopeMutation) Context() context.Context {

@@ -8,10 +8,12 @@ import (
 	"strings"
 	"time"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 )
 
@@ -206,6 +208,9 @@ func loadRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, request
 }
 
 func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, forkRunID, flowInstance string, request runForkActivityRequestPayload, generations []attemptgeneration.Generation, evidence runForkActivityAttemptEvidence) error {
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return err
+	}
 	generation := request.Generation.Normalize()
 	for _, candidate := range generations {
 		if strings.TrimSpace(candidate.LoopID) == strings.TrimSpace(generation.LoopID) {
@@ -239,7 +244,7 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, forkRun
 	if raw := strings.TrimSpace(string(evidence.Failure)); raw != "" && raw != "null" {
 		failure = raw
 	}
-	_, err = tx.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 		INSERT INTO activity_attempts (
 			request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
 			node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
@@ -261,6 +266,10 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, forkRun
 	if err != nil {
 		return fmt.Errorf("copy fork-local activity evidence %s: %w", request.ActivityID, err)
 	}
+	inserted, err := rowsAffected(result)
+	if err != nil {
+		return err
+	}
 	var gotRunID, gotStatus, gotResultID string
 	var gotGeneration []byte
 	if err := tx.QueryRowContext(ctx, `SELECT run_id::text, status, result_event_id::text, loop_generation FROM activity_attempts WHERE request_event_id = $1::uuid`, requestEventID).
@@ -274,5 +283,27 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, forkRun
 	if gotRunID != forkRunID || gotStatus != evidence.Status || gotResultID != resultEventID || !got.Equal(generation) {
 		return fmt.Errorf("fork-local activity evidence %s conflicts with canonical fork identity", request.ActivityID)
 	}
-	return nil
+	if !inserted {
+		return nil
+	}
+	var canonicalFailure *runtimefailures.Envelope
+	if raw := strings.TrimSpace(string(evidence.Failure)); raw != "" && raw != "null" {
+		var decoded runtimefailures.Envelope
+		if err := json.Unmarshal(evidence.Failure, &decoded); err != nil {
+			return fmt.Errorf("decode fork-local activity failure %s: %w", request.ActivityID, err)
+		}
+		canonicalFailure = &decoded
+	}
+	attempt := 1
+	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+		Kind: runtimeauthoractivity.KindActivityLifecycle, Transition: evidence.Status,
+		SourceOwner: "activity_attempts", SourceIdentity: requestEventID + ":" + evidence.Status,
+		DedupKey:   "activity:" + requestEventID + ":" + evidence.Status,
+		OccurredAt: evidence.CompletedAt.UTC(), RunID: forkRunID, EntityID: request.EntityID, FlowID: strings.TrimSpace(flowInstance),
+		Projection: runtimeauthoractivity.Projection{
+			SubjectType: "activity", SubjectID: request.ActivityID, NodeID: request.NodeID, Activity: request.ActivityID,
+			Tool: request.Tool, EffectClass: request.EffectClass, Attempt: &attempt, EventType: evidence.ResultEventType,
+		},
+		Failure: canonicalFailure,
+	})
 }

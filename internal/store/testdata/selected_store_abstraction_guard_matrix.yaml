@@ -105,27 +105,28 @@ rows:
       SQLite construction must keep runtime.Stores.SQLDB nil; promoted stores
       consume typed selected owners instead.
 
-  - id: postgres_not_forced_through_sqlite_serialization_guard
+  - id: postgres_story_order_serialization_guard
     classification: guard
     tier: required_smoke
     concepts:
-      - Postgres must not inherit SQLite global serialization or retry policy
+      - PostgreSQL story mutations serialize on the author-activity singleton without inheriting SQLite retry policy
     owners:
       - internal/store.PostgresStore transaction methods
       - internal/runtime/pipeline.WorkflowInstanceStore Postgres dialect
     proof_refs:
       - kind: go_test
-        name: TestPostgresStore_RunEventTransactionDoesNotSerializeCallbacks
+        name: TestPostgresStore_RunEventTransactionSerializesStoryCommitOrder
       - kind: go_test
         name: TestWorkflowInstanceStore_RunPipelineMutationDoesNotRetryPostgresDialect
     guard_proof_refs:
       - kind: go_test
-        name: TestPostgresStore_RunEventTransactionDoesNotSerializeCallbacks
+        name: TestPostgresStore_RunEventTransactionSerializesStoryCommitOrder
       - kind: go_test
         name: TestWorkflowInstanceStore_RunPipelineMutationDoesNotRetryPostgresDialect
     notes: >
-      SQLite-local busy handling is a store-internal backend policy; Postgres
-      keeps normal transaction behavior.
+      SQLite-local busy handling remains a store-internal backend policy.
+      PostgreSQL does not inherit that retry policy, but story-bearing writes
+      intentionally serialize before domain work to own commit-visible order.
 
   - id: default_sqlite_required_smoke
     classification: required_smoke
@@ -238,7 +239,7 @@ rows:
       - kind: go_test
         name: TestSQLiteWorkflowInstanceStore_RunPipelineMutationUsesRuntimeMutationRunner
       - kind: go_test
-        name: TestPostgresStore_RunEventTransactionDoesNotSerializeCallbacks
+        name: TestPostgresStore_RunEventTransactionSerializesStoryCommitOrder
       - kind: go_test
         name: TestSelectedSQLiteRuntimeWriterBoundaryAudit
     guard_proof_refs:
@@ -279,7 +280,7 @@ rows:
       - kind: go_test
         name: TestSQLiteWorkflowInstanceStore_RunPipelineMutationUsesRuntimeMutationRunner
       - kind: go_test
-        name: TestPostgresStore_RunEventTransactionDoesNotSerializeCallbacks
+        name: TestPostgresStore_RunEventTransactionSerializesStoryCommitOrder
     guard_proof_refs:
       - kind: go_test
         name: TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary

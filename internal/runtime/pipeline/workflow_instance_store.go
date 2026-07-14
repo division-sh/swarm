@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -293,7 +294,9 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 	if !ok {
 		return nil
 	}
-	return s.upsertSpec(ctx, identity.RowID(), identity.StorageRef, instance)
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+		return s.upsertSpec(txctx, identity.RowID(), identity.StorageRef, instance)
+	})
 }
 
 func (s *WorkflowInstanceStore) Create(ctx context.Context, instance WorkflowInstance) error {
@@ -310,7 +313,9 @@ func (s *WorkflowInstanceStore) Create(ctx context.Context, instance WorkflowIns
 	if !ok {
 		return nil
 	}
-	return s.createSpec(ctx, identity.RowID(), identity.StorageRef, instance)
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+		return s.createSpec(txctx, identity.RowID(), identity.StorageRef, instance)
+	})
 }
 
 func normalizeWorkflowInstanceForPersistence(instance WorkflowInstance) (WorkflowInstance, runtimeflowidentity.Persisted, bool, error) {
@@ -383,49 +388,22 @@ func (s *WorkflowInstanceStore) MutateE(ctx context.Context, instanceID string, 
 	if s.isSQLite() {
 		return s.mutateSQLiteE(ctx, instanceID, fn)
 	}
-	tx, ownedTx, err := workflowInstanceStoreTx(ctx, s.db)
-	if err != nil {
-		return err
-	}
-	committed := !ownedTx
-	if ownedTx {
-		defer func() {
-			if !committed {
-				_ = tx.Rollback()
-			}
-		}()
-	}
-	ctx = WithPipelineSQLTxContext(ctx, tx)
-	if err := lockWorkflowInstanceMutation(ctx, tx, instanceID); err != nil {
-		return err
-	}
-	instance, ok, err := s.loadSpec(ctx, workflowInstanceLookupKeys(instanceID), true)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		instance = WorkflowInstance{InstanceID: instanceID}
-	}
-	if err := fn(&instance); err != nil {
-		return err
-	}
-	if err := s.Upsert(ctx, instance); err != nil {
-		return err
-	}
-	if ownedTx {
-		runID, err := runtimecurrentstate.RequireRunID(ctx)
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if err := lockWorkflowInstanceMutation(txctx, tx, instanceID); err != nil {
+			return err
+		}
+		instance, ok, err := s.loadSpec(txctx, workflowInstanceLookupKeys(instanceID), true)
 		if err != nil {
 			return err
 		}
-		if err := captureWorkflowInstanceRevision(ctx, tx, runID); err != nil {
+		if !ok {
+			instance = WorkflowInstance{InstanceID: instanceID}
+		}
+		if err := fn(&instance); err != nil {
 			return err
 		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		committed = true
-	}
-	return nil
+		return s.Upsert(txctx, instance)
+	})
 }
 
 func (s *WorkflowInstanceStore) MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error {
@@ -457,41 +435,25 @@ func (s *WorkflowInstanceStore) MarkTerminated(ctx context.Context, storageRef s
 	if terminatedAt.IsZero() {
 		terminatedAt = time.Now().UTC()
 	}
-	tx, ownedTx, err := workflowInstanceStoreTx(ctx, s.db)
-	if err != nil {
-		return err
-	}
-	committed := !ownedTx
-	if ownedTx {
-		defer func() {
-			if !committed {
-				_ = tx.Rollback()
-			}
-		}()
-	}
-	result, err := tx.ExecContext(ctx, `
-		UPDATE flow_instances
-		SET status = 'terminated',
-		    terminated_at = COALESCE(terminated_at, $2)
-		WHERE instance_id = $1
-	`, storageRef, terminatedAt)
-	if err != nil {
-		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
-		return fmt.Errorf("flow instance not found: %s", storageRef)
-	}
-	if ownedTx {
-		if err := tx.Commit(); err != nil {
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		result, err := tx.ExecContext(txctx, `
+			UPDATE flow_instances
+			SET status = 'terminated',
+			    terminated_at = COALESCE(terminated_at, $2)
+			WHERE instance_id = $1
+		`, storageRef, terminatedAt)
+		if err != nil {
 			return err
 		}
-		committed = true
-	}
-	return nil
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return fmt.Errorf("flow instance not found: %s", storageRef)
+		}
+		return nil
+	})
 }
 
 func markWorkflowInstanceTerminatedSpecTx(ctx context.Context, tx *sql.Tx, storageRef string, terminatedAt time.Time) error {
@@ -742,7 +704,13 @@ func (s *WorkflowInstanceStore) runInPipelineTransaction(ctx context.Context, fn
 		return nil
 	}
 	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
-		return fn(ctx, tx)
+		if runtimeauthoractivity.InMutation(ctx, tx) {
+			return fn(ctx, tx)
+		}
+		if !runtimeauthoractivity.FinalizedMutation(ctx, tx) {
+			return fmt.Errorf("pipeline mutation entered from a raw transaction without author activity ownership")
+		}
+		ctx = WithoutPipelineSQLTxContext(ctx)
 	}
 	if s.isSQLite() {
 		if s.runtimeMutation != nil {
@@ -782,12 +750,22 @@ func (s *WorkflowInstanceStore) runInPipelineTransactionOnce(ctx context.Context
 	txctx = WithPipelineSQLTxContext(txctx, tx)
 	txctx = withPipelinePostCommitActions(txctx, &postCommit)
 	txctx = withPipelineRollbackActions(txctx, &rollbackActions)
-	if err := fn(txctx, tx); err != nil {
+	storyctx, err := runtimeauthoractivity.Begin(txctx, tx, runtimeauthoractivity.DialectPostgres)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := fn(storyctx, tx); err != nil {
 		_ = tx.Rollback()
 		flushPipelineRollbackActions(rollbackActions)
 		return err
 	}
-	if err := CapturePipelineRunForkRevisionChanges(txctx, tx); err != nil {
+	if err := CapturePipelineRunForkRevisionChanges(storyctx, tx); err != nil {
+		_ = tx.Rollback()
+		flushPipelineRollbackActions(rollbackActions)
+		return err
+	}
+	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
 		_ = tx.Rollback()
 		flushPipelineRollbackActions(rollbackActions)
 		return err
@@ -1144,17 +1122,9 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 	if err != nil {
 		return err
 	}
-	tx, ownedTx, err := workflowInstanceStoreTx(ctx, s.db)
-	if err != nil {
-		return err
-	}
-	committed := !ownedTx
-	if ownedTx {
-		defer func() {
-			if !committed {
-				_ = tx.Rollback()
-			}
-		}()
+	tx, ok := sqlTxFromContext(ctx)
+	if !ok || tx == nil || !runtimeauthoractivity.InMutation(ctx, tx) {
+		return fmt.Errorf("workflow instance upsert requires the pipeline story transaction owner")
 	}
 	previous, err := loadTrackedEntityStateProjection(ctx, tx, runID, rowID)
 	if err != nil {
@@ -1250,10 +1220,8 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 	}); err != nil {
 		return err
 	}
-	if !ownedTx {
-		if err := declarePipelineRunForkRevisionChange(ctx, runID, runforkrevision.FamilyTimers); err != nil {
-			return err
-		}
+	if err := declarePipelineRunForkRevisionChange(ctx, runID, runforkrevision.FamilyTimers); err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM timers
@@ -1292,15 +1260,6 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 			return err
 		}
 	}
-	if ownedTx {
-		if err := captureWorkflowInstanceRevision(ctx, tx, runID); err != nil {
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		committed = true
-	}
 	return nil
 }
 
@@ -1309,17 +1268,9 @@ func (s *WorkflowInstanceStore) createSpec(ctx context.Context, rowID, storageRe
 	if err != nil {
 		return err
 	}
-	tx, ownedTx, err := workflowInstanceStoreTx(ctx, s.db)
-	if err != nil {
-		return err
-	}
-	committed := !ownedTx
-	if ownedTx {
-		defer func() {
-			if !committed {
-				_ = tx.Rollback()
-			}
-		}()
+	tx, ok := sqlTxFromContext(ctx)
+	if !ok || tx == nil || !runtimeauthoractivity.InMutation(ctx, tx) {
+		return fmt.Errorf("workflow instance create requires the pipeline story transaction owner")
 	}
 	if err := lockWorkflowInstanceMutation(ctx, tx, storageRef); err != nil {
 		return err
@@ -1428,15 +1379,6 @@ func (s *WorkflowInstanceStore) createSpec(ctx context.Context, rowID, storageRe
 			return err
 		}
 	}
-	if ownedTx {
-		if err := captureWorkflowInstanceRevision(ctx, tx, runID); err != nil {
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		committed = true
-	}
 	return nil
 }
 
@@ -1465,25 +1407,6 @@ func workflowInstanceCreateTargetExists(ctx context.Context, tx *sql.Tx, runID, 
 		return false, err
 	}
 	return exists, nil
-}
-
-func workflowInstanceStoreTx(ctx context.Context, db *sql.DB) (*sql.Tx, bool, error) {
-	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
-		return tx, false, nil
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, false, err
-	}
-	return tx, true, nil
-}
-
-func captureWorkflowInstanceRevision(ctx context.Context, tx *sql.Tx, runID string) error {
-	if err := CapturePipelineRunForkRevisionChanges(ctx, tx); err != nil {
-		return err
-	}
-	_, err := runforkrevision.Capture(ctx, tx, runID, runforkrevision.FamilyTimers)
-	return err
 }
 
 func lockWorkflowInstanceMutation(ctx context.Context, tx *sql.Tx, instanceID string) error {

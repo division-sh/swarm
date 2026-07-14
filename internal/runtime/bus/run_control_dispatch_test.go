@@ -2,6 +2,7 @@ package bus_test
 
 import (
 	"context"
+	"database/sql"
 	"sync"
 	"testing"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -285,17 +285,10 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 			time.Now().UTC(),
 		),
 	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin tx: %v", err)
-	}
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-	if err := eb.EngineOutbox().WriteOutbox(txctx, []runtimeengine.EmitIntent{intent}); err != nil {
-		_ = tx.Rollback()
+	if err := pg.RunEventTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+		return eb.EngineOutbox().WriteOutbox(txctx, []runtimeengine.EmitIntent{intent})
+	}); err != nil {
 		t.Fatalf("WriteOutbox: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit outbox tx: %v", err)
 	}
 
 	if _, err := controller.Pause(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test"}); err != nil {

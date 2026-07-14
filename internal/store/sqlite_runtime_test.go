@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -888,40 +889,28 @@ func TestSQLiteRuntimeStoreAPIIdempotencySerializesAcrossSamePathHandles(t *test
 	assertSQLiteRuntimeCount(t, storeA, `SELECT COUNT(*) FROM api_idempotency WHERE method = ? AND idempotency_key = ?`, 1, req.Method, req.IdempotencyKey)
 }
 
-func TestSQLiteRuntimeStoreAppendEventTxEnsuresFreshRunRow(t *testing.T) {
+func TestSQLiteRuntimeStoreRunEventTransactionEnsuresFreshRunRow(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	tx, err := store.BeginEventTx(ctx)
-	if err != nil {
-		t.Fatalf("BeginEventTx: %v", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	if err := store.AppendEventTx(ctx, tx, eventtest.PersistedProjection(
-		eventID,
-		events.EventType("item.received"),
-		"api.v1",
-		"",
-		json.RawMessage(`{"entity_id":"33333333-3333-3333-3333-333333333333"}`),
-		0,
-		runID,
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "33333333-3333-3333-3333-333333333333"),
-		time.Now().UTC(),
-	)); err != nil {
-		t.Fatalf("AppendEventTx: %v", err)
+	if err := store.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return store.AppendEventTx(txctx, tx, eventtest.PersistedProjection(
+			eventID,
+			events.EventType("item.received"),
+			"api.v1",
+			"",
+			json.RawMessage(`{"entity_id":"33333333-3333-3333-3333-333333333333"}`),
+			0,
+			runID,
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, "33333333-3333-3333-3333-333333333333"),
+			time.Now().UTC(),
+		))
+	}); err != nil {
+		t.Fatalf("RunEventTransaction: %v", err)
 	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit event tx: %v", err)
-	}
-	committed = true
 
 	assertSQLiteRuntimeCount(t, store, `SELECT COUNT(*) FROM runs WHERE run_id = ?`, 1, runID)
 	assertSQLiteRuntimeCount(t, store, `SELECT COUNT(*) FROM events WHERE event_id = ?`, 1, eventID)

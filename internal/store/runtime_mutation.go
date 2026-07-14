@@ -29,16 +29,20 @@ func (s *SQLiteRuntimeStore) RunRuntimeMutationContext(ctx context.Context, fn f
 	if fn == nil {
 		return nil
 	}
-	return s.runRuntimeMutation(ctx, "sqlite runtime mutation", func(txctx context.Context, _ *sql.Tx) error {
+	return s.runAuthorActivityMutation(ctx, "sqlite pipeline mutation", func(txctx context.Context, _ *sql.Tx) error {
 		return fn(txctx)
 	})
 }
 
 func (s *SQLiteRuntimeStore) RunEventTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
-	return s.runRuntimeMutation(ctx, "sqlite event transaction", fn)
+	return s.runAuthorActivityMutation(ctx, "sqlite event transaction", fn)
 }
 
 func (s *PostgresStore) RunEventTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+	return s.runAuthorActivityMutation(ctx, "postgres event transaction", fn)
+}
+
+func (s *PostgresStore) runPostgresRuntimeMutation(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
 	if fn == nil {
 		return nil
 	}
@@ -71,11 +75,6 @@ func (s *PostgresStore) RunEventTransaction(ctx context.Context, fn func(context
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
 	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
 	if err := fn(txctx, tx); err != nil {
-		_ = tx.Rollback()
-		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
-		return err
-	}
-	if err := runtimepipeline.CapturePipelineRunForkRevisionChanges(txctx, tx); err != nil {
 		_ = tx.Rollback()
 		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
 		return err

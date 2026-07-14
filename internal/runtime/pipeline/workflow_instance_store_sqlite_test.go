@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -220,7 +222,11 @@ func TestSQLiteWorkflowInstanceStore_RunPipelineMutationDoesNotRetryActiveTransa
 
 	busyErr := errors.New("SQLITE_BUSY: database is locked")
 	var attempts int32
-	err = store.RunPipelineMutation(WithPipelineSQLTxContext(ctx, tx), func(txctx context.Context) error {
+	txctx, err := runtimeauthoractivity.Begin(WithPipelineSQLTxContext(ctx, tx), tx, runtimeauthoractivity.DialectSQLite)
+	if err != nil {
+		t.Fatalf("begin author activity story: %v", err)
+	}
+	err = store.RunPipelineMutation(txctx, func(txctx context.Context) error {
 		atomic.AddInt32(&attempts, 1)
 		gotTx, ok := PipelineSQLTxFromContext(txctx)
 		if !ok {
@@ -239,8 +245,28 @@ func TestSQLiteWorkflowInstanceStore_RunPipelineMutationDoesNotRetryActiveTransa
 	}
 }
 
-func TestWorkflowInstanceStore_RunPipelineMutationDoesNotRetryPostgresDialect(t *testing.T) {
+func TestSQLiteWorkflowInstanceStore_RunPipelineMutationRejectsUnownedRawTransaction(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	store := NewSQLiteWorkflowInstanceStore(db)
+	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin raw tx: %v", err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback() })
+
+	err = store.RunPipelineMutation(WithPipelineSQLTxContext(ctx, tx), func(context.Context) error {
+		t.Fatal("raw transaction callback must not run")
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "raw transaction without author activity ownership") {
+		t.Fatalf("RunPipelineMutation error = %v, want unowned raw transaction rejection", err)
+	}
+}
+
+func TestWorkflowInstanceStore_RunPipelineMutationDoesNotRetryPostgresDialect(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
 	store := NewWorkflowInstanceStore(db)
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 	busyErr := errors.New("SQLITE_BUSY: database is locked")
@@ -280,7 +306,14 @@ func (r *recordingRuntimeMutationRunner) RunRuntimeMutationContext(ctx context.C
 	}()
 	postCommit := make([]func(), 0, 4)
 	txctx := withPipelinePostCommitActions(WithPipelineSQLTxContext(ctx, tx), &postCommit)
-	if err := fn(txctx); err != nil {
+	storyctx, err := runtimeauthoractivity.Begin(txctx, tx, runtimeauthoractivity.DialectSQLite)
+	if err != nil {
+		return err
+	}
+	if err := fn(storyctx); err != nil {
+		return err
+	}
+	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -443,6 +476,27 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			completed_at TEXT,
 			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE author_activity_order (
+			singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+			last_sequence BIGINT NOT NULL CHECK (last_sequence >= 0)
+		)`,
+		`CREATE TABLE author_activity_occurrences (
+			occurrence_id TEXT PRIMARY KEY,
+			sequence BIGINT NOT NULL UNIQUE CHECK (sequence > 0),
+			kind TEXT NOT NULL,
+			version INTEGER NOT NULL CHECK (version = 1),
+			transition TEXT NOT NULL,
+			source_owner TEXT NOT NULL,
+			source_identity TEXT NOT NULL,
+			dedup_key TEXT NOT NULL UNIQUE,
+			run_id TEXT,
+			entity_id TEXT,
+			agent_id TEXT,
+			flow_id TEXT,
+			projection TEXT NOT NULL DEFAULT '{}',
+			failure TEXT,
+			occurred_at TIMESTAMP NOT NULL
 		)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {

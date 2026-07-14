@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 )
 
 type InsertForkOptions struct {
@@ -35,6 +37,9 @@ func InsertFork(ctx context.Context, db DBTX, forkRunID, status, sourceRunID, fo
 	}
 	if forkEventID == "" {
 		return fmt.Errorf("fork event_id is required")
+	}
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return fmt.Errorf("insert fork run: %w", err)
 	}
 	bundleSource, err := CanonicalBundleSource(opts.BundleSource)
 	if err != nil {
@@ -71,5 +76,19 @@ func InsertFork(ctx context.Context, db DBTX, forkRunID, status, sourceRunID, fo
 		INSERT INTO runs (`+strings.Join(cols, ", ")+`)
 		VALUES (`+strings.Join(values, ", ")+`)
 	`, args...)
-	return err
+	if err != nil {
+		return err
+	}
+	transition := "started"
+	if status == "paused" {
+		transition = "fork_prepared"
+	}
+	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+		Kind: runtimeauthoractivity.KindRunLifecycle, Transition: transition,
+		SourceOwner: "runs", SourceIdentity: forkRunID, DedupKey: "run-created:" + forkRunID,
+		OccurredAt: startedAt.UTC(), RunID: forkRunID,
+		Projection: runtimeauthoractivity.Projection{
+			SubjectType: "run", SubjectID: forkRunID, ParentRunID: sourceRunID, TriggerEventType: "run.fork",
+		},
+	})
 }

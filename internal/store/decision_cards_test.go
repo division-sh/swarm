@@ -314,9 +314,8 @@ func TestDecisionCardStoreEnforcesSafeNumericSnapshotCarriersOnBothStores(t *tes
 			fieldNumber, _ := decided.Fields.Lookup("score")
 			assertStoreSnapshotNumber(t, "fields.score", fieldNumber.Interface(), float64(safeInteger))
 
-			db, postgres := decisionCardStoreDB(t, cardStore)
 			changePayload := admitDecisionCardTestObject(t, map[string]any{"safe_integer": safeInteger, "subnormal": math.SmallestNonzeroFloat64})
-			if _, err := appendDecisionCardChange(ctx, db, runID, card.CardID, decisioncard.ChangeDeferred, changePayload, card.CreatedAt.Add(2*time.Minute), postgres); err != nil {
+			if _, err := appendDecisionCardChangeInStore(ctx, cardStore, runID, card.CardID, decisioncard.ChangeDeferred, changePayload, card.CreatedAt.Add(2*time.Minute)); err != nil {
 				t.Fatalf("append semantic decision-card change: %v", err)
 			}
 			changes, err := cardStore.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 10})
@@ -743,6 +742,27 @@ func decisionCardStoreDB(t *testing.T, cards decisioncard.Store) (*sql.DB, bool)
 		t.Fatalf("unexpected decision card store %T", cards)
 		return nil, false
 	}
+}
+
+func appendDecisionCardChangeInStore(ctx context.Context, cards decisioncard.Store, runID, cardID, changeType string, payload semanticvalue.Value, now time.Time) (int64, error) {
+	var changeID int64
+	appendChange := func(postgres bool) func(context.Context, *sql.Tx) error {
+		return func(txctx context.Context, tx *sql.Tx) error {
+			var err error
+			changeID, err = appendDecisionCardChange(txctx, tx, runID, cardID, changeType, payload, now, postgres)
+			return err
+		}
+	}
+	var err error
+	switch store := cards.(type) {
+	case *PostgresStore:
+		err = runPostgresDecisionCardMutation(ctx, store.DB, appendChange(true))
+	case *SQLiteRuntimeStore:
+		err = store.runDecisionCardMutation(ctx, "test append decision card change", appendChange(false))
+	default:
+		return 0, fmt.Errorf("unexpected decision card store %T", cards)
+	}
+	return changeID, err
 }
 
 func seedDecisionCardGateEntity(t *testing.T, db *sql.DB, postgres bool, runID, entityID string, activation gateruntime.Activation, now time.Time) {

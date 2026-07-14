@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
@@ -759,6 +760,9 @@ func (s *PostgresStore) LoadCommittedReplayScope(
 }
 
 func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, evt events.Event) error {
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return err
+	}
 	id, runID, name, entityID, flowInstance, scope, payload, chainDepth, producedBy, producedByType, sourceEventID, createdAt, err := eventStorageEnvelope(evt)
 	if err != nil {
 		return err
@@ -840,11 +844,14 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 	if err != nil {
 		return fmt.Errorf("append event: %w", err)
 	}
+	rows, rowsErr := res.RowsAffected()
+	if rowsErr != nil {
+		return fmt.Errorf("read append event result: %w", rowsErr)
+	}
+	if rows == 0 {
+		return nil
+	}
 	if caps.Events.LogRunID {
-		rows, rowsErr := res.RowsAffected()
-		if rowsErr == nil && rows == 0 {
-			return nil
-		}
 		if err := s.ensureRunRow(ctx, caps, tx, runID, id, name, true); err != nil {
 			return err
 		}
@@ -854,26 +861,17 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 			}
 		}
 	}
-	return nil
+	return recordPersistedEventAuthorActivity(ctx, s, evt, producedBy, producedByType)
 }
 
 func (s *PostgresStore) persistEventWithDeliveriesSpec(ctx context.Context, caps StoreSchemaCapabilities, evt events.Event, agentIDs []string) error {
 	return withEventStoreRetry(ctx, nil, func() error {
-		tx, err := s.DB.BeginTx(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("begin event tx: %w", err)
-		}
-		defer func() { _ = tx.Rollback() }()
-		if err := s.appendEventSpec(ctx, caps, tx, evt); err != nil {
-			return err
-		}
-		if err := s.insertEventDeliveriesSpec(ctx, caps, tx, evt.ID(), agentIDs); err != nil {
-			return err
-		}
-		if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
-			return fmt.Errorf("commit event tx: %w", err)
-		}
-		return nil
+		return s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := s.appendEventSpec(txctx, caps, tx, evt); err != nil {
+				return err
+			}
+			return s.insertEventDeliveriesSpec(txctx, caps, tx, evt.ID(), agentIDs)
+		})
 	})
 }
 
@@ -885,24 +883,15 @@ func (s *PostgresStore) persistEventWithDeliveriesAndScopeSpec(
 	scope runtimereplayclaim.CommittedReplayScope,
 ) error {
 	return withEventStoreRetry(ctx, nil, func() error {
-		tx, err := s.DB.BeginTx(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("begin event tx: %w", err)
-		}
-		defer func() { _ = tx.Rollback() }()
-		if err := s.appendEventSpec(ctx, caps, tx, evt); err != nil {
-			return err
-		}
-		if err := s.insertEventDeliveriesSpec(ctx, caps, tx, evt.ID(), agentIDs); err != nil {
-			return err
-		}
-		if err := s.upsertCommittedReplayScopeSpec(ctx, caps, tx, evt.ID(), scope); err != nil {
-			return err
-		}
-		if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
-			return fmt.Errorf("commit event tx: %w", err)
-		}
-		return nil
+		return s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := s.appendEventSpec(txctx, caps, tx, evt); err != nil {
+				return err
+			}
+			if err := s.insertEventDeliveriesSpec(txctx, caps, tx, evt.ID(), agentIDs); err != nil {
+				return err
+			}
+			return s.upsertCommittedReplayScopeSpec(txctx, caps, tx, evt.ID(), scope)
+		})
 	})
 }
 
@@ -915,24 +904,15 @@ func (s *PostgresStore) persistEventWithDeliveryRoutesAndScopeSpec(
 	scope runtimereplayclaim.CommittedReplayScope,
 ) error {
 	return withEventStoreRetry(ctx, nil, func() error {
-		tx, err := s.DB.BeginTx(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("begin event tx: %w", err)
-		}
-		defer func() { _ = tx.Rollback() }()
-		if err := s.appendEventSpec(ctx, caps, tx, evt); err != nil {
-			return err
-		}
-		if err := s.insertEventDeliveriesWithTargetsSpec(ctx, caps, tx, evt.ID(), agentIDs, deliveryTargets); err != nil {
-			return err
-		}
-		if err := s.upsertCommittedReplayScopeSpec(ctx, caps, tx, evt.ID(), scope); err != nil {
-			return err
-		}
-		if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
-			return fmt.Errorf("commit event tx: %w", err)
-		}
-		return nil
+		return s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := s.appendEventSpec(txctx, caps, tx, evt); err != nil {
+				return err
+			}
+			if err := s.insertEventDeliveriesWithTargetsSpec(txctx, caps, tx, evt.ID(), agentIDs, deliveryTargets); err != nil {
+				return err
+			}
+			return s.upsertCommittedReplayScopeSpec(txctx, caps, tx, evt.ID(), scope)
+		})
 	})
 }
 
@@ -944,24 +924,15 @@ func (s *PostgresStore) persistEventWithDeliveryRouteSetAndScopeSpec(
 	scope runtimereplayclaim.CommittedReplayScope,
 ) error {
 	return withEventStoreRetry(ctx, nil, func() error {
-		tx, err := s.DB.BeginTx(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("begin event tx: %w", err)
-		}
-		defer func() { _ = tx.Rollback() }()
-		if err := s.appendEventSpec(ctx, caps, tx, evt); err != nil {
-			return err
-		}
-		if err := s.insertEventDeliveryRoutesSpec(ctx, caps, tx, evt.ID(), deliveryRoutes); err != nil {
-			return err
-		}
-		if err := s.upsertCommittedReplayScopeSpec(ctx, caps, tx, evt.ID(), scope); err != nil {
-			return err
-		}
-		if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
-			return fmt.Errorf("commit event tx: %w", err)
-		}
-		return nil
+		return s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := s.appendEventSpec(txctx, caps, tx, evt); err != nil {
+				return err
+			}
+			if err := s.insertEventDeliveryRoutesSpec(txctx, caps, tx, evt.ID(), deliveryRoutes); err != nil {
+				return err
+			}
+			return s.upsertCommittedReplayScopeSpec(txctx, caps, tx, evt.ID(), scope)
+		})
 	})
 }
 
@@ -1715,20 +1686,17 @@ func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status strin
 	if endedAt.IsZero() {
 		endedAt = time.Now().UTC()
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("begin run terminal tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	snap, err := storerunlifecycle.MarkTerminal(ctx, tx, runID, status, failure, endedAt, runLifecycleOptions(caps))
+	var snap storerunlifecycle.Snapshot
+	err = s.runAuthorActivityMutation(ctx, "postgres mark run terminal", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		snap, err = storerunlifecycle.MarkTerminal(txctx, tx, runID, status, failure, endedAt, runLifecycleOptions(caps))
+		if err != nil {
+			return err
+		}
+		return supersedeDecisionCardsForRun(txctx, tx, runID, "run_"+status, endedAt, true)
+	})
 	if err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err
-	}
-	if err := supersedeDecisionCardsForRun(ctx, tx, runID, "run_"+status, endedAt, true); err != nil {
-		return runtimebus.RunLifecycleSnapshot{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("commit run terminal tx: %w", err)
 	}
 	return runtimebus.RunLifecycleSnapshot{
 		RunID:       snap.RunID,
@@ -1746,13 +1714,9 @@ func (s *PostgresStore) ConvergeStandaloneRuntimePlatformRun(ctx context.Context
 	if err != nil {
 		return err
 	}
-	var db storerunlifecycle.DBTX = s.DB
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		db = tx
-	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
-		db = conn
-	}
-	return s.convergeStandaloneRuntimePlatformRunByEventID(ctx, db, caps, strings.TrimSpace(evt.ID()))
+	return s.runAuthorActivityMutation(ctx, "postgres standalone platform run convergence", func(txctx context.Context, tx *sql.Tx) error {
+		return s.convergeStandaloneRuntimePlatformRunByEventID(txctx, tx, caps, strings.TrimSpace(evt.ID()))
+	})
 }
 
 func runLifecycleOptions(caps StoreSchemaCapabilities) storerunlifecycle.EnsureActiveOptions {

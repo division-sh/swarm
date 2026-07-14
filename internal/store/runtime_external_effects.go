@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
@@ -20,27 +21,33 @@ var _ runtimeeffects.RecoveryStore = (*PostgresStore)(nil)
 var _ runtimeeffects.RecoveryStore = (*SQLiteRuntimeStore)(nil)
 
 func (s *PostgresStore) ReconcileExternalEffectAttempts(ctx context.Context, now time.Time) (runtimeeffects.RecoverySummary, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return runtimeeffects.RecoverySummary{}, err
-	}
-	defer tx.Rollback()
-	summary, err := reconcileExternalEffectAttemptsPostgres(ctx, tx, now.UTC())
-	if err != nil {
-		return runtimeeffects.RecoverySummary{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return runtimeeffects.RecoverySummary{}, err
-	}
-	return summary, nil
+	var summary runtimeeffects.RecoverySummary
+	err := s.runAuthorActivityMutation(ctx, "postgres reconcile external effect attempts", func(txctx context.Context, tx *sql.Tx) error {
+		candidates, err := loadExternalEffectRecoveryCandidates(txctx, tx, true)
+		if err != nil {
+			return err
+		}
+		summary, err = reconcileExternalEffectAttemptsPostgres(txctx, tx, now.UTC())
+		if err != nil {
+			return err
+		}
+		return recordRecoveredExternalEffectStories(txctx, tx, candidates, now.UTC(), true)
+	})
+	return summary, err
 }
 
 func (s *SQLiteRuntimeStore) ReconcileExternalEffectAttempts(ctx context.Context, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	var summary runtimeeffects.RecoverySummary
-	err := s.runRuntimeMutation(ctx, "sqlite reconcile external effect attempts", func(txctx context.Context, tx *sql.Tx) error {
-		var err error
+	err := s.runAuthorActivityMutation(ctx, "sqlite reconcile external effect attempts", func(txctx context.Context, tx *sql.Tx) error {
+		candidates, err := loadExternalEffectRecoveryCandidates(txctx, tx, false)
+		if err != nil {
+			return err
+		}
 		summary, err = reconcileExternalEffectAttemptsSQLiteTx(txctx, tx, now.UTC())
-		return err
+		if err != nil {
+			return err
+		}
+		return recordRecoveredExternalEffectStories(txctx, tx, candidates, now.UTC(), false)
 	})
 	return summary, err
 }
@@ -155,6 +162,202 @@ type existingExternalAttempt struct {
 	attemptOrdinal int
 	launched       bool
 	failureJSON    string
+}
+
+type externalEffectStorySource struct {
+	AttemptID     string
+	Kind          string
+	Class         string
+	Adapter       string
+	Transport     string
+	AuthorityKind string
+	AuthorityID   string
+	AgentID       string
+	Ordinal       int
+}
+
+func externalEffectStorySourceFromAttempt(attempt runtimeeffects.Attempt) externalEffectStorySource {
+	return externalEffectStorySource{
+		AttemptID: attempt.AttemptID, Kind: string(attempt.Kind), Class: string(attempt.Class),
+		Adapter: attempt.Adapter, Transport: attempt.Transport, AuthorityKind: string(attempt.Authority.Kind),
+		AuthorityID: attempt.Authority.ID, AgentID: attempt.Authority.Normal.AgentID, Ordinal: attempt.Ordinal,
+	}
+}
+
+func loadExternalEffectStorySource(ctx context.Context, tx *sql.Tx, attemptID string, postgres bool) (externalEffectStorySource, error) {
+	query := `
+		SELECT CAST(a.attempt_id AS TEXT), o.effect_kind, o.effect_class, a.adapter, a.transport,
+		       o.authority_kind, o.authority_id, COALESCE(o.agent_id, ''), a.attempt_ordinal
+		FROM runtime_external_effect_attempts a
+		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
+		WHERE a.attempt_id = ?
+	`
+	if postgres {
+		query = `
+			SELECT a.attempt_id::text, o.effect_kind, o.effect_class, a.adapter, a.transport,
+			       o.authority_kind, o.authority_id, COALESCE(o.agent_id, ''), a.attempt_ordinal
+			FROM runtime_external_effect_attempts a
+			JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
+			WHERE a.attempt_id = $1::uuid
+		`
+	}
+	var source externalEffectStorySource
+	if err := tx.QueryRowContext(ctx, query, strings.TrimSpace(attemptID)).Scan(
+		&source.AttemptID, &source.Kind, &source.Class, &source.Adapter, &source.Transport,
+		&source.AuthorityKind, &source.AuthorityID, &source.AgentID, &source.Ordinal,
+	); err != nil {
+		return externalEffectStorySource{}, fmt.Errorf("load external effect author activity source: %w", err)
+	}
+	return source, nil
+}
+
+type externalEffectStoryDisposition struct {
+	Launch bool
+}
+
+var externalEffectStoryDispositions = map[string]externalEffectStoryDisposition{
+	"provider_turn/anthropic_api":                       {Launch: true},
+	"provider_turn/openai_compatible":                   {Launch: true},
+	"provider_turn/openai_responses":                    {Launch: true},
+	"provider_turn/claude_cli":                          {Launch: true},
+	"http_tool_target/authored_http_tool":               {Launch: true},
+	"managed_credential_request/managed_credential":     {},
+	"native_web_search_http/native_web_search":          {Launch: true},
+	"mcp_http_request/mcp_tools_call_http":              {Launch: true},
+	"mcp_stdio_request/mcp_tools_call_stdio":            {Launch: true},
+	"native_command/native_bash":                        {Launch: true},
+	"native_command/native_read_file":                   {Launch: true},
+	"native_file_write/native_write_file":               {Launch: true},
+	"tool_result_relay/tool_result_relay":               {},
+	"claude_tool_result_relay/claude_tool_result_relay": {},
+}
+
+func externalEffectStoryDispositionFor(kind, adapter string) (externalEffectStoryDisposition, error) {
+	key := strings.TrimSpace(kind) + "/" + strings.TrimSpace(adapter)
+	disposition, ok := externalEffectStoryDispositions[key]
+	if !ok {
+		return externalEffectStoryDisposition{}, fmt.Errorf("external effect registration %q has no author activity disposition", key)
+	}
+	return disposition, nil
+}
+
+func recordExternalEffectStory(ctx context.Context, source externalEffectStorySource, state runtimeeffects.State, failure *runtimefailures.Envelope, occurredAt time.Time) error {
+	disposition, err := externalEffectStoryDispositionFor(source.Kind, source.Adapter)
+	if err != nil {
+		return err
+	}
+	if state == runtimeeffects.StateLaunched {
+		if !disposition.Launch {
+			return nil
+		}
+	}
+	if state != runtimeeffects.StateLaunched && state != runtimeeffects.StateTerminalFailure && state != runtimeeffects.StateOutcomeUncertain {
+		return nil
+	}
+	transition := string(state)
+	attempt := source.Ordinal
+	identity := source.AttemptID + ":" + transition
+	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+		Kind: runtimeauthoractivity.KindEffectLifecycle, Transition: transition,
+		SourceOwner: "runtime_external_effect_attempts", SourceIdentity: identity, DedupKey: "effect:" + identity,
+		OccurredAt: occurredAt.UTC(), AgentID: source.AgentID,
+		Projection: runtimeauthoractivity.Projection{
+			EffectClass: source.Class, Attempt: &attempt, Adapter: source.Adapter, Transport: source.Transport,
+			AuthorityKind: source.AuthorityKind, AuthorityID: source.AuthorityID,
+		},
+		Failure: failure,
+	})
+}
+
+func recordSettledExternalEffectStory(ctx context.Context, tx *sql.Tx, settlement runtimeeffects.Settlement, postgres bool) error {
+	if settlement.State != runtimeeffects.StateTerminalFailure && settlement.State != runtimeeffects.StateOutcomeUncertain {
+		return nil
+	}
+	source, err := loadExternalEffectStorySource(ctx, tx, settlement.AttemptID, postgres)
+	if err != nil {
+		return err
+	}
+	state, failure, occurredAt, err := loadExternalEffectStorySettlement(ctx, tx, settlement.AttemptID, settlement.OperationID, postgres)
+	if err != nil {
+		return err
+	}
+	return recordExternalEffectStory(ctx, source, state, failure, occurredAt)
+}
+
+func loadExternalEffectStorySettlement(ctx context.Context, tx *sql.Tx, attemptID, operationID string, postgres bool) (runtimeeffects.State, *runtimefailures.Envelope, time.Time, error) {
+	query := `SELECT state, COALESCE(failure, 'null'), completed_at FROM runtime_external_effect_attempts WHERE attempt_id = ? AND operation_id = ?`
+	if postgres {
+		query = `SELECT state, COALESCE(failure, 'null'::jsonb), completed_at FROM runtime_external_effect_attempts WHERE attempt_id = $1::uuid AND operation_id = $2::uuid`
+	}
+	var state string
+	var failureRaw []byte
+	var completedAtRaw any
+	if err := tx.QueryRowContext(ctx, query, strings.TrimSpace(attemptID), strings.TrimSpace(operationID)).Scan(&state, &failureRaw, &completedAtRaw); err != nil {
+		return "", nil, time.Time{}, fmt.Errorf("load settled external effect author activity source: %w", err)
+	}
+	completedAt, ok, err := sqliteTimeValue(completedAtRaw)
+	if err != nil || !ok {
+		return "", nil, time.Time{}, fmt.Errorf("load settled external effect completion time: %w", firstNonNilError(err, fmt.Errorf("completed_at is required")))
+	}
+	var failure *runtimefailures.Envelope
+	if raw := strings.TrimSpace(string(failureRaw)); raw != "" && raw != "null" {
+		decoded, err := runtimefailures.UnmarshalEnvelope(failureRaw)
+		if err != nil {
+			return "", nil, time.Time{}, fmt.Errorf("decode settled external effect failure: %w", err)
+		}
+		failure = &decoded
+	}
+	return runtimeeffects.State(strings.TrimSpace(state)), failure, completedAt.UTC(), nil
+}
+
+func loadExternalEffectRecoveryCandidates(ctx context.Context, tx *sql.Tx, postgres bool) ([]string, error) {
+	query := `SELECT CAST(attempt_id AS TEXT) FROM runtime_external_effect_attempts WHERE state IN ('authorized','launched','response_observed') ORDER BY attempt_id`
+	if postgres {
+		query = `SELECT attempt_id::text FROM runtime_external_effect_attempts WHERE state IN ('authorized','launched','response_observed') ORDER BY attempt_id`
+	}
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var candidates []string
+	for rows.Next() {
+		var attemptID string
+		if err := rows.Scan(&attemptID); err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, attemptID)
+	}
+	return candidates, rows.Err()
+}
+
+func recordRecoveredExternalEffectStories(ctx context.Context, tx *sql.Tx, candidates []string, occurredAt time.Time, postgres bool) error {
+	query := `SELECT state, failure FROM runtime_external_effect_attempts WHERE attempt_id = ?`
+	if postgres {
+		query = `SELECT state, failure FROM runtime_external_effect_attempts WHERE attempt_id = $1::uuid`
+	}
+	for _, attemptID := range candidates {
+		var state string
+		var failureRaw []byte
+		if err := tx.QueryRowContext(ctx, query, attemptID).Scan(&state, &failureRaw); err != nil {
+			return err
+		}
+		if state != string(runtimeeffects.StateTerminalFailure) && state != string(runtimeeffects.StateOutcomeUncertain) {
+			continue
+		}
+		failure, err := runtimefailures.UnmarshalEnvelope(failureRaw)
+		if err != nil {
+			return fmt.Errorf("decode recovered external effect failure: %w", err)
+		}
+		source, err := loadExternalEffectStorySource(ctx, tx, attemptID, postgres)
+		if err != nil {
+			return err
+		}
+		if err := recordExternalEffectStory(ctx, source, runtimeeffects.State(state), &failure, occurredAt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (e existingExternalAttempt) matchesAuthorityIdentity(authority runtimeeffects.Authority) bool {
@@ -392,32 +595,33 @@ func externalAuthorizedAttempt(authority runtimeeffects.Authority, req runtimeef
 }
 
 func (s *PostgresStore) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, now time.Time) error {
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := requireExternalEffectAuthorityPostgres(ctx, tx, attempt.Authority, false); err != nil {
-		return err
-	}
-	res, err := tx.ExecContext(ctx, `UPDATE runtime_external_effect_attempts SET state = 'launched', launched_at = $2, updated_at = $2 WHERE attempt_id = $1::uuid AND operation_id = $3::uuid AND execution_owner=$4 AND fence_generation=$5 AND state = 'authorized'`, attempt.AttemptID, now.UTC(), attempt.OperationID, attempt.Authority.ExecutionOwner, attempt.Authority.FenceGeneration)
-	if err := requireExternalAttemptTransition(res, err); err == nil {
-		operationRes, err := tx.ExecContext(ctx, `UPDATE runtime_external_effect_operations SET state = 'launched', updated_at = $2 WHERE operation_id = $1::uuid AND state = 'authorized'`, attempt.OperationID, now.UTC())
-		if err := requireExternalAttemptTransition(operationRes, err); err != nil {
+	return s.runAuthorActivityMutation(ctx, "postgres mark external attempt launched", func(txctx context.Context, tx *sql.Tx) error {
+		if err := requireExternalEffectAuthorityPostgres(txctx, tx, attempt.Authority, false); err != nil {
 			return err
 		}
-		return tx.Commit()
-	}
-	var state string
-	var operationState string
-	if queryErr := tx.QueryRowContext(ctx, `SELECT a.state, o.state FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id WHERE a.attempt_id = $1::uuid AND a.operation_id = $2::uuid`, attempt.AttemptID, attempt.OperationID).Scan(&state, &operationState); queryErr == nil && state == string(runtimeeffects.StateLaunched) && operationState == string(runtimeeffects.StateLaunched) {
-		return nil
-	}
-	return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "external-effects", "launch_attempt", map[string]any{"attempt_id": attempt.AttemptID})
+		res, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_attempts SET state = 'launched', launched_at = $2, updated_at = $2 WHERE attempt_id = $1::uuid AND operation_id = $3::uuid AND execution_owner=$4 AND fence_generation=$5 AND state = 'authorized'`, attempt.AttemptID, now.UTC(), attempt.OperationID, attempt.Authority.ExecutionOwner, attempt.Authority.FenceGeneration)
+		if err := requireExternalAttemptTransition(res, err); err == nil {
+			operationRes, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_operations SET state = 'launched', updated_at = $2 WHERE operation_id = $1::uuid AND state = 'authorized'`, attempt.OperationID, now.UTC())
+			if err := requireExternalAttemptTransition(operationRes, err); err != nil {
+				return err
+			}
+		} else {
+			var state string
+			var operationState string
+			if queryErr := tx.QueryRowContext(txctx, `SELECT a.state, o.state FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id WHERE a.attempt_id = $1::uuid AND a.operation_id = $2::uuid`, attempt.AttemptID, attempt.OperationID).Scan(&state, &operationState); queryErr != nil || state != string(runtimeeffects.StateLaunched) || operationState != string(runtimeeffects.StateLaunched) {
+				return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "external-effects", "launch_attempt", map[string]any{"attempt_id": attempt.AttemptID})
+			}
+		}
+		launchedAt, err := loadExternalEffectLaunchTime(txctx, tx, attempt.AttemptID, attempt.OperationID, true)
+		if err != nil {
+			return err
+		}
+		return recordExternalEffectStory(txctx, externalEffectStorySourceFromAttempt(attempt), runtimeeffects.StateLaunched, nil, launchedAt)
+	})
 }
 
 func (s *SQLiteRuntimeStore) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, now time.Time) error {
-	return s.runRuntimeMutation(ctx, "sqlite mark external attempt launched", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runAuthorActivityMutation(ctx, "sqlite mark external attempt launched", func(txctx context.Context, tx *sql.Tx) error {
 		if err := requireExternalEffectAuthoritySQLite(txctx, tx, attempt.Authority, false); err != nil {
 			return err
 		}
@@ -427,15 +631,35 @@ func (s *SQLiteRuntimeStore) MarkExternalAttemptLaunched(ctx context.Context, at
 			if err := requireExternalAttemptTransition(operationRes, err); err != nil {
 				return err
 			}
-			return nil
+		} else {
+			var state string
+			var operationState string
+			if queryErr := tx.QueryRowContext(txctx, `SELECT a.state, o.state FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id WHERE a.attempt_id = ? AND a.operation_id = ?`, attempt.AttemptID, attempt.OperationID).Scan(&state, &operationState); queryErr != nil || state != string(runtimeeffects.StateLaunched) || operationState != string(runtimeeffects.StateLaunched) {
+				return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "external-effects", "launch_attempt", map[string]any{"attempt_id": attempt.AttemptID})
+			}
 		}
-		var state string
-		var operationState string
-		if queryErr := tx.QueryRowContext(txctx, `SELECT a.state, o.state FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id WHERE a.attempt_id = ? AND a.operation_id = ?`, attempt.AttemptID, attempt.OperationID).Scan(&state, &operationState); queryErr == nil && state == string(runtimeeffects.StateLaunched) && operationState == string(runtimeeffects.StateLaunched) {
-			return nil
+		launchedAt, err := loadExternalEffectLaunchTime(txctx, tx, attempt.AttemptID, attempt.OperationID, false)
+		if err != nil {
+			return err
 		}
-		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "external-effects", "launch_attempt", map[string]any{"attempt_id": attempt.AttemptID})
+		return recordExternalEffectStory(txctx, externalEffectStorySourceFromAttempt(attempt), runtimeeffects.StateLaunched, nil, launchedAt)
 	})
+}
+
+func loadExternalEffectLaunchTime(ctx context.Context, tx *sql.Tx, attemptID, operationID string, postgres bool) (time.Time, error) {
+	query := `SELECT launched_at FROM runtime_external_effect_attempts WHERE attempt_id = ? AND operation_id = ?`
+	if postgres {
+		query = `SELECT launched_at FROM runtime_external_effect_attempts WHERE attempt_id = $1::uuid AND operation_id = $2::uuid`
+	}
+	var launchedAtRaw any
+	if err := tx.QueryRowContext(ctx, query, strings.TrimSpace(attemptID), strings.TrimSpace(operationID)).Scan(&launchedAtRaw); err != nil {
+		return time.Time{}, fmt.Errorf("load launched external effect author activity source: %w", err)
+	}
+	launchedAt, ok, err := sqliteTimeValue(launchedAtRaw)
+	if err != nil || !ok {
+		return time.Time{}, fmt.Errorf("load launched external effect time: %w", firstNonNilError(err, fmt.Errorf("launched_at is required")))
+	}
+	return launchedAt.UTC(), nil
 }
 
 func (s *PostgresStore) HeartbeatCompletionAttempt(ctx context.Context, attempt runtimeeffects.Attempt, now time.Time, lease time.Duration) error {
@@ -546,30 +770,30 @@ func requireExternalAttemptTransition(res sql.Result, err error) error {
 }
 
 func (s *PostgresStore) SettleExternalAttempt(ctx context.Context, settlement runtimeeffects.Settlement) error {
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if settlement.Authority.Valid() {
-		if err := requireExternalEffectAuthorityPostgres(ctx, tx, settlement.Authority, false); err != nil {
+	return s.runAuthorActivityMutation(ctx, "postgres settle external attempt", func(txctx context.Context, tx *sql.Tx) error {
+		if settlement.Authority.Valid() {
+			if err := requireExternalEffectAuthorityPostgres(txctx, tx, settlement.Authority, false); err != nil {
+				return err
+			}
+		}
+		if err := settleExternalAttemptPostgres(txctx, tx, settlement); err != nil {
 			return err
 		}
-	}
-	if err := settleExternalAttemptPostgres(ctx, tx, settlement); err != nil {
-		return err
-	}
-	return tx.Commit()
+		return recordSettledExternalEffectStory(txctx, tx, settlement, true)
+	})
 }
 
 func (s *SQLiteRuntimeStore) SettleExternalAttempt(ctx context.Context, settlement runtimeeffects.Settlement) error {
-	return s.runRuntimeMutation(ctx, "sqlite settle external attempt", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runAuthorActivityMutation(ctx, "sqlite settle external attempt", func(txctx context.Context, tx *sql.Tx) error {
 		if settlement.Authority.Valid() {
 			if err := requireExternalEffectAuthoritySQLite(txctx, tx, settlement.Authority, false); err != nil {
 				return err
 			}
 		}
-		return settleExternalAttemptSQLiteTx(txctx, tx, settlement)
+		if err := settleExternalAttemptSQLiteTx(txctx, tx, settlement); err != nil {
+			return err
+		}
+		return recordSettledExternalEffectStory(txctx, tx, settlement, false)
 	})
 }
 

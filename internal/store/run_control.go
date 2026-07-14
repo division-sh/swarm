@@ -7,10 +7,11 @@ import (
 	"strings"
 	"time"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
-	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/google/uuid"
 )
 
 func (s *PostgresStore) StopRunControl(ctx context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
@@ -74,45 +75,44 @@ func (s *PostgresStore) runControlTransition(ctx context.Context, req runtimerun
 	if !caps.Events.HasRuns {
 		return runtimeruncontrol.State{}, fmt.Errorf("runs table is required")
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return runtimeruncontrol.State{}, fmt.Errorf("begin run control transition: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	var state runtimeruncontrol.State
+	err = s.runAuthorActivityMutation(ctx, "postgres run control transition", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		state, err = lockRunControlState(txctx, tx, runID)
+		if err != nil {
+			return err
 		}
-	}()
-
-	state, err := lockRunControlState(ctx, tx, runID)
-	if err != nil {
-		return runtimeruncontrol.State{}, err
-	}
-
-	switch action {
-	case "stop":
-		state, err = s.stopRunControlTx(ctx, tx, caps, state, req)
-	case "pause":
-		state, err = pauseRunControlTx(ctx, tx, state, req)
-	case "continue":
-		state, err = continueRunControlTx(ctx, tx, state, req)
-	default:
-		err = fmt.Errorf("unsupported run control action %q", action)
-	}
-	if err != nil {
-		return runtimeruncontrol.State{}, err
-	}
-	if action == "stop" && state.AbandonedDeliveries > 0 {
-		if _, err := runforkrevision.Capture(ctx, tx, runID, runforkrevision.FamilyEventDeliveries, runforkrevision.FamilyEventReceipts); err != nil {
-			return runtimeruncontrol.State{}, err
+		switch action {
+		case "stop":
+			state, err = s.stopRunControlTx(txctx, tx, caps, state, req)
+		case "pause":
+			state, err = pauseRunControlTx(txctx, tx, state, req)
+		case "continue":
+			state, err = continueRunControlTx(txctx, tx, state, req)
+		default:
+			err = fmt.Errorf("unsupported run control action %q", action)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return runtimeruncontrol.State{}, fmt.Errorf("commit run control transition: %w", err)
-	}
-	committed = true
-	return state, nil
+		if err != nil {
+			return err
+		}
+		if action == "pause" || action == "continue" {
+			transition := "paused"
+			if action == "continue" {
+				transition = "resumed"
+			}
+			transitionID := uuid.NewString()
+			return runtimeauthoractivity.Record(txctx, runtimeauthoractivity.Draft{
+				Kind: runtimeauthoractivity.KindRunLifecycle, Transition: transition,
+				SourceOwner: "runs", SourceIdentity: transitionID, DedupKey: "run-transition:" + transitionID,
+				OccurredAt: req.Now.UTC(), RunID: runID,
+				Projection: runtimeauthoractivity.Projection{
+					SubjectType: "run", SubjectID: runID, ControlReason: req.Reason, Source: req.ControlledBy,
+				},
+			})
+		}
+		return nil
+	})
+	return state, err
 }
 
 func lockRunControlState(ctx context.Context, tx *sql.Tx, runID string) (runtimeruncontrol.State, error) {

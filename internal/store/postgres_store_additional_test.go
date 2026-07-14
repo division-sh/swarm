@@ -2655,31 +2655,23 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery_QuarantinesNoRunIDCap
 	}
 }
 
-func TestPostgresStore_BeginEventTx_AppendAndDeliveriesTx(t *testing.T) {
+func TestPostgresStore_RunEventTransaction_AppendAndDeliveriesTx(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
-
-	tx, err := pg.BeginEventTx(ctx)
-	if err != nil {
-		t.Fatalf("BeginEventTx: %v", err)
-	}
 
 	eventID := uuid.NewString()
 	evt := eventtest.PersistedProjection(eventID,
 		events.EventType("system.started"),
 		"runtime", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	if err := pg.AppendEventTx(ctx, tx, evt); err != nil {
-		_ = tx.Rollback()
-		t.Fatalf("AppendEventTx: %v", err)
-	}
-	if err := pg.InsertEventDeliveriesTx(ctx, tx, eventID, []string{"control-plane", "reviewer"}); err != nil {
-		_ = tx.Rollback()
-		t.Fatalf("InsertEventDeliveriesTx: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit event tx: %v", err)
+	if err := pg.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if err := pg.AppendEventTx(txctx, tx, evt); err != nil {
+			return err
+		}
+		return pg.InsertEventDeliveriesTx(txctx, tx, eventID, []string{"control-plane", "reviewer"})
+	}); err != nil {
+		t.Fatalf("RunEventTransaction: %v", err)
 	}
 
 	var nEvents, nDeliveries int
@@ -4682,7 +4674,7 @@ func TestManagerStore_AppendAgentTurn_PersistsTurnBlocksWhenColumnExists(t *test
 		RuntimeMode: "task",
 		SessionID:   sessionID,
 		TurnBlocks: []runtimellm.TurnBlock{
-			{Kind: "dispatch", Title: "scoring/vertical.marginal"},
+			{Kind: "dispatch", Title: "scoring/vertical.marginal", Data: json.RawMessage(`{"trigger_event_type":"scoring/vertical.marginal"}`)},
 			{Kind: "tool_use", ToolName: "schedule", Input: json.RawMessage(`{"delay_seconds":1209600}`)},
 			{Kind: "outcome", Text: "14-day review scheduled."},
 		},

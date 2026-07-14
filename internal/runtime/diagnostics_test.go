@@ -10,9 +10,11 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -81,20 +83,11 @@ func (s runtimeLogCapabilityStub) PersistRuntimeLog(ctx context.Context, record 
 		`, string(record.Payload), parentEventID)
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	return runRuntimeLogStoryForTest(ctx, s.db, func(storyctx context.Context, tx *sql.Tx) error {
+		if err := ensureRuntimeLogRunRowInStoryForTest(storyctx, tx, runID); err != nil {
+			return err
 		}
-	}()
-	if err := ensureRuntimeLogRunRowForTest(ctx, tx, runID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `
+		if _, err := tx.ExecContext(storyctx, `
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
 			chain_depth, produced_by, produced_by_type, source_event_id, created_at
@@ -103,22 +96,43 @@ func (s runtimeLogCapabilityStub) PersistRuntimeLog(ctx context.Context, record 
 			NULLIF($1,'')::uuid, gen_random_uuid(), 'platform.runtime_log', NULL, NULL, 'global', $2::jsonb,
 			0, 'runtime', 'platform', NULLIF($3,'')::uuid, now()
 		)
-	`, runID, string(record.Payload), parentEventID); err != nil {
-		return err
-	}
-	if err := storerunlifecycle.SyncCounts(ctx, tx, runID); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	committed = true
-	return nil
+		`, runID, string(record.Payload), parentEventID); err != nil {
+			return err
+		}
+		return storerunlifecycle.SyncCounts(storyctx, tx, runID)
+	})
 }
 
 func newTestRuntimeLogger(db *sql.DB, stub runtimeLogCapabilityStub) *RuntimeLogger {
 	stub.db = db
 	return NewRuntimeLogger(stub)
+}
+
+func expectRuntimeLogStoryBegin(mock sqlmock.Sqlmock) {
+	mock.ExpectExec(`INSERT INTO author_activity_order`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT last_sequence FROM author_activity_order`).
+		WillReturnRows(sqlmock.NewRows([]string{"last_sequence"}).AddRow(0))
+}
+
+func expectRuntimeLogRunAbsent(mock sqlmock.Sqlmock, runID string) {
+	mock.ExpectQuery(`SELECT EXISTS \(SELECT 1 FROM runs`).
+		WithArgs(runID).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+}
+
+func expectRuntimeLogStoryFinalize(mock sqlmock.Sqlmock, runID string) {
+	mock.ExpectQuery(`SELECT CAST\(occurrence_id AS TEXT\).*FROM author_activity_occurrences.*WHERE dedup_key`).
+		WithArgs("run-created:" + runID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"occurrence_id", "sequence", "kind", "version", "transition", "source_owner", "source_identity", "dedup_key",
+			"run_id", "entity_id", "agent_id", "flow_id", "projection", "failure", "occurred_at",
+		}))
+	mock.ExpectExec(`UPDATE author_activity_order SET last_sequence`).
+		WithArgs(int64(1), int64(0)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO author_activity_occurrences`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 
 func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
@@ -372,6 +386,8 @@ func TestRuntimeLogger_Log_EnsuresRunRowBeforePersistingRunScopedEntry(t *testin
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 
 	mock.ExpectBegin()
+	expectRuntimeLogStoryBegin(mock)
+	expectRuntimeLogRunAbsent(mock, runID)
 	mock.ExpectExec(`INSERT INTO runs`).
 		WithArgs(runID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -381,6 +397,7 @@ func TestRuntimeLogger_Log_EnsuresRunRowBeforePersistingRunScopedEntry(t *testin
 	mock.ExpectExec(`UPDATE runs`).
 		WithArgs(runID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectRuntimeLogStoryFinalize(mock, runID)
 	mock.ExpectCommit()
 
 	logger := newTestRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
@@ -708,6 +725,8 @@ func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnRunRowFailure(t *testing
 	runID := uuid.NewString()
 	runRowErr := errors.New("run row failed")
 	mock.ExpectBegin()
+	expectRuntimeLogStoryBegin(mock)
+	expectRuntimeLogRunAbsent(mock, runID)
 	mock.ExpectExec(`INSERT INTO runs`).
 		WithArgs(runID).
 		WillReturnError(runRowErr)
@@ -744,6 +763,8 @@ func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnSyncCountsFailure(t *tes
 	runID := uuid.NewString()
 	syncErr := errors.New("sync failed")
 	mock.ExpectBegin()
+	expectRuntimeLogStoryBegin(mock)
+	expectRuntimeLogRunAbsent(mock, runID)
 	mock.ExpectExec(`INSERT INTO runs`).
 		WithArgs(runID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -1062,10 +1083,44 @@ func countRuntimeLogRowsForRun(t *testing.T, db *sql.DB, runID string) int {
 	return count
 }
 
-func ensureRuntimeLogRunRowForTest(ctx context.Context, db storerunlifecycle.DBTX, runID string) error {
+func ensureRuntimeLogRunRowForTest(ctx context.Context, db *sql.DB, runID string) error {
+	return runRuntimeLogStoryForTest(ctx, db, func(storyctx context.Context, tx *sql.Tx) error {
+		return ensureRuntimeLogRunRowInStoryForTest(storyctx, tx, runID)
+	})
+}
+
+func runRuntimeLogStoryForTest(ctx context.Context, db *sql.DB, fn func(context.Context, *sql.Tx) error) error {
 	if db == nil {
 		return nil
 	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	storyctx, err := runtimeauthoractivity.Begin(runtimepipeline.WithPipelineSQLTxContext(ctx, tx), tx, runtimeauthoractivity.DialectPostgres)
+	if err != nil {
+		return err
+	}
+	if err := fn(storyctx, tx); err != nil {
+		return err
+	}
+	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func ensureRuntimeLogRunRowInStoryForTest(ctx context.Context, db storerunlifecycle.DBTX, runID string) error {
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
 		return nil

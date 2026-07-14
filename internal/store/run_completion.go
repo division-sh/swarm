@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
@@ -38,54 +37,32 @@ func (s *PostgresStore) ConvergeNormalRunCompletion(ctx context.Context, eventID
 		return nil
 	}
 	return withEventStoreRetry(ctx, nil, func() error {
-		conn, borrowed := runtimepipeline.PipelineSQLConnFromContext(ctx)
-		if !borrowed {
-			var err error
-			conn, err = s.DB.Conn(ctx)
-			if err != nil {
-				return fmt.Errorf("acquire normal run completion connection: %w", err)
+		return s.runAuthorActivityMutation(ctx, "postgres normal run completion", func(txctx context.Context, tx *sql.Tx) error {
+			candidate, found, err := lockNormalRunCompletionCandidateTx(txctx, tx, eventID)
+			if err != nil || !found {
+				return err
 			}
-			defer conn.Close()
-		}
-		tx, err := conn.BeginTx(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("begin normal run completion tx: %w", err)
-		}
-		committed := false
-		defer func() {
-			if !committed {
-				_ = tx.Rollback()
+			switch candidate.Status {
+			case "completed":
+				return nil
+			case "running":
+			default:
+				return nil
 			}
-		}()
-
-		candidate, found, err := lockNormalRunCompletionCandidateTx(ctx, tx, eventID)
-		if err != nil || !found {
-			return err
-		}
-		switch candidate.Status {
-		case "completed":
+			if platformRec, platformFound, err := loadStandaloneRuntimePlatformRunRecord(txctx, tx, eventID); err != nil {
+				return err
+			} else if platformFound && isStandaloneRuntimePlatformRunRecord(platformRec) {
+				return nil
+			}
+			ready, err := normalRunCompletionRunReadyTx(txctx, tx, candidate.RunID, workflowTerminals, flowTerminals)
+			if err != nil || !ready {
+				return err
+			}
+			if _, err := storerunlifecycle.MarkTerminal(txctx, tx, candidate.RunID, "completed", nil, time.Now().UTC(), runLifecycleOptions(caps)); err != nil {
+				return fmt.Errorf("converge normal run completion: %w", err)
+			}
 			return nil
-		case "running":
-		default:
-			return nil
-		}
-		if platformRec, platformFound, err := loadStandaloneRuntimePlatformRunRecord(ctx, tx, eventID); err != nil {
-			return err
-		} else if platformFound && isStandaloneRuntimePlatformRunRecord(platformRec) {
-			return nil
-		}
-		ready, err := normalRunCompletionRunReadyTx(ctx, tx, candidate.RunID, workflowTerminals, flowTerminals)
-		if err != nil || !ready {
-			return err
-		}
-		if _, err := storerunlifecycle.MarkTerminal(ctx, tx, candidate.RunID, "completed", nil, time.Now().UTC(), runLifecycleOptions(caps)); err != nil {
-			return fmt.Errorf("converge normal run completion: %w", err)
-		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit normal run completion tx: %w", err)
-		}
-		committed = true
-		return nil
+		})
 	})
 }
 

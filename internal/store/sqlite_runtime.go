@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
@@ -32,15 +33,17 @@ import (
 type SQLiteRuntimeStore struct {
 	*SQLiteSchemaStore
 
-	eventPayloadValidator EventPayloadValidator
-	startupMu             sync.Mutex
-	mutationMu            sync.Mutex
-	sessionMu             sync.Mutex
-	replayMu              sync.Mutex
-	startupOwner          string
-	replayClaims          map[string]struct{}
-	sessionLockTTL        time.Duration
-	nowFn                 func() time.Time
+	eventPayloadValidator   EventPayloadValidator
+	authorActivityCatalogMu sync.RWMutex
+	authorActivityCatalog   map[string]struct{}
+	startupMu               sync.Mutex
+	mutationMu              sync.Mutex
+	sessionMu               sync.Mutex
+	replayMu                sync.Mutex
+	startupOwner            string
+	replayClaims            map[string]struct{}
+	sessionLockTTL          time.Duration
+	nowFn                   func() time.Time
 }
 
 var _ SchemaBootstrapper = (*SQLiteRuntimeStore)(nil)
@@ -138,7 +141,7 @@ func (s *SQLiteRuntimeStore) CanonicalEventReceiptsCapability(ctx context.Contex
 }
 
 func (s *SQLiteRuntimeStore) AppendEvent(ctx context.Context, evt events.Event) error {
-	return s.runRuntimeMutation(ctx, "sqlite append event", func(txctx context.Context, tx *sql.Tx) error {
+	return s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		return s.AppendEventTx(txctx, tx, evt)
 	})
 }
@@ -152,9 +155,12 @@ func (s *SQLiteRuntimeStore) BeginEventTx(ctx context.Context) (*sql.Tx, error) 
 
 func (s *SQLiteRuntimeStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
 	if tx == nil {
-		return s.runRuntimeMutation(ctx, "sqlite append event", func(txctx context.Context, tx *sql.Tx) error {
+		return s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 			return s.AppendEventTx(txctx, tx, evt)
 		})
+	}
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return err
 	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
@@ -183,7 +189,7 @@ func (s *SQLiteRuntimeStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt 
 			return err
 		}
 	}
-	_, err = tx.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 		INSERT OR IGNORE INTO events (
 			event_id, run_id, event_name, entity_id, flow_instance, source_route, target_route, target_set,
 			scope, payload, chain_depth, produced_by, produced_by_type, source_event_id, created_at
@@ -194,7 +200,14 @@ func (s *SQLiteRuntimeStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt 
 	if err != nil {
 		return fmt.Errorf("append sqlite event: %w", err)
 	}
-	return nil
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read append sqlite event result: %w", err)
+	}
+	if rows == 0 {
+		return nil
+	}
+	return recordPersistedEventAuthorActivity(ctx, s, evt, producedBy, producedByType)
 }
 
 func (s *SQLiteRuntimeStore) eventPersistenceAdmissionOptions(ctx context.Context, caps StoreSchemaCapabilities, q rowQueryer, evt events.Event) events.AdmissionOptions {
@@ -595,7 +608,7 @@ func (s *SQLiteRuntimeStore) sqliteRunControlTransition(ctx context.Context, req
 		req.ControlledBy = "api.v1"
 	}
 	var state runtimeruncontrol.State
-	if err := s.runRuntimeMutation(ctx, "sqlite run control transition", func(txctx context.Context, tx *sql.Tx) error {
+	if err := s.runAuthorActivityMutation(ctx, "sqlite run control transition", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		state, err = sqliteLoadRunControlState(txctx, tx, runID)
 		if err != nil {
@@ -611,7 +624,25 @@ func (s *SQLiteRuntimeStore) sqliteRunControlTransition(ctx context.Context, req
 		default:
 			err = fmt.Errorf("unsupported run control action %q", action)
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		if action == "pause" || action == "continue" {
+			transition := "paused"
+			if action == "continue" {
+				transition = "resumed"
+			}
+			transitionID := uuid.NewString()
+			return runtimeauthoractivity.Record(txctx, runtimeauthoractivity.Draft{
+				Kind: runtimeauthoractivity.KindRunLifecycle, Transition: transition,
+				SourceOwner: "runs", SourceIdentity: transitionID, DedupKey: "run-transition:" + transitionID,
+				OccurredAt: req.Now.UTC(), RunID: runID,
+				Projection: runtimeauthoractivity.Projection{
+					SubjectType: "run", SubjectID: runID, ControlReason: req.Reason, Source: req.ControlledBy,
+				},
+			})
+		}
+		return nil
 	}); err != nil {
 		return runtimeruncontrol.State{}, err
 	}
@@ -778,6 +809,9 @@ func sqliteEnsureRunRow(ctx context.Context, tx *sql.Tx, runID, triggerEventID, 
 	if runID == "" {
 		return nil
 	}
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return fmt.Errorf("ensure sqlite run row: %w", err)
+	}
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
@@ -793,7 +827,7 @@ func sqliteEnsureRunRow(ctx context.Context, tx *sql.Tx, runID, triggerEventID, 
 	if bundleSource == "" {
 		bundleSource = storerunlifecycle.BundleSourceLegacy
 	}
-	_, err := tx.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 		INSERT OR IGNORE INTO runs (
 			run_id, status, bundle_hash, bundle_source, bundle_fingerprint,
 			trigger_event_id, trigger_event_type, started_at
@@ -802,6 +836,18 @@ func sqliteEnsureRunRow(ctx context.Context, tx *sql.Tx, runID, triggerEventID, 
 	`, runID, sqliteNullString(bundleHash), bundleSource, sqliteNullString(bundleFingerprint), sqliteNullUUID(triggerEventID), sqliteNullString(triggerEventType), now.UTC())
 	if err != nil {
 		return fmt.Errorf("ensure sqlite run row: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read ensure sqlite run row result: %w", err)
+	}
+	if rows == 1 {
+		return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+			Kind: runtimeauthoractivity.KindRunLifecycle, Transition: "started",
+			SourceOwner: "runs", SourceIdentity: runID, DedupKey: "run-created:" + runID,
+			OccurredAt: now.UTC(), RunID: runID,
+			Projection: runtimeauthoractivity.Projection{SubjectType: "run", SubjectID: runID, TriggerEventType: strings.TrimSpace(triggerEventType)},
+		})
 	}
 	return nil
 }

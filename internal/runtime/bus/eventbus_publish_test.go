@@ -3,6 +3,7 @@ package bus_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"slices"
@@ -1659,10 +1660,21 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 				}()
 			}
 			close(start)
-			for i := 0; i < poolSize; i++ {
-				requireSignalBefore(t, claimed, 5*time.Second, "aligned PostgreSQL publication claim")
+			if form == "mutation_bound" {
+				// Mutation-bound publications own the global author-story order
+				// lock before acquiring event-specific publication claims. Release
+				// the first story so the remaining stories can enter in order.
+				requireSignalBefore(t, claimed, 5*time.Second, "first serialized PostgreSQL publication claim")
+				close(release)
+				for i := 1; i < poolSize; i++ {
+					requireSignalBefore(t, claimed, 5*time.Second, "subsequent serialized PostgreSQL publication claim")
+				}
+			} else {
+				for i := 0; i < poolSize; i++ {
+					requireSignalBefore(t, claimed, 5*time.Second, "aligned PostgreSQL publication claim")
+				}
+				close(release)
 			}
-			close(release)
 			for i := 0; i < poolSize; i++ {
 				if err := requireErrorBefore(t, errs, 10*time.Second, "pool-saturated publication"); err != nil {
 					t.Fatal(err)
@@ -2496,7 +2508,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersis
 			eventID:   "10000000-0000-0000-0000-000000000002",
 			eventType: events.EventType("platform.recovery_failed"),
 			event: func(id string, eventType events.EventType) events.Event {
-				return eventtest.RuntimeDiagnostic(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+				return eventtest.RuntimeDiagnostic(id, eventType, "runtime", "", platformSignalFixturePayload(t, eventType), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 			},
 		},
 	}
@@ -2557,7 +2569,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 			eventID:   "20000000-0000-0000-0000-000000000001",
 			eventType: events.EventType("platform.agent_failed"),
 			event: func(id string, eventType events.EventType) events.Event {
-				return eventtest.RuntimeDiagnostic(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+				return eventtest.RuntimeDiagnostic(id, eventType, "runtime", "", platformSignalFixturePayload(t, eventType), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 			},
 		},
 		{
@@ -2573,7 +2585,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 			eventID:   "20000000-0000-0000-0000-000000000003",
 			eventType: events.EventType("platform.budget_threshold_crossed"),
 			event: func(id string, eventType events.EventType) events.Event {
-				return eventtest.RuntimeDiagnostic(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+				return eventtest.RuntimeDiagnostic(id, eventType, "runtime", "", platformSignalFixturePayload(t, eventType), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 			},
 		},
 		{
@@ -2620,6 +2632,29 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 			}
 		})
 	}
+}
+
+func platformSignalFixturePayload(t *testing.T, eventType events.EventType) []byte {
+	t.Helper()
+	payload := map[string]any{}
+	switch eventType {
+	case events.EventType("platform.agent_failed"), events.EventType("platform.recovery_failed"):
+		failure := runtimefailures.Normalize(runtimefailures.New(
+			runtimefailures.ClassInternalFailure,
+			"unclassified_runtime_error",
+			"eventbus-test",
+			"publish_platform_signal",
+			nil,
+		), "eventbus-test", "publish_platform_signal")
+		payload["failure"] = &failure
+	case events.EventType("platform.budget_threshold_crossed"):
+		payload["level"] = "warning"
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal platform signal fixture %s: %v", eventType, err)
+	}
+	return raw
 }
 
 func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {

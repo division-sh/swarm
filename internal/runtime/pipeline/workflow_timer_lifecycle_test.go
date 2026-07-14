@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -217,7 +218,11 @@ func testActivePipelineSQLTxContext(t *testing.T, db *sql.DB, ctx context.Contex
 		t.Fatalf("BeginTx: %v", err)
 	}
 	t.Cleanup(func() { _ = tx.Rollback() })
-	return WithPipelineSQLTxContext(ctx, tx)
+	storyctx, err := runtimeauthoractivity.Begin(WithPipelineSQLTxContext(ctx, tx), tx, runtimeauthoractivity.DialectPostgres)
+	if err != nil {
+		t.Fatalf("begin pipeline author activity story: %v", err)
+	}
+	return storyctx
 }
 
 func TestWorkflowTimerFireAtSnapshotsPolicyDelayAtStart(t *testing.T) {
@@ -1490,6 +1495,10 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTx
 	)
 
 	seedPipelineNodeDeliveryAuthority(t, db, completion, "root-collector")
+	ctx, err = runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	if err != nil {
+		t.Fatalf("begin nested completion author activity story: %v", err)
+	}
 	passThrough, emitted, err := pc.Intercept(ctx, completion)
 	if err != nil {
 		t.Fatalf("Intercept: %v", err)

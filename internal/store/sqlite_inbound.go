@@ -116,6 +116,9 @@ func (s *SQLiteRuntimeStore) ClaimInboundEventTx(ctx context.Context, tx *sql.Tx
 	if err != nil {
 		return false, fmt.Errorf("record sqlite inbound event in events: %w", err)
 	}
+	if err := recordInboundAuthorActivity(ctx, evt, provider); err != nil {
+		return false, err
+	}
 	return true, nil
 }
 

@@ -21,6 +21,7 @@ type CleanupPolicy struct {
 
 func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 	return []CleanupCatalogEntry{
+		{Table: "author_activity_occurrences", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "author_activity_occurrences.run_id", DeleteOrderGroup: 1},
 		{Table: "run_fork_fact_revisions", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "run_fork_fact_revisions.run_id", DeleteOrderGroup: 1},
 		{Table: "run_fork_revisions", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "run_fork_revisions.run_id", DeleteOrderGroup: 2},
 		{Table: "run_fork_revision_heads", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "run_fork_revision_heads.run_id", DeleteOrderGroup: 3},
@@ -63,6 +64,7 @@ func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 		{Table: "events", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "events.run_id", DeleteOrderGroup: 5},
 		{Table: "runs", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteAll, PredicateOwner: "runs.run_id cleanup set", DeleteOrderGroup: 6},
 		{Table: "runtime_store_metadata", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "immutable runtime store creation origin", PreservationProof: "must survive destructive runtime cleanup unchanged"},
+		{Table: "author_activity_order", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "monotonic author activity cursor authority", PreservationProof: "cursor identity must never be reused after destructive cleanup"},
 		{Table: "api_idempotency", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "API idempotency/auth-like state", PreservationProof: "must survive destructive runtime cleanup"},
 		{Table: "runtime_ingress_state", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "singleton runtime ingress owner", PreservationProof: "must survive destructive runtime cleanup"},
 		{Table: "agents", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "agent registry/config state", PreservationProof: "must survive destructive runtime cleanup"},
