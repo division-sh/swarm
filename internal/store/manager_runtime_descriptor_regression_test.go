@@ -5,8 +5,77 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/testutil"
 )
+
+func TestPersistedAgentProjectionRejectsEnabledPlatformDefaultMemory(t *testing.T) {
+	illegal := agentmemory.Plan{Enabled: true, Source: agentmemory.SourcePlatformDefault}
+	_, err := projectPersistedAgentConfig(runtimeactors.AgentConfig{
+		ID:       "agent-invalid-memory",
+		Role:     "reviewer",
+		Model:    "regular",
+		FlowPath: "review/one",
+		Memory:   illegal,
+	}, "")
+	if err == nil || !strings.Contains(err.Error(), `requires source "authored"`) {
+		t.Fatalf("projectPersistedAgentConfig error = %v, want authored-source requirement", err)
+	}
+
+	_, err = hydratePersistedAgentConfig(persistedAgentProjection{
+		AgentID:           "agent-invalid-memory",
+		FlowInstance:      "review/one",
+		Role:              "reviewer",
+		Model:             "regular",
+		LLMBackend:        "anthropic",
+		MemoryEnabled:     true,
+		MemorySource:      string(agentmemory.SourcePlatformDefault),
+		ConfigJSON:        []byte(`{}`),
+		RuntimeDescriptor: []byte(`{"type":"generic"}`),
+	})
+	if err == nil || !strings.Contains(err.Error(), `requires source "authored"`) {
+		t.Fatalf("hydratePersistedAgentConfig error = %v, want authored-source requirement", err)
+	}
+}
+
+func TestFreshAgentsSchemaRejectsEnabledPlatformDefaultMemory(t *testing.T) {
+	ctx := context.Background()
+	_, postgresDB, _ := testutil.StartPostgres(t)
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+
+	for _, backend := range []struct {
+		name string
+		exec func() error
+	}{
+		{
+			name: "postgres",
+			exec: func() error {
+				_, err := postgresDB.ExecContext(ctx, `
+					INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source)
+					VALUES ('invalid-memory-postgres', 'review/one', 'reviewer', 'regular', TRUE, 'platform_default')
+				`)
+				return err
+			},
+		},
+		{
+			name: "sqlite",
+			exec: func() error {
+				_, err := sqliteStore.DB.ExecContext(ctx, `
+					INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source)
+					VALUES ('invalid-memory-sqlite', 'review/one', 'reviewer', 'regular', 1, 'platform_default')
+				`)
+				return err
+			},
+		},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			if err := backend.exec(); err == nil {
+				t.Fatal("fresh agents schema accepted memory enabled with platform-default provenance")
+			}
+		})
+	}
+}
 
 func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *testing.T) {
 	t.Parallel()

@@ -5485,6 +5485,8 @@ engine:
         omitted: false with provenance platform_default
         explicit_false: false with provenance authored
         explicit_true: true with provenance authored
+        state_invariant: Memory true with platform_default provenance is invalid. Typed plan construction, runtime/store
+          admission, persistence hydration, and fresh-schema constraints fail closed on that impossible pair.
       semantics:
         'false': Every invocation starts with fresh in-process/provider conversation state. Append-only turn and audit
           evidence may remain durable but is never hydrated into later requests.
@@ -11122,7 +11124,7 @@ platform_tables:
         \    JSONB NOT NULL DEFAULT '[]',\n    tools             JSONB NOT NULL DEFAULT '[]',\n    permissions       JSONB\
         \ NOT NULL DEFAULT '[]',\n    runtime_descriptor JSONB NOT NULL DEFAULT '{}',\n    lifecycle_phase   TEXT NOT NULL DEFAULT 'registered' CHECK (lifecycle_phase IN ('registered', 'running', 'terminated', 'failed')),\n    lifecycle_generation BIGINT NOT NULL DEFAULT 0 CHECK (lifecycle_generation >= 0),\n    lifecycle_runtime_epoch BIGINT NOT NULL DEFAULT 0 CHECK (lifecycle_runtime_epoch >= 0),\n    lifecycle_config_revision TEXT NOT NULL DEFAULT '',\n    lifecycle_run_mode TEXT NOT NULL DEFAULT 'stopped' CHECK (lifecycle_run_mode IN ('stopped', 'standard', 'authoritative_delivery_only')),\n    lifecycle_last_transition_id UUID,\n    status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused',\
         \ 'terminated', 'failed')),\n    turn_count        INTEGER NOT NULL DEFAULT 0,\n    last_active_at    TIMESTAMPTZ,\n    created_at\
-        \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_agents_flow (flow_instance) WHERE flow_instance IS NOT\
+        \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK (NOT memory_enabled OR memory_source = 'authored'),\n    INDEX idx_agents_flow (flow_instance) WHERE flow_instance IS NOT\
         \ NULL,\n    INDEX idx_agents_role (role),\n    INDEX idx_agents_status (status),\n    INDEX idx_agents_parent (parent_agent_id)\
         \ WHERE parent_agent_id IS NOT NULL\n);"
     agent_sessions:

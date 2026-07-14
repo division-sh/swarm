@@ -36,8 +36,13 @@ func (p Plan) Normalize() (Plan, error) {
 func NewPlan(enabled bool, source Source) (Plan, error) {
 	source = Source(strings.TrimSpace(string(source)))
 	switch source {
-	case SourceAuthored, SourcePlatformDefault:
+	case SourceAuthored:
 		return Plan{Enabled: enabled, Source: source}, nil
+	case SourcePlatformDefault:
+		if enabled {
+			return Plan{}, fmt.Errorf("agent memory enabled requires source %q", SourceAuthored)
+		}
+		return Plan{Enabled: false, Source: source}, nil
 	default:
 		return Plan{}, fmt.Errorf("invalid agent memory source %q", source)
 	}
