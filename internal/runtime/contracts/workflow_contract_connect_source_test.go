@@ -11,7 +11,7 @@ import (
 func TestFlowPackageConnectCapturesMappingLineAndPreservesStrictFields(t *testing.T) {
 
 	var document ProjectPackageDocument
-	snippet := canonicalrouting.NewParserSnippet(t, "name: test\nversion: 1.0.0\nconnect:\n  - from: producer.done\n    to: consumer.done\n")
+	snippet := canonicalrouting.PackageConnectSourceSnippet(t)
 	if err := snippet.Decode(&document); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
