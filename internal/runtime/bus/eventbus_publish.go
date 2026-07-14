@@ -512,7 +512,7 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 		recipients := inboundPlan.RecipientIDs()
 		if len(recipients) > 0 {
 			eb.logQueuedDeliveries(ctx, evt, inboundPlan.PersistedRecipientIDs(), "matched_agent_subscription", inboundPlan.ExtraDetail)
-			if err := eb.deliverToRecipientsWithRoutes(ctx, evt, recipients, inboundPlan.DeliveryRoutes()); err != nil {
+			if err := eb.deliverRoutePlanWithRoutes(ctx, evt, inboundPlan); err != nil {
 				eb.recordCommittedPublishReceipt(ctx, evt, err)
 				return
 			}
@@ -788,7 +788,7 @@ func (eb *EventBus) publishTransactional(
 		recipients := inboundPlan.RecipientIDs()
 		if len(recipients) > 0 {
 			eb.logQueuedDeliveries(dispatchCtx, evt, inboundPlan.PersistedRecipientIDs(), "matched_agent_subscription", inboundPlan.ExtraDetail)
-			if err := eb.deliverToRecipientsWithRoutes(dispatchCtx, evt, recipients, inboundPlan.DeliveryRoutes()); err != nil {
+			if err := eb.deliverRoutePlanWithRoutes(dispatchCtx, evt, inboundPlan); err != nil {
 				eb.recordCommittedPublishReceipt(dispatchCtx, evt, err)
 				return nil
 			}
@@ -1196,7 +1196,7 @@ func (eb *EventBus) deliverSubscribedPublishPlan(ctx context.Context, evt events
 	routePlan = routePlan.Normalized()
 	recipients := routePlan.RecipientIDs()
 	if len(recipients) > 0 {
-		if err := eb.deliverToRecipientsWithRoutes(ctx, evt, recipients, routePlan.DeliveryRoutes()); err != nil {
+		if err := eb.deliverRoutePlanWithRoutes(ctx, evt, routePlan); err != nil {
 			return false, err
 		}
 		eb.logDelivery(ctx, evt, recipients, routePlan.ExtraDetail)

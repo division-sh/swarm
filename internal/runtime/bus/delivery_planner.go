@@ -20,6 +20,8 @@ type deliveryRoutingResult struct {
 type deliveryRecipientCandidate struct {
 	ID                string
 	PersistAsDelivery bool
+	LiveAuthority     liveRecipientAuthority
+	AgentRoute        *agentRouteHandle
 }
 
 type deliveryRouteResolver struct {
@@ -56,6 +58,7 @@ func (r deliveryRouteResolver) Resolve(evt events.Event) deliveryRoutingResult {
 }
 
 type deliveryRecipientManifest struct {
+	LiveRecipients      []deliveryRecipientCandidate
 	Recipients          []string
 	PersistedRecipients []string
 	DeliveryTargets     map[string]events.RouteIdentity
@@ -87,6 +90,7 @@ func (p deliveryRecipientPolicy) Evaluate(ctx context.Context, evt events.Event,
 	}
 	if !ok {
 		manifest := deliveryRecipientManifest{
+			LiveRecipients:      normalizeDeliveryRecipientCandidates(recipients),
 			Recipients:          deliveryRecipientIDs(recipients),
 			PersistedRecipients: persistedDeliveryRecipientIDs(recipients),
 			DeliveryTargets:     deliveryTargetsForManifest(evt, persistedDeliveryRecipientIDs(recipients), nil),
@@ -249,12 +253,26 @@ func normalizeDeliveryRecipientCandidates(in []deliveryRecipientCandidate) []del
 		}
 		if idx, ok := indexByID[candidate.ID]; ok {
 			out[idx].PersistAsDelivery = out[idx].PersistAsDelivery || candidate.PersistAsDelivery
+			out[idx] = mergeDeliveryRecipientAuthority(out[idx], candidate)
 			continue
 		}
 		indexByID[candidate.ID] = len(out)
 		out = append(out, candidate)
 	}
 	return out
+}
+
+func mergeDeliveryRecipientAuthority(current, candidate deliveryRecipientCandidate) deliveryRecipientCandidate {
+	if current.LiveAuthority.Normalized() == liveRecipientAuthorityIdentity || candidate.LiveAuthority.Normalized() == liveRecipientAuthorityIdentity {
+		current.LiveAuthority = liveRecipientAuthorityIdentity
+		current.AgentRoute = nil
+		return current
+	}
+	current.LiveAuthority = liveRecipientAuthorityAgentRoute
+	if current.AgentRoute == nil {
+		current.AgentRoute = candidate.AgentRoute
+	}
+	return current
 }
 
 func routedSubscriberCandidates(in []Subscriber) []deliveryRecipientCandidate {
@@ -410,12 +428,14 @@ func filterDeliveryRecipientCandidates(evt events.Event, recipients []deliveryRe
 	}
 	singularTarget := evt.TargetRoute()
 	allowed := make([]string, 0, len(recipients))
+	allowedCandidates := make([]deliveryRecipientCandidate, 0, len(recipients))
 	persisted := make([]string, 0, len(recipients))
 	deliveryTargets := map[string]events.RouteIdentity{}
 	deliveryRoutes := make([]events.DeliveryRoute, 0, len(recipients))
 	for _, recipient := range recipients {
 		if !recipient.PersistAsDelivery {
 			allowed = append(allowed, recipient.ID)
+			allowedCandidates = append(allowedCandidates, recipient)
 			continue
 		}
 		descriptor, ok := descriptors[recipient.ID]
@@ -434,6 +454,7 @@ func filterDeliveryRecipientCandidates(evt events.Event, recipients []deliveryRe
 			continue
 		}
 		allowed = append(allowed, recipient.ID)
+		allowedCandidates = append(allowedCandidates, recipient)
 		persisted = append(persisted, recipient.ID)
 		if !target.Empty() {
 			deliveryTargets[recipient.ID] = target
@@ -446,6 +467,7 @@ func filterDeliveryRecipientCandidates(evt events.Event, recipients []deliveryRe
 	}
 	persisted = uniqueStrings(persisted)
 	manifest := deliveryRecipientManifest{
+		LiveRecipients:      normalizeDeliveryRecipientCandidates(allowedCandidates),
 		Recipients:          uniqueStrings(allowed),
 		PersistedRecipients: persisted,
 		DeliveryTargets:     deliveryTargetsForManifest(evt, persisted, deliveryTargets),

@@ -554,6 +554,8 @@ seam_families:
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/route_plan_test.go
       - internal/runtime/bus/eventbus_publish.go
+      - internal/runtime/bus/eventbus_routing.go
+      - internal/runtime/bus/eventbus_route_generation_plan_test.go
       - internal/runtime/bus/eventbus_target_routes_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
     search_dimensions: [route_plan_source_reason, route_plan]

@@ -40,7 +40,7 @@ type EventBus struct {
 	mu                          sync.RWMutex
 	channels                    map[events.EventType]map[string]chan events.Event
 	agentChans                  map[string]chan events.Event
-	agentRouteTokens            map[string]runtimeeffects.LifecycleToken
+	agentRouteHandles           map[string]*agentRouteHandle
 	subscriptions               map[string][]events.EventType
 	subscriptionKinds           map[string]inMemorySubscriberKind
 	pendingInternalByID         map[string][]events.DeliveryRoute
@@ -159,7 +159,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 	eb := &EventBus{
 		channels:                    make(map[events.EventType]map[string]chan events.Event),
 		agentChans:                  make(map[string]chan events.Event),
-		agentRouteTokens:            make(map[string]runtimeeffects.LifecycleToken),
+		agentRouteHandles:           make(map[string]*agentRouteHandle),
 		subscriptions:               make(map[string][]events.EventType),
 		subscriptionKinds:           make(map[string]inMemorySubscriberKind),
 		runtimeAgentDescriptors:     make(map[string]ActiveAgentDescriptor),
@@ -384,9 +384,12 @@ func (eb *EventBus) ResetInMemoryState() error {
 	}
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
+	for _, route := range eb.agentRouteHandles {
+		route.deactivate()
+	}
 	eb.channels = make(map[events.EventType]map[string]chan events.Event)
 	eb.agentChans = make(map[string]chan events.Event)
-	eb.agentRouteTokens = make(map[string]runtimeeffects.LifecycleToken)
+	eb.agentRouteHandles = make(map[string]*agentRouteHandle)
 	eb.subscriptions = make(map[string][]events.EventType)
 	eb.subscriptionKinds = make(map[string]inMemorySubscriberKind)
 	eb.pendingInternalByID = make(map[string][]events.DeliveryRoute)
@@ -492,11 +495,12 @@ func (eb *EventBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToken, event
 	}
 	agentID := strings.TrimSpace(token.AgentID)
 	ch := make(chan events.Event, 128)
+	route := newAgentRouteHandle(token, ch)
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
 	eb.detachSubscriberLocked(agentID)
 	eb.agentChans[agentID] = ch
-	eb.agentRouteTokens[agentID] = token
+	eb.agentRouteHandles[agentID] = route
 	eb.subscriptionKinds[agentID] = inMemorySubscriberAgent
 	for _, eventType := range eventTypes {
 		eventType = events.EventType(strings.TrimSpace(string(eventType)))
@@ -521,7 +525,7 @@ func (eb *EventBus) RemoveAgentRoute(token runtimeeffects.LifecycleToken) {
 	agentID := strings.TrimSpace(token.AgentID)
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
-	if current, ok := eb.agentRouteTokens[agentID]; !ok || current != token {
+	if current := eb.agentRouteHandles[agentID]; current == nil || current.token != token {
 		return
 	}
 	eb.detachSubscriberLocked(agentID)
@@ -537,7 +541,7 @@ func (eb *EventBus) subscribe(subscriberID string, kind inMemorySubscriberKind, 
 	defer eb.mu.Unlock()
 
 	if existing, ok := eb.agentChans[subscriberID]; ok {
-		if _, exactRoute := eb.agentRouteTokens[subscriberID]; exactRoute {
+		if _, exactRoute := eb.agentRouteHandles[subscriberID]; exactRoute {
 			return existing
 		}
 		ch = existing
@@ -563,7 +567,7 @@ func (eb *EventBus) Unsubscribe(agentID string) {
 	}
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
-	if _, exactRoute := eb.agentRouteTokens[agentID]; exactRoute {
+	if _, exactRoute := eb.agentRouteHandles[agentID]; exactRoute {
 		return
 	}
 
@@ -571,8 +575,11 @@ func (eb *EventBus) Unsubscribe(agentID string) {
 }
 
 func (eb *EventBus) detachSubscriberLocked(agentID string) {
+	if route := eb.agentRouteHandles[agentID]; route != nil {
+		route.deactivate()
+	}
 	delete(eb.agentChans, agentID)
-	delete(eb.agentRouteTokens, agentID)
+	delete(eb.agentRouteHandles, agentID)
 	delete(eb.subscriptions, agentID)
 	delete(eb.subscriptionKinds, agentID)
 	for et := range eb.channels {

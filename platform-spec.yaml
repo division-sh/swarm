@@ -28707,6 +28707,12 @@ agent_lifecycle_authority:
       replacement: Every running successor receives a fresh channel and exactly its declared subscription set. Removed subscriptions disappear, retained/new subscriptions point only to the fresh channel, and buffered predecessor work is abandoned with the detached predecessor channel rather than transferred.
       removal: Remove is compare-token removal, so delayed predecessor cleanup cannot delete a successor route. Self-release, terminal exit, both Run cancellations, shutdown, teardown, and reset remove the exact generation route.
       concurrency: Route replacement/removal atomically detaches the old route but never closes a channel that a concurrent publisher may retain. Generic agent-ID Subscribe/Unsubscribe is not an AgentManager lifecycle API.
+      planning_to_dispatch:
+        subscribed: Subscription matching captures the exact ephemeral lifecycle route handle under the same EventBus lock as the match. Recipient policy, normalization, transactional post-commit dispatch, and acknowledged asynchronous dispatch preserve that handle. Dispatch uses only the captured handle; an inactive or superseded handle fails as authoritative_delivery_incomplete and never falls back to the current channel by agent ID.
+        identity_owned: Direct recipients, route-table-selected recipients, outbox delivery, and persisted replay remain identity-owned. They resolve the current exact route handle by agent ID at live-dispatch time and do not persist a lifecycle token or route handle.
+        duplicate: When one agent ID is selected both by an identity-owned route and by an exact-generation subscription, identity authority deliberately dominates because the independent identity route authorizes the current owner. Duplicate exact-generation subscription selections retain their captured handle.
+        persistence: Lifecycle tokens, route handles, and channels are process-ephemeral and never enter event delivery manifests, committed replay scope, delivery routes, or other durable replay evidence. A stale subscribed live attempt leaves the persisted identity manifest pending so canonical replay can deliver once to the current owner.
+        send_fence: Route-handle send admission and replacement/removal are serialized on that route handle. Replacement fences only the selected route, never waits for global EventBus quiescence, and never transfers or closes the predecessor queue.
   transitions:
     operations: [spawn, hydrate, materialize, start, restart, reconfigure, teardown, self_release, shutdown, reset]
     serialization: All creators, replacers, destroyers, and self-release paths serialize through one per-agent coordinator decision point.
@@ -28755,7 +28761,7 @@ agent_lifecycle_authority:
     - parallel AgentManager agent/config execution maps or map-read-then-token-refresh execution
     - caller-selected Agent or subscription slices passed into lifecycle transition helpers
     - generic agent-ID Subscribe/Unsubscribe from AgentManager
-    - predecessor EventBus queue transfer, stale tokenless route removal, or closing a detached route channel
+    - predecessor EventBus queue transfer, stale tokenless route removal, closing a detached route channel, or resolving an exact-generation subscription plan through the current agent-ID route
     - memory-only fallback for a selected persistent runtime store
     - best-effort lifecycle persistence or diagnostic ownership
     - tolerant dual lifecycle readers or compatibility aliases

@@ -408,6 +408,55 @@ func TestExecutionProjectionTeardownRemovesExactRoute(t *testing.T) {
 	}
 }
 
+func TestExecutionProjectionNaturalLoopExitRemovesExactRoute(t *testing.T) {
+	bus := newProjectionTestBus()
+	factory := &projectionTestFactory{handled: make(chan int, 1)}
+	am := NewAgentManager(bus, factory.Build)
+	const agentID = "projection-self-release"
+	if err := am.SpawnAgent(models.AgentConfig{ID: agentID}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	am.Run(runCtx)
+	route, ok := bus.current(agentID)
+	if !ok {
+		t.Fatal("run did not install route")
+	}
+	close(route.channel)
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, live := bus.current(agentID); !live {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("natural loop exit did not remove its exact route")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	am.lifecycle.mu.Lock()
+	cell := am.lifecycle.cells[agentID]
+	phase := cell.phase
+	loopDone := cell.execution.loopDone
+	routeToken := cell.execution.routeToken
+	am.lifecycle.mu.Unlock()
+	if phase != AgentLifecycleRegistered || loopDone != nil || routeToken.Valid() {
+		t.Fatalf("natural loop exit left phase=%q loop_done=%v route_token=%+v, want registered without loop/route", phase, loopDone != nil, routeToken)
+	}
+	bus.mu.Lock()
+	defer bus.mu.Unlock()
+	found := false
+	for _, removed := range bus.removed {
+		if removed == route.token {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("removed tokens = %+v, want natural self-release token %+v", bus.removed, route.token)
+	}
+}
+
 func TestExecutionProjectionBacklogLeaseFencesReplacement(t *testing.T) {
 	const agentID = "projection-backlog"
 	store := &startupReplayTestStore{pending: map[string][]events.Event{
