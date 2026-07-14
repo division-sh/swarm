@@ -182,6 +182,44 @@ func TestOpenRPCMutatingHTTPRuntimeProbes(t *testing.T) {
 	}
 }
 
+func TestMailboxDecideHTTPUsesTheHumanTaskAnchorRegistry(t *testing.T) {
+	handler, _, state := newMutatingRuntimeProbeHandler(t, "mailbox.decide", func(state *mutatingRuntimeProbeState) {
+		anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
+			RequesterAgentID: "requester-agent", OperationID: "provider-turn/tool-call-1", Category: "review",
+			Scope: decisioncard.Scope{Kind: decisioncard.ScopeGlobal},
+		})
+		if err != nil {
+			panic(err)
+		}
+		state.decisionCards.card.Anchor = anchor
+		state.decisionCards.card.Snapshot = mustTestDecisionSnapshot("human_task", "Review provider result", nil, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+			"approve": {Verdict: "approve"},
+			"reject":  {Verdict: "reject", Input: map[string]runtimecontracts.WorkflowGateInputField{"reason": {Type: "text", Required: true}}},
+		})
+	})
+	status, resp, body := callMutatingProbeRPC(t, handler, "mailbox.decide", map[string]any{
+		"card_id": "card-1", "verdict": "approve", "fields": map[string]any{},
+		"observed_content_hash": "content-1", "idempotency_key": "human-task-decision",
+	}, "Bearer "+testToken)
+	if status != http.StatusOK || resp.Error != nil {
+		t.Fatalf("human-task mailbox.decide = status:%d response:%#v body:%s", status, resp, body)
+	}
+	var found store.OperatorEventFull
+	for _, event := range state.observability.events {
+		if event.EventName == decisionCardEventName {
+			found = event
+			break
+		}
+	}
+	if found.EventID == "" || found.Payload["anchor_kind"] != string(decisioncard.AnchorKindHumanTask) {
+		t.Fatalf("human-task decision event = %#v", found)
+	}
+	anchor := asMap(t, found.Payload["anchor"])
+	if anchor["requester_agent_id"] != "requester-agent" || anchor["operation_id"] != "provider-turn/tool-call-1" {
+		t.Fatalf("human-task decision event anchor = %#v", anchor)
+	}
+}
+
 func mutatingProbeGenericIdempotencyCalls(methodName string, normal int) int {
 	if methodName == runtimeagentcontrol.DirectiveOperationMethod {
 		return 0
@@ -951,7 +989,7 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) OperatorReadOptions {
 		}},
 		Mailbox:             s.mailbox,
 		DecisionCards:       s.decisionCards,
-		WorkflowStore:       s.workflowStore,
+		DecisionAuthority:   s.workflowStore,
 		BundleCatalog:       s.bundleCatalog,
 		Idempotency:         s.idempotency,
 		Events:              s.events,
@@ -1479,7 +1517,7 @@ func (s *mutatingProbeDecisionWorkflowStore) RunPipelineMutation(ctx context.Con
 	return fn(ctx)
 }
 
-func (s *mutatingProbeDecisionWorkflowStore) CommitGateDecision(context.Context, decisioncard.Card, string, time.Time) error {
+func (s *mutatingProbeDecisionWorkflowStore) CommitDecision(context.Context, decisioncard.Card, string, time.Time) error {
 	return s.err
 }
 
@@ -1494,9 +1532,15 @@ func newMutatingProbeDecisionCardStore(state *mutatingRuntimeProbeState) *mutati
 		"approve": {AdvancesTo: "operating"},
 		"reject":  {AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
 	})
+	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
+		FlowInstance: "review/primary", FlowID: "review", EntityID: "entity-1",
+		Stage: "awaiting_review", StageActivationID: "activation-1",
+	})
+	if err != nil {
+		panic(err)
+	}
 	return &mutatingProbeDecisionCardStore{state: state, card: decisioncard.Card{
-		CardID: "card-1", RunID: "00000000-0000-0000-0000-000000000101", FlowInstance: "review/primary", FlowID: "review",
-		EntityID: "entity-1", Stage: "awaiting_review", StageActivationID: "activation-1", DecisionID: "launch_review",
+		CardID: "card-1", RunID: "00000000-0000-0000-0000-000000000101", Anchor: anchor,
 		Status: decisioncard.StatusPending, CardContentHash: "content-1", DecisionSchemaHash: "schema-1", BundleHash: runStartTestBundleHash,
 		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
 		Snapshot:         snapshot,
@@ -1511,7 +1555,11 @@ func (s *mutatingProbeDecisionCardStore) ListDecisionCards(_ context.Context, op
 	if strings.TrimSpace(opts.Cursor) != "" {
 		return []decisioncard.ListItem{}, "", nil
 	}
-	return []decisioncard.ListItem{{Kind: decisioncard.KindDecisionCard, CardID: s.card.CardID, RunID: s.card.RunID, FlowInstance: s.card.FlowInstance, EntityID: s.card.EntityID, Stage: s.card.Stage, DecisionID: s.card.DecisionID, Title: s.card.Snapshot.Title, Status: s.card.Status, DeferredUntil: s.card.DeferredUntil, CreatedAt: s.card.CreatedAt, UpdatedAt: s.card.UpdatedAt}}, "", nil
+	scope, err := s.card.Anchor.Scope()
+	if err != nil {
+		return nil, "", err
+	}
+	return []decisioncard.ListItem{{Kind: decisioncard.KindDecisionCard, CardID: s.card.CardID, RunID: s.card.RunID, Anchor: s.card.Anchor, Scope: scope, Title: s.card.Snapshot.Title, Status: s.card.Status, DeferredUntil: s.card.DeferredUntil, CreatedAt: s.card.CreatedAt, UpdatedAt: s.card.UpdatedAt}}, "", nil
 }
 
 func (s *mutatingProbeDecisionCardStore) GetDecisionCard(_ context.Context, id string) (decisioncard.Card, error) {
@@ -1574,7 +1622,7 @@ func (s *mutatingProbeDecisionCardStore) CancelDecisionCardInput(_ context.Conte
 }
 
 func (s *mutatingProbeDecisionCardStore) ListDecisionCardChanges(context.Context, decisioncard.SubscriptionOptions) ([]decisioncard.Change, error) {
-	return []decisioncard.Change{{Sequence: 1, CardID: s.card.CardID, RunID: s.card.RunID, ChangeType: decisioncard.ChangeCreated, Payload: semanticvalue.EmptyObject(), CreatedAt: s.state.now}}, s.err
+	return []decisioncard.Change{{Sequence: 1, CardID: s.card.CardID, RunID: s.card.RunID, ChangeType: decisioncard.ChangeCreated, Payload: mustTestSemanticObject(map[string]any{"status": s.card.Status, "anchor_kind": s.card.Anchor.Kind()}), CreatedAt: s.state.now}}, s.err
 }
 
 func mustTestDecisionSnapshot(decision, title string, context map[string]any, outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan) decisioncard.Snapshot {

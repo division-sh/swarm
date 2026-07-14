@@ -31,7 +31,6 @@ var supportedRuntimeToolNames = map[string]struct{}{
 	"query_metrics":      {},
 	"mailbox_send":       {},
 	"human_task_request": {},
-	"human_task_decide":  {},
 	"read_flow_data":     {},
 }
 

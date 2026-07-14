@@ -525,7 +525,7 @@ func readRuntimeStoreOrigin(ctx context.Context, q interface {
 	default:
 		return nil, fmt.Errorf("runtime store creation time has unsupported type %T", createdAt)
 	}
-	origin.CreatedAt = origin.CreatedAt.UTC()
+	origin = origin.canonical()
 	if err := origin.validateStored(); err != nil {
 		return nil, err
 	}

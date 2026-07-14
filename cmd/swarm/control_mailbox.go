@@ -41,17 +41,36 @@ type mailboxNoticeDetail struct {
 }
 
 type mailboxDecisionCardSummary struct {
-	CardID        string `json:"card_id"`
-	RunID         string `json:"run_id"`
-	FlowInstance  string `json:"flow_instance"`
-	EntityID      string `json:"entity_id"`
-	Stage         string `json:"stage"`
-	DecisionID    string `json:"decision_id"`
-	Title         string `json:"title"`
-	Status        string `json:"status"`
-	DeferredUntil string `json:"deferred_until,omitempty"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	CardID        string                    `json:"card_id"`
+	RunID         string                    `json:"run_id"`
+	AnchorKind    string                    `json:"anchor_kind"`
+	Anchor        mailboxDecisionCardAnchor `json:"anchor"`
+	Scope         mailboxDecisionCardScope  `json:"scope"`
+	Decision      string                    `json:"decision,omitempty"`
+	Category      string                    `json:"category,omitempty"`
+	Title         string                    `json:"title"`
+	Status        string                    `json:"status"`
+	DeferredUntil string                    `json:"deferred_until,omitempty"`
+	CreatedAt     string                    `json:"created_at"`
+	UpdatedAt     string                    `json:"updated_at"`
+}
+
+type mailboxDecisionCardScope struct {
+	Kind         string `json:"kind"`
+	FlowInstance string `json:"flow_instance,omitempty"`
+	EntityID     string `json:"entity_id,omitempty"`
+}
+
+type mailboxDecisionCardAnchor struct {
+	FlowInstance      string                   `json:"flow_instance,omitempty"`
+	FlowID            string                   `json:"flow_id,omitempty"`
+	EntityID          string                   `json:"entity_id,omitempty"`
+	Stage             string                   `json:"stage,omitempty"`
+	StageActivationID string                   `json:"stage_activation_id,omitempty"`
+	RequesterAgentID  string                   `json:"requester_agent_id,omitempty"`
+	OperationID       string                   `json:"operation_id,omitempty"`
+	Category          string                   `json:"category,omitempty"`
+	Scope             mailboxDecisionCardScope `json:"scope,omitempty"`
 }
 
 type mailboxDecisionCard struct {
@@ -287,11 +306,39 @@ func validateMailboxProjection(item mailboxProjection) error {
 			return fmt.Errorf("notice is required")
 		}
 	case "decision_card":
-		if item.DecisionCard == nil || strings.TrimSpace(item.DecisionCard.CardID) == "" || strings.TrimSpace(item.DecisionCard.DecisionID) == "" {
+		if item.DecisionCard == nil || strings.TrimSpace(item.DecisionCard.CardID) == "" {
 			return fmt.Errorf("decision_card is required")
+		}
+		if err := validateMailboxDecisionCardAnchor(*item.DecisionCard); err != nil {
+			return err
 		}
 	default:
 		return fmt.Errorf("kind must be notice or decision_card")
+	}
+	return nil
+}
+
+func validateMailboxDecisionCardAnchor(card mailboxDecisionCardSummary) error {
+	switch strings.TrimSpace(card.AnchorKind) {
+	case "stage_gate":
+		if card.Anchor.FlowInstance == "" || card.Anchor.EntityID == "" || card.Anchor.Stage == "" || card.Anchor.StageActivationID == "" || card.Decision == "" {
+			return fmt.Errorf("stage_gate anchor detail is incomplete")
+		}
+		if card.Category != "" || card.Anchor.RequesterAgentID != "" || card.Anchor.OperationID != "" {
+			return fmt.Errorf("stage_gate card carries human_task selector fields")
+		}
+	case "human_task":
+		if card.Anchor.RequesterAgentID == "" || card.Anchor.OperationID == "" || card.Anchor.Category == "" || card.Category == "" {
+			return fmt.Errorf("human_task anchor detail is incomplete")
+		}
+		if card.Category != card.Anchor.Category || card.Decision != "" || card.Anchor.Stage != "" || card.Anchor.StageActivationID != "" {
+			return fmt.Errorf("human_task card carries conflicting anchor detail")
+		}
+	default:
+		return fmt.Errorf("anchor_kind must be stage_gate or human_task")
+	}
+	if card.Scope.Kind == "" {
+		return fmt.Errorf("decision-card scope is required")
 	}
 	return nil
 }
@@ -324,7 +371,8 @@ func writeMailboxListResult(out io.Writer, result mailboxListResult) {
 			continue
 		}
 		card := projection.DecisionCard
-		rows = append(rows, []string{card.CardID, "decision_card", card.Status, card.DecisionID, card.FlowInstance, card.CreatedAt})
+		label, scope := mailboxDecisionCardListLabels(*card)
+		rows = append(rows, []string{card.CardID, "decision_card", card.Status, label, scope, card.CreatedAt})
 	}
 	footers := []string{}
 	if result.NextCursor != "" {
@@ -346,9 +394,34 @@ func writeMailboxDetailResult(out io.Writer, result mailboxDetailProjection) {
 	}
 	card := result.DecisionCard
 	writeCLITitle(out, "Decision card "+card.CardID)
-	writeCLIFieldLine(out, cliDetailField{Key: "status", Value: card.Status}, cliDetailField{Key: "decision", Value: card.DecisionID}, cliDetailField{Key: "stage", Value: card.Stage})
+	writeCLIFieldLine(out, cliDetailField{Key: "status", Value: card.Status}, cliDetailField{Key: "anchor_kind", Value: card.AnchorKind}, cliDetailField{Key: "scope", Value: mailboxDecisionCardScopeLabel(card.Scope)})
+	if card.AnchorKind == "stage_gate" {
+		writeCLIFieldLine(out, cliDetailField{Key: "decision", Value: card.Decision}, cliDetailField{Key: "stage", Value: card.Anchor.Stage})
+	} else {
+		writeCLIFieldLine(out, cliDetailField{Key: "category", Value: card.Category}, cliDetailField{Key: "requested_by", Value: card.Anchor.RequesterAgentID})
+	}
 	fmt.Fprintf(out, "card_content_hash=%s\n", card.CardContentHash)
 	writeMailboxObject(out, "snapshot", card.Snapshot)
+}
+
+func mailboxDecisionCardListLabels(card mailboxDecisionCardSummary) (string, string) {
+	if card.AnchorKind == "stage_gate" {
+		return "stage_gate:" + card.Decision, mailboxDecisionCardScopeLabel(card.Scope)
+	}
+	return "human_task:" + card.Category, mailboxDecisionCardScopeLabel(card.Scope)
+}
+
+func mailboxDecisionCardScopeLabel(scope mailboxDecisionCardScope) string {
+	switch scope.Kind {
+	case "entity":
+		return scope.FlowInstance + "/" + scope.EntityID
+	case "flow":
+		return scope.FlowInstance
+	case "global":
+		return "global"
+	default:
+		return ""
+	}
 }
 
 func writeMailboxObject(out io.Writer, label string, value map[string]any) {

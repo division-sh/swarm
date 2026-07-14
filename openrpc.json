@@ -5126,7 +5126,7 @@
     },
     {
       "name": "mailbox.decide",
-      "description": "Commit one authored verdict against a pending typed decision card. The current stage activation, typed verdict/fields, change cursor, mailbox.card_decided event, and idempotency response commit atomically. Outcome routing consumes the frozen card snapshot after commit.\n",
+      "description": "Commit one authored verdict against a pending typed decision card. The registered anchor authority, typed verdict/fields, change cursor, mailbox.card_decided event, and idempotency response commit atomically. Outcome routing consumes the frozen card snapshot after commit.\n",
       "params": [
         {
           "name": "card_id",
@@ -5496,7 +5496,7 @@
     },
     {
       "name": "mailbox.defer",
-      "description": "Defer a pending typed decision card. Defer is non-terminal: status remains pending and only deferred_until changes. It never chooses a verdict or routes the stage.\n",
+      "description": "Defer a pending typed decision card. Defer is non-terminal: status remains pending and only deferred_until changes. It never chooses a verdict or routes the stage. The admitted decision time and until value use the decision-card UTC-microsecond timestamp contract.\n",
       "params": [
         {
           "name": "card_id",
@@ -5795,6 +5795,13 @@
           "required": false,
           "schema": {
             "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "anchor_kind",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/DecisionCardAnchorKind"
           }
         },
         {
@@ -10545,6 +10552,12 @@
       "DecisionCard": {
         "additionalProperties": true,
         "properties": {
+          "anchor": {
+            "$ref": "#/components/schemas/DecisionCardAnchor"
+          },
+          "anchor_kind": {
+            "$ref": "#/components/schemas/DecisionCardAnchorKind"
+          },
           "bundle_hash": {
             "type": "string"
           },
@@ -10554,30 +10567,27 @@
           "card_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
+          "category": {
+            "type": "string"
+          },
           "created_at": {
             "$ref": "#/components/schemas/Timestamp"
           },
-          "decision_id": {
+          "decision": {
             "type": "string"
           },
           "decision_schema_hash": {
             "type": "string"
           },
-          "entity_id": {
-            "$ref": "#/components/schemas/OpaqueId"
-          },
           "run_id": {
             "$ref": "#/components/schemas/OpaqueId"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/DecisionCardScope"
           },
           "snapshot": {
             "additionalProperties": true,
             "type": "object"
-          },
-          "stage": {
-            "type": "string"
-          },
-          "stage_activation_id": {
-            "$ref": "#/components/schemas/OpaqueId"
           },
           "status": {
             "$ref": "#/components/schemas/MailboxStatus"
@@ -10589,10 +10599,9 @@
         "required": [
           "card_id",
           "run_id",
-          "entity_id",
-          "stage",
-          "stage_activation_id",
-          "decision_id",
+          "anchor_kind",
+          "anchor",
+          "scope",
           "status",
           "snapshot",
           "card_content_hash",
@@ -10602,6 +10611,23 @@
           "updated_at"
         ],
         "type": "object"
+      },
+      "DecisionCardAnchor": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/StageGateDecisionCardAnchor"
+          },
+          {
+            "$ref": "#/components/schemas/HumanTaskDecisionCardAnchor"
+          }
+        ]
+      },
+      "DecisionCardAnchorKind": {
+        "enum": [
+          "stage_gate",
+          "human_task"
+        ],
+        "type": "string"
       },
       "DecisionCardChange": {
         "additionalProperties": false,
@@ -10614,6 +10640,7 @@
               "created",
               "decided",
               "deferred",
+              "expired",
               "superseded",
               "input_draft_started",
               "input_draft_cancelled",
@@ -10760,26 +10787,52 @@
         ],
         "type": "object"
       },
-      "DecisionCardSummary": {
+      "DecisionCardScope": {
         "additionalProperties": false,
         "properties": {
-          "card_id": {
-            "$ref": "#/components/schemas/OpaqueId"
-          },
-          "created_at": {
-            "$ref": "#/components/schemas/Timestamp"
-          },
-          "decision_id": {
-            "type": "string"
-          },
-          "deferred_until": {
-            "$ref": "#/components/schemas/Timestamp"
-          },
           "entity_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
           "flow_instance": {
             "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "entity",
+              "flow",
+              "global"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "DecisionCardSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor": {
+            "$ref": "#/components/schemas/DecisionCardAnchor"
+          },
+          "anchor_kind": {
+            "$ref": "#/components/schemas/DecisionCardAnchorKind"
+          },
+          "card_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "category": {
+            "type": "string"
+          },
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "deferred_until": {
+            "$ref": "#/components/schemas/Timestamp"
           },
           "kind": {
             "const": "decision_card",
@@ -10788,8 +10841,8 @@
           "run_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
-          "stage": {
-            "type": "string"
+          "scope": {
+            "$ref": "#/components/schemas/DecisionCardScope"
           },
           "status": {
             "$ref": "#/components/schemas/MailboxStatus"
@@ -10805,10 +10858,9 @@
           "kind",
           "card_id",
           "run_id",
-          "flow_instance",
-          "entity_id",
-          "stage",
-          "decision_id",
+          "anchor_kind",
+          "anchor",
+          "scope",
           "title",
           "status",
           "created_at",
@@ -11442,6 +11494,30 @@
           "db_ok",
           "runtime_ok",
           "bundle"
+        ],
+        "type": "object"
+      },
+      "HumanTaskDecisionCardAnchor": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "operation_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "requester_agent_id": {
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/DecisionCardScope"
+          }
+        },
+        "required": [
+          "requester_agent_id",
+          "operation_id",
+          "category",
+          "scope"
         ],
         "type": "object"
       },
@@ -12546,6 +12622,33 @@
         "description": "Content-hash fingerprint of a bundle. Stable across paths/worktrees where content is identical.",
         "pattern": "^sha256:[a-f0-9]{64}$",
         "type": "string"
+      },
+      "StageGateDecisionCardAnchor": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "flow_id": {
+            "type": "string"
+          },
+          "flow_instance": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "stage_activation_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        "required": [
+          "flow_instance",
+          "entity_id",
+          "stage",
+          "stage_activation_id"
+        ],
+        "type": "object"
       },
       "SubscriberType": {
         "enum": [

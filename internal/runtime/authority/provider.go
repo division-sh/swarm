@@ -15,7 +15,6 @@ type Provider interface {
 	AuthorizeRouting(actor, target models.AgentConfig, status string) error
 	AuthorizeManagement(actor, target models.AgentConfig) error
 	AuthorizeMailboxSend(actor models.AgentConfig) error
-	CanDecideHumanTasks(role string) bool
 }
 
 type graphMutableProvider interface {
@@ -54,8 +53,6 @@ func (noopProvider) AuthorizeManagement(actor, target models.AgentConfig) error 
 func (noopProvider) AuthorizeMailboxSend(actor models.AgentConfig) error {
 	return failures.NewDetail("dependency_unavailable", "runtime-authority", "authorize_mailbox", map[string]any{"dependency": "mailbox_authority_provider"})
 }
-
-func (noopProvider) CanDecideHumanTasks(role string) bool { return false }
 
 func NoopProvider() Provider {
 	return noopProvider{}

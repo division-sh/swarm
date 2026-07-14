@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apispec"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/gorilla/websocket"
 )
@@ -236,6 +237,40 @@ func TestOpenRPCWebSocketRuntimeProbes(t *testing.T) {
 	})
 }
 
+func TestMailboxWebSocketSubscriptionPreservesHumanTaskAnchorKind(t *testing.T) {
+	base := time.Unix(1700001400, 0).UTC()
+	state := &mutatingRuntimeProbeState{now: base}
+	cards := newMutatingProbeDecisionCardStore(state)
+	anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
+		RequesterAgentID: "requester-agent", OperationID: "provider-turn/tool-call-1", Category: "review",
+		Scope: decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: "provider/instance-a"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cards.card.Anchor = anchor
+	handler, _ := newWebSocketRuntimeProbeHandler(t, webSocketRuntimeProbeObservability(base), time.Hour, cards)
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	conn := dialTestWS(t, server.URL)
+	defer conn.Close()
+	writeWSRequest(t, conn, map[string]any{
+		"jsonrpc": "2.0", "id": "human-task-mailbox-subscribe", "method": "mailbox.subscribe", "params": map[string]any{},
+	})
+	response := readWSResponse(t, conn)
+	subscriptionID := assertWebSocketRuntimeSubscribeSuccess(t, "mailbox.subscribe", response)
+	notification := readWSNotification(t, conn)
+	assertWebSocketRuntimeNotification(t, "mailbox.subscribe", subscriptionID, notification)
+	result := asMap(t, notification.Params.Result)
+	if result["card_id"] != cards.card.CardID {
+		t.Fatalf("human-task subscription card_id = %#v, want %q", result["card_id"], cards.card.CardID)
+	}
+	payload := asMap(t, result["payload"])
+	if payload["anchor_kind"] != string(decisioncard.AnchorKindHumanTask) {
+		t.Fatalf("human-task subscription payload = %#v", payload)
+	}
+}
+
 func transportAdmissionRuntimeMethods(t *testing.T, api *apispec.APISpecification, openRPC apispec.OpenRPCDocument, matrix openRPCComplianceMatrix) ([]string, []string) {
 	t.Helper()
 	openRPCMethods := map[string]struct{}{}
@@ -344,7 +379,7 @@ func rowHasWebSocketRuntimeProof(row openRPCMethodMatrix) bool {
 	return false
 }
 
-func newWebSocketRuntimeProbeHandler(t *testing.T, observability *fakeObservabilityReadStore, healthInterval time.Duration) (*Handler, map[string]int) {
+func newWebSocketRuntimeProbeHandler(t *testing.T, observability *fakeObservabilityReadStore, healthInterval time.Duration, cardStores ...decisioncard.Store) (*Handler, map[string]int) {
 	t.Helper()
 	if observability == nil {
 		observability = webSocketRuntimeProbeObservability(time.Unix(1700001400, 0).UTC())
@@ -352,12 +387,16 @@ func newWebSocketRuntimeProbeHandler(t *testing.T, observability *fakeObservabil
 	if healthInterval <= 0 {
 		healthInterval = time.Hour
 	}
+	var cards decisioncard.Store = newMutatingProbeDecisionCardStore(&mutatingRuntimeProbeState{now: time.Unix(1700001410, 0).UTC()})
+	if len(cardStores) > 0 && cardStores[0] != nil {
+		cards = cardStores[0]
+	}
 	readOpts := OperatorReadOptions{
 		Now:           func() time.Time { return time.Unix(1700001410, 0).UTC() },
 		Ready:         func() bool { return true },
 		Database:      fakePinger{err: nil},
 		Observability: observability,
-		DecisionCards: newMutatingProbeDecisionCardStore(&mutatingRuntimeProbeState{now: time.Unix(1700001410, 0).UTC()}),
+		DecisionCards: cards,
 		Bundle: runtimecontracts.BundleIdentity{
 			WorkflowName:    "review",
 			WorkflowVersion: "1.2.3",

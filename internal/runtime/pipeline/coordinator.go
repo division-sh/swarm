@@ -221,15 +221,26 @@ func (pc *PipelineCoordinator) Run(ctx context.Context) {
 }
 
 func (pc *PipelineCoordinator) RunMaintenance(ctx context.Context) {
-	expiry, ok := pc.decisionCards.(interface {
+	draftExpiry, hasDraftExpiry := pc.decisionCards.(interface {
 		ExpireDecisionCardInputDrafts(context.Context, time.Time) (int, error)
 	})
-	if !ok || expiry == nil {
+	humanTaskExpiry, hasHumanTaskExpiry := pc.decisionCards.(interface {
+		ExpireHumanTaskCards(context.Context, time.Time, int) (int, error)
+	})
+	if (!hasDraftExpiry || draftExpiry == nil) && (!hasHumanTaskExpiry || humanTaskExpiry == nil) {
 		return
 	}
 	run := func() {
-		if _, err := expiry.ExpireDecisionCardInputDrafts(ctx, time.Now().UTC()); err != nil {
-			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "expire_decision_card_input_drafts", "", "", runtimeWorkflowID, "", nil, err)
+		now := time.Now().UTC()
+		if hasDraftExpiry && draftExpiry != nil {
+			if _, err := draftExpiry.ExpireDecisionCardInputDrafts(ctx, now); err != nil {
+				pc.logRuntimeWarn(ctx, runtimeWorkflowID, "expire_decision_card_input_drafts", "", "", runtimeWorkflowID, "", nil, err)
+			}
+		}
+		if hasHumanTaskExpiry && humanTaskExpiry != nil {
+			if _, err := humanTaskExpiry.ExpireHumanTaskCards(ctx, now, 200); err != nil {
+				pc.logRuntimeWarn(ctx, runtimeWorkflowID, "expire_human_task_cards", "", "", runtimeWorkflowID, "", nil, err)
+			}
 		}
 	}
 	run()
@@ -255,6 +266,14 @@ func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) 
 	}
 	if evt.Type() == workflowGateDecisionEventType {
 		emitted, err := pc.handleWorkflowGateDecisionEvent(ctx, evt)
+		return false, emitted, err
+	}
+	if evt.Type() == decisionCardDeferredEventType {
+		emitted, err := pc.handleDecisionCardDeferredEvent(ctx, evt)
+		return false, emitted, err
+	}
+	if evt.Type() == decisionCardExpiredEventType {
+		emitted, err := pc.handleDecisionCardExpiredEvent(ctx, evt)
 		return false, emitted, err
 	}
 	stageTimer, firedStageTimer, err := pc.handleWorkflowStageTimerFire(ctx, evt)

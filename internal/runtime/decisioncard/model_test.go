@@ -14,9 +14,26 @@ import (
 
 func TestPublicJSONOmitsUnsetOptionalTimestampsAndIncludesTransitions(t *testing.T) {
 	now := time.Date(2026, time.July, 13, 1, 2, 3, 4, time.UTC)
+	card, err := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {Verdict: "approve", AdvancesTo: "operating"},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	card.CreatedAt = now
+	card.UpdatedAt = now
+	scope, err := card.Anchor.Scope()
+	if err != nil {
+		t.Fatal(err)
+	}
+	listItem := ListItem{
+		Kind: KindDecisionCard, CardID: card.CardID, RunID: card.RunID,
+		Anchor: card.Anchor, Scope: scope, Status: card.Status,
+		CreatedAt: now, UpdatedAt: now,
+	}
 	for name, value := range map[string]any{
-		"detail": Card{CardID: "card-1", CreatedAt: now, UpdatedAt: now},
-		"list":   ListItem{CardID: "card-1", CreatedAt: now, UpdatedAt: now},
+		"detail": card,
+		"list":   listItem,
 	} {
 		t.Run(name+"/unset", func(t *testing.T) {
 			raw, err := json.Marshal(value)
@@ -38,11 +55,14 @@ func TestPublicJSONOmitsUnsetOptionalTimestampsAndIncludesTransitions(t *testing
 		})
 	}
 
-	detailRaw, err := json.Marshal(Card{CardID: "card-1", DecidedAt: now, DeferredUntil: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now})
+	card.DecidedAt = now
+	card.DeferredUntil = now.Add(time.Hour)
+	detailRaw, err := json.Marshal(card)
 	if err != nil {
 		t.Fatal(err)
 	}
-	listRaw, err := json.Marshal(ListItem{CardID: "card-1", DeferredUntil: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now})
+	listItem.DeferredUntil = now.Add(time.Hour)
+	listRaw, err := json.Marshal(listItem)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,8 +79,7 @@ func TestPublicJSONOmitsUnsetOptionalTimestampsAndIncludesTransitions(t *testing
 func TestNewStampsDefaultCadenceAndStableHashes(t *testing.T) {
 	now := time.Date(2026, time.July, 12, 10, 0, 0, 0, time.UTC)
 	input := Card{
-		CardID: uuid.NewString(), RunID: "run-1", FlowInstance: "root", EntityID: "entity-1",
-		Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
+		CardID: uuid.NewString(), RunID: "run-1", Anchor: testStageAnchor(),
 		BundleHash: "bundle-hash", WorkflowVersion: "1", CreatedAt: now,
 		Snapshot: testSnapshot(t, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 			"approve": {Verdict: "approve", AdvancesTo: "operating"},
@@ -99,6 +118,7 @@ func TestValidateNoticeShapeReservesDecisionCardAuthority(t *testing.T) {
 		payload  map[string]any
 	}{
 		{itemType: "decision-card"},
+		{itemType: "human_task"},
 		{itemType: "notice", payload: map[string]any{"card_id": "forged"}},
 		{itemType: "notice", payload: map[string]any{"verdict": "approve"}},
 	} {
@@ -113,8 +133,7 @@ func TestValidateNoticeShapeReservesDecisionCardAuthority(t *testing.T) {
 
 func TestNewRejectsInputDraftTTLBeyondReminderInterval(t *testing.T) {
 	_, err := New(Card{
-		CardID: uuid.NewString(), RunID: "run-1", EntityID: "entity-1", Stage: "awaiting_review",
-		StageActivationID: uuid.NewString(), DecisionID: "launch_review", BundleHash: "bundle-hash",
+		CardID: uuid.NewString(), RunID: "run-1", Anchor: testStageAnchor(), BundleHash: "bundle-hash",
 		EffectiveCadence: Cadence{InputDraftTTL: "25h", ReminderInterval: "24h"},
 		Snapshot: testSnapshot(t, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 			"approve": {Verdict: "approve", AdvancesTo: "operating"},
@@ -127,8 +146,7 @@ func TestNewRejectsInputDraftTTLBeyondReminderInterval(t *testing.T) {
 
 func TestNewRejectsNonCanonicalGateInputTypeInSnapshot(t *testing.T) {
 	_, err := New(Card{
-		CardID: uuid.NewString(), RunID: "run-1", EntityID: "entity-1", Stage: "awaiting_review",
-		StageActivationID: uuid.NewString(), DecisionID: "launch_review", BundleHash: "bundle-hash",
+		CardID: uuid.NewString(), RunID: "run-1", Anchor: testStageAnchor(), BundleHash: "bundle-hash",
 		Snapshot: testSnapshot(t, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 			"reject": {
 				AdvancesTo: "building",
@@ -145,8 +163,7 @@ func TestNewRejectsNonCanonicalGateInputTypeInSnapshot(t *testing.T) {
 
 func TestNewRejectsNonExactCanonicalGateInputTypeBeforeHashing(t *testing.T) {
 	card, err := New(Card{
-		CardID: uuid.NewString(), RunID: "run-1", EntityID: "entity-1", Stage: "awaiting_review",
-		StageActivationID: uuid.NewString(), DecisionID: "launch_review", BundleHash: "bundle-hash",
+		CardID: uuid.NewString(), RunID: "run-1", Anchor: testStageAnchor(), BundleHash: "bundle-hash",
 		Snapshot: testSnapshot(t, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 			"reject": {
 				AdvancesTo: "building",
@@ -168,9 +185,9 @@ func TestNewAndValidateRejectNonCanonicalTopLevelDecisionID(t *testing.T) {
 	input := baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
 		"approve": {Verdict: "approve", AdvancesTo: "operating"},
 	})
-	input.DecisionID = " launch_review "
+	input.Snapshot.Decision = " launch_review "
 	card, err := New(input)
-	if err == nil || !strings.Contains(err.Error(), "decision_id") || !strings.Contains(err.Error(), "not canonical") {
+	if err == nil || !strings.Contains(err.Error(), "decision identity") || !strings.Contains(err.Error(), "not canonical") {
 		t.Fatalf("New error = %v, want noncanonical top-level decision identity rejection", err)
 	}
 	if card.CardContentHash != "" || card.DecisionSchemaHash != "" {
@@ -183,8 +200,8 @@ func TestNewAndValidateRejectNonCanonicalTopLevelDecisionID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	valid.DecisionID = " launch_review "
-	if err := valid.Validate(); err == nil || !strings.Contains(err.Error(), "decision_id") || !strings.Contains(err.Error(), "not canonical") {
+	valid.Snapshot.Decision = " launch_review "
+	if err := valid.Validate(); err == nil || !strings.Contains(err.Error(), "decision identity") || !strings.Contains(err.Error(), "not canonical") {
 		t.Fatalf("persisted-card validation error = %v, want exact top-level identity rejection", err)
 	}
 }
@@ -565,11 +582,21 @@ func baseTestDecisionCard(outcomes map[string]runtimecontracts.WorkflowGateOutco
 		panic(err)
 	}
 	return Card{
-		CardID: uuid.NewString(), RunID: "run-1", FlowInstance: "root", EntityID: "entity-1",
-		Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
+		CardID: uuid.NewString(), RunID: "run-1", Anchor: testStageAnchor(),
 		BundleHash: "bundle-hash", WorkflowVersion: "1", CreatedAt: time.Date(2026, time.July, 13, 5, 0, 0, 0, time.UTC),
 		Snapshot: snapshot,
 	}
+}
+
+func testStageAnchor() Anchor {
+	anchor, err := NewStageGateAnchor(StageGateAnchor{
+		FlowInstance: "root", EntityID: "entity-1", Stage: "awaiting_review",
+		StageActivationID: uuid.NewString(),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return anchor
 }
 
 func testSnapshot(t *testing.T, outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan, context map[string]any) Snapshot {

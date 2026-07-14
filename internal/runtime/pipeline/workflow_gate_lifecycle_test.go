@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -25,6 +26,8 @@ type gateLifecycleCardStore struct {
 	created       []decisioncard.Card
 	createTx      []bool
 	supersededFor []string
+	continuations map[string]decisioncard.HumanTaskContinuation
+	completedTx   []bool
 }
 
 func (s *gateLifecycleCardStore) CreateDecisionCard(ctx context.Context, card decisioncard.Card) error {
@@ -49,6 +52,234 @@ func (s *gateLifecycleCardStore) GetDecisionCard(_ context.Context, cardID strin
 func (s *gateLifecycleCardStore) SupersedeDecisionCardsForStage(_ context.Context, _, entityID, _, _ string, _ time.Time) error {
 	s.supersededFor = append(s.supersededFor, entityID)
 	return nil
+}
+
+func (s *gateLifecycleCardStore) CreateHumanTaskCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) error {
+	if err := s.CreateDecisionCard(ctx, card); err != nil {
+		return err
+	}
+	if s.continuations == nil {
+		s.continuations = map[string]decisioncard.HumanTaskContinuation{}
+	}
+	s.continuations[card.CardID] = continuation
+	return nil
+}
+
+func (s *gateLifecycleCardStore) LoadHumanTaskContinuation(_ context.Context, cardID string) (decisioncard.HumanTaskContinuation, error) {
+	continuation, ok := s.continuations[cardID]
+	if !ok {
+		return decisioncard.HumanTaskContinuation{}, decisioncard.ErrNotFound
+	}
+	return continuation, nil
+}
+
+func (s *gateLifecycleCardStore) CompleteHumanTaskOutcome(ctx context.Context, cardID, eventID string, at time.Time) (decisioncard.HumanTaskContinuation, error) {
+	_, inMutation := PipelineSQLTxFromContext(ctx)
+	s.completedTx = append(s.completedTx, inMutation)
+	continuation, ok := s.continuations[cardID]
+	if !ok {
+		return decisioncard.HumanTaskContinuation{}, decisioncard.ErrNotFound
+	}
+	if continuation.OutcomeEventID != eventID {
+		return decisioncard.HumanTaskContinuation{}, errors.New("human-task outcome event identity mismatch")
+	}
+	if continuation.State != decisioncard.HumanTaskContinuationDecisionCommitted &&
+		continuation.State != decisioncard.HumanTaskContinuationExpired &&
+		continuation.State != decisioncard.HumanTaskContinuationOutcomeDispatched {
+		return decisioncard.HumanTaskContinuation{}, errors.New("human-task continuation is not dispatchable")
+	}
+	continuation.State = decisioncard.HumanTaskContinuationOutcomeDispatched
+	continuation.UpdatedAt = at.UTC()
+	s.continuations[cardID] = continuation
+	return continuation, nil
+}
+
+func TestHumanTaskDecisionRoutesDirectlyToRequesterInOneMutationOnBothStores(t *testing.T) {
+	for _, scopeCase := range []struct {
+		name  string
+		scope decisioncard.Scope
+	}{
+		{name: "flow", scope: decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: "provider/instance-a"}},
+		{name: "global", scope: decisioncard.Scope{Kind: decisioncard.ScopeGlobal}},
+	} {
+		for _, tc := range workflowJoinStoreCases() {
+			t.Run(tc.name+"/"+scopeCase.name, func(t *testing.T) {
+				workflowStore, ctx := tc.open(t)
+				runID := runtimeRunID(ctx)
+				ensureGateLifecycleRun(t, workflowStore, runID)
+				now := time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC)
+				decisionEventID := uuid.NewString()
+				anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
+					RequesterAgentID: "requester-agent", OperationID: "provider-turn/tool-call-1", Category: "review",
+					Scope: scopeCase.scope,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				snapshot, err := decisioncard.FreezeSnapshot("human_task", "Review provider result", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+					"approve": {Verdict: "approve", Label: "Approve"},
+					"reject":  {Verdict: "reject", Label: "Reject", Input: map[string]runtimecontracts.WorkflowGateInputField{"reason": {Type: "text", Required: true}}},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				card, err := decisioncard.New(decisioncard.Card{
+					CardID: uuid.NewString(), RunID: runID, Anchor: anchor, Snapshot: snapshot,
+					BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", CreatedAt: now,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				fields, err := canonicaljson.FromGo(map[string]any{"reason": "Needs source evidence"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				card.Status = decisioncard.StatusDecided
+				card.Verdict = "reject"
+				card.Fields = fields
+				card.DecidedBy = "operator-a"
+				card.DecidedAt = now.Add(time.Minute)
+				card.DecisionEventID = decisionEventID
+				cards := &gateLifecycleCardStore{
+					created: []decisioncard.Card{card},
+					continuations: map[string]decisioncard.HumanTaskContinuation{card.CardID: {
+						CardID: card.CardID, RunID: runID,
+						RequesterRoute: events.RouteIdentity{FlowInstance: "provider/instance-a", EntityID: "requester-entity"},
+						ReplyContextID: "reply-context-a", SourceEventID: uuid.NewString(),
+						DeadlineAt: now.Add(24 * time.Hour), BudgetBundleHash: card.BundleHash,
+						BudgetWindowStart: now, BudgetWindowEnd: now.Add(7 * 24 * time.Hour),
+						State: decisioncard.HumanTaskContinuationDecisionCommitted, OutcomeEventID: decisionEventID,
+						CreatedAt: now, UpdatedAt: card.DecidedAt,
+					}},
+				}
+				bus := &recordingPipelineBus{}
+				pc := NewPipelineCoordinatorWithOptions(bus, workflowStore.db, PipelineCoordinatorOptions{
+					Module:        &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())},
+					WorkflowStore: workflowStore, DecisionCards: cards, BundleFingerprint: card.BundleHash,
+				})
+				payload, err := canonicaljson.Bytes(map[string]any{"card_id": card.CardID})
+				if err != nil {
+					t.Fatal(err)
+				}
+				parent := eventtest.RuntimeControl(decisionEventID, workflowGateDecisionEventType, "platform", "", payload, 0, runID, "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "provider/instance-a"), card.DecidedAt)
+				if _, err := pc.handleWorkflowGateDecisionEvent(ctx, parent); err != nil {
+					t.Fatal(err)
+				}
+				if len(cards.completedTx) != 1 || !cards.completedTx[0] {
+					t.Fatalf("continuation completion transaction evidence = %#v", cards.completedTx)
+				}
+				if len(bus.directPublishes) != 1 || bus.directPublishes[0].Type() != events.EventType("human_task.rejected") {
+					t.Fatalf("direct outcomes = %#v", bus.directPublishes)
+				}
+				if len(bus.directRecipients) != 1 || len(bus.directRecipients[0]) != 1 || bus.directRecipients[0][0] != "requester-agent" {
+					t.Fatalf("direct recipients = %#v", bus.directRecipients)
+				}
+				if got := bus.directPublishes[0].TargetRoute().Normalized(); got != (events.RouteIdentity{FlowInstance: "provider/instance-a", EntityID: "requester-entity"}) {
+					t.Fatalf("direct requester route = %#v", got)
+				}
+				if len(bus.directContexts) != 1 || bus.directContexts[0].ReplyContextID() != "reply-context-a" || !bus.directInMutation[0] {
+					t.Fatalf("direct delivery evidence = contexts:%#v transactions:%#v", bus.directContexts, bus.directInMutation)
+				}
+				continuation, err := cards.LoadHumanTaskContinuation(ctx, card.CardID)
+				if err != nil || continuation.State != decisioncard.HumanTaskContinuationOutcomeDispatched {
+					t.Fatalf("dispatched continuation = %#v, %v", continuation, err)
+				}
+			})
+		}
+	}
+}
+
+func TestHumanTaskDeferredAndExpiredOutcomesUseRequesterRouteOnBothStores(t *testing.T) {
+	for _, lifecycle := range []struct {
+		name        string
+		eventType   events.EventType
+		productType events.EventType
+	}{
+		{name: "deferred", eventType: decisionCardDeferredEventType, productType: "human_task.deferred"},
+		{name: "expired", eventType: decisionCardExpiredEventType, productType: "human_task.expired"},
+	} {
+		for _, tc := range workflowJoinStoreCases() {
+			t.Run(tc.name+"/"+lifecycle.name, func(t *testing.T) {
+				workflowStore, ctx := tc.open(t)
+				runID := runtimeRunID(ctx)
+				ensureGateLifecycleRun(t, workflowStore, runID)
+				now := time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC)
+				lifecycleEventID := uuid.NewString()
+				anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
+					RequesterAgentID: "requester-agent", OperationID: "provider-turn/tool-call-1", Category: "review",
+					Scope: decisioncard.Scope{Kind: decisioncard.ScopeGlobal},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				snapshot, err := decisioncard.FreezeSnapshot("human_task", "Review provider result", nil, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+					"approve": {Verdict: "approve", Label: "Approve"},
+					"reject":  {Verdict: "reject", Label: "Reject"},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				card, err := decisioncard.New(decisioncard.Card{
+					CardID: uuid.NewString(), RunID: runID, Anchor: anchor, Snapshot: snapshot,
+					BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", CreatedAt: now,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				continuation := decisioncard.HumanTaskContinuation{
+					CardID: card.CardID, RunID: runID,
+					RequesterRoute: events.RouteIdentity{FlowInstance: "provider/instance-a", EntityID: "requester-entity"},
+					ReplyContextID: "reply-context-a", SourceEventID: uuid.NewString(),
+					DeadlineAt: now.Add(24 * time.Hour), BudgetBundleHash: card.BundleHash,
+					BudgetWindowStart: now, BudgetWindowEnd: now.Add(7 * 24 * time.Hour), CreatedAt: now, UpdatedAt: now,
+				}
+				switch lifecycle.name {
+				case "deferred":
+					card.DeferredUntil = now.Add(time.Hour)
+					continuation.State = decisioncard.HumanTaskContinuationPending
+					continuation.DeferredUntil = card.DeferredUntil
+					continuation.DeferCause = "operator_deferred"
+				case "expired":
+					card.Status = decisioncard.StatusExpired
+					card.DecidedAt = now.Add(time.Hour)
+					continuation.State = decisioncard.HumanTaskContinuationExpired
+					continuation.OutcomeEventID = lifecycleEventID
+				}
+				cards := &gateLifecycleCardStore{
+					created:       []decisioncard.Card{card},
+					continuations: map[string]decisioncard.HumanTaskContinuation{card.CardID: continuation},
+				}
+				bus := &recordingPipelineBus{}
+				pc := NewPipelineCoordinatorWithOptions(bus, workflowStore.db, PipelineCoordinatorOptions{
+					Module:        &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())},
+					WorkflowStore: workflowStore, DecisionCards: cards, BundleFingerprint: card.BundleHash,
+				})
+				payload, err := canonicaljson.Bytes(map[string]any{"card_id": card.CardID})
+				if err != nil {
+					t.Fatal(err)
+				}
+				parent := eventtest.RuntimeControl(lifecycleEventID, lifecycle.eventType, "platform", "", payload, 0, runID, "", events.EventEnvelope{}, now.Add(time.Hour))
+				switch lifecycle.name {
+				case "deferred":
+					_, err = pc.handleDecisionCardDeferredEvent(ctx, parent)
+				case "expired":
+					_, err = pc.handleDecisionCardExpiredEvent(ctx, parent)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(bus.directPublishes) != 1 || bus.directPublishes[0].Type() != lifecycle.productType {
+					t.Fatalf("direct lifecycle outcomes = %#v", bus.directPublishes)
+				}
+				if got := bus.directPublishes[0].TargetRoute().Normalized(); got != continuation.RequesterRoute.Normalized() {
+					t.Fatalf("direct requester route = %#v, want %#v", got, continuation.RequesterRoute)
+				}
+				if len(bus.directRecipients) != 1 || len(bus.directRecipients[0]) != 1 || bus.directRecipients[0][0] != "requester-agent" {
+					t.Fatalf("direct recipients = %#v", bus.directRecipients)
+				}
+			})
+		}
+	}
 }
 
 func TestWorkflowGateEntryUsesOneTransactionAndRollsBackOnCardFailure(t *testing.T) {
@@ -136,7 +367,8 @@ func TestWorkflowGateEntryCreatesMatchingActivationAndCardOnBothStores(t *testin
 			if err != nil || !found {
 				t.Fatalf("gate activation = %#v, %v, %v", activation, found, err)
 			}
-			if activation.CardID != cards.created[0].CardID || activation.ActivationID != cards.created[0].StageActivationID || activation.Status != gateruntime.StatusOpen {
+			cardAnchor := mustStageGateAnchor(t, cards.created[0])
+			if activation.CardID != cards.created[0].CardID || activation.ActivationID != cardAnchor.StageActivationID || activation.Status != gateruntime.StatusOpen {
 				t.Fatalf("activation/card mismatch: activation=%#v card=%#v", activation, cards.created[0])
 			}
 		})
@@ -192,7 +424,7 @@ func TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBo
 			}
 			card := cards.created[0]
 			decisionEventID := uuid.NewString()
-			if err := workflowStore.CommitGateDecision(ctx, card, decisionEventID, now.Add(time.Minute)); err != nil {
+			if err := workflowStore.CommitDecision(ctx, card, decisionEventID, now.Add(time.Minute)); err != nil {
 				t.Fatal(err)
 			}
 			card.Status = decisioncard.StatusDecided
@@ -253,7 +485,7 @@ func TestWorkflowGateCommittedDecisionWinsOrdinaryAndTimerExitRacesOnBothStores(
 					t.Fatal(err)
 				}
 				card := cards.created[0]
-				if err := workflowStore.CommitGateDecision(ctx, card, uuid.NewString(), now.Add(time.Minute)); err != nil {
+				if err := workflowStore.CommitDecision(ctx, card, uuid.NewString(), now.Add(time.Minute)); err != nil {
 					t.Fatal(err)
 				}
 				err := workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
@@ -292,7 +524,7 @@ func TestWorkflowGateDecisionWaitsForItsRecordedBundlePinOnBothStores(t *testing
 			}
 			decisionEventID := uuid.NewString()
 			card := cards.created[0]
-			if err := workflowStore.CommitGateDecision(ctx, card, decisionEventID, now.Add(time.Minute)); err != nil {
+			if err := workflowStore.CommitDecision(ctx, card, decisionEventID, now.Add(time.Minute)); err != nil {
 				t.Fatal(err)
 			}
 			card.Status, card.Verdict, card.DecisionEventID, card.DecidedAt = decisioncard.StatusDecided, "approve", decisionEventID, now.Add(time.Minute)
@@ -332,7 +564,7 @@ func TestInitialStageLifecycleArmsStandingGateOnBothStores(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if len(cards.created) != 1 || cards.created[0].EntityID != entityID {
+			if len(cards.created) != 1 || mustStageGateAnchor(t, cards.created[0]).EntityID != entityID {
 				t.Fatalf("standing initial cards = %#v", cards.created)
 			}
 			assertGateLifecycleState(t, workflowStore, ctx, entityID, "awaiting_review", gateruntime.StatusOpen)
@@ -362,8 +594,9 @@ func TestWorkflowGateTerminationUsesCanonicalPersistedEntityIdentityOnBothStores
 			if len(cards.supersededFor) != 1 || cards.supersededFor[0] != entityID {
 				t.Fatalf("supersession entity identities = %#v, want canonical %s", cards.supersededFor, entityID)
 			}
-			if len(bus.publishes) != 1 || bus.publishes[0].FlowInstance() != cards.created[0].FlowInstance || bus.publishes[0].EntityID() != entityID {
-				t.Fatalf("terminated-flow supersession events = %#v, want card flow %q and entity %q", bus.publishes, cards.created[0].FlowInstance, entityID)
+			cardAnchor := mustStageGateAnchor(t, cards.created[0])
+			if len(bus.publishes) != 1 || bus.publishes[0].FlowInstance() != cardAnchor.FlowInstance || bus.publishes[0].EntityID() != entityID {
+				t.Fatalf("terminated-flow supersession events = %#v, want card flow %q and entity %q", bus.publishes, cardAnchor.FlowInstance, entityID)
 			}
 		})
 	}
@@ -399,8 +632,9 @@ func TestWorkflowGateOrdinaryExitSupersessionCarriesCardFlowIdentityOnBothStores
 			if len(bus.publishes) != 1 || len(cards.created) != 1 {
 				t.Fatalf("ordinary-exit supersession events = %#v cards = %#v", bus.publishes, cards.created)
 			}
-			if got := bus.publishes[0]; got.RunID() != runID || got.EntityID() != entityID || got.FlowInstance() != cards.created[0].FlowInstance {
-				t.Fatalf("ordinary-exit identity = run:%q entity:%q flow:%q, want %q/%q/%q", got.RunID(), got.EntityID(), got.FlowInstance(), runID, entityID, cards.created[0].FlowInstance)
+			cardAnchor := mustStageGateAnchor(t, cards.created[0])
+			if got := bus.publishes[0]; got.RunID() != runID || got.EntityID() != entityID || got.FlowInstance() != cardAnchor.FlowInstance {
+				t.Fatalf("ordinary-exit identity = run:%q entity:%q flow:%q, want %q/%q/%q", got.RunID(), got.EntityID(), got.FlowInstance(), runID, entityID, cardAnchor.FlowInstance)
 			}
 		})
 	}
@@ -415,6 +649,15 @@ func ensureGateLifecycleRun(t *testing.T, store *WorkflowInstanceStore, runID st
 	if _, err := store.db.ExecContext(context.Background(), query, runID); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func mustStageGateAnchor(t *testing.T, card decisioncard.Card) decisioncard.StageGateAnchor {
+	t.Helper()
+	anchor, err := card.Anchor.StageGate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return anchor
 }
 
 func assertGateLifecycleState(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, entityID, stage string, status gateruntime.Status) {

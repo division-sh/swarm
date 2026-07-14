@@ -239,11 +239,6 @@ func (h *runHub) resumeNodeAction(runID string, actionKind string, nodeID string
 	if h.session(runID) == nil {
 		return fmt.Errorf("run not found: %s", runID)
 	}
-	if actionKind == "skip" {
-		if err := h.submitPendingHumanDecision(context.Background(), runID, "deferred"); err != nil {
-			return err
-		}
-	}
 	if h.resumeRuntime == nil {
 		return fmt.Errorf("resume runtime is not configured")
 	}

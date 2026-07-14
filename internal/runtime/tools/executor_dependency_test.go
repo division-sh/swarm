@@ -7,6 +7,7 @@ import (
 	"time"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 )
 
 type allowMailboxAuthority struct{}
@@ -22,7 +23,6 @@ func (allowMailboxAuthority) AuthorizeRouting(actor, target models.AgentConfig, 
 }
 func (allowMailboxAuthority) AuthorizeManagement(actor, target models.AgentConfig) error { return nil }
 func (allowMailboxAuthority) AuthorizeMailboxSend(actor models.AgentConfig) error        { return nil }
-func (allowMailboxAuthority) CanDecideHumanTasks(role string) bool                       { return true }
 
 type mailboxStoreStub struct {
 	last MailboxItem
@@ -66,17 +66,14 @@ func (*entityPersistenceStub) CreateEntity(context.Context, EntityCreateRecord) 
 
 type humanTaskPersistenceStub struct{}
 
-func (*humanTaskPersistenceStub) CreateHumanTask(context.Context, HumanTaskCreateRecord) (string, error) {
-	return "task-1", nil
-}
-func (*humanTaskPersistenceStub) HumanTaskRequeueCount(context.Context, string) (int, error) {
-	return 0, nil
-}
-func (*humanTaskPersistenceStub) CountApprovedHumanTasksSince(context.Context, time.Time) (int, error) {
-	return 0, nil
-}
-func (*humanTaskPersistenceStub) DecideHumanTask(context.Context, HumanTaskDecisionRecord) error {
+func (*humanTaskPersistenceStub) CreateHumanTaskCard(context.Context, decisioncard.Card, decisioncard.HumanTaskContinuation) error {
 	return nil
+}
+func (*humanTaskPersistenceStub) LoadHumanTaskContinuation(context.Context, string) (decisioncard.HumanTaskContinuation, error) {
+	return decisioncard.HumanTaskContinuation{}, nil
+}
+func (*humanTaskPersistenceStub) CompleteHumanTaskOutcome(context.Context, string, string, time.Time) (decisioncard.HumanTaskContinuation, error) {
+	return decisioncard.HumanTaskContinuation{}, nil
 }
 
 func TestExecutorMailboxSendFailsWithoutMailboxStore(t *testing.T) {
@@ -142,7 +139,7 @@ func TestExecutorHumanTaskStoreDependencyFailsWithoutConstructorOwnedStore(t *te
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{})
 
 	store, err := exec.humanTaskStoreDependency()
-	if store != nil || err == nil || !strings.Contains(err.Error(), "human task persistence store is not configured") {
+	if store != nil || err == nil || !strings.Contains(err.Error(), "human-task card store is not configured") {
 		t.Fatalf("humanTaskStoreDependency = (%v, %v), want nil store error", store, err)
 	}
 }

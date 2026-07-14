@@ -42,6 +42,7 @@ func builtinRuntimeContractSchemas(source semanticview.Source, actor *models.Age
 	readContracts := actorOwnedReadTargetContracts(source, actor)
 	readTargetSchema := entityReadTargetInputSchemaForContracts(readContracts)
 	out := genericEntityRuntimeContractSchemas(readTargetSchema)
+	out["human_task_request"] = humanTaskRequestContractSchema()
 	if contract, ok := resolveEntityToolContract(source, actor); ok {
 		if len(readContracts) == 0 {
 			readContracts = []entityruntime.Contract{contract}
@@ -51,6 +52,33 @@ func builtinRuntimeContractSchemas(source semanticview.Source, actor *models.Age
 		}
 	}
 	return out
+}
+
+func humanTaskRequestContractSchema() ContractSchemaEntry {
+	return ContractSchemaEntry{
+		Category:    "human_decision",
+		Description: "Create a typed decision card when admitted work requires a human verdict.",
+		InputSchema: ObjectSchema(map[string]any{
+			"scope": map[string]any{
+				"type": "string",
+				"enum": []any{"entity", "flow", "global"},
+			},
+			"entity_id":      map[string]any{"type": "string", "format": "uuid"},
+			"category":       map[string]any{"type": "string", "minLength": 1},
+			"description":    map[string]any{"type": "string", "minLength": 1},
+			"talking_points": map[string]any{"type": "array", "items": map[string]any{"type": "string", "minLength": 1}},
+			"expected_value": map[string]any{"type": "string"},
+			"priority": map[string]any{
+				"type": "string",
+				"enum": []any{"low", "medium", "high", "critical"},
+			},
+			"deadline_at": map[string]any{"type": "string", "format": "date-time"},
+		}, "scope", "category", "description"),
+		OutputSchema: ObjectSchema(map[string]any{
+			"card_id": map[string]any{"type": "string", "format": "uuid"},
+			"status":  map[string]any{"type": "string", "enum": []any{"pending"}},
+		}, "card_id", "status"),
+	}
 }
 
 func flowDataToolSchemaEntriesForActor(source semanticview.Source, actor models.AgentConfig) map[string]ContractSchemaEntry {

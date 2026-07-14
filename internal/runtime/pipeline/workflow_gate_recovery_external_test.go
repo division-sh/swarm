@@ -51,6 +51,15 @@ type gateRecoveryStoreCase struct {
 	workflowStore *runtimepipeline.WorkflowInstanceStore
 }
 
+func recoveryStageAnchor(t *testing.T, card decisioncard.Card) decisioncard.StageGateAnchor {
+	t.Helper()
+	anchor, err := card.Anchor.StageGate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return anchor
+}
+
 type gateRecoveryFairnessInterceptor struct {
 	deferred map[string]struct{}
 }
@@ -416,7 +425,7 @@ func testDecisionRouteSettlementRetry(t *testing.T, selected gateRecoveryStoreCa
 		t.Fatal(err)
 	}
 	eventID := uuid.NewString()
-	if err := selected.workflowStore.CommitGateDecision(ctx, card, eventID, at); err != nil {
+	if err := selected.workflowStore.CommitDecision(ctx, card, eventID, at); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := selected.cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
@@ -444,7 +453,7 @@ func testDecisionRouteSettlementRetry(t *testing.T, selected gateRecoveryStoreCa
 	bus.SetInterceptors(counting)
 	payload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
 	evt := eventtest.RuntimeControl(eventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), card.FlowInstance), at)
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), recoveryStageAnchor(t, card).FlowInstance), at)
 	if err := bus.Publish(ctx, evt); err != nil {
 		t.Fatalf("foreground decision route: %v", err)
 	}
@@ -577,7 +586,7 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 	}
 	var cardID string
 	for _, item := range items {
-		if item.EntityID == entityID && item.Status == decisioncard.StatusPending {
+		if item.Scope.EntityID == entityID && item.Status == decisioncard.StatusPending {
 			cardID = item.CardID
 			break
 		}
@@ -590,7 +599,7 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 		t.Fatal(err)
 	}
 	eventID := uuid.NewString()
-	if err := tc.workflowStore.CommitGateDecision(ctx, card, eventID, at); err != nil {
+	if err := tc.workflowStore.CommitDecision(ctx, card, eventID, at); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tc.cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
@@ -601,7 +610,7 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 	}
 	payload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
 	evt := eventtest.RuntimeControl(eventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), card.FlowInstance), at)
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), recoveryStageAnchor(t, card).FlowInstance), at)
 	return gateRecoveryForegroundFixture{event: evt, entityID: entityID, cardID: card.CardID}
 }
 
@@ -611,9 +620,15 @@ func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, run
 	if err != nil {
 		t.Fatal(err)
 	}
+	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
+		FlowInstance: "launch/recovery", FlowID: "launch", EntityID: uuid.NewString(),
+		Stage: "awaiting_review", StageActivationID: uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	card, err := decisioncard.New(decisioncard.Card{
-		CardID: uuid.NewString(), RunID: runID, FlowInstance: "launch/recovery", FlowID: "launch", EntityID: uuid.NewString(),
-		Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
+		CardID: uuid.NewString(), RunID: runID, Anchor: anchor,
 		Snapshot:   snapshot,
 		BundleHash: gateRecoveryBundle, EffectiveCadence: decisioncard.Cadence{ReminderInterval: "24h", InputDraftTTL: "15m"}, CreatedAt: at,
 	})
@@ -628,8 +643,9 @@ func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, run
 		t.Fatal(err)
 	}
 	payload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
+	stageAnchor := recoveryStageAnchor(t, card)
 	evt := eventtest.RuntimeControl(eventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, card.EntityID), card.FlowInstance), at)
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, stageAnchor.EntityID), stageAnchor.FlowInstance), at)
 	if err := tc.events.AppendEvent(context.Background(), evt); err != nil {
 		t.Fatal(err)
 	}
@@ -736,7 +752,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	}
 	eventID := uuid.NewString()
 	decidedAt := enteredAt.Add(time.Minute)
-	if err := tc.workflowStore.CommitGateDecision(ctx, card, eventID, decidedAt); err != nil {
+	if err := tc.workflowStore.CommitDecision(ctx, card, eventID, decidedAt); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tc.cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: eventID, Now: decidedAt}); err != nil {
@@ -745,7 +761,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	bus.SetInterceptors(newCoordinator(otherGateBundle))
 	payload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
 	evt := eventtest.RuntimeControl(eventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), card.FlowInstance), decidedAt)
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), recoveryStageAnchor(t, card).FlowInstance), decidedAt)
 	if err := bus.PublishAcknowledged(ctx, evt); err != nil {
 		t.Fatal(err)
 	}
@@ -822,8 +838,8 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	}
 	decisionEventID := uuid.NewString()
 	decidedAt := scenarioAt.Add(time.Minute)
-	if err := tc.workflowStore.CommitGateDecision(ctx, card, decisionEventID, decidedAt); err != nil {
-		t.Fatalf("CommitGateDecision: %v", err)
+	if err := tc.workflowStore.CommitDecision(ctx, card, decisionEventID, decidedAt); err != nil {
+		t.Fatalf("CommitDecision: %v", err)
 	}
 	if _, err := tc.cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
 		CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator-1",
@@ -836,7 +852,7 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	payload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
 	decisionEvent := eventtest.RuntimeControl(
 		decisionEventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), card.FlowInstance), decidedAt,
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), recoveryStageAnchor(t, card).FlowInstance), decidedAt,
 	)
 	if err := bus.PublishAcknowledged(ctx, decisionEvent); err != nil {
 		t.Fatalf("PublishAcknowledged: %v", err)

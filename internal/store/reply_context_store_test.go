@@ -24,13 +24,12 @@ type replyContextStoreTestSurface interface {
 type replyContinuationStoreTestSurface interface {
 	replyContextStoreTestSurface
 	runtimetools.MailboxPersistence
-	runtimetools.HumanTaskPersistence
 	MaterializeMailboxWrite(context.Context, runtimepipeline.MailboxWriteMaterialization) error
 	UpsertSchedule(context.Context, runtimepipeline.Schedule) error
 	LoadActiveSchedules(context.Context) ([]runtimepipeline.Schedule, error)
 }
 
-func TestReplyContinuationRows_BackendParityNoticesAndHumanTaskRestoreContext(t *testing.T) {
+func TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		setup func(*testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error)
@@ -142,67 +141,9 @@ func TestReplyContinuationRows_BackendParityNoticesAndHumanTaskRestoreContext(t 
 				t.Fatal("recurring schedule with open reply context unexpectedly accepted")
 			}
 
-			humanTaskID, err := store.CreateHumanTask(ctx, runtimetools.HumanTaskCreateRecord{
-				ActorID:       "provider-agent",
-				FlowInstance:  "provider",
-				Category:      "approval",
-				Description:   "approve provider response",
-				ExpectedValue: "approved",
-				Priority:      "normal",
-				Deadline:      now.Add(2 * time.Hour),
-				SourceEventID: requestEventID,
-				Context:       deliveryContext,
-			})
-			if err != nil {
-				t.Fatalf("CreateHumanTask: %v", err)
-			}
-			item, err = store.GetMailboxItem(ctx, humanTaskID)
-			if err != nil || item.ReplyContextID != record.ID || item.FlowInstance != "provider" {
-				t.Fatalf("human task readback = %#v err=%v", item, err)
-			}
-			var humanEvents []events.Event
-			humanPublisher := func(publishCtx context.Context, evt events.Event) error {
-				if _, ok := runtimepipeline.PipelineSQLTxFromContext(publishCtx); !ok {
-					t.Fatal("human outcome publish escaped row transaction")
-				}
-				if got := events.DeliveryContextFromContext(publishCtx).ReplyContextID(); got != record.ID {
-					t.Fatalf("human outcome context = %q, want %q", got, record.ID)
-				}
-				humanEvents = append(humanEvents, evt)
-				return nil
-			}
-			if err := store.DecideHumanTask(ctx, runtimetools.HumanTaskDecisionRecord{
-				TaskID:               humanTaskID,
-				Status:               "deferred",
-				ActorID:              "operator",
-				Reason:               "later",
-				RequeueDate:          now.Add(30 * time.Minute).Format(time.RFC3339),
-				DecidedAt:            now,
-				DecisionEventPublish: humanPublisher,
-			}); err != nil {
-				t.Fatalf("defer human task: %v", err)
-			}
-			item, err = store.GetMailboxItem(ctx, humanTaskID)
-			if err != nil || item.Status != "pending" || item.ReplyContextID != record.ID || len(humanEvents) != 1 || humanEvents[0].Type() != "human_task.deferred" {
-				t.Fatalf("deferred human task row=%#v events=%#v err=%v", item, humanEvents, err)
-			}
-			if err := store.DecideHumanTask(ctx, runtimetools.HumanTaskDecisionRecord{
-				TaskID:               humanTaskID,
-				Status:               "approved",
-				ActorID:              "operator",
-				Reason:               "approved",
-				DecidedAt:            now.Add(time.Minute),
-				DecisionEventPublish: humanPublisher,
-			}); err != nil {
-				t.Fatalf("approve human task: %v", err)
-			}
-			item, err = store.GetMailboxItem(ctx, humanTaskID)
-			if err != nil || item.Status != "decided" || item.ReplyContextID != record.ID || len(humanEvents) != 2 || humanEvents[1].Type() != "human_task.approved" {
-				t.Fatalf("approved human task row=%#v events=%#v err=%v", item, humanEvents, err)
-			}
 			loaded, err := store.LoadReplyContext(ctx, record.ID)
 			if err != nil || loaded.State != runtimereplycontext.StateOpen {
-				t.Fatalf("mailbox/human decisions consumed terminal claim: %#v err=%v", loaded, err)
+				t.Fatalf("notice/schedule continuations consumed terminal claim: %#v err=%v", loaded, err)
 			}
 		})
 	}

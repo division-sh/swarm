@@ -72,7 +72,7 @@ func workflowSubscriptions(nodes []WorkflowNode) []events.EventType {
 
 func workflowRuntimeSubscriptions(nodes []WorkflowNode) []events.EventType {
 	subscriptions := workflowSubscriptions(nodes)
-	for _, required := range []events.EventType{activityRequestEventType, workflowGateDecisionEventType} {
+	for _, required := range []events.EventType{activityRequestEventType, workflowGateDecisionEventType, decisionCardDeferredEventType, decisionCardExpiredEventType} {
 		found := false
 		for _, eventType := range subscriptions {
 			if eventType == required {

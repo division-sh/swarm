@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
 	corestate "github.com/division-sh/swarm/internal/runtime/core/state"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 )
 
 type MailboxItem = corestate.MailboxItem
@@ -82,36 +82,4 @@ type EntityCreateRecord struct {
 	Writer       EntityMutationWriter
 }
 
-// HumanTaskPersistence owns human_task_request / human_task_decide mailbox-row
-// semantics used by the runtime tool executor.
-type HumanTaskPersistence interface {
-	CreateHumanTask(ctx context.Context, rec HumanTaskCreateRecord) (string, error)
-	HumanTaskRequeueCount(ctx context.Context, taskID string) (int, error)
-	CountApprovedHumanTasksSince(ctx context.Context, since time.Time) (int, error)
-	DecideHumanTask(ctx context.Context, rec HumanTaskDecisionRecord) error
-}
-
-type HumanTaskCreateRecord struct {
-	ActorID       string
-	EntityID      string
-	FlowInstance  string
-	Category      string
-	Description   string
-	TalkingPoints json.RawMessage
-	ExpectedValue string
-	Priority      string
-	Deadline      time.Time
-	SourceEventID string
-	Context       events.DeliveryContext
-}
-
-type HumanTaskDecisionRecord struct {
-	TaskID               string
-	Status               string
-	ActorID              string
-	Reason               string
-	PriorityRank         int
-	RequeueDate          string
-	DecidedAt            time.Time
-	DecisionEventPublish func(context.Context, events.Event) error
-}
+type HumanTaskCardStore = decisioncard.HumanTaskCreationStore

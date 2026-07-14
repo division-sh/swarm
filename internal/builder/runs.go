@@ -25,7 +25,6 @@ type runSession struct {
 	entityIDs          map[string]struct{}
 	breakpoints        map[string]struct{}
 	trippedBreakpoints map[string]struct{}
-	pendingHuman       *pendingHumanDecision
 	pendingStep        *pendingNodeAction
 	subs               map[string]func(RunEventEnvelope)
 	controlEvents      []RunEventEnvelope
@@ -39,12 +38,6 @@ type runDebugStreamState struct {
 	terminalKey   string
 	eventIDs      map[string]struct{}
 	runtimeLogIDs map[string]struct{}
-}
-
-type pendingHumanDecision struct {
-	nodeID          string
-	instanceID      string
-	requestingAgent string
 }
 
 type pendingNodeAction struct {

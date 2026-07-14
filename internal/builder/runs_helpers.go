@@ -32,19 +32,6 @@ func stringSet(values []string) map[string]struct{} {
 	return out
 }
 
-func normalizeHumanDecision(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "approve", "approved":
-		return "approved"
-	case "reject", "rejected":
-		return "rejected"
-	case "defer", "deferred":
-		return "deferred"
-	default:
-		return ""
-	}
-}
-
 func nonEmptyOrUUID(value string) string {
 	if value = strings.TrimSpace(value); value != "" {
 		return value

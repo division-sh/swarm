@@ -146,7 +146,7 @@ type storeBundle struct {
 	MailboxMaterializer          runtimepipeline.MailboxWriteMaterializationStore
 	MailboxStore                 runtimetools.MailboxPersistence
 	ToolEntityStore              runtimetools.EntityPersistence
-	HumanTaskStore               runtimetools.HumanTaskPersistence
+	HumanTaskStore               runtimetools.HumanTaskCardStore
 	BudgetSpendStore             budgetspend.Store
 	InboundStore                 runtime.InboundPersistence
 	MailboxAPIStore              apiv1.MailboxAPIStore
@@ -1245,7 +1245,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		AgentControl:              dashboardDynamicAgentControl{supervisor: supervisor},
 		Mailbox:                   stores.MailboxAPIStore,
 		DecisionCards:             stores.DecisionCards,
-		WorkflowStore:             stores.PipelineStore,
+		DecisionAuthority:         stores.PipelineStore,
 		Idempotency:               stores.IdempotencyStore,
 		Events:                    rt.Bus,
 		RunControl:                rt.RunControl,

@@ -3803,7 +3803,7 @@ engine:
       status: runnable_v1
       description: Receiver-declared request/reply routing returns one terminal provider result to the exact route that
         emitted the paired request. The runtime carries this authority as opaque route-scoped delivery context; business
-        payload, event envelope, source lineage, flow-instance metadata, requesting_agent, and task_id are never routing owners.
+        payload, event envelope, source lineage, flow-instance metadata, requester_agent_id, and card_id are never routing owners.
       authoring:
         request_output:
           shape: 'pins.outputs.events[] {name: provider_requested, event: provider.requested, carries: [provider_request_id]}'
@@ -3837,9 +3837,9 @@ engine:
           no instance-global metadata copy is permitted.
         mailbox: mailbox.reply_context_id is populated by system mailbox_write and agent mailbox_send. Defer and terminal
           decision updates restore it into the transactional decision-event publication context and do not claim the reply.
-        human_task: human_task_request stores source_event_id, flow_instance, and mailbox.reply_context_id. Defer and final decision outcomes
-          are produced from the locked durable row in the same mutation, restore the ref independently of requesting_agent/task_id,
-          and do not claim the reply.
+        human_task: human_task_request atomically stores a typed decision card and human_task_continuations row with source_event_id,
+          typed scope, requester identity, and the opaque reply_context_id. Defer and terminal outcomes restore the ref from the
+          continuation, persist a direct requester route independently of event payload fields, and do not claim the reply.
       persistence:
         owner: store.ReplyContextStore
         backends: [postgres, sqlite]
@@ -4862,20 +4862,18 @@ engine:
       - broader docs/CI/repo-wide closeout owned by #1089
       - public-source and CI closeout owned by #1089
       - production multi-writer SQLite concurrency semantics
-    - name: runtime_tool_entity_and_human_task_rows
-      owner: runtimetools.EntityPersistence and runtimetools.HumanTaskPersistence consumed through runtime.Stores and ExecutorOptions
+    - name: runtime_tool_entity_rows
+      owner: runtimetools.EntityPersistence consumed through runtime.Stores and ExecutorOptions
       promoted_by: '#1149'
-      sqlite_owner: internal/store.SQLiteRuntimeStore tool entity and human-task persistence methods
-      postgres_owner: internal/store.PostgresStore tool entity and human-task persistence methods
+      sqlite_owner: internal/store.SQLiteRuntimeStore tool entity persistence methods
+      postgres_owner: internal/store.PostgresStore tool entity persistence methods
       scope: >
         SQLite supports explicit local-dev runtime tool entity reads, searches, CEL-backed query/metrics filtering, entity
-        creation, entity field updates with mutation-log rows, generated role-scoped current-entity tools, human_task_request
-        mailbox row creation, and human_task_decide decision/requeue/weekly-budget reads through the same executor behavior
-        owner used by Postgres. Deferred human-task decisions share the platform mailbox defer storage model: status remains
-        pending, decision remains unset, requeue_date is persisted as deferred_until, and defer after expiry fails closed.
-        Backend-specific SQL belongs to the store implementations; the runtime tool executor must
+        creation, entity field updates with mutation-log rows, and generated role-scoped current-entity tools through the same
+        executor behavior owner used by Postgres. Backend-specific SQL belongs to the store implementations; the runtime tool executor must
         not receive a raw SQLite SQL handle as a compatibility seam for these surfaces.
       excludes:
+      - typed human_task_request card creation and continuation owned by engine.persistence_schema.decision_cards and human_task_continuations
       - public operator mailbox API decisions owned by api_specification.method_catalog.mailbox.*
       - public operator agent.usage reads over spend_ledger owned by operator_agent_usage_read_rows
       - runtime diagnostics/logging owned by #1150
@@ -6951,7 +6949,6 @@ permissions_model:
   - approve_spend
   - configure_routing
   - create_flow_instance
-  - human_task_decide
   - human_task_request
   - mailbox_send
   - message_flow
@@ -7047,8 +7044,7 @@ tool_model:
         provider-visible or callable for normal agents.
       get_entity: Read an entity by ID. Legacy trusted runtime-internal compatibility surface; not provider-visible or
         callable for normal agents in favor of generated read_{entity_type} tools.
-      human_task_decide: Record a human decision on a pending task. Requires human_task_decide permission.
-      human_task_request: Create a task for human execution. Requires human_task_request permission.
+      human_task_request: Create a typed human-task decision card. Requires human_task_request permission; verdicts are admitted only through authenticated mailbox decision APIs.
       mailbox_send: Send an item to the human mailbox for decision. Auto-granted to all agents (universal tool).
       read_flow_data: Read a declared immutable reference-data file from the current agent's owning flow data root. Generated
         only from flow_data_access declarations; not universal, not tools:-granted, and not native file I/O.
@@ -10591,6 +10587,7 @@ platform_tables:
         - decision_card_route_obligations
         - decision_card_changes
         - decision_card_input_drafts
+        - human_task_continuations
         - decision_cards
         - reply_contexts
         - agent_turns
@@ -11186,14 +11183,14 @@ platform_tables:
         event_dispatch: SELECT WHERE event_pattern matches AND status = active. Concrete rows (is_materialized) take priority
           over wildcards.
     mailbox:
-      description: 'Notice-only human mailbox queue. Generic mailbox rows cannot own typed stage decisions and cannot be
-        decided or deferred. Human-task rows are the frozen #1995 migration tail and no new producer may create them. from_agent
-        identifies the producer, summary provides human-readable notice content, and source_event_id preserves traceability.
-        reply_context_id is platform-only route-scoped continuation authority and must never be copied into payload. Typed
-        stage decisions are owned only by decision_cards and appear in mailbox.list/get through a read-only tagged projection.'
+      description: 'Notice-only human mailbox queue. Generic mailbox rows cannot own typed decisions and cannot be decided
+        or deferred. from_agent identifies the producer, summary provides human-readable notice content, and source_event_id
+        preserves traceability. reply_context_id is platform-only route-scoped continuation authority and must never be
+        copied into payload. Typed stage-gate and human-task decisions are owned only by decision_cards and appear in
+        mailbox.list/get through a read-only tagged projection.'
       ddl: "CREATE TABLE mailbox (\n    item_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    entity_id     \
         \    UUID,\n    flow_instance     TEXT,\n    scope             TEXT NOT NULL DEFAULT 'entity' CHECK (scope IN ('entity',\
-        \ 'flow', 'global')),\n    item_type         TEXT NOT NULL,\n    source_event_id   UUID,\n    from_agent        TEXT,\n\
+        \ 'flow', 'global')),\n    item_type         TEXT NOT NULL CHECK (item_type <> 'decision_card' AND item_type <> 'human_task'),\n    source_event_id   UUID,\n    from_agent        TEXT,\n\
         \    severity          TEXT NOT NULL DEFAULT 'normal' CHECK (severity IN ('normal', 'urgent', 'critical')),\n    summary\
         \           TEXT,\n    payload           JSONB NOT NULL DEFAULT '{}',\n    status            TEXT NOT NULL DEFAULT\
         \ 'pending' CHECK (status IN ('pending', 'decided', 'expired', 'cancelled')),\n    decision          TEXT,\n    decision_notes\
@@ -11203,21 +11200,21 @@ platform_tables:
         \ IS NOT NULL,\n    INDEX idx_mailbox_type (item_type, status),\n    INDEX idx_mailbox_global (scope, status) WHERE\
         \ scope = 'global'\n);"
     decision_cards:
-      description: 'Sole mutable owner for typed stage-gate decisions. A row freezes the structured card snapshot, authored
-        verdict/input schema, effective cadence, contract and provenance identity, stage-activation fence, and presentation
-        hashes. Stage entry, activation creation, card creation, and its initial change record commit in one selected-store
-        workflow mutation. Generic mailbox rows never mirror writable card state.'
+      description: 'Sole mutable verdict owner for typed stage-gate and human-task decisions. anchor_kind plus anchor is a
+        closed tagged identity union: stage_gate carries its stage-activation fence; human_task carries requester, logical
+        operation, and entity/flow/global scope. A row freezes the structured card snapshot, authored verdict/input schema,
+        effective cadence, contract and provenance identity, and presentation hashes. Generic mailbox rows never mirror
+        writable card state. Creation and every lifecycle mutation admit authoritative timestamps to UTC microsecond
+        precision before validation, card/continuation mutation, change emission, event construction, or readback; this
+        includes decisions, defers, expiry, outcome completion, and supersession. Unknown anchor kinds fail closed;
+        proposed_effect remains unimplemented under #1987.'
       ddl: |
         CREATE TABLE decision_cards (
             card_id                UUID PRIMARY KEY,
             run_id                 UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-            flow_instance          TEXT NOT NULL,
-            flow_id                TEXT,
-            entity_id              UUID NOT NULL,
-            stage                  TEXT NOT NULL,
-            stage_activation_id    UUID NOT NULL,
-            decision_id            TEXT NOT NULL,
-            status                 TEXT NOT NULL CHECK (status IN ('pending', 'decided', 'superseded')),
+            anchor_kind            TEXT NOT NULL CHECK (anchor_kind IN ('stage_gate', 'human_task')),
+            anchor                 JSONB NOT NULL,
+            status                 TEXT NOT NULL CHECK (status IN ('pending', 'decided', 'superseded', 'expired')),
             snapshot               JSONB NOT NULL,
             card_content_hash      TEXT NOT NULL,
             decision_schema_hash   TEXT NOT NULL,
@@ -11236,11 +11233,47 @@ platform_tables:
             superseded_reason      TEXT,
             created_at             TIMESTAMPTZ NOT NULL,
             updated_at             TIMESTAMPTZ NOT NULL,
-            UNIQUE (run_id, flow_instance, entity_id, stage_activation_id, decision_id),
-            CHECK ((status = 'pending' AND verdict IS NULL AND superseded_reason IS NULL) OR (status = 'decided' AND verdict IS NOT NULL AND decided_at IS NOT NULL AND decision_event_id IS NOT NULL) OR (status = 'superseded' AND superseded_reason IS NOT NULL)),
+            CHECK ((status = 'pending' AND verdict IS NULL AND superseded_reason IS NULL) OR (status = 'decided' AND verdict IS NOT NULL AND decided_at IS NOT NULL AND decision_event_id IS NOT NULL) OR (status = 'superseded' AND superseded_reason IS NOT NULL) OR (status = 'expired' AND verdict IS NULL AND decided_at IS NOT NULL)),
             INDEX idx_decision_cards_mailbox (status, deferred_until, created_at),
             INDEX idx_decision_cards_run (run_id, created_at),
-            INDEX idx_decision_cards_entity (run_id, entity_id, stage_activation_id)
+            INDEX idx_decision_cards_anchor (run_id, anchor_kind, created_at)
+        );
+    human_task_continuations:
+      description: 'Operational continuation for the human_task anchor, keyed by the decision card. It owns the opaque
+        requester delivery route and reply reference, source-event provenance, stamped deadline and bundle-scoped weekly budget policy,
+        defer/requeue state, and outcome delivery state. It never owns verdict state. Card creation and continuation creation,
+        card decision and continuation commit, expiry, and run supersession are each one selected-store mutation. Human-task
+        admission canonicalizes source, deadline, budget-window, and continuation lifecycle timestamps to UTC microsecond
+        precision before snapshot construction, hashing, persistence, or idempotent replay comparison; both selected stores
+        consume that same admitted representation. The requester route is stamped independently from the card business scope,
+        so entity-bound requesters receive flow- and global-scoped task outcomes. Transactional direct publication rolls back
+        when its explicit requester is rejected by route policy; outcome delivery state never commits against an empty plan.
+        PostgreSQL approval admission serializes the stamped (budget_bundle_hash, budget_window_start) scope inside the
+        decision transaction before counting committed approvals, so concurrent cards cannot exceed the weekly limit;
+        SQLite provides the same atomicity through its selected-store write serialization.'
+      ddl: |
+        CREATE TABLE human_task_continuations (
+            card_id                UUID PRIMARY KEY REFERENCES decision_cards(card_id) ON DELETE CASCADE,
+            run_id                 UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+            requester_flow_instance TEXT,
+            requester_entity_id    UUID,
+            reply_context_id       TEXT REFERENCES reply_contexts(reply_context_id),
+            source_event_id        UUID,
+            deadline_at            TIMESTAMPTZ NOT NULL,
+            budget_bundle_hash     TEXT NOT NULL,
+            budget_limit           INTEGER NOT NULL CHECK (budget_limit >= 0),
+            budget_window_start    TIMESTAMPTZ NOT NULL,
+            budget_window_end      TIMESTAMPTZ NOT NULL,
+            requeue_count          INTEGER NOT NULL DEFAULT 0 CHECK (requeue_count >= 0),
+            defer_cause            TEXT,
+            deferred_until         TIMESTAMPTZ,
+            state                  TEXT NOT NULL CHECK (state IN ('pending', 'decision_committed', 'outcome_dispatched', 'expired', 'superseded')),
+            outcome_event_id       UUID,
+            created_at             TIMESTAMPTZ NOT NULL,
+            updated_at             TIMESTAMPTZ NOT NULL,
+            CHECK (budget_window_end > budget_window_start),
+            INDEX idx_human_task_due (state, deferred_until, deadline_at),
+            INDEX idx_human_task_budget (budget_bundle_hash, budget_window_start, state)
         );
     decision_card_input_drafts:
       description: 'Durable actor/card/verdict-scoped half-input owner. An active draft is not a verdict. It is cancellable,
@@ -11270,7 +11303,7 @@ platform_tables:
             change_id  BIGSERIAL PRIMARY KEY,
             run_id     UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
             card_id    UUID NOT NULL REFERENCES decision_cards(card_id) ON DELETE CASCADE,
-            change_type TEXT NOT NULL CHECK (change_type IN ('created', 'decided', 'deferred', 'superseded', 'input_draft_started', 'input_draft_cancelled', 'input_draft_expired', 'input_draft_consumed')),
+            change_type TEXT NOT NULL CHECK (change_type IN ('created', 'decided', 'deferred', 'expired', 'superseded', 'input_draft_started', 'input_draft_cancelled', 'input_draft_expired', 'input_draft_consumed')),
             payload    JSONB NOT NULL DEFAULT '{}',
             created_at TIMESTAMPTZ NOT NULL,
             INDEX idx_decision_card_changes_card (card_id, change_id),
@@ -11313,8 +11346,8 @@ platform_tables:
             bundle_hash    TEXT NOT NULL,
             event_name     TEXT NOT NULL,
             payload        JSONB NOT NULL,
-            entity_id      UUID NOT NULL,
-            flow_instance  TEXT NOT NULL,
+            entity_id      UUID,
+            flow_instance  TEXT,
             status         TEXT NOT NULL CHECK (status IN ('pending', 'completed')),
             created_at     TIMESTAMPTZ NOT NULL,
             completed_at   TIMESTAMPTZ,
@@ -11775,7 +11808,8 @@ platform_tables:
       Creation-origin evidence is valid only when the required id=1 row has non-blank Swarm and platform versions after
       trimming and created_at decodes to a non-zero timestamp. Missing, malformed, blank, invalid, or zero-valued evidence
       makes the selected store incompatible and must use the same typed backend-specific diagnostic and fresh-store
-      remediation as catalog drift.
+      remediation as catalog drift. Admission canonicalizes created_at to UTC microsecond precision before either selected
+      backend persists or reports the origin, so SQLite and PostgreSQL expose one exact evidence value.
     rule: >
       Origin versions are immutable diagnostic evidence, never a compatibility verdict. Existing selected stores are
       inspected before any persistent schema or data mutation. A non-empty un-stamped store is not adopted. A stamped store
@@ -13915,17 +13949,18 @@ platform_events:
         timestamp: string (ISO 8601)
       produced_by_type: platform
     mailbox.card_decided:
-      description: Platform event emitted after a typed stage-gate verdict commits against its current activation.
+      description: Platform event emitted after a typed decision-card verdict commits against its anchor authority.
       schema_authority: platform-spec.yaml#api_specification.conventions.mailbox.decision_event_payload_contract
       producer_evidence:
         produced_by_type: platform
         locations:
         - internal/apiv1/operator_decision_cards.go
       routing_class: event_loop_routable
-      scope: entity or flow
+      scope: entity, flow, or global
       payload:
         card_id: uuid
-        stage_activation_id: uuid
+        anchor_kind: text
+        anchor: object (closed shape selected by anchor_kind)
         decision_id: text
         verdict: text
         fields: object
@@ -13934,7 +13969,8 @@ platform_events:
         bundle_hash: text
       required:
       - card_id
-      - stage_activation_id
+      - anchor_kind
+      - anchor
       - decision_id
       - verdict
       - fields
@@ -13950,7 +13986,7 @@ platform_events:
         locations:
         - internal/apiv1/operator_decision_cards.go
       routing_class: event_loop_routable
-      scope: entity or flow
+      scope: entity, flow, or global
       payload:
         card_id: uuid
         until: timestamp
@@ -13959,22 +13995,44 @@ platform_events:
       - until
       produced_by_type: platform
     mailbox.card_superseded:
-      description: Platform evidence event emitted when a competing stage exit supersedes a pending typed decision card.
+      description: Platform evidence event emitted when an anchor-owned lifecycle boundary supersedes a pending typed decision card.
       schema_authority: platform-spec.yaml#api_specification.conventions.mailbox.decision_event_payload_contract
       producer_evidence:
         produced_by_type: platform
         locations:
         - internal/runtime/pipeline/workflow_gate_lifecycle.go
+        - internal/store/decision_cards.go#supersedeDecisionCardsForRun
       routing_class: event_loop_routable
-      scope: entity or flow
+      scope: entity, flow, or global
       payload:
         card_id: uuid
+        anchor_kind: text
         stage_activation_id: uuid
         reason: text
       required:
       - card_id
-      - stage_activation_id
+      - anchor_kind
       - reason
+      produced_by_type: platform
+    mailbox.card_expired:
+      description: Platform evidence event emitted when a human-task decision card reaches its stamped deadline without a verdict.
+      schema_authority: platform-spec.yaml#platform_tables.tables.human_task_continuations
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/store/human_task_cards.go#expireHumanTaskCards
+      routing_class: event_loop_routable
+      scope: entity, flow, or global
+      payload:
+        card_id: uuid
+        anchor_kind: text
+        cause: text
+        deadline_at: timestamp
+      required:
+      - card_id
+      - anchor_kind
+      - cause
+      - deadline_at
       produced_by_type: platform
     human_task.approved:
       description: Product-facing platform event emitted after an operator approves a persisted human task.
@@ -13982,36 +14040,23 @@ platform_events:
       producer_evidence:
         produced_by_type: platform
         locations:
-        - internal/store/tool_persistence.go#publishHumanTaskOutcome
+        - internal/runtime/pipeline/workflow_gate_decision.go#handleHumanTaskDecisionCard
       routing_class: event_loop_routable
-      scope: entity or flow
+      scope: direct requester delivery with entity, flow, or global card scope
       payload:
-        task_id: uuid
-        requesting_agent: text
+        card_id: uuid
+        requester_agent_id: text
         status: text
+        fields: object
         decided_by: text
         decided_at: timestamp
-        category: text
-        description: text
-        expected_value: text
-        priority: text
-        requeue_count: integer
-        talking_points: array
-        reason: text
-        rejection_reason: text
-        expiry_reason: text
-        requeue_date: timestamp
       required:
-      - task_id
-      - requesting_agent
+      - card_id
+      - requester_agent_id
       - status
+      - fields
       - decided_by
       - decided_at
-      - category
-      - description
-      - expected_value
-      - priority
-      - requeue_count
       produced_by_type: platform
     human_task.rejected:
       description: Product-facing platform event emitted after an operator rejects a persisted human task.
@@ -14019,36 +14064,23 @@ platform_events:
       producer_evidence:
         produced_by_type: platform
         locations:
-        - internal/store/tool_persistence.go#publishHumanTaskOutcome
+        - internal/runtime/pipeline/workflow_gate_decision.go#handleHumanTaskDecisionCard
       routing_class: event_loop_routable
-      scope: entity or flow
+      scope: direct requester delivery with entity, flow, or global card scope
       payload:
-        task_id: uuid
-        requesting_agent: text
+        card_id: uuid
+        requester_agent_id: text
         status: text
+        fields: object
         decided_by: text
         decided_at: timestamp
-        category: text
-        description: text
-        expected_value: text
-        priority: text
-        requeue_count: integer
-        talking_points: array
-        reason: text
-        rejection_reason: text
-        expiry_reason: text
-        requeue_date: timestamp
       required:
-      - task_id
-      - requesting_agent
+      - card_id
+      - requester_agent_id
       - status
+      - fields
       - decided_by
       - decided_at
-      - category
-      - description
-      - expected_value
-      - priority
-      - requeue_count
       produced_by_type: platform
     human_task.deferred:
       description: Product-facing platform event emitted when a persisted human task is deferred without terminally deciding it.
@@ -14056,36 +14088,19 @@ platform_events:
       producer_evidence:
         produced_by_type: platform
         locations:
-        - internal/store/tool_persistence.go#publishHumanTaskOutcome
+        - internal/runtime/pipeline/workflow_gate_decision.go#handleDecisionCardDeferredEvent
       routing_class: event_loop_routable
-      scope: entity or flow
+      scope: direct requester delivery with entity, flow, or global card scope
       payload:
-        task_id: uuid
-        requesting_agent: text
+        card_id: uuid
         status: text
-        decided_by: text
-        decided_at: timestamp
-        category: text
-        description: text
-        expected_value: text
-        priority: text
-        requeue_count: integer
-        talking_points: array
-        reason: text
-        rejection_reason: text
-        expiry_reason: text
-        requeue_date: timestamp
+        cause: text
+        resume_at: timestamp
       required:
-      - task_id
-      - requesting_agent
+      - card_id
       - status
-      - decided_by
-      - decided_at
-      - category
-      - description
-      - expected_value
-      - priority
-      - requeue_count
+      - cause
+      - resume_at
       produced_by_type: platform
     human_task.expired:
       description: Product-facing platform event emitted when a persisted human task reaches its terminal timeout decision.
@@ -14093,36 +14108,19 @@ platform_events:
       producer_evidence:
         produced_by_type: platform
         locations:
-        - internal/store/tool_persistence.go#publishHumanTaskOutcome
+        - internal/runtime/pipeline/workflow_gate_decision.go#handleDecisionCardExpiredEvent
       routing_class: event_loop_routable
-      scope: entity or flow
+      scope: direct requester delivery with entity, flow, or global card scope
       payload:
-        task_id: uuid
-        requesting_agent: text
+        card_id: uuid
         status: text
-        decided_by: text
-        decided_at: timestamp
-        category: text
-        description: text
-        expected_value: text
-        priority: text
-        requeue_count: integer
-        talking_points: array
-        reason: text
-        rejection_reason: text
-        expiry_reason: text
-        requeue_date: timestamp
+        cause: text
+        deadline_at: timestamp
       required:
-      - task_id
-      - requesting_agent
+      - card_id
       - status
-      - decided_by
-      - decided_at
-      - category
-      - description
-      - expected_value
-      - priority
-      - requeue_count
+      - cause
+      - deadline_at
       produced_by_type: platform
   routing_rules:
     description: Most platform events enter the normal event loop. Products can subscribe agents to them. System nodes can handle
@@ -14130,7 +14128,7 @@ platform_events:
     routable_events: 'Platform events that enter the normal event loop: platform.dead_letter, platform.agent_failed,
       platform.agent_panic, platform.event_quarantined, platform.dead_letter_escalation, platform.run_stalled, platform.reset, platform.auth_required,
       platform.paused, platform.resumed, platform.boot, platform.recovery_failed, platform.agent_started, platform.budget_threshold_crossed,
-      mailbox.card_decided, mailbox.card_deferred, mailbox.card_superseded, human_task.approved, human_task.rejected, human_task.deferred,
+      mailbox.card_decided, mailbox.card_deferred, mailbox.card_superseded, mailbox.card_expired, human_task.approved, human_task.rejected, human_task.deferred,
       human_task.expired. Products can subscribe to these.'
     internal_routable_events: 'platform.activity_requested enters the normal event loop as a platform-internal durable activity
       request and is consumed by workflow-runtime; products MUST NOT author, emit, or claim ownership of it.'
@@ -22291,17 +22289,19 @@ api_specification:
         terminal_event_name: mailbox.card_decided
         deferred_event_name: mailbox.card_deferred
         superseded_event_name: mailbox.card_superseded
-        producer: /v1/rpc mailbox.decide|mailbox.defer and the stage-exit activation owner
+        producer: /v1/rpc mailbox.decide|mailbox.defer and each registered anchor lifecycle owner
         rule: >
           Card lifecycle events are platform-produced flat event payloads and
           MUST satisfy the active event schema before persistence. A terminal
-          decision carries card, activation, authored verdict, typed fields,
-          content/schema hashes, and pinned bundle identity. Diagnostic text is
-          not semantic decision input. Defer is non-terminal. Supersession names
-          the competing stage-exit owner.
+          decision carries card identity, anchor kind and closed anchor,
+          authored verdict, typed fields, content/schema hashes, and pinned
+          bundle identity. Diagnostic text is not semantic decision input.
+          Defer is non-terminal. Supersession names the competing lifecycle
+          owner selected by the anchor kind.
         terminal_required_fields:
         - card_id
-        - stage_activation_id
+        - anchor_kind
+        - anchor
         - decision_id
         - verdict
         - fields
@@ -22311,14 +22311,14 @@ api_specification:
         deferred_required_fields:
         - card_id
         - until
-        superseded_required_fields: [card_id, stage_activation_id, reason]
+        superseded_required_fields: [card_id, anchor_kind, reason]
       decision_transaction_boundary: >
-        `mailbox.decide` acquires the workflow activation fence before the card,
-        then commits activation decision_committed, typed verdict, change cursor,
-        canonical event, delivery evidence, and API idempotency together. The
-        post-commit runtime routes only under the card's recorded bundle pin.
-        The routed activation, stage/timer/join/gate mutations, deterministic
-        authored outcome event, and its delivery manifest commit in one mutation;
+        `mailbox.decide` acquires the registered anchor authority before the card,
+        then commits the anchor outcome, typed verdict, change cursor, canonical
+        event, delivery evidence, and API idempotency together. The post-commit
+        runtime routes only under the card's recorded bundle pin. Stage-gate
+        routing and human-task requester continuation each consume that same
+        committed event; their deterministic outcome and delivery manifest commit in one mutation;
         acknowledgment-loss retries converge on the same event identity. An
         unavailable pin is classified as retryable
         platform.dependency_unavailable/decision_card_bundle_unavailable,
@@ -23693,31 +23693,67 @@ api_specification:
       DecisionCardSummary:
         type: object
         additionalProperties: false
-        required: [kind, card_id, run_id, flow_instance, entity_id, stage, decision_id, title, status, created_at, updated_at]
+        required: [kind, card_id, run_id, anchor_kind, anchor, scope, title, status, created_at, updated_at]
         properties:
           kind: {type: string, const: decision_card}
           card_id: {$ref: '#/components/schemas/OpaqueId'}
           run_id: {$ref: '#/components/schemas/OpaqueId'}
-          flow_instance: {type: string}
-          entity_id: {$ref: '#/components/schemas/OpaqueId'}
-          stage: {type: string}
-          decision_id: {type: string}
+          anchor_kind: {$ref: '#/components/schemas/DecisionCardAnchorKind'}
+          anchor: {$ref: '#/components/schemas/DecisionCardAnchor'}
+          scope: {$ref: '#/components/schemas/DecisionCardScope'}
+          decision: {type: string}
+          category: {type: string}
           title: {type: string}
           status: {$ref: '#/components/schemas/MailboxStatus'}
           deferred_until: {$ref: '#/components/schemas/Timestamp'}
           created_at: {$ref: '#/components/schemas/Timestamp'}
           updated_at: {$ref: '#/components/schemas/Timestamp'}
-      DecisionCard:
+      DecisionCardAnchorKind:
+        type: string
+        enum: [stage_gate, human_task]
+      DecisionCardScope:
         type: object
-        additionalProperties: true
-        required: [card_id, run_id, entity_id, stage, stage_activation_id, decision_id, status, snapshot, card_content_hash, decision_schema_hash, bundle_hash, created_at, updated_at]
+        additionalProperties: false
+        required: [kind]
         properties:
-          card_id: {$ref: '#/components/schemas/OpaqueId'}
-          run_id: {$ref: '#/components/schemas/OpaqueId'}
+          kind: {type: string, enum: [entity, flow, global]}
+          flow_instance: {type: string}
+          entity_id: {$ref: '#/components/schemas/OpaqueId'}
+      DecisionCardAnchor:
+        oneOf:
+        - $ref: '#/components/schemas/StageGateDecisionCardAnchor'
+        - $ref: '#/components/schemas/HumanTaskDecisionCardAnchor'
+      StageGateDecisionCardAnchor:
+        type: object
+        additionalProperties: false
+        required: [flow_instance, entity_id, stage, stage_activation_id]
+        properties:
+          flow_instance: {type: string}
+          flow_id: {type: string}
           entity_id: {$ref: '#/components/schemas/OpaqueId'}
           stage: {type: string}
           stage_activation_id: {$ref: '#/components/schemas/OpaqueId'}
-          decision_id: {type: string}
+      HumanTaskDecisionCardAnchor:
+        type: object
+        additionalProperties: false
+        required: [requester_agent_id, operation_id, category, scope]
+        properties:
+          requester_agent_id: {type: string}
+          operation_id: {$ref: '#/components/schemas/OpaqueId'}
+          category: {type: string}
+          scope: {$ref: '#/components/schemas/DecisionCardScope'}
+      DecisionCard:
+        type: object
+        additionalProperties: true
+        required: [card_id, run_id, anchor_kind, anchor, scope, status, snapshot, card_content_hash, decision_schema_hash, bundle_hash, created_at, updated_at]
+        properties:
+          card_id: {$ref: '#/components/schemas/OpaqueId'}
+          run_id: {$ref: '#/components/schemas/OpaqueId'}
+          anchor_kind: {$ref: '#/components/schemas/DecisionCardAnchorKind'}
+          anchor: {$ref: '#/components/schemas/DecisionCardAnchor'}
+          scope: {$ref: '#/components/schemas/DecisionCardScope'}
+          decision: {type: string}
+          category: {type: string}
           status: {$ref: '#/components/schemas/MailboxStatus'}
           snapshot: {type: object, additionalProperties: true}
           card_content_hash: {type: string}
@@ -23757,7 +23793,7 @@ api_specification:
           sequence: {type: integer, minimum: 1}
           card_id: {$ref: '#/components/schemas/OpaqueId'}
           run_id: {$ref: '#/components/schemas/OpaqueId'}
-          change_type: {type: string, enum: [created, decided, deferred, superseded, input_draft_started, input_draft_cancelled, input_draft_expired, input_draft_consumed]}
+          change_type: {type: string, enum: [created, decided, deferred, expired, superseded, input_draft_started, input_draft_cancelled, input_draft_expired, input_draft_consumed]}
           payload: {type: object, additionalProperties: true}
           created_at: {$ref: '#/components/schemas/Timestamp'}
       MailboxPriority:
@@ -27204,6 +27240,10 @@ api_specification:
         required: false
         schema:
           $ref: '#/components/schemas/OpaqueId'
+      - name: anchor_kind
+        required: false
+        schema:
+          $ref: '#/components/schemas/DecisionCardAnchorKind'
       - name: type
         required: false
         schema:
@@ -27263,7 +27303,7 @@ api_specification:
       tier: must_have
       description: >
         Commit one authored verdict against a pending typed decision card. The
-        current stage activation, typed verdict/fields, change cursor,
+        registered anchor authority, typed verdict/fields, change cursor,
         mailbox.card_decided event, and idempotency response commit atomically.
         Outcome routing consumes the frozen card snapshot after commit.
       scope:
@@ -27316,7 +27356,8 @@ api_specification:
       description: >
         Defer a pending typed decision card. Defer is non-terminal: status
         remains pending and only deferred_until changes. It never chooses a
-        verdict or routes the stage.
+        verdict or routes the stage. The admitted decision time and until value
+        use the decision-card UTC-microsecond timestamp contract.
       scope:
         required:
         - decide:mailbox

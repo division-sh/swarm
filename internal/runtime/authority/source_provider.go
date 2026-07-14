@@ -13,7 +13,6 @@ import (
 
 type sourceProvider struct {
 	mu               sync.RWMutex
-	humanTaskRoles   []string
 	mailboxSendRoles []string
 	producerRoles    []string
 	agentEvents      map[string][]string
@@ -28,16 +27,8 @@ func buildSourceProvider(source semanticview.Source) Provider {
 	if source == nil {
 		return noopProvider{}
 	}
-	allRoles, toolGrants := sourceRolesAndToolGrants(source)
-	humanTaskRoles := make([]string, 0, len(allRoles))
+	allRoles, _ := sourceRolesAndToolGrants(source)
 	mailboxSendRoles := append([]string(nil), allRoles...)
-
-	for _, role := range allRoles {
-		grants := toolGrants[role]
-		if hasToolGrant(grants, "human_task_decide") {
-			humanTaskRoles = append(humanTaskRoles, role)
-		}
-	}
 
 	agentEvents := buildProducerRegistry(source)
 	producerRoles := make([]string, 0, len(agentEvents))
@@ -47,7 +38,6 @@ func buildSourceProvider(source semanticview.Source) Provider {
 	sort.Strings(producerRoles)
 
 	return &sourceProvider{
-		humanTaskRoles:   cloneRoles(humanTaskRoles),
 		mailboxSendRoles: cloneRoles(mailboxSendRoles),
 		producerRoles:    producerRoles,
 		agentEvents:      agentEvents,
@@ -194,19 +184,6 @@ func authorizationDenied(action string, actor, target models.AgentConfig) error 
 			"target_agent_id": strings.TrimSpace(target.ID),
 		},
 	)
-}
-
-func (p *sourceProvider) CanDecideHumanTasks(role string) bool {
-	role = canonicalRole(role)
-	if role == "" {
-		return false
-	}
-	for _, candidate := range p.humanTaskRoles {
-		if canonicalRole(candidate) == role {
-			return true
-		}
-	}
-	return false
 }
 
 func sourceRolesAndToolGrants(source semanticview.Source) ([]string, map[string]map[string]struct{}) {

@@ -18,13 +18,14 @@ var ErrMailboxV1NotFound = errors.New("mailbox item not found")
 var ErrMailboxV1InvalidCursor = errors.New("invalid mailbox cursor")
 
 type MailboxV1ListOptions struct {
-	Status   string
-	RunID    string
-	EntityID string
-	Type     string
-	Priority string
-	Limit    int
-	Cursor   string
+	Status     string
+	RunID      string
+	EntityID   string
+	Type       string
+	Priority   string
+	AnchorKind string
+	Limit      int
+	Cursor     string
 }
 
 type MailboxV1Item struct {

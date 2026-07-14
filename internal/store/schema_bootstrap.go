@@ -22,6 +22,13 @@ type RuntimeStoreOrigin struct {
 	CreatedAt       time.Time
 }
 
+func (o RuntimeStoreOrigin) canonical() RuntimeStoreOrigin {
+	if !o.CreatedAt.IsZero() {
+		o.CreatedAt = o.CreatedAt.UTC().Round(time.Microsecond)
+	}
+	return o
+}
+
 func (o RuntimeStoreOrigin) validate() error {
 	if strings.TrimSpace(o.SwarmVersion) == "" {
 		return fmt.Errorf("running Swarm version is required for schema bootstrap")
@@ -52,6 +59,11 @@ type SchemaBootstrapRequest struct {
 	PlatformPlans []SchemaTableDDL
 	StatePlans    []SchemaTableDDL
 	Origin        RuntimeStoreOrigin
+}
+
+func (r SchemaBootstrapRequest) canonical() SchemaBootstrapRequest {
+	r.Origin = r.Origin.canonical()
+	return r
 }
 
 func (r SchemaBootstrapRequest) validate() error {

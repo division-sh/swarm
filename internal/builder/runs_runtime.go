@@ -2,12 +2,9 @@ package builder
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
@@ -22,7 +19,6 @@ func (h *runHub) handleRuntimeLog(entry runtimepkg.RuntimeLogEntry) {
 	controlRunIDs := h.correlatedRunIDsForRuntimeEntry(entry)
 	for _, runID := range controlRunIDs {
 		h.maybeEmitBreakpointHit(runID, entry.AgentID, entry.EffectiveEntityID())
-		h.maybeEmitHumanTaskWaiting(runID, entry)
 		h.maybePauseAfterStep(runID, entry.AgentID, entry.EffectiveEntityID())
 	}
 	runIDs := h.runIDsForRuntimeEntry(entry)
@@ -65,92 +61,6 @@ func (h *runHub) maybeEmitBreakpointHit(runID string, nodeID string, instanceID 
 		event["payload"].(map[string]any)["instance_id"] = instanceID
 	}
 	h.emitControl(runID, event)
-}
-
-func (h *runHub) maybeEmitHumanTaskWaiting(runID string, entry runtimepkg.RuntimeLogEntry) {
-	if h == nil || strings.TrimSpace(entry.Component) != "eventbus" || strings.TrimSpace(entry.Action) != "published" || strings.TrimSpace(entry.EventType) != "human_task.requested" {
-		return
-	}
-	nodeID := strings.TrimSpace(entry.AgentID)
-	instanceID := strings.TrimSpace(entry.EntityID)
-	if nodeID == "" || instanceID == "" {
-		return
-	}
-	shouldPause := false
-	h.mu.Lock()
-	session := h.sessions[strings.TrimSpace(runID)]
-	if session != nil && session.pendingHuman == nil {
-		session.pendingHuman = &pendingHumanDecision{nodeID: nodeID, instanceID: instanceID, requestingAgent: nodeID}
-		shouldPause = true
-	}
-	h.mu.Unlock()
-	if !shouldPause {
-		return
-	}
-	if h.pauseRuntime != nil {
-		_ = h.pauseRuntime()
-	}
-	h.emitControl(runID, map[string]any{
-		"id":          uuid.NewString(),
-		"type":        "human.task_waiting",
-		"timestamp":   time.Now().UTC().Format(time.RFC3339),
-		"node_id":     nodeID,
-		"instance_id": instanceID,
-		"payload":     map[string]any{"decision_options": []string{"approved", "rejected", "deferred"}},
-	})
-	h.emitControl(runID, map[string]any{
-		"id":          uuid.NewString(),
-		"type":        "run.paused",
-		"timestamp":   time.Now().UTC().Format(time.RFC3339),
-		"node_id":     nodeID,
-		"instance_id": instanceID,
-		"payload":     map[string]any{"run_id": runID, "reason": "human_task_waiting"},
-	})
-}
-
-func (h *runHub) submitPendingHumanDecision(ctx context.Context, runID string, decision string) error {
-	if h == nil {
-		return nil
-	}
-	if decision = normalizeHumanDecision(decision); decision == "" {
-		return nil
-	}
-	var pending *pendingHumanDecision
-	var runtimeRef *runtimepkg.Runtime
-	h.mu.Lock()
-	session := h.sessions[strings.TrimSpace(runID)]
-	if session != nil {
-		pending = session.pendingHuman
-		runtimeRef = session.runtime
-		session.pendingHuman = nil
-	}
-	h.mu.Unlock()
-	if pending == nil {
-		return nil
-	}
-	if runtimeRef == nil || runtimeRef.Bus == nil {
-		return fmt.Errorf("runtime bus is not configured")
-	}
-	eventType := "human_task." + decision
-	encoded, err := json.Marshal(map[string]any{
-		"requesting_agent": pending.requestingAgent,
-		"entity_id":        pending.instanceID,
-	})
-	if err != nil {
-		return err
-	}
-	if err := runtimeRef.Bus.Publish(ctx, events.NewRootIngressEvent(uuid.NewString(), events.EventType(eventType), "builder", "", encoded, 0, runID, "", events.EventEnvelope{EntityID: pending.instanceID}, time.Now().UTC())); err != nil {
-		return err
-	}
-	h.emitControl(runID, map[string]any{
-		"id":          uuid.NewString(),
-		"type":        "human.task_submitted",
-		"timestamp":   time.Now().UTC().Format(time.RFC3339),
-		"node_id":     pending.nodeID,
-		"instance_id": pending.instanceID,
-		"payload":     map[string]any{"decision": decision},
-	})
-	return nil
 }
 
 func (h *runHub) maybePauseAfterStep(runID string, nodeID string, instanceID string) {

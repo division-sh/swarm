@@ -1749,6 +1749,7 @@ func (r scenarioRunner) findDecisionCard(ctx context.Context, evaluator *scenari
 		"run_id": runID,
 		"limit":  200,
 	}
+	evaluatedMatch := make(map[string]string, len(match))
 	for key, value := range match {
 		evaluated, err := evaluator.evalValue(value)
 		if err != nil {
@@ -1758,12 +1759,31 @@ func (r scenarioRunner) findDecisionCard(ctx context.Context, evaluator *scenari
 		if text == "" {
 			continue
 		}
+		evaluatedMatch[key] = text
 		switch key {
 		case "entity_id":
 			params["entity_id"] = text
-		case "decision", "stage":
+		case "anchor_kind":
+			params["anchor_kind"] = text
+		case "card_id", "decision", "stage", "flow_instance", "requester_agent_id", "category", "scope":
 		default:
-			return "", "", fmt.Errorf("unsupported decision-card match field %q", key)
+			return "", "", scenarioTestValidationError{err: fmt.Errorf("unsupported decision-card match field %q", key)}
+		}
+	}
+	anchorKind := evaluatedMatch["anchor_kind"]
+	if anchorKind != "stage_gate" && anchorKind != "human_task" {
+		return "", "", scenarioTestValidationError{err: fmt.Errorf("decision-card match.anchor_kind is required and must be stage_gate or human_task")}
+	}
+	for key := range evaluatedMatch {
+		switch anchorKind {
+		case "stage_gate":
+			if key == "requester_agent_id" || key == "category" || key == "scope" {
+				return "", "", scenarioTestValidationError{err: fmt.Errorf("decision-card match.%s is valid only for anchor_kind human_task", key)}
+			}
+		case "human_task":
+			if key == "decision" || key == "stage" {
+				return "", "", scenarioTestValidationError{err: fmt.Errorf("decision-card match.%s is valid only for anchor_kind stage_gate", key)}
+			}
 		}
 	}
 	var result mailboxListResult
@@ -1779,23 +1799,32 @@ func (r scenarioRunner) findDecisionCard(ctx context.Context, evaluator *scenari
 			continue
 		}
 		card := *item.DecisionCard
-		if value, ok := match["decision"]; ok {
-			expected, err := evaluator.evalValue(value)
-			if err != nil {
-				return "", "", err
-			}
-			if card.DecisionID != optionalScenarioString(expected) {
-				continue
-			}
+		if card.AnchorKind != anchorKind {
+			continue
 		}
-		if value, ok := match["stage"]; ok {
-			expected, err := evaluator.evalValue(value)
-			if err != nil {
-				return "", "", err
-			}
-			if card.Stage != optionalScenarioString(expected) {
-				continue
-			}
+		if expected := evaluatedMatch["card_id"]; expected != "" && card.CardID != expected {
+			continue
+		}
+		if expected := evaluatedMatch["entity_id"]; expected != "" && card.Scope.EntityID != expected {
+			continue
+		}
+		if expected := evaluatedMatch["flow_instance"]; expected != "" && card.Scope.FlowInstance != expected {
+			continue
+		}
+		if expected := evaluatedMatch["decision"]; expected != "" && card.Decision != expected {
+			continue
+		}
+		if expected := evaluatedMatch["stage"]; expected != "" && card.Anchor.Stage != expected {
+			continue
+		}
+		if expected := evaluatedMatch["requester_agent_id"]; expected != "" && card.Anchor.RequesterAgentID != expected {
+			continue
+		}
+		if expected := evaluatedMatch["category"]; expected != "" && card.Category != expected {
+			continue
+		}
+		if expected := evaluatedMatch["scope"]; expected != "" && card.Scope.Kind != expected {
+			continue
 		}
 		matches = append(matches, card)
 	}

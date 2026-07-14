@@ -17,7 +17,6 @@ var defaultPlatformPermissions = []string{
 	"approve_spend",
 	"configure_routing",
 	"create_flow_instance",
-	"human_task_decide",
 	"human_task_request",
 	"mailbox_send",
 	"message_flow",
@@ -31,7 +30,6 @@ var toolPermissionRequirements = map[string]string{
 	"agent_reconfigure":  "agent_reconfigure",
 	"configure_routing":  "configure_routing",
 	"human_task_request": "human_task_request",
-	"human_task_decide":  "human_task_decide",
 	"schedule":           "schedule",
 }
 

@@ -33,8 +33,7 @@ func TestDecisionCardStoreLifecycleParity(t *testing.T) {
 			cardStore, runID := decisionCardTestStore(t, backend)
 			now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
 			card, err := decisioncard.New(decisioncard.Card{
-				CardID: uuid.NewString(), RunID: runID, FlowInstance: "launch/review-1", FlowID: "launch", EntityID: uuid.NewString(),
-				Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
+				CardID: uuid.NewString(), RunID: runID, Anchor: newDecisionCardTestStageAnchor("launch/review-1", "launch", uuid.NewString(), "awaiting_review", uuid.NewString()),
 				Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 					"accept": {Verdict: "accept", AdvancesTo: "operating"},
 					"revise": {Verdict: "revise", AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
@@ -99,9 +98,9 @@ func TestDecisionCardStoreRejectsNonCanonicalDecisionIdentityWithoutPersistenceO
 			ctx := context.Background()
 			cardStore, runID := decisionCardTestStore(t, backend)
 			card := newDecisionCardTestCard(t, runID, time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC))
-			card.DecisionID = " launch_review "
+			card.Snapshot.Decision = " launch_review "
 
-			if err := cardStore.CreateDecisionCard(ctx, card); err == nil || !strings.Contains(err.Error(), "decision_id") || !strings.Contains(err.Error(), "not canonical") {
+			if err := cardStore.CreateDecisionCard(ctx, card); err == nil || !strings.Contains(err.Error(), "decision identity") || !strings.Contains(err.Error(), "not canonical") {
 				t.Fatalf("CreateDecisionCard error = %v, want noncanonical decision identity rejection", err)
 			}
 			if _, err := cardStore.GetDecisionCard(ctx, card.CardID); !errors.Is(err, decisioncard.ErrNotFound) {
@@ -184,8 +183,7 @@ func TestDecisionCardStoreRejectsStructuralSnapshotDriftAtEveryTypedLevelOnBothS
 			ctx := context.Background()
 			cardStore, runID := decisionCardTestStore(t, backend)
 			card, err := decisioncard.New(decisioncard.Card{
-				CardID: uuid.NewString(), RunID: runID, FlowInstance: "launch/review", FlowID: "launch", EntityID: uuid.NewString(),
-				Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
+				CardID: uuid.NewString(), RunID: runID, Anchor: newDecisionCardTestStageAnchor("launch/review", "launch", uuid.NewString(), "awaiting_review", uuid.NewString()),
 				Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 					"revise": {
 						Verdict: "revise", AdvancesTo: "building",
@@ -243,8 +241,7 @@ func TestDecisionCardStoreEnforcesSafeNumericSnapshotCarriersOnBothStores(t *tes
 			ctx := context.Background()
 			cardStore, runID := decisionCardTestStore(t, backend)
 			card, err := decisioncard.New(decisioncard.Card{
-				CardID: uuid.NewString(), RunID: runID, FlowInstance: "launch/review", FlowID: "launch", EntityID: uuid.NewString(),
-				Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
+				CardID: uuid.NewString(), RunID: runID, Anchor: newDecisionCardTestStageAnchor("launch/review", "launch", uuid.NewString(), "awaiting_review", uuid.NewString()),
 				Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", map[string]any{"large_integer": safeInteger, "subnormal": math.SmallestNonzeroFloat64}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 					"approve": {
 						Verdict: "approve", AdvancesTo: "operating",
@@ -432,8 +429,7 @@ func TestDecisionCardInvalidFrozenOutcomeNeverCommitsOnBothStores(t *testing.T) 
 				"owner":     map[string]any{"type": "string", "x-swarm-equalTo": "component"},
 			}
 			card, err := decisioncard.New(decisioncard.Card{
-				CardID: uuid.NewString(), RunID: runID, FlowInstance: "root", FlowID: "launch", EntityID: uuid.NewString(),
-				Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
+				CardID: uuid.NewString(), RunID: runID, Anchor: newDecisionCardTestStageAnchor("root", "launch", uuid.NewString(), "awaiting_review", uuid.NewString()),
 				Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", nil, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 					"approve": {
 						Verdict: "approve", AdvancesTo: "operating",
@@ -542,7 +538,8 @@ func TestDecisionCardStoreDeferDraftCancelAndSupersedeParity(t *testing.T) {
 			if err != nil || cancelled.Status != decisioncard.DraftStatusCancelled {
 				t.Fatalf("CancelDecisionCardInput = %#v, %v", cancelled, err)
 			}
-			if err := cardStore.SupersedeDecisionCardsForStage(ctx, runID, card.EntityID, card.StageActivationID, "stage_exited", now.Add(2*time.Minute)); err != nil {
+			anchor := mustDecisionCardTestStageAnchor(t, card)
+			if err := cardStore.SupersedeDecisionCardsForStage(ctx, runID, anchor.EntityID, anchor.StageActivationID, "stage_exited", now.Add(2*time.Minute)); err != nil {
 				t.Fatalf("SupersedeDecisionCardsForStage: %v", err)
 			}
 			loaded, err := cardStore.GetDecisionCard(ctx, card.CardID)
@@ -590,7 +587,8 @@ func TestDecisionCardDraftReplacementExpiryAndSupersessionAreCursorVisibleOnBoth
 			if _, err := cardStore.BeginDecisionCardInput(ctx, decisioncard.BeginInputRequest{CardID: card.CardID, Verdict: "revise", ActorTokenID: "operator-b", Now: now.Add(8 * time.Minute), TTL: 5 * time.Minute}); err != nil {
 				t.Fatal(err)
 			}
-			if err := cardStore.SupersedeDecisionCardsForStage(ctx, runID, card.EntityID, card.StageActivationID, "timer_fired", now.Add(9*time.Minute)); err != nil {
+			anchor := mustDecisionCardTestStageAnchor(t, card)
+			if err := cardStore.SupersedeDecisionCardsForStage(ctx, runID, anchor.EntityID, anchor.StageActivationID, "timer_fired", now.Add(9*time.Minute)); err != nil {
 				t.Fatal(err)
 			}
 			changes, err := cardStore.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 50})
@@ -622,8 +620,9 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 				t.Fatal(err)
 			}
 			card := newDecisionCardTestCard(t, runID, now)
-			card.CardID, card.EntityID, card.FlowInstance, card.FlowID = activation.CardID, entityID, "launch/review", "launch"
-			card.StageActivationID, card.Stage, card.DecisionID, card.BundleHash = activation.ActivationID, activation.Stage, activation.DecisionID, activation.BundleHash
+			card.CardID = activation.CardID
+			card.Anchor = newDecisionCardTestStageAnchor("launch/review", "launch", entityID, activation.Stage, activation.ActivationID)
+			card.Snapshot.Decision, card.BundleHash = activation.DecisionID, activation.BundleHash
 			card, err = decisioncard.New(card)
 			if err != nil {
 				t.Fatal(err)
@@ -669,7 +668,7 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 			case <-waitCtx.Done():
 				t.Fatal("timed out waiting for run supersession lifecycle event")
 			}
-			if lifecycle.RunID() != runID || lifecycle.EntityID() != entityID || lifecycle.FlowInstance() != card.FlowInstance {
+			if lifecycle.RunID() != runID || lifecycle.EntityID() != entityID || lifecycle.FlowInstance() != mustDecisionCardTestStageAnchor(t, card).FlowInstance {
 				t.Fatalf("lifecycle identity = run:%q entity:%q flow:%q", lifecycle.RunID(), lifecycle.EntityID(), lifecycle.FlowInstance())
 			}
 			recipients, err := eventStore.ListEventDeliveryRecipients(ctx, lifecycle.ID())
@@ -700,8 +699,9 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 				t.Fatal(err)
 			}
 			card := newDecisionCardTestCard(t, runID, now)
-			card.CardID, card.EntityID, card.FlowInstance, card.FlowID = activation.CardID, entityID, "launch/review", "launch"
-			card.StageActivationID, card.Stage, card.DecisionID, card.BundleHash = activation.ActivationID, activation.Stage, activation.DecisionID, activation.BundleHash
+			card.CardID = activation.CardID
+			card.Anchor = newDecisionCardTestStageAnchor("launch/review", "launch", entityID, activation.Stage, activation.ActivationID)
+			card.Snapshot.Decision, card.BundleHash = activation.DecisionID, activation.BundleHash
 			card, err = decisioncard.New(card)
 			if err != nil {
 				t.Fatal(err)
@@ -804,8 +804,7 @@ func markDecisionCardRunTerminal(ctx context.Context, cards decisioncard.Store, 
 func newDecisionCardTestCard(t *testing.T, runID string, now time.Time) decisioncard.Card {
 	t.Helper()
 	card, err := decisioncard.New(decisioncard.Card{
-		CardID: uuid.NewString(), RunID: runID, FlowInstance: "launch/review", FlowID: "launch", EntityID: uuid.NewString(),
-		Stage: "awaiting_review", StageActivationID: uuid.NewString(), DecisionID: "launch_review",
+		CardID: uuid.NewString(), RunID: runID, Anchor: newDecisionCardTestStageAnchor("launch/review", "launch", uuid.NewString(), "awaiting_review", uuid.NewString()),
 		Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 			"accept": {Verdict: "accept", AdvancesTo: "operating"},
 			"revise": {Verdict: "revise", AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
@@ -817,6 +816,26 @@ func newDecisionCardTestCard(t *testing.T, runID string, now time.Time) decision
 		t.Fatalf("New decision card: %v", err)
 	}
 	return card
+}
+
+func newDecisionCardTestStageAnchor(flowInstance, flowID, entityID, stage, activationID string) decisioncard.Anchor {
+	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
+		FlowInstance: flowInstance, FlowID: flowID, EntityID: entityID,
+		Stage: stage, StageActivationID: activationID,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return anchor
+}
+
+func mustDecisionCardTestStageAnchor(t *testing.T, card decisioncard.Card) decisioncard.StageGateAnchor {
+	t.Helper()
+	anchor, err := card.Anchor.StageGate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return anchor
 }
 
 func freezeDecisionCardTestSnapshot(t *testing.T, decision string, context map[string]any, outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan) decisioncard.Snapshot {

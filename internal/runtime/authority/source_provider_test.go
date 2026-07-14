@@ -139,22 +139,6 @@ func TestNewSourceProvider_AuthorityMatrix(t *testing.T) {
 	}
 }
 
-func TestNewSourceProvider_UsesCanonicalToolsFieldForGrants(t *testing.T) {
-	provider := NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"control-plane": {
-				ID:    "control-plane",
-				Role:  "control-plane",
-				Tools: []string{"human_task_decide"},
-			},
-		},
-	}))
-
-	if !provider.CanDecideHumanTasks("control-plane") {
-		t.Fatal("expected human_task_decide grant to be read from tools field")
-	}
-}
-
 func TestSourceProvider_ManagedAgentGraphUpdates(t *testing.T) {
 	provider, ok := NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{

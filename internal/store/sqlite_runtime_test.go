@@ -100,7 +100,7 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 		EventID:   evtID,
 		EntityID:  entityID,
 		FromAgent: "agent-1",
-		Type:      "human_task",
+		Type:      "review_notice",
 		Priority:  "critical",
 		Status:    "pending",
 		Summary:   "needs decision",
@@ -120,8 +120,8 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetMailboxItem: %v", err)
 	}
-	if item.Status != "pending" || item.Type != "human_task" {
-		t.Fatalf("mailbox item status=%q type=%q, want pending human_task notice", item.Status, item.Type)
+	if item.Status != "pending" || item.Type != "review_notice" {
+		t.Fatalf("mailbox item status=%q type=%q, want pending review notice", item.Status, item.Type)
 	}
 
 	schedule := runtimepipeline.Schedule{

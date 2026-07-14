@@ -26,8 +26,7 @@ var builtinToolUsageHints = map[string]string{
 	"query_entities":     "Read/query entity_state rows. entity_type, select, group_by, and filter paths must use delivered enum/declared scalar or enum leaf names. filter is CEL, so equality is ==, strings are quoted, and assignment = is invalid.",
 	"search_entities":    "Search entity_state rows with object field filters. entity_type and filter keys must use delivered declared field names for the target entity contract. Use query_entities when you need CEL, select, or group_by.",
 	"query_metrics":      "Aggregate entity_state rows. metric must be one of the delivered enum values. field and group_by must use delivered scalar or enum selector names. filter is CEL, so equality is == and strings are quoted.",
-	"human_task_request": "Create a human task only when human input is required. Provide a clear summary/context and deadline fields in supported shapes.",
-	"human_task_decide":  "Record a decision on an existing human task. Use only supported decision values such as approved, rejected, or deferred and include the target task reference.",
+	"human_task_request": "Create a typed human decision card only when human input is required. Provide an explicit entity, flow, or global scope and the single deadline_at spelling when overriding the stamped expiry policy.",
 	"read_flow_data":     "Read only declared deploy-time reference files from your owning flow data root. Provide one filename from the delivered enum; do not use host paths or this tool for mutable artifacts.",
 }
 

@@ -12,6 +12,7 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -192,8 +193,8 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
 	a.applyTurnToolDefinitions(ctx)
 
-	// Human task events must feed back into the requesting agent's reasoning context
-	// as an async tool-result style message correlated by task_id.
+	// Human-task outcomes are delivered directly to the requester and correlate
+	// through the canonical decision-card identity.
 	if isHumanTaskOutcomeEvent(evt.Type()) {
 		if err := a.injectHumanTaskToolResult(ctx, evt); err != nil {
 			return nil, err
@@ -436,7 +437,6 @@ func isHumanTaskOutcomeEvent(t events.EventType) bool {
 	case "human_task.approved",
 		"human_task.rejected",
 		"human_task.deferred",
-		"human_task.completed",
 		"human_task.expired":
 		return true
 	default:
@@ -448,44 +448,52 @@ func (a *LLMAgent) injectHumanTaskToolResult(ctx context.Context, evt events.Eve
 	if len(evt.Payload()) == 0 || a.conversation == nil {
 		return nil
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
-		return nil
+	value, err := canonicaljson.Decode(evt.Payload())
+	if err != nil {
+		return fmt.Errorf("decode human-task outcome: %w", err)
 	}
-	reqAgent, _ := payload["requesting_agent"].(string)
-	reqAgent = strings.TrimSpace(reqAgent)
-	if reqAgent == "" || reqAgent != a.cfg.ID {
-		return nil
+	payloadValue, ok := value.ObjectMap()
+	if !ok {
+		return fmt.Errorf("human-task outcome payload must be an object")
 	}
-	taskID, _ := payload["task_id"].(string)
-	taskID = strings.TrimSpace(taskID)
+	payload := value.Interface().(map[string]any)
+	cardIDValue, found := payloadValue["card_id"]
+	if !found {
+		return fmt.Errorf("human-task outcome card_id is required")
+	}
+	cardID, ok := cardIDValue.String()
+	if !ok || strings.TrimSpace(cardID) == "" {
+		return fmt.Errorf("human-task outcome card_id must be a non-empty string")
+	}
+	cardID = strings.TrimSpace(cardID)
 
 	result := map[string]any{
-		"task_id": taskID,
+		"card_id": cardID,
 		"event":   string(evt.Type()),
 		"payload": payload,
 	}
 
-	ok := true
+	outcomeOK := true
 	errText := ""
 	switch string(evt.Type()) {
 	case "human_task.rejected":
-		ok = false
-		if v, _ := payload["rejection_reason"].(string); strings.TrimSpace(v) != "" {
+		outcomeOK = false
+		fields, _ := payload["fields"].(map[string]any)
+		if v, _ := fields["reason"].(string); strings.TrimSpace(v) != "" {
 			errText = strings.TrimSpace(v)
 		} else {
 			errText = "human task rejected"
 		}
 	case "human_task.expired":
-		ok = false
-		if v, _ := payload["expiry_reason"].(string); strings.TrimSpace(v) != "" {
+		outcomeOK = false
+		if v, _ := payload["cause"].(string); strings.TrimSpace(v) != "" {
 			errText = strings.TrimSpace(v)
 		} else {
 			errText = "human task expired"
 		}
 	}
 
-	return a.conversation.InjectAsyncToolResult(ctx, "human_task_request", ok, result, errText)
+	return a.conversation.InjectAsyncToolResult(ctx, "human_task_request", outcomeOK, result, errText)
 }
 
 func (a *LLMAgent) BoardStep(ctx context.Context, directive runtimeagentcontrol.BoardDirective) (string, error) {

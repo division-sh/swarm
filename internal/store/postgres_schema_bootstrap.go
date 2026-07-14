@@ -22,6 +22,7 @@ func (s *PostgresStore) BootstrapSchema(ctx context.Context, request SchemaBoots
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("postgres store is required for schema bootstrap")
 	}
+	request = request.canonical()
 	if err := request.validate(); err != nil {
 		return err
 	}

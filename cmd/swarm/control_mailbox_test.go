@@ -24,6 +24,7 @@ func TestMailboxListUsesTaggedNoticeAndDecisionCardProjection(t *testing.T) {
 			"items": []any{
 				map[string]any{"kind": "notice", "notice": mailboxNoticeResult("notice-1")},
 				map[string]any{"kind": "decision_card", "decision_card": mailboxCardSummaryResult("card-1")},
+				map[string]any{"kind": "decision_card", "decision_card": mailboxHumanTaskCardSummaryResult("human-card-1")},
 			},
 			"next_cursor": "cursor-2",
 		})
@@ -44,7 +45,7 @@ func TestMailboxListUsesTaggedNoticeAndDecisionCardProjection(t *testing.T) {
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
-	for _, want := range []string{"MAILBOX_ID", "notice-1", "notice", "card-1", "decision_card", "launch_review", "next_cursor=cursor-2"} {
+	for _, want := range []string{"MAILBOX_ID", "notice-1", "notice", "card-1", "decision_card", "launch_review", "human-card-1", "human_task:strategic_decision", "next_cursor=cursor-2"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -82,6 +83,7 @@ func TestMailboxViewRendersTaggedResources(t *testing.T) {
 	}{
 		{name: "notice", id: "notice-1", result: map[string]any{"kind": "notice", "notice": map[string]any{"item": mailboxNoticeResult("notice-1"), "payload": map[string]any{"summary": "review"}}}, wants: []string{"Mailbox notice notice-1", "status=pending", `payload={"summary":"review"}`}},
 		{name: "card", id: "card-1", result: map[string]any{"kind": "decision_card", "decision_card": mailboxCardDetailResult("card-1")}, wants: []string{"Decision card card-1", "decision=launch_review", "card_content_hash=content-hash", `"decision":"launch_review"`}},
+		{name: "human task", id: "human-card-1", result: map[string]any{"kind": "decision_card", "decision_card": mailboxHumanTaskCardDetailResult("human-card-1")}, wants: []string{"Decision card human-card-1", "anchor_kind=human_task", "scope=root", "category=strategic_decision", "requested_by=ceo", "card_content_hash=human-content-hash"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setCLIAPITestToken(t, "test-token")
@@ -142,7 +144,7 @@ func TestMailboxViewRejectsUnsupportedNumericDecisionEvidence(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("content-type", "application/json")
-		fmt.Fprint(w, `{"jsonrpc":"2.0","id":"swarm-cli:mailbox.get","result":{"kind":"decision_card","decision_card":{"card_id":"card-unsafe","run_id":"run-1","flow_instance":"root","entity_id":"entity-1","stage":"review","decision_id":"launch_review","title":"Review","status":"pending","created_at":"2026-05-13T12:00:01Z","updated_at":"2026-05-13T12:00:01Z","card_content_hash":"hash","snapshot":{"context":{"unsafe":9007199254740992}}}}}`)
+		fmt.Fprint(w, `{"jsonrpc":"2.0","id":"swarm-cli:mailbox.get","result":{"kind":"decision_card","decision_card":{"card_id":"card-unsafe","run_id":"run-1","anchor_kind":"stage_gate","anchor":{"flow_instance":"root","entity_id":"entity-1","stage":"review","stage_activation_id":"activation-1"},"scope":{"kind":"entity","flow_instance":"root","entity_id":"entity-1"},"decision":"launch_review","title":"Review","status":"pending","created_at":"2026-05-13T12:00:01Z","updated_at":"2026-05-13T12:00:01Z","card_content_hash":"hash","snapshot":{"context":{"unsafe":9007199254740992}}}}}`)
 	}))
 	defer server.Close()
 
@@ -252,13 +254,45 @@ func mailboxNoticeResult(id string) map[string]any {
 }
 
 func mailboxCardSummaryResult(id string) map[string]any {
-	return map[string]any{"card_id": id, "run_id": "run-1", "flow_instance": "root", "entity_id": "entity-1", "stage": "launch_review", "decision_id": "launch_review", "title": "Launch review", "status": "pending", "created_at": "2026-05-13T12:00:01Z", "updated_at": "2026-05-13T12:00:01Z"}
+	return map[string]any{
+		"kind": "decision_card", "card_id": id, "run_id": "run-1", "anchor_kind": "stage_gate",
+		"anchor": map[string]any{
+			"flow_instance": "root", "flow_id": "review", "entity_id": "entity-1",
+			"stage": "launch_review", "stage_activation_id": "activation-1",
+		},
+		"scope":    map[string]any{"kind": "entity", "flow_instance": "root", "entity_id": "entity-1"},
+		"decision": "launch_review", "title": "Launch review", "status": "pending",
+		"created_at": "2026-05-13T12:00:01Z", "updated_at": "2026-05-13T12:00:01Z",
+	}
 }
 
 func mailboxCardDetailResult(id string) map[string]any {
 	out := mailboxCardSummaryResult(id)
 	out["card_content_hash"] = "content-hash"
 	out["snapshot"] = map[string]any{"decision": "launch_review", "context": map[string]any{"qa": "passed"}, "outcomes": map[string]any{"approve": map[string]any{"advances_to": "done"}}}
+	return out
+}
+
+func mailboxHumanTaskCardSummaryResult(id string) map[string]any {
+	return map[string]any{
+		"kind": "decision_card", "card_id": id, "run_id": "run-1", "anchor_kind": "human_task",
+		"anchor": map[string]any{
+			"requester_agent_id": "ceo", "operation_id": "operation-1", "category": "strategic_decision",
+			"scope": map[string]any{"kind": "flow", "flow_instance": "root"},
+		},
+		"scope":    map[string]any{"kind": "flow", "flow_instance": "root"},
+		"category": "strategic_decision", "title": "Choose launch market", "status": "pending",
+		"created_at": "2026-05-13T12:00:01Z", "updated_at": "2026-05-13T12:00:01Z",
+	}
+}
+
+func mailboxHumanTaskCardDetailResult(id string) map[string]any {
+	out := mailboxHumanTaskCardSummaryResult(id)
+	out["card_content_hash"] = "human-content-hash"
+	out["snapshot"] = map[string]any{
+		"description": "Choose the launch market",
+		"outcomes":    map[string]any{"approve": map[string]any{}, "reject": map[string]any{}},
+	}
 	return out
 }
 

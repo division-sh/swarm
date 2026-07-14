@@ -1255,6 +1255,7 @@ steps:
     payload: {item_id: review}
   - mailbox.decide:
       match:
+        anchor_kind: stage_gate
         decision: launch_review
       verdict: approve
       fields: {}
@@ -1316,6 +1317,150 @@ steps:
 		"run.diagnose",
 		"run.diagnose",
 	})
+}
+
+func TestSwarmTestHumanTaskDecideAndDeferUsePublicMailboxRPC(t *testing.T) {
+	for _, action := range []string{"mailbox.decide", "mailbox.defer"} {
+		t.Run(action, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			setCLIAPITestToken(t, "test-token")
+			contractsPath := writeServedEventPublishFollowUpFixture(t)
+			step := `
+  - mailbox.decide:
+      match:
+        anchor_kind: human_task
+        requester_agent_id: ceo
+        category: strategic_decision
+        scope: flow
+      verdict: approve
+      fields: {}`
+			if action == "mailbox.defer" {
+				step = `
+  - mailbox.defer:
+      match:
+        anchor_kind: human_task
+        requester_agent_id: ceo
+        category: strategic_decision
+        scope: flow
+      until: "2026-05-14T12:00:00Z"`
+			}
+			writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "human-task.yaml"), `
+name: human task mailbox scenario
+steps:
+  - publish: item.received
+    payload: {item_id: human-review}
+`+step+`
+`)
+			var calls []jsonRPCRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				calls = append(calls, req)
+				switch req.Method {
+				case eventPublishMethod:
+					writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
+				case "run.diagnose":
+					writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
+				case "mailbox.list":
+					want := map[string]any{"status": "pending", "run_id": "run-1", "anchor_kind": "human_task", "limit": float64(200)}
+					if !reflect.DeepEqual(req.Params, want) {
+						t.Fatalf("mailbox.list params = %#v, want %#v", req.Params, want)
+					}
+					writeJSONRPCResult(t, w, req.ID, map[string]any{"items": []any{map[string]any{"kind": "decision_card", "decision_card": mailboxHumanTaskCardSummaryResult("human-card-1")}}})
+				case "mailbox.get":
+					writeJSONRPCResult(t, w, req.ID, map[string]any{"kind": "decision_card", "decision_card": mailboxHumanTaskCardDetailResult("human-card-1")})
+				case action:
+					want := map[string]any{"card_id": "human-card-1"}
+					if action == "mailbox.decide" {
+						want["verdict"] = "approve"
+						want["fields"] = map[string]any{}
+						want["observed_content_hash"] = "human-content-hash"
+					} else {
+						want["until"] = "2026-05-14T12:00:00Z"
+					}
+					if !reflect.DeepEqual(req.Params, want) {
+						t.Fatalf("%s params = %#v, want %#v", action, req.Params, want)
+					}
+					writeJSONRPCResult(t, w, req.ID, map[string]any{"ok": true, "card_id": "human-card-1", "status": "pending", "change_id": 1})
+				default:
+					t.Fatalf("unexpected method = %s", req.Method)
+				}
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+				"test", filepath.Join(contractsPath, "tests", "human-task.yaml"),
+				"--contracts", contractsPath, "--platform-spec", defaultPlatformSpecPath,
+				"--timeout", "2s", "--poll-interval", "10ms",
+			}, &stdout, &stderr, testRootCommandOptions(server))
+			if code != 0 {
+				t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+			}
+			assertScenarioTestMethods(t, calls, []string{
+				eventPublishMethod, "run.diagnose", "mailbox.list", "mailbox.get", action, "run.diagnose", "run.diagnose",
+			})
+		})
+	}
+}
+
+func TestSwarmTestRejectsCrossAnchorDecisionCardSelectorsBeforeLookup(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		match string
+		want  string
+	}{
+		{name: "missing kind", match: "decision: launch_review", want: "match.anchor_kind is required"},
+		{name: "human selector on stage gate", match: "anchor_kind: stage_gate\n        category: strategic_decision", want: "match.category is valid only for anchor_kind human_task"},
+		{name: "stage selector on human task", match: "anchor_kind: human_task\n        stage: review", want: "match.stage is valid only for anchor_kind stage_gate"},
+		{name: "unknown kind", match: "anchor_kind: proposed_effect", want: "must be stage_gate or human_task"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			setCLIAPITestToken(t, "test-token")
+			contractsPath := writeServedEventPublishFollowUpFixture(t)
+			writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "invalid-card-match.yaml"), `
+name: invalid card match
+steps:
+  - publish: item.received
+    payload: {item_id: human-review}
+  - mailbox.decide:
+      match:
+        `+tc.match+`
+      verdict: approve
+`)
+			var lookup bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				switch req.Method {
+				case eventPublishMethod:
+					writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
+				case "run.diagnose":
+					writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
+				case "mailbox.list":
+					lookup = true
+					t.Fatal("mailbox lookup occurred for an invalid cross-anchor selector")
+				default:
+					t.Fatalf("unexpected method = %s", req.Method)
+				}
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+				"test", filepath.Join(contractsPath, "tests", "invalid-card-match.yaml"),
+				"--contracts", contractsPath, "--platform-spec", defaultPlatformSpecPath,
+			}, &stdout, &stderr, testRootCommandOptions(server))
+			if code != scenarioTestExitValidation || lookup || !strings.Contains(stderr.String(), tc.want) {
+				t.Fatalf("code=%d lookup=%v stderr=%q, want validation containing %q", code, lookup, stderr.String(), tc.want)
+			}
+		})
+	}
 }
 
 func TestSwarmTestMailboxDecideMissingVerdictFailsBeforeMailboxLookup(t *testing.T) {
