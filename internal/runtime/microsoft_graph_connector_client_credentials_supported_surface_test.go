@@ -102,6 +102,11 @@ func runMicrosoftGraphClientCredentialsConnectorSurface(t *testing.T, backend sl
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "323456789", "send first mail")
+	firstInboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, "323456789")
+	firstAttempt := waitForMicrosoftGraphTerminalActivityAttempt(t, backend, firstInboundEventID)
+	if firstAttempt.Status != runtimepipeline.ActivityAttemptStatusSucceeded {
+		t.Fatalf("%s first activity attempt status = %q failure=%#v, want succeeded", backend.name, firstAttempt.Status, firstAttempt.Failure)
+	}
 	firstCall := fake.requireSideEffectCall(t, backend.name, "client_credentials refresh-before-use")
 	if firstCall.auth != "Bearer graph-fresh-token" {
 		t.Fatalf("%s first Graph auth = %q, want Bearer graph-fresh-token", backend.name, firstCall.auth)
@@ -112,11 +117,6 @@ func runMicrosoftGraphClientCredentialsConnectorSurface(t *testing.T, backend sl
 	if recipients := microsoftGraphMessageRecipients(firstCall.body); len(recipients) != 1 {
 		t.Fatalf("%s first Graph toRecipients = %#v, want one JSON array recipient", backend.name, microsoftGraphMessageValue(firstCall.body, "toRecipients"))
 	}
-	firstInboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, "323456789")
-	firstAttempt := waitForMicrosoftGraphTerminalActivityAttempt(t, backend, firstInboundEventID)
-	if firstAttempt.Status != runtimepipeline.ActivityAttemptStatusSucceeded {
-		t.Fatalf("%s first activity attempt status = %q, want succeeded", backend.name, firstAttempt.Status)
-	}
 	requireSlackManagedConnectorResultEventEventually(t, backend, firstAttempt.ResultEventID, firstAttempt.ResultEventType)
 	if got := fake.tokenRequestCount(); got != 1 {
 		t.Fatalf("%s client_credentials token requests after refresh-before-use = %d, want 1", backend.name, got)
@@ -126,14 +126,14 @@ func runMicrosoftGraphClientCredentialsConnectorSurface(t *testing.T, backend sl
 	}
 
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "323456790", "needs 401 refresh")
-	secondCall := fake.requireSideEffectCall(t, backend.name, "client_credentials re-acquire-on-401")
-	if secondCall.auth != "Bearer graph-after-401-token" {
-		t.Fatalf("%s second Graph auth = %q, want Bearer graph-after-401-token", backend.name, secondCall.auth)
-	}
 	secondInboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, "323456790")
 	secondAttempt := waitForMicrosoftGraphTerminalActivityAttempt(t, backend, secondInboundEventID)
 	if secondAttempt.Status != runtimepipeline.ActivityAttemptStatusSucceeded {
-		t.Fatalf("%s second activity attempt status = %q, want succeeded", backend.name, secondAttempt.Status)
+		t.Fatalf("%s second activity attempt status = %q failure=%#v, want succeeded", backend.name, secondAttempt.Status, secondAttempt.Failure)
+	}
+	secondCall := fake.requireSideEffectCall(t, backend.name, "client_credentials re-acquire-on-401")
+	if secondCall.auth != "Bearer graph-after-401-token" {
+		t.Fatalf("%s second Graph auth = %q, want Bearer graph-after-401-token", backend.name, secondCall.auth)
 	}
 	if got := fake.tokenRequestCount(); got != 2 {
 		t.Fatalf("%s client_credentials token requests after 401 = %d, want 2", backend.name, got)
@@ -156,9 +156,9 @@ func runMicrosoftGraphClientCredentialsConnectorSurface(t *testing.T, backend sl
 	}
 
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "323456791", "provider 429 fixture")
-	fake.requireNoSideEffectCall(t, backend.name, "429 fixture")
 	rateLimitInboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, "323456791")
 	rateLimitAttempt := waitForMicrosoftGraphTerminalActivityAttempt(t, backend, rateLimitInboundEventID)
+	fake.requireNoSideEffectCall(t, backend.name, "429 fixture")
 	if rateLimitAttempt.Status != runtimepipeline.ActivityAttemptStatusFailed {
 		t.Fatalf("%s 429 activity attempt status = %q, want failed", backend.name, rateLimitAttempt.Status)
 	}
