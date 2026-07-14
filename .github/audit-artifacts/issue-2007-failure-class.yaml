@@ -1,7 +1,7 @@
 version: 1
 kind: pre_implementation_failure_class_artifact
 issue: 2007
-audit_base: bbc2fbee2b516ae3db0f8d0168a606b1613a07b8
+audit_base: 69320f3ce394e185ac7b07370c0fa90dbca1eea8
 working_class: declaration_owned_standing_service_reconciliation_terminal_run_decision_card_supersession_state_change_atomicity_and_inbound_publication_operations
 parent_class: durable_runtime_desired_state_and_status_specific_terminal_lifecycle_atomicity
 
@@ -27,6 +27,9 @@ binding_context:
   direct_terminal_evidence_pr_freeze: https://github.com/division-sh/swarm/pull/2047#issuecomment-4964811974
   state_change_only_architecture_ruling: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964911650
   state_change_only_pr_freeze: https://github.com/division-sh/swarm/pull/2047#issuecomment-4964912599
+  superseded_legacy_event_graph_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964984576
+  pre_1_0_hard_schema_cutoff_ruling: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964995740
+  pre_1_0_hard_schema_cutoff_pr_freeze: https://github.com/division-sh/swarm/pull/2047#issuecomment-4964996392
   superseded_standing_posture: https://github.com/division-sh/swarm/issues/1770#issuecomment-4952958019
   lifecycle_conformance_sibling: 2008
   normal_completion_regression_owner: 994
@@ -170,6 +173,7 @@ tracked_watchlist_mapping:
     - obsolete_terminal_lifecycle_outbox_and_releaser_removal
     - terminal_event_receipt_delivery_and_runtime_non_creation
     - unused_standalone_run_supersession_capability_removal
+    - pre_1_0_obsolete_outbox_hard_schema_cutoff
   canonical_consumers:
     - provider_trigger_request_authentication_and_retry_projection
     - provider_trigger_new_operation_output_projection
@@ -181,7 +185,7 @@ tracked_watchlist_mapping:
     - post_commit_runtime_materialization_and_delivery_recovery
     - destructive_reset_and_schema_compatibility
     - terminal_run_producers_and_transaction_local_card_change_mutation
-    - legacy_outbox_schema_migration_and_releaser_removal
+    - obsolete_outbox_schema_compatibility_refusal_and_releaser_removal
     - mailbox_subscription_change_cursor_readback
     - terminal_event_replay_dispatch_and_recovery_non_creation
   sibling_dispositions:
@@ -2145,12 +2149,14 @@ superseded_terminal_decision_card_evidence_reaudit:
 
 terminal_run_decision_card_supersession_reaudit:
   status: proposed_binding_pending_fresh_independent_gate
-  audit_base: bbc2fbee2b516ae3db0f8d0168a606b1613a07b8
+  audit_base: 69320f3ce394e185ac7b07370c0fa90dbca1eea8
   architecture_ruling: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964911650
+  migration_ruling: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964995740
+  superseded_migration_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964984576
   supersedes_artifact_commits:
     - bb7c25f9c6bba983d0fcd04e4db88e5cd32c6308
     - bbc2399a3a9cf01ddcfe6594270c9c570d590c38
-  issue_category: high_risk_terminal_lifecycle_state_atomicity_backend_parity_and_hard_schema_migration
+  issue_category: high_risk_terminal_lifecycle_state_atomicity_backend_parity_and_pre_1_0_schema_compatibility_cutoff
   observed_symptom: >-
     Run-level terminalization already commits the authoritative superseded card,
     gate, draft, and append-only decision-card change state, but also creates a
@@ -2164,7 +2170,7 @@ terminal_run_decision_card_supersession_reaudit:
     - terminal_supersession_event_non_creation
     - obsolete_lifecycle_outbox_and_releaser_retirement
     - unused_standalone_run_supersession_capability_removal
-    - verified_one_way_legacy_outbox_migration
+    - pre_1_0_obsolete_outbox_hard_schema_cutoff
     - sqlite_postgres_atomicity_and_observation_parity
   chosen_working_failure_class: terminal_run_decision_card_supersession_state_and_change_atomicity
   immediate_parent_failure_class: status_specific_terminal_run_state_change_atomicity
@@ -2175,11 +2181,12 @@ terminal_run_decision_card_supersession_reaudit:
     The outbox release failure was only the entry point. The audit boundary is
     every run-level terminal producer, the private transaction-local card/change
     mutation, standalone capability removal, mailbox subscription observation,
-    all outbox producers and releasers, legacy verification and removal, active
-    stage supersession preservation, rollback/retry/concurrency, and both stores.
+    all outbox producers and releasers, schema compatibility refusal and
+    removal, active stage supersession preservation, rollback/retry/concurrency,
+    and both stores.
 
   binding_governing_context:
-    issue_and_thread: issue_2007_with_state_change_only_lead_ruling
+    issue_and_thread: issue_2007_with_state_change_only_and_pre_1_0_hard_cutoff_lead_rulings
     exact_spec_refs:
       - platform-spec.yaml#platform_tables.decision_cards
       - platform-spec.yaml#platform_tables.decision_card_input_drafts
@@ -2198,7 +2205,9 @@ terminal_run_decision_card_supersession_reaudit:
       run/control, and counter state in one selected-store transaction. State
       explicitly that mailbox.subscribe reads the change cursor and that only
       active competing-stage supersession produces the normally routable
-      mailbox.card_superseded event.
+      mailbox.card_superseded event. Remove the obsolete table from fresh schema,
+      drop only an existing empty table, and reject every non-empty legacy table
+      before runtime initialization with explicit database-recreation remediation.
 
   canonical_operation_contract:
     semantic_owner: selected_store_typed_terminal_run_transaction
@@ -2279,7 +2288,7 @@ terminal_run_decision_card_supersession_reaudit:
     current_state_reconciliation: decision_cards_and_mailbox_list
     subscription_projection: mailbox_subscribe_ListDecisionCardChanges_consumer
     run_and_control_terminality: existing_status_specific_terminalization_owner
-    schema_migration: selected_store_platform_schema_compatibility_owner
+    schema_compatibility: selected_store_pre_runtime_platform_schema_compatibility_owner
     cleanup: existing_run_scoped_destructive_reset_cleanup_without_outbox_release
     active_supersession: existing_SupersedeDecisionCardsForStage_and_PublishInMutation_owner_unchanged
     owner_judgment: >-
@@ -2352,34 +2361,46 @@ terminal_run_decision_card_supersession_reaudit:
       action: remove_both_backend_APIs_and_interfaces
       proof: repository_symbol_guard
 
-  verified_legacy_migration:
-    policy: verify_committed_domain_truth_then_drop_outbox_transactionally
-    row_verification:
-      - outbox_card_and_run_resolve_exactly
-      - card_status_is_superseded_and_superseded_reason_matches_payload_reason
-      - outbox_run_bundle_entity_flow_event_name_card_id_stage_activation_and_created_at_match_the_card_and_payload
-      - exactly_one_superseded_decision_card_change_matches_run_card_reason_and_transition_timestamp
-      - completed_row_requires_an_exact_matching_historical_event
-      - pending_row_may_have_no_event_or_one_exact_event_from_publish_before_completion_failure
-      - any_existing_event_delivery_receipt_route_or_scope_rows_are_preserved_unchanged_as_historical_truth
-    pending_row_rule: rely_on_verified_card_and_change_state_and_create_no_event
-    completed_row_rule: preserve_existing_historical_event_and_all_related_rows
-    success_rule: drop_the_outbox_table_in_the_same_migration_transaction_after_every_row_verifies
-    failure_rule: orphan_duplicate_or_semantic_mismatch_aborts_migration_and_preserves_the_table_and_rows
+  pre_1_0_hard_schema_cutoff:
+    policy: reject_every_nonempty_obsolete_outbox_before_runtime_initialization
+    compatibility_states:
+      fresh_database: create_schema_without_decision_card_lifecycle_outbox
+      existing_empty_table: drop_the_table_transactionally_during_schema_compatibility
+      existing_nonempty_table: refuse_schema_compatibility_and_runtime_startup
+    row_content_rule: >-
+      Row state and related history are intentionally irrelevant. One pending,
+      completed, valid-looking, malformed, orphaned, or otherwise populated row
+      makes the pre-1.0 database unsupported. The compatibility owner counts only
+      enough to distinguish empty from non-empty and never interprets a row.
+    refusal_boundary: >-
+      Refusal occurs before EventBus, runtime manager, recovery, sweepers,
+      providers, agents, workflow handlers, or destructive cleanup initialize.
+      The obsolete table and all rows remain untouched on refusal.
+    exact_error_contract: >-
+      The error names decision_card_lifecycle_outbox, states that the database is
+      an unsupported pre-1.0 database with legacy rows, and instructs the
+      operator to recreate or select a fresh empty database. SQLite remediation
+      names recreating the configured database file; PostgreSQL remediation
+      names provisioning or selecting a fresh empty database. Both explicitly
+      state that existing database state is not migrated.
     forbidden:
+      - historical_event_delivery_receipt_route_or_replay_inspection
+      - row_payload_or_status_interpretation
       - terminal_replacement_event_creation
-      - synthetic_receipt_or_delivery_creation
-      - silent_row_deletion
+      - synthetic_receipt_delivery_or_settlement_creation
+      - selective_row_or_event_graph_deletion
       - runtime_dual_read_or_dual_write
       - compatibility_release_or_dispatch
-      - best_effort_partial_migration
+      - preservation_conversion_or_best_effort_migration
     backend_proof:
       - fresh_postgres_and_sqlite_schema_contains_no_outbox
-      - empty_legacy_table_drops_successfully
-      - consistent_pending_without_event_verifies_and_drops
-      - consistent_pending_with_exact_historical_event_verifies_preserves_history_and_drops
-      - consistent_completed_with_exact_history_verifies_preserves_history_and_drops
-      - every_field_reason_timestamp_card_change_event_and_orphan_mismatch_fails_closed
+      - empty_legacy_table_drops_transactionally
+      - one_pending_row_refuses_before_runtime_components_start
+      - one_completed_row_refuses_before_runtime_components_start
+      - multiple_and_valid_looking_rows_refuse_by_the_same_nonempty_rule
+      - exact_backend_remediation_names_the_obsolete_table_and_fresh_database_requirement
+      - refusal_preserves_the_obsolete_table_and_rows
+      - no_runtime_component_reads_or_writes_the_obsolete_table
 
   systematic_consumption_audit:
     private_supersedeDecisionCardsForRun:
@@ -2410,11 +2431,11 @@ terminal_run_decision_card_supersession_reaudit:
     run_stop_startup_sweep_and_nuke_release_calls:
       disposition: remove
     platform_schema_order_DDL_cleanup_and_capability_catalogs:
-      disposition: remove_outbox_and_add_verified_migration_owner
+      disposition: remove_outbox_and_add_pre_runtime_hard_schema_cutoff_owner
     generic_event_publish_receipt_delivery_and_replay:
       disposition: no_terminal_supersession_consumer_and_no_special_case
     historical_published_lifecycle_rows:
-      disposition: preserved_as_immutable_history_but_never_a_new_terminal_authority
+      disposition: not_consulted_for_compatibility_and_cannot_make_a_nonempty_legacy_table_startable
 
   old_non_authoritative_or_invalid_paths:
     - decision_card_lifecycle_outbox_as_terminal_notification_owner
@@ -2429,7 +2450,7 @@ terminal_run_decision_card_supersession_reaudit:
     - terminal_mailbox_card_superseded_event_creation
     - terminal_platform_pipeline_receipt_or_delivery_creation
     - bundle_route_planner_dispatch_or_recovery_for_terminal_supersession
-    - migration_that_creates_replacement_events_or_silently_discards_mismatches
+    - migration_that_inspects_preserves_converts_settles_or_selectively_deletes_legacy_rows_or_event_graphs
 
   manifestation_and_exact_proof_plan:
     producer_atomicity:
@@ -2462,10 +2483,12 @@ terminal_run_decision_card_supersession_reaudit:
       - active_agent_and_node_consumers_still_receive_mailbox_card_superseded
       - terminal_private_helper_cannot_be_invoked_through_decisioncard_Store
     migration_and_cleanup:
-      - every_verified_legacy_shape_above_on_postgres_and_sqlite
-      - completed_and_publish_before_complete_history_is_preserved_byte_for_byte
-      - orphan_and_every_semantic_field_mismatch_fail_closed
-      - successful_migration_removes_table_schema_order_cleanup_and_runtime_symbols
+      - fresh_postgres_and_sqlite_schema_has_no_obsolete_outbox
+      - empty_legacy_table_drops_transactionally_on_both_backends
+      - any_pending_completed_valid_or_invalid_legacy_row_refuses_before_runtime_initialization
+      - refusal_error_names_the_obsolete_table_and_exact_backend_recreation_remediation
+      - refusal_preserves_the_nonempty_legacy_table_and_rows_without_graph_inspection
+      - successful_empty_table_cutoff_removes_table_schema_order_cleanup_and_runtime_symbols
       - normal_destructive_cleanup_deletes_card_change_and_any_historical_event_rows_by_existing_run_scope
     generic_event_sibling:
       - exact_duplicate_event_side_effect_expansion_remains_owned_by_the_existing_terminal_event_admission_class
@@ -2501,8 +2524,8 @@ terminal_run_decision_card_supersession_reaudit:
     chosen_class_closure_commitment: >-
       PR 2047 must eliminate terminal run decision-card state/change atomicity
       divergence on SQLite and PostgreSQL, remove every terminal event/outbox/
-      releaser and standalone supersession path, migrate legacy state by exact
-      verification, and preserve active-run routable supersession.
+      releaser and standalone supersession path, enforce the pre-1.0 hard schema
+      cutoff, and preserve active-run routable supersession.
     closure_feasibility: >-
       Feasible in this PR because every production terminal producer already
       enters the same private helper inside its selected-store transaction,
@@ -2512,9 +2535,9 @@ terminal_run_decision_card_supersession_reaudit:
       event creator stops implementation for another gate repair.
     local_endpoint_only_check: >-
       Removing only outbox insertion would leave release APIs, schema, cleanup,
-      standalone mutation authority, and migration ambiguity. Complete closure
-      requires all producer consumption, symbol/schema removal, and supported
-      change-feed proof.
+      standalone mutation authority, and ambiguous legacy startup. Complete
+      closure requires all producer consumption, symbol/schema removal, hard
+      compatibility refusal, and supported change-feed proof.
     required_supported_surface_proof:
       - selected_store_failure_injection_retry_and_concurrency_matrix_for_every_terminal_producer
       - dual_backend_mailbox_subscribe_and_mailbox_list_reconciliation
@@ -2522,7 +2545,7 @@ terminal_run_decision_card_supersession_reaudit:
       - real_swarm_serve_dev_host_postgres_run_stop_startup_quiescence_and_runtime_nuke
       - zero_terminal_event_receipt_delivery_route_replay_and_runtime_consumer_proof
       - active_run_mailbox_card_superseded_served_routing_regression
-      - verified_legacy_schema_migration_and_fresh_store_proof_on_both_backends
+      - hard_schema_cutoff_fresh_empty_and_nonempty_store_proof_on_both_backends
       - repository_wide_removed_symbol_and_schema_reference_guard
       - unchanged_generic_terminal_admission_dispatch_and_exact_duplicate_operation_matrix
       - full_go_test_all_with_host_postgres
