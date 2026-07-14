@@ -1,8 +1,8 @@
 version: 1
 kind: pre_implementation_failure_class_artifact
 issue: 2007
-audit_base: 43f1a2b74d3b138fda843ee478cced02c8b61ad6
-working_class: declaration_owned_standing_service_reconciliation_status_specific_terminalization_typed_event_admission_and_inbound_publication_operations
+audit_base: c93b0bc26782c68ba30b1ea3902db20b1c9addd7
+working_class: declaration_owned_standing_service_reconciliation_status_specific_terminalization_typed_terminal_lifecycle_outbox_materialization_non_executable_route_settlement_and_inbound_publication_operations
 parent_class: durable_runtime_desired_state_and_status_specific_terminal_lifecycle_atomicity
 
 binding_context:
@@ -17,6 +17,11 @@ binding_context:
   normalized_batch_escalation: https://github.com/division-sh/swarm/issues/2007#issuecomment-4954782904
   normalized_batch_insufficient_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4958394632
   normalized_batch_approved_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4958580209
+  terminal_lifecycle_outbox_escalation: https://github.com/division-sh/swarm/issues/2007#issuecomment-4963804816
+  terminal_lifecycle_outbox_insufficient_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964484845
+  terminal_lifecycle_outbox_pr_freeze: https://github.com/division-sh/swarm/pull/2047#issuecomment-4964485739
+  terminal_lifecycle_recipient_execution_insufficient_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964599843
+  terminal_lifecycle_recipient_execution_pr_freeze: https://github.com/division-sh/swarm/pull/2047#issuecomment-4964599985
   superseded_standing_posture: https://github.com/division-sh/swarm/issues/1770#issuecomment-4952958019
   lifecycle_conformance_sibling: 2008
   normal_completion_regression_owner: 994
@@ -144,7 +149,7 @@ tracked_watchlist_mapping:
   node: inbound_publication_operation_ownership
   authority: this_tracked_audit_artifact
   parent_class: durable_runtime_desired_state_and_status_specific_terminal_lifecycle_atomicity
-  selected_class: declaration_owned_standing_service_reconciliation_status_specific_terminalization_typed_event_admission_and_inbound_publication_operations
+  selected_class: declaration_owned_standing_service_reconciliation_status_specific_terminalization_typed_terminal_lifecycle_outbox_materialization_non_executable_route_settlement_and_inbound_publication_operations
   promoted_now:
     - dedicated_inbound_publications_operation_ledger
     - ordered_inbound_publication_events_membership_ledger
@@ -155,6 +160,9 @@ tracked_watchlist_mapping:
     - per_event_final_recipient_plan_derived_inside_the_publication_mutation
     - evidence_only_platform_inbound_recorded_marker
     - permanent_identity_and_explicit_runtime_nuke_release_policy
+    - typed_terminal_lifecycle_outbox_materialization
+    - persisted_intent_authorized_non_executable_route_settlement
+    - terminal_agent_and_workflow_node_execution_prohibition
   canonical_consumers:
     - provider_trigger_request_authentication_and_retry_projection
     - provider_trigger_new_operation_output_projection
@@ -165,6 +173,8 @@ tracked_watchlist_mapping:
     - postgres_and_sqlite_selected_store_mutations
     - post_commit_runtime_materialization_and_delivery_recovery
     - destructive_reset_and_schema_compatibility
+    - terminal_run_producers_and_lifecycle_outbox_release_consumers
+    - typed_terminal_lifecycle_route_settlement_and_recovery_exclusion
   sibling_dispositions:
     issue_1150: runtime_log_persistence_closed_and_preserved
     issue_1932: directive_operation_owner_closed_and_preserved
@@ -1255,6 +1265,465 @@ proof_manifestations:
     - human_and_json_readiness_all_outcomes
     - api_cli_openrpc_catalog_permission_guards
     - full_go_test_all
+
+terminal_lifecycle_outbox_reaudit:
+  audit_base: c93b0bc26782c68ba30b1ea3902db20b1c9addd7
+  gate_outcome_being_repaired: insufficient_widen_class_recipient_execution
+  issue_category: high_risk_runtime_semantic_ownership_terminal_lifecycle_backend_parity_and_supported_eventbus_behavior
+  observed_symptom: >-
+    Terminal run owners atomically supersede pending decision cards and persist
+    mailbox.card_superseded publication intents, but every ordinary EventBus
+    publication and recovery path correctly rejects the terminal or stopped
+    predecessor. A persistence-only exception would strand committed rows,
+    while delivering either agent or node routes invokes normal runtime work
+    after terminalization and can perform irreversible side effects before a
+    later admission fence runs.
+  exact_semantic_concepts:
+    - typed_terminal_run_lifecycle_publication_intent
+    - atomic_event_route_manifest_and_replay_scope_materialization
+    - persisted_intent_authorized_non_executable_route_settlement
+    - agent_and_workflow_node_non_execution_for_terminal_predecessors
+    - event_owned_terminal_receipt_and_restart_recovery_exclusion
+    - sqlite_postgres_transaction_and_recovery_parity
+  chosen_working_failure_class: typed_terminal_lifecycle_outbox_materialization_and_non_executable_route_settlement_convergence
+  immediate_parent_failure_class: status_specific_terminalization_typed_event_admission
+  parent_failure_class: declaration_owned_standing_service_reconciliation_status_specific_terminalization_typed_event_admission_and_inbound_publication_operations
+  broadest_parent_failure_class: durable_runtime_desired_state_and_status_specific_terminal_lifecycle_atomicity
+  framing_decision: broad_enough_after_absorbing_materialization_and_all_routing_execution_recipient_settlement
+  entry_point_not_boundary: >-
+    The post-rebase duplicate-admission failure and ReleaseDecisionCardLifecycleEvents
+    were entry points only. The boundary includes all terminal producers, all
+    release consumers, selected-store materialization, every recipient class,
+    stopped-run settlement, receipt finalization, crash/restart exclusion,
+    cleanup, corruption, every normal agent OnEvent entry, and both backends.
+  binding_governing_context:
+    lead_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964484845
+    pr_freeze: https://github.com/division-sh/swarm/pull/2047#issuecomment-4964485739
+    recipient_execution_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964599843
+    recipient_execution_pr_freeze: https://github.com/division-sh/swarm/pull/2047#issuecomment-4964599985
+    issue_and_existing_audit: issue_2007_and_this_artifact
+    exact_spec_refs:
+      - platform-spec.yaml#platform_tables.decision_card_lifecycle_outbox
+      - 'platform-spec.yaml#platform_events.catalog["mailbox.card_superseded"]'
+      - platform-spec.yaml#api_specification.conventions.mailbox.decision_event_payload_contract
+      - platform-spec.yaml#contract_formats.event_schema.routing_derivation.route_plan_authority
+      - platform-spec.yaml#contract_formats.event_schema.delivery_filter
+      - platform-spec.yaml#engine.runtime_boot.active_run_abandon_quiescence
+      - platform-spec.yaml#platform_tables.destructive_reset_cleanup_policy
+    spec_action: >-
+      The implementation PR must replace the current generic EventBus publication
+      claim with typed materialization plus atomic terminal settlement of every
+      routing-execution route. The spec must distinguish active-run routable
+      mailbox.card_superseded events from terminal-run lifecycle evidence: the
+      latter is readable through persisted run-independent event/audit surfaces
+      but never invokes agent OnEvent, workflow carriers, interceptors, or
+      handlers. Issue prose is not a merge artifact.
+
+  full_relevant_execution_path:
+    - a_terminal_owner_locks_the_run_gate_activations_cards_and_terminal_side_effects
+    - pending_cards_are_superseded_and_one_immutable_lifecycle_intent_per_card_is_inserted_in_the_same_transaction
+    - the_terminal_run_and_control_state_commit_before_lifecycle_materialization
+    - an_immediate_startup_periodic_or_pre_cleanup_releaser_enumerates_pending_intents
+    - the_exact_bundle_owner_constructs_one_canonical_route_plan_for_a_pending_intent
+    - the_selected_store_typed_mutation_locks_and_validates_intent_run_card_event_and_existing_effects
+    - event_replay_scope_complete_route_manifest_terminal_delivery_receipts_and_pipeline_receipt_materialize_atomically_with_outbox_completion
+    - both_agent_and_workflow_node_routes_are_terminally_settled_without_runtime_consumer_invocation
+    - persisted_event_and_audit_read_surfaces_may_observe_after_commit_without_route_authority
+    - exact_retry_or_restart_validates_the_completed_operation_and_schedules_no_dispatch_or_replay
+  reachability_gates:
+    terminal_producer_transaction: same_chosen_class
+    exact_loaded_bundle_resolution: same_chosen_class_and_must_fail_retryably_when_unavailable
+    route_plan_construction: same_chosen_class_first_materialization_only
+    typed_intent_integrity_validation: same_chosen_class
+    ordinary_terminal_event_admission: different_semantic_concept_and_remains_closed
+    generic_run_dispatch_gate: different_semantic_owner_and_remains_closed
+    event_owned_delivery_and_receipt_rows: existing_downstream_owner_terminally_finalized_by_this_class
+    agent_manager_OnEvent_pipeline: explicitly_prohibited_for_this_class
+    workflow_node_handler_pipeline: explicitly_prohibited_for_this_class
+    internal_observation_hooks: different_non_routing_semantic_concept
+
+  canonical_owners:
+    terminal_intent_producer: supersedeDecisionCardsForRun_inside_each_terminal_owner_transaction
+    immutable_intent_store: decision_card_lifecycle_outbox
+    selected_store_materialization_owner: TerminalLifecycleOutboxMaterializationMutation
+    route_authority_owner: canonical_EventBus_RoutePlan_for_the_exact_pinned_bundle
+    terminal_route_settlement_owner: TerminalLifecycleRouteSettlementMutation
+    delivery_outcome_owner: event_deliveries_event_receipts_and_pipeline_receipt_finalized_inside_materialization
+    non_executable_observation_owner: persisted_event_run_read_audit_debug_and_metric_surfaces_only
+    generic_terminal_admission_owner: typed_event_admission_from_issue_2007_remains_closed
+    destructive_cleanup_owner: runtime_nuke_plan_quiescence_release_then_cleanup
+    owner_judgment: >-
+      These are semantic owners. ReleaseDecisionCardLifecycleEvents, one SQL
+      insert helper, an event-name check, a context flag, RunDispatchBlocked
+      bypass, normal agent subscription, or Agent.OnEvent is not an owner.
+
+  persisted_operation_contract:
+    input_authority: >-
+      The caller supplies only an intent identifier and the first-materialization
+      canonical route plan. The mutation reloads every semantic event field from
+      the locked outbox row and refuses caller-authored event identity, payload,
+      run, card, bundle, entity, flow, or timestamp substitutions.
+    immutable_identity_fields:
+      - event_id
+      - card_id
+      - run_id
+      - bundle_hash
+      - event_name
+      - canonical_payload
+      - entity_id
+      - flow_instance
+      - created_at
+    materialization_integrity_fields:
+      - materialization_version
+      - committed_replay_scope
+      - immutable_route_manifest_hash
+      - immutable_route_count
+      - terminally_settled_agent_route_count
+      - terminally_settled_node_route_count
+      - completed_at
+    route_manifest_hash_scope: >-
+      The hash covers normalized subscriber type/id, target identity, delivery
+      context, and the required terminal-settlement disposition. Every delivery
+      and receipt is final at first commit; the summary remains an immutable
+      integrity cross-check rather than a second dispatch owner.
+    first_materialization_transaction:
+      - lock_and_validate_pending_intent_card_and_terminal_predecessor
+      - reject_any_conflicting_event_or_partial_effects
+      - insert_the_exact_platform_event_without_generic_terminal_admission
+      - persist_committed_subscribed_replay_scope
+      - persist_all_agent_and_node_route_rows_as_dead_letter_terminal_predecessor_observation_only
+      - persist_matching_terminal_agent_and_node_receipts
+      - persist_terminal_pipeline_receipt
+      - persist_immutable_route_integrity_summary_on_the_outbox_row
+      - transition_pending_to_completed_in_the_same_commit
+    result_vocabulary:
+      pending_intent_materialized: >-
+        The intent exists and is pending, the event/effects are absent, all exact
+        rows and outbox completion commit atomically, and no dispatch happened
+        before commit.
+      already_materialized_exact_retry: >-
+        A concurrent winner materialized the exact immutable event, replay scope,
+        route set, and outbox summary. The loser performs no mutation and returns
+        the existing operation result.
+      completed_exact_retry: >-
+        The outbox is completed and the immutable event, scope, terminal
+        agent/node deliveries, recipient receipts, pipeline receipt, and summary
+        all match. No runtime dispatch or recovery is scheduled.
+      conflict_or_corruption: >-
+        The intent is absent, malformed, mismatched, nonterminal, associated with
+        a different card/run/bundle/event/payload/entity/flow, or accompanied by
+        missing, extra, partial, or conflicting event-owned rows. The operation
+        fails closed with zero mutation.
+    exact_retry_rule: >-
+      An exact retry never invokes current route planning, adds recipients,
+      changes scope/manifest, opens a delivery, or invokes EventBus, AgentManager,
+      Agent.OnEvent, workflow carriers, interceptors, or handlers.
+    completion_meaning: >-
+      Outbox completed means immutable evidence and terminal settlement of every
+      routing-execution route committed together. Event-owned delivery/receipt
+      rows remain authoritative, but there is no post-commit executable delivery
+      phase. The completed outbox row remains the durable authorization and
+      integrity link.
+
+  terminal_producer_inventory:
+    postgres_MarkRunTerminal_failed:
+      classification: same_chosen_class
+      proof: open_card_terminal_failure_commits_one_exact_intent_and_failure_atomically
+    sqlite_MarkRunTerminal_failed:
+      classification: same_chosen_class
+      proof: same_as_postgres_with_selected_store_failure_injection
+    postgres_MarkRunTerminal_cancelled:
+      classification: same_chosen_class
+      proof: open_card_cancel_commits_one_exact_intent_and_terminal_row_atomically
+    sqlite_MarkRunTerminal_cancelled:
+      classification: same_chosen_class
+      proof: same_as_postgres_with_selected_store_failure_injection
+    postgres_MarkRunTerminal_forked:
+      classification: same_lifecycle_intent_class_with_execution_freeze_still_owned_by_issue_2020
+      proof: immutable_supersession_evidence_materializes_without_unfreezing_forked_source_execution
+    sqlite_MarkRunTerminal_forked:
+      classification: same_lifecycle_intent_class_with_execution_freeze_still_owned_by_issue_2020
+      proof: same_as_postgres_and_all_ordinary_forked_dispatch_remains_refused
+    postgres_run_stop:
+      classification: same_chosen_class
+      proof: stop_intent_cancelled_run_stopped_control_and_abandoned_deliveries_commit_together
+    sqlite_run_stop:
+      classification: same_chosen_class
+      proof: same_as_postgres
+    postgres_serve_startup_active_run_quiescence:
+      classification: same_chosen_class
+      proof: quiesced_run_cards_deliveries_receipts_control_and_intents_commit_together
+    sqlite_serve_startup_active_run_quiescence:
+      classification: same_chosen_class
+      proof: same_as_postgres
+    postgres_runtime_nuke_quiescence:
+      classification: same_chosen_class_before_cleanup
+      proof: lifecycle_materialization_and_required_convergence_precede_delete_or_cleanup_aborts
+    sqlite_runtime_nuke_quiescence:
+      classification: different_supported_surface_with_spec_proof
+      proof: >-
+        runtime.nuke is explicitly PostgreSQL-only under
+        platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.runtime_nuke;
+        SQLite still proves the shared typed releaser through run.stop, startup
+        recovery/quiescence, and periodic sweep.
+    natural_completed_run:
+      classification: different_semantic_concept_with_proof
+      proof: open_or_committed_gate_blocks_completion_and_completed_terminalization_produces_no_supersession_intent
+    active_stage_or_flow_gate_supersession:
+      classification: different_semantic_concept_with_proof
+      proof: run_is_active_and_PublishInMutation_retains_normal_event_loop_routing_and_node_execution
+    direct_SupersedeDecisionCardsForRun_callers:
+      classification: canonical_helper_not_an_independent_production_owner
+      proof: production_call_graph_is_exhaustively_the_terminal_owners_above
+
+  release_consumer_inventory:
+    runcontrol_Controller_Stop:
+      classification: immediate_same_class_consumer
+      proof: real_served_run_stop_materializes_and_terminally_settles_all_routes_on_both_backends
+    pipeline_RecoveryManager_Recover:
+      classification: startup_same_class_consumer
+      proof: crash_after_materialization_and_crash_before_materialization_both_converge_without_generic_replay
+    EventBus_SweepUndispatched:
+      classification: periodic_same_class_consumer
+      proof: pending_and_completed_retry_rows_converge_once_without_route_expansion
+    runtime_nuke_pre_cleanup_release:
+      classification: postgres_only_cleanup_same_class_consumer_with_binding_spec_ref
+      proof: >-
+        PostgreSQL success releases before delete and any release failure
+        preserves the cleanup set; SQLite continues to refuse the classified
+        unsupported runtime.nuke surface.
+    other_production_releasers:
+      classification: none_found_on_current_master
+      proof: exhaustive_call_site_search_for_ReleaseDecisionCardLifecycleEvents
+
+  recipient_class_policy:
+    external_notification_decision: >-
+      No executable push notification is required for this class. Durable event
+      and terminal route/receipt rows satisfy lifecycle evidence and are exposed
+      through existing run-independent read/audit/debug/metric surfaces. A future
+      push observer is a separately gated capability and must be mechanically
+      unable to reach normal subscriptions, Agent.OnEvent, tools, connectors,
+      workflow handlers, or emitted-event callbacks.
+    agent_routes:
+      disposition: persist_as_terminally_settled_non_executable_evidence
+      rule: >-
+        Route authority is recorded for auditability, but each agent delivery is
+        born terminal with outcome dead_letter and reason
+        terminal_predecessor_observation_only plus a matching terminal receipt.
+        It is never sent to an ordinary subscribed channel and therefore never
+        reaches AgentManager.startAgentLoopTransition, processEventDetailed,
+        MarkEventDeliveryInProgress, agent.OnEvent, tools/connectors, LLM/session/
+        turn persistence, budgets, outputs, or agent retry/crash recovery.
+      proof: >-
+        A real registered/subscribed agent receives zero channel events and has
+        zero OnEvent, tool, connector, turn, session, budget, output, receipt
+        retry, or external-effect calls while the exact terminal delivery and
+        receipt rows remain readable.
+    workflow_node_routes:
+      disposition: persist_as_terminally_suppressed_non_executable_evidence
+      rule: >-
+        Route authority is recorded for auditability but the delivery row is
+        terminal at first materialization with a typed
+        terminal_predecessor_observation_only reason and matching receipt. It is
+        never passed to InterceptDeliveryRoute, the workflow-runtime carrier,
+        node handlers, deferred transition flush, or deferred event publication.
+      proof: >-
+        A bundle whose mailbox.card_superseded route includes a node records the
+        suppressed route and terminal receipt while handler, entity, timer,
+        gate, join, and emitted-event counters remain unchanged.
+    mixed_agent_and_node_routes:
+      disposition: terminally_settle_every_route_without_runtime_delivery
+      proof: exact_manifest_and_receipts_include_both_types_and_no_agent_or_node_consumer_runs
+    no_routing_recipient:
+      disposition: materialize_and_terminally_settle_without_dispatch
+      proof: event_scope_outbox_and_terminal_pipeline_receipt_converge_without_invented_recipient
+    internal_observation_hooks:
+      disposition: persisted_run_independent_read_and_telemetry_surfaces_only
+      rule: >-
+        Event/read APIs, audit records, debug streams, and metric projection may
+        read the committed event after materialization. They are mechanically
+        non-executable because they are not EventBus subscriptions, do not own
+        event_deliveries, and expose no Agent.OnEvent, workflow interceptor,
+        handler, tool, connector, or emitted-event callback.
+      proof: >-
+        Observation readback succeeds with zero routing subscriber/channel/
+        manager/pipeline invocation. If a future push notification is required,
+        it needs a separately gated observer capability with these mechanical
+        exclusions; normal subscriptions and context flags remain forbidden.
+    missing_or_timed_out_agent_carrier:
+      disposition: unobservable_and_irrelevant_to_settlement
+      proof: materialization_converges_identically_with_present_missing_full_or_closed_agent_channels
+
+  dispatch_gate_inventory:
+    run_control_stopped:
+      current_behavior: ordinary_dispatch_returns_ErrRunDispatchBlocked
+      typed_behavior: >-
+        No dispatcher crosses this gate. The selected-store materialization
+        mutation writes already-terminal deliveries and receipts; ordinary
+        dispatch remains blocked for every agent and node route.
+    run_terminal_status:
+      current_behavior: generic_append_publish_and_duplicate_replay_remain_closed
+      typed_behavior: first_materialization_requires_the_exact_terminal_predecessor_and_superseded_card
+    runtime_ingress_paused:
+      typed_behavior: >-
+        Materialization is a selected-store terminal evidence mutation, not
+        external ingress. It creates no queued runtime work and needs no ingress
+        or shutdown bypass.
+    replay_scope:
+      typed_behavior: persisted_scope_is_loaded_and_validated_never_inferred_or_repaired
+    settlement_claim:
+      typed_behavior: no_post_commit_claim_exists_because_all_route_and_receipt_outcomes_commit_in_materialization
+    bundle_pin:
+      typed_behavior: >-
+        The exact outbox bundle owner must be loaded. Missing, stale, or mismatched
+        ownership leaves the intent pending and visible; another
+        bundle bus cannot consume it.
+
+  systematic_consumption_audit:
+    supersedeDecisionCardsForRun: already_canonical_intent_producer_consumed_by_all_terminal_owners
+    insertDecisionCardLifecycleOutbox: moved_from_best_effort_insert_to_exact_immutable_intent_insert
+    ListPendingDecisionCardLifecycleEvents: replaced_by_typed_candidate_and_integrity_loader
+    CompleteDecisionCardLifecycleEvent: removed_as_non_atomic_second_transaction_owner
+    EventBus_ReleaseDecisionCardLifecycleEvents: moved_to_one_typed_materialize_and_terminally_settle_operation
+    runcontrol_Controller_Stop: consumes_typed_releaser
+    pipeline_RecoveryManager_Recover: consumes_typed_releaser_before_generic_recovery
+    EventBus_SweepUndispatched: consumes_typed_releaser_and_excludes_completed_terminally_settled_events_from_recovery
+    operator_runtime_nuke: consumes_typed_releaser_before_cleanup
+    EventBus_Publish_and_PublishInMutation: different_generic_semantic_concept_and_remain_terminal_closed
+    PublishPersistedRecipients_and_RecoverPersistedPipeline: different_generic_semantic_concept_and_remain_run_dispatch_blocked
+    event_deliveries_and_receipts: already_canonical_rows_terminally_finalized_in_the_materialization_transaction
+    settlement_claim_and_redelivery_owners: explicitly_receive_no_pending_work_for_this_class
+    workflow_PipelineCoordinator_interceptors: explicitly_never_invoked
+    workflow_runtime_internal_carrier_and_node_handlers: explicitly_prohibited
+    EventBus_agent_subscription_channels: explicitly_receive_no_terminal_lifecycle_delivery
+    AgentManager_startAgentLoopTransition_and_processEventDetailed: explicitly_prohibited
+    agent_OnEvent_tools_connectors_sessions_turns_budgets_outputs_and_retries: execution_proven_unreachable
+    persisted_event_audit_debug_metric_and_read_APIs: mechanically_non_executable_observers_only
+    ordinary_active_run_card_supersession: different_semantic_concept_and_keeps_normal_transactional_publish
+    destructive_reset_cleanup_catalog: consumes_completed_or_preserved_intent_event_and_effect_rows_in_declared_order
+
+  old_non_authoritative_or_invalid_paths:
+    - generic_eb_Publish_for_terminal_lifecycle_outbox
+    - separate_publish_then_CompleteDecisionCardLifecycleEvent_transactions
+    - ON_CONFLICT_event_id_DO_NOTHING_without_identity_validation
+    - current_bundle_only_pending_query_as_silent_global_ownership
+    - event_name_or_produced_by_context_flag_as_terminal_dispatch_bypass
+    - generic_PublishPersistedRecipients_or_RecoverPersistedPipeline_for_stopped_runs
+    - current_route_replanning_on_exact_retry_or_restart
+    - ordinary_agent_channel_or_Agent_OnEvent_for_terminal_lifecycle_events
+    - workflow_node_interceptor_or_handler_execution_for_terminal_lifecycle_events
+    - post_commit_terminal_lifecycle_dispatch_or_delivery_claim
+    - outbox_status_as_a_second_mutable_delivery_state_machine
+
+  manifestation_and_proof_plan:
+    producer_atomicity:
+      - every_terminal_producer_above_on_postgres_and_sqlite
+      - one_intent_per_superseded_card_with_exact_reason_identity_and_payload
+      - failure_at_card_activation_change_intent_and_terminal_row_rolls_back_everything
+    first_materialization:
+      - pending_valid_intent_materializes_exact_event_scope_routes_terminal_delivery_receipts_pipeline_receipt_and_summary_atomically
+      - route_plan_refusal_or_bundle_unavailability_leaves_intent_pending_and_zero_effect_rows
+      - injected_failure_at_event_scope_each_delivery_each_recipient_receipt_pipeline_receipt_summary_and_completion_rolls_back_all_rows
+    exact_retry_and_concurrency:
+      - concurrent_releasers_have_one_materializer_and_one_already_materialized_exact_result
+      - completed_exact_retry_does_not_replan_or_expand_recipients
+      - duplicate_release_returns_existing_terminal_outcome_without_any_runtime_dispatch
+    corruption:
+      - absent_or_malformed_intent_fails_closed
+      - conflicting_event_id_or_event_identity_fails_closed
+      - wrong_card_run_bundle_payload_entity_flow_name_or_timestamp_fails_closed
+      - missing_extra_changed_or_partial_scope_route_or_manifest_rows_fail_closed
+      - nonterminal_predecessor_or_non_superseded_card_fails_closed
+      - stale_bundle_owner_cannot_claim_or_repair_the_intent
+    non_executable_route_settlement:
+      - node_only_agent_only_mixed_and_zero_recipient_classes_follow_the_policy_above
+      - no_agent_channels_AgentManager_OnEvent_tools_connectors_LLM_sessions_turns_budgets_outputs_or_external_effects_run
+      - no_interceptors_workflow_carriers_handlers_deferred_transitions_deferred_events_or_workflow_mutations_run
+      - present_missing_full_and_closed_runtime_channels_have_identical_terminal_settlement
+      - persisted_event_run_read_audit_debug_and_metric_observation_requires_no_executable_callback
+    crash_and_restart:
+      - crash_before_materialization_commit_leaves_pending_intent_and_no_partial_rows
+      - crash_after_materialization_finds_completed_intent_terminal_deliveries_and_terminal_receipts_with_no_dispatch_gap
+      - startup_and_periodic_recovery_validate_or_skip_the_completed_operation_and_never_queue_it
+      - no_crash_window_exists_between_agent_send_and_receipt_because_agent_send_is_forbidden
+    cleanup:
+      - runtime_nuke_release_success_precedes_cleanup
+      - runtime_nuke_release_failure_aborts_cleanup_and_preserves_all_rows
+      - cleanup_failure_at_each_catalog_layer_preserves_or_rolls_back_declared_coupled_rows
+      - successful_reset_leaves_no_orphan_event_scope_delivery_receipt_or_authorization_row
+    generic_closed_paths:
+      - generic_new_terminal_event_refuses_on_all_terminal_statuses_and_both_backends
+      - generic_duplicate_replay_cannot_expand_side_effects
+      - generic_stopped_run_dispatch_and_recovery_remain_blocked
+      - forked_source_ordinary_execution_remains_frozen_under_issue_2020
+
+  parent_and_tracker_decisions:
+    parent_sibling_probe: >-
+      Natural completion, active-run stage/flow supersession, generic event
+      publication, diagnostic direct events, inbound publication, directives,
+      and fork execution were rechecked. Only terminal run-level card lifecycle
+      intents share this operation; ordinary fork execution remains #2020 and
+      the reusable lifecycle conformance tier remains #2008.
+    parent_action: absorb_now_into_issue_2007_no_child
+    tracker_state_decision: current_issue_and_checked_in_artifact_updated_before_coding
+    watchlist_backed_promotion_check: >-
+      inbound_publication_operation_ownership already tracks typed admission,
+      operation integrity, event-owned recovery, and terminal status policy. It
+      exposes this live terminal lifecycle consumer, so the selected parent must
+      absorb it now rather than leave a follow-up hole.
+    watchlist_mapping_decision: promote_typed_terminal_lifecycle_materialization_and_non_executable_route_settlement_now
+    remaining_parent_tail:
+      - issue_2020_forked_freeze_invariant
+      - issue_2008_reusable_full_lifecycle_conformance_tier
+    remaining_tail_estimate: two_explicitly_split_classes_with_high_confidence_no_additional_same_concept_interpreter_found
+
+  closure_and_proof:
+    intended_closure_level: selected_failure_class_eliminated
+    chosen_class_closure_commitment: >-
+      PR 2047 must eliminate typed terminal lifecycle outbox materialization and
+      routing-execution settlement divergence entirely on SQLite and PostgreSQL
+      while preserving generic terminal closure and invoking no normal agent or
+      workflow runtime consumer.
+    closure_feasibility: >-
+      Feasible in this PR because all producers already commit one outbox shape,
+      all four releasers enter one method, and event-level delivery/receipt rows
+      already represent terminal outcomes. No post-commit dispatcher or observer
+      capability is required. If another producer, releaser, recipient
+      interpreter, or runtime callback is discovered, implementation stops and
+      this gate is repaired again.
+    local_endpoint_only_check: >-
+      Fixing ReleaseDecisionCardLifecycleEvents with an agent-only exception
+      would leave arbitrary Agent.OnEvent effects live; the typed materializer
+      must atomically settle every agent and node route and write terminal
+      receipts before returning.
+    required_supported_surface_proof:
+      - selected_store_unit_and_failure_injection_matrix_for_every_producer_and_operation_result
+      - real_swarm_serve_dev_sqlite_run_stop_with_agent_node_mixed_and_zero_recipient_terminal_settlement_fixtures
+      - real_swarm_serve_dev_host_postgres_same_non_executable_run_stop_matrix
+      - instrumented_AgentManager_and_Agent_OnEvent_zero_invocation_proof
+      - startup_recovery_after_each_crash_window_on_both_backends
+      - periodic_sweep_convergence_on_both_backends
+      - host_postgres_runtime_nuke_release_and_cleanup_success_failure
+      - sqlite_runtime_nuke_remains_explicitly_unavailable_with_the_binding_spec_ref
+      - unchanged_generic_terminal_admission_and_dispatch_regression_matrix
+      - full_go_test_all_with_host_postgres
+    parity_issue: true
+
+  architecture_feedback:
+    smell: >-
+      The current outbox status conflates intent release with normal executable
+      delivery, and ordinary agent subscriptions expose arbitrary OnEvent side
+      effects. The clean model is immutable terminal intent plus one atomic
+      evidence/terminal-route-settlement result, with no executable delivery.
+    long_run_direction: >-
+      Keep typed lifecycle materializers as explicit capabilities over one
+      shared event-effect mutation substrate. Expose terminal evidence through
+      persisted run-independent read/telemetry surfaces; never add a generic
+      terminal-run bypass, normal subscription exception, or second delivery
+      state machine.
+    tracking_decision: update_issue_2007_and_this_watchlist_artifact_now
+    effort_and_roi: medium_one_broad_pr_high_roi_because_it_closes_a_real_terminal_recovery_hole_on_both_backends
+  blocking_condition: fresh_independent_gate_required_before_runtime_code_commit_or_push
 
 closure:
   intended_level: selected_failure_class_eliminated
