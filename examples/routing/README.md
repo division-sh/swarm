@@ -10,6 +10,7 @@ These directories are the positive authoring owners for supported routing patter
 | Reuse or create one keyed child | `template-select-or-create` | Use receiver `resolution.mode: select-or-create`. |
 | Return to the exact requester | `template-reply` | Pair request/reply pins; correlation defaults to request event identity. |
 | Create a child with a platform-minted key | `template-create-minted-key` | Use receiver `resolution.mode: create` with `mint: uuid` or `event_id`. |
+| Validate an intentionally harness-produced input | `harness-injection` | Declare `source: harness`; verify labels it non-production-valid and serve rejects it. |
 
 Verify any example with:
 

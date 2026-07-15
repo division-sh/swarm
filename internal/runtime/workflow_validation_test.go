@@ -8,9 +8,71 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
+
+func TestDefaultWorkflowContractValidationRejectsHarnessInput(t *testing.T) {
+	source := loadHarnessInjectionValidationSource(t)
+	result, err := ValidateWorkflowContractSurface(context.Background(), source, DefaultWorkflowContractValidationOptions(nil))
+	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only input source: harness at worker.work_requested") {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want harness production rejection", err)
+	}
+	if result.HarnessInjectedInputCount != 1 || result.ProductionValid {
+		t.Fatalf("validation result = %#v, want one harness input and production_valid=false", result)
+	}
+}
+
+func TestValidateWorkflowContractSurfaceAllowsHarnessOnlyForExplicitVerifyPolicy(t *testing.T) {
+	source := loadHarnessInjectionValidationSource(t)
+	opts := DefaultWorkflowContractValidationOptions(nil)
+	opts.AllowHarnessInputs = true
+	opts.CheckMCPReachable = false
+	opts.FatalBootWarnings = false
+	result, err := ValidateWorkflowContractSurface(context.Background(), source, opts)
+	if err != nil {
+		t.Fatalf("ValidateWorkflowContractSurface: %v", err)
+	}
+	if result.HarnessInjectedInputCount != 1 || result.ProductionValid {
+		t.Fatalf("validation result = %#v, want one harness input and production_valid=false", result)
+	}
+}
+
+func TestEnsureWorkflowBootWiringRejectsHarnessInput(t *testing.T) {
+	err := ensureWorkflowBootWiring(RuntimeOptions{
+		WorkflowModule: semanticOnlyWorkflowRuntime{source: loadHarnessInjectionValidationSource(t)},
+	})
+	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only input source: harness") {
+		t.Fatalf("ensureWorkflowBootWiring error = %v, want harness production rejection", err)
+	}
+}
+
+func TestHarnessInputCreatesNoStandingTargetProviderIngressOrTargetFreeRoute(t *testing.T) {
+	source := loadHarnessInjectionValidationSource(t)
+	declarations, err := ResolveStandingTargetDeclarations(source, nil)
+	if err != nil {
+		t.Fatalf("ResolveStandingTargetDeclarations: %v", err)
+	}
+	if len(declarations) != 0 {
+		t.Fatalf("standing targets = %#v, want none", declarations)
+	}
+
+	wrapped, err := SourceWithProviderTriggerEvents(source, nil)
+	if err != nil {
+		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
+	}
+	authorization := runtimeprovideroutput.Authorization{
+		Provider: "test", Event: "worker/work.requested", PackID: "provider.test", PackVersion: "1.0.0",
+		ManifestHash: "sha256:test", GenerationID: "generation-test",
+	}
+	plans, issues := runtimepinrouting.LowerTargetFreeInputRoutePlans(wrapped, []runtimeprovideroutput.Authorization{authorization})
+	if len(plans) != 0 || len(issues) != 0 {
+		t.Fatalf("target-free plans = %#v issues = %#v, want none", plans, issues)
+	}
+}
 
 func testRuntimeWorkflowValidationBundle() *runtimecontracts.WorkflowContractBundle {
 	bundle := &runtimecontracts.WorkflowContractBundle{}
@@ -903,4 +965,18 @@ func loadRuntimeWorkflowValidationFixtureBundle(t *testing.T, relativeRoot strin
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", fixtureRoot, err)
 	}
 	return bundle
+}
+
+func loadHarnessInjectionValidationSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load harness injection artifact: %v", err)
+	}
+	return semanticview.Wrap(bundle)
 }

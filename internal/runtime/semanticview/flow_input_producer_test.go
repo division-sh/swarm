@@ -57,18 +57,53 @@ func TestResolveFlowInputProducer_ClassifiesParentConnectWithoutRoutePattern(t *
 	}
 }
 
-func TestResolveFlowInputProducer_ClassifiesHarnessInjection(t *testing.T) {
-	source := flowInputProducerFixture(runtimecontracts.FlowInputEventPin{
-		Name:  "work.requested",
-		Event: "work.requested",
+func TestResolveFlowInputProducer_ClassifiesDeclaredHarnessSource(t *testing.T) {
+	source := harnessOnlyFlowInputProducerFixture(runtimecontracts.FlowInputEventPin{
+		Name:   "work.requested",
+		Event:  "work.requested",
+		Source: "harness",
 	}, nil)
 
-	resolution := ResolveFlowInputProducerWithOptions(source, "worker", "work.requested", runtimecontracts.FlowInputProducerResolutionOptions{
-		HarnessInjections: []runtimecontracts.FlowInputProducerInjection{{FlowID: "worker", EventType: "work.requested"}},
-	})
+	resolution := ResolveFlowInputProducer(source, "worker", "work.requested")
 
 	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryHarnessInjection) {
 		t.Fatalf("evidence = %#v, want harness injection", resolution.Evidence)
+	}
+	if got := resolution.ProducerPatterns(); len(got) != 0 {
+		t.Fatalf("ProducerPatterns = %#v, want no harness routing authority", got)
+	}
+	if got := resolution.ProducerFlows(); len(got) != 0 {
+		t.Fatalf("ProducerFlows = %#v, want no harness routing authority", got)
+	}
+	if resolution.HasConflictingHarnessEvidence() {
+		t.Fatalf("evidence = %#v, want harness as the sole producer proof", resolution.Evidence)
+	}
+}
+
+func TestResolveFlowInputAutoWire_HarnessEvidenceHasNoPatternsOrProducerFlows(t *testing.T) {
+	source := harnessOnlyFlowInputProducerFixture(runtimecontracts.FlowInputEventPin{
+		Name: "work.requested", Event: "work.requested", Source: "harness",
+	}, nil)
+
+	resolution := ResolveFlowInputAutoWire(source, "worker", "work.requested")
+	if len(resolution.Patterns) != 0 || len(resolution.ProducerFlows) != 0 {
+		t.Fatalf("auto-wire = %#v, want no harness routing authority", resolution)
+	}
+	if patterns := FlowInputProducerPatterns(source, "worker", "work.requested"); len(patterns) != 0 {
+		t.Fatalf("producer patterns = %#v, want none", patterns)
+	}
+}
+
+func TestImportBoundaryHarnessInputCreatesNoAlias(t *testing.T) {
+	source := harnessOnlyFlowInputProducerFixture(runtimecontracts.FlowInputEventPin{
+		Name: "work.requested", Event: "work.requested", Source: "harness",
+	}, nil)
+
+	if ImportBoundaryInputAliasRequired(source, "worker", "work.requested") {
+		t.Fatal("bare harness input unexpectedly requires an import-boundary alias")
+	}
+	if aliases := ImportBoundaryInputAliases(source, "worker", "work.requested"); len(aliases) != 0 {
+		t.Fatalf("import aliases = %#v, want none", aliases)
 	}
 }
 
@@ -194,4 +229,20 @@ func flowInputProducerFixture(inputPin runtimecontracts.FlowInputEventPin, conne
 		"platform.runtime_log": {},
 	}
 	return Wrap(bundle)
+}
+
+func harnessOnlyFlowInputProducerFixture(inputPin runtimecontracts.FlowInputEventPin, connects []runtimecontracts.FlowPackageConnect) Source {
+	source := flowInputProducerFixture(inputPin, connects)
+	bundle, ok := Bundle(source)
+	if !ok || bundle == nil {
+		panic("flow input producer fixture did not expose its bundle")
+	}
+	producer := bundle.FlowTree.ByID["producer"]
+	producer.Schema.Pins.Outputs = runtimecontracts.FlowOutputPins{}
+	bundle.FlowSchemas["producer"] = producer.Schema
+	if bundle.Semantics.FlowOutputs == nil {
+		bundle.Semantics.FlowOutputs = map[string][]string{}
+	}
+	bundle.Semantics.FlowOutputs["producer"] = nil
+	return source
 }

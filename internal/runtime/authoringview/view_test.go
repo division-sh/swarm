@@ -42,6 +42,26 @@ func TestBuildShowsReplyPairedTopology(t *testing.T) {
 	}
 }
 
+func TestBuildIncludesHarnessInputSource(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load harness injection artifact: %v", err)
+	}
+	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	worker := flowByID(t, view, "worker")
+	if len(worker.InputPins) != 1 || worker.InputPins[0].Source != "harness" {
+		t.Fatalf("worker input pins = %#v, want effective source harness", worker.InputPins)
+	}
+}
+
 func TestBuildStageGraphShowsFanInBarrierEffectiveJoinProvenance(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(

@@ -77,6 +77,18 @@ func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing
 	}
 }
 
+func TestOperatorTestSetupValidationFixtureDeclaresNoInputPins(t *testing.T) {
+	bundle := testSetupValidationBundle(t)
+	if pins := bundle.FlowInputEventPins(""); len(pins) != 0 {
+		t.Fatalf("root input pins = %#v, want none", pins)
+	}
+	for flowID := range bundle.FlowSchemas {
+		if pins := bundle.FlowInputEventPins(flowID); len(pins) != 0 {
+			t.Fatalf("flow %s input pins = %#v, want none", flowID, pins)
+		}
+	}
+}
+
 func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 	cases := []struct {
 		name      string

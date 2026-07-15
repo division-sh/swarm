@@ -335,8 +335,8 @@ func decodeFlowInputPinEventNode(node *yaml.Node) (FlowInputEventPin, error) {
 			if err := value.Decode(&out.Source); err != nil {
 				return FlowInputEventPin{}, fmt.Errorf("input event pin source: %w", err)
 			}
-			if source := strings.ToLower(strings.TrimSpace(out.Source)); source != "" && source != "external" {
-				return FlowInputEventPin{}, fmt.Errorf("input event pin source must be external")
+			if source := strings.ToLower(strings.TrimSpace(out.Source)); source != "" && source != "external" && source != "harness" {
+				return FlowInputEventPin{}, fmt.Errorf("input event pin source must be external or harness")
 			}
 		case "address":
 			var address FlowInputPinAddress

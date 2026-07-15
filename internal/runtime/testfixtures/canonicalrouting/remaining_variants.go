@@ -297,9 +297,6 @@ flows:
 initial_state: new
 terminal_states: [done]
 states: [new, done]
-pins:
-  inputs:
-    events: [scan.requested]
 `,
 		"entities.yaml": "{}\n",
 		"events.yaml":   "scan.requested:\n  swarm: {source: external}\n  topic: text\n",
@@ -310,9 +307,6 @@ mode: static
 initial_state: initializing
 terminal_states: [ready]
 states: [initializing, waiting, ready]
-pins:
-  inputs:
-    events: [opco.product_review_requested]
 `,
 		"flows/operating/entities.yaml": `product:
   product_id: text

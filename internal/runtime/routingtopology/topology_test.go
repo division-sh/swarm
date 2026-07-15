@@ -11,11 +11,56 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatereply"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectexisting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectorcreate"
 )
+
+func TestHarnessInputCreatesEndpointWithoutRouteOrTopologyEdge(t *testing.T) {
+	harness := loadHarnessTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection))
+	withoutSource := loadHarnessTopologySource(t, canonicalrouting.CopyHarnessInjectionWithoutSource(t))
+	harnessTopology := Build(harness)
+	plainTopology := Build(withoutSource)
+
+	if len(harnessTopology.InputPins) != 1 || harnessTopology.InputPins[0].FlowID != "worker" {
+		t.Fatalf("input endpoints = %#v, want worker harness endpoint", harnessTopology.InputPins)
+	}
+	if !sameTopologyEdgeIdentities(harnessTopology.Edges, plainTopology.Edges) ||
+		!reflect.DeepEqual(harnessTopology.BoundaryExposures, plainTopology.BoundaryExposures) ||
+		!reflect.DeepEqual(harnessTopology.RootInputSources, plainTopology.RootInputSources) {
+		t.Fatalf("harness declaration changed delivery topology\nharness=%#v\nplain=%#v", harnessTopology, plainTopology)
+	}
+}
+
+func sameTopologyEdgeIdentities(left, right []Edge) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx].ID != right[idx].ID || left[idx].Scope != right[idx].Scope ||
+			left[idx].Event != right[idx].Event || left[idx].Producer.ID != right[idx].Producer.ID ||
+			left[idx].Consumer.ID != right[idx].Consumer.ID {
+			return false
+		}
+	}
+	return true
+}
+
+func loadHarnessTopologySource(t *testing.T, root string) semanticview.Source {
+	t.Helper()
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		root,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load harness injection artifact: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
 
 func TestBuildProjectsFanInConnectWithCompleteResolution(t *testing.T) {
 	topology := Build(templatefanin.LoadSource(t, templatefanin.Options{}))

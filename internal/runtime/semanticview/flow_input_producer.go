@@ -66,7 +66,9 @@ func ResolveFlowInputProducerWithOptions(source Source, flowID, eventType string
 		}
 		appendExternalMetadataEvidence(source, flowID, eventType, appendEvidence)
 	}
-	appendHarnessInjectionEvidence(flowID, eventType, opts, appendEvidence)
+	if isInputEvent {
+		appendHarnessInputEvidence(source, flowID, eventType, appendEvidence)
+	}
 	appendPlatformSourceEvidence(source, flowID, eventType, appendEvidence)
 	appendInternalTopologyEvidence(source, flowID, eventType, appendEvidence)
 
@@ -129,16 +131,17 @@ func appendParentConnectEvidence(source Source, flowID, eventType string, append
 	}
 }
 
-func appendHarnessInjectionEvidence(flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
-	for _, injection := range opts.HarnessInjections {
-		if strings.TrimSpace(injection.FlowID) != flowID || eventidentity.Normalize(injection.EventType) != eventType {
+func appendHarnessInputEvidence(source Source, flowID, eventType string, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
+	for _, pin := range flowInputPinsForEvent(source, flowID, eventType) {
+		if strings.TrimSpace(pin.Source) != "harness" {
 			continue
 		}
 		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
 			Kind:      runtimecontracts.FlowInputProducerBoundaryHarnessInjection,
 			FlowID:    flowID,
 			EventType: eventType,
-			Detail:    "explicit validation harness injection",
+			Pin:       pin.PinName(),
+			Detail:    "input pin declares source: harness",
 		})
 	}
 }

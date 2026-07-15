@@ -48,6 +48,36 @@ func TestSourceWithProviderTriggerEventsRejectsLocalPackEventRedeclaration(t *te
 	}
 }
 
+func TestSourceWithProviderTriggerEvents_HarnessInputIsNotIngress(t *testing.T) {
+	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("fixture bundle missing")
+	}
+	pins := bundle.Semantics.FlowInputEventPins["coordinator"]
+	if len(pins) != 1 {
+		t.Fatalf("coordinator pins = %#v, want one", pins)
+	}
+	pins[0].Source = "harness"
+	bundle.Semantics.FlowInputEventPins["coordinator"] = pins
+	flow, ok := bundle.FlowViewByID("coordinator")
+	if !ok || len(flow.Schema.Pins.Inputs.EventPins) != 1 {
+		t.Fatal("coordinator typed input pin missing")
+	}
+	flow.Schema.Pins.Inputs.EventPins[0].Source = "harness"
+	schema := bundle.FlowSchemas["coordinator"]
+	schema.Pins.Inputs.EventPins[0].Source = "harness"
+	bundle.FlowSchemas["coordinator"] = schema
+
+	wrapped, err := SourceWithProviderTriggerEvents(source, catalog)
+	if err != nil {
+		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
+	}
+	if _, err := ResolveStandingTargetDeclarations(wrapped, catalog); err == nil || !strings.Contains(err.Error(), `add an exact external input pin for "inbound.telegram"`) {
+		t.Fatalf("standing ingress error = %v, want harness excluded from provider ingress", err)
+	}
+}
+
 func TestProviderTriggerNormalizedEventLowersThroughExactExternalInputPin(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram.text_message")
 	bundle, ok := semanticview.Bundle(source)

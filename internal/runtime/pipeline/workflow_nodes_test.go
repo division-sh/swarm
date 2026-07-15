@@ -98,6 +98,41 @@ func TestWorkflowFlowInputProducerAliases_DoNotAutoWireCrossFlowInputPinsToProdu
 	}
 }
 
+func TestWorkflowFlowInputProducerAliases_HarnessSourceAddsNoAlias(t *testing.T) {
+	source := loadHarnessInjectionPipelineSource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection))
+	if aliases := workflowFlowInputProducerAliases(source, "worker", "work.requested"); len(aliases) != 0 {
+		t.Fatalf("producer aliases = %#v, want none for harness source", aliases)
+	}
+}
+
+func TestWorkflowNodeHarnessInputKeepsOnlyAuthoredLocalSubscription(t *testing.T) {
+	harness := loadHarnessInjectionPipelineSource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection))
+	withoutSource := loadHarnessInjectionPipelineSource(t, canonicalrouting.CopyHarnessInjectionWithoutSource(t))
+
+	got := workflowNodeSubscriptionAliases(harness, "worker-node", "work.requested")
+	want := workflowNodeSubscriptionAliases(withoutSource, "worker-node", "work.requested")
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("harness subscriptions = %#v, undeclared subscriptions = %#v", got, want)
+	}
+	if strings.Join(got, ",") != "worker/work.requested,work.requested" {
+		t.Fatalf("subscriptions = %#v, want only ordinary authored local aliases", got)
+	}
+}
+
+func loadHarnessInjectionPipelineSource(t *testing.T, root string) semanticview.Source {
+	t.Helper()
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		root,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load harness injection fixture: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func TestWorkflowNodeExternalEventType_ExternalizesLocalFlowOutputs(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-pin-wiring")

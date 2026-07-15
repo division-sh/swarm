@@ -1,0 +1,8 @@
+name: worker
+mode: static
+pins:
+  inputs:
+    events:
+      - name: work_requested
+        event: work.requested
+        source: harness

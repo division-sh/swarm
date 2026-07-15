@@ -820,6 +820,38 @@ pins:
 	}
 }
 
+func TestFlowSchemaDocumentDecode_NormalizesClosedInputPinSourceEnum(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{name: "empty", source: "", want: ""},
+		{name: "external", source: "  EXTERNAL  ", want: "external"},
+		{name: "harness", source: "  HARNESS  ", want: "harness"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var doc FlowSchemaDocument
+			raw := "name: source-enum\npins:\n  inputs:\n    events:\n      - name: work_requested\n        event: work.requested\n"
+			if tc.source != "" {
+				raw += "        source: '" + tc.source + "'\n"
+			}
+			if err := yaml.Unmarshal([]byte(raw), &doc); err != nil {
+				t.Fatalf("yaml.Unmarshal: %v", err)
+			}
+			if got := doc.Pins.Inputs.EventPins[0].Source; got != tc.want {
+				t.Fatalf("Source = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	var doc FlowSchemaDocument
+	err := yaml.Unmarshal([]byte("name: source-enum\npins:\n  inputs:\n    events:\n      - name: work_requested\n        source: fallback\n"), &doc)
+	if err == nil || !strings.Contains(err.Error(), "input event pin source must be external or harness") {
+		t.Fatalf("yaml.Unmarshal error = %v, want closed source-enum rejection", err)
+	}
+}
+
 func TestFlowSchemaDocumentDecode_RejectsUnsupportedAddressedPinFields(t *testing.T) {
 	var doc FlowSchemaDocument
 	err := yaml.Unmarshal([]byte(`

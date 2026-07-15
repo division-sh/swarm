@@ -1617,13 +1617,15 @@ func closeAdditionalServeRuntimeContexts(ctx context.Context, contexts []serveRu
 }
 
 type verifyCommandResult struct {
-	OK                 bool                  `json:"ok"`
-	Contracts          string                `json:"contracts"`
-	WorkspaceBackend   string                `json:"workspace_backend"`
-	Errors             []verifyFindingOutput `json:"errors"`
-	Warnings           []verifyFindingOutput `json:"warnings"`
-	LintEvidence       []verifyFindingOutput `json:"lint_evidence"`
-	CapabilitySubjects []packs.Subject       `json:"capability_subjects"`
+	OK                    bool                  `json:"ok"`
+	Contracts             string                `json:"contracts"`
+	WorkspaceBackend      string                `json:"workspace_backend"`
+	HarnessInjectedInputs int                   `json:"harness_injected_inputs"`
+	ProductionValid       bool                  `json:"production_valid"`
+	Errors                []verifyFindingOutput `json:"errors"`
+	Warnings              []verifyFindingOutput `json:"warnings"`
+	LintEvidence          []verifyFindingOutput `json:"lint_evidence"`
+	CapabilitySubjects    []packs.Subject       `json:"capability_subjects"`
 }
 
 type verifyFindingOutput struct {
@@ -1723,7 +1725,11 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 			writeVerifyFindings(errOut, result.BootReport.Warnings(), false)
 			writeVerifyFindings(errOut, result.BootReport.LintEvidence(), false)
 			if out != nil {
-				fmt.Fprintf(out, "verify ok: contracts=%s\n", contractsRoot)
+				if result.HarnessInjectedInputCount > 0 {
+					fmt.Fprintf(out, "verify ok: contracts=%s -- %d harness-injected input%s; not production-valid\n", contractsRoot, result.HarnessInjectedInputCount, pluralSuffix(result.HarnessInjectedInputCount))
+				} else {
+					fmt.Fprintf(out, "verify ok: contracts=%s\n", contractsRoot)
+				}
 				fmt.Fprintf(out, "%s\n", workspaceBackendDetail)
 				for _, subject := range result.CapabilitySubjects {
 					fmt.Fprintln(out, packs.RenderSubject(subject, false))
@@ -1740,14 +1746,23 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 
 func verifyCommandOutput(ok bool, contractsRoot string, workspaceBackend string, result runtime.WorkflowContractValidationResult) verifyCommandResult {
 	return verifyCommandResult{
-		OK:                 ok,
-		Contracts:          contractsRoot,
-		WorkspaceBackend:   workspaceBackend,
-		Errors:             verifyFindingOutputs(result.BootReport.Errors()),
-		Warnings:           verifyFindingOutputs(result.BootReport.Warnings()),
-		LintEvidence:       verifyFindingOutputs(result.BootReport.LintEvidence()),
-		CapabilitySubjects: append([]packs.Subject(nil), result.CapabilitySubjects...),
+		OK:                    ok,
+		Contracts:             contractsRoot,
+		WorkspaceBackend:      workspaceBackend,
+		HarnessInjectedInputs: result.HarnessInjectedInputCount,
+		ProductionValid:       result.ProductionValid,
+		Errors:                verifyFindingOutputs(result.BootReport.Errors()),
+		Warnings:              verifyFindingOutputs(result.BootReport.Warnings()),
+		LintEvidence:          verifyFindingOutputs(result.BootReport.LintEvidence()),
+		CapabilitySubjects:    append([]packs.Subject(nil), result.CapabilitySubjects...),
 	}
+}
+
+func pluralSuffix(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
 }
 
 func verifyValidationResultHasBlockingBootFindings(result runtime.WorkflowContractValidationResult, opts runtime.WorkflowContractValidationOptions) bool {
@@ -2353,6 +2368,7 @@ func verifyWorkflowContractValidationOptions(repo, configPath string, source sem
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("configure managed credentials: %w", err)
 	}
 	opts.ManagedCredentials = managedCredentialStore
+	opts.AllowHarnessInputs = true
 	configResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
 	if err != nil {
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("load runtime config: %w", err)

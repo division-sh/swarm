@@ -31,12 +31,62 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 )
+
+func TestRuntimeProjectSupervisorRejectsHarnessInputReplacementBeforeQuiesce(t *testing.T) {
+	repo := canonicalrouting.RepoRoot(t)
+	root := canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection)
+	spec := runtimecontracts.DefaultPlatformSpecFile(repo)
+	module, bundle, err := newSwarmWorkflowModule(repo, root, spec)
+	if err != nil {
+		t.Fatalf("load harness artifact: %v", err)
+	}
+	catalog := testProviderTriggerCatalog(t)
+	oldRuntime := &runtimepkg.Runtime{}
+	var ready atomic.Bool
+	ready.Store(true)
+	supervisor := newRuntimeProjectSupervisor(
+		repo, spec, nil, storeBundle{}, &ready, workspaceMountSources{},
+		workspaceBackendSelection{NoWorkspace: true, Source: "test"},
+		nil, nil, catalog, "/old", &runtimecontracts.WorkflowContractBundle{},
+		semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), oldRuntime,
+	)
+	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) { return catalog, nil }
+	supervisor.loadWorkflow = func(_, contractsRoot, _ string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+		if contractsRoot != root {
+			t.Fatalf("contracts root = %q, want %q", contractsRoot, root)
+		}
+		return module, bundle, nil
+	}
+	supervisor.validateSource = func(ctx context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot) error {
+		opts := runtimepkg.DefaultWorkflowContractValidationOptions(nil)
+		opts.ProviderTriggerCatalog = catalog
+		_, err := runtimepkg.ValidateWorkflowContractSurface(ctx, source, opts)
+		return err
+	}
+	supervisor.quiesceRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error {
+		t.Fatal("quiesce must not run after harness validation rejection")
+		return nil
+	}
+	supervisor.createRuntime = func(context.Context, runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
+		t.Fatal("replacement runtime must not be created after harness validation rejection")
+		return nil, nil
+	}
+
+	_, err = supervisor.OpenProject(context.Background(), root)
+	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only input source: harness") {
+		t.Fatalf("OpenProject error = %v, want harness production rejection", err)
+	}
+	if supervisor.CurrentRuntime() != oldRuntime || !ready.Load() {
+		t.Fatal("harness replacement disturbed the ready predecessor runtime")
+	}
+}
 
 func TestRuntimeProjectSupervisorReplaceCurrentRuntime_ClearsReadinessBeforeShutdown(t *testing.T) {
 	oldRT := &runtimepkg.Runtime{}

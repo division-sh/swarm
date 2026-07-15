@@ -1011,6 +1011,7 @@ func canonicalArtifactConstant(name string) (ArtifactID, bool) {
 		"TemplateCreateMintedKey": "examples/routing/template-create-minted-key",
 		"FanInStream":             "examples/routing/fan-in/stream",
 		"FanInBarrier":            "examples/routing/fan-in/barrier",
+		"HarnessInjection":        "examples/routing/harness-injection",
 	}
 	id, ok := ids[name]
 	return id, ok
