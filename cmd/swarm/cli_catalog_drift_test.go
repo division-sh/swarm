@@ -67,6 +67,15 @@ func driftMappingValue(node *yaml.Node, key string) *yaml.Node {
 	return nil
 }
 
+func driftRequiredScalar(t *testing.T, node *yaml.Node, key string) string {
+	t.Helper()
+	value := driftMappingValue(node, key)
+	if value == nil || value.Kind != yaml.ScalarNode || strings.TrimSpace(value.Value) == "" {
+		t.Fatalf("YAML mapping is missing non-empty scalar %q", key)
+	}
+	return value.Value
+}
+
 // commandPathTokens derives the command path from a catalog `command:` string:
 // tokens after "swarm" up to the first flag/placeholder/alternation token.
 func commandPathTokens(command string) []string {

@@ -121,6 +121,13 @@ func TestCLITableRendererAlignsAndRendersEmptyValues(t *testing.T) {
 	}
 }
 
+func TestFormatCLIHumanCodePreservesUnknownValue(t *testing.T) {
+	const raw = "  future_status_code  "
+	if got := formatCLIHumanCode(cliHumanCodeRunStatus, raw); got != raw {
+		t.Fatalf("unknown CLI projection = %q, want exact raw value %q", got, raw)
+	}
+}
+
 func TestCLITableRendererDoesNotImplicitlyTruncateIdentifierColumns(t *testing.T) {
 	var out bytes.Buffer
 	id := "run_0123456789abcdef0123456789abcdef"
