@@ -15,8 +15,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -31,6 +35,28 @@ func TestMockAgentSupportedSurfaceSQLitePostgres(t *testing.T) {
 				t.Fatalf("mock supported surface took %s, want less than 1m", elapsed)
 			}
 		})
+	}
+}
+
+func TestForkChatSandboxBuildsCanonicalMockAdapter(t *testing.T) {
+	harness := effecttest.New()
+	runtime, err := buildForkChatSandboxLLMRuntime(
+		&config.Config{LLM: config.LLMConfig{Backend: "mock"}},
+		nil,
+		toolgateway.Binding{},
+		nil,
+		harness,
+		harness,
+	)
+	if err != nil {
+		t.Fatalf("build fork-chat mock runtime: %v", err)
+	}
+	contract, err := runtimellm.RequireProviderContract(string(runtimeeffects.ExecutionModeMock), runtime)
+	if err != nil {
+		t.Fatalf("fork-chat mock provider contract: %v", err)
+	}
+	if contract.Provider != "mock" || contract.Transport != runtimellm.ProviderTransportInProcess {
+		t.Fatalf("fork-chat mock provider contract = %#v", contract)
 	}
 }
 
@@ -140,6 +166,7 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	}
 	publishStandingSingletonMemoryEvent(t, secondURL, bundleHash, singleton, "singleton three", "third")
 	waitForMockAgentTurns(t, backend, location, 5)
+	assertMockUsageReadback(t, secondURL+"/v1/rpc", "memory-bot")
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d\n%s", code, second.outputString())
 	}
@@ -346,6 +373,27 @@ func assertMockMailboxReadback(t *testing.T, endpoint, cardID string) {
 	if detail["kind"] != "decision_card" || !ok || strings.TrimSpace(fmt.Sprint(card["execution_mode"])) != "mock" {
 		t.Fatalf("mock mailbox.get = %#v, want decision_card with execution_mode mock", detail)
 	}
+}
+
+func assertMockUsageReadback(t *testing.T, endpoint, agentID string) {
+	t.Helper()
+	var result map[string]any
+	requireServedJSONRPCResult(t, endpoint, "agent.usage", map[string]any{"agent_id": agentID}, &result)
+	breakdown, ok := result["breakdown"].([]any)
+	if !ok || len(breakdown) == 0 {
+		t.Fatalf("mock agent.usage = %#v, want non-empty breakdown", result)
+	}
+	for _, raw := range breakdown {
+		row, ok := raw.(map[string]any)
+		if !ok || strings.TrimSpace(fmt.Sprint(row["execution_mode"])) != "mock" {
+			continue
+		}
+		cost := strings.TrimSpace(fmt.Sprint(row["cost_display"]))
+		if strings.HasPrefix(cost, "~$") && strings.HasSuffix(cost, " (mock estimate)") {
+			return
+		}
+	}
+	t.Fatalf("mock agent.usage = %#v, want visibly labelled mock estimate", result)
 }
 
 func assertMockCount(t testing.TB, db *sql.DB, label string, want int, query string) {

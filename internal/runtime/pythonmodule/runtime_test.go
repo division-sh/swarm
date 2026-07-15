@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,6 +26,67 @@ func TestExecuteHonorsCancelledContext(t *testing.T) {
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Execute error = %v, want context cancellation", err)
+	}
+}
+
+func TestExecuteInterruptsInFlightOnContextCancellation(t *testing.T) {
+	source := []byte("def handle(input):\n    while True:\n        pass\n")
+	ctx, cancel := newObservedCancelContext()
+	t.Cleanup(cancel)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := Execute(ctx, Request{
+			ModuleID: "in_flight_cancel", RowID: "in_flight_cancel", Digest: digestSource(source),
+			Entry: DefaultEntry, Source: source, Input: []byte(`{}`), Fuel: 3_000_000_000, MemoryPages: 8192, OutputBytes: 1024,
+		})
+		done <- err
+	}()
+
+	select {
+	case <-ctx.observed:
+		cancel()
+	case <-time.After(10 * time.Second):
+		t.Fatal("Python execution did not install its in-flight cancellation watcher")
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Execute error = %v, want in-flight context cancellation", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("in-flight Python execution did not stop after context cancellation")
+	}
+}
+
+type observedCancelContext struct {
+	context.Context
+	done        chan struct{}
+	observed    chan struct{}
+	doneOnce    sync.Once
+	observeOnce sync.Once
+}
+
+func newObservedCancelContext() (*observedCancelContext, context.CancelFunc) {
+	ctx := &observedCancelContext{
+		Context:  context.Background(),
+		done:     make(chan struct{}),
+		observed: make(chan struct{}),
+	}
+	return ctx, func() { ctx.doneOnce.Do(func() { close(ctx.done) }) }
+}
+
+func (c *observedCancelContext) Done() <-chan struct{} {
+	c.observeOnce.Do(func() { close(c.observed) })
+	return c.done
+}
+
+func (c *observedCancelContext) Err() error {
+	select {
+	case <-c.done:
+		return context.Canceled
+	default:
+		return nil
 	}
 }
 

@@ -101,6 +101,7 @@ func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 		{backend: "claude_cli", runtimeMode: "cli_test", provider: "claude"},
 		{backend: "openai_compatible", runtimeMode: "openai_compatible", provider: "openai_compatible"},
 		{backend: "openai_responses", runtimeMode: "openai_responses", provider: "openai"},
+		{backend: "mock", runtimeMode: "mock", provider: "mock"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.backend, func(t *testing.T) {

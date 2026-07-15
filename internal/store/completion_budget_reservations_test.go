@@ -65,6 +65,58 @@ func TestCompletionBudgetAdmissionLinearizableAcrossAuthorities(t *testing.T) {
 	}
 }
 
+func TestMockCompletionSpendDoesNotConsumeLiveAdmissionCap(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			fixture := newCompletionBudgetRaceFixture(t, backend == "sqlite")
+			mockAuthority := fixture.normal.authority
+			mockAuthority.ExecutionMode = runtimeeffects.ExecutionModeMock
+			mockAuthority.Target.ID = uuid.NewString()
+			mockCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(context.Background(), mockAuthority), runtimeeffects.NewController(fixture.primary))
+			mockCtx = runtimeeffects.WithLogicalOperationIdentity(mockCtx, "mock-spend-before-live-cap")
+			mockHandle, err := runtimeeffects.BeginCompletion(mockCtx, "mock_python", []byte("mock spend"), nil)
+			if err != nil {
+				t.Fatalf("authorize mock completion: %v", err)
+			}
+			if err := mockHandle.MarkLaunched(mockCtx); err != nil {
+				t.Fatalf("launch mock completion: %v", err)
+			}
+			if err := mockHandle.MarkResponseObserved(mockCtx, map[string]any{"execution_mode": "mock"}); err != nil {
+				t.Fatalf("observe mock completion: %v", err)
+			}
+			if err := mockHandle.SettleCompletion(mockCtx, budgetAccountingSettlement(mockAuthority.Target, runtimeeffects.CompletionUsageEstimated, runtimeeffects.StateSettled, 10)); err != nil {
+				t.Fatalf("settle mock completion: %v", err)
+			}
+
+			liveAuthority := fixture.normal.authority
+			liveAuthority.Target.ID = uuid.NewString()
+			liveAuthority.BudgetScopes = []runtimeeffects.BudgetAdmissionScope{{Kind: "system", CapUSD: 1}}
+			liveCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(context.Background(), liveAuthority), runtimeeffects.NewController(fixture.primary))
+			liveCtx = runtimeeffects.WithLogicalOperationIdentity(liveCtx, "live-cap-after-mock-spend")
+			liveHandle, err := runtimeeffects.BeginCompletion(liveCtx, "openai_compatible", []byte("live admission"), nil)
+			if err != nil {
+				t.Fatalf("mock estimate consumed live admission cap: %v", err)
+			}
+
+			var mockSpend, liveReservations int
+			if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM spend_ledger WHERE execution_mode='mock' AND cost_usd=10`).Scan(&mockSpend); err != nil {
+				t.Fatalf("count mock spend: %v", err)
+			}
+			placeholder := "?"
+			if backend == "postgres" {
+				placeholder = "$1::uuid"
+			}
+			if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM runtime_effect_budget_reservations WHERE attempt_id=`+placeholder, liveHandle.Attempt().AttemptID).Scan(&liveReservations); err != nil {
+				t.Fatalf("count live reservations: %v", err)
+			}
+			if mockSpend != 1 || liveReservations != 1 {
+				t.Fatalf("mock spend rows=%d live reservations=%d, want 1/1", mockSpend, liveReservations)
+			}
+		})
+	}
+}
+
 func proveCompletionBudgetAdmissionRace(t *testing.T, fixture completionBudgetRaceFixture, left, right runtimeeffects.Authority, wantSuccesses, wantReservations int) {
 	t.Helper()
 	type result struct {
