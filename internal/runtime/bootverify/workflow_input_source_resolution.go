@@ -8,9 +8,7 @@ import (
 )
 
 func (c *checkerContext) resolveDeclaredInputProducerSource(flowID, eventType string) (runtimecontracts.FlowInputProducerResolution, bool) {
-	return resolveDeclaredInputProducerSource(c.source, flowID, eventType, runtimecontracts.FlowInputProducerResolutionOptions{
-		HarnessInjections: c.opts.HarnessInjections,
-	})
+	return resolveDeclaredInputProducerSource(c.source, flowID, eventType, runtimecontracts.FlowInputProducerResolutionOptions{})
 }
 
 func resolveDeclaredInputProducerSource(source semanticview.Source, flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions) (runtimecontracts.FlowInputProducerResolution, bool) {

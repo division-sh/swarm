@@ -23,6 +23,7 @@ const (
 	TemplateCreateMintedKey ArtifactID = "template-create-minted-key"
 	FanInStream             ArtifactID = "fan-in/stream"
 	FanInBarrier            ArtifactID = "fan-in/barrier"
+	HarnessInjection        ArtifactID = "harness-injection"
 )
 
 // ArtifactID is a checked-in routing artifact identity. The ownership guard
@@ -171,6 +172,7 @@ func canonicalExamplePath(id ArtifactID) (string, bool) {
 		TemplateCreateMintedKey,
 		FanInStream,
 		FanInBarrier,
+		HarnessInjection,
 	} {
 		root := filepath.ToSlash(filepath.Join("examples", "routing", string(canonical)))
 		if requested == string(canonical) || requested == root {

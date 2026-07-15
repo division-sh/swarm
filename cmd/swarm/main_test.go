@@ -15494,7 +15494,7 @@ func TestVerifyBundle_InputPinProducerPathReturnsHardInvaliditySurface(t *testin
 		"Boundary external ingress: not found",
 		"Intrinsic ingress input pin: not found",
 		"Parent connect: not found",
-		"Explicit harness injection: not found",
+		"Validation-only harness input: not found",
 		"Platform source: not found",
 		"Internal topology producer: not found",
 	} {

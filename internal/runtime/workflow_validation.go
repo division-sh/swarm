@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/packs"
@@ -10,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -29,7 +29,7 @@ type WorkflowContractValidationOptions struct {
 	ValidateLLMModelResolution     bool
 	LLMProfile                     llmselection.Profile
 	ModelAliases                   llmselection.ModelAliases
-	HarnessInjections              []runtimecontracts.FlowInputProducerInjection
+	AllowHarnessInputs             bool
 	ProviderTriggerCatalog         *providertriggers.CatalogSnapshot
 }
 
@@ -40,6 +40,8 @@ type WorkflowContractValidationResult struct {
 	GeneratedEmitSchemaErrors        []error
 	GeneratedToolSchemaClosureErrors []error
 	CapabilitySubjects               []packs.Subject
+	HarnessInjectedInputCount        int
+	ProductionValid                  bool
 }
 
 func DefaultWorkflowContractValidationOptions(credentials runtimecredentials.Store) WorkflowContractValidationOptions {
@@ -56,9 +58,17 @@ func DefaultWorkflowContractValidationOptions(credentials runtimecredentials.Sto
 // ValidateWorkflowContractSurface is the canonical verify/boot contract-validation entrypoint
 // for prompt guards, bootverify errors, tool implementation validation, and explicit emit-schema coverage.
 func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.Source, opts WorkflowContractValidationOptions) (WorkflowContractValidationResult, error) {
-	result := WorkflowContractValidationResult{}
+	result := WorkflowContractValidationResult{ProductionValid: true}
 	if source == nil {
 		return result, fmt.Errorf("semantic source is required")
+	}
+	harnessInputs := workflowHarnessInputDeclarations(source)
+	result.HarnessInjectedInputCount = len(harnessInputs)
+	if len(harnessInputs) > 0 {
+		result.ProductionValid = false
+		if !opts.AllowHarnessInputs {
+			return result, fmt.Errorf("production validation rejects test-only input source: harness at %s; replace it with a real producer before booting", strings.Join(harnessInputs, ", "))
+		}
 	}
 	var err error
 	source, err = providerconnectors.SourceWithConnectorPackImports(source)
@@ -77,7 +87,6 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 		ValidateModelResolution: opts.ValidateLLMModelResolution,
 		LLMProfile:              opts.LLMProfile,
 		ModelAliases:            opts.ModelAliases,
-		HarnessInjections:       opts.HarnessInjections,
 	})
 	if result.BootReport.HasErrors() {
 		return result, fmt.Errorf("boot verification failed:\n%s", formatWorkflowValidationFindings(result.BootReport.Errors(), true))
@@ -137,6 +146,27 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	}
 
 	return result, nil
+}
+
+func workflowHarnessInputDeclarations(source semanticview.Source) []string {
+	if source == nil {
+		return nil
+	}
+	var declarations []string
+	for flowID := range source.FlowSchemaEntries() {
+		for _, pin := range source.FlowInputEventPins(flowID) {
+			if strings.TrimSpace(pin.Source) != "harness" {
+				continue
+			}
+			location := strings.TrimSpace(pin.PinName())
+			if flowID != "" {
+				location = strings.TrimSpace(flowID) + "." + location
+			}
+			declarations = append(declarations, location)
+		}
+	}
+	sort.Strings(declarations)
+	return declarations
 }
 
 func unsignedRawAdmissionFindings(declarations []StandingTargetDeclaration) []runtimebootverify.Finding {

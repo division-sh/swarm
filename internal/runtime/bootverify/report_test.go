@@ -4132,15 +4132,156 @@ func TestRun_DoesNotErrorForExternalInputPinWithoutEmitter(t *testing.T) {
 	}
 }
 
-func TestRun_DoesNotErrorForHarnessInjectedInputPinWithoutEmitter(t *testing.T) {
-	source := loadTier8Fixture(t, "test-boot-missing-pin")
+func TestRun_HarnessInputSatisfiesInputPinWiringFromPin(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	markFlowInputPinSource(t, bundle, "child", "task.feedback", "harness")
 
-	report := Run(context.Background(), source, Options{
-		HarnessInjections: []runtimecontracts.FlowInputProducerInjection{{FlowID: "child", EventType: "task.feedback"}},
-	})
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
 	if reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
 		t.Fatalf("unexpected input_pin_wiring error for harness-injected input, got %#v", report.Errors())
+	}
+}
+
+func TestRun_HarnessInputSatisfiesEventProducerExists(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	markFlowInputPinSource(t, bundle, "child", "task.feedback", "harness")
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "event_producer_exists", "task.feedback") {
+		t.Fatalf("unexpected producer warning for harness input, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_RejectsHarnessUnknownEventAndDuplicatePin(t *testing.T) {
+	tests := []struct {
+		name      string
+		root      func(testing.TB) string
+		wantCheck string
+		want      string
+	}{
+		{name: "unknown event", root: canonicalrouting.CopyHarnessInjectionWithUnknownEvent, wantCheck: "transition_reference_validation", want: "work.unknown"},
+		{name: "duplicate pin", root: canonicalrouting.CopyHarnessInjectionWithDuplicatePin, wantCheck: "input_pin_wiring", want: "work.requested"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repoRoot := canonicalrouting.RepoRoot(t)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+				repoRoot,
+				test.root(t),
+				runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+			)
+			if err != nil {
+				t.Fatalf("load harness mutation: %v", err)
+			}
+
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			if !reportContains(report.Errors(), test.wantCheck, test.want) {
+				t.Fatalf("harness mutation %q was not rejected: %#v", test.name, report.Errors())
+			}
+		})
+	}
+}
+
+func TestRun_HarnessInputCountsOnlyItsDeclaredDeadEventSourceRole(t *testing.T) {
+	bundle := loadHarnessBootverifyBundle(t, canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection))
+	worker, ok := bundle.FlowViewByID("worker")
+	if !ok {
+		t.Fatal("worker flow missing")
+	}
+	delete(worker.Nodes, "worker-node")
+	delete(bundle.Nodes, "worker-node")
+	delete(bundle.Semantics.NodeHandlers, "worker-node")
+	worker.Events["unrelated.dead"] = runtimecontracts.EventCatalogEntry{Source: "events.yaml"}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "work.requested") {
+		t.Fatalf("harness input was not counted as its declared event source role: %#v", report.Warnings())
+	}
+	if !reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "unrelated.dead") {
+		t.Fatalf("unrelated dead event was incorrectly cleared: %#v", report.Warnings())
+	}
+}
+
+func TestRun_HarnessInputUsesNoTargetClassificationWithoutDeliveryAuthority(t *testing.T) {
+	source := semanticview.Wrap(loadHarnessBootverifyBundle(t, canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection)))
+	resolution, ok := resolveDeclaredInputProducerSource(source, "worker", "work.requested", runtimecontracts.FlowInputProducerResolutionOptions{})
+	if !ok || !inputProducerSourceIsExternalNoTarget(resolution) {
+		t.Fatalf("resolution = %#v ok=%t, want harness external/no-target validation classification", resolution, ok)
+	}
+	if len(resolution.ProducerPatterns()) != 0 || len(resolution.ProducerFlows()) != 0 {
+		t.Fatalf("resolution = %#v, want no delivery projection", resolution)
+	}
+}
+
+func TestRun_RejectsHarnessInputWithRootOrIntrinsicIngress(t *testing.T) {
+	bundle := loadHarnessBootverifyBundle(t, canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress))
+	markRootInputPinSource(t, bundle, "item.received", "harness")
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "input_pin_wiring", "source: harness and another accepted producer source") {
+		t.Fatalf("expected root/harness exclusivity error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsHarnessInputWithParentConnect(t *testing.T) {
+	bundle := loadHarnessBootverifyBundle(t, canonicalrouting.ExampleRoot(t, canonicalrouting.ParentConnect))
+	markFlowInputPinSource(t, bundle, "consumer", "work.ready", "harness")
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "input_pin_wiring", "source: harness and another accepted producer source") ||
+		!reportContains(report.Errors(), "input_pin_wiring", "parent connect") {
+		t.Fatalf("expected parent-connect/harness exclusivity error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsHarnessInputWithInternalOrPlatformProducer(t *testing.T) {
+	t.Run("internal", func(t *testing.T) {
+		bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+		markFlowInputPinSource(t, bundle, "child", "task.feedback", "harness")
+		bundle.Agents["lifecycle-coordinator"] = runtimecontracts.AgentRegistryEntry{ID: "lifecycle-coordinator", EmitEvents: []string{"task.feedback"}}
+		report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+		if !reportContains(report.Errors(), "input_pin_wiring", "source: harness and another accepted producer source") ||
+			!reportContains(report.Errors(), "input_pin_wiring", "internal") {
+			t.Fatalf("expected internal/harness exclusivity error, got %#v", report.Errors())
+		}
+	})
+
+	t.Run("platform", func(t *testing.T) {
+		bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+		bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{"platform.runtime_log": {}}
+		renameFlowHandlerEvent(t, bundle, "child", "worker", "task.feedback", "platform.runtime_log", runtimecontracts.SystemNodeEventHandler{AdvancesTo: "done"})
+		markFlowInputPinSource(t, bundle, "child", "platform.runtime_log", "harness")
+		report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+		if !reportContains(report.Errors(), "input_pin_wiring", "source: harness and another accepted producer source") ||
+			!reportContains(report.Errors(), "input_pin_wiring", "platform") {
+			t.Fatalf("expected platform/harness exclusivity error, got %#v", report.Errors())
+		}
+	})
+}
+
+func TestRun_MissingInputProducerListsProductionExitsBeforeTestHarness(t *testing.T) {
+	report := Run(context.Background(), loadTier8Fixture(t, "test-boot-missing-pin"), Options{})
+	var message string
+	for _, finding := range report.Errors() {
+		if finding.CheckID == "input_pin_wiring" && strings.Contains(finding.Message, "task.feedback") {
+			message = finding.Message
+			break
+		}
+	}
+	if message == "" {
+		t.Fatalf("missing input producer finding absent: %#v", report.Errors())
+	}
+	harness := strings.Index(message, "For a validation fixture only, set source: harness")
+	for _, productionExit := range []string{"parent package.yaml connect", "source: external", "platform-owned event", "intra-flow topology"} {
+		index := strings.Index(message, productionExit)
+		if index < 0 || harness < 0 || index > harness {
+			t.Fatalf("remediation order is not production-first for %q:\n%s", productionExit, message)
+		}
 	}
 }
 
@@ -5037,13 +5178,10 @@ func TestRun_AllowsRuleConditionReferenceToDeclaredEntityAndEventContext(t *test
 		Condition: `entity.revision_count == 0 && payload.score >= 0 && event["source"].entity_id != ""`,
 	}}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+	markFlowInputPinSource(t, bundle, "child", "task.assigned", "harness")
+	markFlowInputPinSource(t, bundle, "child", "task.feedback", "harness")
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{
-		HarnessInjections: []runtimecontracts.FlowInputProducerInjection{
-			{FlowID: "child", EventType: "task.assigned"},
-			{FlowID: "child", EventType: "task.feedback"},
-		},
-	})
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
 	if report.HasErrors() {
 		t.Fatalf("unexpected rule-condition errors, got %#v", report.Errors())
@@ -6360,6 +6498,47 @@ func TestRun_ReportsErrorForTimerStartEventWithoutProducerPath(t *testing.T) {
 	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
 	if !reportContains(report.Errors(), "timer_validation", "start_on event support/ticket.closed has no producer path") {
 		t.Fatalf("expected timer_validation start_on producer error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_HarnessInputSatisfiesTimerTriggerProducerProofOnly(t *testing.T) {
+	root := writeTimerValidationFixtureWithOptions(t, timerValidationFixtureOptions{
+		startOn:              "event:ticket.closed",
+		owner:                "support-node",
+		event:                "timer.reminder",
+		includeTimerEvent:    true,
+		externalSourceEvents: []string{"ticket.opened"},
+	})
+	repoRoot := repoRootForBootverifyTest(t)
+	bundle := loadFixtureBundleAt(t, repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	addFlowInputPin(t, bundle, "support", runtimecontracts.FlowInputEventPin{
+		Name: "ticket_closed", Event: "ticket.closed", Source: "harness",
+	})
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "timer_validation", "start_on event support/ticket.closed has no producer path") {
+		t.Fatalf("harness input did not satisfy timer producer proof: %#v", report.Errors())
+	}
+	resolution := semanticview.ResolveFlowInputProducer(semanticview.Wrap(bundle), "support", "ticket.closed")
+	if len(resolution.ProducerPatterns()) != 0 || len(resolution.ProducerFlows()) != 0 {
+		t.Fatalf("harness timer proof created delivery authority: %#v", resolution)
+	}
+}
+
+func TestRun_HarnessInputSatisfiesAccumulatorProducerPathFromPin(t *testing.T) {
+	harness := loadHarnessBootverifyBundle(t, canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection))
+	addHarnessAccumulator(t, harness)
+	report := Run(context.Background(), semanticview.Wrap(harness), Options{})
+	if reportContains(report.Errors(), "accumulator_input_producer_path", "work.requested") {
+		t.Fatalf("harness input did not satisfy accumulator producer proof: %#v", report.Errors())
+	}
+
+	withoutSource := loadHarnessBootverifyBundle(t, canonicalrouting.CopyHarnessInjectionWithoutSource(t))
+	addHarnessAccumulator(t, withoutSource)
+	report = Run(context.Background(), semanticview.Wrap(withoutSource), Options{})
+	if !reportContains(report.Errors(), "accumulator_input_producer_path", "work.requested") {
+		t.Fatalf("removing harness source did not restore accumulator producer failure: %#v", report.Errors())
 	}
 }
 
@@ -7797,6 +7976,87 @@ func markFlowInputPinSource(t *testing.T, bundle *runtimecontracts.WorkflowContr
 			bundle.Semantics.FlowInputEventPins[flowID][idx].Source = source
 		}
 	}
+}
+
+func addFlowInputPin(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID string, pin runtimecontracts.FlowInputEventPin) {
+	t.Helper()
+	flowView, ok := bundle.FlowViewByID(flowID)
+	if !ok || flowView == nil {
+		t.Fatalf("flow view %s missing", flowID)
+	}
+	eventType := strings.TrimSpace(pin.EventType())
+	flowView.Schema.Pins.Inputs.Events = append(flowView.Schema.Pins.Inputs.Events, eventType)
+	flowView.Schema.Pins.Inputs.EventPins = append(flowView.Schema.Pins.Inputs.EventPins, pin)
+	schema := bundle.FlowSchemas[flowID]
+	schema.Pins.Inputs.Events = append(schema.Pins.Inputs.Events, eventType)
+	schema.Pins.Inputs.EventPins = append(schema.Pins.Inputs.EventPins, pin)
+	bundle.FlowSchemas[flowID] = schema
+	if bundle.Semantics.FlowInputs == nil {
+		bundle.Semantics.FlowInputs = map[string][]string{}
+	}
+	bundle.Semantics.FlowInputs[flowID] = append(bundle.Semantics.FlowInputs[flowID], eventType)
+	if bundle.Semantics.FlowInputEventPins == nil {
+		bundle.Semantics.FlowInputEventPins = map[string][]runtimecontracts.FlowInputEventPin{}
+	}
+	bundle.Semantics.FlowInputEventPins[flowID] = append(bundle.Semantics.FlowInputEventPins[flowID], pin)
+}
+
+func markRootInputPinSource(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, eventType, source string) {
+	t.Helper()
+	if bundle.RootSchema == nil {
+		t.Fatal("root schema missing")
+	}
+	ensureFlowInputEventPins(&bundle.RootSchema.Pins.Inputs)
+	found := false
+	for idx := range bundle.RootSchema.Pins.Inputs.EventPins {
+		if strings.TrimSpace(bundle.RootSchema.Pins.Inputs.EventPins[idx].EventType()) != strings.TrimSpace(eventType) {
+			continue
+		}
+		bundle.RootSchema.Pins.Inputs.EventPins[idx].Source = source
+		found = true
+	}
+	if !found {
+		t.Fatalf("root input event %s missing", eventType)
+	}
+	if bundle.Semantics.FlowInputEventPins == nil {
+		bundle.Semantics.FlowInputEventPins = map[string][]runtimecontracts.FlowInputEventPin{}
+	}
+	bundle.Semantics.FlowInputEventPins[""] = append([]runtimecontracts.FlowInputEventPin(nil), bundle.RootSchema.Pins.Inputs.EventPins...)
+}
+
+func loadHarnessBootverifyBundle(t *testing.T, root string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		root,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load harness bootverify fixture: %v", err)
+	}
+	return bundle
+}
+
+func addHarnessAccumulator(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) {
+	t.Helper()
+	worker, ok := bundle.FlowViewByID("worker")
+	if !ok {
+		t.Fatal("worker flow missing")
+	}
+	node := worker.Nodes["worker-node"]
+	handler := node.EventHandlers["work.requested"]
+	handler.Accumulate = &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}
+	node.EventHandlers["work.requested"] = handler
+	worker.Nodes["worker-node"] = node
+	bundle.Nodes["worker-node"] = node
+	if bundle.Semantics.NodeHandlers == nil {
+		bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
+	}
+	if bundle.Semantics.NodeHandlers["worker-node"] == nil {
+		bundle.Semantics.NodeHandlers["worker-node"] = map[string]runtimecontracts.SystemNodeEventHandler{}
+	}
+	bundle.Semantics.NodeHandlers["worker-node"]["work.requested"] = handler
 }
 
 func renameFlowInputPinEvent(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID, oldEventType, newEventType string) {

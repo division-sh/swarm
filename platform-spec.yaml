@@ -847,8 +847,11 @@ contract_formats:
         rule: |
           Flow input producer proof is resolved once through a typed source taxonomy and consumed by boot verification,
           RouteTable derivation, and workflow-node subscription projection. The accepted proof classes are boundary external
-          ingress, intrinsic input-pin ingress (`source: external` on the input pin), parent connect, explicit harness
-          injection, platform source, and internal topology producer. Internal topology producer proof proves the event is
+          ingress, intrinsic input-pin ingress (`source: external` on the input pin), parent connect, validation-only harness
+          intent (`source: harness` on the input pin), platform source, and internal topology producer. Harness intent is
+          static producer proof only: it MUST be exclusive of every other accepted producer source and MUST NOT create a
+          route, topology edge, producer pattern, alias, standing target, provider ingress, subscriber, or runtime delivery
+          authority. Internal topology producer proof proves the event is
           produced inside the authored topology by sibling flow outputs, root/flow agent or node emits, timers, fan_out,
           or root/flow `auto_emit_on_create`, but it MUST NOT generate producer-scoped auto-wire route patterns.
           Direct parent connect proof proves the input is satisfied, but concrete delivery authority remains the connect
@@ -4168,7 +4171,9 @@ engine:
     - step: 7
       name: validate_pins
       action: 'For each flow: required input event pins must be satisfied by the canonical input-source resolver: parent connect
-        topology, input pin source:external, explicit harness injection, platform source, or internal topology producer. Pin-declared output emits consume
+        topology, input pin source:external, validation-only input pin source:harness, platform source, or internal topology producer.
+        Harness source is accepted only by the verify policy, is labeled non-production-valid in human and machine readback,
+        and MUST be rejected by serve and every shared production boot path before route/runtime materialization. Pin-declared output emits consume
         flow_model.flow_package.composition_routing: lowered parent connect supplies singular event.target or fan-out
         event.target_set route facts; explicit target is only the dynamic escape hatch; structural ParentRoute and eligible
         static-child delivery-entity routing are fallback paths when no lowered connect route applies; broadcast:true is the
@@ -6703,7 +6708,8 @@ engine:
       scope: per-flow
       trigger: 'A flow''s required input event pin (from schema.yaml pins.inputs.events) has no satisfiable authored producer
         source on the static verify surface. The warning consumes internal/runtime/semanticview.ResolveFlowInputProducer
-        evidence: boundary external ingress, intrinsic input-pin source:external, parent connect, explicit harness injection,
+        evidence: boundary external ingress, intrinsic input-pin source:external, parent connect, validation-only input-pin
+        source:harness,
         platform source, and internal topology producer. It does not use unique same-name sibling output-pin inference as
         producer-pattern authority, events.yaml swarm.source:external as input-pin proof, produces, or swarm.status: planned.'
       when: boot-only
@@ -6713,7 +6719,7 @@ engine:
       trigger: A handler declares an accumulator over an input event but the authored bundle has no accepted static producer
         or source path for that event. This check consumes the same canonical producer-source resolver as input_pin_wiring
         with non-input producer checking enabled. Accepted proof classes are external event metadata for non-input events,
-        parent connect, explicit harness injection, platform source, and internal topology producer (including handler emits,
+        parent connect, validation-only input-pin source:harness, platform source, and internal topology producer (including handler emits,
         agent emit_events, flow output pins, and timers). produces declarations and swarm.status planned do not satisfy this
         proof.
       when: boot-only
@@ -10283,8 +10289,12 @@ flow_model:
   pins:
     description: Flows have typed input/output pins, like IC chips in a circuit. The platform validates pin wiring at boot.
     input_event_pins:
-      description: Events the flow subscribes to through its public receiver interface. Required pins must be wired by parent
-        connect, input pin source:external, explicit harness injection, platform source, or internal topology producer proof.
+      description: |
+        Events the flow subscribes to through its public receiver interface. Required pins must be wired by parent
+        connect, input pin source:external, validation-only input pin source:harness, platform source, or internal topology
+        producer proof. The normalized authored source enum is empty, external, or harness. Harness is exclusive static
+        producer proof only: verify reports its count and production_valid:false, while serve and shared production boot
+        validation reject it before runtime construction. It never creates delivery authority.
       required: true
     output_event_pins:
       description: Events the flow emits across its public interface. Optional, but when an emit site emits one of these
@@ -15927,7 +15937,9 @@ static_analyzer:
       parent_connect:
         rule: Parent package.yaml connect binds a producer output pin to this receiver input pin and lowers to a concrete RoutePlan.
       harness_injection:
-        rule: Validation/test harness declares an explicit injected flow/event source.
+        rule: 'The input pin declares source: harness. This is exclusive validation-only static producer proof: verify may
+          accept it only with explicit non-production readback, while all production admission rejects it. It creates no
+          producer pattern, alias, route, topology edge, standing target, provider ingress, subscriber, or runtime delivery.'
       platform_source:
         rule: The input pin event exactly matches a platform_events.catalog key or accepted platform source proof.
       internal_topology_producer:

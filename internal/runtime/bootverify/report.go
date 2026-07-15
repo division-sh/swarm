@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -175,7 +174,6 @@ type Options struct {
 	ValidateModelResolution bool
 	LLMProfile              llmselection.Profile
 	ModelAliases            llmselection.ModelAliases
-	HarnessInjections       []runtimecontracts.FlowInputProducerInjection
 }
 
 func Run(ctx context.Context, source semanticview.Source, opts Options) Report {

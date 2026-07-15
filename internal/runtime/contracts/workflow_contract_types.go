@@ -153,13 +153,7 @@ const (
 )
 
 type FlowInputProducerResolutionOptions struct {
-	HarnessInjections  []FlowInputProducerInjection
 	AllowNonInputEvent bool
-}
-
-type FlowInputProducerInjection struct {
-	FlowID    string
-	EventType string
 }
 
 func (r FlowInputProducerResolution) HasEvidence() bool {
@@ -224,6 +218,19 @@ func (r FlowInputProducerResolution) HasAmbiguousBoundaryEvidence() bool {
 	return len(seen) > 1
 }
 
+func (r FlowInputProducerResolution) HasConflictingHarnessEvidence() bool {
+	if !r.HasEvidenceKind(FlowInputProducerBoundaryHarnessInjection) {
+		return false
+	}
+	for _, evidence := range r.Evidence {
+		kind := strings.TrimSpace(evidence.Kind)
+		if kind != FlowInputProducerBoundaryHarnessInjection && FlowInputProducerEvidenceKindIsProof(kind) {
+			return true
+		}
+	}
+	return false
+}
+
 func (r FlowInputProducerResolution) ProducerPatterns() []string {
 	seen := map[string]struct{}{}
 	for _, evidence := range r.Evidence {
@@ -250,7 +257,8 @@ func (r FlowInputProducerResolution) ProducerFlows() []string {
 		if !FlowInputProducerEvidenceKindIsProof(evidence.Kind) {
 			continue
 		}
-		if strings.TrimSpace(evidence.Kind) == FlowInputProducerInternalTopology {
+		switch strings.TrimSpace(evidence.Kind) {
+		case FlowInputProducerInternalTopology, FlowInputProducerBoundaryHarnessInjection:
 			continue
 		}
 		flowID := strings.TrimSpace(evidence.FlowID)

@@ -23,6 +23,7 @@ func canonicalExampleNames() []ArtifactID {
 		TemplateCreateMintedKey,
 		FanInStream,
 		FanInBarrier,
+		HarnessInjection,
 	}
 }
 
@@ -44,7 +45,7 @@ func TestCanonicalPositiveFixtureOwnerSetIsClosed(t *testing.T) {
 }
 
 func TestCanonicalRoutingExamplesLoadAndVerify(t *testing.T) {
-	Prove(t, RootIngress, ParentConnect, TemplateSelectExisting, TemplateSelectOrCreate, TemplateReply, TemplateCreateMintedKey, FanInStream, FanInBarrier)
+	Prove(t, RootIngress, ParentConnect, TemplateSelectExisting, TemplateSelectOrCreate, TemplateReply, TemplateCreateMintedKey, FanInStream, FanInBarrier, HarnessInjection)
 	for _, name := range canonicalExampleNames() {
 		t.Run(string(name), func(t *testing.T) {
 			root := ExampleRoot(t, name)

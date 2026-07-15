@@ -237,6 +237,7 @@ type InputPinView struct {
 	Name          string               `json:"name"`
 	Event         string               `json:"event"`
 	ResolvedEvent string               `json:"resolved_event"`
+	Source        string               `json:"source,omitempty"`
 	Address       *InputPinAddressView `json:"address,omitempty"`
 }
 
@@ -991,6 +992,7 @@ func inputPinViews(source semanticview.Source, flowID string, pins []runtimecont
 			Name:          strings.TrimSpace(pin.PinName()),
 			Event:         strings.TrimSpace(pin.EventType()),
 			ResolvedEvent: strings.TrimSpace(source.ResolveFlowEventReference(flowID, pin.EventType())),
+			Source:        strings.TrimSpace(pin.Source),
 		}
 		if pin.Address != nil {
 			item.Address = &InputPinAddressView{

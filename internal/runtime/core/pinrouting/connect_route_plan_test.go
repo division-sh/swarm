@@ -8,11 +8,31 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 )
+
+func TestLowerTargetFreeInputRoutePlans_RejectsHarnessSource(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load harness injection artifact: %v", err)
+	}
+	plans, issues := LowerTargetFreeInputRoutePlans(semanticview.Wrap(bundle), []runtimeprovideroutput.Authorization{{
+		Provider: "test", Event: "worker/work.requested", PackID: "provider.test", PackVersion: "1.0.0",
+		ManifestHash: "sha256:test", GenerationID: "generation-test",
+	}})
+	if len(plans) != 0 || len(issues) != 0 {
+		t.Fatalf("plans = %#v issues = %#v, want harness excluded without lowering issues", plans, issues)
+	}
+}
 
 func TestLowerCompositionConnectRoutePlansFromLoadedPackageFixture(t *testing.T) {
 	repoRoot, err := os.Getwd()

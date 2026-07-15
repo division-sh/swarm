@@ -16,8 +16,28 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
 )
+
+func TestDeriveStandingTargets_HarnessSourceCreatesNoTarget(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load harness injection artifact: %v", err)
+	}
+	declarations, err := ResolveStandingTargetDeclarations(semanticview.Wrap(bundle), nil)
+	if err != nil {
+		t.Fatalf("ResolveStandingTargetDeclarations: %v", err)
+	}
+	if len(declarations) != 0 {
+		t.Fatalf("standing targets = %#v, want none", declarations)
+	}
+}
 
 func TestResolveStandingTargetDeclarationsRequiresExactProviderPin(t *testing.T) {
 	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")

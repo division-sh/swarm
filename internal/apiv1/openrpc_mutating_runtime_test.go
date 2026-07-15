@@ -972,7 +972,11 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 
 func (s *mutatingRuntimeProbeState) options(t *testing.T) OperatorReadOptions {
 	t.Helper()
-	source := semanticview.Wrap(testSetupValidationBundle(t))
+	bundle := testSetupValidationBundle(t)
+	if s.method == "run.start" {
+		bundle = runStartTestBundle("scan.requested")
+	}
+	source := semanticview.Wrap(bundle)
 	return OperatorReadOptions{
 		RepoRoot:                  t.TempDir(),
 		PlatformSpecPath:          testBundleRegistrationPlatformSpec(t),
