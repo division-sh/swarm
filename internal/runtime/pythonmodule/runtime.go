@@ -46,6 +46,10 @@ var (
 	artifactOnce sync.Once
 	artifactDir  string
 	artifactErr  error
+
+	interpreterModuleOnce       sync.Once
+	serializedInterpreterModule []byte
+	interpreterModuleErr        error
 )
 
 type Identity struct {
@@ -188,10 +192,6 @@ func runHarness(ctx context.Context, req Request, envelope harnessEnvelope, fuel
 	if err != nil {
 		return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
 	}
-	wasm, err := os.ReadFile(filepath.Join(root, pythonWasmPath))
-	if err != nil {
-		return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("read embedded %s: %w", pythonWasmPath, err)}
-	}
 	input, err := json.Marshal(envelope)
 	if err != nil {
 		return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
@@ -208,20 +208,12 @@ func runHarness(ctx context.Context, req Request, envelope harnessEnvelope, fuel
 		return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
 	}
 
-	cfg := wasmtime.NewConfig()
-	cfg.SetConsumeFuel(true)
-	cfg.SetEpochInterruption(true)
-	cfg.SetWasmBulkMemory(true)
-	cfg.SetWasmMemory64(false)
-	cfg.SetWasmMultiMemory(false)
-	cfg.SetWasmSIMD(false)
-	cfg.SetWasmRelaxedSIMD(false)
-	cfg.SetWasmThreads(false)
-	engine := wasmtime.NewEngineWithConfig(cfg)
-	module, err := wasmtime.NewModule(engine, wasm)
+	engine, module, err := newInterpreterModule(root)
 	if err != nil {
 		return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
 	}
+	defer engine.Close()
+	defer module.Close()
 	store := wasmtime.NewStore(engine)
 	store.SetEpochDeadline(1)
 	store.Limiter(memoryLimitBytes(req.MemoryPages), -1, -1, -1, -1)
@@ -299,6 +291,48 @@ func runHarness(ctx context.Context, req Request, envelope harnessEnvelope, fuel
 		return harnessWireResult{}, classifyPythonCallError(req, computemodule.CodeTrap, fmt.Errorf("%w; stderr=%s", callErr, strings.TrimSpace(string(stderr))))
 	}
 	return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("python harness emitted invalid response stdout=%q stderr=%q", strings.TrimSpace(string(stdout)), strings.TrimSpace(string(stderr)))}
+}
+
+func newInterpreterModule(root string) (*wasmtime.Engine, *wasmtime.Module, error) {
+	interpreterModuleOnce.Do(func() {
+		wasm, err := os.ReadFile(filepath.Join(root, pythonWasmPath))
+		if err != nil {
+			interpreterModuleErr = fmt.Errorf("read embedded %s: %w", pythonWasmPath, err)
+			return
+		}
+		engine := wasmtime.NewEngineWithConfig(newInterpreterConfig())
+		defer engine.Close()
+		module, err := wasmtime.NewModule(engine, wasm)
+		if err != nil {
+			interpreterModuleErr = err
+			return
+		}
+		defer module.Close()
+		serializedInterpreterModule, interpreterModuleErr = module.Serialize()
+	})
+	if interpreterModuleErr != nil {
+		return nil, nil, interpreterModuleErr
+	}
+	engine := wasmtime.NewEngineWithConfig(newInterpreterConfig())
+	module, err := wasmtime.NewModuleDeserialize(engine, serializedInterpreterModule)
+	if err != nil {
+		engine.Close()
+		return nil, nil, err
+	}
+	return engine, module, nil
+}
+
+func newInterpreterConfig() *wasmtime.Config {
+	cfg := wasmtime.NewConfig()
+	cfg.SetConsumeFuel(true)
+	cfg.SetEpochInterruption(true)
+	cfg.SetWasmBulkMemory(true)
+	cfg.SetWasmMemory64(false)
+	cfg.SetWasmMultiMemory(false)
+	cfg.SetWasmSIMD(false)
+	cfg.SetWasmRelaxedSIMD(false)
+	cfg.SetWasmThreads(false)
+	return cfg
 }
 
 func contextError(ctx context.Context) error {
