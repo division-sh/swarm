@@ -139,7 +139,7 @@ func NewRetiredConnectDeliveryDiagnostic() *LoaderDiagnostic {
 		"contract_loader.retired_connect_delivery",
 		"package.yaml.connect.delivery",
 		"connect.delivery is retired.",
-		"Remove delivery. A connect row declares one inter-flow edge; use multiple rows for static fan-out, and declare instance selection or cardinality on the receiver input resolution.",
+		"Remove delivery. For delivery: one, run 'swarm migrate-connect-delivery-one --contracts <bundle-root>'. A connect row declares one inter-flow edge; use multiple rows for static fan-out, and declare instance selection or cardinality on the receiver input resolution.",
 		nil,
 	)
 }
