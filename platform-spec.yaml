@@ -3471,7 +3471,10 @@ handler_specification:
           uncertain attempt never redispatches.
         supersession: >
           Run termination and replacement of the owning loop generation may supersede a pending proposal through one CAS
-          race with decision. Ordinary stage exit does not supersede it.
+          race with decision. Both paths commit only the card, proposed_effect_continuations, append-only
+          decision_card_changes, and author-activity story in their selected-store transaction. They do not create a
+          mailbox.card_superseded event or a lifecycle-specific outbox/recovery path. Ordinary stage exit does not
+          supersede it.
         readback: >
           Mailbox list/get/subscribe and CLI projection expose authorization and dispatch as independent axes. approved never
           implies sent. The authoring view exposes approval_points with exact flow, node, handler, activity, tool, decision,
@@ -12065,9 +12068,12 @@ platform_tables:
           continuation whose outcome is durably dispatched. Human-task continuations in pending, decision_committed, or
           expired state remain unresolved; a missing or identity-inconsistent continuation fails closed. A dispatched
           decision must retain the card's decision event identity, while a dispatched expiry retains its stamped outcome
-          event identity. Local runtime or builder quiescence is observational only: the builder may project a completed
-          state already committed by this owner, but MUST NOT derive or write completed from local quiescence and MUST
-          leave a waiting decision run running without a synthetic failure.
+          event identity. Every proposed_effect card must likewise have a matching same-run continuation that is either
+          request_released, outcome_dispatched, or consistently superseded; pending, decision_committed, missing, or
+          identity-inconsistent proposed-effect continuations remain unresolved. Local runtime or builder quiescence is
+          observational only: the builder may project a completed state already committed by this owner, but MUST NOT
+          derive or write completed from local quiescence and MUST leave a waiting decision run running without a
+          synthetic failure.
         immutability: A repeated terminal write is idempotent only when status and canonical failure match exactly. Conflicting failure evidence or terminal status fails closed.
         migration:
           failed_rows: Migrate only a strictly valid platform.failure/v1 value. Empty or prose-only evidence aborts with status, count, and run IDs; no text heuristic exists.
