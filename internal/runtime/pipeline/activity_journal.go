@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
@@ -24,6 +25,7 @@ const (
 type ActivityAttemptRecord struct {
 	RequestEventID  string
 	RunID           string
+	ExecutionMode   runtimeeffects.ExecutionMode
 	SourceEventID   string
 	ParentEventID   string
 	EntityID        string
@@ -70,9 +72,9 @@ func (s *WorkflowInstanceStore) StartActivityAttempt(ctx context.Context, rec Ac
 			INSERT INTO activity_attempts (
 				request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
 				node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
-				success_event, failure_event, input_hash, loop_generation, loop_stage, reply_context_id
+				success_event, failure_event, input_hash, loop_generation, loop_stage, reply_context_id, execution_mode
 			) VALUES (
-				?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, '')
+				?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?
 			)
 			ON CONFLICT (request_event_id) DO NOTHING
 		`
@@ -81,17 +83,17 @@ func (s *WorkflowInstanceStore) StartActivityAttempt(ctx context.Context, rec Ac
 				INSERT INTO activity_attempts (
 					request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
 					node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
-					success_event, failure_event, input_hash, loop_generation, loop_stage, reply_context_id
+					success_event, failure_event, input_hash, loop_generation, loop_stage, reply_context_id, execution_mode
 				) VALUES (
 					$1::uuid, $2::uuid, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, NULLIF($5, '')::uuid, NULLIF($6, ''),
-					$7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, NULLIF($18, ''), NULLIF($19, '')
+					$7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, NULLIF($18, ''), NULLIF($19, ''), $20
 				)
 				ON CONFLICT (request_event_id) DO NOTHING
 			`
 		}
 		res, err := dbExecContext(txctx, s.db, query, rec.RequestEventID, rec.RunID, nullableUUID(rec.SourceEventID), nullableUUID(rec.ParentEventID), nullableUUID(rec.EntityID), nullableString(rec.FlowInstance),
 			rec.NodeID, rec.HandlerEventKey, rec.ActivityID, rec.Tool, rec.EffectClass, rec.Attempt, rec.Status,
-			rec.SuccessEvent, rec.FailureEvent, rec.InputHash, string(generationJSON), nullableString(rec.LoopStage), rec.ReplyContextID)
+			rec.SuccessEvent, rec.FailureEvent, rec.InputHash, string(generationJSON), nullableString(rec.LoopStage), rec.ReplyContextID, rec.ExecutionMode)
 		if err != nil {
 			return fmt.Errorf("start activity attempt %s: %w", rec.RequestEventID, err)
 		}
@@ -166,7 +168,7 @@ func validateActivityAttemptClaimIdentity(actual, expected ActivityAttemptRecord
 	if actual.RequestEventID == expected.RequestEventID && actual.RunID == expected.RunID &&
 		actual.EntityID == expected.EntityID && actual.NodeID == expected.NodeID &&
 		actual.HandlerEventKey == expected.HandlerEventKey && actual.ActivityID == expected.ActivityID &&
-		actual.Tool == expected.Tool && actual.EffectClass == expected.EffectClass &&
+		actual.Tool == expected.Tool && actual.EffectClass == expected.EffectClass && actual.ExecutionMode == expected.ExecutionMode &&
 		actual.SuccessEvent == expected.SuccessEvent && actual.FailureEvent == expected.FailureEvent &&
 		actual.InputHash == expected.InputHash && actual.LoopStage == expected.LoopStage &&
 		((!actual.Generation.Valid() && !expected.Generation.Valid()) || actual.Generation.Equal(expected.Generation)) {
@@ -201,6 +203,7 @@ func (s *WorkflowInstanceStore) CompleteActivityAttempt(ctx context.Context, rec
 			    completed_at = CURRENT_TIMESTAMP,
 			    updated_at = CURRENT_TIMESTAMP
 			WHERE request_event_id = ?
+			  AND execution_mode = ?
 			  AND status = 'started'
 		`
 		if !s.isSQLite() {
@@ -214,6 +217,7 @@ func (s *WorkflowInstanceStore) CompleteActivityAttempt(ctx context.Context, rec
 				    completed_at = NOW(),
 				    updated_at = NOW()
 				WHERE request_event_id = $6::uuid
+				  AND execution_mode = $7
 				  AND status = 'started'
 			`
 		}
@@ -224,7 +228,7 @@ func (s *WorkflowInstanceStore) CompleteActivityAttempt(ctx context.Context, rec
 		if err != nil {
 			return err
 		}
-		res, err := dbExecContext(txctx, s.db, query, rec.Status, rec.ResultEventID, rec.ResultEventType, string(rawPayload), nullableString(failureJSON), rec.RequestEventID)
+		res, err := dbExecContext(txctx, s.db, query, rec.Status, rec.ResultEventID, rec.ResultEventType, string(rawPayload), nullableString(failureJSON), rec.RequestEventID, rec.ExecutionMode)
 		if err != nil {
 			return fmt.Errorf("complete activity attempt %s: %w", rec.RequestEventID, err)
 		}
@@ -235,6 +239,9 @@ func (s *WorkflowInstanceStore) CompleteActivityAttempt(ctx context.Context, rec
 		}
 		if !ok {
 			return fmt.Errorf("activity attempt %s was not found for completion", rec.RequestEventID)
+		}
+		if err := validateActivityAttemptTerminalMode(loaded, rec); err != nil {
+			return err
 		}
 		if rows == 0 && loaded.Status == ActivityAttemptStatusStarted {
 			return fmt.Errorf("activity attempt %s remained started after terminal update", rec.RequestEventID)
@@ -281,6 +288,7 @@ func (s *WorkflowInstanceStore) MarkActivityAttemptUncertain(ctx context.Context
 			    completed_at = CURRENT_TIMESTAMP,
 			    updated_at = CURRENT_TIMESTAMP
 			WHERE request_event_id = ?
+			  AND execution_mode = ?
 			  AND status = 'started'
 		`
 		if !s.isSQLite() {
@@ -294,6 +302,7 @@ func (s *WorkflowInstanceStore) MarkActivityAttemptUncertain(ctx context.Context
 				    completed_at = NOW(),
 				    updated_at = NOW()
 				WHERE request_event_id = $5::uuid
+				  AND execution_mode = $6
 				  AND status = 'started'
 			`
 		}
@@ -301,7 +310,7 @@ func (s *WorkflowInstanceStore) MarkActivityAttemptUncertain(ctx context.Context
 		if err != nil {
 			return err
 		}
-		if _, err := dbExecContext(txctx, s.db, query, rec.ResultEventID, rec.ResultEventType, string(rawPayload), failureJSON, rec.RequestEventID); err != nil {
+		if _, err := dbExecContext(txctx, s.db, query, rec.ResultEventID, rec.ResultEventType, string(rawPayload), failureJSON, rec.RequestEventID, rec.ExecutionMode); err != nil {
 			return fmt.Errorf("mark activity attempt %s uncertain: %w", rec.RequestEventID, err)
 		}
 		loaded, ok, err := s.LoadActivityAttempt(txctx, rec.RequestEventID)
@@ -311,6 +320,9 @@ func (s *WorkflowInstanceStore) MarkActivityAttemptUncertain(ctx context.Context
 		if !ok {
 			return fmt.Errorf("activity attempt %s was not found for uncertain transition", rec.RequestEventID)
 		}
+		if err := validateActivityAttemptTerminalMode(loaded, rec); err != nil {
+			return err
+		}
 		out = loaded
 		return recordActivityAttemptStory(txctx, out, ActivityAttemptStatusUncertain)
 	})
@@ -318,6 +330,18 @@ func (s *WorkflowInstanceStore) MarkActivityAttemptUncertain(ctx context.Context
 		return ActivityAttemptRecord{}, err
 	}
 	return out, nil
+}
+
+func validateActivityAttemptTerminalMode(actual, expected ActivityAttemptRecord) error {
+	if actual.ExecutionMode == expected.ExecutionMode {
+		return nil
+	}
+	return fmt.Errorf(
+		"activity attempt %s execution_mode conflict: stored %q, terminal %q",
+		expected.RequestEventID,
+		actual.ExecutionMode,
+		expected.ExecutionMode,
+	)
 }
 
 func (s *WorkflowInstanceStore) LoadActivityAttempt(ctx context.Context, requestEventID string) (ActivityAttemptRecord, bool, error) {
@@ -332,7 +356,7 @@ func (s *WorkflowInstanceStore) LoadActivityAttempt(ctx context.Context, request
 		SELECT request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
 		       node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
 		       success_event, failure_event, result_event_id, result_event_type, result_payload,
-		       failure, input_hash, loop_generation, loop_stage, reply_context_id, started_at, completed_at, updated_at
+		       failure, input_hash, loop_generation, loop_stage, reply_context_id, execution_mode, started_at, completed_at, updated_at
 		FROM activity_attempts
 		WHERE request_event_id = ?
 	`
@@ -341,7 +365,7 @@ func (s *WorkflowInstanceStore) LoadActivityAttempt(ctx context.Context, request
 			SELECT request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
 			       node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
 			success_event, failure_event, result_event_id, result_event_type, result_payload,
-			       failure, input_hash, loop_generation, loop_stage, reply_context_id, started_at, completed_at, updated_at
+			       failure, input_hash, loop_generation, loop_stage, reply_context_id, execution_mode, started_at, completed_at, updated_at
 			FROM activity_attempts
 			WHERE request_event_id = $1::uuid
 		`
@@ -367,7 +391,7 @@ func scanActivityAttempt(row *sql.Row) (ActivityAttemptRecord, error) {
 		&rec.RequestEventID, &rec.RunID, &sourceEventID, &parentEventID, &entityID, &flowInstance,
 		&rec.NodeID, &rec.HandlerEventKey, &rec.ActivityID, &rec.Tool, &rec.EffectClass, &rec.Attempt, &rec.Status,
 		&rec.SuccessEvent, &rec.FailureEvent, &resultEventID, &resultEventType, &rawPayload,
-		&rawFailure, &rec.InputHash, &rawGeneration, &loopStage, &replyContextID, &startedAtRaw, &completedAtRaw, &updatedAtRaw,
+		&rawFailure, &rec.InputHash, &rawGeneration, &loopStage, &replyContextID, &rec.ExecutionMode, &startedAtRaw, &completedAtRaw, &updatedAtRaw,
 	); err != nil {
 		return ActivityAttemptRecord{}, err
 	}
@@ -499,6 +523,7 @@ func decodeActivityAttemptPayload(raw any) (map[string]any, error) {
 func (rec ActivityAttemptRecord) normalized() ActivityAttemptRecord {
 	rec.RequestEventID = strings.TrimSpace(rec.RequestEventID)
 	rec.RunID = strings.TrimSpace(rec.RunID)
+	rec.ExecutionMode = runtimeeffects.ExecutionMode(strings.TrimSpace(string(rec.ExecutionMode)))
 	rec.SourceEventID = strings.TrimSpace(rec.SourceEventID)
 	rec.ParentEventID = strings.TrimSpace(rec.ParentEventID)
 	rec.EntityID = strings.TrimSpace(rec.EntityID)
@@ -534,6 +559,9 @@ func (rec ActivityAttemptRecord) validateStart() error {
 	if err := validateActivityAttemptUUID(rec.RunID, "run_id"); err != nil {
 		return err
 	}
+	if !rec.ExecutionMode.Valid() {
+		return fmt.Errorf("activity attempt execution_mode %q is invalid", rec.ExecutionMode)
+	}
 	for field, value := range map[string]string{
 		"source_event_id": rec.SourceEventID,
 		"parent_event_id": rec.ParentEventID,
@@ -558,6 +586,9 @@ func (rec ActivityAttemptRecord) validateStart() error {
 func (rec ActivityAttemptRecord) validateTerminal() error {
 	if err := validateActivityAttemptUUID(rec.RequestEventID, "request_event_id"); err != nil {
 		return err
+	}
+	if !rec.ExecutionMode.Valid() {
+		return fmt.Errorf("activity attempt execution_mode %q is invalid", rec.ExecutionMode)
 	}
 	if rec.Status != ActivityAttemptStatusSucceeded && rec.Status != ActivityAttemptStatusFailed && rec.Status != ActivityAttemptStatusUncertain {
 		return fmt.Errorf("activity attempt status %q is not terminal", rec.Status)

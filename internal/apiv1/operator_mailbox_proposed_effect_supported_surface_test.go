@@ -162,7 +162,7 @@ func newProposedEffectMailboxHandler(
 	var coordinator *runtimepipeline.PipelineCoordinator
 	bus, err := runtimebus.NewEventBusWithOptions(persistence.(runtimebus.EventStore), runtimebus.EventBusOptions{
 		ContractBundle:    source,
-		BundleFingerprint: fact.BundleHash,
+		BundleFingerprint: fact.BundleFingerprint,
 		BundleSourceFact:  fact,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if coordinator == nil {
@@ -185,7 +185,7 @@ func newProposedEffectMailboxHandler(
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		Module: newRunCompletionSystemNodeModule(t, source), WorkflowStore: workflowStore,
 		DecisionCards: cards, EventReceiptsCapability: eventReceiptsCapability(persistence),
-		BundleFingerprint: fact.BundleHash,
+		BundleHash: fact.BundleHash,
 	})
 	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: "workflow-runtime"})
 	bus.Subscribe("workflow-runtime", events.EventType("mailbox.card_decided"), events.EventType("platform.activity_requested"))

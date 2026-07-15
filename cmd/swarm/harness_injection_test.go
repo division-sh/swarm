@@ -82,11 +82,15 @@ func TestServeRejectsHarnessInjectionBeforeRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadServeRuntimeBundle: %v", err)
 	}
+	cfg, err := defaultRuntimeConfig()
+	if err != nil {
+		t.Fatalf("defaultRuntimeConfig: %v", err)
+	}
 	loaded.bundleSourceFact = runtimecorrelation.BundleSourceFact{BundleHash: loaded.bootIdentity.Fingerprint}
 	contextDef, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
 		Ctx: context.Background(), Loaded: loaded, StateStoreSummary: "test stores ready",
 		WorkspaceBackend: workspaceBackendSelection{Backend: workspaceBackendNone, NoWorkspace: true, Source: "test"},
-		BootStartedAt:    time.Now().UTC(),
+		BootStartedAt:    time.Now().UTC(), Config: cfg,
 	})
 	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only input source: harness") {
 		t.Fatalf("buildServeRuntimeBundleContext = %#v error=%v, want production rejection", contextDef, err)

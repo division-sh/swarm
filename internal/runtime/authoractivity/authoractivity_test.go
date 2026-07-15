@@ -344,6 +344,9 @@ func testDraft(kind Kind, transition string, at time.Time) Draft {
 		subjectTypes := sortedSet(contract.SubjectTypes)
 		projection.SubjectType = subjectTypes[0]
 		projection.SubjectID = "subject-a"
+		if kind == KindActivityLifecycle {
+			projection.ExecutionMode = "live"
+		}
 	case subjectProducer:
 		projection.EventType = "message.normalized"
 		projection.ProducerType = "agent"

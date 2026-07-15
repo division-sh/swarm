@@ -6,7 +6,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -170,6 +172,8 @@ type Report struct {
 type Options struct {
 	Credentials             runtimecredentials.Store
 	ManagedCredentials      runtimemanagedcredentials.Store
+	ExecutionMode           executionmode.Mode
+	MockConnectorResponses  *providerconnectors.MockResponsePlan
 	CheckMCPReachable       bool
 	ValidateModelResolution bool
 	LLMProfile              llmselection.Profile

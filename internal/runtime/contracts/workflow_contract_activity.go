@@ -487,3 +487,9 @@ func toolInputSchemaToJSONSchema(schema ToolInputSchema) map[string]any {
 	}
 	return out
 }
+
+// ToolInputSchemaJSONSchema exposes the canonical ToolInputSchema projection
+// for runtime validators that consume the same authored tool model.
+func ToolInputSchemaJSONSchema(schema ToolInputSchema) map[string]any {
+	return toolInputSchemaToJSONSchema(schema)
+}

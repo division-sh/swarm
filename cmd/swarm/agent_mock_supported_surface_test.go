@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +15,9 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -81,7 +84,6 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	}
 	for key, value := range map[string]string{
 		"webhook_signing.telegram": "telegram-secret",
-		"telegram_bot_token":       "bound-but-fenced",
 	} {
 		if err := credentialStore.Set(context.Background(), key, value); err != nil {
 			t.Fatalf("set credential %s: %v", key, err)
@@ -90,11 +92,18 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 
 	var location string
 	var prepareRestart func()
+	mockResponses, err := providerconnectors.NewMockResponsePlan(map[string]map[string]any{
+		"telegram.send_message": {"ok": true},
+	})
+	if err != nil {
+		t.Fatalf("NewMockResponsePlan: %v", err)
+	}
 	opts := serveOptions{
 		ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, RequireBundleMatch: false, Dev: true, Verbose: true,
-		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+		TestOutboxSweeperConfig:    servedEventPublishProofOutboxSweeperConfig(),
+		TestMockConnectorResponses: mockResponses,
 	}
 	switch backend {
 	case "sqlite":
@@ -147,8 +156,10 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	entityID := sendStandingTelegramUpdate(t, firstURL, 301, 42)
 	publishStandingSingletonMemoryEvent(t, firstURL, bundleHash, singleton, "request review", "review")
 	waitForMockAgentTurns(t, backend, location, 3)
-	cardID := waitForMockDecisionCards(t, backend, location, 1)
+	cardID := waitForMockConnectorDecisionCard(t, backend, location, 1)
 	assertMockMailboxReadback(t, firstURL+"/v1/rpc", cardID)
+	approveMockDecisionCard(t, firstURL+"/v1/rpc", cardID)
+	waitForMockConnectorAttempts(t, backend, location, 1)
 	if code := first.stop(); code != 0 {
 		t.Fatalf("first serve exit = %d\n%s", code, first.outputString())
 	}
@@ -161,11 +172,15 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	second := startServeRuntimeTestProcess(t, opts)
 	second.waitForReadyLine()
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
+	waitForMockConnectorAttempts(t, backend, location, 1)
 	if got := sendStandingTelegramUpdate(t, secondURL, 302, 42); got != entityID {
 		t.Fatalf("post-restart entity = %q, want %q", got, entityID)
 	}
 	publishStandingSingletonMemoryEvent(t, secondURL, bundleHash, singleton, "singleton three", "third")
 	waitForMockAgentTurns(t, backend, location, 5)
+	secondCardID := waitForMockConnectorDecisionCard(t, backend, location, 2)
+	approveMockDecisionCard(t, secondURL+"/v1/rpc", secondCardID)
+	waitForMockConnectorAttempts(t, backend, location, 2)
 	assertMockUsageReadback(t, secondURL+"/v1/rpc", "memory-bot")
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d\n%s", code, second.outputString())
@@ -284,27 +299,146 @@ func openMockProofDB(t testing.TB, backend, location string) *sql.DB {
 	return db
 }
 
-func waitForMockDecisionCards(t testing.TB, backend, location string, want int) string {
+func waitForMockConnectorDecisionCard(t testing.TB, backend, location string, want int) string {
+	t.Helper()
+	db := openMockProofDB(t, backend, location)
+	defer db.Close()
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		count, pendingCardID := mockConnectorDecisionCardState(t, db, backend)
+		if count >= want && pendingCardID != "" {
+			return pendingCardID
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("%s send_telegram_message decision cards did not reach %d", backend, want)
+	return ""
+}
+
+func mockConnectorDecisionCardState(t testing.TB, db *sql.DB, backend string) (int, string) {
+	t.Helper()
+	rows, err := db.Query(`SELECT card_id, CAST(snapshot AS TEXT), status FROM decision_cards WHERE execution_mode = 'mock' ORDER BY created_at`)
+	if err != nil {
+		t.Fatalf("query %s mock decision cards: %v", backend, err)
+	}
+	defer rows.Close()
+	count := 0
+	pendingCardID := ""
+	for rows.Next() {
+		var cardID, rawSnapshot, status string
+		if err := rows.Scan(&cardID, &rawSnapshot, &status); err != nil {
+			t.Fatalf("scan %s mock decision card: %v", backend, err)
+		}
+		var snapshot map[string]any
+		if err := json.Unmarshal([]byte(rawSnapshot), &snapshot); err != nil {
+			t.Fatalf("decode %s mock decision card %s snapshot: %v", backend, cardID, err)
+		}
+		if strings.TrimSpace(fmt.Sprint(snapshot["decision"])) != "send_telegram_message" {
+			continue
+		}
+		count++
+		if status == decisioncard.StatusPending {
+			pendingCardID = cardID
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate %s mock decision cards: %v", backend, err)
+	}
+	return count, pendingCardID
+}
+
+func approveMockDecisionCard(t *testing.T, endpoint, cardID string) {
+	t.Helper()
+	var detail map[string]any
+	requireServedJSONRPCResult(t, endpoint, "mailbox.get", map[string]any{"mailbox_id": cardID}, &detail)
+	card, ok := detail["decision_card"].(map[string]any)
+	if !ok {
+		t.Fatalf("mailbox.get %s = %#v", cardID, detail)
+	}
+	contentHash := strings.TrimSpace(fmt.Sprint(card["card_content_hash"]))
+	if contentHash == "" {
+		t.Fatalf("decision card %s has no content hash: %#v", cardID, card)
+	}
+	var decided map[string]any
+	requireServedJSONRPCResult(t, endpoint, "mailbox.decide", map[string]any{
+		"card_id": cardID, "verdict": "approve", "observed_content_hash": contentHash,
+		"idempotency_key": "mock-approve-" + cardID,
+	}, &decided)
+	if decided["status"] != decisioncard.StatusDecided {
+		t.Fatalf("mailbox.decide %s = %#v", cardID, decided)
+	}
+}
+
+func waitForMockConnectorAttempts(t testing.TB, backend, location string, want int) {
 	t.Helper()
 	db := openMockProofDB(t, backend, location)
 	defer db.Close()
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		var count int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE execution_mode = 'mock'`).Scan(&count); err != nil {
-			t.Fatalf("query %s mock decision cards: %v", backend, err)
+		if err := db.QueryRow(`SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND execution_mode = 'mock' AND status = 'succeeded'`).Scan(&count); err != nil {
+			t.Fatalf("query %s mock connector attempts: %v", backend, err)
 		}
-		if count >= want {
-			var cardID string
-			if err := db.QueryRow(`SELECT card_id FROM decision_cards WHERE execution_mode = 'mock' ORDER BY created_at LIMIT 1`).Scan(&cardID); err != nil {
-				t.Fatalf("query %s mock decision-card identity: %v", backend, err)
-			}
-			return cardID
+		if count == want {
+			return
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("%s mock decision cards did not reach %d", backend, want)
-	return ""
+	t.Fatalf("%s mock connector attempts did not reach %d; %s", backend, want, mockConnectorFailureEvidence(t, db))
+}
+
+func mockConnectorFailureEvidence(t testing.TB, db *sql.DB) string {
+	t.Helper()
+	parts := []string{}
+	eventRows, err := db.Query(`SELECT event_name, execution_mode, CAST(payload AS TEXT) FROM events WHERE event_name LIKE '%telegram%' OR event_name LIKE '%activity%' ORDER BY created_at`)
+	if err != nil {
+		parts = append(parts, "events_error="+err.Error())
+	} else {
+		events := []string{}
+		for eventRows.Next() {
+			var name, mode, payload string
+			if scanErr := eventRows.Scan(&name, &mode, &payload); scanErr != nil {
+				events = append(events, "scan_error="+scanErr.Error())
+				break
+			}
+			events = append(events, fmt.Sprintf("%s/%s=%s", name, mode, payload))
+		}
+		_ = eventRows.Close()
+		parts = append(parts, "events=["+strings.Join(events, "; ")+"]")
+	}
+	attemptRows, err := db.Query(`SELECT tool, execution_mode, status, CAST(COALESCE(failure, '{}') AS TEXT) FROM activity_attempts ORDER BY started_at`)
+	if err != nil {
+		parts = append(parts, "attempts_error="+err.Error())
+	} else {
+		attempts := []string{}
+		for attemptRows.Next() {
+			var tool, mode, status, failure string
+			if scanErr := attemptRows.Scan(&tool, &mode, &status, &failure); scanErr != nil {
+				attempts = append(attempts, "scan_error="+scanErr.Error())
+				break
+			}
+			attempts = append(attempts, fmt.Sprintf("%s/%s/%s=%s", tool, mode, status, failure))
+		}
+		_ = attemptRows.Close()
+		parts = append(parts, "attempts=["+strings.Join(attempts, "; ")+"]")
+	}
+	deliveryRows, err := db.Query(`SELECT subscriber_id, status, COALESCE(reason_code, ''), CAST(COALESCE(failure, '{}') AS TEXT) FROM event_deliveries WHERE subscriber_id LIKE '%telegram%' ORDER BY created_at`)
+	if err != nil {
+		parts = append(parts, "deliveries_error="+err.Error())
+	} else {
+		deliveries := []string{}
+		for deliveryRows.Next() {
+			var subscriber, status, reason, failure string
+			if scanErr := deliveryRows.Scan(&subscriber, &status, &reason, &failure); scanErr != nil {
+				deliveries = append(deliveries, "scan_error="+scanErr.Error())
+				break
+			}
+			deliveries = append(deliveries, fmt.Sprintf("%s/%s/%s=%s", subscriber, status, reason, failure))
+		}
+		_ = deliveryRows.Close()
+		parts = append(parts, "deliveries=["+strings.Join(deliveries, "; ")+"]")
+	}
+	return strings.Join(parts, " ")
 }
 
 func requireMockSessionShape(t testing.TB, sessions map[string]standingMemorySession) {
@@ -336,9 +470,10 @@ func assertMockSupportedEvidence(t testing.TB, backend, location, entityID strin
 	assertMockCount(t, db, "turns", 5, `SELECT COUNT(*) FROM agent_turns WHERE execution_mode = 'mock' AND (agent_id LIKE 'phrase-bot%' OR agent_id = 'memory-bot')`)
 	assertMockCount(t, db, "mock attempts", 5, `SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE adapter = 'mock_python' AND execution_mode = 'mock' AND state = 'settled'`)
 	assertMockCount(t, db, "non-mock attempts", 0, `SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE execution_mode <> 'mock'`)
-	assertMockCount(t, db, "Telegram activity attempts", 0, `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message'`)
+	assertMockCount(t, db, "Telegram mock activity attempts", 2, `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND execution_mode = 'mock' AND status = 'succeeded'`)
+	assertMockCount(t, db, "Telegram live activity attempts", 0, `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND execution_mode = 'live'`)
 	assertMockCount(t, db, "mock reply events", 2, `SELECT COUNT(*) FROM events WHERE event_name LIKE '%telegram.reply_requested' AND execution_mode = 'mock'`)
-	assertMockCount(t, db, "mock decision cards", 2, `SELECT COUNT(*) FROM decision_cards WHERE execution_mode = 'mock'`)
+	assertMockCount(t, db, "mock connector decision cards", 2, `SELECT COUNT(*) FROM decision_cards WHERE execution_mode = 'mock' AND CAST(snapshot AS TEXT) LIKE '%send_telegram_message%'`)
 	assertMockCount(t, db, "mock spend rows", 5, `SELECT COUNT(*) FROM spend_ledger WHERE execution_mode = 'mock'`)
 	assertMockCount(t, db, "live spend rows", 0, `SELECT COUNT(*) FROM spend_ledger WHERE execution_mode = 'live'`)
 	assertMockAtLeast(t, db, "mock author activity", 1, `SELECT COUNT(*) FROM author_activity_occurrences WHERE `+mockJSONTextExpression(backend, "projection", "execution_mode")+` = 'mock'`)

@@ -195,8 +195,8 @@ var kindContracts = map[Kind]kindContract{
 	},
 	KindActivityLifecycle: {
 		Transitions: set("started", "succeeded", "failed", "uncertain"), SourceOwner: "activity_attempts", SourceIdentityRequired: true,
-		AllowedProjectionFields:  set("subject_type", "subject_id", "node_id", "activity", "tool", "effect_class", "attempt", "event_type"),
-		RequiredProjectionFields: set("subject_type", "subject_id"), FailureTransitions: set("failed", "uncertain"),
+		AllowedProjectionFields:  set("subject_type", "subject_id", "node_id", "activity", "tool", "effect_class", "attempt", "event_type", "execution_mode"),
+		RequiredProjectionFields: set("subject_type", "subject_id", "execution_mode"), FailureTransitions: set("failed", "uncertain"),
 		SubjectStrategy: subjectTypedIdentity, SubjectTypes: set("activity"),
 	},
 	KindEffectLifecycle: {

@@ -200,7 +200,7 @@ func workflowGateBundleHash(ctx context.Context, pc *PipelineCoordinator) string
 		}
 	}
 	if pc != nil {
-		return strings.TrimSpace(pc.bundleFingerprint)
+		return strings.TrimSpace(pc.bundleHash)
 	}
 	return ""
 }

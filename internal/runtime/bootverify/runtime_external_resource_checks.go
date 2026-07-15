@@ -1,13 +1,16 @@
 package bootverify
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func (c *checkerContext) credentials() []Finding {
@@ -15,31 +18,29 @@ func (c *checkerContext) credentials() []Finding {
 		return c.credentialFindings
 	}
 	c.credentialLoaded = true
-	if c.opts.Credentials != nil {
-		missing, err := runtimecredentials.MissingRequired(c.ctx, c.opts.Credentials, c.source)
-		if err != nil {
-			c.credentialFindings = append(c.credentialFindings, Finding{
-				CheckID:  "credential_key_exists",
-				Severity: "error",
-				Message:  strings.TrimSpace(err.Error()),
-				Location: "global",
-			})
-			return c.credentialFindings
-		}
-		for _, item := range missing {
-			requiredBy := make([]string, 0, len(item.RequiredBy))
-			for _, ref := range item.RequiredBy {
-				requiredBy = append(requiredBy, strings.TrimSpace(ref.Kind)+" "+strings.TrimSpace(ref.Name))
-			}
-			c.credentialFindings = append(c.credentialFindings, Finding{
-				CheckID:  "credential_key_exists",
-				Severity: "warning",
-				Message:  fmtCredentialWarning(item.Key, requiredBy),
-				Location: item.Key,
-			})
-		}
+	missing, err := MissingStaticCredentialRequirements(c.ctx, c.source, c.opts)
+	if err != nil {
+		c.credentialFindings = append(c.credentialFindings, Finding{
+			CheckID:  "credential_key_exists",
+			Severity: "error",
+			Message:  strings.TrimSpace(err.Error()),
+			Location: "global",
+		})
+		return c.credentialFindings
 	}
-	managed, err := runtimemanagedcredentials.MissingOrUnusableRequired(c.ctx, c.opts.ManagedCredentials, c.source)
+	for _, item := range missing {
+		requiredBy := make([]string, 0, len(item.RequiredBy))
+		for _, ref := range item.RequiredBy {
+			requiredBy = append(requiredBy, strings.TrimSpace(ref.Kind)+" "+strings.TrimSpace(ref.Name))
+		}
+		c.credentialFindings = append(c.credentialFindings, Finding{
+			CheckID:  "credential_key_exists",
+			Severity: "warning",
+			Message:  fmtCredentialWarning(item.Key, requiredBy),
+			Location: item.Key,
+		})
+	}
+	managed, err := MissingManagedCredentialRequirements(c.ctx, c.source, c.opts)
 	if err != nil {
 		c.credentialFindings = append(c.credentialFindings, Finding{
 			CheckID:  "managed_credential_state",
@@ -62,6 +63,67 @@ func (c *checkerContext) credentials() []Finding {
 		})
 	}
 	return c.credentialFindings
+}
+
+func MissingStaticCredentialRequirements(ctx context.Context, source semanticview.Source, opts Options) ([]runtimecredentials.Descriptor, error) {
+	if opts.Credentials == nil {
+		return nil, nil
+	}
+	missing, err := runtimecredentials.MissingRequired(ctx, opts.Credentials, source)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]runtimecredentials.Descriptor, 0, len(missing))
+	for _, descriptor := range missing {
+		descriptor.RequiredBy = liveStaticCredentialRequirements(source, opts, descriptor.RequiredBy)
+		if len(descriptor.RequiredBy) > 0 {
+			out = append(out, descriptor)
+		}
+	}
+	return out, nil
+}
+
+func liveStaticCredentialRequirements(_ semanticview.Source, opts Options, requirements []runtimecredentials.Requirement) []runtimecredentials.Requirement {
+	out := make([]runtimecredentials.Requirement, 0, len(requirements))
+	for _, requirement := range requirements {
+		if requiresLiveCredential(opts, requirement.Kind) {
+			out = append(out, requirement)
+		}
+	}
+	return out
+}
+
+func liveManagedCredentialRequirements(_ semanticview.Source, opts Options, requirements []runtimemanagedcredentials.Requirement) []runtimemanagedcredentials.Requirement {
+	out := make([]runtimemanagedcredentials.Requirement, 0, len(requirements))
+	for _, requirement := range requirements {
+		if requiresLiveCredential(opts, requirement.Kind) {
+			out = append(out, requirement)
+		}
+	}
+	return out
+}
+
+func requiresLiveCredential(opts Options, kind string) bool {
+	return opts.ExecutionMode != executionmode.Mock || strings.TrimSpace(kind) != "tool"
+}
+
+func MissingManagedCredentialRequirements(ctx context.Context, source semanticview.Source, opts Options) ([]runtimemanagedcredentials.RequirementDescriptor, error) {
+	descriptors, err := runtimemanagedcredentials.ListRequirementDescriptors(ctx, opts.ManagedCredentials, source)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]runtimemanagedcredentials.RequirementDescriptor, 0)
+	for _, descriptor := range descriptors {
+		descriptor.RequiredBy = liveManagedCredentialRequirements(source, opts, descriptor.RequiredBy)
+		for _, requirement := range descriptor.RequiredBy {
+			evaluation := runtimemanagedcredentials.EvaluateRequirement(descriptor, requirement)
+			if !evaluation.Satisfied {
+				out = append(out, evaluation.Descriptor)
+				break
+			}
+		}
+	}
+	return out, nil
 }
 
 func fmtManagedCredentialWarning(item runtimemanagedcredentials.RequirementDescriptor, requiredBy []string) string {

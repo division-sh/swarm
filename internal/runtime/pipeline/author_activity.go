@@ -151,7 +151,7 @@ func recordActivityAttemptStory(ctx context.Context, rec ActivityAttemptRecord, 
 		OccurredAt: activityOccurrenceTime(rec, transition), RunID: rec.RunID, EntityID: rec.EntityID, FlowID: rec.FlowInstance,
 		Projection: runtimeauthoractivity.Projection{
 			SubjectType: "activity", SubjectID: rec.ActivityID, NodeID: rec.NodeID, Activity: rec.ActivityID,
-			Tool: rec.Tool, EffectClass: rec.EffectClass, Attempt: intPointer(retry), EventType: eventType,
+			Tool: rec.Tool, EffectClass: rec.EffectClass, Attempt: intPointer(retry), EventType: eventType, ExecutionMode: string(rec.ExecutionMode),
 		},
 		Failure: failure,
 	})

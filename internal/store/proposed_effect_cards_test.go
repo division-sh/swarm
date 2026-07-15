@@ -13,6 +13,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
@@ -337,7 +338,7 @@ func TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothSt
 
 				journal := proposedEffectTestJournal(cards)
 				started, inserted, err := journal.StartActivityAttempt(ctx, runtimepipeline.ActivityAttemptRecord{
-					RequestEventID: continuation.RequestEventID, RunID: runID, SourceEventID: continuation.SourceEventID,
+					RequestEventID: continuation.RequestEventID, RunID: runID, ExecutionMode: continuation.ExecutionMode, SourceEventID: continuation.SourceEventID,
 					EntityID: continuation.EntityID, FlowInstance: continuation.FlowInstance, NodeID: continuation.NodeID,
 					HandlerEventKey: continuation.HandlerEventKey, ActivityID: continuation.ActivityID, Tool: continuation.Tool,
 					EffectClass: string(continuation.EffectClass), Attempt: 1, Status: runtimepipeline.ActivityAttemptStatusStarted,
@@ -371,8 +372,28 @@ func TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothSt
 				if err != nil || readback.DispatchState != status || readback.ContinuationState != decisioncard.ProposedEffectRequestReleased {
 					t.Fatalf("readback = %#v, %v; want authorization=decided continuation=released dispatch=%s", readback, err, status)
 				}
+				overwriteProposedEffectAttemptMode(t, ctx, cards, continuation.RequestEventID, executionmode.Mock)
+				if _, err := store.ProposedEffectReadback(ctx, card.CardID); err == nil || !strings.Contains(err.Error(), "execution mode") {
+					t.Fatalf("cross-mode readback error = %v", err)
+				}
 			})
 		}
+	}
+}
+
+func overwriteProposedEffectAttemptMode(t *testing.T, ctx context.Context, cards decisioncard.Store, requestEventID string, mode executionmode.Mode) {
+	t.Helper()
+	var err error
+	switch selected := cards.(type) {
+	case *SQLiteRuntimeStore:
+		_, err = selected.DB.ExecContext(ctx, `UPDATE activity_attempts SET execution_mode = ? WHERE request_event_id = ?`, mode, requestEventID)
+	case *PostgresStore:
+		_, err = selected.DB.ExecContext(ctx, `UPDATE activity_attempts SET execution_mode = $2 WHERE request_event_id = $1::uuid`, requestEventID, mode)
+	default:
+		t.Fatalf("unsupported proposed-effect test store %T", cards)
+	}
+	if err != nil {
+		t.Fatalf("overwrite proposed-effect attempt mode: %v", err)
 	}
 }
 

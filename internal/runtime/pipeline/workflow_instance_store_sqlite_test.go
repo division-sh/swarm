@@ -463,6 +463,7 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 		`CREATE TABLE activity_attempts (
 			request_event_id TEXT PRIMARY KEY,
 			run_id TEXT NOT NULL,
+			execution_mode TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
 			source_event_id TEXT,
 			parent_event_id TEXT,
 			entity_id TEXT,

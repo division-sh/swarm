@@ -374,13 +374,16 @@ func (am *AgentManager) resolveAgentModel(cfg *models.AgentConfig) error {
 	cfg.ResolvedModel = resolved.ConcreteModel
 	cfg.ResolvedLLMProvider = resolved.Provider
 	cfg.ResolvedLLMTransport = resolved.Transport
-	if profile.ID == llmselection.BackendMock {
-		cfg.ExecutionMode = runtimeeffects.ExecutionModeMock
+	executionMode, err := llmselection.ExecutionModeForProfile(profile)
+	if err != nil {
+		return fmt.Errorf("agent %s execution mode resolution failed: %w", strings.TrimSpace(cfg.ID), err)
+	}
+	cfg.ExecutionMode = executionMode
+	if executionMode == runtimeeffects.ExecutionModeMock {
 		if !cfg.Mock.Configured() {
 			return fmt.Errorf("agent %s selects llm_backend %q but does not declare a mock performance", strings.TrimSpace(cfg.ID), profile.ID)
 		}
 	} else {
-		cfg.ExecutionMode = runtimeeffects.ExecutionModeLive
 		cfg.Mock = mockperformance.Performance{}
 	}
 	return nil

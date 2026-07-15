@@ -145,12 +145,16 @@ func proposedEffectReadback(ctx context.Context, db decisionCardSQL, cardID stri
 	case decisioncard.ProposedEffectSuperseded:
 		dispatchState = "superseded"
 	}
-	query := `SELECT status FROM activity_attempts WHERE request_event_id = ?`
+	query := `SELECT status, execution_mode FROM activity_attempts WHERE request_event_id = ?`
 	if postgres {
-		query = `SELECT status FROM activity_attempts WHERE request_event_id = $1::uuid`
+		query = `SELECT status, execution_mode FROM activity_attempts WHERE request_event_id = $1::uuid`
 	}
 	var attemptState string
-	if err := db.QueryRowContext(ctx, query, continuation.RequestEventID).Scan(&attemptState); err == nil {
+	var attemptMode executionmode.Mode
+	if err := db.QueryRowContext(ctx, query, continuation.RequestEventID).Scan(&attemptState, &attemptMode); err == nil {
+		if attemptMode != continuation.ExecutionMode {
+			return decisioncard.ProposedEffectReadback{}, fmt.Errorf("proposed effect %s activity attempt execution mode %q conflicts with continuation mode %q", cardID, attemptMode, continuation.ExecutionMode)
+		}
 		dispatchState = strings.TrimSpace(attemptState)
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return decisioncard.ProposedEffectReadback{}, err

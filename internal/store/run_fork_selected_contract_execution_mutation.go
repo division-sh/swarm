@@ -166,7 +166,7 @@ func RequireRunForkSelectedContractExecutionCapabilities(caps StoreSchemaCapabil
 	}{
 		{runForkSelectedContractExecutionLineageTable, []string{"fork_run_id", "source_run_id", "source_event_id", "fork_event_id", "event_name", "created_at"}},
 		{runForkSelectedContractBranchDivergenceTable, []string{"fork_run_id", "source_run_id", "fork_event_id", "owner", "policy", "source_run_status_at_activation", "source_run_status_after_activation", "source_frozen", "source_advanced_facts", "created_at"}},
-		{"activity_attempts", []string{"request_event_id", "run_id", "source_event_id", "parent_event_id", "entity_id", "node_id", "handler_event_key", "activity_id", "tool", "effect_class", "attempt", "status", "success_event", "failure_event", "result_event_id", "result_event_type", "result_payload", "failure", "input_hash", "loop_generation", "loop_stage", "started_at", "completed_at", "updated_at"}},
+		{"activity_attempts", []string{"request_event_id", "run_id", "execution_mode", "source_event_id", "parent_event_id", "entity_id", "node_id", "handler_event_key", "activity_id", "tool", "effect_class", "attempt", "status", "success_event", "failure_event", "result_event_id", "result_event_type", "result_payload", "failure", "input_hash", "loop_generation", "loop_stage", "started_at", "completed_at", "updated_at"}},
 	}
 	for _, requirement := range required {
 		if catalog.hasColumns(requirement.table, requirement.columns...) {

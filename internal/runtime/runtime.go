@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
+	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -36,6 +37,7 @@ import (
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
@@ -88,6 +90,7 @@ type RuntimeOptions struct {
 	ManagedCredentials               runtimemanagedcredentials.Store
 	ProviderCredentials              runtimecredentials.Store
 	ProviderTriggerCatalog           *providertriggers.CatalogSnapshot
+	MockConnectorResponses           *providerconnectors.MockResponsePlan
 	BootStartedAt                    time.Time
 	BootProgress                     func(BootProgressEvent)
 	SystemContainers                 []string
@@ -113,6 +116,7 @@ type validatedRuntimeDeps struct {
 	PromptResolver             runtimecontracts.PromptResolver
 	Credentials                runtimecredentials.Store
 	ManagedCredentials         runtimemanagedcredentials.Store
+	ExecutionMode              runtimeeffects.ExecutionMode
 	ProviderCredentialResolver llm.ProviderCredentialResolver
 	Authority                  runtimeauthority.Provider
 	EmitRegistry               *runtimetools.EmitRegistry
@@ -529,7 +533,7 @@ func runtimeThrottleSuppressPrefixes(source semanticview.Source) []string {
 	}
 }
 
-func ensureWorkflowBootWiring(opts RuntimeOptions) error {
+func ensureWorkflowBootWiring(opts RuntimeOptions, executionMode runtimeeffects.ExecutionMode) error {
 	if opts.WorkflowModule == nil {
 		return fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
 	}
@@ -542,6 +546,8 @@ func ensureWorkflowBootWiring(opts RuntimeOptions) error {
 	validationOpts := DefaultWorkflowContractValidationOptions(opts.Credentials)
 	validationOpts.ManagedCredentials = opts.ManagedCredentials
 	validationOpts.ProviderTriggerCatalog = opts.ProviderTriggerCatalog
+	validationOpts.ExecutionMode = executionMode
+	validationOpts.MockConnectorResponses = opts.MockConnectorResponses
 	result, err := ValidateWorkflowContractSurface(context.Background(), source, validationOpts)
 	if err != nil {
 		return err
@@ -616,8 +622,13 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	if err := cfg.ValidateExtensions(); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime config validation failed: %w", err)
 	}
-	if _, err := cfg.LLMBackendProfile(); err != nil {
+	profile, err := cfg.LLMBackendProfile()
+	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime config validation failed: %w", err)
+	}
+	executionMode, err := llmselection.ExecutionModeForProfile(profile)
+	if err != nil {
+		return validatedRuntimeDeps{}, fmt.Errorf("runtime execution mode validation failed: %w", err)
 	}
 	if blocker := strings.TrimSpace(stores.ConstructionBlocker); blocker != "" {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime store boundary is not construction-ready: %s", blocker)
@@ -634,7 +645,7 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 		opts.WorkflowModule = workflowModule
 		source = wrappedSource
 	}
-	if err := ensureWorkflowBootWiring(opts); err != nil {
+	if err := ensureWorkflowBootWiring(opts, executionMode); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
 	if source == nil {
@@ -670,6 +681,7 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 		PromptResolver:             promptResolver,
 		Credentials:                credentials,
 		ManagedCredentials:         opts.ManagedCredentials,
+		ExecutionMode:              executionMode,
 		ProviderCredentialResolver: providerCredentialResolver,
 		Authority:                  authorityProvider,
 		EmitRegistry:               emitRegistry,
@@ -836,8 +848,9 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			EventReceiptsCapability: boot.EventReceiptCapability,
 			Credentials:             rt.Credentials,
 			ManagedCredentials:      rt.ManagedCredentials,
+			MockConnectorResponses:  opts.MockConnectorResponses,
 			ArtifactRoot:            artifactRoot,
-			BundleFingerprint:       opts.BundleFingerprint,
+			BundleHash:              opts.BundleSourceFact.BundleHash,
 			DecisionCardCadence: decisioncard.CadencePolicy{
 				FirstReminderDelay: rt.Config.Runtime.DecisionCardFirstReminder,
 				UrgencyDelay:       rt.Config.Runtime.DecisionCardUrgency,
@@ -916,7 +929,13 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			return managerRef
 		},
 	}, stores.ScheduleStore)
-	if missing, err := runtimecredentials.MissingRequired(ctx, rt.Credentials, source); err != nil {
+	credentialValidationOptions := runtimebootverify.Options{
+		Credentials:            rt.Credentials,
+		ManagedCredentials:     rt.ManagedCredentials,
+		ExecutionMode:          boot.ExecutionMode,
+		MockConnectorResponses: opts.MockConnectorResponses,
+	}
+	if missing, err := runtimebootverify.MissingStaticCredentialRequirements(ctx, source, credentialValidationOptions); err != nil {
 		return nil, fmt.Errorf("credential validation failed: %w", err)
 	} else {
 		if bootWarningsFatal() && len(missing) > 0 {
@@ -940,7 +959,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			slog.Warn("credential requirement warning", "key", item.Key, "required_by", strings.Join(requiredBy, ", "))
 		}
 	}
-	if missing, err := runtimemanagedcredentials.MissingOrUnusableRequired(ctx, rt.ManagedCredentials, source); err != nil {
+	if missing, err := runtimebootverify.MissingManagedCredentialRequirements(ctx, source, credentialValidationOptions); err != nil {
 		return nil, fmt.Errorf("managed credential validation failed: %w", err)
 	} else {
 		if bootWarningsFatal() && len(missing) > 0 {

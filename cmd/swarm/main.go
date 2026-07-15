@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/platform"
+	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
@@ -383,6 +384,7 @@ type serveOptions struct {
 	TestWorkflowNodeHandlerStartHook runtimepipeline.WorkflowNodeHandlerStartHook
 	TestLifecycleProbe               runtimelifecycleprobe.Observer
 	TestLLMRuntime                   runtimellm.Runtime
+	TestMockConnectorResponses       *providerconnectors.MockResponsePlan
 	TestOutboxSweeperConfig          runtimebus.OutboxSweeperConfig
 	TestRuntimeReadyHook             func(*runtime.Runtime)
 	TestRuntimeContextsReadyHook     func(*runtime.RuntimeContextManager)
@@ -747,6 +749,15 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	validationOpts := runtime.DefaultWorkflowContractValidationOptions(req.Credentials)
 	validationOpts.ManagedCredentials = req.ManagedCredentials
 	validationOpts.ProviderTriggerCatalog = req.ProviderTriggerCatalog
+	profile, err := req.Config.LLMBackendProfile()
+	if err != nil {
+		return serveRuntimeBundleContext{}, fmt.Errorf("resolve llm backend profile for workflow validation: %w", err)
+	}
+	validationOpts.ExecutionMode, err = llmselection.ExecutionModeForProfile(profile)
+	if err != nil {
+		return serveRuntimeBundleContext{}, fmt.Errorf("resolve workflow execution mode: %w", err)
+	}
+	validationOpts.MockConnectorResponses = req.Options.TestMockConnectorResponses
 	validation, err := runtime.ValidateWorkflowContractSurface(req.Ctx, loaded.source, validationOpts)
 	if err != nil {
 		return serveRuntimeBundleContext{}, err
@@ -775,6 +786,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			ManagedCredentials:               req.ManagedCredentials,
 			ProviderCredentials:              req.ProviderCredentials,
 			ProviderTriggerCatalog:           req.ProviderTriggerCatalog,
+			MockConnectorResponses:           req.Options.TestMockConnectorResponses,
 			BootStartedAt:                    req.BootStartedAt,
 			BootProgress:                     req.BootProgress,
 			SystemContainers:                 systemWorkspaceContainers(workspaces),
@@ -2649,6 +2661,10 @@ func verifyWorkflowContractValidationOptions(repo, configPath string, source sem
 	}
 	opts.ValidateLLMModelResolution = true
 	opts.LLMProfile = profile
+	opts.ExecutionMode, err = llmselection.ExecutionModeForProfile(profile)
+	if err != nil {
+		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("resolve workflow execution mode: %w", err)
+	}
 	opts.ModelAliases = configResult.Config.LLM.Models
 	providerPacks, err := loadConfiguredProviderTriggerPacks(repo, configResult)
 	if err != nil {
