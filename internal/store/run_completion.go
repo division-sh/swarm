@@ -182,7 +182,10 @@ func normalRunCompletionProposedEffectsSettledTx(ctx context.Context, tx *sql.Tx
 	`, runID).Scan(&unresolved); err != nil {
 		return false, fmt.Errorf("check normal run proposed-effect settlement: %w", err)
 	}
-	return !unresolved, nil
+	if unresolved {
+		return false, nil
+	}
+	return normalRunCompletionProposedEffectOutcomeEventsPersistedTx(ctx, tx, runID, true)
 }
 
 func normalRunCompletionHumanTasksSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
@@ -217,7 +220,10 @@ func normalRunCompletionHumanTasksSettledTx(ctx context.Context, tx *sql.Tx, run
 	`, runID).Scan(&unresolved); err != nil {
 		return false, fmt.Errorf("check normal run human-task settlement: %w", err)
 	}
-	return !unresolved, nil
+	if unresolved {
+		return false, nil
+	}
+	return normalRunCompletionHumanTaskOutcomeEventsPersistedTx(ctx, tx, runID, true)
 }
 
 func normalRunCompletionGateObligationsSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
