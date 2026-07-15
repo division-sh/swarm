@@ -29,7 +29,7 @@ func TestForkedRunSelectedContractExecutionIssueClaimHeartbeatAndTerminalMutatio
 				surface = base.sqlite
 				fixture = newSelectedCompletionFixture(t, surface, base.db, true)
 			}
-			ctx := context.Background()
+			ctx := testAuthorActivityBundleSourceContext()
 			issued, err := surface.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 			if err != nil {
 				t.Fatal(err)
@@ -70,7 +70,7 @@ func markSelectedTestRunForked(t *testing.T, fixture selectedCompletionFixture, 
 	t.Helper()
 	continuedRunID := uuid.NewString()
 	if fixture.sqlite {
-		if _, err := fixture.db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, continuedRunID, now); err != nil {
+		if _, err := fixture.db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES (?, 'running', ?, 'ephemeral', ?)`, continuedRunID, authorActivityTestBundleHash, now); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := fixture.db.ExecContext(context.Background(), `UPDATE runs SET status = 'forked', ended_at = ?, continued_as_run_id = ? WHERE run_id = ?`, now, continuedRunID, fixture.forkRun); err != nil {
@@ -78,7 +78,7 @@ func markSelectedTestRunForked(t *testing.T, fixture selectedCompletionFixture, 
 		}
 		return
 	}
-	if _, err := fixture.db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, continuedRunID, now); err != nil {
+	if _, err := fixture.db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'running', $2, 'ephemeral', $3)`, continuedRunID, authorActivityTestBundleHash, now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.db.ExecContext(context.Background(), `UPDATE runs SET status = 'forked', ended_at = $2, continued_as_run_id = $3::uuid WHERE run_id = $1::uuid`, fixture.forkRun, now, continuedRunID); err != nil {
@@ -92,7 +92,7 @@ func TestForkedSourceCannotWriteSelectedContractRouteRecoveryEvidence(t *testing
 	insertForkedConsumerEvent(t, fixture, eventID, "selected.route.source", fixture.forkedAt.Add(-time.Minute))
 	fixture.freeze(t)
 	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
-	_, err := fixture.postgres.RecordRunForkSelectedContractRouteRecovery(context.Background(), RunForkSelectedContractRouteRecoveryRequest{
+	_, err := fixture.postgres.RecordRunForkSelectedContractRouteRecovery(testAuthorActivityBundleSourceContext(), RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID: fixture.continued, SourceRunID: fixture.sourceRun, ForkEventID: eventID,
 		ContractSelection: selection, RouteTopology: topology, RecipientPlanning: planning,
 	})

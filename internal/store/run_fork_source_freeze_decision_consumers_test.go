@@ -33,7 +33,7 @@ func TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance(t *t
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
-			ctx := context.Background()
+			ctx := testAuthorActivityBundleSourceContext()
 			now := fixture.forkedAt.Add(-time.Minute)
 			var surface forkedDecisionConsumerSurface
 			if fixture.postgres != nil {

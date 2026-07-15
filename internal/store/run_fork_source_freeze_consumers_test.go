@@ -39,19 +39,19 @@ func newForkedConsumerTestBackend(t *testing.T, backend string) *forkedConsumerT
 		_, db, _ := testutil.StartPostgres(t)
 		out.db = db
 		out.postgres = &PostgresStore{DB: db}
-		if _, err := db.Exec(`INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, out.sourceRun, now.Add(-time.Hour)); err != nil {
+		if _, err := db.Exec(`INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'running', $2, 'ephemeral', $3)`, out.sourceRun, authorActivityTestBundleHash, now.Add(-time.Hour)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.Exec(`INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id, started_at) VALUES ($1::uuid, 'paused', $2::uuid, $3::uuid, $4)`, out.continued, out.sourceRun, uuid.NewString(), now); err != nil {
+		if _, err := db.Exec(`INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'paused', $2::uuid, $3::uuid, $4, 'ephemeral', $5)`, out.continued, out.sourceRun, uuid.NewString(), authorActivityTestBundleHash, now); err != nil {
 			t.Fatal(err)
 		}
 	case "sqlite":
 		out.sqlite = newBootstrappedSQLiteRuntimeStoreForTest(t)
 		out.db = out.sqlite.DB
-		if _, err := out.db.Exec(`INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, out.sourceRun, now.Add(-time.Hour)); err != nil {
+		if _, err := out.db.Exec(`INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES (?, 'running', ?, 'ephemeral', ?)`, out.sourceRun, authorActivityTestBundleHash, now.Add(-time.Hour)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := out.db.Exec(`INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id, started_at) VALUES (?, 'paused', ?, ?, ?)`, out.continued, out.sourceRun, uuid.NewString(), now); err != nil {
+		if _, err := out.db.Exec(`INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id, bundle_hash, bundle_source, started_at) VALUES (?, 'paused', ?, ?, ?, 'ephemeral', ?)`, out.continued, out.sourceRun, uuid.NewString(), authorActivityTestBundleHash, now); err != nil {
 			t.Fatal(err)
 		}
 	default:
@@ -62,11 +62,12 @@ func newForkedConsumerTestBackend(t *testing.T, backend string) *forkedConsumerT
 
 func (b *forkedConsumerTestBackend) freeze(t *testing.T) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityBundleSourceContext()
 	if b.postgres != nil {
 		lineage := runForkActivationLineage{
 			SourceRunID: b.sourceRun, ForkRunID: b.continued, ForkEventID: uuid.NewString(),
 			ForkEventName: "consumer.freeze", ForkEventTime: b.forkedAt, SourceRunStatus: "running", ForkStatus: "paused",
+			SourceBundleHash: authorActivityTestBundleHash, ForkBundleHash: authorActivityTestBundleHash,
 		}
 		if err := commitRunForkSourceFreezeForTest(ctx, b.db, lineage, b.forkedAt, true); err != nil {
 			t.Fatal(err)
@@ -100,7 +101,7 @@ func TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude(t 
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
-			ctx := context.Background()
+			ctx := testAuthorActivityBundleSourceContext()
 			eventID := uuid.NewString()
 			if fixture.postgres != nil {
 				if _, err := fixture.db.ExecContext(ctx, `
@@ -146,7 +147,7 @@ func TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude(t 
 
 func assertForkedEventConsumerRefusals(t *testing.T, store any, eventID string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityBundleSourceContext()
 	routes := []events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "late-agent"}}
 	switch s := store.(type) {
 	case *PostgresStore:
@@ -217,7 +218,7 @@ type forkedEventSelectorSurface interface {
 
 func assertForkedEventSelectors(t *testing.T, store forkedEventSelectorSurface, runID, eventID string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityBundleSourceContext()
 	for label, list := range map[string]func() ([]events.PersistedReplayEvent, error){
 		"missing receipt": func() ([]events.PersistedReplayEvent, error) {
 			return store.ListEventsMissingPipelineReceiptForRun(ctx, runID, time.Time{}, 10)
@@ -242,7 +243,7 @@ func TestForkedSourceTimerConsumersRefuseWhileClaimsCanBeReleased(t *testing.T) 
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
-			ctx := context.Background()
+			ctx := testAuthorActivityBundleSourceContext()
 			schedule := runtimepipeline.Schedule{
 				RunID: fixture.sourceRun, AgentID: "freeze-agent", EventType: "freeze.timer", Mode: "once",
 				At: fixture.forkedAt.Add(time.Hour), TaskID: "freeze-timer", Payload: []byte(`{"timer":true}`),
@@ -310,7 +311,7 @@ func TestForkedSourceSessionTurnAndConversationConsumersRefuse(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
 			fixture.freeze(t)
-			ctx := runtimeeffects.WithExecutionMode(context.Background(), runtimeeffects.ExecutionModeLive)
+			ctx := runtimeeffects.WithExecutionMode(testAuthorActivityBundleSourceContext(), runtimeeffects.ExecutionModeLive)
 			identity := agentmemory.Identity{RunID: fixture.sourceRun, AgentID: "freeze-agent", FlowInstance: "freeze/flow"}
 			lease := &runtimesessions.Lease{SessionID: uuid.NewString(), Identity: identity, LockOwner: "worker", ExpiresAt: time.Now().Add(time.Minute)}
 			conversation := runtimellm.ConversationRecord{

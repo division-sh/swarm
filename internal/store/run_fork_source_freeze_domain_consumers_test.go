@@ -35,7 +35,7 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
-			ctx := runtimecorrelation.WithRunID(context.Background(), fixture.sourceRun)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityBundleSourceContext(), fixture.sourceRun)
 			var surface forkedDomainConsumerSurface
 			if fixture.postgres != nil {
 				surface = fixture.postgres
@@ -180,7 +180,7 @@ func TestForkedSourceDirectiveReservationTransitionsAndRecoveryRefuse(t *testing
 			} else {
 				surface = fixture.sqlite
 			}
-			ctx := context.Background()
+			ctx := testAuthorActivityBundleSourceContext()
 			now := fixture.forkedAt.Add(time.Minute)
 			request := forkedDirectiveReservation(t, fixture.sourceRun, now)
 			_, err := surface.ReserveDirectiveOperation(ctx, request)
@@ -292,7 +292,7 @@ func TestForkedSourceManagedExternalEffectAdmissionTransitionsAndRecoveryRefuse(
 				Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: fixture.sourceRun,
 				AgentID: token.AgentID, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "freeze/effect",
 			}
-			ctx := runtimecorrelation.WithRunID(context.Background(), fixture.sourceRun)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityBundleSourceContext(), fixture.sourceRun)
 			if current, err := surface.IsExternalEffectAuthorityCurrent(ctx, authority); err != nil || current {
 				t.Fatalf("frozen external authority current=%v err=%v", current, err)
 			}
@@ -359,9 +359,9 @@ func seedForkedExternalEffectAttempt(t *testing.T, fixture *forkedConsumerTestBa
 	}
 	agentQuery := `INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at) VALUES (?, 'freeze/effect', 'worker', 'standard', 'mock', TRUE, 'authored', 'active', ?)`
 	operationQuery := `INSERT INTO runtime_external_effect_operations (
-		operation_id, effect_kind, effect_class, execution_mode, authority_kind, authority_id, agent_id,
+		operation_id, effect_kind, effect_class, execution_mode, bundle_hash, authority_kind, authority_id, agent_id,
 		runtime_epoch, generation, capability_plan_fingerprint, authority_evidence, lineage, request_fingerprint, state, created_at, updated_at
-	) VALUES (?, 'native_command', 'write_or_unknown', 'live', 'normal_agent', ?, ?, 1, 1, ?, '{}', ?, 'frozen-fingerprint', 'launched', ?, ?)`
+	) VALUES (?, 'native_command', 'write_or_unknown', 'live', ?, 'normal_agent', ?, ?, 1, 1, ?, '{}', ?, 'frozen-fingerprint', 'launched', ?, ?)`
 	attemptQuery := `INSERT INTO runtime_external_effect_attempts (
 		attempt_id, operation_id, attempt_ordinal, adapter, transport, execution_mode, runtime_epoch, generation,
 		execution_owner, lease_expires_at, fence_generation, usage_target_kind, usage_target_id, capability_surface_id,
@@ -371,9 +371,9 @@ func seedForkedExternalEffectAttempt(t *testing.T, fixture *forkedConsumerTestBa
 	if fixture.postgres != nil {
 		agentQuery = `INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at) VALUES ($1, 'freeze/effect', 'worker', 'standard', 'mock', TRUE, 'authored', 'active', $2)`
 		operationQuery = `INSERT INTO runtime_external_effect_operations (
-			operation_id, effect_kind, effect_class, execution_mode, authority_kind, authority_id, agent_id,
+			operation_id, effect_kind, effect_class, execution_mode, bundle_hash, authority_kind, authority_id, agent_id,
 			runtime_epoch, generation, capability_plan_fingerprint, authority_evidence, lineage, request_fingerprint, state, created_at, updated_at
-		) VALUES ($1::uuid, 'native_command', 'write_or_unknown', 'live', 'normal_agent', $2, $3, 1, 1, $4, '{}'::jsonb, $5::jsonb, 'frozen-fingerprint', 'launched', $6, $6)`
+		) VALUES ($1::uuid, 'native_command', 'write_or_unknown', 'live', $2, 'normal_agent', $3, $4, 1, 1, $5, '{}'::jsonb, $6::jsonb, 'frozen-fingerprint', 'launched', $7, $7)`
 		attemptQuery = `INSERT INTO runtime_external_effect_attempts (
 			attempt_id, operation_id, attempt_ordinal, adapter, transport, execution_mode, runtime_epoch, generation,
 			execution_owner, lease_expires_at, fence_generation, usage_target_kind, usage_target_id, capability_surface_id,
@@ -383,9 +383,9 @@ func seedForkedExternalEffectAttempt(t *testing.T, fixture *forkedConsumerTestBa
 	if _, err := fixture.db.ExecContext(context.Background(), agentQuery, agentID, now); err != nil {
 		t.Fatal(err)
 	}
-	operationArgs := []any{operationID, agentID, agentID, capabilityPlanFingerprint, lineage, now, now}
+	operationArgs := []any{operationID, authorActivityTestBundleHash, agentID, agentID, capabilityPlanFingerprint, lineage, now, now}
 	if fixture.postgres != nil {
-		operationArgs = operationArgs[:6]
+		operationArgs = operationArgs[:7]
 	}
 	if _, err := fixture.db.ExecContext(context.Background(), operationQuery, operationArgs...); err != nil {
 		t.Fatal(err)
