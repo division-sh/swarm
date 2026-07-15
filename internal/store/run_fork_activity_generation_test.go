@@ -71,12 +71,12 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	resultEventID := activityidentity.ResultEventID(fact, "write.succeeded")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO activity_attempts (
-			request_event_id, run_id, source_event_id, entity_id, flow_instance, node_id, handler_event_key,
+			request_event_id, run_id, execution_mode, source_event_id, entity_id, flow_instance, node_id, handler_event_key,
 			activity_id, tool, effect_class, attempt, status, success_event, failure_event,
 			result_event_id, result_event_type, result_payload, input_hash, loop_generation, loop_stage,
 			started_at, completed_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, $3::uuid, $4::uuid, 'flow-a/1', 'writer', 'review.accepted',
+			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow-a/1', 'writer', 'review.accepted',
 			'commit', 'provider.write', 'non_idempotent_write', 1, 'succeeded', 'write.succeeded', 'write.failed',
 			$5::uuid, 'write.succeeded', $6::jsonb, 'input-hash', $7::jsonb, 'review', $8, $8, $8
 		)
@@ -278,12 +278,12 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	resultEventID := activityidentity.ResultEventID(fact, "write.failed")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO activity_attempts (
-			request_event_id, run_id, source_event_id, entity_id, flow_instance, node_id, handler_event_key,
+			request_event_id, run_id, execution_mode, source_event_id, entity_id, flow_instance, node_id, handler_event_key,
 			activity_id, tool, effect_class, attempt, status, success_event, failure_event,
 			result_event_id, result_event_type, result_payload, failure, input_hash, loop_generation, loop_stage,
 			started_at, completed_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, $3::uuid, $4::uuid, 'flow-a/1', 'writer', 'review.accepted',
+			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow-a/1', 'writer', 'review.accepted',
 			'commit', 'provider.write', 'non_idempotent_write', 1, 'failed', 'write.succeeded', 'write.failed',
 			$5::uuid, 'write.failed', $6::jsonb, $7::jsonb, 'input-hash', $8::jsonb, 'review', $9, $9, $9
 		)

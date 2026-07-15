@@ -8,6 +8,7 @@ import (
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -65,9 +66,19 @@ func TestActivityAttemptJournalSQLiteAndPostgres(t *testing.T) {
 			if _, _, err := journal.StartActivityAttempt(ctx, conflicting); err == nil {
 				t.Fatal("conflicting request identity was accepted")
 			}
+			conflictingMode := start
+			conflictingMode.ExecutionMode = executionmode.Mock
+			if _, _, err := journal.StartActivityAttempt(ctx, conflictingMode); err == nil {
+				t.Fatal("cross-mode request identity was accepted")
+			}
 
 			payload := activitySuccessPayload(intent, map[string]any{"ok": true})
 			terminal := started.withTerminal(ActivityAttemptStatusSucceeded, activityResultEventID(intent, intent.SuccessEvent), intent.SuccessEvent, payload, nil)
+			conflictingTerminal := terminal
+			conflictingTerminal.ExecutionMode = executionmode.Mock
+			if _, err := journal.CompleteActivityAttempt(ctx, conflictingTerminal); err == nil {
+				t.Fatal("cross-mode terminal transition was accepted")
+			}
 			completed, err := journal.CompleteActivityAttempt(ctx, terminal)
 			if err != nil {
 				t.Fatalf("CompleteActivityAttempt: %v", err)

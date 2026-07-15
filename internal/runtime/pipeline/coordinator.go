@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -66,8 +67,9 @@ type PipelineCoordinator struct {
 	eventReceiptsCapability func(context.Context) (bool, error)
 	credentials             runtimecredentials.Store
 	managedCredentials      runtimemanagedcredentials.Store
+	mockConnectorResponses  *providerconnectors.MockResponsePlan
 	artifactRoot            string
-	bundleFingerprint       string
+	bundleHash              string
 	decisionCardCadence     decisioncard.CadencePolicy
 
 	testSubscribeHook                func()
@@ -92,8 +94,9 @@ type PipelineCoordinatorOptions struct {
 	EventReceiptsCapability          func(context.Context) (bool, error)
 	Credentials                      runtimecredentials.Store
 	ManagedCredentials               runtimemanagedcredentials.Store
+	MockConnectorResponses           *providerconnectors.MockResponsePlan
 	ArtifactRoot                     string
-	BundleFingerprint                string
+	BundleHash                       string
 	DecisionCardCadence              decisioncard.CadencePolicy
 	TestEntityStateHook              func(entityID, state string)
 	TestWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
@@ -137,8 +140,9 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		eventReceiptsCapability:          opts.EventReceiptsCapability,
 		credentials:                      credentials,
 		managedCredentials:               opts.ManagedCredentials,
+		mockConnectorResponses:           opts.MockConnectorResponses,
 		artifactRoot:                     strings.TrimSpace(opts.ArtifactRoot),
-		bundleFingerprint:                strings.TrimSpace(opts.BundleFingerprint),
+		bundleHash:                       strings.TrimSpace(opts.BundleHash),
 		decisionCardCadence:              opts.DecisionCardCadence.Normalize(),
 		testEntityStateHook:              opts.TestEntityStateHook,
 		testWorkflowNodeHandlerStartHook: opts.TestWorkflowNodeHandlerStartHook,

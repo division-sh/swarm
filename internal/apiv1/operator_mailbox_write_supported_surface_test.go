@@ -215,7 +215,7 @@ func newMailboxWriteSupportedSurfaceHandler(
 		WorkflowStore:           workflowStore,
 		MailboxMaterializer:     materializer,
 		EventReceiptsCapability: eventReceiptsCapability(persistence),
-		BundleFingerprint:       fact.BundleFingerprint,
+		BundleHash:              fact.BundleHash,
 		TestLifecycleProbe:      probe,
 	})
 	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: "workflow-runtime"})

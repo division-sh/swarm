@@ -17,6 +17,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimeeventpayload "github.com/division-sh/swarm/internal/runtime/eventpayload"
@@ -757,7 +758,8 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 }
 
 type pipelineEngineActionRunner struct {
-	coordinator *PipelineCoordinator
+	coordinator        *PipelineCoordinator
+	artifactRepoCommit func(context.Context, runtimecontracts.ActionSpec, runtimeengine.ExecutionContext) error
 }
 
 func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action runtimecontracts.ActionSpec, entry runtimeregistry.ActionInstruction, execCtx runtimeengine.ExecutionContext) (bool, error) {
@@ -800,13 +802,37 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 		}
 		return true, nil
 	case "artifact_repo_commit":
-		if err := pc.commitArtifactRepo(ctx, action, execCtx); err != nil {
+		mode, err := pipelineActionExecutionMode(ctx, execCtx)
+		if err != nil {
+			return true, err
+		}
+		if mode == runtimeeffects.ExecutionModeMock {
+			return true, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "mock_artifact_repo_commit_forbidden", "pipeline-action-runtime", "admit_artifact_repo_commit", map[string]any{
+				"action": "artifact_repo_commit", "execution_mode": string(mode),
+			})
+		}
+		commit := r.artifactRepoCommit
+		if commit == nil {
+			commit = pc.commitArtifactRepo
+		}
+		if err := commit(ctx, action, execCtx); err != nil {
 			return true, err
 		}
 		return true, nil
 	default:
 		return false, nil
 	}
+}
+
+func pipelineActionExecutionMode(ctx context.Context, execCtx runtimeengine.ExecutionContext) (runtimeeffects.ExecutionMode, error) {
+	eventMode := execCtx.Request.Event.ExecutionMode()
+	if !eventMode.Valid() {
+		return "", fmt.Errorf("pipeline action requires typed causal execution mode")
+	}
+	if contextMode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok && contextMode != eventMode {
+		return "", fmt.Errorf("pipeline action execution mode conflicts with source event")
+	}
+	return eventMode, nil
 }
 
 func recordEvidenceTarget(req runtimeengine.ExecutionRequest) string {

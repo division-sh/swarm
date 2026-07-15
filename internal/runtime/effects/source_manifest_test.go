@@ -19,6 +19,7 @@ const (
 	ownerManagedAgent        primitiveOwner = "managed_agent_attempt"
 	ownerRuntimeDependency   primitiveOwner = "runtime_dependency"
 	ownerPipelineActivity    primitiveOwner = "pipeline_activity"
+	ownerPipelineAction      primitiveOwner = "pipeline_action"
 	ownerNotification        primitiveOwner = "notification"
 	ownerOperatorInfra       primitiveOwner = "operator_infrastructure"
 	ownerCredentialLifecycle primitiveOwner = "credential_lifecycle"
@@ -43,7 +44,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/contracts/connect_delivery_one_codemod.go:writeConnectDeliveryOneRewrite:filesystem_write:5":        ownerOperatorInfra,
 	"internal/runtime/credentials/file_store.go:saveLocked:filesystem_write:1":                                            ownerCredentialLifecycle,
 	"internal/runtime/credentials/file_store.go:saveLocked:filesystem_write:2":                                            ownerCredentialLifecycle,
-	"internal/runtime/engine/helpers.go:executionConditionEnv:http_do:1":                                                  ownerPipelineActivity,
+	"internal/runtime/engine/helpers.go:executionConditionEnv:http_do:1":                                                  ownerRuntimeDependency,
 	"internal/runtime/llm/api_runtime.go:sendRequest:http_do:1":                                                           ownerManagedAgent,
 	"internal/runtime/llm/cli_runtime_process.go:runStreamingPrepared:process_launch:1":                                   ownerManagedAgent,
 	"internal/runtime/llm/cli_runtime_process.go:runWithPreparedInput:process_launch:1":                                   ownerManagedAgent,
@@ -59,9 +60,9 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/mcp/client.go:newStdioRPCClient:process_launch:1":                                                   ownerRuntimeDependency,
 	"internal/runtime/mcp/client.go:Call:stdio_write:1":                                                                   ownerManagedAgent,
 	"internal/runtime/pipeline/activity_engine.go:executePreparedActivityHTTPTool:http_do:1":                              ownerPipelineActivity,
-	"internal/runtime/pipeline/artifact_repo.go:runArtifactGit:process_launch:1":                                          ownerPipelineActivity,
-	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoWritableDirectory:filesystem_write:1":                 ownerPipelineActivity,
-	"internal/runtime/pipeline/artifact_repo.go:writeArtifactRepoFiles:filesystem_write:1":                                ownerPipelineActivity,
+	"internal/runtime/pipeline/artifact_repo.go:runArtifactGit:process_launch:1":                                          ownerPipelineAction,
+	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoWritableDirectory:filesystem_write:1":                 ownerPipelineAction,
+	"internal/runtime/pipeline/artifact_repo.go:writeArtifactRepoFiles:filesystem_write:1":                                ownerPipelineAction,
 	"internal/runtime/pipeline/generic_test_module.go:init:http_do:1":                                                     ownerBuildTest,
 	"internal/runtime/pythonmodule/runtime.go:materializedArtifactDir:http_do:1":                                          ownerComputeSandbox,
 	"internal/runtime/pythonmodule/runtime.go:newInterpreterModule:http_do:1":                                             ownerComputeSandbox,
@@ -92,8 +93,8 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/tools/executor_native.go:runWorkspaceCommand:process_launch:1":                                      ownerManagedAgent,
 	"internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:1":                             ownerManagedAgent,
 	"internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:2":                             ownerManagedAgent,
-	"internal/runtime/workflowexpr/data_expression.go:dataExpressionEnvForContext:http_do:1":                              ownerPipelineActivity,
-	"internal/runtime/workflowexpr/data_expression.go:dataExpressionEnvForContext:http_do:2":                              ownerPipelineActivity,
+	"internal/runtime/workflowexpr/data_expression.go:dataExpressionEnvForContext:http_do:1":                              ownerRuntimeDependency,
+	"internal/runtime/workflowexpr/data_expression.go:dataExpressionEnvForContext:http_do:2":                              ownerRuntimeDependency,
 	"internal/runtime/workspace/manager.go:RunDocker:process_launch:1":                                                    ownerRuntimeDependency,
 	"internal/runtime/contracts/bundle_build.go:BuildBundleMaterialization:filesystem_write:2":                            ownerOperatorInfra,
 	"internal/runtime/contracts/bundle_build.go:BuildBundleMaterialization:filesystem_write:3":                            ownerOperatorInfra,
@@ -122,12 +123,12 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/managedcredentials/store.go:writeLocked:filesystem_write:4":                                         ownerCredentialLifecycle,
 	"internal/runtime/managedcredentials/store.go:writeLocked:filesystem_write:5":                                         ownerCredentialLifecycle,
 	"internal/runtime/managedcredentials/store.go:writeLocked:filesystem_write:6":                                         ownerCredentialLifecycle,
-	"internal/runtime/pipeline/artifact_repo.go:ensureArtifactRepoInitialized:filesystem_write:1":                         ownerPipelineActivity,
-	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoRootWritable:filesystem_write:1":                      ownerPipelineActivity,
-	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoRootWritable:filesystem_write:2":                      ownerPipelineActivity,
-	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoWritableDirectory:filesystem_write:2":                 ownerPipelineActivity,
-	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoWritableDirectory:filesystem_write:3":                 ownerPipelineActivity,
-	"internal/runtime/pipeline/artifact_repo.go:writeArtifactRepoFiles:filesystem_write:2":                                ownerPipelineActivity,
+	"internal/runtime/pipeline/artifact_repo.go:ensureArtifactRepoInitialized:filesystem_write:1":                         ownerPipelineAction,
+	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoRootWritable:filesystem_write:1":                      ownerPipelineAction,
+	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoRootWritable:filesystem_write:2":                      ownerPipelineAction,
+	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoWritableDirectory:filesystem_write:2":                 ownerPipelineAction,
+	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoWritableDirectory:filesystem_write:3":                 ownerPipelineAction,
+	"internal/runtime/pipeline/artifact_repo.go:writeArtifactRepoFiles:filesystem_write:2":                                ownerPipelineAction,
 	"internal/runtime/pythonmodule/runtime.go:extractArtifact:filesystem_write:1":                                         ownerComputeSandbox,
 	"internal/runtime/pythonmodule/runtime.go:extractArtifact:filesystem_write:2":                                         ownerComputeSandbox,
 	"internal/runtime/pythonmodule/runtime.go:extractArtifact:filesystem_write:3":                                         ownerComputeSandbox,
@@ -168,6 +169,33 @@ func TestDirectPrimitiveOwnershipManifestIsTotal(t *testing.T) {
 	sort.Strings(stale)
 	if len(missing) != 0 || len(stale) != 0 {
 		t.Fatalf("direct primitive ownership manifest drift\nmissing:\n%s\nstale:\n%s", strings.Join(missing, "\n"), strings.Join(stale, "\n"))
+	}
+}
+
+func TestPipelineEffectPrimitiveOwnersAreExact(t *testing.T) {
+	activity := []string{}
+	action := []string{}
+	for primitive, owner := range sourcePrimitiveOwners {
+		switch owner {
+		case ownerPipelineActivity:
+			activity = append(activity, primitive)
+		case ownerPipelineAction:
+			action = append(action, primitive)
+		}
+	}
+	sort.Strings(activity)
+	sort.Strings(action)
+	wantActivity := []string{"internal/runtime/pipeline/activity_engine.go:executePreparedActivityHTTPTool:http_do:1"}
+	if fmt.Sprint(activity) != fmt.Sprint(wantActivity) {
+		t.Fatalf("pipeline activity primitives = %v, want %v", activity, wantActivity)
+	}
+	if len(action) == 0 {
+		t.Fatal("pipeline action primitive owner is empty")
+	}
+	for _, primitive := range action {
+		if !strings.HasPrefix(primitive, "internal/runtime/pipeline/artifact_repo.go:") {
+			t.Fatalf("pipeline action primitive %q is outside artifact_repo action owner", primitive)
+		}
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
@@ -265,10 +266,6 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	if source == nil {
 		return runtimefailures.New(runtimefailures.ClassInternalFailure, "activity_semantic_source_missing", "activity-runtime", "execute_activity", nil)
 	}
-	client := d.client
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
-	}
 	tool, ok := source.ToolEntries()[intent.Tool]
 	if !ok {
 		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassTargetUnreachable, "activity_tool_not_declared", "activity-runtime", "execute_activity", map[string]any{"tool": intent.Tool}))
@@ -284,13 +281,30 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 			"tool": intent.Tool, "effect_class": string(toolEffectClass),
 		}))
 	}
+	var mockResponse *providerconnectors.AdmittedMockResponse
+	if intent.ExecutionMode == runtimeeffects.ExecutionModeMock {
+		if toolEffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+			return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "mock_activity_effect_class_unsupported", "activity-runtime", "admit_mock_activity", map[string]any{
+				"tool": intent.Tool, "effect_class": string(toolEffectClass), "required_effect_class": string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+			}))
+		}
+		admitted, err := d.coordinator.mockConnectorResponses.Admit(intent.Tool, tool)
+		if err != nil {
+			return d.publishActivityFailure(ctx, intent, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "mock_connector_response_not_admitted", "activity-runtime", "admit_mock_activity", map[string]any{"tool": intent.Tool}, err))
+		}
+		mockResponse = &admitted
+	}
 	if toolEffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 		if err := d.admitReadOnlyActivityGeneration(ctx, intent); err != nil {
 			return d.publishActivityFailure(ctx, intent, err)
 		}
 	}
 	if toolEffectClass == runtimecontracts.ActivityEffectClassNonIdempotentWrite {
-		return d.executeNonIdempotentActivityIntent(ctx, intent, tool)
+		return d.executeNonIdempotentActivityIntent(ctx, intent, tool, mockResponse)
+	}
+	client := d.client
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	if recorded, ok, err := d.recordedActivityResult(ctx, intent); err != nil {
 		return err
@@ -420,13 +434,9 @@ func (d pipelineActivityDispatcher) admitReadOnlyActivityGeneration(ctx context.
 	})
 }
 
-func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx context.Context, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) error {
+func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx context.Context, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry, mockResponse *providerconnectors.AdmittedMockResponse) error {
 	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.Enabled() {
 		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "activity_journal_unavailable", "activity-runtime", "load_activity_attempt", map[string]any{"tool": strings.TrimSpace(intent.Tool)}))
-	}
-	client := d.client
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	intent.Attempt = 1
 	startRecord := activityAttemptStartRecord(intent, activityInputHash(intent.Input))
@@ -444,6 +454,28 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 	}
 	if !inserted {
 		return d.publishExistingActivityAttempt(ctx, intent, started)
+	}
+	if mockResponse != nil {
+		result, err := mockResponse.Materialize()
+		if err != nil {
+			return d.publishActivityFailure(ctx, intent, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "mock_connector_response_materialization_failed", "activity-runtime", "materialize_mock_activity", map[string]any{"tool": intent.Tool}, err))
+		}
+		terminal := started.withTerminal(
+			ActivityAttemptStatusSucceeded,
+			activityResultEventID(intent, intent.SuccessEvent),
+			intent.SuccessEvent,
+			activitySuccessPayload(intent, result),
+			nil,
+		)
+		stored, err := d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
+		if err != nil {
+			return activityDependencyFailure(err, intent.Tool, "complete_activity_attempt")
+		}
+		return d.publishJournaledActivityResult(ctx, intent, stored)
+	}
+	client := d.client
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	prepared, err := d.prepareActivityHTTPTool(ctx, client, intent, tool)
 	if err != nil {
@@ -1575,6 +1607,7 @@ func activityAttemptStartRecord(intent runtimeengine.ActivityIntent, inputHash s
 	return ActivityAttemptRecord{
 		RequestEventID:  activityRequestEventID(intent),
 		RunID:           intent.SourceRunID,
+		ExecutionMode:   intent.ExecutionMode,
 		SourceEventID:   intent.SourceEventID,
 		ParentEventID:   intent.ParentEventID,
 		EntityID:        intent.EntityID.String(),

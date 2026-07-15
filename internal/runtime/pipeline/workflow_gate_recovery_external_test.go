@@ -323,7 +323,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			}
 			newCoordinator := func(bundleHash string) *runtimepipeline.PipelineCoordinator {
 				return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
-					Module: module, WorkflowStore: selected.workflowStore, DecisionCards: selected.cards, BundleFingerprint: bundleHash,
+					Module: module, WorkflowStore: selected.workflowStore, DecisionCards: selected.cards, BundleHash: bundleHash,
 					Credentials:             credentials,
 					EventReceiptsCapability: func(context.Context) (bool, error) { return true, nil },
 				})
@@ -643,7 +643,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				})}
 				coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
 					Module: gateRecoveryModule{source: source}, WorkflowStore: selected.workflowStore,
-					DecisionCards: selected.cards, BundleFingerprint: gateRecoveryBundle,
+					DecisionCards: selected.cards, BundleHash: gateRecoveryBundle,
 				})
 				forward, emitted, err := coordinator.Intercept(ctx, decisionEvent)
 				if err != nil || forward || len(emitted) != 0 {
@@ -676,7 +676,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				beforeOutbox, beforePublished := len(bus.outbox), len(bus.published)
 				changed := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
 					Module: gateRecoveryModule{source: source}, WorkflowStore: selected.workflowStore,
-					DecisionCards: selected.cards, BundleFingerprint: otherGateBundle,
+					DecisionCards: selected.cards, BundleHash: otherGateBundle,
 				})
 				if _, _, err := changed.Intercept(ctx, decisionEvent); err != nil {
 					t.Fatalf("%s terminal route replay under changed bundle: %v", verdict, err)
@@ -720,7 +720,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 				}},
 			}
 			coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
-				Module: module, WorkflowStore: selected.workflowStore, DecisionCards: selected.cards, BundleFingerprint: gateRecoveryBundle,
+				Module: module, WorkflowStore: selected.workflowStore, DecisionCards: selected.cards, BundleHash: gateRecoveryBundle,
 				EventReceiptsCapability: func(context.Context) (bool, error) { return true, nil },
 			})
 			bus.SetInterceptors(coordinator)
@@ -952,7 +952,7 @@ func testDecisionRouteSettlementFailureFairness(t *testing.T, selected gateRecov
 	}
 	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
 		Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, WorkflowStore: selected.workflowStore,
-		DecisionCards: selected.cards, BundleFingerprint: gateRecoveryBundle,
+		DecisionCards: selected.cards, BundleHash: gateRecoveryBundle,
 	})
 	counting := &gateRecoveryCountingInterceptor{delegate: coordinator}
 	bus.SetInterceptors(counting)
@@ -1031,7 +1031,7 @@ func testDecisionRouteSettlementRetry(t *testing.T, selected gateRecoveryStoreCa
 	}
 	setupCoordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(setupBus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
 		Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, WorkflowStore: selected.workflowStore,
-		DecisionCards: selected.cards, BundleFingerprint: gateRecoveryBundle,
+		DecisionCards: selected.cards, BundleHash: gateRecoveryBundle,
 	})
 	at := time.Now().UTC().Add(-time.Minute)
 	if err := selected.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
@@ -1077,7 +1077,7 @@ func testDecisionRouteSettlementRetry(t *testing.T, selected gateRecoveryStoreCa
 	}
 	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
 		Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, WorkflowStore: selected.workflowStore,
-		DecisionCards: selected.cards, BundleFingerprint: gateRecoveryBundle,
+		DecisionCards: selected.cards, BundleHash: gateRecoveryBundle,
 	})
 	counting := &gateRecoveryCountingInterceptor{delegate: coordinator}
 	bus.SetInterceptors(counting)
@@ -1196,7 +1196,7 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 	}
 	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(setupBus, tc.db, runtimepipeline.PipelineCoordinatorOptions{
 		Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, WorkflowStore: tc.workflowStore,
-		DecisionCards: tc.cards, BundleFingerprint: gateRecoveryBundle,
+		DecisionCards: tc.cards, BundleHash: gateRecoveryBundle,
 	})
 	if err := tc.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: "launch/foreground-" + uuid.NewString(), StorageRef: entityID, WorkflowName: "launch", WorkflowVersion: "1",
@@ -1356,7 +1356,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	newCoordinator := func(bundleHash string) *runtimepipeline.PipelineCoordinator {
 		return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, tc.db, runtimepipeline.PipelineCoordinatorOptions{
 			Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, WorkflowStore: tc.workflowStore,
-			DecisionCards: tc.cards, BundleFingerprint: bundleHash,
+			DecisionCards: tc.cards, BundleHash: bundleHash,
 		})
 	}
 	matching := newCoordinator(gateRecoveryBundle)
@@ -1438,10 +1438,10 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 
 	newCoordinator := func(bundleHash string) *runtimepipeline.PipelineCoordinator {
 		return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, tc.db, runtimepipeline.PipelineCoordinatorOptions{
-			Module:            gateRecoveryModule{source: semanticview.Wrap(bundle)},
-			WorkflowStore:     tc.workflowStore,
-			DecisionCards:     tc.cards,
-			BundleFingerprint: bundleHash,
+			Module:        gateRecoveryModule{source: semanticview.Wrap(bundle)},
+			WorkflowStore: tc.workflowStore,
+			DecisionCards: tc.cards,
+			BundleHash:    bundleHash,
 		})
 	}
 	matching := newCoordinator(gateRecoveryBundle)

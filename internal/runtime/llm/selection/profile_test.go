@@ -3,6 +3,8 @@ package selection
 import (
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
 func TestResolveActiveBackendProfiles(t *testing.T) {
@@ -57,6 +59,38 @@ func TestResolveActiveMockBackendAndBuiltInAliases(t *testing.T) {
 		if resolved.ConcreteModel != "mock-"+alias {
 			t.Fatalf("ResolveModel(%s) = %q", alias, resolved.ConcreteModel)
 		}
+	}
+}
+
+func TestExecutionModeForProfileUsesSelectedBackendOnly(t *testing.T) {
+	tests := []struct {
+		backend string
+		want    executionmode.Mode
+	}{
+		{backend: BackendAnthropic, want: executionmode.Live},
+		{backend: BackendClaudeCLI, want: executionmode.Live},
+		{backend: BackendOpenAICompatible, want: executionmode.Live},
+		{backend: BackendOpenAIResponses, want: executionmode.Live},
+		{backend: BackendMock, want: executionmode.Mock},
+	}
+	for _, tc := range tests {
+		t.Run(tc.backend, func(t *testing.T) {
+			profile, err := ResolveActiveBackend(tc.backend)
+			if err != nil {
+				t.Fatalf("ResolveActiveBackend: %v", err)
+			}
+			got, err := ExecutionModeForProfile(profile)
+			if err != nil {
+				t.Fatalf("ExecutionModeForProfile: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("ExecutionModeForProfile(%s) = %q, want %q", tc.backend, got, tc.want)
+			}
+		})
+	}
+
+	if _, err := ExecutionModeForProfile(Profile{ID: BackendLocal}); err == nil {
+		t.Fatal("ExecutionModeForProfile(local) error = nil, want inactive-backend rejection")
 	}
 }
 

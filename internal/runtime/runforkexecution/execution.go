@@ -325,7 +325,17 @@ func newSelectedContractPipeline(
 	workflowStore *runtimepipeline.WorkflowInstanceStore,
 	instanceActivator runtimepipeline.FlowInstanceActivator,
 ) *runtimepipeline.PipelineCoordinator {
-	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, store.DB, runtimepipeline.PipelineCoordinatorOptions{
+	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, store.DB, selectedContractPipelineCoordinatorOptions(store, loaded, agentRuntime, workflowStore, instanceActivator))
+}
+
+func selectedContractPipelineCoordinatorOptions(
+	store *store.PostgresStore,
+	loaded LoadedSelectedContractSource,
+	agentRuntime SelectedContractAgentRuntimeOptions,
+	workflowStore *runtimepipeline.WorkflowInstanceStore,
+	instanceActivator runtimepipeline.FlowInstanceActivator,
+) runtimepipeline.PipelineCoordinatorOptions {
+	return runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  loaded.Module,
 		WorkflowStore:           workflowStore,
 		InstanceActivator:       instanceActivator,
@@ -334,7 +344,9 @@ func newSelectedContractPipeline(
 		EventReceiptsCapability: store.CanonicalEventReceiptsCapability,
 		Credentials:             agentRuntime.Credentials,
 		ManagedCredentials:      agentRuntime.ManagedCredentials,
-	})
+		MockConnectorResponses:  agentRuntime.MockConnectorResponses,
+		BundleHash:              loaded.BundleHash,
+	}
 }
 
 func selectedContractExecutionFrontierEventIDs(events []store.RunForkContractFrontierEvent) []string {

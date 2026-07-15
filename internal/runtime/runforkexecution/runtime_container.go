@@ -158,8 +158,9 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 		if profileErr != nil {
 			return selectedContractForkLocalRuntimeContainer{}, profileErr
 		}
-		if profile.ID == llmselection.BackendMock {
-			mode = runtimeeffects.ExecutionModeMock
+		mode, profileErr = llmselection.ExecutionModeForProfile(profile)
+		if profileErr != nil {
+			return selectedContractForkLocalRuntimeContainer{}, profileErr
 		}
 	}
 	for _, record := range req.AgentRuntime.Records {

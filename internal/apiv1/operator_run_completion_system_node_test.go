@@ -44,7 +44,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  module,
 		EventReceiptsCapability: pg.CanonicalEventReceiptsCapability,
-		BundleFingerprint:       runStartTestFingerprint,
+		BundleHash:              runStartTestBundleHash,
 	})
 
 	runID := "11111111-1111-4111-8111-111111111111"

@@ -263,12 +263,12 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 			}
 			if _, err := db.ExecContext(ctx, `
 				INSERT INTO activity_attempts (
-					request_event_id, run_id, source_event_id, entity_id, flow_instance, node_id, handler_event_key,
+					request_event_id, run_id, execution_mode, source_event_id, entity_id, flow_instance, node_id, handler_event_key,
 					activity_id, tool, effect_class, attempt, status, success_event, failure_event,
 					result_event_id, result_event_type, result_payload, failure, input_hash, loop_generation, loop_stage,
 					started_at, completed_at, updated_at
 				) VALUES (
-					$1::uuid, $2::uuid, $3::uuid, $4::uuid, 'root', $5, $6,
+					$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'root', $5, $6,
 					$7, $8, 'non_idempotent_write', 1, $9, $10, $11,
 					$12::uuid, $13, $14::jsonb, $15::jsonb, 'input-hash', '{}'::jsonb, '', $16, $17, $16
 				)

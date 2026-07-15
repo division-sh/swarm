@@ -313,12 +313,12 @@ func seedSelectedContractActivityAttempt(t *testing.T, db *sql.DB, fact activity
 	inputHash := sha256.Sum256([]byte(`{"value":"x"}`))
 	if _, err := db.ExecContext(context.Background(), `
 		INSERT INTO activity_attempts (
-			request_event_id, run_id, source_event_id, entity_id, flow_instance, node_id, handler_event_key,
+			request_event_id, run_id, execution_mode, source_event_id, entity_id, flow_instance, node_id, handler_event_key,
 			activity_id, tool, effect_class, attempt, status, success_event, failure_event,
 			result_event_id, result_event_type, result_payload, failure, input_hash, loop_generation, loop_stage,
 			started_at, completed_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, $3::uuid, $4::uuid, 'flow-a/1', 'test-node', 'review.requested',
+			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow-a/1', 'test-node', 'review.requested',
 			'connector', 'provider.connector', 'non_idempotent_write', 1, $5, 'activity.succeeded', 'activity.failed',
 			$6::uuid, $7, $8::jsonb, $9::jsonb, $10, $11::jsonb, 'review', $12, $12, $12
 		)

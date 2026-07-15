@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -20,7 +21,9 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -1261,6 +1264,75 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	}
 	if strings.Contains(tree, "notes/extra.txt") {
 		t.Fatalf("non-allowlisted file was committed:\n%s", tree)
+	}
+}
+
+func TestPipelineEngineActionRunner_MockArtifactRepoCommitStopsBeforeActionLaunchSQLitePostgres(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var db *sql.DB
+			var cleanup func()
+			if backend == "sqlite" {
+				var err error
+				db, err = sql.Open("sqlite", ":memory:")
+				if err != nil {
+					t.Fatalf("open sqlite: %v", err)
+				}
+				cleanup = func() { _ = db.Close() }
+			} else {
+				_, db, cleanup = testutil.StartPostgres(t)
+			}
+			defer cleanup()
+
+			artifactRoot := filepath.Join(t.TempDir(), "must-not-exist")
+			pc := &PipelineCoordinator{db: db, artifactRoot: artifactRoot}
+			action, execCtx := testArtifactRepoActionAndContext(
+				"22222222-2222-2222-2222-222222222222",
+				testArtifactRepoEntityFields(),
+				"33333333-3333-3333-3333-333333333333",
+				"44444444-4444-4444-4444-444444444444",
+				"name: Demo\n",
+			)
+			execCtx.Request.Event = execCtx.Request.Event.WithExecutionMode(executionmode.Mock)
+			launches := 0
+			runner := pipelineEngineActionRunner{
+				coordinator: pc,
+				artifactRepoCommit: func(context.Context, runtimecontracts.ActionSpec, runtimeengine.ExecutionContext) error {
+					launches++
+					return nil
+				},
+			}
+			ctx := runtimeeffects.WithExecutionMode(context.Background(), executionmode.Mock)
+			claimed, err := runner.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+			if !claimed || err == nil || !strings.Contains(err.Error(), "mock_artifact_repo_commit_forbidden") {
+				t.Fatalf("ExecuteAction claimed=%v err=%v", claimed, err)
+			}
+			if launches != 0 {
+				t.Fatalf("artifact action launches = %d, want zero", launches)
+			}
+			if _, err := os.Stat(artifactRoot); !os.IsNotExist(err) {
+				t.Fatalf("artifact root mutation occurred: %v", err)
+			}
+		})
+	}
+}
+
+func TestPipelineActionExecutionModeRejectsMissingAndConflictingAuthority(t *testing.T) {
+	_, execCtx := testArtifactRepoActionAndContext(
+		"22222222-2222-2222-2222-222222222222",
+		testArtifactRepoEntityFields(),
+		"33333333-3333-3333-3333-333333333333",
+		"44444444-4444-4444-4444-444444444444",
+		"name: Demo\n",
+	)
+	missingEventMode := execCtx
+	missingEventMode.Request.Event = events.EmptyEvent()
+	if _, err := pipelineActionExecutionMode(context.Background(), missingEventMode); err == nil || !strings.Contains(err.Error(), "causal execution mode") {
+		t.Fatalf("missing causal mode error = %v", err)
+	}
+	ctx := runtimeeffects.WithExecutionMode(context.Background(), executionmode.Mock)
+	if _, err := pipelineActionExecutionMode(ctx, execCtx); err == nil || !strings.Contains(err.Error(), "conflicts") {
+		t.Fatalf("conflicting context mode error = %v", err)
 	}
 }
 

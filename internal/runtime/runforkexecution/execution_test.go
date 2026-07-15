@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/providerconnectors"
 	swaruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/bus"
@@ -295,6 +296,28 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	}
 	if sourceStatus != store.RunForkSourceFrozenStatus || forkStatus != store.RunForkActivatedStatus || forkEntityState == "" {
 		t.Fatalf("post execution = source:%s fork:%s entity:%s", sourceStatus, forkStatus, forkEntityState)
+	}
+}
+
+func TestSelectedContractPipelineConsumesExactMockConnectorResponseOwner(t *testing.T) {
+	plan, err := providerconnectors.NewMockResponsePlan(map[string]map[string]any{
+		"provider.write": {"ok": true},
+	})
+	if err != nil {
+		t.Fatalf("NewMockResponsePlan: %v", err)
+	}
+	opts := selectedContractPipelineCoordinatorOptions(
+		&store.PostgresStore{},
+		LoadedSelectedContractSource{BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		SelectedContractAgentRuntimeOptions{MockConnectorResponses: plan},
+		nil,
+		nil,
+	)
+	if opts.MockConnectorResponses != plan {
+		t.Fatal("selected-contract pipeline did not retain exact mock connector response owner")
+	}
+	if opts.BundleHash != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("selected-contract pipeline bundle hash = %q", opts.BundleHash)
 	}
 }
 

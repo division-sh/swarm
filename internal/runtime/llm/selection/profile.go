@@ -3,6 +3,8 @@ package selection
 import (
 	"fmt"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
 const (
@@ -225,6 +227,20 @@ func ResolveActiveBackend(raw string) (Profile, error) {
 		return Profile{}, fmt.Errorf("%s %q is reserved: %s", ConfigBackendField, profile.ID, profile.ReservedNote)
 	}
 	return profile, nil
+}
+
+// ExecutionModeForProfile projects the selected LLM backend onto the runtime's
+// typed causal execution mode. Backend selection is the only authority for
+// this projection; mock artifacts and downstream responder presence are not.
+func ExecutionModeForProfile(profile Profile) (executionmode.Mode, error) {
+	resolved, err := ResolveActiveBackend(profile.ID)
+	if err != nil {
+		return "", err
+	}
+	if resolved.ID == BackendMock {
+		return executionmode.Mock, nil
+	}
+	return executionmode.Live, nil
 }
 
 func ResolvePersistedBackend(raw string) (Profile, error) {

@@ -614,6 +614,154 @@ func TestPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCrede
 	}
 }
 
+func TestPipelineActivityRequestMockProviderConnectorUsesExactResponseAndJournal(t *testing.T) {
+	ctx := context.Background()
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		calls.Add(1)
+	}))
+	defer server.Close()
+
+	tool := testTelegramConnectorTool(server.URL)
+	tool.OutputSchema = runtimecontracts.ToolInputSchema{
+		Type: "object",
+		Properties: map[string]runtimecontracts.ToolInputSchema{
+			"ok": {Type: "boolean"},
+		},
+		Required: []string{"ok"},
+	}
+	plan, err := providerconnectors.NewMockResponsePlan(map[string]map[string]any{
+		"telegram.send_message": {"ok": true},
+	})
+	if err != nil {
+		t.Fatalf("NewMockResponsePlan: %v", err)
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
+		"telegram.send_message": tool,
+	}})
+	bus := &recordingPipelineBus{}
+	db, store := newSQLiteActivityJournalStore(t, ctx)
+	seedActivityRun(t, db, true, runID)
+	credentialStore := &countingActivityCredentialStore{}
+	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+		Module:                 staticSemanticWorkflowModule{source: source},
+		WorkflowStore:          store,
+		MockConnectorResponses: plan,
+		Credentials:            credentialStore,
+	})
+	intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), entityID)
+	intent.Tool = "telegram.send_message"
+	intent.ActivityID = "telegram_send_message"
+	intent.ExecutionMode = executionmode.Mock
+	intent.Input = mustActivityInput(map[string]any{"chat_id": "42", "text": "hello"})
+
+	for delivery := 1; delivery <= 2; delivery++ {
+		if err := (pipelineActivityDispatcher{coordinator: pc}).executeActivityIntent(ctx, intent); err != nil {
+			t.Fatalf("execute mock activity delivery %d: %v", delivery, err)
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("HTTP calls = %d, want zero", calls.Load())
+	}
+	if credentialStore.reads.Load() != 0 {
+		t.Fatalf("credential reads = %d, want zero", credentialStore.reads.Load())
+	}
+	record, ok, err := store.LoadActivityAttempt(ctx, activityRequestEventID(intent))
+	if err != nil || !ok {
+		t.Fatalf("LoadActivityAttempt found=%v err=%v publications=%#v", ok, err, bus.publishes)
+	}
+	if record.Status != ActivityAttemptStatusSucceeded || record.ExecutionMode != executionmode.Mock {
+		t.Fatalf("mock attempt = %#v", record)
+	}
+	result, _ := record.ResultPayload["result"].(map[string]any)
+	if result["ok"] != true {
+		t.Fatalf("mock result = %#v", record.ResultPayload)
+	}
+	if len(bus.publishes) != 2 || bus.publishes[0].ID() != bus.publishes[1].ID() {
+		t.Fatalf("mock duplicate publications = %#v", bus.publishes)
+	}
+	var storyModes int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM author_activity_occurrences WHERE json_extract(projection, '$.execution_mode') = 'mock' AND source_owner = 'activity_attempts'`).Scan(&storyModes); err != nil {
+		t.Fatalf("query mock author activity: %v", err)
+	}
+	if storyModes != 2 {
+		t.Fatalf("mock author activity rows = %d, want started and succeeded", storyModes)
+	}
+}
+
+func TestPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTTP(t *testing.T) {
+	backends := []struct {
+		name  string
+		store func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool)
+	}{
+		{name: "sqlite", store: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
+			db, journal := newSQLiteActivityJournalStore(t, ctx)
+			return db, journal, true
+		}},
+		{name: "postgres", store: func(t *testing.T, _ context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
+			_, db, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			return db, NewWorkflowInstanceStore(db), false
+		}},
+	}
+	for _, backend := range backends {
+		t.Run(backend.name, func(t *testing.T) {
+			ctx := context.Background()
+			db, store, sqlite := backend.store(t, ctx)
+			for _, tc := range []struct {
+				name      string
+				tool      runtimecontracts.ToolSchemaEntry
+				responses map[string]map[string]any
+				wantCode  string
+			}{
+				{name: "missing response", tool: testTelegramConnectorTool("http://127.0.0.1:1"), responses: nil, wantCode: "mock_connector_response_not_admitted"},
+				{name: "non provider", tool: runtimecontracts.ToolSchemaEntry{HandlerType: "http", EffectClass: "non_idempotent_write", OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"}}, responses: map[string]map[string]any{"telegram.send_message": {"ok": true}}, wantCode: "mock_connector_response_not_admitted"},
+				{name: "read only", tool: runtimecontracts.ToolSchemaEntry{Category: providerconnectors.Category, HandlerType: "http", EffectClass: "read_only", OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"}}, responses: map[string]map[string]any{"telegram.send_message": {"ok": true}}, wantCode: "mock_activity_effect_class_unsupported"},
+				{name: "invalid response", tool: runtimecontracts.ToolSchemaEntry{Category: providerconnectors.Category, HandlerType: "http", EffectClass: "non_idempotent_write", HTTP: &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "http://127.0.0.1:1"}, OutputSchema: runtimecontracts.ToolInputSchema{Type: "object", Properties: map[string]runtimecontracts.ToolInputSchema{"ok": {Type: "boolean"}}, Required: []string{"ok"}}}, responses: map[string]map[string]any{"telegram.send_message": {"ok": "invalid"}}, wantCode: "mock_connector_response_not_admitted"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					runID := uuid.NewString()
+					seedActivityRun(t, db, sqlite, runID)
+					tc.tool.Credentials = []string{"must_not_read"}
+					plan, err := providerconnectors.NewMockResponsePlan(tc.responses)
+					if err != nil {
+						t.Fatalf("NewMockResponsePlan: %v", err)
+					}
+					source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"telegram.send_message": tc.tool}})
+					bus := &recordingPipelineBus{}
+					credentialStore := &countingActivityCredentialStore{}
+					pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+						Module: staticSemanticWorkflowModule{source: source}, WorkflowStore: store,
+						MockConnectorResponses: plan, Credentials: credentialStore,
+					})
+					intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
+					intent.Tool = "telegram.send_message"
+					intent.ExecutionMode = executionmode.Mock
+					intent.EffectClass = runtimecontracts.NormalizeActivityEffectClass(tc.tool.EffectClass)
+					if err := (pipelineActivityDispatcher{coordinator: pc}).executeActivityIntent(ctx, intent); err != nil {
+						t.Fatalf("execute rejected mock activity: %v", err)
+					}
+					var attempts int
+					if err := db.QueryRow(`SELECT COUNT(*) FROM activity_attempts WHERE run_id = `+activityTestPlaceholder(sqlite, 1), runID).Scan(&attempts); err != nil {
+						t.Fatalf("count activity attempts: %v", err)
+					}
+					if attempts != 0 {
+						t.Fatalf("activity attempts = %d, want zero", attempts)
+					}
+					if credentialStore.reads.Load() != 0 {
+						t.Fatalf("credential reads = %d, want zero", credentialStore.reads.Load())
+					}
+					if len(bus.publishes) != 1 || !strings.Contains(string(bus.publishes[0].Payload()), tc.wantCode) {
+						t.Fatalf("failure publications = %#v, want code %q", bus.publishes, tc.wantCode)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplay(t *testing.T) {
 	ctx := context.Background()
 	artifacts, err := providerconnectors.GenerateCatalog(os.DirFS("../../providerconnectors"))
@@ -1496,6 +1644,26 @@ func (f activityRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, err
 	return f(req)
 }
 
+type countingActivityCredentialStore struct {
+	reads atomic.Int32
+}
+
+func (s *countingActivityCredentialStore) Get(context.Context, string) (string, bool, error) {
+	s.reads.Add(1)
+	return "", false, nil
+}
+
+func (*countingActivityCredentialStore) Set(context.Context, string, string) error { return nil }
+func (*countingActivityCredentialStore) List(context.Context) ([]string, error)    { return nil, nil }
+func (*countingActivityCredentialStore) Delete(context.Context, string) error      { return nil }
+
+func activityTestPlaceholder(sqlite bool, position int) string {
+	if sqlite {
+		return "?"
+	}
+	return fmt.Sprintf("$%d::uuid", position)
+}
+
 func newSQLiteActivityJournalStore(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore) {
 	t.Helper()
 	name := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
@@ -1531,6 +1699,7 @@ func createActivityJournalSQLiteSchema(t *testing.T, ctx context.Context, db *sq
 		`CREATE TABLE activity_attempts (
 			request_event_id TEXT PRIMARY KEY,
 			run_id TEXT NOT NULL,
+			execution_mode TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
 			source_event_id TEXT,
 			parent_event_id TEXT,
 			entity_id TEXT,
