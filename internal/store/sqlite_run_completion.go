@@ -393,6 +393,7 @@ func (s *SQLiteRuntimeStore) sqliteNormalRunCompletionRunReadyTx(
 		sqliteNormalRunCompletionDeliveriesSettledTx,
 		sqliteNormalRunCompletionTimersSettledTx,
 		s.sqliteNormalRunCompletionSessionLeasesSettledTx,
+		sqliteNormalRunCompletionHumanTasksSettledTx,
 		sqliteNormalRunCompletionGateObligationsSettledTx,
 	}
 	for _, check := range checks {
@@ -402,6 +403,30 @@ func (s *SQLiteRuntimeStore) sqliteNormalRunCompletionRunReadyTx(
 		}
 	}
 	return sqliteNormalRunCompletionEntitiesTerminalTx(ctx, tx, runID, workflowTerminals, flowTerminals)
+}
+
+func sqliteNormalRunCompletionHumanTasksSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
+	var unresolved bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM decision_cards c
+			LEFT JOIN human_task_continuations h ON h.card_id = c.card_id
+			WHERE c.run_id = ?
+			  AND c.anchor_kind = 'human_task'
+			  AND (
+				h.card_id IS NULL
+				OR h.run_id <> c.run_id
+				OR h.state <> 'outcome_dispatched'
+				OR h.outcome_event_id IS NULL
+				OR c.status NOT IN ('decided', 'expired')
+				OR (c.status = 'decided' AND (c.decision_event_id IS NULL OR c.decision_event_id <> h.outcome_event_id))
+			  )
+		)
+	`, runID).Scan(&unresolved); err != nil {
+		return false, fmt.Errorf("check sqlite normal run human-task settlement: %w", err)
+	}
+	return !unresolved, nil
 }
 
 func sqliteNormalRunCompletionGateObligationsSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {

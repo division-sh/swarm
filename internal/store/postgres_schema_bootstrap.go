@@ -46,9 +46,6 @@ func (s *PostgresStore) BootstrapSchema(ctx context.Context, request SchemaBoots
 	if err := enforcePostgresDecisionCardLifecycleOutboxCutoff(ctx, tx); err != nil {
 		return err
 	}
-	if err := migratePostgresCompletionAuthoritySchema(ctx, tx, request.PlatformPlans); err != nil {
-		return err
-	}
 	target, report, err := inspectPostgresCompatibility(ctx, tx, expected)
 	if err != nil {
 		return err

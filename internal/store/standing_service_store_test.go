@@ -136,10 +136,10 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	if _, err := store.DB.ExecContext(ctx, `INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status) VALUES (?, ?, ?, 'agent', ?, 'in_progress')`, uuid.NewString(), created.RunID, eventID, agentID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, conversation_mode) VALUES (?, 'worker', 'test', 'session')`, agentID); err != nil {
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, memory_enabled, memory_source) VALUES (?, 'worker', 'test', 1, 'authored')`, agentID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO agent_sessions (session_id, run_id, agent_id, scope_key, scope, conversation, runtime_mode, runtime_state, status) VALUES (?, ?, ?, 'global', 'global', '[]', 'session', '{}', 'active')`, sessionID, created.RunID, agentID); err != nil {
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, conversation, runtime_state, status) VALUES (?, ?, ?, 'standing/ingress', 1, 'authored', '[]', '{}', 'active')`, sessionID, created.RunID, agentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.DB.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status) VALUES (?, 'standing-timer', ?, 'timer.fire', ?, 'active')`, timerID, created.RunID, time.Now().UTC().Add(time.Hour)); err != nil {
@@ -347,10 +347,10 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	if _, err := db.ExecContext(ctx, `INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status) VALUES ($1::uuid, $2::uuid, $3::uuid, 'agent', $4, 'in_progress')`, uuid.NewString(), created[0].RunID, eventID, agentID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, conversation_mode) VALUES ($1, 'worker', 'test', 'session')`, agentID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, memory_enabled, memory_source) VALUES ($1, 'worker', 'test', TRUE, 'authored')`, agentID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id, run_id, agent_id, scope_key, scope, conversation, runtime_mode, runtime_state, status) VALUES ($1::uuid, $2::uuid, $3, 'global', 'global', '[]', 'session', '{}', 'active')`, uuid.NewString(), created[0].RunID, agentID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, conversation, runtime_state, status) VALUES ($1::uuid, $2::uuid, $3, 'standing/ingress', TRUE, 'authored', '[]', '{}', 'active')`, uuid.NewString(), created[0].RunID, agentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status) VALUES ($1::uuid, 'standing-timer', $2::uuid, 'timer.fire', $3, 'active')`, uuid.NewString(), created[0].RunID, time.Now().UTC().Add(time.Hour)); err != nil {

@@ -12061,9 +12061,13 @@ platform_tables:
         normal_completion_operation: >
           ConvergeNormalRunCompletion is the sole successful-completion writer. In one selected-store transaction it
           requires terminal workflow entities, successful pipeline receipts, settled deliveries, timers, and session
-          leases, and no open or decision_committed gate. Local runtime or builder quiescence is observational only: the
-          builder may project a completed state already committed by this owner, but MUST NOT derive or write completed
-          from local quiescence and MUST leave a waiting decision run running without a synthetic failure.
+          leases, no open or decision_committed gate, and every human_task decision card to have a matching same-run
+          continuation whose outcome is durably dispatched. Human-task continuations in pending, decision_committed, or
+          expired state remain unresolved; a missing or identity-inconsistent continuation fails closed. A dispatched
+          decision must retain the card's decision event identity, while a dispatched expiry retains its stamped outcome
+          event identity. Local runtime or builder quiescence is observational only: the builder may project a completed
+          state already committed by this owner, but MUST NOT derive or write completed from local quiescence and MUST
+          leave a waiting decision run running without a synthetic failure.
         immutability: A repeated terminal write is idempotent only when status and canonical failure match exactly. Conflicting failure evidence or terminal status fails closed.
         migration:
           failed_rows: Migrate only a strictly valid platform.failure/v1 value. Empty or prose-only evidence aborts with status, count, and run IDs; no text heuristic exists.

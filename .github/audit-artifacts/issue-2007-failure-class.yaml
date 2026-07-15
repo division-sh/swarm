@@ -1,7 +1,7 @@
 version: 1
 kind: pre_implementation_failure_class_artifact
 issue: 2007
-audit_base: 69320f3ce394e185ac7b07370c0fa90dbca1eea8
+audit_base: 39448828369f32b1c2cb49282da4bfdd50902b83
 working_class: declaration_owned_standing_service_reconciliation_terminal_run_decision_card_supersession_state_change_atomicity_and_inbound_publication_operations
 parent_class: durable_runtime_desired_state_and_status_specific_terminal_lifecycle_atomicity
 
@@ -30,6 +30,8 @@ binding_context:
   superseded_legacy_event_graph_gate: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964984576
   pre_1_0_hard_schema_cutoff_ruling: https://github.com/division-sh/swarm/issues/2007#issuecomment-4964995740
   pre_1_0_hard_schema_cutoff_pr_freeze: https://github.com/division-sh/swarm/pull/2047#issuecomment-4964996392
+  human_task_completion_review: https://github.com/division-sh/swarm/pull/2047#pullrequestreview-4699853801
+  human_task_completion_checklist: https://github.com/division-sh/swarm/pull/2047#issuecomment-4975603839
   superseded_standing_posture: https://github.com/division-sh/swarm/issues/1770#issuecomment-4952958019
   lifecycle_conformance_sibling: 2008
   normal_completion_regression_owner: 994
@@ -174,6 +176,7 @@ tracked_watchlist_mapping:
     - terminal_event_receipt_delivery_and_runtime_non_creation
     - unused_standalone_run_supersession_capability_removal
     - pre_1_0_obsolete_outbox_hard_schema_cutoff
+    - normal_completion_human_task_continuation_settlement
   canonical_consumers:
     - provider_trigger_request_authentication_and_retry_projection
     - provider_trigger_new_operation_output_projection
@@ -188,6 +191,7 @@ tracked_watchlist_mapping:
     - obsolete_outbox_schema_compatibility_refusal_and_releaser_removal
     - mailbox_subscription_change_cursor_readback
     - terminal_event_replay_dispatch_and_recovery_non_creation
+    - postgres_and_sqlite_normal_run_completion_human_task_predicates
   sibling_dispositions:
     issue_1150: runtime_log_persistence_closed_and_preserved
     issue_1932: directive_operation_owner_closed_and_preserved
@@ -212,6 +216,54 @@ tracked_watchlist_mapping:
     The issue-thread amendment cites the commit containing this mapping. A
     private swarm-docs backup is neither a source of truth nor tracker repair.
 
+normal_completion_human_task_eligibility:
+  issue_category: high_risk_runtime_semantic_ownership_failure_class_and_backend_parity
+  observed_symptom: >-
+    An otherwise quiescent run could become completed while a standalone
+    human-task card remained pending, decision_committed, expired without
+    outcome delivery, or malformed without its authoritative continuation.
+  chosen_working_failure_class: successful_completion_with_unresolved_human_task_obligations
+  immediate_parent_failure_class: successful_completion_admission_and_obligation_settlement
+  parent_failure_class: durable_runtime_desired_state_and_status_specific_terminal_lifecycle_atomicity
+  framing_decision: absorbed_into_existing_broad_issue_2007_class
+  entry_point_not_boundary: >-
+    The missing predicate in normalRunCompletionRunReadyTx was the entry point.
+    The audit covers every human-task continuation state, card/continuation
+    identity consistency, standalone tasks without stage gates, both selected
+    stores, and the existing successful-completion writer.
+  canonical_owner: ConvergeNormalRunCompletion
+  owner_disposition: existing_real_semantic_owner_completed_not_replaced
+  systematic_consumption_audit:
+    postgres_normalRunCompletionRunReadyTx: consumes_authoritative_human_task_rows_in_this_work
+    sqlite_sqliteNormalRunCompletionRunReadyTx: consumes_authoritative_human_task_rows_in_this_work
+    stage_gate_accumulator_check: different_decision_anchor_and_retained_separately
+    builder_and_runtime_quiescence: observational_only_and_never_a_completion_writer
+    destructive_terminalization: different_status_specific_semantics
+    decision_card_and_continuation_mutators: already_authoritative_row_producers
+  invalid_interpreters:
+    - successful_completion_inferred_without_querying_human_task_continuations
+    - stage_gate_only_obligation_proof_used_as_human_task_proof
+    - outcome_dispatched_state_accepted_without_matching_card_and_event_identity
+  manifestations:
+    missing_continuation: fail_closed_run_remains_running
+    pending: fail_closed_run_remains_running
+    decision_committed: fail_closed_run_remains_running
+    expired_before_outcome_dispatched: fail_closed_run_remains_running
+    outcome_dispatched_decision: eligible_when_all_other_completion_checks_pass
+    outcome_dispatched_expiry: eligible_when_all_other_completion_checks_pass
+  exact_proof:
+    - TestNormalRunCompletionRequiresSettledHumanTasksParity
+    - TestNormalRunCompletionDecisionGateAuthorityParity
+  supported_surfaces:
+    - sqlite_selected_store
+    - host_postgres_selected_store
+    - full_go_test_all
+  tracker_state_decision: current_issue_and_checked_in_artifact_repaired_no_new_issue
+  watchlist_decision: refine_existing_issue_2007_node_only
+  intended_closure_level: selected_failure_class_eliminated
+  closure_feasibility: one_bounded_predicate_per_selected_store_and_dual_backend_proof
+  blocking_condition: none_after_implementation_and_proof
+
 terminal_status_invariants:
   completed:
     owner: normal_run_completion_owner_from_issue_994
@@ -219,7 +271,9 @@ terminal_status_invariants:
     rule: >-
       The transition does not destroy work. It succeeds only when canonical
       entity/flow terminality, deliveries, pipeline receipts, active timers and
-      claims, and session leases prove that no same-run execution remains.
+      claims, session leases, stage-gate obligations, and every standalone
+      human-task outcome prove that no same-run execution or operator obligation
+      remains.
     issue_2007_action: preserve_completion_owner_and_absorb_terminal_event_admission
   cancelled:
     owner: canonical_run_destructive_terminalization_owner
