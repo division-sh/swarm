@@ -13,7 +13,6 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
-	"github.com/google/uuid"
 )
 
 func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm.AgentTurnRecord) error {

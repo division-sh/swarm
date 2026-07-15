@@ -335,40 +335,64 @@ func TestForkedSourceManagedExternalEffectAdmissionTransitionsAndRecoveryRefuse(
 func seedForkedExternalEffectAttempt(t *testing.T, fixture *forkedConsumerTestBackend, now time.Time) (string, string) {
 	t.Helper()
 	agentID, operationID, attemptID := "frozen-recovery-agent-"+uuid.NewString(), uuid.NewString(), uuid.NewString()
+	turnID, sessionID := uuid.NewString(), uuid.NewString()
+	authority := runtimeeffects.NormalAgentAuthority(
+		runtimeeffects.LifecycleToken{RuntimeEpoch: 1, AgentID: agentID, Generation: 1},
+		"freeze-worker",
+		now.Add(-time.Minute),
+	)
+	authority.Target = runtimeeffects.UsageTarget{
+		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: fixture.sourceRun,
+		AgentID: agentID, SessionID: sessionID, Memory: agentmemory.PlatformDefault(), FlowInstance: "freeze/effect",
+	}
+	capabilitySurface := managedCompletionTestSurface(t, authority, "native_command")
+	capabilityStore := managedCapabilityTestStore(fixture.sqlite)
+	if fixture.postgres != nil {
+		capabilityStore = fixture.postgres
+	}
+	if err := capabilityStore.SaveManagedCapabilitySurface(context.Background(), capabilitySurface); err != nil {
+		t.Fatalf("seed frozen external-effect capability surface: %v", err)
+	}
+	capabilityPlanFingerprint, err := capabilitySurface.PlanFingerprint()
+	if err != nil {
+		t.Fatalf("fingerprint frozen external-effect capability plan: %v", err)
+	}
 	agentQuery := `INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at) VALUES (?, 'freeze/effect', 'worker', 'standard', 'mock', TRUE, 'authored', 'active', ?)`
 	operationQuery := `INSERT INTO runtime_external_effect_operations (
 		operation_id, effect_kind, effect_class, execution_mode, authority_kind, authority_id, agent_id,
-		runtime_epoch, generation, authority_evidence, lineage, request_fingerprint, state, created_at, updated_at
-	) VALUES (?, 'native_command', 'write_or_unknown', 'live', 'normal_agent', ?, ?, 1, 1, '{}', ?, 'frozen-fingerprint', 'launched', ?, ?)`
+		runtime_epoch, generation, capability_plan_fingerprint, authority_evidence, lineage, request_fingerprint, state, created_at, updated_at
+	) VALUES (?, 'native_command', 'write_or_unknown', 'live', 'normal_agent', ?, ?, 1, 1, ?, '{}', ?, 'frozen-fingerprint', 'launched', ?, ?)`
 	attemptQuery := `INSERT INTO runtime_external_effect_attempts (
 		attempt_id, operation_id, attempt_ordinal, adapter, transport, execution_mode, runtime_epoch, generation,
-		execution_owner, lease_expires_at, fence_generation, state, evidence, authorized_at, launched_at, updated_at
-	) VALUES (?, ?, 1, 'native_command', 'process', 'live', 1, 1, 'freeze-worker', ?, 1, 'launched', '{}', ?, ?, ?)`
+		execution_owner, lease_expires_at, fence_generation, usage_target_kind, usage_target_id, capability_surface_id,
+		state, evidence, authorized_at, launched_at, updated_at
+	) VALUES (?, ?, 1, 'native_command', 'process', 'live', 1, 1, 'freeze-worker', ?, 1, 'agent_turn', ?, ?, 'launched', '{}', ?, ?, ?)`
 	lineage := `{"run_id":"` + fixture.sourceRun + `"}`
 	if fixture.postgres != nil {
 		agentQuery = `INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at) VALUES ($1, 'freeze/effect', 'worker', 'standard', 'mock', TRUE, 'authored', 'active', $2)`
 		operationQuery = `INSERT INTO runtime_external_effect_operations (
 			operation_id, effect_kind, effect_class, execution_mode, authority_kind, authority_id, agent_id,
-			runtime_epoch, generation, authority_evidence, lineage, request_fingerprint, state, created_at, updated_at
-		) VALUES ($1::uuid, 'native_command', 'write_or_unknown', 'live', 'normal_agent', $2, $3, 1, 1, '{}'::jsonb, $4::jsonb, 'frozen-fingerprint', 'launched', $5, $5)`
+			runtime_epoch, generation, capability_plan_fingerprint, authority_evidence, lineage, request_fingerprint, state, created_at, updated_at
+		) VALUES ($1::uuid, 'native_command', 'write_or_unknown', 'live', 'normal_agent', $2, $3, 1, 1, $4, '{}'::jsonb, $5::jsonb, 'frozen-fingerprint', 'launched', $6, $6)`
 		attemptQuery = `INSERT INTO runtime_external_effect_attempts (
 			attempt_id, operation_id, attempt_ordinal, adapter, transport, execution_mode, runtime_epoch, generation,
-			execution_owner, lease_expires_at, fence_generation, state, evidence, authorized_at, launched_at, updated_at
-		) VALUES ($1::uuid, $2::uuid, 1, 'native_command', 'process', 'live', 1, 1, 'freeze-worker', $3, 1, 'launched', '{}'::jsonb, $4, $4, $4)`
+			execution_owner, lease_expires_at, fence_generation, usage_target_kind, usage_target_id, capability_surface_id,
+			state, evidence, authorized_at, launched_at, updated_at
+		) VALUES ($1::uuid, $2::uuid, 1, 'native_command', 'process', 'live', 1, 1, 'freeze-worker', $3, 1, 'agent_turn', $4::uuid, $5::uuid, 'launched', '{}'::jsonb, $6, $6, $6)`
 	}
 	if _, err := fixture.db.ExecContext(context.Background(), agentQuery, agentID, now); err != nil {
 		t.Fatal(err)
 	}
-	operationArgs := []any{operationID, agentID, agentID, lineage, now, now}
+	operationArgs := []any{operationID, agentID, agentID, capabilityPlanFingerprint, lineage, now, now}
 	if fixture.postgres != nil {
-		operationArgs = operationArgs[:5]
+		operationArgs = operationArgs[:6]
 	}
 	if _, err := fixture.db.ExecContext(context.Background(), operationQuery, operationArgs...); err != nil {
 		t.Fatal(err)
 	}
-	attemptArgs := []any{attemptID, operationID, now.Add(-time.Minute), now, now, now}
+	attemptArgs := []any{attemptID, operationID, now.Add(-time.Minute), turnID, capabilitySurface.ID, now, now, now}
 	if fixture.postgres != nil {
-		attemptArgs = attemptArgs[:4]
+		attemptArgs = attemptArgs[:6]
 	}
 	if _, err := fixture.db.ExecContext(context.Background(), attemptQuery, attemptArgs...); err != nil {
 		t.Fatal(err)
