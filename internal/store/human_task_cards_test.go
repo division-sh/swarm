@@ -77,6 +77,98 @@ func TestHumanTaskDecisionAndBudgetLifecycleParity(t *testing.T) {
 	}
 }
 
+func TestNormalRunCompletionRequiresSettledHumanTasksParity(t *testing.T) {
+	testCases := []struct {
+		name          string
+		continuation  string
+		wantCompleted bool
+	}{
+		{name: "missing_continuation", continuation: "missing"},
+		{name: "pending", continuation: string(decisioncard.HumanTaskContinuationPending)},
+		{name: "decision_committed", continuation: string(decisioncard.HumanTaskContinuationDecisionCommitted)},
+		{name: "expired", continuation: string(decisioncard.HumanTaskContinuationExpired)},
+		{name: "outcome_dispatched", continuation: string(decisioncard.HumanTaskContinuationOutcomeDispatched), wantCompleted: true},
+		{name: "expired_outcome_dispatched", continuation: "expired_outcome_dispatched", wantCompleted: true},
+	}
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, testCase := range testCases {
+			backend, testCase := backend, testCase
+			t.Run(backend+"/"+testCase.name, func(t *testing.T) {
+				ctx := context.Background()
+				cardStore, runID := decisionCardTestStore(t, backend)
+				humanStore := cardStore.(decisioncard.HumanTaskStore)
+				db, postgres := decisionCardStoreDB(t, cardStore)
+				now := time.Date(2026, 7, 14, 17, 0, 0, 0, time.UTC)
+				card, continuation := newHumanTaskDecisionCardTestFixture(t, runID, testCase.name, now, 1, now.Add(time.Hour))
+
+				if testCase.continuation == "missing" {
+					if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
+						t.Fatalf("CreateDecisionCard malformed human task: %v", err)
+					}
+				} else {
+					if err := humanStore.CreateHumanTaskCard(ctx, card, continuation); err != nil {
+						t.Fatalf("CreateHumanTaskCard: %v", err)
+					}
+				}
+
+				var outcomeEventID string
+				switch testCase.continuation {
+				case string(decisioncard.HumanTaskContinuationDecisionCommitted), string(decisioncard.HumanTaskContinuationOutcomeDispatched):
+					outcomeEventID = uuid.NewString()
+					if _, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
+						CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator-a",
+						ObservedContentHash: card.CardContentHash, DecisionEventID: outcomeEventID, Now: now.Add(time.Minute),
+					}); err != nil {
+						t.Fatalf("DecideDecisionCard: %v", err)
+					}
+					if testCase.continuation == string(decisioncard.HumanTaskContinuationOutcomeDispatched) {
+						if _, err := humanStore.CompleteHumanTaskOutcome(ctx, card.CardID, outcomeEventID, now.Add(2*time.Minute)); err != nil {
+							t.Fatalf("CompleteHumanTaskOutcome: %v", err)
+						}
+					}
+				case string(decisioncard.HumanTaskContinuationExpired), "expired_outcome_dispatched":
+					expiryStore := cardStore.(decisioncard.HumanTaskExpiryStore)
+					if eventsOut := expireHumanTaskCardsInTestMutation(t, ctx, cardStore, expiryStore, now.Add(2*time.Hour), 10); len(eventsOut) != 1 {
+						t.Fatalf("expired events = %d, want 1", len(eventsOut))
+					}
+					if testCase.continuation == "expired_outcome_dispatched" {
+						expired, err := humanStore.LoadHumanTaskContinuation(ctx, card.CardID)
+						if err != nil {
+							t.Fatalf("LoadHumanTaskContinuation: %v", err)
+						}
+						if _, err := humanStore.CompleteHumanTaskOutcome(ctx, card.CardID, expired.OutcomeEventID, now.Add(2*time.Hour+time.Minute)); err != nil {
+							t.Fatalf("CompleteHumanTaskOutcome expired: %v", err)
+						}
+					}
+				}
+
+				entityID := uuid.NewString()
+				seedDecisionCardCompletionEntity(t, db, postgres, runID, entityID, "done", now)
+				eventID := seedDecisionCardCompletionEvent(t, ctx, cardStore, runID, entityID, now.Add(3*time.Hour))
+				if err := convergeDecisionCardRunCompletion(ctx, cardStore, eventID); err != nil {
+					t.Fatalf("ConvergeNormalRunCompletion: %v", err)
+				}
+
+				query := `SELECT status FROM runs WHERE run_id = ?`
+				if postgres {
+					query = `SELECT status FROM runs WHERE run_id = $1::uuid`
+				}
+				var status string
+				if err := db.QueryRowContext(ctx, query, runID).Scan(&status); err != nil {
+					t.Fatalf("load run status: %v", err)
+				}
+				wantStatus := "running"
+				if testCase.wantCompleted {
+					wantStatus = "completed"
+				}
+				if status != wantStatus {
+					t.Fatalf("run status = %q, want %q", status, wantStatus)
+				}
+			})
+		}
+	}
+}
+
 func TestPostgresHumanTaskWeeklyBudgetSerializesConcurrentApprovals(t *testing.T) {
 	ctx := context.Background()
 	cardStore, runID := decisionCardTestStore(t, "postgres")

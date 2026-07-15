@@ -130,6 +130,7 @@ func normalRunCompletionRunReadyTx(
 		normalRunCompletionDeliveriesSettledTx,
 		normalRunCompletionTimersSettledTx,
 		normalRunCompletionSessionLeasesSettledTx,
+		normalRunCompletionHumanTasksSettledTx,
 		normalRunCompletionGateObligationsSettledTx,
 	}
 	for _, check := range checks {
@@ -139,6 +140,30 @@ func normalRunCompletionRunReadyTx(
 		}
 	}
 	return normalRunCompletionEntitiesTerminalTx(ctx, tx, runID, workflowTerminals, flowTerminals)
+}
+
+func normalRunCompletionHumanTasksSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
+	var unresolved bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM decision_cards c
+			LEFT JOIN human_task_continuations h ON h.card_id = c.card_id
+			WHERE c.run_id = $1::uuid
+			  AND c.anchor_kind = 'human_task'
+			  AND (
+				h.card_id IS NULL
+				OR h.run_id <> c.run_id
+				OR h.state <> 'outcome_dispatched'
+				OR h.outcome_event_id IS NULL
+				OR c.status NOT IN ('decided', 'expired')
+				OR (c.status = 'decided' AND (c.decision_event_id IS NULL OR c.decision_event_id <> h.outcome_event_id))
+			  )
+		)
+	`, runID).Scan(&unresolved); err != nil {
+		return false, fmt.Errorf("check normal run human-task settlement: %w", err)
+	}
+	return !unresolved, nil
 }
 
 func normalRunCompletionGateObligationsSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
