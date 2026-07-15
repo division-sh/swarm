@@ -103,29 +103,19 @@ func (s *SQLiteRuntimeStore) LoadHumanTaskContinuation(ctx context.Context, card
 }
 
 func (s *PostgresStore) CompleteHumanTaskOutcome(ctx context.Context, cardID, eventID string, at time.Time) (decisioncard.HumanTaskContinuation, error) {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return completeHumanTaskOutcome(ctx, tx, cardID, eventID, at, true)
+	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
+	if !ok || tx == nil {
+		return decisioncard.HumanTaskContinuation{}, fmt.Errorf("human-task outcome completion requires an active pipeline transaction")
 	}
-	var out decisioncard.HumanTaskContinuation
-	err := runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = completeHumanTaskOutcome(txctx, tx, cardID, eventID, at, true)
-		return err
-	})
-	return out, err
+	return completeHumanTaskOutcome(ctx, tx, cardID, eventID, at, true)
 }
 
 func (s *SQLiteRuntimeStore) CompleteHumanTaskOutcome(ctx context.Context, cardID, eventID string, at time.Time) (decisioncard.HumanTaskContinuation, error) {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return completeHumanTaskOutcome(ctx, tx, cardID, eventID, at, false)
+	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
+	if !ok || tx == nil {
+		return decisioncard.HumanTaskContinuation{}, fmt.Errorf("human-task outcome completion requires an active pipeline transaction")
 	}
-	var out decisioncard.HumanTaskContinuation
-	err := s.runRuntimeMutation(ctx, "sqlite complete human-task outcome", func(txctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = completeHumanTaskOutcome(txctx, tx, cardID, eventID, at, false)
-		return err
-	})
-	return out, err
+	return completeHumanTaskOutcome(ctx, tx, cardID, eventID, at, false)
 }
 
 func completeHumanTaskOutcome(ctx context.Context, tx *sql.Tx, cardID, eventID string, at time.Time, postgres bool) (decisioncard.HumanTaskContinuation, error) {
@@ -133,21 +123,46 @@ func completeHumanTaskOutcome(ctx context.Context, tx *sql.Tx, cardID, eventID s
 	if at.IsZero() {
 		return decisioncard.HumanTaskContinuation{}, fmt.Errorf("human-task outcome completion requires an authoritative timestamp")
 	}
+	card, err := loadDecisionCard(ctx, tx, cardID, postgres, true)
+	if err != nil {
+		return decisioncard.HumanTaskContinuation{}, err
+	}
 	current, err := loadHumanTaskContinuation(ctx, tx, cardID, postgres, true)
 	if err != nil {
 		return decisioncard.HumanTaskContinuation{}, err
 	}
-	if current.State == decisioncard.HumanTaskContinuationOutcomeDispatched && current.OutcomeEventID == strings.TrimSpace(eventID) {
+	eventID = strings.TrimSpace(eventID)
+	if current.OutcomeEventID != eventID {
+		return decisioncard.HumanTaskContinuation{}, fmt.Errorf("human-task continuation does not authorize outcome %s", eventID)
+	}
+	eventName := ""
+	switch {
+	case card.Status == decisioncard.StatusDecided && card.DecisionEventID == eventID && card.Verdict == "approve":
+		eventName = "human_task.approved"
+	case card.Status == decisioncard.StatusDecided && card.DecisionEventID == eventID && card.Verdict == "reject":
+		eventName = "human_task.rejected"
+	case card.Status == decisioncard.StatusExpired && current.State != decisioncard.HumanTaskContinuationDecisionCommitted:
+		eventName = "human_task.expired"
+	default:
+		return decisioncard.HumanTaskContinuation{}, fmt.Errorf("human-task card does not authorize outcome %s", eventID)
+	}
+	if err := requireDecisionCardOutcomeEvent(ctx, tx, decisionCardOutcomeEvent{
+		eventID: decisioncard.HumanTaskOutcomeEventID(card.CardID, eventID), runID: current.RunID,
+		eventName: eventName, sourceEventID: eventID,
+	}, postgres); err != nil {
+		return decisioncard.HumanTaskContinuation{}, err
+	}
+	if current.State == decisioncard.HumanTaskContinuationOutcomeDispatched {
 		return current, nil
 	}
-	if (current.State != decisioncard.HumanTaskContinuationDecisionCommitted && current.State != decisioncard.HumanTaskContinuationExpired) || current.OutcomeEventID != strings.TrimSpace(eventID) {
+	if current.State != decisioncard.HumanTaskContinuationDecisionCommitted && current.State != decisioncard.HumanTaskContinuationExpired {
 		return decisioncard.HumanTaskContinuation{}, fmt.Errorf("human-task continuation does not authorize outcome %s", eventID)
 	}
 	query := `UPDATE human_task_continuations SET state = 'outcome_dispatched', updated_at = ? WHERE card_id = ? AND state IN ('decision_committed', 'expired') AND outcome_event_id = ?`
 	if postgres {
 		query = `UPDATE human_task_continuations SET state = 'outcome_dispatched', updated_at = $1 WHERE card_id = $2 AND state IN ('decision_committed', 'expired') AND outcome_event_id = $3::uuid`
 	}
-	result, err := tx.ExecContext(ctx, query, at, strings.TrimSpace(cardID), strings.TrimSpace(eventID))
+	result, err := tx.ExecContext(ctx, query, at, strings.TrimSpace(cardID), eventID)
 	if err != nil {
 		return decisioncard.HumanTaskContinuation{}, err
 	}

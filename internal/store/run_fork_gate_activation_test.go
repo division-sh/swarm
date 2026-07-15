@@ -232,9 +232,7 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := cards.CompleteProposedEffectRoute(ctx, card.CardID, uuid.NewString(), now.Add(2*time.Minute)); err != nil {
-				t.Fatal(err)
-			}
+			completeProposedEffectRouteInTestMutation(t, ctx, cards, card.CardID, decisionEventID, now.Add(2*time.Minute))
 			if _, err := db.ExecContext(ctx, `
 				INSERT INTO entity_state (
 					run_id, entity_id, flow_instance, entity_type, current_state,

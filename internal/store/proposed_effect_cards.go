@@ -288,42 +288,64 @@ func commitProposedEffectDecision(ctx context.Context, tx *sql.Tx, card decision
 }
 
 func (s *PostgresStore) CompleteProposedEffectRoute(ctx context.Context, cardID, routeEventID string, at time.Time) (decisioncard.ProposedEffectContinuation, error) {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return completeProposedEffectRoute(ctx, tx, cardID, routeEventID, at, true)
+	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
+	if !ok || tx == nil {
+		return decisioncard.ProposedEffectContinuation{}, fmt.Errorf("proposed-effect route completion requires an active pipeline transaction")
 	}
-	var out decisioncard.ProposedEffectContinuation
-	err := runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
-		var inner error
-		out, inner = completeProposedEffectRoute(txctx, tx, cardID, routeEventID, at, true)
-		return inner
-	})
-	return out, err
+	return completeProposedEffectRoute(ctx, tx, cardID, routeEventID, at, true)
 }
 
 func (s *SQLiteRuntimeStore) CompleteProposedEffectRoute(ctx context.Context, cardID, routeEventID string, at time.Time) (decisioncard.ProposedEffectContinuation, error) {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return completeProposedEffectRoute(ctx, tx, cardID, routeEventID, at, false)
+	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
+	if !ok || tx == nil {
+		return decisioncard.ProposedEffectContinuation{}, fmt.Errorf("proposed-effect route completion requires an active pipeline transaction")
 	}
-	var out decisioncard.ProposedEffectContinuation
-	err := s.runDecisionCardMutation(ctx, "sqlite complete proposed-effect route", func(txctx context.Context, tx *sql.Tx) error {
-		var inner error
-		out, inner = completeProposedEffectRoute(txctx, tx, cardID, routeEventID, at, false)
-		return inner
-	})
-	return out, err
+	return completeProposedEffectRoute(ctx, tx, cardID, routeEventID, at, false)
 }
 
 func completeProposedEffectRoute(ctx context.Context, tx *sql.Tx, cardID, routeEventID string, at time.Time, postgres bool) (decisioncard.ProposedEffectContinuation, error) {
 	at = decisioncard.CanonicalTimestamp(at)
+	if at.IsZero() {
+		return decisioncard.ProposedEffectContinuation{}, fmt.Errorf("proposed-effect route completion requires an authoritative timestamp")
+	}
+	card, err := loadDecisionCard(ctx, tx, cardID, postgres, true)
+	if err != nil {
+		return decisioncard.ProposedEffectContinuation{}, err
+	}
 	current, err := loadProposedEffectContinuation(ctx, tx, cardID, postgres, true)
 	if err != nil {
 		return decisioncard.ProposedEffectContinuation{}, err
 	}
+	routeEventID = strings.TrimSpace(routeEventID)
+	if routeEventID == "" || routeEventID != current.DecisionEventID || card.Status != decisioncard.StatusDecided || card.DecisionEventID != current.DecisionEventID || card.Verdict != current.Verdict {
+		return decisioncard.ProposedEffectContinuation{}, fmt.Errorf("proposed-effect continuation does not authorize route %s", routeEventID)
+	}
 	wantState := decisioncard.ProposedEffectOutcomeDispatched
+	expected := decisionCardOutcomeEvent{runID: current.RunID}
 	if current.Verdict == "approve" {
 		wantState = decisioncard.ProposedEffectRequestReleased
+		expected.eventID = current.RequestEventID
+		expected.eventName = "platform.activity_requested"
+		expected.sourceEventID = current.SourceEventID
+	} else {
+		expected.eventID = decisioncard.ProposedEffectOutcomeEventID(card.CardID, current.DecisionEventID, current.Verdict)
+		expected.sourceEventID = current.DecisionEventID
+		switch current.Verdict {
+		case "revise":
+			expected.eventName = current.RevisionEvent
+		case "reject":
+			expected.eventName = current.RejectedEvent
+		default:
+			return decisioncard.ProposedEffectContinuation{}, fmt.Errorf("proposed-effect verdict %q has no route operation", current.Verdict)
+		}
 	}
-	if current.State == wantState && current.RouteEventID == strings.TrimSpace(routeEventID) {
+	if current.RouteEventID != "" && current.RouteEventID != current.DecisionEventID {
+		return decisioncard.ProposedEffectContinuation{}, fmt.Errorf("proposed-effect continuation has inconsistent route identity")
+	}
+	if err := requireDecisionCardOutcomeEvent(ctx, tx, expected, postgres); err != nil {
+		return decisioncard.ProposedEffectContinuation{}, err
+	}
+	if current.State == wantState && current.RouteEventID == routeEventID {
 		return current, nil
 	}
 	if current.State != decisioncard.ProposedEffectDecisionCommitted || current.DecisionEventID == "" {
@@ -333,7 +355,7 @@ func completeProposedEffectRoute(ctx context.Context, tx *sql.Tx, cardID, routeE
 	if postgres {
 		query = `UPDATE proposed_effect_continuations SET state = $1, route_event_id = $2::uuid, updated_at = $3 WHERE card_id = $4 AND state = 'decision_committed' AND decision_event_id = $5::uuid`
 	}
-	result, err := tx.ExecContext(ctx, query, wantState, strings.TrimSpace(routeEventID), at, current.CardID, current.DecisionEventID)
+	result, err := tx.ExecContext(ctx, query, wantState, routeEventID, at, current.CardID, current.DecisionEventID)
 	if err != nil {
 		return decisioncard.ProposedEffectContinuation{}, err
 	}
@@ -341,7 +363,7 @@ func completeProposedEffectRoute(ctx context.Context, tx *sql.Tx, cardID, routeE
 		return decisioncard.ProposedEffectContinuation{}, fmt.Errorf("proposed-effect route lost authority")
 	}
 	current.State = wantState
-	current.RouteEventID = strings.TrimSpace(routeEventID)
+	current.RouteEventID = routeEventID
 	current.UpdatedAt = at
 	return current, nil
 }

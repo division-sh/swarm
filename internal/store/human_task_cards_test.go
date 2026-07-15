@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -47,14 +49,31 @@ func TestHumanTaskDecisionAndBudgetLifecycleParity(t *testing.T) {
 			}
 			completionAt := now.Add(2 * time.Minute).Add(789 * time.Nanosecond)
 			wantCompletionAt := decisioncard.CanonicalTimestamp(completionAt)
-			dispatched, err := humanStore.CompleteHumanTaskOutcome(ctx, approved.CardID, decisionEventID, completionAt)
-			if err != nil || dispatched.State != decisioncard.HumanTaskContinuationOutcomeDispatched || !dispatched.UpdatedAt.Equal(wantCompletionAt) {
-				t.Fatalf("CompleteHumanTaskOutcome = %#v, %v", dispatched, err)
+			if _, err := humanStore.CompleteHumanTaskOutcome(ctx, approved.CardID, decisionEventID, completionAt); err == nil || !strings.Contains(err.Error(), "active pipeline transaction") {
+				t.Fatalf("standalone CompleteHumanTaskOutcome error = %v", err)
 			}
-			if replayed, err := humanStore.CompleteHumanTaskOutcome(ctx, approved.CardID, decisionEventID, now.Add(3*time.Minute)); err != nil || replayed.State != decisioncard.HumanTaskContinuationOutcomeDispatched || !replayed.UpdatedAt.Equal(wantCompletionAt) {
+			if err := runDecisionCardTestPipelineMutation(t, ctx, cardStore, func(txctx context.Context, _ *sql.Tx) error {
+				_, err := humanStore.CompleteHumanTaskOutcome(txctx, approved.CardID, decisionEventID, completionAt)
+				return err
+			}); err == nil || !strings.Contains(err.Error(), "outcome event is not persisted") {
+				t.Fatalf("eventless CompleteHumanTaskOutcome error = %v", err)
+			}
+			dispatched := completeHumanTaskOutcomeInTestMutation(t, ctx, cardStore, approved.CardID, decisionEventID, completionAt)
+			if dispatched.State != decisioncard.HumanTaskContinuationOutcomeDispatched || !dispatched.UpdatedAt.Equal(wantCompletionAt) {
+				t.Fatalf("CompleteHumanTaskOutcome = %#v", dispatched)
+			}
+			var replayed decisioncard.HumanTaskContinuation
+			if err := runDecisionCardTestPipelineMutation(t, ctx, cardStore, func(txctx context.Context, _ *sql.Tx) error {
+				var err error
+				replayed, err = humanStore.CompleteHumanTaskOutcome(txctx, approved.CardID, decisionEventID, now.Add(3*time.Minute))
+				return err
+			}); err != nil || replayed.State != decisioncard.HumanTaskContinuationOutcomeDispatched || !replayed.UpdatedAt.Equal(wantCompletionAt) {
 				t.Fatalf("replayed CompleteHumanTaskOutcome = %#v, %v", replayed, err)
 			}
-			if _, err := humanStore.CompleteHumanTaskOutcome(ctx, approved.CardID, uuid.NewString(), now.Add(3*time.Minute)); err == nil {
+			if err := runDecisionCardTestPipelineMutation(t, ctx, cardStore, func(txctx context.Context, _ *sql.Tx) error {
+				_, err := humanStore.CompleteHumanTaskOutcome(txctx, approved.CardID, uuid.NewString(), now.Add(3*time.Minute))
+				return err
+			}); err == nil {
 				t.Fatal("conflicting human-task outcome identity was accepted")
 			}
 
@@ -88,6 +107,7 @@ func TestNormalRunCompletionRequiresSettledHumanTasksParity(t *testing.T) {
 		{name: "decision_committed", continuation: string(decisioncard.HumanTaskContinuationDecisionCommitted)},
 		{name: "expired", continuation: string(decisioncard.HumanTaskContinuationExpired)},
 		{name: "outcome_dispatched", continuation: string(decisioncard.HumanTaskContinuationOutcomeDispatched), wantCompleted: true},
+		{name: "outcome_dispatched_without_event", continuation: "outcome_dispatched_without_event"},
 		{name: "expired_outcome_dispatched", continuation: "expired_outcome_dispatched", wantCompleted: true},
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
@@ -113,7 +133,7 @@ func TestNormalRunCompletionRequiresSettledHumanTasksParity(t *testing.T) {
 
 				var outcomeEventID string
 				switch testCase.continuation {
-				case string(decisioncard.HumanTaskContinuationDecisionCommitted), string(decisioncard.HumanTaskContinuationOutcomeDispatched):
+				case string(decisioncard.HumanTaskContinuationDecisionCommitted), string(decisioncard.HumanTaskContinuationOutcomeDispatched), "outcome_dispatched_without_event":
 					outcomeEventID = uuid.NewString()
 					if _, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
 						CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator-a",
@@ -122,8 +142,14 @@ func TestNormalRunCompletionRequiresSettledHumanTasksParity(t *testing.T) {
 						t.Fatalf("DecideDecisionCard: %v", err)
 					}
 					if testCase.continuation == string(decisioncard.HumanTaskContinuationOutcomeDispatched) {
-						if _, err := humanStore.CompleteHumanTaskOutcome(ctx, card.CardID, outcomeEventID, now.Add(2*time.Minute)); err != nil {
-							t.Fatalf("CompleteHumanTaskOutcome: %v", err)
+						completeHumanTaskOutcomeInTestMutation(t, ctx, cardStore, card.CardID, outcomeEventID, now.Add(2*time.Minute))
+					} else if testCase.continuation == "outcome_dispatched_without_event" {
+						query := `UPDATE human_task_continuations SET state = 'outcome_dispatched' WHERE card_id = ?`
+						if postgres {
+							query = `UPDATE human_task_continuations SET state = 'outcome_dispatched' WHERE card_id = $1`
+						}
+						if _, err := db.ExecContext(ctx, query, card.CardID); err != nil {
+							t.Fatal(err)
 						}
 					}
 				case string(decisioncard.HumanTaskContinuationExpired), "expired_outcome_dispatched":
@@ -136,9 +162,7 @@ func TestNormalRunCompletionRequiresSettledHumanTasksParity(t *testing.T) {
 						if err != nil {
 							t.Fatalf("LoadHumanTaskContinuation: %v", err)
 						}
-						if _, err := humanStore.CompleteHumanTaskOutcome(ctx, card.CardID, expired.OutcomeEventID, now.Add(2*time.Hour+time.Minute)); err != nil {
-							t.Fatalf("CompleteHumanTaskOutcome expired: %v", err)
-						}
+						completeHumanTaskOutcomeInTestMutation(t, ctx, cardStore, card.CardID, expired.OutcomeEventID, now.Add(2*time.Hour+time.Minute))
 					}
 				}
 

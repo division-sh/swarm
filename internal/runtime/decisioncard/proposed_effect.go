@@ -67,6 +67,11 @@ func ProposedEffectCardID(requestEventID, decision string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.proposed-effect.card.v1\x00"+identity)).String()
 }
 
+func ProposedEffectOutcomeEventID(cardID, decisionEventID, verdict string) string {
+	identity := strings.TrimSpace(cardID) + "\x00" + strings.TrimSpace(decisionEventID) + "\x00" + strings.TrimSpace(verdict)
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.proposed-effect.outcome.v1\x00"+identity)).String()
+}
+
 func (c ProposedEffectContinuation) Canonical() ProposedEffectContinuation {
 	c.CardID = strings.TrimSpace(c.CardID)
 	c.RunID = strings.TrimSpace(c.RunID)

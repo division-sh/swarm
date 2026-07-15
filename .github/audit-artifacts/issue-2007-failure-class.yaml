@@ -2901,6 +2901,43 @@ terminal_run_decision_card_supersession_reaudit:
     closure_feasibility: true_existing_selected_store_event_and_recovery_owners_are_sufficient
     blocking_ambiguity: none_after_post_upstream_gate
 
+  post_review_continuation_settlement_repair:
+    status: implemented_and_proven_pending_review
+    review_ref: https://github.com/division-sh/swarm/pull/2047#pullrequestreview-4700428459
+    chosen_working_failure_class: decision_card_continuation_settlement_without_required_event_operation
+    immediate_parent_failure_class: decision_card_lifecycle_state_and_outcome_atomicity
+    parent_failure_class: durable_runtime_desired_state_and_status_specific_terminal_lifecycle_atomicity
+    issue_2007_relation: absorbed_review_manifestation
+    canonical_owner: selected_store_RunPipelineMutation_plus_canonical_event_identity
+    exhaustive_consumers:
+      human_task_approve_reject: publish_deterministic_direct_outcome_then_complete_in_same_mutation
+      human_task_expiry: publish_deterministic_direct_expiry_outcome_then_complete_in_same_mutation
+      proposed_effect_approve: persist_exact_activity_request_then_complete_with_decision_event_identity
+      proposed_effect_revise_reject: publish_deterministic_typed_outcome_then_complete_with_decision_event_identity
+      proposed_effect_completed_replay: revalidate_persisted_operation_and_exact_route_identity
+      normal_run_completion_postgres: requires_state_identity_and_persisted_operation
+      normal_run_completion_sqlite: requires_state_identity_and_persisted_operation
+    invalid_paths_removed:
+      - standalone_CompleteHumanTaskOutcome_transaction
+      - standalone_CompleteProposedEffectRoute_transaction
+      - proposed_effect_route_event_identity_distinct_from_decision_event_identity
+      - outcome_dispatched_or_request_released_without_required_event_row
+      - completed_route_replay_bypassing_store_consistency_validation
+    manifestation_proof:
+      human_task_standalone_completion: rejected_on_both_backends
+      human_task_active_mutation_without_outcome_event: rejected_on_both_backends
+      human_task_decision_and_expiry: event_and_state_commit_together_on_both_backends
+      proposed_effect_standalone_completion: rejected_on_both_backends
+      proposed_effect_mismatched_route_identity: rejected_on_both_backends
+      proposed_effect_active_mutation_without_route_operation: rejected_on_both_backends
+      proposed_effect_approve_revise_reject: event_and_state_commit_together_on_both_backends
+      normal_completion_corrupt_or_missing_operation: remains_running_on_both_backends
+    tracker_state_decision: existing_issue_and_artifact_refined_no_new_issue
+    watchlist_mapping_decision: existing_inbound_publication_operation_ownership_node_remains_correct
+    intended_closure_level: absorbed_review_manifestation_eliminated
+    closure_feasibility: true_existing_selected_store_and_event_identity_owners_are_sufficient
+    blocking_ambiguity: none
+
   architecture_feedback:
     smell: >-
       Domain lifecycle state already had an append-only supported notification

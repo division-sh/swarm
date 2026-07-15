@@ -19,6 +19,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
@@ -1041,6 +1042,113 @@ func decisionCardStoreDB(t *testing.T, cards decisioncard.Store) (*sql.DB, bool)
 		t.Fatalf("unexpected decision card store %T", cards)
 		return nil, false
 	}
+}
+
+func runDecisionCardTestPipelineMutation(t *testing.T, ctx context.Context, cards decisioncard.Store, fn func(context.Context, *sql.Tx) error) error {
+	t.Helper()
+	db, postgres := decisionCardStoreDB(t, cards)
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	if !postgres {
+		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, cards.(*SQLiteRuntimeStore))
+	}
+	return workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+		tx, ok := runtimepipeline.PipelineSQLTxFromContext(txctx)
+		if !ok || tx == nil {
+			return fmt.Errorf("test pipeline mutation did not provide a transaction")
+		}
+		return fn(txctx, tx)
+	})
+}
+
+func appendDecisionCardTestEvent(t *testing.T, ctx context.Context, cards decisioncard.Store, tx *sql.Tx, evt events.Event) error {
+	t.Helper()
+	switch selected := cards.(type) {
+	case *PostgresStore:
+		if err := selected.AppendEventTx(ctx, tx, evt); err != nil {
+			return err
+		}
+		return selected.UpsertPipelineReceiptTx(ctx, tx, evt.ID(), "processed", nil)
+	case *SQLiteRuntimeStore:
+		if err := selected.AppendEventTx(ctx, tx, evt); err != nil {
+			return err
+		}
+		return selected.UpsertPipelineReceiptTx(ctx, tx, evt.ID(), "processed", nil)
+	default:
+		return fmt.Errorf("unexpected decision card store %T", cards)
+	}
+}
+
+func completeHumanTaskOutcomeInTestMutation(t *testing.T, ctx context.Context, cards decisioncard.Store, cardID, outcomeEventID string, at time.Time) decisioncard.HumanTaskContinuation {
+	t.Helper()
+	human := cards.(decisioncard.HumanTaskStore)
+	card, err := cards.GetDecisionCard(ctx, cardID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuation, err := human.LoadHumanTaskContinuation(ctx, cardID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventName := "human_task.expired"
+	if card.Status == decisioncard.StatusDecided {
+		switch card.Verdict {
+		case "approve":
+			eventName = "human_task.approved"
+		case "reject":
+			eventName = "human_task.rejected"
+		default:
+			t.Fatalf("unsupported human-task verdict %q", card.Verdict)
+		}
+	}
+	evt := eventtest.PersistedProjection(
+		decisioncard.HumanTaskOutcomeEventID(cardID, outcomeEventID), events.EventType(eventName), "test", "", []byte(`{}`),
+		1, continuation.RunID, outcomeEventID, events.EventEnvelope{}, at,
+	)
+	var completed decisioncard.HumanTaskContinuation
+	if err := runDecisionCardTestPipelineMutation(t, ctx, cards, func(txctx context.Context, tx *sql.Tx) error {
+		if err := appendDecisionCardTestEvent(t, txctx, cards, tx, evt); err != nil {
+			return err
+		}
+		var err error
+		completed, err = human.CompleteHumanTaskOutcome(txctx, cardID, outcomeEventID, at)
+		return err
+	}); err != nil {
+		t.Fatalf("complete human-task outcome in test mutation: %v", err)
+	}
+	return completed
+}
+
+func completeProposedEffectRouteInTestMutation(t *testing.T, ctx context.Context, cards decisioncard.Store, cardID, decisionEventID string, at time.Time) decisioncard.ProposedEffectContinuation {
+	t.Helper()
+	proposed := cards.(decisioncard.ProposedEffectStore)
+	continuation, err := proposed.LoadProposedEffectContinuation(ctx, cardID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedID := decisioncard.ProposedEffectOutcomeEventID(cardID, decisionEventID, continuation.Verdict)
+	expectedName := continuation.RejectedEvent
+	parentID := decisionEventID
+	if continuation.Verdict == "approve" {
+		expectedID = continuation.RequestEventID
+		expectedName = "platform.activity_requested"
+		parentID = continuation.SourceEventID
+	} else if continuation.Verdict == "revise" {
+		expectedName = continuation.RevisionEvent
+	}
+	evt := eventtest.PersistedProjection(expectedID, events.EventType(expectedName), "test", "", []byte(`{}`), 1,
+		continuation.RunID, parentID, events.EventEnvelope{}, at)
+	var completed decisioncard.ProposedEffectContinuation
+	if err := runDecisionCardTestPipelineMutation(t, ctx, cards, func(txctx context.Context, tx *sql.Tx) error {
+		if err := appendDecisionCardTestEvent(t, txctx, cards, tx, evt); err != nil {
+			return err
+		}
+		var err error
+		completed, err = proposed.CompleteProposedEffectRoute(txctx, cardID, decisionEventID, at)
+		return err
+	}); err != nil {
+		t.Fatalf("complete proposed-effect route in test mutation: %v", err)
+	}
+	return completed
 }
 
 func appendDecisionCardChangeInStore(ctx context.Context, cards decisioncard.Store, runID, cardID, changeType string, payload semanticvalue.Value, now time.Time) (int64, error) {

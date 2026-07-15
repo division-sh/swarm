@@ -3465,7 +3465,9 @@ handler_specification:
           decision_cards owns presentation and mutable verdict state. proposed_effect_continuations is the sole execution
           owner. approve atomically writes one deterministic platform.activity_requested and marks request_released; revise
           and reject atomically publish their generated typed outcome and mark outcome_dispatched. Duplicate decisions,
-          route replay, and restart converge by card/request identity. A replay recognizes an already-completed
+          route replay, and restart converge by card/request identity. Route completion is transaction-local only: the
+          required request or generated outcome event MUST already be visible in the active RunPipelineMutation,
+          route_event_id MUST equal decision_event_id, and standalone or identity-inconsistent completion fails closed. A replay validates an already-completed
           request_released or outcome_dispatched route before checking the current bundle because no contract interpretation
           remains. Revise and reject restore the continuation's opaque delivery context on the typed outcome. A started or
           uncertain attempt never redispatches.
@@ -11662,6 +11664,9 @@ platform_tables:
         consume that same admitted representation. The requester route is stamped independently from the card business scope,
         so entity-bound requesters receive flow- and global-scoped task outcomes. Transactional direct publication rolls back
         when its explicit requester is rejected by route policy; outcome delivery state never commits against an empty plan.
+        Human-task outcome completion is transaction-local only and requires the deterministic human_task.approved,
+        human_task.rejected, or human_task.expired event to be visible in that active RunPipelineMutation before the
+        continuation can enter outcome_dispatched; standalone or identity-inconsistent completion fails closed.
         Automatic expiry executes inside one selected-store RunPipelineMutation: the transaction-local store operation
         updates the card, continuation, and decision-card change rows and returns the deterministic mailbox.card_expired
         event, then PipelineCoordinator publishes that event with EventBus.PublishInMutation before the same transaction
@@ -12068,9 +12073,11 @@ platform_tables:
           continuation whose outcome is durably dispatched. Human-task continuations in pending, decision_committed, or
           expired state remain unresolved; a missing or identity-inconsistent continuation fails closed. A dispatched
           decision must retain the card's decision event identity, while a dispatched expiry retains its stamped outcome
-          event identity. Every proposed_effect card must likewise have a matching same-run continuation that is either
+          event identity, and the corresponding deterministic human_task outcome event must remain persisted. Every proposed_effect card must likewise have a matching same-run continuation that is either
           request_released, outcome_dispatched, or consistently superseded; pending, decision_committed, missing, or
-          identity-inconsistent proposed-effect continuations remain unresolved. Local runtime or builder quiescence is
+          identity-inconsistent proposed-effect continuations remain unresolved. A released/dispatched proposed effect
+          requires route_event_id to equal decision_event_id and its exact activity request or generated outcome event to
+          remain persisted. Local runtime or builder quiescence is
           observational only: the builder may project a completed state already committed by this owner, but MUST NOT
           derive or write completed from local quiescence and MUST leave a waiting decision run running without a
           synthetic failure.

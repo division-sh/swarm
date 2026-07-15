@@ -426,6 +426,16 @@ func sqliteNormalRunCompletionProposedEffectsSettledTx(ctx context.Context, tx *
 						OR p.route_event_id IS NULL
 						OR c.decision_event_id IS NULL
 						OR c.decision_event_id <> p.decision_event_id
+						OR p.route_event_id <> p.decision_event_id
+						OR NOT EXISTS (
+							SELECT 1 FROM events e
+							WHERE e.run_id = c.run_id
+							  AND (
+								(p.verdict = 'approve' AND e.event_id = p.request_event_id AND e.event_name = 'platform.activity_requested')
+								OR (p.verdict = 'revise' AND e.source_event_id = p.decision_event_id AND e.event_name = json_extract(p.effect, '$.revision_event'))
+								OR (p.verdict = 'reject' AND e.source_event_id = p.decision_event_id AND e.event_name = json_extract(p.effect, '$.rejected_event'))
+							  )
+						)
 					)
 				)
 				OR (c.status = 'superseded' AND p.state <> 'superseded')
@@ -454,6 +464,17 @@ func sqliteNormalRunCompletionHumanTasksSettledTx(ctx context.Context, tx *sql.T
 				OR h.outcome_event_id IS NULL
 				OR c.status NOT IN ('decided', 'expired')
 				OR (c.status = 'decided' AND (c.decision_event_id IS NULL OR c.decision_event_id <> h.outcome_event_id))
+				OR NOT EXISTS (
+					SELECT 1 FROM events e
+					WHERE e.run_id = c.run_id
+					  AND e.source_event_id = h.outcome_event_id
+					  AND e.event_name = CASE
+						WHEN c.status = 'expired' THEN 'human_task.expired'
+						WHEN c.verdict = 'approve' THEN 'human_task.approved'
+						WHEN c.verdict = 'reject' THEN 'human_task.rejected'
+						ELSE ''
+					  END
+				)
 			  )
 		)
 	`, runID).Scan(&unresolved); err != nil {
