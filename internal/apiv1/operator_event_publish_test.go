@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sort"
 	"strings"
 	"sync"
@@ -429,7 +431,7 @@ func TestOperatorEventPublishHandlersRequireCanonicalBundleHashForCreateNewWork(
 	assertNoEventPublishPersistence(t, db)
 }
 
-func TestOperatorEventPublishHandlersUseActiveEphemeralBundleScopeForCreateNewWork(t *testing.T) {
+func TestOperatorEventPublishPostgresUsesPublisherScopeWithPlainRequestContext(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
@@ -442,7 +444,7 @@ func TestOperatorEventPublishHandlersUseActiveEphemeralBundleScopeForCreateNewWo
 	defer bus.Unsubscribe("scan-orchestrator")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
-	published := rpcCall(t, handler, eventPublishBodyWithoutBundle("", "scan.requested", `{"topic":"medicine"}`, "", "idem-publish-no-bundle"))
+	published := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithoutBundle("", "scan.requested", `{"topic":"medicine"}`, "", "idem-publish-no-bundle"))
 	if published.Error != nil {
 		t.Fatalf("event.publish active ephemeral bundle scope error = %#v", published.Error)
 	}
@@ -457,6 +459,49 @@ func TestOperatorEventPublishHandlersUseActiveEphemeralBundleScopeForCreateNewWo
 	if got.ID() != eventID {
 		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
 	}
+}
+
+func TestOperatorEventPublishSQLiteUsesPublisherScopeWithPlainRequestContext(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := newScopedAPITestEventBus(t, sqliteStore, runStartTestEventBusOptions(source))
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, sqliteStore, "scan-orchestrator")
+	ch := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
+	defer bus.Unsubscribe("scan-orchestrator")
+	handler := eventPublishTestHandlerWithStores(t, sqliteStore, sqliteStore, sqliteStore, bus, source)
+
+	published := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithoutBundle("", "scan.requested", `{"topic":"medicine"}`, "", "idem-sqlite-publish-no-bundle"))
+	if published.Error != nil {
+		t.Fatalf("sqlite event.publish active ephemeral bundle scope error = %#v", published.Error)
+	}
+	result := asMap(t, published.Result)
+	eventID := stringValue(t, result["event_id"], "event_id")
+	runID := stringValue(t, result["run_id"], "run_id")
+	assertSQLiteEventPublishRows(t, sqliteStore.DB, runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+	got := requireAPIV1RuntimeBusEvent(t, ch, "sqlite event.publish delivery")
+	if got.ID() != eventID {
+		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
+	}
+}
+
+func rpcCallWithPlainRequestContext(t *testing.T, handler *Handler, body string) rpcResponse {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer "+testToken)
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response rpcResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode rpc response: %v body=%s", err, recorder.Body.String())
+	}
+	return response
 }
 
 func TestOperatorEventPublishPersistsIdempotencyBeforeReadbackFailure(t *testing.T) {
