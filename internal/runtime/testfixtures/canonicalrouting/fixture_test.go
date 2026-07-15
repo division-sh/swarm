@@ -99,6 +99,16 @@ func canonicalRoutingTeachingContractSource(t *testing.T) SourceToken {
 				t.Fatalf("canonical routing inventory = %v, want %v", got, want)
 			}
 
+			index, err := os.ReadFile(filepath.Join(RepoRoot(t), "examples", "routing", "README.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, root := range append(artifactIDs, ArtifactID("notify-all-children")) {
+				if !strings.Contains(string(index), "`"+string(root)+"`") {
+					t.Fatalf("routing example index does not expose %q", root)
+				}
+			}
+
 			for _, id := range artifactIDs {
 				t.Run(string(id), func(t *testing.T) {
 					root := ExampleRoot(t, id)
