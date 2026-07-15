@@ -460,12 +460,12 @@ func sqliteLoadRunControlState(ctx context.Context, tx *sql.Tx, runID string) (r
 	var controlStatus, reason, controlledBy sql.NullString
 	var updatedAt any
 	err := tx.QueryRowContext(ctx, `
-		SELECT r.run_id, COALESCE(r.status, ''), COALESCE(rc.control_status, ''),
+		SELECT r.run_id, COALESCE(r.status, ''), COALESCE(r.bundle_hash, ''), COALESCE(rc.control_status, ''),
 		       COALESCE(rc.reason, ''), COALESCE(rc.controlled_by, ''), rc.updated_at
 		FROM runs r
 		LEFT JOIN run_control_state rc ON rc.run_id = r.run_id
 		WHERE r.run_id = ?
-	`, runID).Scan(&state.RunID, &state.Status, &controlStatus, &reason, &controlledBy, &updatedAt)
+	`, runID).Scan(&state.RunID, &state.Status, &state.BundleHash, &controlStatus, &reason, &controlledBy, &updatedAt)
 	if err == sql.ErrNoRows {
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrRunNotFound, RunID: runID}
 	}
@@ -473,6 +473,7 @@ func sqliteLoadRunControlState(ctx context.Context, tx *sql.Tx, runID string) (r
 		return runtimeruncontrol.State{}, fmt.Errorf("load sqlite run control state: %w", err)
 	}
 	state.ControlStatus = strings.TrimSpace(controlStatus.String)
+	state.BundleHash = strings.TrimSpace(state.BundleHash)
 	state.Reason = strings.TrimSpace(reason.String)
 	state.ControlledBy = strings.TrimSpace(controlledBy.String)
 	if at, ok, err := sqliteTimeValue(updatedAt); err != nil {

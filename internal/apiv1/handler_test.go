@@ -92,7 +92,7 @@ func TestLegacyEnvironmentTokensDoNotAuthorizeV1Transports(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"auth","method":"rpc.unsubscribe","params":{"subscription_id":"sub-1"}}`))
 	req.Header.Set("Authorization", "Bearer legacy-builder")
-	handler.ServeHTTP(rec, req)
+	handler.ServeHTTP(rec, testAuthorActivityRequest(req))
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("/v1/rpc status = %d, want 401 with only the default canonical token configured body=%s", rec.Code, rec.Body.String())
 	}
@@ -131,7 +131,7 @@ func TestHandlerHTTPAuthBoundary(t *testing.T) {
 			if tc.authHeader != "" {
 				req.Header.Set("Authorization", tc.authHeader)
 			}
-			handler.ServeHTTP(rec, req)
+			handler.ServeHTTP(rec, testAuthorActivityRequest(req))
 
 			if rec.Code != tc.wantStatus {
 				t.Fatalf("status = %d, want %d body=%s", rec.Code, tc.wantStatus, rec.Body.String())
@@ -188,7 +188,7 @@ func TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics(t *testing.T) {
 			if tc.headerCID != "" {
 				req.Header.Set("X-Correlation-ID", tc.headerCID)
 			}
-			handler.ServeHTTP(rec, req)
+			handler.ServeHTTP(rec, testAuthorActivityRequest(req))
 
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
@@ -369,7 +369,7 @@ func TestHandlerLogsInternalFallbackErrors(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":null,"method":"event.publish","params":{"event_name":"scan.requested","run_id":"run-log","payload":{"entity_id":"entity-log","secret":"do-not-log"}}}`))
 		req.Header.Set("Authorization", "Bearer "+testToken)
 		req.Header.Set("X-Correlation-ID", "trace-log")
-		handler.ServeHTTP(rec, req)
+		handler.ServeHTTP(rec, testAuthorActivityRequest(req))
 
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
@@ -425,7 +425,7 @@ func TestHandlerCanonicalizesMalformedTypedFallbackFailure(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"malformed","method":"health.ping","params":{}}`))
 	req.Header.Set("Authorization", "Bearer "+testToken)
-	handler.ServeHTTP(rec, req)
+	handler.ServeHTTP(rec, testAuthorActivityRequest(req))
 
 	var resp rpcResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
@@ -1194,7 +1194,7 @@ func rpcCall(t *testing.T, handler *Handler, body string) rpcResponse {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+testToken)
-	handler.ServeHTTP(rec, req)
+	handler.ServeHTTP(rec, testAuthorActivityRequest(req))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,11 +41,11 @@ func TestAuthorActivityDuplicateTerminalReceiptIsNoOpParity(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fixture := tt.open(t)
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			eventID := uuid.NewString()
 			agentID := "normalizer"
 			event := eventtest.PersistedProjection(
-				eventID, events.EventType("test.delivery_receipt"), "runtime", "", []byte(`{}`), 0,
+				eventID, events.EventType("test.delivery_receipt"), "runtime", "", []byte(`{"text":"how are you","secret":"must-not-render"}`), 0,
 				"", "", events.EventEnvelope{}, time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
 			)
 			if err := fixture.store.PersistEventWithDeliveries(ctx, event, []string{agentID}); err != nil {
@@ -55,8 +56,16 @@ func TestAuthorActivityDuplicateTerminalReceiptIsNoOpParity(t *testing.T) {
 			}
 
 			before := listAuthorActivityForReceiptParity(t, fixture, ctx)
-			if len(before) != 1 || before[0].Kind != runtimeauthoractivity.KindDeliveryLifecycle || before[0].Transition != "delivered" {
-				t.Fatalf("first receipt occurrences = %#v, want one delivered occurrence", before)
+			if len(before) != 2 || before[0].Kind != runtimeauthoractivity.KindEventEmitted || before[1].Kind != runtimeauthoractivity.KindDeliveryLifecycle || before[1].Transition != "delivered" {
+				t.Fatalf("first receipt occurrences = %#v, want emitted and delivered occurrences", before)
+			}
+			for _, occurrence := range before {
+				if occurrence.AuthorSafeSummary != "how are you" {
+					t.Fatalf("%s summary = %q, want persisted safe source summary", occurrence.Kind, occurrence.AuthorSafeSummary)
+				}
+				if strings.Contains(occurrence.AuthorSafeSummary, "must-not-render") {
+					t.Fatalf("%s summary leaked undeclared payload", occurrence.Kind)
+				}
 			}
 			beforeStamp := fixture.stamp(ctx, eventID, agentID)
 			fixture.advance()
@@ -109,6 +118,7 @@ func openPostgresAuthorActivityReceiptFixture(t *testing.T) authorActivityReceip
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	store := &PostgresStore{DB: db}
+	registerTestAuthorActivityCatalog(t, store)
 	return authorActivityReceiptFixture{
 		store: store, db: db, dialect: runtimeauthoractivity.DialectPostgres,
 		stamp: func(ctx context.Context, eventID, agentID string) [2]string {

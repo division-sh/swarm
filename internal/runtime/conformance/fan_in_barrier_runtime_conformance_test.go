@@ -93,7 +93,7 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 		t.Run(tc.name, func(t *testing.T) {
 			backend, db := tc.setup(t)
 			runID := uuid.NewString()
-			ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 			seedFanInBarrierRun(t, ctx, backend, db, runID)
 			runtime := newFanInBarrierRuntime(t, backend, db, source)
 			seedFanInBarrierPortfolioShell(t, ctx, runtime.workflowStore, bundle)
@@ -163,7 +163,7 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		coordinator *runtimepipeline.PipelineCoordinator
 		manager     *runtimemanager.AgentManager
 	)
-	eventBus, err := runtimebus.NewEventBusWithOptions(backend, runtimebus.EventBusOptions{
+	eventBus, err := newScopedTestEventBus(t, backend, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if coordinator == nil {
@@ -248,7 +248,7 @@ func seedFanInBarrierPortfolioShell(t *testing.T, ctx context.Context, workflowS
 
 func mustFanInBarrierRoutes(t *testing.T, backend fanInBarrierConformanceStore) []runtimebus.FlowInstanceRouteRecord {
 	t.Helper()
-	routes, err := backend.ListFlowInstanceRoutes(context.Background())
+	routes, err := backend.ListFlowInstanceRoutes(testAuthorActivityContext(context.Background()))
 	if err != nil {
 		t.Fatalf("ListFlowInstanceRoutes: %v", err)
 	}
@@ -273,7 +273,7 @@ func publishFanInBarrierEvent(t *testing.T, ctx context.Context, eventBus *runti
 	evt := eventtest.RootIngress(
 		eventID,
 		events.EventType(source.ResolveFlowEventReference(flowID, localEvent)),
-		"",
+		flowID,
 		"",
 		raw,
 		0,
@@ -285,7 +285,7 @@ func publishFanInBarrierEvent(t *testing.T, ctx context.Context, eventBus *runti
 	if err := eventBus.PublishAcknowledged(ctx, evt); err != nil {
 		t.Fatalf("PublishAcknowledged(%s): %v", localEvent, err)
 	}
-	waitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	waitCtx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 10*time.Second)
 	defer cancel()
 	if err := eventBus.WaitForQuiescence(waitCtx); err != nil {
 		t.Fatalf("WaitForQuiescence(%s): %v", localEvent, err)

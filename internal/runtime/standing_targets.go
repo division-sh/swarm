@@ -438,6 +438,7 @@ func (rt *Runtime) EnsureStandingReplacementTargets(ctx context.Context, predece
 }
 
 func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) ([]StandingTarget, []StandingActivation, error) {
+	ctx = rt.authorActivityContext(ctx)
 	plans, err := rt.standingTargetPlans()
 	if err != nil {
 		return nil, nil, err

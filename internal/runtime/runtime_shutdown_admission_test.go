@@ -158,10 +158,10 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	if err := am.Run(managedExecutionTestContext(t, context.Background())); err != nil {
+	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if err := bus.Publish(context.Background(), eventtest.RootIngress("evt-in-1",
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress("evt-in-1",
 		events.EventType("test.in"),
 		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -187,7 +187,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	if !rt.shutdownAdmissionClosed() {
 		t.Fatal("runtime shutdown admission was not closed before manager drain")
 	}
-	if err := am.ReplayAgentBacklog(context.Background(), agent.id); err == nil || !strings.Contains(err.Error(), "runtime shutting down") {
+	if err := am.ReplayAgentBacklog(testAuthorActivityContext(context.Background()), agent.id); err == nil || !strings.Contains(err.Error(), "runtime shutting down") {
 		t.Fatalf("ReplayAgentBacklog during shutdown err = %v, want runtime shutting down", err)
 	}
 	if managerStore.listPendingCalled {
@@ -250,10 +250,10 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	if err := am.Run(managedExecutionTestContext(t, context.Background())); err != nil {
+	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if err := bus.Publish(context.Background(), eventtest.RootIngress("evt-in-1",
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress("evt-in-1",
 		events.EventType("test.in"),
 		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)

@@ -42,6 +42,7 @@ type ServeAbandonStore interface {
 
 type QuiescedRun struct {
 	RunID          string
+	BundleHash     string
 	PreviousStatus string
 	Status         string
 	ReasonCode     string

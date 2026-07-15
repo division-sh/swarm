@@ -20,7 +20,7 @@ import (
 
 func TestSealedFlowPackageConformance_CoversBoundaryOwners(t *testing.T) {
 	source := sealedpackage.LoadSource(t, sealedpackage.Options{})
-	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+	report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {
 		t.Fatalf("sealed package conformance hard invalidities = %#v, want none", got)
 	}
@@ -73,7 +73,7 @@ func TestSealedFlowPackageConformance_FailClosedMatrix(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			source := sealedpackage.LoadSource(t, tc.opts)
-			report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+			report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 			if !sealedPackageConformanceFindingContains(report.HardInvalidities(), tc.checkID, tc.wantMessage) {
 				t.Fatalf("expected %s containing %q, got %#v", tc.checkID, tc.wantMessage, report.HardInvalidities())
 			}
@@ -144,7 +144,7 @@ func assertSealedPackageConformanceConnectRoutePlan(t *testing.T, source semanti
 func assertSealedPackageConformancePublishPreflight(t *testing.T, source semanticview.Source) {
 	t.Helper()
 
-	eb, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(t, nil, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -172,7 +172,7 @@ func assertSealedPackageConformancePublishPreflight(t *testing.T, source semanti
 		events.EventEnvelope{},
 		time.Now().UTC(),
 	)
-	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	plan, err := eb.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), evt)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
 	}
@@ -194,7 +194,7 @@ func assertSealedPackageConformancePublishPreflight(t *testing.T, source semanti
 		events.EventEnvelope{},
 		time.Now().UTC(),
 	)
-	siblingPlan, err := eb.CheckPublishRecipientPlan(context.Background(), sibling)
+	siblingPlan, err := eb.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), sibling)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan sibling wildcard: %v", err)
 	}

@@ -59,7 +59,7 @@ func TestAgentMemoryConformance_IdentityIsCompleteBeforeAcquire(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			identity := base
 			tc.edit(&identity)
-			_, err := runtimesessions.NewInMemoryRegistry(0).Acquire(context.Background(), identity, "proof")
+			_, err := runtimesessions.NewInMemoryRegistry(0).Acquire(testAuthorActivityContext(context.Background()), identity, "proof")
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Acquire error = %v, want %q", err, tc.want)
 			}
@@ -80,11 +80,11 @@ func TestAgentMemoryConformance_RootMemoryFailsClosed(t *testing.T) {
 
 func acquireAndReleaseMemory(t *testing.T, registry runtimesessions.Registry, identity agentmemory.Identity, owner string) string {
 	t.Helper()
-	lease, err := registry.Acquire(context.Background(), identity, owner)
+	lease, err := registry.Acquire(testAuthorActivityContext(context.Background()), identity, owner)
 	if err != nil {
 		t.Fatalf("Acquire(%+v): %v", identity, err)
 	}
-	if err := registry.Release(context.Background(), lease); err != nil {
+	if err := registry.Release(testAuthorActivityContext(context.Background()), lease); err != nil {
 		t.Fatalf("Release(%+v): %v", identity, err)
 	}
 	return lease.SessionID

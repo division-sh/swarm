@@ -65,6 +65,7 @@ type EventBus struct {
 	runDispatchGate             RunDispatchGate
 	bundleFingerprint           string
 	bundleSourceFact            runtimecorrelation.BundleSourceFact
+	runtimeInstanceID           string
 	testLifecycleProbe          runtimelifecycleprobe.Observer
 	providerOutputVerifier      ProviderOutputAuthorizationVerifier
 	outboxSweeperActive         bool
@@ -147,6 +148,7 @@ type EventBusOptions struct {
 	RunDispatchGate             RunDispatchGate
 	BundleFingerprint           string
 	BundleSourceFact            runtimecorrelation.BundleSourceFact
+	RuntimeInstanceID           string
 	TestLifecycleProbe          runtimelifecycleprobe.Observer
 	ProviderOutputVerifier      ProviderOutputAuthorizationVerifier
 }
@@ -214,6 +216,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		runDispatchGate:             opts.RunDispatchGate,
 		bundleFingerprint:           strings.TrimSpace(opts.BundleFingerprint),
 		bundleSourceFact:            opts.BundleSourceFact.Normalized(),
+		runtimeInstanceID:           strings.TrimSpace(opts.RuntimeInstanceID),
 		testLifecycleProbe:          opts.TestLifecycleProbe,
 		providerOutputVerifier:      opts.ProviderOutputVerifier,
 		inFlightEventIDs:            make(map[string]int),

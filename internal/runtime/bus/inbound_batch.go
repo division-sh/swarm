@@ -6,12 +6,16 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 )
 
 type InboundDeliveryBatch struct {
-	Provider string
-	Events   []InboundDeliveryEvent
+	Provider          string
+	AuthorSubjectType string
+	AuthorSubjectID   string
+	AuthorSummary     string
+	Events            []InboundDeliveryEvent
 }
 
 type InboundDeliveryEvent struct {
@@ -34,6 +38,7 @@ func (eb *EventBus) PrepareInboundDeliveryBatchInMutation(ctx context.Context, b
 	if eb == nil {
 		return nil, fmt.Errorf("event bus is required")
 	}
+	ctx = eb.withBundleFingerprint(ctx)
 	validated, err := preflightInboundDeliveryBatch(eb.providerOutputAuthorizationVerifier(), batch)
 	if err != nil {
 		return nil, err
@@ -46,6 +51,11 @@ func (eb *EventBus) PrepareInboundDeliveryBatchInMutation(ctx context.Context, b
 	if err != nil {
 		return nil, err
 	}
+	txctx = runtimeauthoractivity.WithInboundProjection(txctx, runtimeauthoractivity.InboundProjection{
+		SubjectType: validated.AuthorSubjectType,
+		SubjectID:   validated.AuthorSubjectID,
+		Summary:     validated.AuthorSummary,
+	})
 	prepared := make([]PreparedPublish, 0, len(validated.Events))
 	for _, item := range validated.Events {
 		itemCtx := txctx
@@ -73,6 +83,12 @@ func preflightInboundDeliveryBatch(verifier ProviderOutputAuthorizationVerifier,
 	}
 	validated := batch
 	validated.Provider = provider
+	validated.AuthorSubjectType = strings.TrimSpace(validated.AuthorSubjectType)
+	validated.AuthorSubjectID = strings.TrimSpace(validated.AuthorSubjectID)
+	validated.AuthorSummary = strings.TrimSpace(validated.AuthorSummary)
+	if (validated.AuthorSubjectType == "") != (validated.AuthorSubjectID == "") {
+		return InboundDeliveryBatch{}, fmt.Errorf("inbound delivery author subject requires type and id together")
+	}
 	validated.Events = append([]InboundDeliveryEvent(nil), batch.Events...)
 	for index := range validated.Events {
 		item := &validated.Events[index]

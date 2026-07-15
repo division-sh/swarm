@@ -60,7 +60,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext(context.Background())
 			backend, db := tc.setup(t)
 			runID := uuid.NewString()
 			fixedEngineNow := time.Date(2026, time.July, 12, 12, 0, 0, 1, time.UTC)
@@ -222,7 +222,7 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 	t.Helper()
 	var coordinator *runtimepipeline.PipelineCoordinator
 	var manager *runtimemanager.AgentManager
-	eventBus, err := runtimebus.NewEventBusWithOptions(backend, runtimebus.EventBusOptions{
+	eventBus, err := newScopedTestEventBus(t, backend, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if coordinator == nil {
@@ -241,7 +241,7 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	if routeStore, ok := backend.(runtimebus.FlowInstanceRoutePersistence); ok {
-		routes, err := routeStore.ListFlowInstanceRoutes(context.Background())
+		routes, err := routeStore.ListFlowInstanceRoutes(testAuthorActivityContext(context.Background()))
 		if err != nil {
 			t.Fatalf("ListFlowInstanceRoutes: %v", err)
 		}
@@ -295,7 +295,7 @@ func publishNotifyAllChildrenEvent(t *testing.T, ctx context.Context, eventBus *
 	evt := eventtest.RootIngress(
 		id,
 		events.EventType(source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, localEvent)),
-		"",
+		notifyallchildren.OwnerFlowID,
 		"",
 		raw,
 		0,
@@ -313,7 +313,7 @@ func publishNotifyAllChildrenEvent(t *testing.T, ctx context.Context, eventBus *
 
 func waitNotifyAllChildrenBus(t *testing.T, eventBus *runtimebus.EventBus) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 30*time.Second)
 	defer cancel()
 	if err := eventBus.WaitForQuiescence(ctx); err != nil {
 		t.Fatalf("WaitForQuiescence: %v", err)

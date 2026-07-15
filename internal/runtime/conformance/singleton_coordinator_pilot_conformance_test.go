@@ -15,7 +15,7 @@ import (
 
 func TestSingletonCoordinatorPilotConformance_CoversSingletonMapCoordinatorOwners(t *testing.T) {
 	source := singletoncoordinatorpilot.LoadSource(t, singletoncoordinatorpilot.Options{})
-	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+	report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {
 		t.Fatalf("singleton coordinator pilot hard invalidities = %#v, want none", got)
 	}
@@ -161,7 +161,7 @@ func TestSingletonCoordinatorPilotConformance_FailClosedMatrix(t *testing.T) {
 				t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 			}
 			source := semanticview.Wrap(bundle)
-			report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+			report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 			if !singletonCoordinatorPilotFindingContains(report.HardInvalidities(), tc.checkID, tc.wantMessage) {
 				t.Fatalf("expected hard invalidity %s containing %q, got %#v", tc.checkID, tc.wantMessage, report.HardInvalidities())
 			}

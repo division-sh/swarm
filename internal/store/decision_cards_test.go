@@ -43,7 +43,7 @@ func TestDecisionCardStoreLifecycleParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
 			now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
 			card, err := decisioncard.New(decisioncard.Card{
@@ -110,7 +110,7 @@ func TestDecisionCardStoreRejectsNonCanonicalDecisionIdentityWithoutPersistenceO
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
 			card := newDecisionCardTestCard(t, runID, time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC))
 			card.Snapshot.Decision = " launch_review "
@@ -133,7 +133,7 @@ func TestDecisionCardStoreRejectsSnapshotHashDriftOnCreateAndReadbackOnBothStore
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
 			now := time.Date(2026, 7, 13, 11, 0, 0, 0, time.UTC)
 
@@ -195,7 +195,7 @@ func TestDecisionCardStoreRejectsStructuralSnapshotDriftAtEveryTypedLevelOnBothS
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
 			card, err := decisioncard.New(decisioncard.Card{
 				CardID: uuid.NewString(), RunID: runID, Anchor: newDecisionCardTestStageAnchor("launch/review", "launch", uuid.NewString(), "awaiting_review", uuid.NewString()),
@@ -247,7 +247,7 @@ func TestDecisionCardStoreEnforcesSafeNumericSnapshotCarriersOnBothStores(t *tes
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
 			card, err := decisioncard.New(decisioncard.Card{
 				CardID: uuid.NewString(), RunID: runID, Anchor: newDecisionCardTestStageAnchor("launch/review", "launch", uuid.NewString(), "awaiting_review", uuid.NewString()),
@@ -346,7 +346,7 @@ func TestDecisionCardStoreRejectsUnadmittedPersistedCarriersOnBothStores(t *test
 			for _, carrier := range []string{"provenance", "fields", "change_payload"} {
 				carrier := carrier
 				t.Run(carrier, func(t *testing.T) {
-					ctx := context.Background()
+					ctx := testAuthorActivityContext()
 					cardStore, runID := decisionCardTestStore(t, backend)
 					card := newDecisionCardTestCard(t, runID, time.Date(2026, 7, 13, 13, 0, 0, 0, time.UTC))
 					if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
@@ -417,7 +417,7 @@ func TestDecisionCardInvalidFrozenOutcomeNeverCommitsOnBothStores(t *testing.T) 
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
 			now := time.Date(2026, 7, 13, 5, 30, 0, 0, time.UTC)
 			card, err := decisioncard.New(decisioncard.Card{
@@ -463,7 +463,7 @@ func TestDecisionCardStorePaginationUsesCreationOrderOnBothStores(t *testing.T) 
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
 			base := time.Date(2026, 7, 12, 13, 0, 0, 0, time.UTC)
 			want := make([]string, 0, 3)
@@ -508,7 +508,7 @@ func TestDecisionCardStoreDeferDraftCancelAndSupersedeParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
 			now := time.Date(2026, 7, 12, 14, 0, 0, 0, time.UTC)
 			card := newDecisionCardTestCard(t, runID, now)
@@ -546,7 +546,7 @@ func TestDecisionCardDraftReplacementExpiryAndSupersessionAreCursorVisibleOnBoth
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
 			now := time.Date(2026, 7, 12, 15, 0, 0, 0, time.UTC)
 			card := newDecisionCardTestCard(t, runID, now)
@@ -599,7 +599,7 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
 			db, postgres := decisionCardStoreDB(t, cardStore)
 			now := time.Date(2026, 7, 12, 16, 0, 0, 0, time.UTC)
@@ -658,7 +658,7 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 		})
 
 		t.Run(backend+"/committed_verdict_blocks_terminalization", func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
 			db, postgres := decisionCardStoreDB(t, cardStore)
 			now := time.Date(2026, 7, 12, 17, 0, 0, 0, time.UTC)
@@ -1190,7 +1190,7 @@ func seedDecisionCardGateEntity(t *testing.T, db *sql.DB, postgres bool, runID, 
 	if postgres {
 		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, $2::uuid, 'launch/review', 'default', 'launch', 'Launch', 'awaiting_review', '{}'::jsonb, '{}'::jsonb, $3::jsonb, 1, $4, $5, $6)`
 	}
-	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
+	if _, err := db.ExecContext(testAuthorActivityContext(), query, args...); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -1202,7 +1202,7 @@ func loadDecisionCardGateActivation(t *testing.T, db *sql.DB, postgres bool, run
 		query = `SELECT accumulator FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
 	}
 	var raw any
-	if err := db.QueryRowContext(context.Background(), query, runID, entityID).Scan(&raw); err != nil {
+	if err := db.QueryRowContext(testAuthorActivityContext(), query, runID, entityID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	accumulator, err := toolDecodeJSONMap(raw)
@@ -1342,7 +1342,7 @@ func storeDecisionSnapshotNestedObject(t *testing.T, root map[string]any, path .
 
 func decisionCardTestStore(t *testing.T, backend string) (decisioncard.Store, string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	spec := loadPlatformSpecForSQLiteSchemaTest(t)
 	plans, err := GeneratePlatformTableDDLs(spec)
 	if err != nil {

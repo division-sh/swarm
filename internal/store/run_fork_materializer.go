@@ -53,7 +53,7 @@ func RequireRunForkMaterializerCapabilities(caps StoreSchemaCapabilities, catalo
 		return err
 	}
 	required := map[string][]string{
-		"runs":         {"run_id", "status", "forked_from_run_id", "forked_from_event_id", "entity_count", "event_count", "started_at"},
+		"runs":         {"run_id", "status", "forked_from_run_id", "forked_from_event_id", "entity_count", "event_count", "started_at", "bundle_hash", "bundle_source"},
 		"entity_state": {"run_id", "entity_id", "flow_instance", "entity_type", "slug", "name", "current_state", "gates", "fields", "accumulator", "revision", "entered_state_at", "created_at", "updated_at"},
 	}
 	for tableName, columns := range required {
@@ -145,10 +145,19 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req RunForkMater
 		return RunForkMaterialization{}, err
 	}
 	now := time.Now().UTC()
-	if err := insertRunForkRun(ctx, tx, catalog, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, runForkBundleInsertIdentity{
+	identity, err := resolveRunForkBundleInsertIdentity(ctx, tx, plan.SourceRunID, runForkBundleInsertIdentity{
 		BundleHash:   req.BundleHash,
 		BundleSource: req.BundleSource,
-	}); err != nil {
+	})
+	if err != nil {
+		return RunForkMaterialization{}, fmt.Errorf("resolve fork bundle identity: %w", err)
+	}
+	forkScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, identity.BundleHash)
+	if err != nil {
+		return RunForkMaterialization{}, fmt.Errorf("resolve fork author activity scope: %w", err)
+	}
+	ctx = runtimeauthoractivity.WithScope(ctx, forkScope)
+	if err := insertRunForkRun(ctx, tx, catalog, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, identity); err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("insert fork run: %w", err)
 	}
 
@@ -219,11 +228,8 @@ func insertRunForkRun(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatal
 	if err != nil {
 		return err
 	}
-	if bundleSource != storerunlifecycle.BundleSourceLegacy && bundleHash == "" {
-		return fmt.Errorf("fork run canonical bundle identity requires bundle_hash for bundle_source=%s", bundleSource)
-	}
-	if bundleSource == storerunlifecycle.BundleSourceLegacy && bundleHash != "" {
-		return fmt.Errorf("fork run legacy bundle identity cannot carry canonical bundle_hash")
+	if bundleSource == storerunlifecycle.BundleSourceLegacy || bundleHash == "" {
+		return fmt.Errorf("fork run requires canonical bundle_hash and non-legacy bundle_source")
 	}
 	opts := storerunlifecycle.InsertForkOptions{
 		HasBundleHashCol:        catalog.hasColumns("runs", "bundle_hash"),
@@ -232,35 +238,47 @@ func insertRunForkRun(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatal
 		BundleHash:              bundleHash,
 		BundleSource:            bundleSource,
 	}
-	if bundleSource == storerunlifecycle.BundleSourceLegacy && catalog.hasColumns("runs", "bundle_fingerprint") {
-		fingerprint, err := runForkBundleFingerprintForInsert(ctx, tx, sourceRunID)
-		if err != nil {
-			return err
-		}
-		opts.BundleFingerprint = fingerprint
-	}
 	return storerunlifecycle.InsertFork(ctx, tx, forkRunID, RunForkMaterializedStatus, sourceRunID, forkEventID, entityCount, startedAt, opts)
 }
 
-func runForkBundleFingerprintForInsert(ctx context.Context, tx *sql.Tx, sourceRunID string) (string, error) {
-	if fingerprint := runtimecorrelation.BundleFingerprintFromContext(ctx); fingerprint != "" {
-		return fingerprint, nil
+func resolveRunForkBundleInsertIdentity(ctx context.Context, tx *sql.Tx, sourceRunID string, requested runForkBundleInsertIdentity) (runForkBundleInsertIdentity, error) {
+	if err := ctx.Err(); err != nil {
+		return runForkBundleInsertIdentity{}, err
 	}
-	var source sql.NullString
+	requested.BundleHash = strings.TrimSpace(requested.BundleHash)
+	requested.BundleSource = strings.TrimSpace(requested.BundleSource)
+	if requested.BundleHash != "" || requested.BundleSource != "" {
+		if requested.BundleHash == "" || requested.BundleSource == "" {
+			return runForkBundleInsertIdentity{}, fmt.Errorf("explicit fork bundle identity requires both bundle_hash and bundle_source")
+		}
+		return validateRunForkBundleInsertIdentity(requested)
+	}
+
+	var inherited runForkBundleInsertIdentity
 	if err := tx.QueryRowContext(ctx, `
-		SELECT bundle_fingerprint
+		SELECT COALESCE(bundle_hash, ''), bundle_source
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, sourceRunID).Scan(&source); err != nil {
+	`, sourceRunID).Scan(&inherited.BundleHash, &inherited.BundleSource); err != nil {
 		if err == sql.ErrNoRows {
-			return "", fmt.Errorf("source run %s not found", sourceRunID)
+			return runForkBundleInsertIdentity{}, fmt.Errorf("source run %s not found", sourceRunID)
 		}
-		return "", fmt.Errorf("load source run bundle fingerprint: %w", err)
+		return runForkBundleInsertIdentity{}, fmt.Errorf("load source run bundle identity: %w", err)
 	}
-	if !source.Valid {
-		return "", nil
+	return validateRunForkBundleInsertIdentity(inherited)
+}
+
+func validateRunForkBundleInsertIdentity(identity runForkBundleInsertIdentity) (runForkBundleInsertIdentity, error) {
+	identity.BundleHash = strings.TrimSpace(identity.BundleHash)
+	bundleSource, err := storerunlifecycle.CanonicalBundleSource(identity.BundleSource)
+	if err != nil {
+		return runForkBundleInsertIdentity{}, err
 	}
-	return strings.TrimSpace(source.String), nil
+	if identity.BundleHash == "" || bundleSource == storerunlifecycle.BundleSourceLegacy {
+		return runForkBundleInsertIdentity{}, fmt.Errorf("source run has no canonical bundle identity")
+	}
+	identity.BundleSource = bundleSource
+	return identity, nil
 }
 
 func loadRunForkEntityMetadata(plan RunForkPlan) (map[string]runForkEntityMetadata, error) {

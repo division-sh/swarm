@@ -22,7 +22,7 @@ import (
 )
 
 func TestDeliveryLifecycleConformance(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 
 	cases := []struct {
 		name   string
@@ -206,7 +206,7 @@ func newDeliveryLifecycleFixture(t *testing.T, ctx context.Context) *deliveryLif
 	pg := &store.PostgresStore{DB: db}
 	requireCanonicalDeliveryLifecycleSurface(t, ctx, pg)
 
-	bus, err := runtimebus.NewEventBus(pg)
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, "review.requested")
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

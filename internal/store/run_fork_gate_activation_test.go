@@ -19,7 +19,7 @@ import (
 
 func TestMaterializeRunForkDecisionCardsCreatesForkLocalPendingAuthority(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sourceRunID, forkRunID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	now := time.Date(2026, 7, 12, 15, 0, 0, 0, time.UTC)
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $3), ($2::uuid, 'running', $3)`, sourceRunID, forkRunID, now); err != nil {
@@ -85,7 +85,7 @@ func TestMaterializeRunForkDecisionCardsCreatesForkLocalPendingAuthority(t *test
 func TestMaterializeRunForkDecisionCardsPreservesCommittedSemanticFields(t *testing.T) {
 	const safeInteger = int64(9007199254740991)
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sourceRunID, forkRunID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	now := time.Date(2026, 7, 13, 15, 0, 0, 0, time.UTC)
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $3), ($2::uuid, 'running', $3)`, sourceRunID, forkRunID, now); err != nil {
@@ -151,7 +151,7 @@ func TestMaterializeRunForkDecisionCardsPreservesCommittedSemanticFields(t *test
 
 func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sourceRunID, forkRunID := uuid.NewString(), uuid.NewString()
 	now := time.Date(2026, 7, 14, 18, 0, 0, 0, time.UTC)
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $3), ($2::uuid, 'running', $3)`, sourceRunID, forkRunID, now); err != nil {
@@ -216,7 +216,7 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			sourceRunID, forkRunID := uuid.NewString(), uuid.NewString()
 			now := time.Date(2026, 7, 14, 19, 0, 0, 0, time.UTC)
 			if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $3), ($2::uuid, 'running', $3)`, sourceRunID, forkRunID, now); err != nil {

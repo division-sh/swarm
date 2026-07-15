@@ -33,7 +33,7 @@ func TestImportBoundaryInputAliasRoutesParentEventToPackageInputPin(t *testing.T
 	}
 
 	store := &routePersistenceTestStore{}
-	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestImportBoundaryOutputAliasRoutesPackageOutputToParentEvent(t *testing.T)
 	}
 
 	store := &routePersistenceTestStore{}
-	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestImportBoundaryOutputAliasRoutesPackageOutputToWildcardParentSubscriber(
 	}
 
 	store := &routePersistenceTestStore{}
-	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}

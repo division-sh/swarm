@@ -165,7 +165,7 @@ func assertDynamicFlowInstanceFlowMatchTargetedNodeDelivery(t testing.TB, h *run
 	nodeID = strings.TrimSpace(nodeID)
 	wantEntityID := runtimeflowidentity.EntityID(flowInstance)
 	var eventID, targetFlowInstance, targetEntityID, targetSet string
-	err := h.db.QueryRowContext(context.Background(), `
+	err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT event_id::text,
 		       COALESCE(target_route->>'flow_instance', ''),
 		       COALESCE(target_route->>'entity_id', ''),
@@ -186,7 +186,7 @@ func assertDynamicFlowInstanceFlowMatchTargetedNodeDelivery(t testing.TB, h *run
 	}
 
 	var deliveryStatus, reasonCode, deliveryFlowInstance, deliveryEntityID string
-	if err := h.db.QueryRowContext(context.Background(), `
+	if err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COALESCE(status, ''),
 		       COALESCE(reason_code, ''),
 		       COALESCE(delivery_target_route->>'flow_instance', ''),
@@ -209,7 +209,7 @@ func assertDynamicFlowInstanceFlowMatchTargetedNodeDelivery(t testing.TB, h *run
 	}
 
 	var deliveryCount int
-	if err := h.db.QueryRowContext(context.Background(), `
+	if err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COUNT(*)
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
@@ -225,7 +225,7 @@ func assertDynamicFlowInstanceFlowMatchTargetedNodeDelivery(t testing.TB, h *run
 	}
 
 	var deadLetterCount int
-	if err := h.db.QueryRowContext(context.Background(), `
+	if err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COUNT(*)
 		FROM dead_letters
 		WHERE original_event_id = $1::uuid
@@ -240,7 +240,7 @@ func assertDynamicFlowInstanceFlowMatchTargetedNodeDelivery(t testing.TB, h *run
 
 func dumpEventDeliveries(t testing.TB, db *sql.DB, eventID string) string {
 	t.Helper()
-	rows, err := db.QueryContext(context.Background(), `
+	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), `
 		SELECT COALESCE(subscriber_type, ''),
 		       COALESCE(subscriber_id, ''),
 		       COALESCE(status, ''),

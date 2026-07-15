@@ -116,6 +116,10 @@ func (am *AgentManager) Restart(ctx context.Context, req runtimeagentcontrol.Res
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	ctx, err := am.bindRuntimeOperationContext(ctx)
+	if err != nil {
+		return runtimeagentcontrol.RestartResult{}, err
+	}
 	operationID := strings.TrimSpace(req.OperationID)
 	if operationID == "" {
 		operationID = uuid.NewString()
@@ -390,6 +394,11 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	var err error
+	ctx, err = am.bindRuntimeOperationContext(ctx)
+	if err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
 	if am.shutdownAdmissionClosed() {
 		return runtimeagentcontrol.SendDirectiveResult{}, agentControlNotRunning(req.AgentID, runtimeagentcontrol.StatusTerminated)
 	}
@@ -412,7 +421,6 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
 	req.RequestHash = strings.TrimSpace(req.RequestHash)
 	if req.RequestHash == "" {
-		var err error
 		req.RequestHash, err = directiveRequestHash(req)
 		if err != nil {
 			return runtimeagentcontrol.SendDirectiveResult{}, err
@@ -1126,6 +1134,11 @@ func (am *AgentManager) ReplayAgentBacklog(ctx context.Context, agentID string) 
 }
 
 func (am *AgentManager) ReplayBacklog(ctx context.Context, req runtimeagentcontrol.ReplayBacklogRequest) (runtimeagentcontrol.ReplayBacklogResult, error) {
+	var err error
+	ctx, err = am.bindRuntimeOperationContext(ctx)
+	if err != nil {
+		return runtimeagentcontrol.ReplayBacklogResult{}, err
+	}
 	summary, err := am.replayAgentBacklogDetailed(ctx, req.AgentID)
 	if err != nil {
 		return runtimeagentcontrol.ReplayBacklogResult{}, err

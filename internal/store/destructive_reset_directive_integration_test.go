@@ -47,7 +47,7 @@ func (a *destructiveResetBlockingDirectiveAgent) BoardStep(context.Context, runt
 func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	pg := &store.PostgresStore{DB: db}
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, "INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')", runID); err != nil {

@@ -27,7 +27,7 @@ func reconfigureMemoryIdentity(agentID, flowInstance string) agentmemory.Identit
 
 func acquireReconfigureMemory(t *testing.T, registry *sessions.InMemoryRegistry, cfg models.AgentConfig) *sessions.Lease {
 	t.Helper()
-	ctx := effects.WithDifferentOwner(models.WithActor(context.Background(), cfg), effects.OwnerBuildTestInfrastructure)
+	ctx := effects.WithDifferentOwner(models.WithActor(testAuthorActivityContext(context.Background()), cfg), effects.OwnerBuildTestInfrastructure)
 	lease, err := registry.Acquire(ctx, reconfigureMemoryIdentity(cfg.ID, cfg.CanonicalFlowPath()), "reconfigure-test")
 	if err != nil {
 		t.Fatalf("Acquire memory: %v", err)

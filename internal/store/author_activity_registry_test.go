@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -123,13 +125,116 @@ func TestAuthorActivityEffectDispositionCoversRegistrations(t *testing.T) {
 
 type authoredEventOutputClassifier struct{}
 
-func (authoredEventOutputClassifier) authoredAuthorActivityEvent(name string) bool {
-	return name == "phrase.completed"
+func (authoredEventOutputClassifier) authorActivityEventDescriptor(_ runtimeauthoractivity.Scope, name string) (runtimeauthoractivity.EventDescriptor, bool) {
+	return runtimeauthoractivity.EventDescriptor{EventType: name, Disposition: runtimeauthoractivity.StoryAuthored}, name == "phrase.completed"
+}
+
+type dynamicAuthoredEventDescriptorResolver struct {
+	registry *runtimeauthoractivity.EventCatalogRegistry
+}
+
+func (r dynamicAuthoredEventDescriptorResolver) authorActivityEventDescriptor(scope runtimeauthoractivity.Scope, name string) (runtimeauthoractivity.EventDescriptor, bool) {
+	return r.registry.Resolve(scope, name)
+}
+
+func (r dynamicAuthoredEventDescriptorResolver) authorActivityEventCatalogRegistered(scope runtimeauthoractivity.Scope) bool {
+	return r.registry.HasScope(scope)
+}
+
+func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *testing.T) {
+	db := openAuthorActivityAdapterDB(t)
+	scope := runtimeauthoractivity.BundleScope(uuid.NewString(), "bundle-v1:sha256:"+strings.Repeat("d", 64))
+	registry := runtimeauthoractivity.NewEventCatalogRegistry()
+	lease, err := registry.Register(scope, []runtimeauthoractivity.EventDescriptor{{EventType: "static.event", Disposition: runtimeauthoractivity.StoryDifferent}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := dynamicAuthoredEventDescriptorResolver{registry: registry}
+	dynamic := runtimeauthoractivity.EventDescriptor{
+		EventType: "chat/instance-1/reply.requested", Disposition: runtimeauthoractivity.StoryAuthored, AuthorSummaryField: "text",
+	}
+	base := runtimeauthoractivity.WithScope(context.Background(), scope)
+	base, err = runtimeauthoractivity.WithResolvedEventDescriptor(base, scope, dynamic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := eventtest.PersistedProjection(
+		uuid.NewString(), events.EventType(dynamic.EventType), "sender", "", []byte(`{"text":"hello"}`), 0,
+		"", "", events.EventEnvelope{}, time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
+	)
+
+	tx, err := db.BeginTx(base, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	story, err := runtimeauthoractivity.Begin(base, tx, runtimeauthoractivity.DialectSQLite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recordPersistedEventAuthorActivity(story, resolver, event, "sender", "agent"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtimeauthoractivity.Finalize(story); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	page, err := runtimeauthoractivity.List(base, db, runtimeauthoractivity.DialectSQLite, runtimeauthoractivity.ListOptions{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Occurrences) != 1 || page.Occurrences[0].AuthorSafeSummary != "hello" {
+		t.Fatalf("dynamic occurrence = %#v", page.Occurrences)
+	}
+
+	lease.Release()
+	tx, err = db.BeginTx(base, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	story, err = runtimeauthoractivity.Begin(base, tx, runtimeauthoractivity.DialectSQLite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := eventtest.PersistedProjection(
+		uuid.NewString(), events.EventType(dynamic.EventType), "sender", "", []byte(`{"text":"stale"}`), 0,
+		"", "", events.EventEnvelope{}, time.Date(2026, 7, 14, 12, 0, 1, 0, time.UTC),
+	)
+	if err := recordPersistedEventAuthorActivity(story, resolver, stale, "sender", "agent"); err == nil || !strings.Contains(err.Error(), "no live registry lease") {
+		t.Fatalf("stale lease error = %v", err)
+	}
+	_ = tx.Rollback()
+}
+
+func TestDynamicAuthorActivityEventDescriptorRejectsStaticConflict(t *testing.T) {
+	scope := runtimeauthoractivity.BundleScope(uuid.NewString(), "bundle-v1:sha256:"+strings.Repeat("e", 64))
+	registry := runtimeauthoractivity.NewEventCatalogRegistry()
+	lease, err := registry.Register(scope, []runtimeauthoractivity.EventDescriptor{{EventType: "message.sent", Disposition: runtimeauthoractivity.StoryAuthored, AuthorSummaryField: "text"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	ctx := runtimeauthoractivity.WithScope(context.Background(), scope)
+	ctx, err = runtimeauthoractivity.WithResolvedEventDescriptor(ctx, scope, runtimeauthoractivity.EventDescriptor{
+		EventType: "message.sent", Disposition: runtimeauthoractivity.StoryAuthored, AuthorSummaryField: "body",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := eventtest.PersistedProjection(
+		uuid.NewString(), events.EventType("message.sent"), "sender", "", []byte(`{"text":"hello"}`), 0,
+		"", "", events.EventEnvelope{}, time.Now(),
+	)
+	if err := recordPersistedEventAuthorActivity(ctx, dynamicAuthoredEventDescriptorResolver{registry: registry}, event, "sender", "agent"); err == nil || !strings.Contains(err.Error(), "conflicts") {
+		t.Fatalf("descriptor conflict error = %v", err)
+	}
 }
 
 func TestAuthorActivityEventAndEffectAdaptersRenderExactSubjects(t *testing.T) {
 	db := openAuthorActivityAdapterDB(t)
-	ctx := context.Background()
+	ctx := runtimecorrelation.WithRuntimeInstanceID(testAuthorActivityContext(), uuid.NewString())
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, runtimecorrelation.BundleSourceFact{BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64)})
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +282,7 @@ func TestAuthorActivityEventAndEffectAdaptersRenderExactSubjects(t *testing.T) {
 	if err := runtimeauthoractivity.Render(&output, page.Occurrences, runtimeauthoractivity.RenderOptions{Mode: runtimeauthoractivity.RenderPlain, Width: 120}); err != nil {
 		t.Fatal(err)
 	}
-	want := "12:00:00  phrase-completer  emitted phrase.completed\n12:00:01  anthropic_api  in flight\n"
+	want := "12:00:00  phrase-completer → phrase.completed\n"
 	if output.String() != want {
 		t.Fatalf("author activity output = %q, want %q", output.String(), want)
 	}
@@ -195,9 +300,10 @@ func openAuthorActivityAdapterDB(t *testing.T) *sql.DB {
 		`CREATE TABLE author_activity_order (singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1), last_sequence BIGINT NOT NULL CHECK (last_sequence >= 0))`,
 		`CREATE TABLE author_activity_occurrences (
 			occurrence_id TEXT PRIMARY KEY, sequence BIGINT NOT NULL UNIQUE CHECK (sequence > 0), kind TEXT NOT NULL,
-			version INTEGER NOT NULL CHECK (version = 1), transition TEXT NOT NULL, source_owner TEXT NOT NULL,
+			version INTEGER NOT NULL CHECK (version = 2), transition TEXT NOT NULL, source_owner TEXT NOT NULL,
 			source_identity TEXT NOT NULL, dedup_key TEXT NOT NULL UNIQUE, run_id TEXT, entity_id TEXT, agent_id TEXT,
-			flow_id TEXT, projection TEXT NOT NULL DEFAULT '{}', failure TEXT, occurred_at TIMESTAMP NOT NULL
+			flow_id TEXT, scope_kind TEXT NOT NULL, runtime_instance_id TEXT, bundle_hash TEXT, author_safe_summary TEXT,
+			projection TEXT NOT NULL DEFAULT '{}', failure TEXT, occurred_at TIMESTAMP NOT NULL
 		)`,
 	} {
 		if _, err := db.Exec(ddl); err != nil {

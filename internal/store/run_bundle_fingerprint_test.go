@@ -24,8 +24,8 @@ const (
 
 func TestPostgresStore_RunBundleSourceClassifiesCurrentWritersAsLegacyAndKeepsServeAdmissionFingerprint(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := runtimecorrelation.WithBundleFingerprint(context.Background(), testBootBundleFingerprint)
+	pg := newTestPostgresStore(t, db)
+	ctx := runtimecorrelation.WithBundleFingerprint(testAuthorActivityContext(), testBootBundleFingerprint)
 	runID := uuid.NewString()
 
 	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(uuid.NewString(),
@@ -36,7 +36,7 @@ func TestPostgresStore_RunBundleSourceClassifiesCurrentWritersAsLegacyAndKeepsSe
 	}
 	assertRunBundleIdentity(t, db, runID, "", storerunlifecycle.BundleSourceLegacy, testBootBundleFingerprint)
 
-	changedCtx := runtimecorrelation.WithBundleFingerprint(context.Background(), testOtherBundleFingerprint)
+	changedCtx := runtimecorrelation.WithBundleFingerprint(testAuthorActivityContext(), testOtherBundleFingerprint)
 	if err := pg.AppendEvent(changedCtx, eventtest.PersistedProjection(uuid.NewString(),
 
 		"scan.followup",
@@ -48,15 +48,17 @@ func TestPostgresStore_RunBundleSourceClassifiesCurrentWritersAsLegacyAndKeepsSe
 
 func TestPostgresStore_RunBundleSourceConsumesCanonicalSourceFact(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := newTestPostgresStore(t, db)
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(context.Background(), `
+	if _, err := db.ExecContext(testAuthorActivityContext(), `
 		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
 		VALUES ($1, 'name: test', '{}'::jsonb)
 	`, testCanonicalBundleHash); err != nil {
 		t.Fatalf("seed canonical bundle row: %v", err)
 	}
-	ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), runtimecorrelation.BundleSourceFact{
+	ctx := testAuthorActivityContextForBundle(testCanonicalBundleHash)
+	registerTestAuthorActivityCatalogForContext(t, pg, ctx)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, runtimecorrelation.BundleSourceFact{
 		BundleHash:        testCanonicalBundleHash,
 		BundleSource:      storerunlifecycle.BundleSourcePersisted,
 		BundleFingerprint: testBootBundleFingerprint,
@@ -72,7 +74,9 @@ func TestPostgresStore_RunBundleSourceConsumesCanonicalSourceFact(t *testing.T) 
 
 	ephemeralRunID := uuid.NewString()
 	ephemeralHash := "bundle-v1:sha256:3333333333333333333333333333333333333333333333333333333333333333"
-	ephemeralCtx := runtimecorrelation.WithBundleSourceFact(context.Background(), runtimecorrelation.BundleSourceFact{
+	ephemeralCtx := testAuthorActivityContextForBundle(ephemeralHash)
+	registerTestAuthorActivityCatalogForContext(t, pg, ephemeralCtx)
+	ephemeralCtx = runtimecorrelation.WithBundleSourceFact(ephemeralCtx, runtimecorrelation.BundleSourceFact{
 		BundleHash:        ephemeralHash,
 		BundleSource:      storerunlifecycle.BundleSourceEphemeral,
 		BundleFingerprint: testOtherBundleFingerprint,
@@ -88,10 +92,10 @@ func TestPostgresStore_RunBundleSourceConsumesCanonicalSourceFact(t *testing.T) 
 
 func TestPostgresStore_RunBundleSourceAllowsUnknownLegacyRows(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := newTestPostgresStore(t, db)
 	runID := uuid.NewString()
 
-	if err := pg.AppendEvent(context.Background(), eventtest.PersistedProjection(uuid.NewString(),
+	if err := pg.AppendEvent(testAuthorActivityContext(), eventtest.PersistedProjection(uuid.NewString(),
 
 		"legacy.requested",
 		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
@@ -102,8 +106,8 @@ func TestPostgresStore_RunBundleSourceAllowsUnknownLegacyRows(t *testing.T) {
 
 func TestPostgresStore_RunBundleSourceDoesNotPromoteLegacyFingerprintIntoBundleHashOnReopen(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 
 	if _, err := db.ExecContext(ctx, `
@@ -134,8 +138,8 @@ func TestPostgresStore_RunBundleSourceDoesNotPromoteLegacyFingerprintIntoBundleH
 
 func TestRunLifecycleOwnerPersistsCanonicalBundleHashWhenSupplied(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContextForBundle(testCanonicalBundleHash)
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
@@ -160,8 +164,8 @@ func TestRunLifecycleOwnerPersistsCanonicalBundleHashWhenSupplied(t *testing.T) 
 
 func TestRunLifecycleOwnerRejectsNonLegacySourceWithoutBundleHash(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	err := pg.runAuthorActivityMutation(context.Background(), "test ensure invalid active run", func(txctx context.Context, tx *sql.Tx) error {
+	pg := newTestPostgresStore(t, db)
+	err := pg.runAuthorActivityMutation(testAuthorActivityContext(), "test ensure invalid active run", func(txctx context.Context, tx *sql.Tx) error {
 		return storerunlifecycle.EnsureActive(txctx, tx, uuid.NewString(), "", "", storerunlifecycle.EnsureActiveOptions{
 			HasBundleHashCol:   true,
 			HasBundleSourceCol: true,
@@ -175,8 +179,8 @@ func TestRunLifecycleOwnerRejectsNonLegacySourceWithoutBundleHash(t *testing.T) 
 
 func TestRunLifecycleOwnerRejectsPersistedSourceWithoutBundleRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 
 	err := pg.runAuthorActivityMutation(ctx, "test ensure missing persisted run bundle", func(txctx context.Context, tx *sql.Tx) error {
@@ -195,8 +199,8 @@ func TestRunLifecycleOwnerRejectsPersistedSourceWithoutBundleRow(t *testing.T) {
 
 func TestPostgresStore_ActiveRunBundleAvailabilityConflicts(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 	legacyRunID := uuid.NewString()
 	persistedRunID := uuid.NewString()
 	persistedMissingRunID := uuid.NewString()

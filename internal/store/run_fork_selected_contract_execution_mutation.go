@@ -290,10 +290,19 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 		return RunForkMaterialization{}, err
 	}
 	now := time.Now().UTC()
-	if err := insertRunForkRun(ctx, tx, catalog, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, runForkBundleInsertIdentity{
+	identity, err := resolveRunForkBundleInsertIdentity(ctx, tx, plan.SourceRunID, runForkBundleInsertIdentity{
 		BundleHash:   req.BundleHash,
 		BundleSource: req.BundleSource,
-	}); err != nil {
+	})
+	if err != nil {
+		return RunForkMaterialization{}, fmt.Errorf("resolve selected-contract fork bundle identity: %w", err)
+	}
+	forkScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, identity.BundleHash)
+	if err != nil {
+		return RunForkMaterialization{}, fmt.Errorf("resolve selected-contract fork author activity scope: %w", err)
+	}
+	ctx = runtimeauthoractivity.WithScope(ctx, forkScope)
+	if err := insertRunForkRun(ctx, tx, catalog, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, identity); err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("insert selected-contract fork run: %w", err)
 	}
 

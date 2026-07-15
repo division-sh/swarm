@@ -248,7 +248,7 @@ func materializeSelectedContractForkCleanupProbe(
 func assertSourcePendingAgentDelivery(t testing.TB, db *sql.DB, runID, eventID, agentID string) {
 	t.Helper()
 	var rows int
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COUNT(*)
 		FROM event_deliveries
 		WHERE run_id = $1::uuid
@@ -266,7 +266,7 @@ func assertSourcePendingAgentDelivery(t testing.TB, db *sql.DB, runID, eventID, 
 
 func assertSelectedContractForkExecutionRows(t testing.TB, db *sql.DB, sourceRunID, forkRunID, sourceEventID, forkEventID string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	var lineageRows int
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
@@ -285,7 +285,7 @@ func assertSelectedContractForkExecutionRows(t testing.TB, db *sql.DB, sourceRun
 
 func assertSelectedContractForkRuntimeRows(t testing.TB, db *sql.DB, forkRunID, forkEventID string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	counts := selectedContractForkRunCounts(t, db, forkRunID)
 	for _, key := range []string{
 		"runs",
@@ -347,7 +347,7 @@ func assertSelectedContractForkRuntimeRows(t testing.TB, db *sql.DB, forkRunID, 
 
 func assertSelectedContractForkSourceIsolation(t testing.TB, db *sql.DB, sourceRunID, forkRunID, sourceEventID, forkEventID string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	var copiedSourceEvents, sourceIDReuse, sourceRunForkRows int
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
@@ -382,7 +382,7 @@ func assertSelectedContractForkSourceIsolation(t testing.TB, db *sql.DB, sourceR
 
 func selectedContractSourceRowSnapshot(t testing.TB, db *sql.DB, sourceRunID, sourceEventID string) map[string]string {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	queries := map[string]string{
 		"source_event": `
 			SELECT COALESCE(jsonb_agg(to_jsonb(e) ORDER BY e.event_id), '[]'::jsonb)::text
@@ -454,7 +454,7 @@ func assertSourceRunLifecycle(t testing.TB, db *sql.DB, runID, wantStatus string
 	t.Helper()
 	var status string
 	var ended bool
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT status, ended_at IS NOT NULL
 		FROM runs
 		WHERE run_id = $1::uuid
@@ -563,7 +563,7 @@ func selectedContractSourceRunCounts(t testing.TB, db *sql.DB, runID string) map
 
 func selectedContractRunCounts(t testing.TB, db *sql.DB, runID string, ignoreRuntimeDiagnosticEvents bool) map[string]int {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	eventFilter := ""
 	if ignoreRuntimeDiagnosticEvents {
 		eventFilter = " AND event_name NOT IN ('platform.runtime_log', 'platform.agent_started')"

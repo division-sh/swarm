@@ -258,7 +258,7 @@ func (b *flowActivationTestBus) RemoveFlowInstanceRouteContext(ctx context.Conte
 }
 
 func flowActivationRunContext() context.Context {
-	return runtimecorrelation.WithRunID(context.Background(), "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	return runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 }
 
 type flowActivationStubAgent struct{ id string }
@@ -473,7 +473,7 @@ func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.InitialState = "queued"
-	err := am.ActivateFlowInstance(context.Background(), req)
+	err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req)
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -494,7 +494,7 @@ func TestActivateFlowInstanceDefersAgentStartupUntilMutationCommit(t *testing.T)
 	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle("")
 	postCommit := make([]func(), 0, 1)
-	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), &sql.Tx{})
+	ctx := runtimepipeline.WithPipelineSQLTxContext(testAuthorActivityContext(context.Background()), &sql.Tx{})
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
 
 	if err := am.ActivateFlowInstance(ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
@@ -532,7 +532,7 @@ func TestActivateFlowInstanceUsesStagedInitialState(t *testing.T) {
 	bundle.FlowSchemas["review"] = schema
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+	if err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	if len(store.creates) != 1 {
@@ -552,7 +552,7 @@ func TestActivateFlowInstancePassesActivationConfigToRouteMaterialization(t *tes
 	req.Config = map[string]any{
 		"vertical_id": "11111111-1111-4111-8111-111111111111",
 	}
-	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+	if err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	if len(bus.addedRouteRequests) != 1 {
@@ -585,7 +585,7 @@ func TestActivateFlowInstanceUsesSameBuiltinsForAgentAndRouteMaterialization(t *
 		"instance_id":        "wrong-config-instance",
 		"template_id":        "wrong-config-template",
 	}
-	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+	if err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	if _, ok := am.GetAgentConfig("reviewer-review/inst-1"); !ok {
@@ -615,7 +615,7 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	bundle := testFlowBundle("task.started")
 	const runID = "11111111-1111-1111-1111-111111111115"
 	const triggerEventID = "33333333-3333-3333-3333-333333333333"
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID).WithExecutionMode(executionmode.Mock)
 
@@ -656,7 +656,7 @@ func TestActivateFlowInstancePreservesReplyContextIntoAutoEmit(t *testing.T) {
 	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:child-activation"}}
-	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+	if err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	if len(bus.publishedContexts) != 1 || bus.publishedContexts[0].ReplyContextID() != req.Context.ReplyContextID() {
@@ -672,7 +672,7 @@ func TestActivateFlowInstanceAutoEmitDoesNotInventLineageWithoutTrigger(t *testi
 	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle("task.started")
 
-	if err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
+	if err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/task.started")
@@ -702,7 +702,7 @@ func TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationCont
 		"component_type": "api",
 	}
 
-	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+	if err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/component.scaffold.start")
@@ -743,7 +743,7 @@ func TestActivateFlowInstanceAutoEmitKeepsPayloadSourceEventIDNonAuthoritative(t
 	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID)
 	req.Config = map[string]any{"source_event_id": payloadSourceEventID}
 
-	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+	if err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/component.scaffold.start")
@@ -771,7 +771,7 @@ func TestActivateFlowInstanceQueuedAutoEmitUsesProjectedConfigPayload(t *testing
 		Required: []string{"component_id"},
 	})
 	postCommit := make([]func(), 0, 1)
-	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommit)
+	ctx := runtimepipeline.WithPipelinePostCommitActions(testAuthorActivityContext(context.Background()), &postCommit)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Config = map[string]any{"component_id": "component-1"}
 
@@ -808,7 +808,7 @@ func TestActivateFlowInstanceAutoEmitAllowsDeclaredTemplateIDBusinessField(t *te
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Config = map[string]any{"template_id": "application-basic-v1"}
 
-	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+	if err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/repo.template.selected")
@@ -825,7 +825,7 @@ func TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable(t *testi
 	const runID = "22222222-2222-2222-2222-222222222215"
 	const triggerEventID = "55555555-5555-5555-5555-555555555555"
 	postCommit := make([]func(), 0, 1)
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID)
@@ -864,7 +864,7 @@ func TestActivateFlowInstanceRejectsDuplicateInstanceIDBeforeSideEffects(t *test
 	bundle := testFlowBundle("task.started")
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 
-	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+	if err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("first ActivateFlowInstance: %v", err)
 	}
 	firstCreates := len(instances.creates)
@@ -872,7 +872,7 @@ func TestActivateFlowInstanceRejectsDuplicateInstanceIDBeforeSideEffects(t *test
 	firstPublished := len(bus.published)
 	firstAgents := len(store.upserts)
 
-	err := am.ActivateFlowInstance(context.Background(), req)
+	err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req)
 	failure, ok := runtimefailures.As(err)
 	if err == nil || !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate || failure.Failure.Detail.Code != "flow_instance_already_exists" {
 		t.Fatalf("duplicate ActivateFlowInstance failure = %#v, want canonical already-exists failure", failure)
@@ -904,7 +904,7 @@ func TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField(t *testin
 		Required: []string{"reason"},
 	})
 
-	err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
+	err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
 	if err == nil || !strings.Contains(err.Error(), "auto-emit task.started") || !strings.Contains(err.Error(), "reason is required") {
 		t.Fatalf("ActivateFlowInstance error = %v, want missing required auto-emit schema failure", err)
 	}
@@ -931,7 +931,7 @@ func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t 
 	am := newFlowActivationManager(bus, instances)
 	bundle := testFlowBundle("task.started")
 	postCommit := make([]func(), 0, 1)
-	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommit)
+	ctx := runtimepipeline.WithPipelinePostCommitActions(testAuthorActivityContext(context.Background()), &postCommit)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Config = map[string]any{
 		"unexpected": "value",
@@ -971,7 +971,7 @@ func TestActivateFlowInstanceAutoEmitFailsClosedOnUndeclaredEnvelopeLikeConfigFi
 		"entity_id": "business-value",
 	}
 
-	err := am.ActivateFlowInstance(context.Background(), req)
+	err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req)
 	if err == nil || !strings.Contains(err.Error(), "auto-emit task.started") || !strings.Contains(err.Error(), "entity_id is not allowed") {
 		t.Fatalf("ActivateFlowInstance error = %v, want undeclared envelope-like config field failure", err)
 	}
@@ -1110,7 +1110,7 @@ func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 		"name":     "alpha",
 		"priority": 1,
 	}
-	err := am.ActivateFlowInstance(context.Background(), req)
+	err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req)
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -1144,7 +1144,7 @@ func TestActivateFlowInstancePersistsFullParentRouteMetadata(t *testing.T) {
 		FlowInstance: "operating/root",
 		EntityID:     "parent-ent",
 	}
-	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+	if err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	if len(instances.creates) != 1 {
@@ -1183,7 +1183,7 @@ func TestActivateFlowInstanceResolvesAgentPermissions(t *testing.T) {
 	reviewFlow.Agents["reviewer"] = entry
 	bundle.FlowTree.Root.Children[0].Agents["reviewer"] = entry
 
-	err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
+	err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -1202,7 +1202,7 @@ func TestDeactivateFlowInstanceRemovesAgentsAndRoutes(t *testing.T) {
 	am := newFlowActivationManager(bus, instances)
 	bundle := testFlowBundle("")
 
-	err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
+	err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -1231,7 +1231,7 @@ func TestDeactivateFlowInstanceQueuesTerminalSideEffectsUntilPostCommitWhenAvail
 	am := newFlowActivationManager(bus, instances, managerStore)
 	bundle := testFlowBundle("")
 
-	if err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
+	if err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	postCommit := make([]func(), 0, 1)
@@ -1290,7 +1290,7 @@ func TestDeactivateFlowInstanceLogsPostCommitAgentFailureWithoutRouteRemoval(t *
 	am := newFlowActivationManager(bus, instances, managerStore)
 	bundle := testFlowBundle("")
 
-	if err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
+	if err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	postCommit := make([]func(), 0, 1)
@@ -1325,7 +1325,7 @@ func TestDeactivateFlowInstanceLogsPostCommitRouteFailureAfterAgentTeardown(t *t
 	am := newFlowActivationManager(bus, instances, managerStore)
 	bundle := testFlowBundle("")
 
-	if err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
+	if err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	postCommit := make([]func(), 0, 1)
@@ -1362,7 +1362,7 @@ func TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate(t *tes
 	am := newFlowActivationManager(bus, instances)
 	bundle := testNestedFlowBundle()
 
-	err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "grandchild", "inst-1", "ent-1", "child/grandchild/inst-1"))
+	err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "grandchild", "inst-1", "ent-1", "child/grandchild/inst-1"))
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -1381,7 +1381,7 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	const runID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status)
 		VALUES ($1::uuid, 'running')
@@ -1429,7 +1429,7 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 		status       string
 		terminatedAt time.Time
 	)
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT status, terminated_at
 		FROM flow_instances
 		WHERE instance_id = $1
@@ -1475,7 +1475,7 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	const runID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status)
 		VALUES ($1::uuid, 'running')
@@ -1519,7 +1519,7 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 			t.Fatalf("route status before commit = %q, want active", got)
 		}
 		var externalStatus string
-		if err := db.QueryRowContext(context.Background(), `
+		if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 			SELECT status
 			FROM flow_instances
 			WHERE instance_id = $1
@@ -1535,7 +1535,7 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 	}
 
 	var status string
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT status
 		FROM flow_instances
 		WHERE instance_id = $1
@@ -1594,7 +1594,7 @@ func TestEnsureStaticFlowRequiredAgentsRegistersStaticFlowSubscriptions(t *testi
 	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{}, store)
 	bundle := testStaticFlowBundle()
 
-	if err := am.EnsureStaticFlowRequiredAgents(context.Background(), semanticview.Wrap(bundle)); err != nil {
+	if err := am.EnsureStaticFlowRequiredAgents(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle)); err != nil {
 		t.Fatalf("EnsureStaticFlowRequiredAgents: %v", err)
 	}
 	cfg, ok := am.GetAgentConfig("analyzer")
@@ -1654,7 +1654,7 @@ func TestEnsureStaticFlowRequiredAgentsInfersFromOmittedRequiredAgents(t *testin
 	bundle.Semantics.FlowAgents = map[string][]runtimecontracts.FlowRequiredAgent{}
 	bundle.Semantics.FlowAgentFacts = map[string][]runtimecontracts.RequiredAgentFact{}
 
-	if err := am.EnsureStaticFlowRequiredAgents(context.Background(), semanticview.Wrap(bundle)); err != nil {
+	if err := am.EnsureStaticFlowRequiredAgents(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle)); err != nil {
 		t.Fatalf("EnsureStaticFlowRequiredAgents: %v", err)
 	}
 	cfg, ok := am.GetAgentConfig("analyzer")
@@ -1709,7 +1709,7 @@ func TestEnsureStaticAgentsForScopeRegistersRootAndFlowSubscriptions(t *testing.
 			EmitEvents:    []string{"task.completed"},
 		},
 	}
-	if err := am.ensureStaticAgentsForScope(context.Background(), source, "", "", rootAgents); err != nil {
+	if err := am.ensureStaticAgentsForScope(testAuthorActivityContext(context.Background()), source, "", "", rootAgents); err != nil {
 		t.Fatalf("ensureStaticAgentsForScope(root): %v", err)
 	}
 	flowAgents := map[string]runtimecontracts.AgentRegistryEntry{
@@ -1721,7 +1721,7 @@ func TestEnsureStaticAgentsForScopeRegistersRootAndFlowSubscriptions(t *testing.
 			EmitEvents:    []string{"work.completed"},
 		},
 	}
-	if err := am.ensureStaticAgentsForScope(context.Background(), source, "ops-flow", "ops-flow", flowAgents); err != nil {
+	if err := am.ensureStaticAgentsForScope(testAuthorActivityContext(context.Background()), source, "ops-flow", "ops-flow", flowAgents); err != nil {
 		t.Fatalf("ensureStaticAgentsForScope(flow): %v", err)
 	}
 
@@ -1752,7 +1752,7 @@ func TestEnsureStaticAgents_PackageBackedFlowOwnedAgentsCarryCanonicalFlowPath(t
 		return flowActivationStubAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{}, store)
 
-	if err := am.EnsureStaticAgents(context.Background(), source); err != nil {
+	if err := am.EnsureStaticAgents(testAuthorActivityContext(context.Background()), source); err != nil {
 		t.Fatalf("EnsureStaticAgents: %v", err)
 	}
 	if len(captured) != 1 {
@@ -1782,7 +1782,7 @@ func TestEnsureStaticAgents_SoleParentFlowPackageAgentsStartWithOwningFlowPath(t
 		return flowActivationStubAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{}, store)
 
-	if err := am.EnsureStaticAgents(context.Background(), source); err != nil {
+	if err := am.EnsureStaticAgents(testAuthorActivityContext(context.Background()), source); err != nil {
 		t.Fatalf("EnsureStaticAgents: %v", err)
 	}
 	if len(captured) != 1 {
@@ -1803,7 +1803,7 @@ func TestActivateFlowInstanceFailsWithoutWorkflowInstanceStore(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := NewAgentManager(bus, nil)
 
-	err := am.ActivateFlowInstance(context.Background(), testActivationRequest(testFlowBundle(""), "review", "inst-1", "ent-1", "review/inst-1"))
+	err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), testActivationRequest(testFlowBundle(""), "review", "inst-1", "ent-1", "review/inst-1"))
 	if err == nil || !strings.Contains(err.Error(), "workflow instance store is required") {
 		t.Fatalf("ActivateFlowInstance err = %v, want workflow instance store error", err)
 	}

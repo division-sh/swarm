@@ -209,7 +209,7 @@ func TestResetRuntimeStateFailureAlwaysLeavesResetPhase(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			am := NewAgentManagerWithOptions(tt.bus, nil, AgentManagerOptions{})
 			rec := lifecycleTestPersistedAgent()
-			if err := am.lifecycle.register(context.Background(), rec, false); err != nil {
+			if err := am.lifecycle.register(testAuthorActivityContext(context.Background()), rec, false); err != nil {
 				t.Fatalf("register lifecycle cell: %v", err)
 			}
 
@@ -225,7 +225,7 @@ func TestResetRuntimeStateFailureAlwaysLeavesResetPhase(t *testing.T) {
 			if cellExists != tt.wantCellAfter {
 				t.Fatalf("lifecycle cell exists = %v, want %v", cellExists, tt.wantCellAfter)
 			}
-			if _, started := am.lifecycle.beginRun(context.Background(), AgentRunModeStandard); !started {
+			if _, started := am.lifecycle.beginRun(testAuthorActivityContext(context.Background()), AgentRunModeStandard); !started {
 				t.Fatal("runtime remained blocked after reset failure")
 			}
 			am.lifecycle.beginShutdownAdmission()

@@ -74,10 +74,13 @@ type Delivery struct {
 }
 
 type DeliveryEvent struct {
-	Name          events.EventType
-	Kind          OutputKind
-	Payload       map[string]any
-	Authorization runtimeprovideroutput.Authorization
+	Name              events.EventType
+	Kind              OutputKind
+	Payload           map[string]any
+	Authorization     runtimeprovideroutput.Authorization
+	AuthorSummary     string
+	AuthorSubjectType string
+	AuthorSubjectID   string
 }
 
 type Response struct {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -42,7 +43,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 	t.Cleanup(cleanup)
 	ctx := seedRuntimeTestRun(t, db)
 	pg := &store.PostgresStore{DB: db}
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -70,13 +71,16 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 	evt := eventtest.RootIngress(
 		eventID,
 		events.EventType("operating/inst-1/opco.product_initialization_requested"),
-		"",
+		"operating",
 		"",
 		[]byte(`{"entity_id":"11111111-1111-4111-8111-111111111111"}`),
 		0,
 		templateInstanceDeliveryRunID,
 		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-4111-8111-111111111111"), "operating/inst-1"),
+		events.EnvelopeForSourceRoute(
+			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-4111-8111-111111111111"), "operating/inst-1"),
+			events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: "11111111-1111-4111-8111-111111111111"},
+		),
 		time.Now().UTC(),
 	)
 
@@ -113,7 +117,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	t.Cleanup(cleanup)
 	ctx := seedRuntimeTestRun(t, db)
 	pg := &store.PostgresStore{DB: db}
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -125,13 +129,16 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	evt := eventtest.RootIngress(
 		eventID,
 		events.EventType("operating/inst-1/opco.product_initialization_requested"),
-		"",
+		"operating",
 		"",
 		[]byte(`{"entity_id":"11111111-1111-4111-8111-111111111111"}`),
 		0,
 		templateInstanceDeliveryRunID,
 		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-4111-8111-111111111111"), "operating/inst-1"),
+		events.EnvelopeForSourceRoute(
+			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-4111-8111-111111111111"), "operating/inst-1"),
+			events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: "11111111-1111-4111-8111-111111111111"},
+		),
 		time.Now().UTC(),
 	)
 
@@ -167,7 +174,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	t.Cleanup(cleanup)
 	ctx := seedRuntimeTestRun(t, db)
 	pg := &store.PostgresStore{DB: db}
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -176,11 +183,17 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
 	})
+	activationCalls := 0
+	var activationErr error
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:            module,
-		InstanceActivator: manager.ActivateFlowInstance,
-		WorkflowStore:     workflowStore,
+		Module: module,
+		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+			activationCalls++
+			activationErr = manager.ActivateFlowInstance(ctx, req)
+			return activationErr
+		},
+		WorkflowStore: workflowStore,
 		EventReceiptsCapability: func(context.Context) (bool, error) {
 			return true, nil
 		},
@@ -190,7 +203,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	spinup := eventtest.RootIngress(
 		"99999999-9999-4999-8999-999999999910",
 		events.EventType("opco.spinup_requested"),
-		"",
+		"test-producer",
 		"",
 		[]byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
 		0,
@@ -202,6 +215,9 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 
 	if err := bus.Publish(ctx, spinup); err != nil {
 		t.Fatalf("Publish spinup: %v", err)
+	}
+	if activationCalls != 1 || activationErr != nil {
+		t.Fatalf("flow activation calls = %d, error = %v; want one successful activation", activationCalls, activationErr)
 	}
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_receipts
@@ -260,7 +276,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	ctx := seedRuntimeTestRun(t, db)
 	pg := &store.PostgresStore{DB: db}
 	proofStore := routeMaterializationDBProofStore{pg: pg}
-	bus, err := runtimebus.NewEventBusWithOptions(proofStore, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := newScopedTestEventBus(t, proofStore, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -283,7 +299,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	spinup := eventtest.RootIngress(
 		"99999999-9999-4999-8999-999999999930",
 		events.EventType("opco.spinup_requested"),
-		"",
+		"test-producer",
 		"",
 		[]byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
 		0,
@@ -337,7 +353,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	proofStore := &failingDeliveryRouteStore{PostgresStore: pg}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	var manager *runtimemanager.AgentManager
-	bus, err := runtimebus.NewEventBusWithOptions(proofStore, runtimebus.EventBusOptions{
+	bus, err := newScopedTestEventBus(t, proofStore, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		TemplateInstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 			if manager == nil {
@@ -357,7 +373,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	evt := eventtest.RootIngress(
 		"99999999-9999-4999-8999-999999999940",
 		events.EventType("producer/deploy.done"),
-		"",
+		"producer",
 		"",
 		[]byte(`{"vertical_id":"v-1"}`),
 		0,
@@ -409,14 +425,14 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 }
 
 func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect(t *testing.T) {
-	bundle := loadRuntimeTempBundle(t, templateInstanceEmpireOutboxFixtureFiles())
+	bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyTemplateInstanceEmpireOutbox(t))
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	ctx := seedRuntimeTestRun(t, db)
 	pg := &store.PostgresStore{DB: db}
 	var pc *runtimepipeline.PipelineCoordinator
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
@@ -446,7 +462,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	mailbox := eventtest.RootIngress(
 		"99999999-9999-4999-8999-999999999913",
 		events.EventType("approval.completed"),
-		"",
+		"approval-source",
 		"",
 		[]byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
 		0,
@@ -528,13 +544,13 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 }
 
 func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyleSideEffect(t *testing.T) {
-	bundle := loadRuntimeTempBundle(t, templateInstanceEmpireOutboxFixtureFiles())
+	bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyTemplateInstanceEmpireOutbox(t))
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	ctx := seedRuntimeTestRun(t, db)
 	pg := &store.PostgresStore{DB: db}
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -566,7 +582,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 	mailbox := eventtest.RootIngress(
 		"99999999-9999-4999-8999-999999999912",
 		events.EventType("approval.completed"),
-		"",
+		"approval-source",
 		"",
 		[]byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
 		0,
@@ -883,7 +899,7 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 			name: "sqlite",
 			setup: func(t *testing.T, checkpoint providerRollbackMutationCheckpoint) (context.Context, *sql.DB, runtimebus.EventStore) {
 				sqliteStore := storetest.StartSQLiteRuntimeStore(t)
-				ctx := runtimecorrelation.WithRunID(context.Background(), templateInstanceDeliveryRunID)
+				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, templateInstanceDeliveryRunID); err != nil {
 					t.Fatalf("seed SQLite rollback run: %v", err)
 				}
@@ -909,7 +925,7 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 					workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStore(db)
 				}
 				var manager *runtimemanager.AgentManager
-				bus, err := runtimebus.NewEventBusWithOptions(eventStore, runtimebus.EventBusOptions{
+				bus, err := newScopedTestEventBus(t, eventStore, runtimebus.EventBusOptions{
 					ContractBundle: source, ProviderOutputVerifier: source.(runtimebus.ProviderOutputAuthorizationVerifier),
 					TemplateInstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 						if manager == nil {
@@ -1296,6 +1312,10 @@ type routeMaterializationDBProofStore struct {
 	pg *store.PostgresStore
 }
 
+func (s routeMaterializationDBProofStore) RegisterAuthorActivityEventCatalog(scope runtimeauthoractivity.Scope, descriptors []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {
+	return s.pg.RegisterAuthorActivityEventCatalog(scope, descriptors)
+}
+
 func (s routeMaterializationDBProofStore) AppendEvent(ctx context.Context, evt events.Event) error {
 	return s.pg.AppendEvent(ctx, evt)
 }
@@ -1328,78 +1348,9 @@ func (s routeMaterializationDBProofStore) ListFlowInstanceRoutes(ctx context.Con
 	return s.pg.ListFlowInstanceRoutes(ctx)
 }
 
-func templateInstanceEmpireOutboxFixtureFiles() map[string]string {
-	return map[string]string{
-		"package.yaml": `name: test
-version: 1.0.0
-flows:
-  - id: operating
-    flow: operating
-    mode: template
-`,
-		"events.yaml": `approval.completed:
-  entity_id: string
-  instance_id: string
-  product_id: string
-opco.spinup_requested:
-  instance_id: string
-  product_id: string
-`,
-		"nodes.yaml": `approval-router:
-  id: approval-router
-  execution_type: system_node
-  subscribes_to: [approval.completed]
-  produces: [opco.spinup_requested]
-  event_handlers:
-    approval.completed:
-      emit:
-        event: opco.spinup_requested
-        broadcast: true
-        fields:
-          instance_id: payload.instance_id
-          product_id: payload.product_id
-portfolio-node:
-  id: portfolio-node
-  execution_type: system_node
-  subscribes_to: [opco.spinup_requested]
-  event_handlers:
-    opco.spinup_requested:
-      action: create_flow_instance
-      template: operating
-      instance_id_from: payload.instance_id
-      config_from:
-        product_id: payload.product_id
-`,
-		"flows/operating/schema.yaml": `name: operating
-initial_state: initializing
-terminal_states: [ready]
-states: [initializing, ready]
-auto_emit_on_create:
-  event: opco.product_initialization_requested
-`,
-		"flows/operating/events.yaml": `opco.product_initialization_requested:
-  product_id: string
-component_scaffold.spawn_requested:
-  product_id: string
-`,
-		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
-  id: lifecycle-orchestrator
-  execution_type: system_node
-  subscribes_to: [opco.product_initialization_requested]
-  produces: [component_scaffold.spawn_requested]
-  event_handlers:
-    opco.product_initialization_requested:
-      emit:
-        event: component_scaffold.spawn_requested
-        fields:
-          product_id: payload.product_id
-`,
-	}
-}
-
 func seedRuntimeTestRun(t *testing.T, db *sql.DB) context.Context {
 	t.Helper()
-	ctx := runtimecorrelation.WithRunID(context.Background(), templateInstanceDeliveryRunID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status)
 		VALUES ($1::uuid, 'running')
@@ -1422,7 +1373,7 @@ func waitRuntimeDBCount(t *testing.T, ctx context.Context, db *sql.DB, query str
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("count = %d, want %d for query %s", got, want, strings.TrimSpace(query))
+			t.Fatalf("count = %d, want %d for query %s\n%s", got, want, strings.TrimSpace(query), runtimeTestEventDiagnostics(ctx, db))
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
@@ -1441,10 +1392,59 @@ func waitRuntimeEventID(t *testing.T, ctx context.Context, db *sql.DB, query str
 			t.Fatalf("query event id: %v", err)
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for event id from query %s", strings.TrimSpace(query))
+			t.Fatalf("timed out waiting for event id from query %s\n%s", strings.TrimSpace(query), runtimeTestEventDiagnostics(ctx, db))
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
+}
+
+func runtimeTestEventDiagnostics(ctx context.Context, db *sql.DB) string {
+	rows, err := db.QueryContext(ctx, `
+		SELECT e.event_name, COALESCE(e.produced_by, ''), COALESCE(r.subscriber_id, ''),
+		       COALESCE(r.outcome, ''), COALESCE(r.reason_code, ''), COALESCE(r.side_effects::text, '')
+		FROM events e
+		LEFT JOIN event_receipts r ON r.event_id = e.event_id
+		ORDER BY e.created_at, e.event_id, r.subscriber_id
+	`)
+	if err != nil {
+		return "event diagnostics unavailable: " + err.Error()
+	}
+	defer rows.Close()
+	var out strings.Builder
+	for rows.Next() {
+		var eventType, producer, subscriber, outcome, reason, sideEffects string
+		if err := rows.Scan(&eventType, &producer, &subscriber, &outcome, &reason, &sideEffects); err != nil {
+			return "event diagnostics scan: " + err.Error()
+		}
+		fmt.Fprintf(&out, "event=%s producer=%s subscriber=%s outcome=%s reason=%s side_effects=%s\n", eventType, producer, subscriber, outcome, reason, sideEffects)
+	}
+	instanceRows, err := db.QueryContext(ctx, `SELECT flow_template, instance_id, status FROM flow_instances ORDER BY created_at, instance_id`)
+	if err == nil {
+		defer instanceRows.Close()
+		for instanceRows.Next() {
+			var template, instance, status string
+			if err := instanceRows.Scan(&template, &instance, &status); err != nil {
+				break
+			}
+			fmt.Fprintf(&out, "flow_instance=%s template=%s status=%s\n", instance, template, status)
+		}
+	}
+	deadLetterRows, err := db.QueryContext(ctx, `
+		SELECT COALESCE(original_event, ''), COALESCE(handler_node, ''), COALESCE(failure::text, '')
+		FROM dead_letters
+		ORDER BY created_at, dead_letter_id
+	`)
+	if err == nil {
+		defer deadLetterRows.Close()
+		for deadLetterRows.Next() {
+			var eventType, handler, failure string
+			if err := deadLetterRows.Scan(&eventType, &handler, &failure); err != nil {
+				break
+			}
+			fmt.Fprintf(&out, "dead_letter event=%s handler=%s failure=%s\n", eventType, handler, failure)
+		}
+	}
+	return out.String()
 }
 
 func assertRuntimeEventPayloadProductOnly(t *testing.T, ctx context.Context, db *sql.DB, eventID string) {

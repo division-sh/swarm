@@ -190,7 +190,7 @@ func newMailboxWriteSupportedSurfaceHandler(
 ) (*Handler, *runtimebus.EventBus) {
 	t.Helper()
 	var coordinator *runtimepipeline.PipelineCoordinator
-	bus, err := runtimebus.NewEventBusWithOptions(persistence.(runtimebus.EventStore), runtimebus.EventBusOptions{
+	bus, err := newScopedAPITestEventBus(t, persistence.(runtimebus.EventStore), runtimebus.EventBusOptions{
 		ContractBundle:     source,
 		BundleFingerprint:  fact.BundleFingerprint,
 		BundleSourceFact:   fact,

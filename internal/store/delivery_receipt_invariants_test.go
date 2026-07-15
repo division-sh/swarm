@@ -83,7 +83,7 @@ func TestCanonicalDeliveryOwnerInvariant_PendingSurfacesAgree_V2(t *testing.T) {
 			pg, cleanup := newTestPostgresStore(t)
 			defer cleanup()
 
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 			evt := seedEvent(t, ctx, pg, entityID, "test.delivery_receipt.invariant."+strings.ReplaceAll(tt.name, " ", "_"))
 			if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
@@ -100,7 +100,7 @@ func TestCanonicalDeliveryOwnerInvariant_ReceiptRowsRemainOutcomeOnly_V2(t *test
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.delivery_receipt.invariant.legacy_receipt_only")
 	insertLegacyAgentReceiptState(t, ctx, pg, evt.ID(), agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", time.Now().Add(-2*time.Minute))

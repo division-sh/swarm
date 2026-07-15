@@ -304,7 +304,7 @@ func TestHandleWorkflowStageTimerFireMarksFiredAndAdvancesWithSQLiteStore(t *tes
 		module:        &pipelineFixtureWorkflowModule{source: source},
 		workflowStore: store,
 	}
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	now := time.Now().UTC().Round(time.Microsecond)
 
 	if err := store.Upsert(ctx, WorkflowInstance{
@@ -423,7 +423,7 @@ func TestHandleWorkflowStageTimerFireDeactivatesTerminalTemplateFlow(t *testing.
 			return nil
 		},
 	}
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	now := time.Now().UTC().Round(time.Microsecond)
 	const flowPath = "review/inst-1"
 	entityID := FlowInstanceEntityID(flowPath)
@@ -490,7 +490,7 @@ func TestPipelineEngineStateRepoSaveStateArmsInitialStageTimersWithSQLiteStore(t
 		timerScheduleStore: schedules,
 	}
 	repo := pipelineEngineStateRepo{coordinator: pc}
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	entityID := identity.NormalizeEntityID("33333333-3333-3333-3333-333333333333")
 
 	if err := repo.SaveState(ctx, entityID, testEngineStateMutation(nil, nil, nil)); err != nil {
@@ -803,7 +803,7 @@ func TestPipelineIntercept_EventTimerStartOnRegistersSchedule(t *testing.T) {
 
 	seedPipelineNodeDeliveryAuthority(t, db, evt, "test-node")
 
-	_, handled := pc.interceptPolicy(context.Background(), "timer.scheduled", evt)
+	_, handled := pc.interceptPolicy(testAuthorActivityContext(context.Background()), "timer.scheduled", evt)
 	if !handled {
 		t.Fatal("expected timer.scheduled to be interceptable")
 	}
@@ -849,7 +849,7 @@ func assertWorkflowTimerSchedulePostCommitClaimDropsPipelineTransaction(t *testi
 		timerScheduleStore: store,
 		timerScheduler:     scheduler,
 	}
-	tx, err := db.BeginTx(context.Background(), nil)
+	tx, err := db.BeginTx(testAuthorActivityContext(context.Background()), nil)
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
@@ -860,7 +860,7 @@ func assertWorkflowTimerSchedulePostCommitClaimDropsPipelineTransaction(t *testi
 		}
 	})
 	actions := make([]func(), 0, 1)
-	ctx := WithPipelineSQLTxContext(withPipelinePostCommitActions(context.Background(), &actions), tx)
+	ctx := WithPipelineSQLTxContext(withPipelinePostCommitActions(testAuthorActivityContext(context.Background()), &actions), tx)
 	sc := Schedule{
 		AgentID:   "owner",
 		EventType: "timer.review",
@@ -1382,7 +1382,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedT
 	}); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}
-	if consume, handled := pc.workflowNodeInterceptPolicy(context.Background(), "child/grandchild/micro.done", eventtest.RootIngress(
+	if consume, handled := pc.workflowNodeInterceptPolicy(testAuthorActivityContext(context.Background()), "child/grandchild/micro.done", eventtest.RootIngress(
 		"",
 		events.EventType("child/grandchild/micro.done"),
 		"",
@@ -1476,7 +1476,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTx
 	}); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}
-	tx, err := db.BeginTx(context.Background(), nil)
+	tx, err := db.BeginTx(testAuthorActivityContext(context.Background()), nil)
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}

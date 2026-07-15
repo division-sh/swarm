@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/store"
 )
@@ -76,6 +78,26 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		return SelectedContractActivationGateResult{}, fmt.Errorf("load selected semantic source for activation gate: %w", err)
 	}
 	defer cleanupLoadedSelectedContractSource(loadedSource)
+	pgStore, _ := req.Store.(*store.PostgresStore)
+	if pgStore != nil {
+		if strings.TrimSpace(loadedSource.BundleHash) == "" || strings.TrimSpace(loadedSource.BundleSource) == "" {
+			return SelectedContractActivationGateResult{}, fmt.Errorf("selected-contract activation source loader returned incomplete bundle identity")
+		}
+		scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loadedSource.BundleHash)
+		if err != nil {
+			return SelectedContractActivationGateResult{}, fmt.Errorf("resolve selected-contract activation author activity scope: %w", err)
+		}
+		ctx = runtimeauthoractivity.WithScope(ctx, scope)
+		descriptors, err := runtimepkg.AuthorActivityEventDescriptors(loadedSource.Source)
+		if err != nil {
+			return SelectedContractActivationGateResult{}, fmt.Errorf("project selected-contract activation descriptors: %w", err)
+		}
+		lease, err := pgStore.RegisterAuthorActivityEventCatalog(scope, descriptors)
+		if err != nil {
+			return SelectedContractActivationGateResult{}, fmt.Errorf("register selected-contract activation descriptors: %w", err)
+		}
+		defer lease.Release()
+	}
 	plan, err := req.Store.PlanRunFork(ctx, store.RunForkPlanRequest{SourceRunID: binding.SourceRunID, At: binding.ForkEventID})
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("plan selected-contract activation gate: %w", err)
@@ -149,7 +171,6 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		plan.UnsupportedBlockerCount = len(replayAdmission.UnsupportedBlockers)
 		plan.ExecutionReady = replayAdmission.StateOnlyExecutionReady || replayAdmission.DeliveryEventReplayReady
 	}
-	pgStore, _ := req.Store.(*store.PostgresStore)
 	contractSwapAdmission, err := BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
 		SelectedExecutionAdmission: admission,
 		ReplayResumeAdmission:      replayAdmission,

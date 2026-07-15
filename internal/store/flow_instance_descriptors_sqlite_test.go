@@ -1,7 +1,6 @@
 package store_test
 
 import (
-	"context"
 	"testing"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -12,7 +11,7 @@ import (
 
 func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(t *testing.T) {
 	const runID = "11111111-1111-4111-8111-111111111111"
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
@@ -68,7 +67,7 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTempl
 }
 
 func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsOmitsAddressFieldsWithoutRunScope(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
@@ -103,7 +102,7 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsOmitsAddressFieldsWi
 }
 
 func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsReadsPipelineTransaction(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 
 	tx, err := sqliteStore.DB.BeginTx(ctx, nil)

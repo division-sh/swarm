@@ -297,7 +297,7 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 		),
 		ForkTurns: detectSchemaFlavor(catalog, "conversation_fork_turns",
 			[]string{
-				"fork_turn_id", "fork_id", "turn_index", "actor_token_id", "message",
+				"fork_turn_id", "fork_id", "bundle_hash", "turn_index", "actor_token_id", "message",
 				"assistant_message", "request_payload", "response_payload", "tool_calls",
 				"sandbox_policy", "snapshot_owner", "created_at",
 			},

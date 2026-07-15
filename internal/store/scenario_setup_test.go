@@ -10,7 +10,7 @@ import (
 )
 
 func TestSQLiteScenarioSetupEntitiesIdempotentExistingRows(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	entityID := uuid.NewString()

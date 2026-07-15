@@ -15,7 +15,7 @@ func TestOperatorRuntimeControlHandlersUseIngressOwnerAndIdempotency(t *testing.
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := &store.PostgresStore{DB: db}
-	bus, err := runtimebus.NewEventBus(pg)
+	bus, err := newScopedAPITestEventBus(t, pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

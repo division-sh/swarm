@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"database/sql"
 	"testing"
 	"time"
@@ -19,12 +18,12 @@ func captureRunForkTestRevision(t *testing.T, db *sql.DB, runID string, families
 	if len(families) == 0 {
 		families = runforkrevision.AllFamilies()
 	}
-	tx, err := db.BeginTx(context.Background(), nil)
+	tx, err := db.BeginTx(testAuthorActivityContext(), nil)
 	if err != nil {
 		t.Fatalf("begin run fork test revision: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	revision, err := runforkrevision.Capture(context.Background(), tx, runID, families...)
+	revision, err := runforkrevision.Capture(testAuthorActivityContext(), tx, runID, families...)
 	if err != nil {
 		t.Fatalf("capture run fork test revision: %v", err)
 	}
@@ -36,7 +35,7 @@ func captureRunForkTestRevision(t *testing.T, db *sql.DB, runID string, families
 
 func seedRunForkSessionProjection(t *testing.T, db *sql.DB, runID, agentID, sessionID, status string, at time.Time) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at)
 		VALUES ($1, $2, 'worker', 'standard', 'mock', TRUE, 'authored', 'active', $3)
@@ -60,7 +59,7 @@ func seedRunForkSessionProjection(t *testing.T, db *sql.DB, runID, agentID, sess
 
 func mutateRunForkSessionExcludedColumns(t *testing.T, db *sql.DB, runID, sessionID string, at time.Time) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin excluded session mutation: %v", err)
@@ -91,7 +90,7 @@ func mutateRunForkSessionExcludedColumns(t *testing.T, db *sql.DB, runID, sessio
 
 func exerciseRunForkSessionExcludedWriters(t *testing.T, store *PostgresStore, runID, agentID, sessionID string) {
 	t.Helper()
-	ctx := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
+	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
 	identity := agentmemory.Identity{RunID: runID, AgentID: agentID, FlowInstance: runForkRevisionFlowInstance}
 	lease, _, err := store.AcquireLiveSession(ctx, identity, "revision-writer")
 	if err != nil {

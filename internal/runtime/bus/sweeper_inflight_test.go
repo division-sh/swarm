@@ -49,7 +49,7 @@ func TestSweepUndispatchedSkipsForegroundInFlightEvent(t *testing.T) {
 		time.Now().UTC(),
 	)
 	store := &inFlightSweepStore{event: events.PersistedReplayEvent{Event: evt}}
-	eb, err := NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

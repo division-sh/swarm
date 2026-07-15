@@ -44,7 +44,7 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 			entityID     = "6a000000-0000-0000-0000-000000000002"
 			flowInstance = "telegram-connector-supported-surface-pg"
 		)
-		ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		pg := &store.PostgresStore{DB: db}
 		workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 		seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
@@ -70,7 +70,7 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 			entityID     = "6b000000-0000-0000-0000-000000000002"
 			flowInstance = "telegram-connector-supported-surface-sqlite"
 		)
-		ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 		workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 		seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
@@ -143,7 +143,7 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 	credentialStore := telegramConnectorSupportedSurfaceCredentialStore(t, "telegram_bot_token", "provider-secret")
 	source := telegramConnectorSupportedSurfaceSource(t, server.URL, backend.flowInstance)
 	var pc *runtimepipeline.PipelineCoordinator
-	bus, err := runtimebus.NewEventBusWithOptions(backend.eventStore, runtimebus.EventBusOptions{
+	bus, err := newScopedTestEventBus(t, backend.eventStore, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
@@ -151,7 +151,7 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 			}
 			return []runtimebus.EventInterceptor{pc}
 		},
-	})
+	}, "inbound.telegram", "inbound.telegram.text_message")
 	if err != nil {
 		t.Fatalf("%s NewEventBusWithOptions: %v", backend.name, err)
 	}
@@ -231,7 +231,7 @@ func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend t
 	credentialStore := telegramConnectorSupportedSurfaceCredentialStore(t, "", "")
 	source := telegramConnectorSupportedSurfaceSource(t, baseURL, backend.flowInstance)
 	var pc *runtimepipeline.PipelineCoordinator
-	bus, err := runtimebus.NewEventBusWithOptions(backend.eventStore, runtimebus.EventBusOptions{
+	bus, err := newScopedTestEventBus(t, backend.eventStore, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
@@ -239,7 +239,7 @@ func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend t
 			}
 			return []runtimebus.EventInterceptor{pc}
 		},
-	})
+	}, "inbound.telegram", "inbound.telegram.text_message")
 	if err != nil {
 		t.Fatalf("%s missing-token NewEventBusWithOptions: %v", backend.name, err)
 	}
@@ -464,7 +464,7 @@ func telegramConnectorSupportedSurfaceCredentialStore(t *testing.T, key, value s
 		t.Fatalf("NewFileStore: %v", err)
 	}
 	if strings.TrimSpace(key) != "" {
-		if err := store.Set(context.Background(), key, value); err != nil {
+		if err := store.Set(testAuthorActivityContext(context.Background()), key, value); err != nil {
 			t.Fatalf("Set credential: %v", err)
 		}
 	}

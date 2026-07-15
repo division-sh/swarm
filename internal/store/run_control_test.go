@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
@@ -15,7 +14,7 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
@@ -115,7 +114,7 @@ func TestPostgresStore_RunControlContinueRequiresOperatorPauseOwner(t *testing.T
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'paused')`, runID); err != nil {
 		t.Fatalf("seed paused run: %v", err)

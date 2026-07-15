@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -18,6 +19,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type pipelineTransitionSchemaCapabilityProvider interface {
@@ -189,6 +191,10 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	if err != nil {
 		return err
 	}
+	ictx, err = eb.withAuthorActivityEventDescriptor(ictx, evt)
+	if err != nil {
+		return err
+	}
 	eb.beginEventPublish(evt.ID())
 	defer eb.endEventPublish(evt.ID())
 	publicationClaim, err := eb.claimPipelinePublication(ictx, evt.ID())
@@ -317,6 +323,10 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 	if err != nil {
 		return err
 	}
+	ictx, err = eb.withAuthorActivityEventDescriptor(ictx, evt)
+	if err != nil {
+		return err
+	}
 	eb.beginEventPublish(evt.ID())
 	defer eb.endEventPublish(evt.ID())
 	publicationClaim, err := eb.claimPipelinePublication(ictx, evt.ID())
@@ -441,6 +451,10 @@ func (eb *EventBus) preparePublishInMutation(ctx context.Context, evt events.Eve
 		}
 	}
 	ictx, evt, err := admitEventForPublish(ctx, evt, time.Now(), "")
+	if err != nil {
+		return PreparedPublish{}, err
+	}
+	ictx, err = eb.withAuthorActivityEventDescriptor(ictx, evt)
 	if err != nil {
 		return PreparedPublish{}, err
 	}
@@ -822,13 +836,18 @@ func (eb *EventBus) withBundleFingerprint(ctx context.Context) context.Context {
 	if ctx == nil || eb == nil {
 		return ctx
 	}
-	if _, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
-		return ctx
-	}
 	eb.mu.RLock()
+	runtimeInstanceID := eb.runtimeInstanceID
 	sourceFact := eb.bundleSourceFact
 	fingerprint := eb.bundleFingerprint
 	eb.mu.RUnlock()
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
+	if runtimeInstanceID != "" && sourceFact.BundleHash != "" {
+		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, sourceFact.BundleHash))
+	}
+	if _, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
+		return ctx
+	}
 	if sourceFact.BundleFingerprint == "" {
 		sourceFact.BundleFingerprint = fingerprint
 	}
@@ -839,6 +858,31 @@ func (eb *EventBus) withBundleFingerprint(ctx context.Context) context.Context {
 		return ctx
 	}
 	return runtimecorrelation.WithBundleFingerprint(ctx, fingerprint)
+}
+
+func (eb *EventBus) withAuthorActivityEventDescriptor(ctx context.Context, evt events.Event) (context.Context, error) {
+	ctx = runtimeauthoractivity.WithoutResolvedEventDescriptor(ctx)
+	if eb == nil || eb.semanticSource == nil {
+		return ctx, nil
+	}
+	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
+	if !ok || scope.Kind != runtimeauthoractivity.ScopeBundle {
+		return ctx, nil
+	}
+	name := strings.TrimSpace(string(evt.Type()))
+	proof := semanticview.ResolveFlowEventProof(eb.semanticSource, evt.SourceRoute().FlowID, name)
+	if !proof.HasSchema {
+		return ctx, nil
+	}
+	disposition := runtimeauthoractivity.StoryDifferent
+	if _, authored := eb.semanticSource.AuthoredResolvedEventCatalog()[strings.TrimSpace(proof.CatalogKey)]; authored {
+		disposition = runtimeauthoractivity.StoryAuthored
+	}
+	return runtimeauthoractivity.WithResolvedEventDescriptor(ctx, scope, runtimeauthoractivity.EventDescriptor{
+		EventType:          name,
+		Disposition:        disposition,
+		AuthorSummaryField: strings.TrimSpace(proof.Entry.AuthorSummaryField),
+	})
 }
 
 func (eb *EventBus) WithBundleFingerprint(ctx context.Context) context.Context {
@@ -1845,6 +1889,10 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 		}
 	}
 	ctx, evt, err = admitEventForPublish(ctx, evt, time.Now(), "")
+	if err != nil {
+		return err
+	}
+	ctx, err = eb.withAuthorActivityEventDescriptor(ctx, evt)
 	if err != nil {
 		return err
 	}

@@ -8,7 +8,7 @@ import (
 )
 
 func TestSQLiteRunDebugTracePagePaginationWindowAndFilterParity(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	fixture := seedSQLiteRunTraceParityRows(t, ctx, sqliteStore)
 	mainFilter := RunDebugTraceFilter{
@@ -90,7 +90,7 @@ func TestSQLiteRunDebugTracePagePaginationWindowAndFilterParity(t *testing.T) {
 }
 
 func TestSQLiteRunDebugTracePageDeterministicDeliveryAndTurnTiePaging(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	fixture := seedSQLiteRunTraceParityRows(t, ctx, sqliteStore)
 
@@ -129,7 +129,7 @@ func TestSQLiteRunDebugTracePageDeterministicDeliveryAndTurnTiePaging(t *testing
 }
 
 func TestSQLiteRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 
 	runID := "00000000-0000-0000-0000-000000001816"
@@ -165,7 +165,7 @@ func TestSQLiteRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 }
 
 func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	base := time.Unix(1700003200, 0).UTC()
 	runID := "00000000-0000-0000-0000-000000001430"

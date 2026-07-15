@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -98,7 +97,7 @@ func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	const runID = "55555555-5555-5555-5555-555555555555"
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	if err := pg.Ping(ctx); err != nil {
 		t.Fatalf("Ping: %v", err)
 	}

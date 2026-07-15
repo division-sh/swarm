@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -31,6 +32,11 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared stor
 	if message == "" {
 		return store.ConversationForkChatExecution{}, fmt.Errorf("conversation fork chat message is required")
 	}
+	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, prepared.SourceBundleHash)
+	if err != nil {
+		return store.ConversationForkChatExecution{}, fmt.Errorf("resolve conversation fork chat source scope: %w", err)
+	}
+	ctx = runtimeauthoractivity.WithScope(ctx, scope)
 	actor := conversationForkChatActor(prepared)
 	tools := conversationForkChatToolDefinitions(prepared)
 	toolExec := newConversationForkChatToolExecutor(prepared)
@@ -44,7 +50,7 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared stor
 		ExecutionOwner: prepared.ExecutionOwner, LeaseExpiresAt: prepared.LeaseExpiresAt, FenceGeneration: prepared.FenceGeneration,
 		ExecutionMode: actor.ExecutionMode,
 		ForkChat: runtimeeffects.ConversationForkChatAuthority{
-			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, ActorTokenID: prepared.ActorTokenID,
+			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, BundleHash: prepared.SourceBundleHash, ActorTokenID: prepared.ActorTokenID,
 			RequestOccurrenceID: prepared.RequestOccurrenceID, RequestHash: prepared.RequestHash,
 		},
 	})

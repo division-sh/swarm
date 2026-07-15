@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -13,7 +12,7 @@ import (
 )
 
 func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 
@@ -164,7 +163,7 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 }
 
 func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	db := sqliteStore.DB
 

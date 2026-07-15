@@ -250,7 +250,7 @@ func exactOnceCreateEntityHandler() runtimecontracts.SystemNodeEventHandler {
 
 func sqliteExactOnceRunContext(t *testing.T, db *sql.DB) context.Context {
 	t.Helper()
-	ctx := runtimecorrelation.WithRunID(context.Background(), testPipelineRunID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), testPipelineRunID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT OR IGNORE INTO runs (run_id, status, started_at)
 		VALUES (?, 'running', ?)

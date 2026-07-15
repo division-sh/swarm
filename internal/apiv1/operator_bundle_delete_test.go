@@ -364,7 +364,7 @@ func TestOperatorBundleDeleteBlocksPostDeleteNewWorkFromPersistedRuntimeSource(t
 				BundleSource:      storerunlifecycle.BundleSourcePersisted,
 				BundleFingerprint: runStartTestFingerprint,
 			}
-			bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+			bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 				ContractBundle:   source,
 				BundleSourceFact: sourceFact,
 			})
@@ -459,7 +459,7 @@ func assertBundleUnavailableNewWork(t *testing.T, resp rpcResponse, method strin
 func newBundleDeleteRuntimeContextManager(t *testing.T) *swruntime.RuntimeContextManager {
 	t.Helper()
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{
+	bus, err := newScopedAPITestEventBus(t, nil, runtimebus.EventBusOptions{
 		ContractBundle:   source,
 		BundleSourceFact: runtimeContextTestSourceFact(runStartTestBundleHash),
 	})

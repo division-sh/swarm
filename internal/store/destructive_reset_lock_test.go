@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/testutil"
@@ -16,7 +15,7 @@ func TestPostgresStore_TryAcquireSerializesDestructiveResetLock(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	first, acquired, err := pg.TryAcquire(ctx, "test:destructive-reset")
 	if err != nil {
 		t.Fatalf("first TryAcquire: %v", err)

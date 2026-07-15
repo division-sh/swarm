@@ -380,6 +380,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		NodeID:          identity.NormalizeNodeID(e.nodeID),
 		FlowID:          identity.NormalizeFlowID(flowID),
 		Event:           evt,
+		ProducerRoute:   actionResultProducerRoute(source, flowID, entityID, evt, stateSnapshot, evt.TargetRoute()),
 		HandlerEventKey: handlerEventKey,
 		ChainDepth:      evt.ChainDepth(),
 		Handler:         handler,

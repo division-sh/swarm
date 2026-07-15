@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +17,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -45,6 +49,18 @@ func (telegramPhraseBotLLMRuntime) StartSession(ctx context.Context, agentID, sy
 		ID: uuid.NewString(), AgentID: agentID, SystemPrompt: systemPrompt,
 		Tools: append([]runtimellm.ToolDefinition(nil), tools...), Memory: memory, MemoryIdentity: execution.Identity,
 	}, nil
+}
+
+type authorActivityHeadFailureEventStore struct {
+	runtimebus.EventStore
+}
+
+func (authorActivityHeadFailureEventStore) HeadAuthorActivity(context.Context) (int64, error) {
+	return 0, errors.New("author activity head unavailable")
+}
+
+func (authorActivityHeadFailureEventStore) ListAuthorActivity(context.Context, runtimeauthoractivity.ListOptions) (runtimeauthoractivity.ListResult, error) {
+	return runtimeauthoractivity.ListResult{}, errors.New("author activity list must not run after head failure")
 }
 
 func (telegramPhraseBotLLMRuntime) ContinueSession(ctx context.Context, session *runtimellm.Session, message runtimellm.Message) (*runtimellm.Response, error) {
@@ -348,9 +364,18 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		SelfCheck: true, RequireBundleMatch: false, Dev: true,
 		TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
+	var readyRuntime *runtimepkg.Runtime
+	opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) { readyRuntime = rt }
+	opts.TestAfterAuthorActivityHead = func() error {
+		if readyRuntime == nil {
+			return fmt.Errorf("runtime ready hook did not run before author activity head")
+		}
+		return commitReadinessHandoffAuthorActivity(sqlitePath, readyRuntime)
+	}
 
 	first := startServeRuntimeTestProcess(t, opts)
 	first.waitForReadyLine()
+	waitForStandingStoryOutput(t, first, "ready — waiting for events", "handoff → message received (chat readiness) \"across head\"")
 	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
 	firstEntity := sendStandingTelegramUpdate(t, firstURL, 101, 42)
 	secondEntity := sendStandingTelegramUpdate(t, firstURL, 102, 42)
@@ -362,6 +387,9 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		t.Fatalf("first serve exit = %d", code)
 	}
 	firstOutput := first.outputString()
+	if strings.Count(firstOutput, "handoff → message received (chat readiness) \"across head\"") != 1 {
+		t.Fatalf("readiness handoff occurrence was not rendered exactly once:\n%s", firstOutput)
+	}
 	for _, want := range []string{
 		"swarm serve --dev · ",
 		"store                      sqlite · " + sqlitePath,
@@ -461,6 +489,68 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		t.Fatalf("standing entity event lineage = events:%d wrong_run:%d, want events>0/wrong_run:0", entityEvents, wrongRunEvents)
 	}
 	requireChangedStandingColdStartMatrix(t, opts, contractsRoot, standingRunID, nil)
+}
+
+func TestServeAuthorActivityAttachmentFailureKeepsRuntimeHealthy(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer telegram.Close()
+
+	contractsRoot := writeStandingTelegramServeFixture(t, telegram.URL)
+	dataRoot := t.TempDir()
+	sqlitePath := filepath.Join(dataRoot, "standing.sqlite")
+	credentialPath := filepath.Join(dataRoot, "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	for key, value := range map[string]string{"webhook_signing.telegram": "telegram-secret", "telegram_bot_token": "bot-token"} {
+		if err := credentialStore.Set(context.Background(), key, value); err != nil {
+			t.Fatalf("set credential %s: %v", key, err)
+		}
+	}
+
+	oldBuildStores := buildStoresForServe
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+		stores, err := oldBuildStores(ctx, selection, cfg)
+		if err != nil {
+			return storeBundle{}, err
+		}
+		stores.EventStore = authorActivityHeadFailureEventStore{EventStore: stores.EventStore}
+		return stores, nil
+	}
+	t.Cleanup(func() { buildStoresForServe = oldBuildStores })
+
+	process := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:    writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
+		ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		SelfCheck: true, RequireBundleMatch: false, Dev: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{},
+	})
+	process.waitForReadyLine()
+	output := process.outputString()
+	for _, want := range []string{"author activity head unavailable", "inspect with swarm logs --follow"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("attachment failure output missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "ready — waiting for events") {
+		t.Fatalf("failed attachment claimed to be waiting for events:\n%s", output)
+	}
+	response, err := http.Get("http://" + serveRuntimeAPIListenerFromOutput(t, output) + "/healthz")
+	if err != nil {
+		t.Fatalf("healthy runtime after feed attachment failure: %v", err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("health status after feed attachment failure = %d", response.StatusCode)
+	}
+	if code := process.stop(); code != 0 {
+		t.Fatalf("serve exit after feed attachment failure = %d\n%s", code, process.outputString())
+	}
 }
 
 func TestStandingIngressUnsupportedAliasFailsBeforeServeReadiness(t *testing.T) {
@@ -944,4 +1034,61 @@ func standingSQLiteDiagnostics(path string) string {
 func writeStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) string {
 	t.Helper()
 	return canonicalrouting.CopyStandingTelegramServe(t, telegramBaseURL)
+}
+
+func commitReadinessHandoffAuthorActivity(sqlitePath string, rt *runtimepkg.Runtime) error {
+	selected, err := store.NewSQLiteRuntimeStore(sqlitePath)
+	if err != nil {
+		return err
+	}
+	defer selected.Close()
+	scope := runtimeauthoractivity.BundleScope(rt.Options.RuntimeInstanceID, rt.Options.BundleSourceFact.BundleHash)
+	ctx := runtimeauthoractivity.WithScope(context.Background(), scope)
+	tx, err := selected.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	story, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	identity := uuid.NewString()
+	if err := runtimeauthoractivity.Record(story, runtimeauthoractivity.Draft{
+		Kind: runtimeauthoractivity.KindInboundReceived, Version: runtimeauthoractivity.Version, Transition: "received",
+		SourceOwner: "events", SourceIdentity: identity, DedupKey: "readiness-handoff:" + identity,
+		OccurredAt: time.Now().UTC(), Scope: scope, AuthorSafeSummary: "across head",
+		Projection: runtimeauthoractivity.Projection{
+			SubjectType: "entity", SubjectID: uuid.NewString(), Provider: "handoff",
+			AuthorSubjectType: "chat", AuthorSubjectID: "readiness",
+		},
+	}); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := runtimeauthoractivity.Finalize(story); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+func waitForStandingStoryOutput(t testing.TB, process *serveRuntimeTestProcess, fragments ...string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		output := process.outputString()
+		matched := true
+		for _, fragment := range fragments {
+			if !strings.Contains(output, fragment) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for story output %q:\n%s", fragments, process.outputString())
 }

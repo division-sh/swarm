@@ -577,6 +577,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 				}
 				t.Run(name, func(t *testing.T) {
 					stores := backend.open(t)
+					runtimeInstanceID := "11111111-1111-1111-1111-111111111111"
 					var active, maxActive atomic.Int32
 					bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier8-boot-verification/test-boot-success")
 					if _, err := initializeStateStores(context.Background(), stores, bundle); err != nil {
@@ -600,6 +601,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 								LLMRuntime:                       runtimellm.NoopRuntime{},
 								DisablePersistentStartupRecovery: true,
 								ProviderTriggerCatalog:           providerRegistry,
+								RuntimeInstanceID:                runtimeInstanceID,
 								BundleSourceFact: runtimecorrelation.BundleSourceFact{
 									BundleHash:   hash,
 									BundleSource: storerunlifecycle.BundleSourceEphemeral,
@@ -782,11 +784,12 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 			source := semanticview.Wrap(bundle)
 			providerRegistry := testProviderTriggerCatalog(t)
 			hash := runtimeContextTestHash("f")
+			runtimeInstanceID := "11111111-1111-1111-1111-111111111111"
 			fact := runtimecorrelation.BundleSourceFact{BundleHash: hash, BundleSource: storerunlifecycle.BundleSourceEphemeral}
 			newRuntime := func() *runtimepkg.Runtime {
 				rt, err := runtimepkg.NewRuntime(context.Background(), runtimepkg.RuntimeDeps{
 					Config: &config.Config{}, Stores: stores.runtimeStores(),
-					Options: runtimepkg.RuntimeOptions{SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source}, LLMRuntime: runtimellm.NoopRuntime{}, DisablePersistentStartupRecovery: true, ProviderTriggerCatalog: providerRegistry, BundleSourceFact: fact},
+					Options: runtimepkg.RuntimeOptions{SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source}, LLMRuntime: runtimellm.NoopRuntime{}, DisablePersistentStartupRecovery: true, ProviderTriggerCatalog: providerRegistry, BundleSourceFact: fact, RuntimeInstanceID: runtimeInstanceID},
 				})
 				if err != nil {
 					t.Fatalf("NewRuntime: %v", err)

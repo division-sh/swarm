@@ -160,7 +160,7 @@ func assertSealedFlowPackageRuntimeDelivery(t *testing.T, source semanticview.So
 	t.Helper()
 
 	store := &sealedFlowPackageRouteStore{}
-	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}

@@ -11,6 +11,24 @@ type Queryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
+type QueryRower interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func Head(ctx context.Context, db QueryRower) (int64, error) {
+	if db == nil {
+		return 0, fmt.Errorf("author activity reader is required")
+	}
+	var sequence int64
+	if err := db.QueryRowContext(ctx, `SELECT last_sequence FROM author_activity_order WHERE singleton_id = 1`).Scan(&sequence); err != nil {
+		if err == sql.ErrNoRows {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("read author activity head: %w", err)
+	}
+	return sequence, nil
+}
+
 func List(ctx context.Context, db Queryer, dialect Dialect, opts ListOptions) (ListResult, error) {
 	if db == nil {
 		return ListResult{}, fmt.Errorf("author activity reader is required")
@@ -45,6 +63,35 @@ func List(ctx context.Context, db Queryer, dialect Dialect, opts ListOptions) (L
 		}
 		where = append(where, filter.column+" = "+placeholder)
 	}
+	if len(opts.BundleHashes) > 0 || opts.IncludeRuntimeScope || strings.TrimSpace(opts.RuntimeInstanceID) != "" {
+		runtimeInstanceID := strings.TrimSpace(opts.RuntimeInstanceID)
+		if runtimeInstanceID == "" {
+			return ListResult{}, fmt.Errorf("author activity scoped read requires runtime_instance_id")
+		}
+		args = append(args, runtimeInstanceID)
+		runtimePlaceholder := bind(dialect, len(args))
+		if dialect == DialectPostgres {
+			runtimePlaceholder += "::uuid"
+		}
+		where = append(where, "runtime_instance_id = "+runtimePlaceholder)
+		var scopes []string
+		bundleHashes := normalizedUniqueStrings(opts.BundleHashes)
+		if len(bundleHashes) > 0 {
+			placeholders := make([]string, 0, len(bundleHashes))
+			for _, bundleHash := range bundleHashes {
+				args = append(args, bundleHash)
+				placeholders = append(placeholders, bind(dialect, len(args)))
+			}
+			scopes = append(scopes, "(scope_kind = 'bundle' AND bundle_hash IN ("+strings.Join(placeholders, ", ")+"))")
+		}
+		if opts.IncludeRuntimeScope {
+			scopes = append(scopes, "(scope_kind = 'runtime' AND bundle_hash IS NULL)")
+		}
+		if len(scopes) == 0 {
+			return ListResult{}, fmt.Errorf("author activity scoped read requires bundle hashes or runtime scope")
+		}
+		where = append(where, "("+strings.Join(scopes, " OR ")+")")
+	}
 	args = append(args, opts.Limit)
 	query := occurrenceSelect + " WHERE " + strings.Join(where, " AND ") + " ORDER BY sequence ASC LIMIT " + bind(dialect, len(args))
 	rows, err := db.QueryContext(ctx, query, args...)
@@ -65,6 +112,23 @@ func List(ctx context.Context, db Queryer, dialect Dialect, opts ListOptions) (L
 		return ListResult{}, fmt.Errorf("list author activity: %w", err)
 	}
 	return result, nil
+}
+
+func normalizedUniqueStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func bind(dialect Dialect, index int) string {

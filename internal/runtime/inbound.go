@@ -16,6 +16,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -380,14 +381,20 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	published, evidence, projectionErr := projectInboundPublication(target, admitted, publicationRequest, now)
+	published, evidence, authorProjection, projectionErr := projectInboundPublication(target, admitted, publicationRequest, now)
 	var prepared []runtimebus.PreparedPublish
 	record, err := g.store.RunInboundPublicationMutation(pubCtx, publicationRequest, func(mutation runtimeinbound.Mutation) error {
 		if projectionErr != nil {
 			return projectionErr
 		}
 		var prepareErr error
-		prepared, prepareErr = g.bus.PrepareInboundDeliveryBatchInMutation(mutation.Context(), runtimebus.InboundDeliveryBatch{Provider: provider, Events: published})
+		prepared, prepareErr = g.bus.PrepareInboundDeliveryBatchInMutation(mutation.Context(), runtimebus.InboundDeliveryBatch{
+			Provider:          provider,
+			AuthorSubjectType: authorProjection.SubjectType,
+			AuthorSubjectID:   authorProjection.SubjectID,
+			AuthorSummary:     authorProjection.Summary,
+			Events:            published,
+		})
 		if prepareErr != nil {
 			return prepareErr
 		}
@@ -453,21 +460,22 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusAccepted, inboundPublicationResponse("accepted", record, admitted.ProviderEventType, entityID, entitySlug))
 }
 
-func projectInboundPublication(target InboundTarget, admitted providertriggers.AdmittedRequest, request runtimeinbound.Request, now time.Time) ([]runtimebus.InboundDeliveryEvent, events.Event, error) {
+func projectInboundPublication(target InboundTarget, admitted providertriggers.AdmittedRequest, request runtimeinbound.Request, now time.Time) ([]runtimebus.InboundDeliveryEvent, events.Event, runtimeauthoractivity.InboundProjection, error) {
 	delivery, err := target.AdmissionPlan.ProjectDelivery(admitted)
 	if err != nil {
-		return nil, events.EmptyEvent(), err
+		return nil, events.EmptyEvent(), runtimeauthoractivity.InboundProjection{}, err
 	}
 	if delivery.ProviderEventID != admitted.ProviderEventID || delivery.ProviderEventType != admitted.ProviderEventType {
-		return nil, events.EmptyEvent(), fmt.Errorf("compiled provider projection changed admitted request identity")
+		return nil, events.EmptyEvent(), runtimeauthoractivity.InboundProjection{}, fmt.Errorf("compiled provider projection changed admitted request identity")
 	}
 	published := make([]runtimebus.InboundDeliveryEvent, 0, len(delivery.Events))
 	eventIDs := make([]string, 0, len(delivery.Events))
 	eventNames := make([]string, 0, len(delivery.Events))
+	authorProjection := runtimeauthoractivity.InboundProjection{}
 	for ordinal, output := range delivery.Events {
 		eventID, err := runtimeinbound.DeterministicEventID(request.PublicationID, ordinal)
 		if err != nil {
-			return nil, events.EmptyEvent(), err
+			return nil, events.EmptyEvent(), runtimeauthoractivity.InboundProjection{}, err
 		}
 		envelope := events.EventEnvelope{}
 		if output.Kind == providertriggers.OutputKindRaw {
@@ -482,16 +490,23 @@ func projectInboundPublication(target InboundTarget, admitted providertriggers.A
 		})
 		eventIDs = append(eventIDs, eventID)
 		eventNames = append(eventNames, string(output.Name))
+		if output.Kind == providertriggers.OutputKindNormalized {
+			authorProjection = runtimeauthoractivity.InboundProjection{
+				SubjectType: output.AuthorSubjectType,
+				SubjectID:   output.AuthorSubjectID,
+				Summary:     output.AuthorSummary,
+			}
+		}
 	}
 	evidencePayload, err := runtimeinbound.BuildEvidencePayload(request, eventIDs, eventNames)
 	if err != nil {
-		return nil, events.EmptyEvent(), err
+		return nil, events.EmptyEvent(), runtimeauthoractivity.InboundProjection{}, err
 	}
 	evidence := events.NewDiagnosticDirectEvent(
 		request.MarkerEventID, events.EventTypePlatformInboundRecord, "runtime", "", evidencePayload,
 		0, request.ResolvedRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), now,
 	)
-	return published, evidence, nil
+	return published, evidence, authorProjection, nil
 }
 
 func inboundPublicationResponse(status string, record runtimeinbound.Record, providerEventType, entityID, entitySlug string) map[string]any {

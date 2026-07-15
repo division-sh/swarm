@@ -28,14 +28,14 @@ import (
 )
 
 func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnStoredDivergence(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	sqliteStore := newComputeModuleReplaySQLiteStore(t)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES (?, 'running', ?)
-	`, runID, time.Now().UTC()); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
+		VALUES (?, 'running', ?, ?, ?, ?)
+	`, runID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint, time.Now().UTC()); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
 

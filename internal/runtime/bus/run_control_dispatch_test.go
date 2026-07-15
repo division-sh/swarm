@@ -21,9 +21,9 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	pg := &store.PostgresStore{DB: db}
-	eb, err := runtimebus.NewEventBus(pg)
+	eb, err := newScopedTestEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -39,9 +39,7 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	pausedRunID := uuid.NewString()
 	otherRunID := uuid.NewString()
 	for _, runID := range []string{pausedRunID, otherRunID} {
-		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
-			t.Fatalf("seed run %s: %v", runID, err)
-		}
+		seedRunControlTestRun(t, ctx, db, runID)
 	}
 	if _, err := controller.Pause(ctx, runtimeruncontrol.TransitionRequest{RunID: pausedRunID, Reason: "test", ControlledBy: "test"}); err != nil {
 		t.Fatalf("Pause: %v", err)
@@ -107,9 +105,9 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	pg := &store.PostgresStore{DB: db}
-	eb, err := runtimebus.NewEventBus(pg)
+	eb, err := newScopedTestEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -123,9 +121,7 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 	defer eb.Unsubscribe(agentID)
 
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	seedRunControlTestRun(t, ctx, db, runID)
 	if _, err := controller.Pause(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test"}); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
@@ -170,7 +166,7 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	pg := &store.PostgresStore{DB: db}
 	eventType := events.EventType("custom.run_control.intercepted")
 	deferredType := events.EventType("custom.run_control.deferred")
@@ -178,7 +174,7 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 		triggerType:  eventType,
 		deferredType: deferredType,
 	}
-	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
 		Interceptors: []runtimebus.EventInterceptor{recorder},
 	})
 	if err != nil {
@@ -193,9 +189,7 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 	defer eb.Unsubscribe(agentID)
 
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	seedRunControlTestRun(t, ctx, db, runID)
 	if _, err := controller.Pause(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test"}); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
@@ -244,7 +238,7 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	pg := &store.PostgresStore{DB: db}
 	eventType := events.EventType("custom.run_control.postcommit")
 	deferredType := events.EventType("custom.run_control.postcommit.deferred")
@@ -252,7 +246,7 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 		triggerType:  eventType,
 		deferredType: deferredType,
 	}
-	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
 		Interceptors: []runtimebus.EventInterceptor{recorder},
 	})
 	if err != nil {
@@ -267,9 +261,7 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 	defer eb.Unsubscribe(agentID)
 
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	seedRunControlTestRun(t, ctx, db, runID)
 
 	intent := runtimeengine.EmitIntent{
 		Event: eventtest.RootIngress(
@@ -318,6 +310,16 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 	requireBusEventTypes(t, ch, "released post-commit original and deferred events", eventType, deferredType)
 	if got := countPipelineReceiptsForEvent(t, ctx, db, intent.Event.ID()); got != 1 {
 		t.Fatalf("post-commit event receipts after continue = %d, want 1", got)
+	}
+}
+
+func seedRunControlTestRun(t *testing.T, ctx context.Context, db *sql.DB, runID string) {
+	t.Helper()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
+		VALUES ($1::uuid, 'running', $2, $3, $4)
+	`, runID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint); err != nil {
+		t.Fatalf("seed run %s: %v", runID, err)
 	}
 }
 

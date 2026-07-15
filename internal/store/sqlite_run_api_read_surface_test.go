@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
@@ -11,7 +10,7 @@ import (
 )
 
 func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	now := time.Unix(1700000000, 0).UTC()
 	newer := uuid.NewString()
@@ -200,7 +199,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 }
 
 func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
 	sqliteStore.nowFn = func() time.Time { return now }
@@ -320,7 +319,7 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 
 func TestSQLiteRunAPIReadSurface_LoadRunHeaderNotFound(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	_, err := sqliteStore.LoadRunHeader(context.Background(), uuid.NewString())
+	_, err := sqliteStore.LoadRunHeader(testAuthorActivityContext(), uuid.NewString())
 	if !errors.Is(err, ErrRunNotFound) {
 		t.Fatalf("LoadRunHeader error = %v, want ErrRunNotFound", err)
 	}

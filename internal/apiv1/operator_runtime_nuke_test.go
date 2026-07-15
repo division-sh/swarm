@@ -261,14 +261,14 @@ func TestOperatorRuntimeNukeAuthFailureDoesNotTouchResetOwners(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{}}`))
-	handler.ServeHTTP(rec, req)
+	handler.ServeHTTP(rec, testAuthorActivityRequest(req))
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("missing auth status = %d, want 401", rec.Code)
 	}
 	req = httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{}}`))
 	req.Header.Set("Authorization", "Bearer wrong")
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+	handler.ServeHTTP(rec, testAuthorActivityRequest(req))
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("bad auth status = %d, want 401", rec.Code)
 	}

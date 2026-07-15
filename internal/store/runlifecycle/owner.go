@@ -28,6 +28,7 @@ const (
 type Snapshot struct {
 	RunID       string
 	Status      string
+	BundleHash  string
 	EventCount  int
 	EntityCount int
 	Failure     *runtimefailures.Envelope
@@ -331,6 +332,13 @@ func ensureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = $1::uuid)`, runID).Scan(&existed); err != nil {
 		return fmt.Errorf("ensure run row: inspect existing run: %w", err)
 	}
+	var occurrenceScope runtimeauthoractivity.Scope
+	if !existed {
+		occurrenceScope, err = runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
+		if err != nil {
+			return fmt.Errorf("ensure run row: %w", err)
+		}
+	}
 	query += `
 		WHERE runs.status IN ('running', 'paused')`
 	result, err := db.ExecContext(ctx, query, args...)
@@ -353,7 +361,7 @@ func ensureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 		return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
 			Kind: runtimeauthoractivity.KindRunLifecycle, Transition: "started",
 			SourceOwner: "runs", SourceIdentity: runID, DedupKey: "run-created:" + runID,
-			OccurredAt: occurredAt, RunID: runID,
+			OccurredAt: occurredAt, RunID: runID, Scope: occurrenceScope,
 			Projection: runtimeauthoractivity.Projection{
 				SubjectType: "run", SubjectID: runID, TriggerEventType: triggerEventType,
 			},
@@ -456,6 +464,7 @@ func LoadSnapshot(ctx context.Context, db DBTX, runID string, opts EnsureActiveO
 		SELECT
 			run_id::text,
 			COALESCE(status, ''),
+			'',
 			0,
 			0,
 			NULL::jsonb,
@@ -469,6 +478,13 @@ func LoadSnapshot(ctx context.Context, db DBTX, runID string, opts EnsureActiveO
 		SELECT
 			run_id::text,
 			COALESCE(status, ''), `
+		if opts.HasBundleHashCol {
+			query += `
+			COALESCE(bundle_hash, ''),`
+		} else {
+			query += `
+			'',`
+		}
 		if opts.HasCounterCols {
 			query += `
 			COALESCE(event_count, 0),`
@@ -516,6 +532,7 @@ func LoadSnapshot(ctx context.Context, db DBTX, runID string, opts EnsureActiveO
 	if err := db.QueryRowContext(ctx, query, runID).Scan(
 		&snap.RunID,
 		&snap.Status,
+		&snap.BundleHash,
 		&snap.EventCount,
 		&snap.EntityCount,
 		&failureRaw,
@@ -529,6 +546,7 @@ func LoadSnapshot(ctx context.Context, db DBTX, runID string, opts EnsureActiveO
 	}
 	snap.RunID = strings.TrimSpace(snap.RunID)
 	snap.Status = strings.TrimSpace(snap.Status)
+	snap.BundleHash = strings.TrimSpace(snap.BundleHash)
 	if len(failureRaw) > 0 {
 		failure, err := runtimefailures.UnmarshalEnvelope(failureRaw)
 		if err != nil {
@@ -580,6 +598,10 @@ func MarkTerminal(ctx context.Context, db DBTX, runID, status string, failure *r
 	}
 	if opts.RequireEntityStateCount && !opts.HasEntityStateCountSrc {
 		return Snapshot{}, fmt.Errorf("run lifecycle entity count requires canonical run-scoped entity_state")
+	}
+	occurrenceScope, err := runBundleScope(ctx, db, runID, opts)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("mark run terminal: %w", err)
 	}
 	if opts.HasCounterCols && opts.HasEntityStateCountSrc {
 		if err := SyncCounts(ctx, db, runID); err != nil {
@@ -641,12 +663,25 @@ func MarkTerminal(ctx context.Context, db DBTX, runID, status string, failure *r
 	if err := runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindRunLifecycle, Transition: status,
 		SourceOwner: "runs", SourceIdentity: runID + ":" + status, DedupKey: "run-terminal:" + runID + ":" + status,
-		OccurredAt: occurredAt, RunID: runID, Failure: failure,
+		OccurredAt: occurredAt, RunID: runID, Scope: occurrenceScope, Failure: failure,
 		Projection: runtimeauthoractivity.Projection{SubjectType: "run", SubjectID: runID},
 	}); err != nil {
 		return Snapshot{}, err
 	}
 	return snapshot, nil
+}
+
+func runBundleScope(ctx context.Context, db DBTX, runID string, opts EnsureActiveOptions) (runtimeauthoractivity.Scope, error) {
+	bundleHash := strings.TrimSpace(opts.BundleHash)
+	if bundleHash == "" && opts.HasBundleHashCol {
+		if err := db.QueryRowContext(ctx, `SELECT COALESCE(bundle_hash, '') FROM runs WHERE run_id = $1::uuid`, runID).Scan(&bundleHash); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return runtimeauthoractivity.Scope{}, fmt.Errorf("run %s not found", runID)
+			}
+			return runtimeauthoractivity.Scope{}, fmt.Errorf("load source-owned run bundle_hash: %w", err)
+		}
+	}
+	return runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
 }
 
 func ValidateStatusFailure(status string, failure *runtimefailures.Envelope) error {

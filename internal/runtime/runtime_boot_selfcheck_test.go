@@ -32,7 +32,7 @@ func TestRuntimeStart_PipelineMaintenanceFailureUsesCanonicalBootStepIdentity(t 
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	store := &bootSelfCheckDescriptorStore{}
 	progress := []BootProgressEvent{}
-	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore: store,
 	}, Options: RuntimeOptions{
 		WorkflowModule: module,
@@ -45,7 +45,7 @@ func TestRuntimeStart_PipelineMaintenanceFailureUsesCanonicalBootStepIdentity(t 
 		t.Fatalf("NewRuntime: %v", err)
 	}
 	rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, db, runtimepipeline.PipelineCoordinatorOptions{Module: module})
-	if err := rt.Start(context.Background()); err == nil {
+	if err := rt.Start(testAuthorActivityContext(context.Background())); err == nil {
 		t.Fatal("Start error = nil, want pipeline maintenance failure")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -101,7 +101,7 @@ func TestRuntimeStart_SelfCheckUsesInternalSubscriberVisibility(t *testing.T) {
 	store := &bootSelfCheckDescriptorStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "agent-a"}},
 	}
-	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore: store,
 	}, Options: RuntimeOptions{
 		SelfCheck:      true,
@@ -112,7 +112,7 @@ func TestRuntimeStart_SelfCheckUsesInternalSubscriberVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	if err := rt.Start(context.Background()); err != nil {
+	if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	t.Cleanup(func() {
@@ -134,7 +134,7 @@ func TestRuntimeStart_PlatformBootPayloadCarriesBootDecisionSummary(t *testing.T
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	store := &bootSelfCheckDescriptorStore{}
 	progress := []BootProgressEvent{}
-	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore: store,
 	}, Options: RuntimeOptions{
 		SelfCheck:         true,
@@ -151,7 +151,7 @@ func TestRuntimeStart_PlatformBootPayloadCarriesBootDecisionSummary(t *testing.T
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	if err := rt.Start(context.Background()); err != nil {
+	if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	t.Cleanup(func() {

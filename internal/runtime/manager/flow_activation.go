@@ -294,10 +294,15 @@ func buildAutoEmitOnCreateEvent(source semanticview.Source, schema runtimecontra
 	if err != nil {
 		return events.EmptyEvent(), autoEmit, fmt.Errorf("encode auto-emit payload %s: %w", autoEmit, err)
 	}
-	return events.NewChildEventWithLineage(uuid.NewString(), events.EventType(eventType), "flow-instance-activator", "", encoded, 0, lineage, events.EventEnvelope{
+	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{
 		EntityID:     flowEntityID,
 		FlowInstance: flowPath,
-	}, time.Now().UTC()), autoEmit, nil
+	}, events.RouteIdentity{
+		FlowID:       templateID,
+		FlowInstance: flowPath,
+		EntityID:     flowEntityID,
+	})
+	return events.NewChildEventWithLineage(uuid.NewString(), events.EventType(eventType), "flow-instance-activator", "", encoded, 0, lineage, envelope, time.Now().UTC()), autoEmit, nil
 }
 
 func validateAutoEmitPayload(source semanticview.Source, flowID, eventType string, payload map[string]any) error {

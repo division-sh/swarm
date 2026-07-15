@@ -41,7 +41,7 @@ type runForkReplaySourceEvent struct {
 	HandlerNode    sql.NullString
 }
 
-func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, classifier authoredEventClassifier, lineage runForkActivationLineage, execution RunForkHistoricalReplayExecution, now time.Time) (RunForkDeliveryEventReplayResult, error) {
+func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, classifier authoredEventDescriptorResolver, lineage runForkActivationLineage, execution RunForkHistoricalReplayExecution, now time.Time) (RunForkDeliveryEventReplayResult, error) {
 	result := RunForkDeliveryEventReplayResult{
 		Owner:       RunForkDeliveryEventReplayOwner,
 		SourceRunID: lineage.SourceRunID,

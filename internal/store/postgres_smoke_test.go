@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -18,9 +17,9 @@ import (
 
 func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := newTestPostgresStore(t, db)
 	const runID = "66666666-6666-6666-6666-666666666666"
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 
 	// Seed entity.
 	entityID := uuid.NewString()

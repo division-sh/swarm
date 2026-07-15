@@ -385,6 +385,83 @@ pins:
 	return root
 }
 
+func CopyTemplateInstanceEmpireOutbox(t testing.TB) string {
+	t.Helper()
+	root := CopyExample(t, TemplateSelectOrCreate)
+	files := map[string]string{
+		"package.yaml": `name: test
+version: 1.0.0
+flows:
+  - id: operating
+    flow: operating
+    mode: template
+`,
+		"events.yaml": `approval.completed:
+  swarm:
+    source: external
+  entity_id: string
+  instance_id: string
+  product_id: string
+opco.spinup_requested:
+  instance_id: string
+  product_id: string
+`,
+		"nodes.yaml": `approval-router:
+  id: approval-router
+  execution_type: system_node
+  subscribes_to: [approval.completed]
+  produces: [opco.spinup_requested]
+  event_handlers:
+    approval.completed:
+      emit:
+        event: opco.spinup_requested
+        broadcast: true
+        fields:
+          instance_id: payload.instance_id
+          product_id: payload.product_id
+portfolio-node:
+  id: portfolio-node
+  execution_type: system_node
+  subscribes_to: [opco.spinup_requested]
+  event_handlers:
+    opco.spinup_requested:
+      action: create_flow_instance
+      template: operating
+      instance_id_from: payload.instance_id
+      config_from:
+        product_id: payload.product_id
+`,
+		"flows/operating/schema.yaml": `name: operating
+initial_state: initializing
+terminal_states: [ready]
+states: [initializing, ready]
+auto_emit_on_create:
+  event: opco.product_initialization_requested
+`,
+		"flows/operating/events.yaml": `opco.product_initialization_requested:
+  product_id: string
+component_scaffold.spawn_requested:
+  product_id: string
+`,
+		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
+  id: lifecycle-orchestrator
+  execution_type: system_node
+  subscribes_to: [opco.product_initialization_requested]
+  produces: [component_scaffold.spawn_requested]
+  event_handlers:
+    opco.product_initialization_requested:
+      emit:
+        event: component_scaffold.spawn_requested
+        fields:
+          product_id: payload.product_id
+`,
+	}
+	for name, source := range files {
+		writeClosedVariantFile(t, root, name, source)
+	}
+	return root
+}
+
 func CopyProviderRollback(t testing.TB, withCarrier bool) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectOrCreate)
@@ -492,7 +569,7 @@ pins:
 `,
 		"flows/telegram-chat/types.yaml": "{}\n", "flows/telegram-chat/policy.yaml": "{}\n",
 		"flows/telegram-chat/entities.yaml": "chat:\n  chat_id:\n    type: text\n    indexed: true\n    _unused_reason: populated from the normalized input resolution carry\n  last_message:\n    type: text\n    initial: \"\"\n",
-		"flows/telegram-chat/events.yaml":   "telegram.reply_requested:\n  chat_id: text\n  text: text\n",
+		"flows/telegram-chat/events.yaml":   "telegram.reply_requested:\n  chat_id: text\n  text: text\n  author_summary_field: text\n",
 		"flows/telegram-chat/nodes.yaml": `telegram-responder:
   id: telegram-responder
   execution_type: system_node

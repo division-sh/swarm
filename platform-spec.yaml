@@ -8298,12 +8298,15 @@ tool_model:
         and requires the relevant signed-payload recipe to fail closed on malformed form input.
       normalized_events:
         shape: >
-          Optional list entries use `{event, fields, when}`. `event` must be an exact `inbound.<provider>.*` literal.
+          Optional list entries use `{event, fields, when, author_summary_field}`. `event` must be an exact `inbound.<provider>.*` literal.
           `fields` is the same carry-style typed projection vocabulary: each field declares `from`, a standalone-resolvable
           Wave-1 `type`, optional `optional`, and optional closed conversion. Because trigger manifests do not declare a
           type catalog, unresolved named types fail pack load; built-in, list, and map references are validated recursively.
           The event payload schema, required set, extraction plan, carry
           eligibility, and capability descriptor derive mechanically from this one block.
+          Optional `author_summary_field` must name one declared text field and is the only normalized provider content
+          eligible for the author story after the connector projection/redaction boundary. Readers never inspect another
+          payload field to recover a preview.
         paths: >
           `from` and `when.exists/absent` use strict dotted paths relative to the decoded raw provider object. Empty
           segments, rooted JSONPath, CEL, runtime namespaces, expression syntax, and unsupported segments fail pack load.
@@ -10934,7 +10937,7 @@ platform_tables:
   author_activity_story:
     owner: author_activity_order and author_activity_occurrences in the selected store, consumed through the typed AuthorActivity registry
     purpose: >-
-      Own immutable author-facing occurrence identity, commit-visible cross-source order, and metadata-only safe projections.
+      Own immutable author-facing occurrence identity, commit-visible cross-source order, and privacy-safe typed projections.
       Runtime source tables remain authoritative for execution outcomes. This journal MUST NOT reinterpret those outcomes.
     transaction_contract:
       - A story-bearing outer transaction MUST lock author_activity_order singleton_id=1 before any domain lock or domain database action.
@@ -10947,33 +10950,54 @@ platform_tables:
     read_contract:
       cursor: author_activity_occurrences.sequence
       ordering: strictly ascending sequence after an exclusive cursor
-      filters: [run_id, entity_id, agent_id, flow_id]
+      filters: [run_id, entity_id, agent_id, flow_id, runtime_instance_id, bundle_hashes, include_runtime_scope]
+      head: author_activity_order.last_sequence is the backend-neutral O(1) head cursor; readers never derive a cursor from timestamps or MAX scans.
       parity: SQLite and PostgreSQL MUST return the same typed rows and cursor behavior.
+    scope_contract:
+      owner: The closed per-kind/transition registry owns bundle, runtime, or global scope requirements; canonical producers stamp scope before persistence.
+      bundle: runtime_instance_id and bundle_hash are both required.
+      runtime: runtime_instance_id is required and bundle_hash is forbidden.
+      global: runtime_instance_id and bundle_hash are both forbidden.
+      serve_filter: The serve story reads exact bundle rows for its runtime instance and loaded bundle set plus runtime-scoped rows for that runtime instance; store-global and unrelated rows are excluded.
+      forbidden: [run joins, selected-store-wide inference, empty-string scope inference, current-bundle fallback, timestamp correlation]
     privacy_contract:
-      allowed: Exact registry-owned metadata fields and a validated platform.failure/v1 envelope.
+      allowed: Exact registry-owned metadata fields, one producer-owned validated author_safe_summary, and a validated platform.failure/v1 envelope.
       forbidden: Raw payloads, prompts, transcripts, provider responses, credentials, arbitrary tool results, stacks, hidden reasoning, and generic evidence maps.
       rule: Allowlisting and redaction happen before persistence. Rendering may truncate only after that boundary.
     registry:
       closed_kinds:
-        - inbound.received/v1
-        - event.emitted/v1
-        - entity.lifecycle/v1
-        - delivery.lifecycle/v1
-        - dead_letter.recorded/v1
-        - activity.lifecycle/v1
-        - effect.lifecycle/v1
-        - turn.lifecycle/v1
-        - turn.tool_completed/v1
-        - card.lifecycle/v1
-        - agent.lifecycle/v1
-        - directive.lifecycle/v1
-        - run.lifecycle/v1
-        - platform.signal/v1
+        - inbound.received/v2
+        - event.emitted/v2
+        - entity.lifecycle/v2
+        - delivery.lifecycle/v2
+        - dead_letter.recorded/v2
+        - activity.lifecycle/v2
+        - effect.lifecycle/v2
+        - turn.lifecycle/v2
+        - turn.tool_completed/v2
+        - card.lifecycle/v2
+        - agent.lifecycle/v2
+        - directive.lifecycle/v2
+        - run.lifecycle/v2
+        - platform.signal/v2
       extension_rule: New platform-event and effect registrations require an explicit admitted, handled-by-other-owner, or different-concept disposition.
       kind_contract: >-
         One closed per-kind registry row MUST own the admitted transitions, exact source owner and required source identity,
         allowed and required projection fields, failure-bearing transitions, author-facing subject strategy, and any typed
-        subject vocabulary. Producers and renderers MUST consume that same row; parallel source, field, or subject registries are forbidden.
+        subject vocabulary, exact scope policy, human visibility, and rendered action. Producers and renderers MUST consume
+        that same row; parallel source, field, scope, visibility, action, or subject registries are forbidden.
+      event_descriptor_projection: >-
+        The selected store holds one process-local immutable projection keyed by exact (runtime_instance_id, bundle_hash).
+        Every descriptor carries event_type, authored|different disposition, and optional author_summary_field from the
+        resolved semantic source. Identical same-key registration is reference-safe; conflicts fail closed. Names-only,
+        process-global, last-writer-wins, fallback, and current-bundle classifiers are forbidden.
+      event_descriptor_lifecycle: >-
+        Static descriptors register before a bundle runtime starts or recovery can mutate and remain leased until that
+        exact runtime/bundle context is quiescent. Replacement registers the incoming scope before activation; rollback
+        removes only that incoming lease; identical overlap is reference-safe so stale teardown cannot remove a live scope.
+        Concrete template-instance event identities that do not exist before materialization travel with the source mutation
+        as one typed descriptor fact resolved from the canonical semantic source. The selected store may consume that fact
+        only under the matching live exact-scope lease and must reject missing, stale, mismatched, or conflicting facts.
       subject_rules:
         event_emitted: The subject is the exact canonical producer identity and type paired with the exact event type. The event UUID is source evidence and MUST NOT render as the subject.
         effect_lifecycle: The subject is derived from exact adapter, transport, and authority metadata. The effect-attempt UUID is source evidence and MUST NOT render as the subject.
@@ -10986,6 +11010,31 @@ platform_tables:
       ndjson: One complete typed AuthorActivity occurrence per line; machine output MUST NOT scrape human prose.
       vocabulary: [received, in flight, emitted, sent, completed, failed, outcome uncertain]
       missing_facts: Omit unavailable phases, summaries, and content. Never render placeholders or infer them from elapsed time or logs.
+      safe_summary: >-
+        Authored events may select only an explicit event-catalog author_summary_field. Provider ingress may select only its
+        exact connector-declared normalized projection after connector redaction. authoractivity validates scalar text,
+        valid UTF-8, normalizes controls/whitespace to one line, and caps at 24 Unicode code points before persistence.
+      repetition: >-
+        Human output groups only contiguous identical failures by exact registry kind/transition, author subject, rendered
+        action, failure class/code, diagnostic route, and safe summary. It renders the first, marks the second as (2nd time),
+        and emits aggregate (×N in D) rows at each fifth repeat, a three-minute close, a different occurrence, or shutdown.
+        Typed NDJSON is never compressed.
+    serve_follower:
+      handoff: Capture head after all real readiness gates and before readiness publication, then read strictly after it in bounded pages.
+      cursor_discipline: Validate and render a complete page before cursor advance; retry failures from the unchanged cursor and deduplicate by occurrence identity/sequence.
+      failure_policy: >-
+        Initial attachment failure warns on stderr with `swarm logs --follow`, disables the unavailable view, and keeps the
+        runtime healthy. Once attached, read or render failures warn and retry from the unchanged cursor. Cancellation
+        flushes and joins before runtime/store closure.
+      ready_line: An enabled attached feed prints exactly one `ready — waiting for events` line after readiness publication; a failed or disabled feed does not claim it is waiting.
+      flags: >-
+        `swarm serve --dev` enables the feed; `--no-feed` is valid only with `--dev`; `--no-color`, `NO_COLOR`,
+        and non-TTY disable presentation color without changing words or values. `--verbose` retains boot-detail meaning
+        and neither widens, replaces, nor interleaves the curated feed.
+      color_contract: >-
+        Color is presentation-only and ANSI-stripped TTY text equals plain text. Red is reserved for complete failure lines,
+        yellow for retry/waiting, green for the success mark only, cyan for author identities, and timestamps/counts/routes
+        are dim. An ordinary line uses no more than two colored semantic tokens.
     legacy_policy: Fresh authoritative schema only. Old selected stores are unsupported; no migration, adoption, backfill, dual reader, log fallback, or compatibility cursor is allowed.
   tables:
     bundles:
@@ -11103,7 +11152,7 @@ platform_tables:
             occurrence_id   UUID PRIMARY KEY,
             sequence        BIGINT NOT NULL UNIQUE CHECK (sequence > 0),
             kind            TEXT NOT NULL,
-            version         INTEGER NOT NULL CHECK (version = 1),
+            version         INTEGER NOT NULL CHECK (version = 2),
             transition      TEXT NOT NULL,
             source_owner    TEXT NOT NULL,
             source_identity TEXT NOT NULL,
@@ -11112,13 +11161,21 @@ platform_tables:
             entity_id       UUID,
             agent_id        TEXT,
             flow_id         TEXT,
+            scope_kind      TEXT NOT NULL CHECK (scope_kind IN ('bundle', 'runtime', 'global')),
+            runtime_instance_id UUID,
+            bundle_hash     TEXT,
+            author_safe_summary TEXT,
             projection      JSONB NOT NULL DEFAULT '{}',
             failure         JSONB,
             occurred_at     TIMESTAMPTZ NOT NULL,
+            CHECK ((scope_kind = 'bundle' AND runtime_instance_id IS NOT NULL AND bundle_hash IS NOT NULL) OR (scope_kind = 'runtime' AND runtime_instance_id IS NOT NULL AND bundle_hash IS NULL) OR (scope_kind = 'global' AND runtime_instance_id IS NULL AND bundle_hash IS NULL)),
+            CHECK (author_safe_summary IS NULL OR length(author_safe_summary) <= 24),
             INDEX idx_author_activity_run (run_id, sequence) WHERE run_id IS NOT NULL,
             INDEX idx_author_activity_entity (entity_id, sequence) WHERE entity_id IS NOT NULL,
             INDEX idx_author_activity_agent (agent_id, sequence) WHERE agent_id IS NOT NULL,
             INDEX idx_author_activity_flow (flow_id, sequence) WHERE flow_id IS NOT NULL,
+            INDEX idx_author_activity_runtime_bundle (runtime_instance_id, bundle_hash, sequence) WHERE scope_kind = 'bundle',
+            INDEX idx_author_activity_runtime (runtime_instance_id, sequence) WHERE scope_kind = 'runtime',
             INDEX idx_author_activity_kind (kind, sequence)
         );
     run_fork_revision_heads:
@@ -11345,6 +11402,7 @@ platform_tables:
             effect_kind        TEXT NOT NULL,
             effect_class       TEXT NOT NULL CHECK (effect_class IN ('read_only', 'write_or_unknown')),
             execution_mode     TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
+            bundle_hash        TEXT NOT NULL,
             authority_kind     TEXT NOT NULL CHECK (authority_kind IN ('normal_agent', 'selected_contract_fork', 'conversation_fork_chat', 'startup_probe')),
             authority_id       TEXT NOT NULL,
             agent_id           TEXT REFERENCES agents(agent_id),
@@ -12024,13 +12082,15 @@ platform_tables:
     conversation_fork_turns:
       description: >-
         Preallocated forkchat request-occurrence and terminal transcript owner. The row exists before
-        provider authorization, binds actor/request/idempotency identity and a fenced execution lease,
+        provider authorization, binds the source-owned exact bundle, actor/request/idempotency identity,
+        and a fenced execution lease,
         and owns abandonment/no-repeat recovery. Per-provider-call usage remains in ordered
         conversation_fork_turn_completions children.
       ddl: |
         CREATE TABLE conversation_fork_turns (
             fork_turn_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             fork_id            UUID NOT NULL REFERENCES conversation_forks(fork_id) ON DELETE CASCADE,
+            bundle_hash        TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),
             turn_index         INTEGER NOT NULL CHECK (turn_index >= 1),
             actor_token_id     TEXT NOT NULL,
             request_occurrence_id UUID NOT NULL,
@@ -14305,6 +14365,36 @@ platform_events:
       dotted_event_key: 'platform-spec.yaml#platform_events.catalog["platform.boot"].payload'
       simple_owner: platform-spec.yaml#engine.error_model.dead_letter_schema
   catalog:
+    event.replayed:
+      description: Durable operator audit evidence that an existing event delivery was replayed. This audit event is diagnostic evidence and is not an author-story occurrence.
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["event.replayed"].payload'
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/apiv1/operator_event_replay.go
+      routing_class: event_loop_routable
+      scope: entity or flow
+      payload:
+        original_event_id: uuid
+        original_event_name: string
+        replay_event_id: uuid
+        audit_event_id: uuid
+        run_id: uuid
+        entity_id: uuid (optional)
+        subscribers: array of string
+        triggered_by: string
+        actor_token_id: string (optional)
+        original_deliveries: array of object
+      required:
+      - original_event_id
+      - original_event_name
+      - replay_event_id
+      - audit_event_id
+      - run_id
+      - subscribers
+      - triggered_by
+      - original_deliveries
+      produced_by_type: platform
     platform.dead_letter:
       description: Failed event after retry exhaustion or chain depth overflow.
       defined_in: engine.error_model.dead_letter_schema
@@ -19260,10 +19350,11 @@ cli_specification:
           commands:
           - serve
           rule: >
-            `swarm serve` is a long-running process-control command. Its boot-progress text remains owned by
-            serve boot observability and `--verbose`; output modes are unsupported until a later tracked serve
-            output-mode row defines a machine-readable boot/readiness stream. Unsupported output-mode flags fail
-            before runtime boot or active-run mutation.
+            `swarm serve` is a long-running process-control command. Its boot-progress and development story text
+            remain owned by serve boot observability and the author-activity story contract. `--no-color` controls
+            presentation only and is supported; JSON and quiet output modes remain unsupported until a later tracked
+            serve output-mode row defines a machine-readable boot/readiness stream. Unsupported output-mode flags
+            fail before runtime boot or active-run mutation.
         retired_namespaces:
           commands:
           - investigate

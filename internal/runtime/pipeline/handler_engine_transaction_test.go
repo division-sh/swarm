@@ -210,7 +210,7 @@ func TestLogComputeModuleReplayEvidenceEmitsRuntimeLogCarrier(t *testing.T) {
 		Engine: "wasmtime-go:v46.0.0",
 		Arch:   "arm64",
 	}
-	logComputeModuleReplayEvidence(context.Background(), bus, "renderer", evt, []runtimeengine.ComputeModuleTrace{trace})
+	logComputeModuleReplayEvidence(testAuthorActivityContext(context.Background()), bus, "renderer", evt, []runtimeengine.ComputeModuleTrace{trace})
 	logs := bus.runtimeLogEntries()
 	if len(logs) != 1 {
 		t.Fatalf("runtime logs = %#v, want one replay evidence carrier", logs)
@@ -384,7 +384,7 @@ func TestPipelineCoordinatorPublish_ReturnsBusPublishError(t *testing.T) {
 		bus: &recordingPipelineBus{publishErr: wantErr},
 	}
 
-	err := pc.publish(context.Background(), "custom.emitted", "ent-1", map[string]any{"ok": true})
+	err := pc.publish(testAuthorActivityContext(context.Background()), "custom.emitted", "ent-1", map[string]any{"ok": true})
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("publish error = %v, want %v", err, wantErr)
 	}
@@ -398,7 +398,7 @@ func TestExecuteNodeContractHandlerFlushesCollectedEventsToParentCollector(t *te
 		entityLocks:    map[string]*sync.Mutex{},
 	}
 	parentCollector := make([]events.Event, 0, 1)
-	ctx := context.WithValue(context.Background(), pipelineEmitCollectorKey{}, &parentCollector)
+	ctx := context.WithValue(testAuthorActivityContext(context.Background()), pipelineEmitCollectorKey{}, &parentCollector)
 
 	result, err := pc.executeNodeContractHandler(ctx, "node-a", runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
@@ -1464,7 +1464,7 @@ node-a:
 	}
 	assertCreatedChildFlowIdentityCoherent(t, db, "validation", entityID, emitted, instance)
 
-	rows, err := db.QueryContext(context.Background(), `
+	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), `
 		SELECT field, COALESCE(writer_type, ''), COALESCE(writer_id, ''), COALESCE(handler_step, '')
 		FROM entity_mutations
 		WHERE entity_id = $1::uuid
@@ -1546,14 +1546,14 @@ node-a:
 	}
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	const otherRunID = "88888888-8888-8888-8888-888888888888"
-	if _, err := db.ExecContext(context.Background(), `
+	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `
 		INSERT INTO runs (run_id, status)
 		VALUES ($1::uuid, 'running')
 		ON CONFLICT (run_id) DO NOTHING
 	`, otherRunID); err != nil {
 		t.Fatalf("seed other run: %v", err)
 	}
-	otherCtx := runtimecorrelation.WithRunID(context.Background(), otherRunID)
+	otherCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), otherRunID)
 	seedQueryEntitiesGuardInstance(t, pc.workflowStore, ctx, "11111111-1111-1111-1111-111111111111", "validation/existing-same", "req-existing")
 	seedQueryEntitiesGuardInstance(t, pc.workflowStore, otherCtx, "22222222-2222-2222-2222-222222222222", "validation/existing-other", "req-cross-run")
 
@@ -1736,7 +1736,7 @@ func assertCreatedChildFlowIdentityCoherent(t *testing.T, db *sql.DB, flowID, en
 		t.Fatalf("created %s emitted flow_instance = %q, want %q", flowID, got, flowPath)
 	}
 	var rowOwner string
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT flow_instance
 		FROM entity_state
 		WHERE entity_id = $1::uuid
@@ -1833,7 +1833,7 @@ node-a:
 		t.Fatalf("persisted revision_count = %#v, want field cleared", instance.Metadata["revision_count"])
 	}
 
-	rows, err := db.QueryContext(context.Background(), `
+	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), `
 		SELECT field, COALESCE(writer_type, ''), COALESCE(writer_id, ''), COALESCE(handler_step, '')
 		FROM entity_mutations
 		WHERE entity_id = $1::uuid AND field = 'revision_count'
@@ -1906,7 +1906,7 @@ node-a:
 		t.Fatal("expected temp workflow bundle")
 	}
 
-	preview, err := PreviewContractHandlerExecution(context.Background(), bundle, "node-a", eventtest.RootIngress("", events.EventType("candidate.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), WorkflowState{}, nil)
+	preview, err := PreviewContractHandlerExecution(testAuthorActivityContext(context.Background()), bundle, "node-a", eventtest.RootIngress("", events.EventType("candidate.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), WorkflowState{}, nil)
 	if err != nil {
 		t.Fatalf("PreviewContractHandlerExecution: %v", err)
 	}
@@ -2218,7 +2218,7 @@ func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionDoesNotBackPropa
 	}); err != nil {
 		t.Fatalf("seed grandchild instance: %v", err)
 	}
-	if consume, handled := pc.workflowNodeInterceptPolicy(context.Background(), "child/grandchild/micro.done", eventtest.RootIngress(
+	if consume, handled := pc.workflowNodeInterceptPolicy(testAuthorActivityContext(context.Background()), "child/grandchild/micro.done", eventtest.RootIngress(
 		"",
 		events.EventType("child/grandchild/micro.done"),
 		"",

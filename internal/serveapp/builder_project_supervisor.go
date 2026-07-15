@@ -50,6 +50,7 @@ type runtimeProjectSupervisor struct {
 	cloneRuntime        func(context.Context, *runtime.Runtime) (*runtime.Runtime, error)
 	replacementShutdown runtime.ShutdownOptions
 	runtimeLifetime     context.Context
+	runtimeInstanceID   string
 	operationMu         sync.Mutex
 
 	mu                              sync.RWMutex
@@ -107,6 +108,12 @@ func newRuntimeProjectSupervisor(
 		credentials:         credentials,
 		providerCredentials: providerCredentials,
 		providerTriggers:    providerTriggers,
+		runtimeInstanceID: func() string {
+			if initialRT == nil {
+				return ""
+			}
+			return strings.TrimSpace(initialRT.Options.RuntimeInstanceID)
+		}(),
 		startRuntime: func(ctx context.Context, rt *runtime.Runtime) error {
 			return rt.Start(ctx)
 		},
@@ -307,6 +314,7 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 			WorkspaceLifecycle:     workspaces,
 			BundleFingerprint:      bundleIdentity.Fingerprint,
 			BundleSourceFact:       bundleSourceFact,
+			RuntimeInstanceID:      s.runtimeInstanceID,
 			Credentials:            s.credentials,
 			ManagedCredentials:     managedCredentialStore,
 			ProviderCredentials:    s.providerCredentials,

@@ -53,7 +53,7 @@ func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {
 	)
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
-	ok := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
+	ok := pc.createFlowInstance(testAuthorActivityContext(context.Background()), triggerCtx, handlerExecutionPlan{
 		Template:       "review",
 		InstanceIDFrom: "payload.desired_instance_id",
 		InstanceIDPath: paths.Parse("payload.desired_instance_id"),
@@ -117,7 +117,7 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 		time.Time{},
 	)
 	triggerCtx := workflowTriggerContext{Event: trigger}
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	beforeCreate := time.Now().UTC()
 
 	err := pc.createFlowInstance(ctx, triggerCtx, handlerExecutionPlan{
@@ -168,7 +168,7 @@ func TestCreateFlowInstanceResolvesConfigFromBindings(t *testing.T) {
 	)
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
-	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
+	err := pc.createFlowInstance(testAuthorActivityContext(context.Background()), triggerCtx, handlerExecutionPlan{
 		Template:       "review",
 		InstanceIDFrom: "payload.instance_id",
 		InstanceIDPath: paths.Parse("payload.instance_id"),
@@ -215,7 +215,7 @@ func TestCreateFlowInstancePreservesNullConfigFromValues(t *testing.T) {
 	)
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
-	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
+	err := pc.createFlowInstance(testAuthorActivityContext(context.Background()), triggerCtx, handlerExecutionPlan{
 		Template:       "review",
 		InstanceIDFrom: "payload.instance_id",
 		InstanceIDPath: paths.Parse("payload.instance_id"),
@@ -270,7 +270,7 @@ func TestCreateFlowInstanceResolvesConfigFromHandlerEventContext(t *testing.T) {
 
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
-	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
+	err := pc.createFlowInstance(testAuthorActivityContext(context.Background()), triggerCtx, handlerExecutionPlan{
 		Template:       "review",
 		InstanceIDFrom: "payload.instance_id",
 		InstanceIDPath: paths.Parse("payload.instance_id"),
@@ -324,7 +324,7 @@ func TestCreateFlowInstanceRejectsUnknownEventConfigRef(t *testing.T) {
 
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
-	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
+	err := pc.createFlowInstance(testAuthorActivityContext(context.Background()), triggerCtx, handlerExecutionPlan{
 		Template:       "review",
 		InstanceIDFrom: "payload.instance_id",
 		InstanceIDPath: paths.Parse("payload.instance_id"),
@@ -367,7 +367,7 @@ func TestCreateFlowInstanceRejectsUnsupportedConfigRefRoot(t *testing.T) {
 
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
-	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
+	err := pc.createFlowInstance(testAuthorActivityContext(context.Background()), triggerCtx, handlerExecutionPlan{
 		Template:       "review",
 		InstanceIDFrom: "payload.instance_id",
 		InstanceIDPath: paths.Parse("payload.instance_id"),
@@ -410,7 +410,7 @@ func TestCreateFlowInstanceDoesNotResolveInstanceIDFromEventRef(t *testing.T) {
 
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
-	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
+	err := pc.createFlowInstance(testAuthorActivityContext(context.Background()), triggerCtx, handlerExecutionPlan{
 		Template:       "review",
 		InstanceIDFrom: "event.id",
 		InstanceIDPath: paths.Parse("event.id"),
@@ -446,7 +446,7 @@ func TestCreateFlowInstanceRejectsMissingRequiredSiblingFields(t *testing.T) {
 	)
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
-	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
+	err := pc.createFlowInstance(testAuthorActivityContext(context.Background()), triggerCtx, handlerExecutionPlan{
 		Template: "review",
 	}, testCreateFlowInstanceContext(triggerCtx))
 	if err == nil || !strings.Contains(err.Error(), "requires non-empty instance_id_from and config_from") {
@@ -475,7 +475,7 @@ func TestCreateFlowInstanceRejectsGeneratedFallbackWithoutInstanceIDFrom(t *test
 	)
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
-	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
+	err := pc.createFlowInstance(testAuthorActivityContext(context.Background()), triggerCtx, handlerExecutionPlan{
 		Template: "review",
 		ConfigFrom: &runtimecontracts.ConfigFromSpec{
 			Bindings: map[string]string{
@@ -509,7 +509,7 @@ func TestCreateFlowInstanceRejectsEmptyConfigFromBindings(t *testing.T) {
 	)
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
-	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
+	err := pc.createFlowInstance(testAuthorActivityContext(context.Background()), triggerCtx, handlerExecutionPlan{
 		Template:       "review",
 		InstanceIDFrom: "payload.desired_instance_id",
 		InstanceIDPath: paths.Parse("payload.desired_instance_id"),
@@ -543,7 +543,7 @@ func TestCreateFlowInstanceRejectsEmptyResolvedConfig(t *testing.T) {
 	)
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
-	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
+	err := pc.createFlowInstance(testAuthorActivityContext(context.Background()), triggerCtx, handlerExecutionPlan{
 		Template:       "review",
 		InstanceIDFrom: "payload.desired_instance_id",
 		InstanceIDPath: paths.Parse("payload.desired_instance_id"),
@@ -588,12 +588,12 @@ func TestHandlerEmitEnvelope_KeepsLocalEntityAcrossOutputBoundaries(t *testing.T
 		},
 	}
 
-	internalPayload := pc.handlerEmitEnvelope(withPipelineFlowScope(context.Background(), "child"), trigger, "child/child.internal")
+	internalPayload := pc.handlerEmitEnvelope(withPipelineFlowScope(testAuthorActivityContext(context.Background()), "child"), trigger, "child/child.internal")
 	if got := asString(internalPayload["entity_id"]); got != "ent-child" {
 		t.Fatalf("internal payload entity_id = %q, want ent-child", got)
 	}
 
-	outputPayload := pc.handlerEmitEnvelope(withPipelineFlowScope(context.Background(), "child"), trigger, "child/child.done")
+	outputPayload := pc.handlerEmitEnvelope(withPipelineFlowScope(testAuthorActivityContext(context.Background()), "child"), trigger, "child/child.done")
 	if got := asString(outputPayload["entity_id"]); got != "ent-child" {
 		t.Fatalf("output payload entity_id = %q, want ent-child", got)
 	}
@@ -604,7 +604,7 @@ func TestHandlerEmitEnvelope_KeepsLocalEntityAcrossOutputBoundaries(t *testing.T
 		t.Fatalf("newPipelineFixtureWorkflowModule(pin wiring): %v", err)
 	}
 	pinPC := &PipelineCoordinator{module: pinModule}
-	pinPayload := pinPC.handlerEmitEnvelope(withPipelineFlowScope(context.Background(), "child"), trigger, "child/work.completed")
+	pinPayload := pinPC.handlerEmitEnvelope(withPipelineFlowScope(testAuthorActivityContext(context.Background()), "child"), trigger, "child/work.completed")
 	if got := asString(pinPayload["entity_id"]); got != "ent-child" {
 		t.Fatalf("pin output payload entity_id = %q, want ent-child", got)
 	}
@@ -654,7 +654,7 @@ pins:
 		},
 	}
 
-	payload := pc.handlerEmitEnvelope(withPipelineFlowScope(context.Background(), "scoring"), trigger, "scoring/scoring.requested")
+	payload := pc.handlerEmitEnvelope(withPipelineFlowScope(testAuthorActivityContext(context.Background()), "scoring"), trigger, "scoring/scoring.requested")
 	if got := asString(payload["entity_id"]); got != "ent-child" {
 		t.Fatalf("root flow output payload entity_id = %q, want ent-child", got)
 	}

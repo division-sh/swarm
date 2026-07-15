@@ -48,7 +48,7 @@ func assertRunTestQuiescence(t *testing.T, got RunTestQuiescence, want RunTestQu
 func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	olderRunID := uuid.NewString()
 	newerRunID := uuid.NewString()
@@ -111,7 +111,7 @@ func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T
 func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	targetRunID := uuid.NewString()
 	olderRunID := uuid.NewString()
@@ -149,7 +149,7 @@ func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t
 func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMutations(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	targetRunID := uuid.NewString()
 	otherRunID := uuid.NewString()
@@ -302,7 +302,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	blockedRunID := uuid.NewString()
 	readyRunID := uuid.NewString()
@@ -408,7 +408,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -520,7 +520,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWatermark(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -604,7 +604,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessionDoesNotExist(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()

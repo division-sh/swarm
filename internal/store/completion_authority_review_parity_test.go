@@ -39,7 +39,7 @@ func TestCompletionAuthorityReviewFindingParity(t *testing.T) {
 func proveSelectedCurrentAuthorityTransition(t *testing.T, sqlite bool) {
 	t.Helper()
 	fixture := newSelectedReviewFixture(t, sqlite)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	issued, err := fixture.store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 	if err != nil {
 		t.Fatalf("issue selected authority: %v", err)
@@ -123,14 +123,14 @@ func proveForkChatCurrentAuthorityTransition(t *testing.T, sqlite bool) {
 	launchAndObserveForkChatCompletion(t, providerCtx, handle, "review-expiry")
 	settleForkChatCompletionAttempt(t, providerCtx, handle, prepared, runtimeeffects.StateSettled, nil, fixture.now.Add(2*time.Second))
 	expireForkChatGroupLease(t, fixture, prepared.ForkTurnID)
-	if err := fixture.store.HeartbeatOperatorConversationForkChat(context.Background(), prepared, time.Now().UTC()); err == nil {
+	if err := fixture.store.HeartbeatOperatorConversationForkChat(testAuthorActivityContext(), prepared, time.Now().UTC()); err == nil {
 		t.Fatal("forkchat heartbeat resurrected an expired group authority")
 	}
-	if _, err := fixture.store.RecordOperatorConversationForkChat(context.Background(), successfulForkChatRecord(prepared, "review expiry", time.Now().UTC())); err == nil {
+	if _, err := fixture.store.RecordOperatorConversationForkChat(testAuthorActivityContext(), successfulForkChatRecord(prepared, "review expiry", time.Now().UTC())); err == nil {
 		t.Fatal("forkchat success accepted an expired group authority")
 	}
 	requireForkChatGroupState(t, fixture, prepared.ForkTurnID, "executing", false)
-	if err := fixture.store.FailOperatorConversationForkChat(context.Background(), ConversationForkChatFailureRequest{
+	if err := fixture.store.FailOperatorConversationForkChat(testAuthorActivityContext(), ConversationForkChatFailureRequest{
 		Prepared: prepared, Cause: context.DeadlineExceeded, OutcomeUncertain: true, Now: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("terminalize expired forkchat authority outcome-uncertain: %v", err)
@@ -142,7 +142,7 @@ func proveForkChatCurrentAuthorityTransition(t *testing.T, sqlite bool) {
 	launchAndObserveForkChatCompletion(t, firstCtx, first, "review-live-child-1")
 	settleForkChatCompletionAttempt(t, firstCtx, first, live, runtimeeffects.StateSettled, nil, time.Now().UTC())
 	_, _ = beginForkChatCompletionAttempt(t, fixture, live, 2, "review-live-child-2")
-	if _, err := fixture.store.RecordOperatorConversationForkChat(context.Background(), successfulForkChatRecord(live, "review live child", time.Now().UTC())); err == nil {
+	if _, err := fixture.store.RecordOperatorConversationForkChat(testAuthorActivityContext(), successfulForkChatRecord(live, "review live child", time.Now().UTC())); err == nil {
 		t.Fatal("forkchat success accepted a live child attempt")
 	}
 	requireForkChatGroupState(t, fixture, live.ForkTurnID, "executing", false)
@@ -175,14 +175,14 @@ func proveClaudeRetryGenerationAuthority(t *testing.T, sqlite bool) {
 	nextAuthority.FenceGeneration = 2
 	nextAuthority.Target.ID = uuid.NewString()
 	nextCtx := runtimeeffects.WithLogicalOperationIdentity(
-		runtimeeffects.WithController(runtimeeffects.WithAuthority(context.Background(), nextAuthority), runtimeeffects.NewController(fixture.store)),
+		runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), nextAuthority), runtimeeffects.NewController(fixture.store)),
 		logicalID,
 	)
 	nextCtx = withManagedCompletionTestSurface(t, nextCtx, nextAuthority, "claude_cli")
 	if _, err := runtimeeffects.BeginCompletion(nextCtx, "claude_cli", []byte("retry-generation"), nil); err == nil {
 		t.Fatal("generation-2 authority retried a generation-1 operation")
 	}
-	if _, err := fixture.store.ReconcileExternalEffectAttempts(context.Background(), time.Now().UTC().Add(time.Minute)); err != nil {
+	if _, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), time.Now().UTC().Add(time.Minute)); err != nil {
 		t.Fatalf("reconcile cross-generation Claude retry evidence: %v", err)
 	}
 	var attempts, generation int
@@ -211,7 +211,7 @@ func proveCommittedCompletionBudgetProjection(t *testing.T, sqlite bool) {
 	fixture := newCompletionReviewFixture(t, sqlite)
 	projection := &completionProjectionCapture{}
 	ctx := runtimeeffects.WithLogicalOperationIdentity(
-		runtimeeffects.WithController(runtimeeffects.WithAuthority(context.Background(), fixture.authority), runtimeeffects.NewCompletionController(fixture.store, projection)),
+		runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), fixture.authority), runtimeeffects.NewCompletionController(fixture.store, projection)),
 		"review:budget-projection",
 	)
 	handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "budget-projection")

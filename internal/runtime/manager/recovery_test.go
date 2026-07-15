@@ -58,7 +58,7 @@ func TestRecoverReturnsBudgetRecoveryProjectionFailure(t *testing.T) {
 	budget := &recoveryBudgetGuardStub{err: projectionErr}
 	am := NewAgentManagerWithOptions(&recordingReceiptBus{}, nil, AgentManagerOptions{Budget: budget}, &receiptReaderStub{})
 
-	err := am.Recover(context.Background())
+	err := am.Recover(testAuthorActivityContext(context.Background()))
 	if !errors.Is(err, projectionErr) {
 		t.Fatalf("Recover error = %v, want wrapped budget projection failure", err)
 	}
@@ -228,7 +228,7 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{WorkflowInstances: workflowInstances}, store)
 
-	if err := am.Recover(managedExecutionTestContext(t, context.Background())); err != nil {
+	if err := am.Recover(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	if len(bus.restored) != 1 || bus.restored[0] != "review/inst-1" {
@@ -249,10 +249,10 @@ func TestDirectiveReconciliationPrecedesGenericPipelineRecovery(t *testing.T) {
 	}
 	am := NewAgentManager(bus, nil, &recoveryTestStore{})
 
-	if err := am.ReconcileDirectiveOperations(context.Background()); err != nil {
+	if err := am.ReconcileDirectiveOperations(testAuthorActivityContext(context.Background())); err != nil {
 		t.Fatalf("ReconcileDirectiveOperations: %v", err)
 	}
-	if err := am.Recover(managedExecutionTestContext(t, context.Background())); err != nil {
+	if err := am.Recover(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	if len(bus.order) < 2 || bus.order[0] != "directive" || bus.order[1] != "pipeline" {
@@ -271,7 +271,7 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, &recoveryTestStore{})
 
-	if err := am.Recover(managedExecutionTestContext(t, context.Background())); err != nil {
+	if err := am.Recover(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	snapshot := am.SelectedContractRouteRecoverySnapshot()
@@ -322,10 +322,10 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 		events.EventType("work.ready"),
 		selectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 
-	if err := guard.AuthorizeEvent(context.Background(), evt); err != nil {
+	if err := guard.AuthorizeEvent(testAuthorActivityContext(context.Background()), evt); err != nil {
 		t.Fatalf("AuthorizeEvent recovered guard: %v", err)
 	}
-	if err := guard.Authorize(context.Background(), evt, runtimebus.PublishRecipientPlan{
+	if err := guard.Authorize(testAuthorActivityContext(context.Background()), evt, runtimebus.PublishRecipientPlan{
 		RoutedRecipients: []runtimebus.PublishDiagnosticRecipient{{
 			Type:        "agent",
 			ID:          "agent-a",
@@ -335,7 +335,7 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 	}); err != nil {
 		t.Fatalf("Authorize recovered recipients: %v", err)
 	}
-	if err := guard.Authorize(context.Background(), evt, runtimebus.PublishRecipientPlan{
+	if err := guard.Authorize(testAuthorActivityContext(context.Background()), evt, runtimebus.PublishRecipientPlan{
 		SubscriptionRecipients: []string{"agent-a"},
 	}); err == nil || !strings.Contains(err.Error(), "live subscriptions") {
 		t.Fatalf("Authorize subscription bypass error = %v, want live subscription rejection", err)
@@ -343,7 +343,7 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 	if len(bus.restored) != 0 {
 		t.Fatalf("current route restore was used for selected route recovery: %#v", bus.restored)
 	}
-	state, err := am.RecoverableStateSnapshot(context.Background())
+	state, err := am.RecoverableStateSnapshot(testAuthorActivityContext(context.Background()))
 	if err != nil {
 		t.Fatalf("RecoverableStateSnapshot: %v", err)
 	}
@@ -362,7 +362,7 @@ func TestRecoverRejectsSelectedContractRouteRecoveryFromCurrentRouteOwner(t *tes
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, &recoveryTestStore{})
 
-	err := am.Recover(context.Background())
+	err := am.Recover(testAuthorActivityContext(context.Background()))
 	if err == nil || !strings.Contains(err.Error(), SelectedContractRoutePersistenceOwner) {
 		t.Fatalf("Recover error = %v, want canonical owner rejection", err)
 	}
@@ -396,7 +396,7 @@ func TestRecoverRejectsSelectedContractRouteRecoveryFingerprintMismatch(t *testi
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, &recoveryTestStore{})
 
-	err := am.Recover(context.Background())
+	err := am.Recover(testAuthorActivityContext(context.Background()))
 	if err == nil || !strings.Contains(err.Error(), "recipient planning fingerprint mismatch") {
 		t.Fatalf("Recover error = %v, want recipient planning fingerprint mismatch", err)
 	}
@@ -516,7 +516,7 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, store)
 
-	if err := am.Recover(managedExecutionTestContext(t, context.Background())); err != nil {
+	if err := am.Recover(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	if hydrated.ID != "reviewer-inst-1" {
@@ -556,7 +556,7 @@ func TestRecover_UsesCanonicalPipelineReplayAftermathDiagnostics(t *testing.T) {
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, &recoveryTestStore{})
 
-	if err := am.Recover(managedExecutionTestContext(t, context.Background())); err != nil {
+	if err := am.Recover(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	if len(bus.direct) != 1 || bus.direct[0].ID() != childID {
@@ -603,7 +603,7 @@ func TestRecoverWithStartupReplayDiagnostics_LogsCanonicalManagerReplayAftermath
 	}, store)
 	am.inFlight["agent-a|evt-inflight"] = struct{}{}
 
-	summary, err := am.RecoverWithStartupReplayDiagnostics(managedExecutionTestContext(t, context.Background()))
+	summary, err := am.RecoverWithStartupReplayDiagnostics(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
 	if err != nil {
 		t.Fatalf("RecoverWithStartupReplayDiagnostics: %v", err)
 	}
@@ -661,13 +661,13 @@ func TestReplayAgentBacklog_DoesNotEmitStartupAftermathOutsideStartupRecovery(t 
 	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
 		return startupReplayTestAgent{id: cfg.ID}, nil
 	}, store)
-	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
+	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: models.AgentConfig{ExecutionMode: "live", ID: "agent-a"},
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
-	if err := am.ReplayAgentBacklog(context.Background(), "agent-a"); err != nil {
+	if err := am.ReplayAgentBacklog(testAuthorActivityContext(context.Background()), "agent-a"); err != nil {
 		t.Fatalf("ReplayAgentBacklog: %v", err)
 	}
 	foundLegacyFailure := false
@@ -697,13 +697,13 @@ func TestReplayBacklogReportsDirectReplayCount(t *testing.T) {
 	am := NewAgentManager(nil, func(cfg models.AgentConfig) (Agent, error) {
 		return startupReplayTestAgent{id: cfg.ID}, nil
 	}, store)
-	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
+	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: models.AgentConfig{ExecutionMode: "live", ID: "agent-a"},
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
-	result, err := am.ReplayBacklog(context.Background(), runtimeagentcontrol.ReplayBacklogRequest{AgentID: "agent-a"})
+	result, err := am.ReplayBacklog(testAuthorActivityContext(context.Background()), runtimeagentcontrol.ReplayBacklogRequest{AgentID: "agent-a"})
 	if err != nil {
 		t.Fatalf("ReplayBacklog: %v", err)
 	}

@@ -21,7 +21,7 @@ func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRo
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	ensurePipelineTestRun(t, store, runID)
 	ctx = withWorkflowCreateEntityInitialValues(ctx, map[string]any{
 		"region": "west",
@@ -56,7 +56,7 @@ func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *test
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	ensurePipelineTestRun(t, store, runID)
 	storageRef := "review/inst-1"
 
@@ -142,7 +142,7 @@ func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *
 func TestSQLiteWorkflowInstanceStore_RunPipelineMutationRequiresRuntimeMutationRunner(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := NewSQLiteWorkflowInstanceStore(db)
-	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), uuid.NewString())
 	called := false
 
 	err := store.RunPipelineMutation(ctx, func(context.Context) error {
@@ -162,7 +162,7 @@ func TestSQLiteWorkflowInstanceStore_RunPipelineMutationUsesRuntimeMutationRunne
 	runner := &recordingRuntimeMutationRunner{db: db}
 	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
 	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	ensurePipelineTestRun(t, store, runID)
 	var postCommitActions int32
 
@@ -198,7 +198,7 @@ func TestSQLiteWorkflowInstanceStore_MutateERollsBackCallbackFailure(t *testing.
 	runner := &recordingRuntimeMutationRunner{db: db}
 	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
 	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	ensurePipelineTestRun(t, store, runID)
 	instance := WorkflowInstance{InstanceID: "root/item", StorageRef: "root/item", WorkflowName: "root", WorkflowVersion: "1.0.0", CurrentState: "queued", Metadata: map[string]any{}}
 	if err := store.Upsert(ctx, instance); err != nil {
@@ -223,7 +223,7 @@ func TestSQLiteWorkflowInstanceStore_MutateERollsBackCallbackFailure(t *testing.
 func TestSQLiteWorkflowInstanceStore_RunPipelineMutationDoesNotRetryActiveTransaction(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := NewSQLiteWorkflowInstanceStore(db)
-	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), uuid.NewString())
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin active tx: %v", err)
@@ -258,7 +258,7 @@ func TestSQLiteWorkflowInstanceStore_RunPipelineMutationDoesNotRetryActiveTransa
 func TestSQLiteWorkflowInstanceStore_RunPipelineMutationRejectsUnownedRawTransaction(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := NewSQLiteWorkflowInstanceStore(db)
-	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), uuid.NewString())
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin raw tx: %v", err)
@@ -278,7 +278,7 @@ func TestWorkflowInstanceStore_RunPipelineMutationDoesNotRetryPostgresDialect(t 
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	store := NewWorkflowInstanceStore(db)
-	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), uuid.NewString())
 	busyErr := errors.New("SQLITE_BUSY: database is locked")
 	var attempts int32
 
@@ -497,7 +497,7 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			occurrence_id TEXT PRIMARY KEY,
 			sequence BIGINT NOT NULL UNIQUE CHECK (sequence > 0),
 			kind TEXT NOT NULL,
-			version INTEGER NOT NULL CHECK (version = 1),
+			version INTEGER NOT NULL CHECK (version = 2),
 			transition TEXT NOT NULL,
 			source_owner TEXT NOT NULL,
 			source_identity TEXT NOT NULL,
@@ -506,6 +506,10 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			entity_id TEXT,
 			agent_id TEXT,
 			flow_id TEXT,
+			scope_kind TEXT NOT NULL,
+			runtime_instance_id TEXT,
+			bundle_hash TEXT,
+			author_safe_summary TEXT,
 			projection TEXT NOT NULL DEFAULT '{}',
 			failure TEXT,
 			occurred_at TIMESTAMP NOT NULL

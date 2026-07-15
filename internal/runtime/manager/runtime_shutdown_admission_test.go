@@ -55,7 +55,7 @@ func TestRun_UsesRuntimeShutdownAdmissionOwner(t *testing.T) {
 		RuntimeShutdownAdmissionClosed: closed.Load,
 	})
 
-	am.Run(managedExecutionTestContext(t, context.Background()))
+	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
 
 	if am.IsRunning() {
 		t.Fatal("Run started manager even though runtime shutdown admission was already closed")
@@ -75,7 +75,7 @@ func TestReplayAgentBacklog_UsesRuntimeShutdownAdmissionOwnerBeforeStoreAccess(t
 		RuntimeShutdownAdmissionClosed: closed.Load,
 	}, store)
 
-	if err := am.ReplayAgentBacklog(context.Background(), "agent-1"); err == nil || err.Error() != "runtime shutting down" {
+	if err := am.ReplayAgentBacklog(testAuthorActivityContext(context.Background()), "agent-1"); err == nil || err.Error() != "runtime shutting down" {
 		t.Fatalf("ReplayAgentBacklog err = %v, want runtime shutting down", err)
 	}
 	if store.listPendingCalled.Load() {
@@ -134,14 +134,14 @@ func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown
 	}, AgentManagerOptions{
 		RuntimeShutdownAdmissionClosed: func() bool { return false },
 	}, store)
-	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
+	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id},
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
-	am.Run(managedExecutionTestContext(t, context.Background()))
-	if err := bus.Publish(context.Background(), eventtest.RootIngress("evt-in-1",
+	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress("evt-in-1",
 		events.EventType("test.in"),
 		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -160,7 +160,7 @@ func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown
 
 	waitForManagerShuttingDown(t, am)
 
-	if err := am.ReplayAgentBacklog(context.Background(), "agent-1"); err == nil || err.Error() != "runtime shutting down" {
+	if err := am.ReplayAgentBacklog(testAuthorActivityContext(context.Background()), "agent-1"); err == nil || err.Error() != "runtime shutting down" {
 		t.Fatalf("ReplayAgentBacklog during reset shutdown err = %v, want runtime shutting down", err)
 	}
 	if store.listPendingCalled.Load() {
@@ -213,14 +213,14 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 	}, AgentManagerOptions{
 		RuntimeShutdownAdmissionClosed: func() bool { return false },
 	}, store)
-	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
+	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id},
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
-	am.Run(managedExecutionTestContext(t, context.Background()))
-	if err := bus.Publish(context.Background(), eventtest.RootIngress("evt-in-1",
+	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress("evt-in-1",
 		events.EventType("test.in"),
 		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -234,13 +234,13 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 
 	breakerDone := make(chan struct{})
 	go func() {
-		am.maybeTripAuthCircuitBreaker(context.Background(), agent.id, "evt-in-1", testAuthFailure())
+		am.maybeTripAuthCircuitBreaker(testAuthorActivityContext(context.Background()), agent.id, "evt-in-1", testAuthFailure())
 		close(breakerDone)
 	}()
 
 	waitForManagerShuttingDown(t, am)
 
-	if err := am.ReplayAgentBacklog(context.Background(), "agent-1"); err == nil || err.Error() != "runtime shutting down" {
+	if err := am.ReplayAgentBacklog(testAuthorActivityContext(context.Background()), "agent-1"); err == nil || err.Error() != "runtime shutting down" {
 		t.Fatalf("ReplayAgentBacklog during auth-breaker shutdown err = %v, want runtime shutting down", err)
 	}
 	if store.listPendingCalled.Load() {

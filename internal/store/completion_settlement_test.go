@@ -180,7 +180,7 @@ func proveCompletionAttemptHeartbeatFencesRecovery(t *testing.T, fixture complet
 	if err := fixture.store.HeartbeatCompletionAttempt(ctx, stale, time.Now().UTC(), 2*time.Minute); err == nil {
 		t.Fatal("stale completion fence renewed the attempt lease")
 	}
-	summary, err := fixture.store.ReconcileExternalEffectAttempts(context.Background(), time.Now().UTC().Add(time.Minute))
+	summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), time.Now().UTC().Add(time.Minute))
 	if err != nil {
 		t.Fatalf("reconcile heartbeating completion: %v", err)
 	}
@@ -229,7 +229,7 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 		t.Fatalf("authorize live completion: %v", err)
 	}
 	now := time.Now().UTC()
-	summary, err := fixture.store.ReconcileExternalEffectAttempts(context.Background(), now)
+	summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), now)
 	if err != nil {
 		t.Fatalf("reconcile live completion: %v", err)
 	}
@@ -240,7 +240,7 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 	requireCompletionRecoveryRows(t, fixture, authorized.Attempt().AttemptID, 0, 0, 1)
 
 	setCompletionFixtureGeneration(t, fixture, 2)
-	summary, err = fixture.store.ReconcileExternalEffectAttempts(context.Background(), now.Add(time.Second))
+	summary, err = fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), now.Add(time.Second))
 	if err != nil {
 		t.Fatalf("reconcile fenced prelaunch completion: %v", err)
 	}
@@ -263,7 +263,7 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 		t.Fatalf("mark completion launched: %v", err)
 	}
 	setCompletionFixtureGeneration(t, fixture, 2)
-	summary, err = fixture.store.ReconcileExternalEffectAttempts(context.Background(), now.Add(2*time.Second))
+	summary, err = fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), now.Add(2*time.Second))
 	if err != nil {
 		t.Fatalf("reconcile fenced launched completion: %v", err)
 	}
@@ -292,7 +292,7 @@ func proveCompletionProviderHeadStaleAuthorityCannotSettle(t *testing.T, fixture
 
 func newCompletionSettlementFixture(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool) completionSettlementFixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	now := time.Now().UTC()
 	agentID := "completion-settlement-agent"
 	sessionID := uuid.NewString()

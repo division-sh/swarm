@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -18,7 +17,7 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := &store.PostgresStore{DB: db}
-	bus, err := runtimebus.NewEventBus(pg)
+	bus, err := newScopedAPITestEventBus(t, pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -38,7 +37,10 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 	})
 	ctx := context.Background()
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
+		VALUES ($1::uuid, 'running', $2, $3, $4)
+	`, runID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -111,7 +113,7 @@ func TestOperatorRunControlHandlersTypedResourceErrors(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := &store.PostgresStore{DB: db}
-	bus, err := runtimebus.NewEventBus(pg)
+	bus, err := newScopedAPITestEventBus(t, pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -137,7 +139,10 @@ func TestOperatorRunControlHandlersTypedResourceErrors(t *testing.T) {
 	}
 
 	materializedLikePausedRunID := uuid.NewString()
-	if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'paused')`, materializedLikePausedRunID); err != nil {
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
+		VALUES ($1::uuid, 'paused', $2, $3, $4)
+	`, materializedLikePausedRunID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint); err != nil {
 		t.Fatalf("seed paused run without control owner: %v", err)
 	}
 	resp := rpcCall(t, handler, runControlBody("run.continue", materializedLikePausedRunID, ""))

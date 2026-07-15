@@ -14,12 +14,12 @@ import (
 
 func TestEventBusRejectsMalformedFailureBeforeRuntimeLog(t *testing.T) {
 	logger := NewRuntimeLogger(nil)
-	eventBus, err := newRuntimeEventBus(nil, logger, nil, "", runtimecorrelation.BundleSourceFact{}, nil, nil, nil, nil, nil)
+	eventBus, err := newRuntimeEventBus(nil, logger, nil, "", runtimecorrelation.BundleSourceFact{}, "", nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newRuntimeEventBus: %v", err)
 	}
 
-	err = eventBus.LogRuntime(context.Background(), runtimepipeline.RuntimeLogEntry{
+	err = eventBus.LogRuntime(testAuthorActivityContext(context.Background()), runtimepipeline.RuntimeLogEntry{
 		Component: "test",
 		Action:    "malformed_failure",
 		Failure: &runtimefailures.Envelope{

@@ -51,7 +51,7 @@ func TestSelectedForkCompletionAuthorityIssuanceConsumesExactAdmissionPostgres(t
 
 func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selectedCompletionFixture) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	invalidAdmissions := []struct {
 		name   string
@@ -226,7 +226,7 @@ func TestSelectedForkCompletionAuthoritySingleCurrentGenerationPostgres(t *testi
 
 func proveSelectedForkCompletionAuthoritySingleCurrentGeneration(t *testing.T, fixture selectedCompletionFixture) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	const contenders = 2
 	results := make(chan SelectedContractRuntimeExecution, contenders)
 	errs := make(chan error, contenders)
@@ -275,7 +275,7 @@ func TestSelectedForkCompletionAuthorityRecoveryNoRedispatchPostgres(t *testing.
 
 func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixture selectedCompletionFixture) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	issued, err := fixture.store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 	if err != nil {
 		t.Fatal(err)
@@ -362,7 +362,7 @@ func TestSelectedForkCompletionAuthorityCleanupPreservesEvidencePostgres(t *test
 	_, db, _ := testutil.StartPostgres(t)
 	store := &PostgresStore{DB: db}
 	fixture := newSelectedCompletionFixture(t, store, db, false)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 	if err != nil {
@@ -548,7 +548,7 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 func TestSelectedForkDiscardRejectsLiveDependentForkPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	now := time.Now().UTC()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
@@ -657,7 +657,7 @@ func requireSelectedAttemptUsesCurrentLease(t *testing.T, fixture selectedComple
 
 func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorityStore, db *sql.DB, sqlite bool) selectedCompletionFixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	now := time.Now().UTC()
 	sourceRun := uuid.NewString()
 	forkRun := uuid.NewString()

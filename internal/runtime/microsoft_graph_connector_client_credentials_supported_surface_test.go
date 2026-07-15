@@ -37,7 +37,7 @@ func TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJou
 			entityID     = "8c000000-0000-0000-0000-000000000002"
 			flowInstance = "microsoft-graph-connector-client-credentials-pg"
 		)
-		ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		pg := &store.PostgresStore{DB: db}
 		workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 		seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "microsoft-graph-client-credentials-observer")
@@ -63,7 +63,7 @@ func TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJou
 			entityID     = "8d000000-0000-0000-0000-000000000002"
 			flowInstance = "microsoft-graph-connector-client-credentials-sqlite"
 		)
-		ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 		workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 		seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "microsoft-graph-client-credentials-observer")

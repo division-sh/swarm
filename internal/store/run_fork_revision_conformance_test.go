@@ -88,7 +88,7 @@ func TestRunForkRevisionStateAccessorInventoryIsClosed(t *testing.T) {
 
 func TestRunForkRevisionCaptureReusesTransactionRevisionAndRollbackPublishesNothing(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
@@ -159,7 +159,7 @@ func TestRunForkRevisionCaptureReusesTransactionRevisionAndRollbackPublishesNoth
 
 func TestRunForkRevisionCaptureSerializesSameRunCommitVisibility(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	firstEventID := uuid.NewString()
 	secondEventID := uuid.NewString()
@@ -392,7 +392,7 @@ func waitForPostgresQueryLock(t *testing.T, ctx context.Context, db *sql.DB, que
 
 func TestRunForkRevisionCaptureOrdersMultiRunLocksDeterministically(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 5*time.Second)
 	defer cancel()
 	runIDs := []string{uuid.NewString(), uuid.NewString()}
 	sort.Strings(runIDs)
@@ -451,7 +451,7 @@ func TestRunForkRevisionCaptureOrdersMultiRunLocksDeterministically(t *testing.T
 
 func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	store := &PostgresStore{DB: db}
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 	agentID := "revision-lifecycle-agent"
@@ -552,7 +552,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 
 func TestRunForkRevisionSessionProjectionIgnoresExcludedWriterChurnAndTracksStatusPresence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	store := &PostgresStore{DB: db}
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -636,7 +636,7 @@ func TestRunForkRevisionSessionProjectionIgnoresExcludedWriterChurnAndTracksStat
 func TestScheduleNoOpTerminalMutationsDoNotPublishRunForkRevision(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -711,7 +711,7 @@ func TestScheduleNoOpTerminalMutationsDoNotPublishRunForkRevision(t *testing.T) 
 
 func TestRunForkRevisionDeletionPublishesTombstoneAndUnrevisionedDriftFailsClosed(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	timerID := uuid.NewString()

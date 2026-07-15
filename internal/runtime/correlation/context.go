@@ -20,6 +20,28 @@ type BundleSourceFact struct {
 	BundleFingerprint string
 }
 
+type runtimeInstanceIDContextKey struct{}
+
+func WithRuntimeInstanceID(ctx context.Context, runtimeInstanceID string) context.Context {
+	runtimeInstanceID = strings.TrimSpace(runtimeInstanceID)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if runtimeInstanceID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, runtimeInstanceIDContextKey{}, runtimeInstanceID)
+}
+
+func RuntimeInstanceIDFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	runtimeInstanceID, ok := ctx.Value(runtimeInstanceIDContextKey{}).(string)
+	runtimeInstanceID = strings.TrimSpace(runtimeInstanceID)
+	return runtimeInstanceID, ok && runtimeInstanceID != ""
+}
+
 func (f BundleSourceFact) Normalized() BundleSourceFact {
 	f.BundleHash = strings.TrimSpace(f.BundleHash)
 	f.BundleSource = strings.TrimSpace(f.BundleSource)

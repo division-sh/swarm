@@ -742,7 +742,7 @@ func insertSQLiteEntityStateDiff(ctx context.Context, tx *sql.Tx, runID string, 
 			sqliteNullUUID(causedByEvent), rec.WriterType, rec.WriterID, sqliteNullString(rec.HandlerStep), createdAt.UTC()); err != nil {
 			return fmt.Errorf("insert sqlite entity mutation: %w", err)
 		}
-		draft, admitted, err := runtimemutationlog.AuthorActivityDraft(runID, mutationID, rec, createdAt)
+		draft, admitted, err := runtimemutationlog.AuthorActivityDraft(ctx, runID, mutationID, rec, createdAt)
 		if err != nil {
 			return err
 		}

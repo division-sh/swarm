@@ -149,7 +149,7 @@ func TestEventBusPublish_UsesRouteTableWildcardSubscriberResolution(t *testing.T
 	}}
 	rt.rebuildLocked()
 	delete(rt.routes, eventType)
-	eb, err := NewEventBusWithOptions(InMemoryEventStore{}, EventBusOptions{RouteTable: rt})
+	eb, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{RouteTable: rt})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}

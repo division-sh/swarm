@@ -15,7 +15,7 @@ import (
 )
 
 func TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	sqliteStore := newSQLiteMailboxMaterializationAPIStore(t, ctx)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -84,5 +84,7 @@ func TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite(t *testing.T
 
 func newSQLiteMailboxMaterializationAPIStore(t *testing.T, ctx context.Context) *storepkg.SQLiteRuntimeStore {
 	t.Helper()
-	return storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	store := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	registerScopedAPITestCatalog(t, store, nil)
+	return store
 }

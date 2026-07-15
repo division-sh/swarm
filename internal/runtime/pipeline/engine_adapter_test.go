@@ -782,7 +782,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceReturnsMutationError(t *testin
 		},
 	}
 	runner := pipelineEngineActionRunner{coordinator: pc}
-	ok, err := runner.ExecuteAction(context.Background(), runtimecontracts.ActionSpec{ID: "record_evidence"}, runtimeregistry.ActionInstruction{Builtin: "record_evidence"}, runtimeengine.ExecutionContext{
+	ok, err := runner.ExecuteAction(testAuthorActivityContext(context.Background()), runtimecontracts.ActionSpec{ID: "record_evidence"}, runtimeregistry.ActionInstruction{Builtin: "record_evidence"}, runtimeengine.ExecutionContext{
 		Request: runtimeengine.ExecutionRequest{
 			EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 			NodeID:   identity.NormalizeNodeID("node-a"),
@@ -972,7 +972,7 @@ func TestPipelineEngineActionRunner_CreateFlowInstanceUsesExecutionBaseContextFo
 		},
 	}
 
-	ok, err := runner.ExecuteAction(context.Background(), action, runtimeregistry.ActionInstruction{Builtin: "create_flow_instance"}, runtimeengine.ExecutionContext{
+	ok, err := runner.ExecuteAction(testAuthorActivityContext(context.Background()), action, runtimeregistry.ActionInstruction{Builtin: "create_flow_instance"}, runtimeengine.ExecutionContext{
 		Base: base,
 		Request: runtimeengine.ExecutionRequest{
 			EntityID: identity.NormalizeEntityID("ent-1"),
@@ -1005,7 +1005,7 @@ func TestPipelineEngineActionRunner_MailboxWriteMaterializesIdempotentRow(t *tes
 	materializer := &recordingMailboxWriteMaterializer{}
 	pc := &PipelineCoordinator{mailboxMaterializer: materializer}
 	runner := pipelineEngineActionRunner{coordinator: pc}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	eventID := "11111111-1111-1111-1111-111111111111"
 	entityID := "22222222-2222-2222-2222-222222222222"
 	action := runtimecontracts.ActionSpec{
@@ -1095,7 +1095,7 @@ func TestPipelineEngineActionRunner_MailboxWriteMaterializesIdempotentRow(t *tes
 func TestPipelineEngineActionRunner_MailboxWriteFailsClosedOnMissingRequiredExpression(t *testing.T) {
 	materializer := &recordingMailboxWriteMaterializer{}
 	runner := pipelineEngineActionRunner{coordinator: &PipelineCoordinator{mailboxMaterializer: materializer}}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	eventID := "33333333-3333-3333-3333-333333333333"
 	action := runtimecontracts.ActionSpec{
 		ID: "mailbox_write",
@@ -2680,7 +2680,7 @@ func TestPipelineEnginePayloadShaper_UsesParentEntityForCrossFlowOutputs(t *test
 		},
 	}
 
-	internal, err := shaper.ShapeEmitPayload(context.Background(), req, "child/child.internal", map[string]any{"step": "done"})
+	internal, err := shaper.ShapeEmitPayload(testAuthorActivityContext(context.Background()), req, "child/child.internal", map[string]any{"step": "done"})
 	if err != nil {
 		t.Fatalf("ShapeEmitPayload internal: %v", err)
 	}
@@ -2691,7 +2691,7 @@ func TestPipelineEnginePayloadShaper_UsesParentEntityForCrossFlowOutputs(t *test
 		t.Fatalf("internal emit step = %#v, want done", got)
 	}
 
-	if _, err := shaper.ShapeEmitPayload(context.Background(), req, "child/child.done", map[string]any{"step": "done"}); err == nil {
+	if _, err := shaper.ShapeEmitPayload(testAuthorActivityContext(context.Background()), req, "child/child.done", map[string]any{"step": "done"}); err == nil {
 		t.Fatal("expected cross-flow undeclared field to fail closed")
 	} else if !errors.Is(err, runtimeengine.ErrEmitPayloadContractViolation) {
 		t.Fatalf("ShapeEmitPayload output error = %v, want %v", err, runtimeengine.ErrEmitPayloadContractViolation)
@@ -2734,7 +2734,7 @@ func TestPipelineEnginePayloadShaper_RejectsUndeclaredFieldsAcrossCrossFlowOutpu
 		},
 	}
 
-	_, err := shaper.ShapeEmitPayload(context.Background(), req, "child/child.done", map[string]any{
+	_, err := shaper.ShapeEmitPayload(testAuthorActivityContext(context.Background()), req, "child/child.done", map[string]any{
 		"vertical_id": "ent-child",
 		"result":      "accepted",
 	})
@@ -2782,7 +2782,7 @@ func TestPipelineEnginePayloadShaper_AllowsDeclaredPayloadOnActionSurface(t *tes
 		},
 	}
 
-	actionCtx := runtimeengine.WithEmitSurface(context.Background(), runtimeengine.EmitSurfaceAction)
+	actionCtx := runtimeengine.WithEmitSurface(testAuthorActivityContext(context.Background()), runtimeengine.EmitSurfaceAction)
 	payload, err := shaper.ShapeEmitPayload(actionCtx, req, "child/child.done", map[string]any{})
 	if err != nil {
 		t.Fatalf("ShapeEmitPayload action surface: %v", err)
@@ -2835,7 +2835,7 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnActionSurface
 		},
 	}
 
-	actionCtx := runtimeengine.WithEmitSurface(context.Background(), runtimeengine.EmitSurfaceAction)
+	actionCtx := runtimeengine.WithEmitSurface(testAuthorActivityContext(context.Background()), runtimeengine.EmitSurfaceAction)
 	_, err := shaper.ShapeEmitPayload(actionCtx, req, "child/child.internal", map[string]any{
 		"entity_id": "ent-child",
 	})
@@ -2890,7 +2890,7 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemp
 		},
 	}
 
-	_, err := shaper.ShapeEmitPayload(context.Background(), req, "child/inst-1/child.done", map[string]any{})
+	_, err := shaper.ShapeEmitPayload(testAuthorActivityContext(context.Background()), req, "child/inst-1/child.done", map[string]any{})
 	if err == nil {
 		t.Fatal("expected concrete template output missing required field to fail closed")
 	}
@@ -2898,7 +2898,7 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemp
 		t.Fatalf("ShapeEmitPayload concrete template output error = %v, want %v", err, runtimeengine.ErrEmitPayloadContractViolation)
 	}
 
-	if _, err := shaper.ShapeEmitPayload(context.Background(), req, "child/inst-1/child.done", map[string]any{"step": "done"}); err != nil {
+	if _, err := shaper.ShapeEmitPayload(testAuthorActivityContext(context.Background()), req, "child/inst-1/child.done", map[string]any{"step": "done"}); err != nil {
 		t.Fatalf("ShapeEmitPayload concrete template output with required field: %v", err)
 	}
 }
@@ -2946,7 +2946,7 @@ func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnActionSur
 		},
 	}
 
-	actionCtx := runtimeengine.WithEmitSurface(context.Background(), runtimeengine.EmitSurfaceAction)
+	actionCtx := runtimeengine.WithEmitSurface(testAuthorActivityContext(context.Background()), runtimeengine.EmitSurfaceAction)
 	_, err := shaper.ShapeEmitPayload(actionCtx, req, "child/child.internal", map[string]any{})
 	if err == nil {
 		t.Fatal("expected action surface envelope-only required field to fail closed")
@@ -3025,7 +3025,7 @@ func TestPipelineEnginePayloadShaper_UsesRootNamedTypeSchemaForChildOutput(t *te
 
 	for _, eventType := range []string{"handoff.completed", "child/handoff.completed"} {
 		t.Run(eventType, func(t *testing.T) {
-			payload, err := shaper.ShapeEmitPayload(context.Background(), req, eventType, map[string]any{
+			payload, err := shaper.ShapeEmitPayload(testAuthorActivityContext(context.Background()), req, eventType, map[string]any{
 				"evidence": map[string]any{"root_field": "ok"},
 			})
 			if err != nil {
@@ -3036,7 +3036,7 @@ func TestPipelineEnginePayloadShaper_UsesRootNamedTypeSchemaForChildOutput(t *te
 				t.Fatalf("payload = %#v, want root_field evidence", payload)
 			}
 
-			_, err = shaper.ShapeEmitPayload(context.Background(), req, eventType, map[string]any{
+			_, err = shaper.ShapeEmitPayload(testAuthorActivityContext(context.Background()), req, eventType, map[string]any{
 				"evidence": map[string]any{"child_field": "wrong catalog"},
 			})
 			if err == nil {
@@ -3088,7 +3088,7 @@ func TestPipelineEnginePayloadShaper_RejectsUndeclaredFieldsOnActionSurface(t *t
 		},
 	}
 
-	actionCtx := runtimeengine.WithEmitSurface(context.Background(), runtimeengine.EmitSurfaceAction)
+	actionCtx := runtimeengine.WithEmitSurface(testAuthorActivityContext(context.Background()), runtimeengine.EmitSurfaceAction)
 	_, err := shaper.ShapeEmitPayload(actionCtx, req, "child/child.done", map[string]any{
 		"entity_id":   "ent-child",
 		"vertical_id": "ent-child",
@@ -3166,7 +3166,7 @@ func TestPipelineEngineTimerApplierPersistsTimersAndDefersSchedulerToPostCommit(
 		timerScheduleStore: store,
 	}
 	actions := make([]func(), 0, 2)
-	ctx := withPipelinePostCommitActions(context.Background(), &actions)
+	ctx := withPipelinePostCommitActions(testAuthorActivityContext(context.Background()), &actions)
 	sc := Schedule{
 		AgentID:   "owner",
 		EventType: "timer.review",
@@ -3194,7 +3194,7 @@ func TestPipelineEngineTimerApplierPersistsTimersAndDefersSchedulerToPostCommit(
 	}
 
 	cancelActions := make([]func(), 0, 1)
-	cancelCtx := withPipelinePostCommitActions(context.Background(), &cancelActions)
+	cancelCtx := withPipelinePostCommitActions(testAuthorActivityContext(context.Background()), &cancelActions)
 	if err := pc.persistWorkflowTimerCancellation(cancelCtx, sc); err != nil {
 		t.Fatalf("persistWorkflowTimerCancellation: %v", err)
 	}

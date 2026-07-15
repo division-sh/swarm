@@ -18,7 +18,7 @@ import (
 
 func TestAgentManagerDefaultsLLMBackendFromCanonicalProfile(t *testing.T) {
 	am := NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{LLMBackend: "openai_compatible"})
-	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
+	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: models.AgentConfig{
 			ExecutionMode: "live",
 			ID:            "agent-1",

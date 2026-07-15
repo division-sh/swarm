@@ -54,7 +54,7 @@ func TestNormalizeRunForkSelectedContractRouteRecoveryRejectsCurrentRouteOwner(t
 func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -109,7 +109,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence(t
 func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -171,7 +171,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection
 func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJSONB(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -230,7 +230,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJS
 func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBundleHashJSONB(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -298,7 +298,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 func TestRecordRunForkSelectedContractRouteRecoveryRejectsJSONBTamperDuringManagerRecovery(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
 	eventID := uuid.NewString()

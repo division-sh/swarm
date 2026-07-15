@@ -144,3 +144,56 @@ func TestSQLitePostgresRegistryPersistenceParity(t *testing.T) {
 		t.Fatalf("backend rows differ\nsqlite: %#v\npostgres: %#v", sqliteRows, postgresRows)
 	}
 }
+
+func TestSQLitePostgresExactRuntimeBundleScopeFilterParity(t *testing.T) {
+	_, postgres, _ := testutil.StartPostgres(t)
+	sqlite := openAuthorActivitySQLite(t)
+	now := time.Date(2026, 7, 14, 13, 0, 0, 0, time.UTC)
+	runtimeA, runtimeB := "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
+	bundleA, bundleB := "bundle-a", "bundle-b"
+	drafts := []Draft{
+		testDraft(KindInboundReceived, "received", now),
+		testDraft(KindEventEmitted, "emitted", now.Add(time.Second)),
+		testDraft(KindPlatformSignal, "runtime_reset", now.Add(2*time.Second)),
+		testDraft(KindInboundReceived, "received", now.Add(3*time.Second)),
+	}
+	drafts[0].Scope = BundleScope(runtimeA, bundleA)
+	drafts[1].Scope = BundleScope(runtimeA, bundleB)
+	drafts[2].Scope = RuntimeScope(runtimeA)
+	drafts[3].Scope = BundleScope(runtimeB, bundleA)
+	for i := range drafts {
+		drafts[i].SourceIdentity = drafts[i].SourceIdentity + string(rune('a'+i))
+		drafts[i].DedupKey = drafts[i].DedupKey + string(rune('a'+i))
+	}
+	commitDrafts(t, sqlite, DialectSQLite, drafts...)
+	commitDrafts(t, postgres, DialectPostgres, drafts...)
+
+	assertScope := func(t *testing.T, db *sql.DB, dialect Dialect, opts ListOptions, want []int64) {
+		t.Helper()
+		page, err := List(context.Background(), db, dialect, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := make([]int64, 0, len(page.Occurrences))
+		for _, occurrence := range page.Occurrences {
+			got = append(got, occurrence.Sequence)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("scope rows = %v, want %v", got, want)
+		}
+		head, err := Head(context.Background(), db)
+		if err != nil || head != 4 {
+			t.Fatalf("head = %d, %v, want 4", head, err)
+		}
+	}
+	for name, fixture := range map[string]struct {
+		db      *sql.DB
+		dialect Dialect
+	}{"sqlite": {sqlite, DialectSQLite}, "postgres": {postgres, DialectPostgres}} {
+		t.Run(name, func(t *testing.T) {
+			assertScope(t, fixture.db, fixture.dialect, ListOptions{RuntimeInstanceID: runtimeA, BundleHashes: []string{bundleA, bundleB}, IncludeRuntimeScope: true, Limit: 10}, []int64{1, 2, 3})
+			assertScope(t, fixture.db, fixture.dialect, ListOptions{RuntimeInstanceID: runtimeA, BundleHashes: []string{bundleA}, Limit: 10}, []int64{1})
+			assertScope(t, fixture.db, fixture.dialect, ListOptions{RuntimeInstanceID: runtimeB, BundleHashes: []string{bundleA}, IncludeRuntimeScope: true, Limit: 10}, []int64{4})
+		})
+	}
+}

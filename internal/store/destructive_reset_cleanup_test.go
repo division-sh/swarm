@@ -24,7 +24,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 
 	now := time.Date(2026, 5, 16, 18, 30, 0, 0, time.UTC)
@@ -116,7 +116,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 
 	now := time.Date(2026, 5, 16, 18, 35, 0, 0, time.UTC)
@@ -167,7 +167,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RejectsExecutingDirectiveAut
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 	now := time.Date(2026, 7, 10, 18, 0, 0, 0, time.UTC)
 	request := destructiveResetDirectiveReservation(t, seed.RunA, "reset-active", "reset-active-hash", now.Add(-2*time.Minute))
@@ -210,7 +210,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RetainsTerminalDirectiveAuth
 				t.Fatalf("NewPostgresStore: %v", err)
 			}
 			t.Cleanup(func() { _ = pg.DB.Close() })
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 			now := time.Date(2026, 7, 10, 19, 0, 0, 0, time.UTC)
 			request := destructiveResetDirectiveReservation(t, seed.RunA, "reset-terminal", "reset-terminal-hash", now)
@@ -276,7 +276,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_IncludeBundlesDeletesBundleC
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 	seedDestructiveResetBundleRows(t, ctx, pg)
 
@@ -318,7 +318,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_ExcludeBundlesPreservesBundl
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 	seedDestructiveResetBundleRows(t, ctx, pg)
 
@@ -360,7 +360,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunIncludeBundlesCountsWi
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 	seedDestructiveResetBundleRows(t, ctx, pg)
 
@@ -396,7 +396,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_IncludeBundlesRejectsOutOfPl
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	seedDestructiveResetBundleRows(t, ctx, pg)
 	outOfPlanRun := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `
@@ -440,7 +440,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DoesNotDeleteRunsCreatedAfte
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	seedDestructiveResetCleanupRows(t, ctx, pg)
 	plan, err := (destructivereset.InventoryPlanner{Reader: pg}).BuildPlan(ctx, destructivereset.Request{ActorTokenID: "operator-token", IncludeBundles: false, IncludeBundlesSet: true})
 	if err != nil {
@@ -497,7 +497,7 @@ func TestPostgresStore_DestructiveResetPlanCapturesManagedContainersBeforeCleanu
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	seedDestructiveResetCleanupRows(t, ctx, pg)
 	containerRefs := []destructivereset.ContainerRef{{
 		Name:          "swarm-agent-agent-a",
@@ -549,7 +549,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	lateRunID := uuid.NewString()
@@ -738,7 +738,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	cleanupRunID := uuid.NewString()
 	preservedSourceRunID := uuid.NewString()
 	preservedForkRunID := uuid.NewString()
@@ -865,7 +865,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RollsBackOnUnknownForeignKey
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -917,7 +917,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RequiresAppliedQuiescence(t 
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
 	now := time.Date(2026, 5, 16, 18, 50, 0, 0, time.UTC)
-	_, err = pg.ApplyDestructiveResetCleanup(context.Background(), destructivereset.CleanupRequest{
+	_, err = pg.ApplyDestructiveResetCleanup(testAuthorActivityContext(), destructivereset.CleanupRequest{
 		ActorTokenID: "operator-token",
 		Result: destructivereset.Result{
 			OperationName: destructivereset.DefaultOperationName,
@@ -952,7 +952,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RejectsStaleQuiescenceEnvelo
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := pg.ApplyDestructiveResetCleanup(context.Background(), destructivereset.CleanupRequest{
+			_, err := pg.ApplyDestructiveResetCleanup(testAuthorActivityContext(), destructivereset.CleanupRequest{
 				ActorTokenID: "operator-token",
 				RequestedAt:  now,
 				Result: destructivereset.Result{
@@ -979,7 +979,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RequiresPlannedCleanupRunSet
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
 	now := time.Date(2026, 5, 16, 19, 0, 0, 0, time.UTC)
-	_, err = pg.ApplyDestructiveResetCleanup(context.Background(), destructivereset.CleanupRequest{
+	_, err = pg.ApplyDestructiveResetCleanup(testAuthorActivityContext(), destructivereset.CleanupRequest{
 		ActorTokenID: "operator-token",
 		RequestedAt:  now,
 		Result: destructivereset.Result{

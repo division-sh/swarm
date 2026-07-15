@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"database/sql"
 	"strings"
 	"testing"
@@ -17,8 +16,8 @@ import (
 
 func TestRecordDeadLetter_PersistsAndDedupes(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 
 	entityID := uuid.NewString()
 	evt := eventtest.PersistedProjection(
@@ -72,8 +71,8 @@ func TestRecordDeadLetter_PersistsAndDedupes(t *testing.T) {
 
 func TestRecordDeadLetter_AllowsNonUUIDEntityIDViaSourceEventPayload(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 
 	evt := eventtest.PersistedProjection(uuid.NewString(),
 		"deadletter.test",
@@ -113,8 +112,8 @@ func TestRecordDeadLetter_AllowsNonUUIDEntityIDViaSourceEventPayload(t *testing.
 
 func TestRecordDeadLetter_PersistsTargetResolutionFailureContext(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 
 	evt := eventtest.PersistedProjection(
 		uuid.NewString(),

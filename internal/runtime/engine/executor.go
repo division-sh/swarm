@@ -3158,7 +3158,7 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 	evt := events.NewChildEvent(
 		"",
 		events.EventType(strings.TrimSpace(eventType)),
-		"",
+		strings.TrimSpace(frame.req.NodeID.String()),
 		"",
 		encoded,
 		chainDepth,

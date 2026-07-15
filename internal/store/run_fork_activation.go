@@ -47,7 +47,9 @@ type RunForkActivation struct {
 type runForkActivationLineage struct {
 	ForkRunID         string
 	ForkStatus        string
+	ForkBundleHash    string
 	SourceRunID       string
+	SourceBundleHash  string
 	ForkEventID       string
 	ForkEventName     string
 	ForkEventTime     time.Time
@@ -231,11 +233,19 @@ func recordRunForkActivationAuthorActivity(ctx context.Context, lineage runForkA
 		}{runID: lineage.SourceRunID, transition: "forked", forkRunID: lineage.ForkRunID})
 	}
 	for _, occurrence := range occurrences {
+		bundleHash := lineage.ForkBundleHash
+		if occurrence.runID == lineage.SourceRunID {
+			bundleHash = lineage.SourceBundleHash
+		}
+		occurrenceScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, bundleHash)
+		if err != nil {
+			return fmt.Errorf("record run fork activation source scope: %w", err)
+		}
 		transitionID := uuid.NewString()
 		if err := runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
 			Kind: runtimeauthoractivity.KindRunLifecycle, Transition: occurrence.transition,
 			SourceOwner: "runs", SourceIdentity: transitionID, DedupKey: "run-transition:" + transitionID,
-			OccurredAt: now.UTC(), RunID: occurrence.runID,
+			OccurredAt: now.UTC(), RunID: occurrence.runID, Scope: occurrenceScope,
 			Projection: runtimeauthoractivity.Projection{
 				SubjectType: "run", SubjectID: occurrence.runID, ParentRunID: occurrence.parentRunID,
 				ForkRunID: occurrence.forkRunID, TriggerEventType: lineage.ForkEventName,
@@ -308,7 +318,9 @@ func loadRunForkActivationLineage(ctx context.Context, tx *sql.Tx, forkRunID str
 		SELECT
 			f.run_id::text,
 			COALESCE(f.status, ''),
+			COALESCE(f.bundle_hash, ''),
 			COALESCE(f.forked_from_run_id::text, ''),
+			COALESCE(s.bundle_hash, ''),
 			COALESCE(f.forked_from_event_id::text, ''),
 			COALESCE(s.status, ''),
 			COALESCE(e.event_name, ''),
@@ -321,7 +333,9 @@ func loadRunForkActivationLineage(ctx context.Context, tx *sql.Tx, forkRunID str
 	`, forkRunID).Scan(
 		&lineage.ForkRunID,
 		&lineage.ForkStatus,
+		&lineage.ForkBundleHash,
 		&lineage.SourceRunID,
+		&lineage.SourceBundleHash,
 		&lineage.ForkEventID,
 		&lineage.SourceRunStatus,
 		&lineage.ForkEventName,
@@ -340,7 +354,7 @@ func loadRunForkActivationLineage(ctx context.Context, tx *sql.Tx, forkRunID str
 		return runForkActivationLineage{}, fmt.Errorf("fork activation requires source run and fork point event")
 	}
 	lineage.ForkEventTime = forkEventTime.Time
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid FOR UPDATE`, lineage.SourceRunID).Scan(&lineage.SourceRunStatus); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT status, COALESCE(bundle_hash, '') FROM runs WHERE run_id = $1::uuid FOR UPDATE`, lineage.SourceRunID).Scan(&lineage.SourceRunStatus, &lineage.SourceBundleHash); err != nil {
 		return runForkActivationLineage{}, fmt.Errorf("lock source run: %w", err)
 	}
 	rows, err := tx.QueryContext(ctx, `
@@ -377,6 +391,8 @@ func loadRunForkActivationLineage(ctx context.Context, tx *sql.Tx, forkRunID str
 		return runForkActivationLineage{}, fmt.Errorf("read fork materialized state facts: %w", err)
 	}
 	lineage.SourceFlows = stringSetValues(sourceFlowSet)
+	lineage.ForkBundleHash = strings.TrimSpace(lineage.ForkBundleHash)
+	lineage.SourceBundleHash = strings.TrimSpace(lineage.SourceBundleHash)
 	return lineage, nil
 }
 

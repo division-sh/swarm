@@ -229,7 +229,7 @@ func TestEnsureBootWorkflowSchedulesSkipsLifecycleScopedRecurringTimers(t *testi
 		t.Fatalf("load bundle: %v", err)
 	}
 	store := &recordingRuntimeScheduleStore{}
-	err = ensureBootWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
+	err = ensureBootWorkflowSchedules(testAuthorActivityContext(context.Background()), store, nil, semanticOnlyWorkflowRuntime{
 		source: semanticview.Wrap(bundle),
 	})
 	if err != nil {
@@ -254,7 +254,7 @@ func TestEnsureBootWorkflowSchedulesRegistersGlobalBootRecurringTimers(t *testin
 			}},
 		},
 	}
-	err := ensureBootWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
+	err := ensureBootWorkflowSchedules(testAuthorActivityContext(context.Background()), store, nil, semanticOnlyWorkflowRuntime{
 		source: semanticview.Wrap(bundle),
 	})
 	if err != nil {
@@ -298,7 +298,7 @@ func TestEnsureBootWorkflowSchedulesRegistersGlobalBootOneShotTimers(t *testing.
 		},
 	}
 	before := time.Now().UTC()
-	err := ensureBootWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
+	err := ensureBootWorkflowSchedules(testAuthorActivityContext(context.Background()), store, nil, semanticOnlyWorkflowRuntime{
 		source: semanticview.Wrap(bundle),
 	})
 	if err != nil {
@@ -336,7 +336,7 @@ func TestEnsureBootWorkflowSchedulesSupportsCanonicalDayDelay(t *testing.T) {
 		},
 	}
 	before := time.Now().UTC()
-	err := ensureBootWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
+	err := ensureBootWorkflowSchedules(testAuthorActivityContext(context.Background()), store, nil, semanticOnlyWorkflowRuntime{
 		source: semanticview.Wrap(bundle),
 	})
 	if err != nil {
@@ -373,7 +373,7 @@ func TestEnsureBootWorkflowSchedulesPreservesActiveExactBootSchedule(t *testing.
 			}},
 		},
 	}
-	if err := ensureBootWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
+	if err := ensureBootWorkflowSchedules(testAuthorActivityContext(context.Background()), store, nil, semanticOnlyWorkflowRuntime{
 		source: semanticview.Wrap(bundle),
 	}); err != nil {
 		t.Fatalf("ensureBootWorkflowSchedules: %v", err)
@@ -404,7 +404,7 @@ func TestEnsureBootWorkflowSchedulesUsesRestoredSnapshotToAvoidRecreatingBootSch
 			}},
 		},
 	}
-	if err := ensureBootWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
+	if err := ensureBootWorkflowSchedules(testAuthorActivityContext(context.Background()), store, nil, semanticOnlyWorkflowRuntime{
 		source: semanticview.Wrap(bundle),
 	}, []runtimepipeline.Schedule{restored}); err != nil {
 		t.Fatalf("ensureBootWorkflowSchedules: %v", err)
@@ -431,7 +431,7 @@ func TestEnsureBootWorkflowSchedulesRendersPolicyDelayAtStartup(t *testing.T) {
 		},
 	}
 	before := time.Now().UTC()
-	if err := ensureBootWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
+	if err := ensureBootWorkflowSchedules(testAuthorActivityContext(context.Background()), store, nil, semanticOnlyWorkflowRuntime{
 		source: semanticview.Wrap(bundle),
 	}); err != nil {
 		t.Fatalf("ensureBootWorkflowSchedules: %v", err)
@@ -468,7 +468,7 @@ func TestEnsureBootWorkflowSchedulesSkipsUnsupportedBootCancelTimers(t *testing.
 			},
 		},
 	}
-	if err := ensureBootWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
+	if err := ensureBootWorkflowSchedules(testAuthorActivityContext(context.Background()), store, nil, semanticOnlyWorkflowRuntime{
 		source: semanticview.Wrap(bundle),
 	}); err != nil {
 		t.Fatalf("ensureBootWorkflowSchedules: %v", err)
@@ -487,7 +487,7 @@ func TestNewRuntime_SchedulerMarksSchedulesFiredThroughCanonicalTerminalHelper(t
 		t.Fatalf("load bundle: %v", err)
 	}
 	store := &recordingRuntimeScheduleStore{fired: make(chan runtimepipeline.Schedule, 1)}
-	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: &config.Config{
+	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
 		LLM:     config.LLMConfig{Backend: "anthropic"},
 	}, Stores: Stores{ScheduleStore: store}, Options: RuntimeOptions{
@@ -562,7 +562,7 @@ func TestRuntime_StartRestoresExactSchedulesDistinctByFlowInstance(t *testing.T)
 		},
 		fired: make(chan runtimepipeline.Schedule, 2),
 	}
-	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: &config.Config{
+	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
 		LLM:     config.LLMConfig{Backend: "anthropic"},
 	}, Stores: Stores{ScheduleStore: store}, Options: RuntimeOptions{
@@ -579,7 +579,7 @@ func TestRuntime_StartRestoresExactSchedulesDistinctByFlowInstance(t *testing.T)
 	}
 	t.Cleanup(rt.Scheduler.Stop)
 
-	runCtx, cancel := context.WithCancel(context.Background())
+	runCtx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
 	t.Cleanup(cancel)
 	if err := rt.Start(runCtx); err != nil {
 		t.Fatalf("Start: %v", err)

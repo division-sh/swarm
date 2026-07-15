@@ -175,13 +175,13 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	pg := &store.PostgresStore{DB: db}
 	pg.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
 
-	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(context.Background(), catalogRuntimeRunID))
+	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), catalogRuntimeRunID))
 	t.Cleanup(cancel)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
+		VALUES ($1::uuid, 'running', $2, $3, $4)
 		ON CONFLICT (run_id) DO NOTHING
-	`, catalogRuntimeRunID); err != nil {
+	`, catalogRuntimeRunID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint); err != nil {
 		t.Fatalf("seed catalog runtime run: %v", err)
 	}
 
@@ -200,13 +200,18 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 		RuntimeIngressStore: pg,
 		ConversationStore:   nil,
 	}, Options: runtime.RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     llmRuntime,
+		SelfCheck:         false,
+		WorkflowModule:    module,
+		LLMRuntime:        llmRuntime,
+		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+		BundleSourceFact:  authorActivityTestBundleSourceFact,
 	}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
+	}
+	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
+		t.Fatalf("PrepareAuthorActivityCatalog: %v", err)
 	}
 	if start {
 		if err := rt.Start(ctx); err != nil {
@@ -239,7 +244,7 @@ func catalogHarnessStartBoundary(t testing.TB, db *sql.DB) time.Time {
 	t.Helper()
 	appTime := time.Now().UTC()
 	var out time.Time
-	if err := db.QueryRowContext(context.Background(), `SELECT NOW()`).Scan(&out); err != nil {
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `SELECT NOW()`).Scan(&out); err != nil {
 		t.Fatalf("query catalog harness db time: %v", err)
 	}
 	dbTime := out.UTC()
@@ -494,7 +499,7 @@ func waitForCatalogHarnessDB(t testing.TB, db *sql.DB) {
 	if db == nil {
 		t.Fatal("catalog harness db is nil")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 5*time.Second)
 	defer cancel()
 	var lastErr error
 	for attempt := 0; attempt < 25; attempt++ {

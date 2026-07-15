@@ -954,7 +954,7 @@ func callReadOnlyProbeRPC(t *testing.T, handler *Handler, methodName string, par
 	if strings.TrimSpace(authHeader) != "" {
 		req.Header.Set("Authorization", authHeader)
 	}
-	handler.ServeHTTP(rec, req)
+	handler.ServeHTTP(rec, testAuthorActivityRequest(req))
 
 	if rec.Code != http.StatusOK {
 		return rec.Code, rpcResponse{}, rec.Body.String()

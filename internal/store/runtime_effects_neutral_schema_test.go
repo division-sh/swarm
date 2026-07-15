@@ -89,7 +89,7 @@ func proveRuntimeEffectsNeutralSchemaRegisteredAdapterParity(t *testing.T, fixtu
 			authorized := beginNeutralRecoveryAttempt(t, fixture, registration.Adapter, "authorized", false, false)
 			launched := beginNeutralRecoveryAttempt(t, fixture, registration.Adapter, "launched", true, false)
 			observed := beginNeutralRecoveryAttempt(t, fixture, registration.Adapter, "response-observed", true, true)
-			summary, err := fixture.store.ReconcileExternalEffectAttempts(context.Background(), time.Now().UTC().Add(time.Minute))
+			summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), time.Now().UTC().Add(time.Minute))
 			if err != nil {
 				t.Fatalf("reconcile %s attempts: %v", registration.Adapter, err)
 			}
@@ -156,7 +156,7 @@ func nonCompletionRegistrationsForParity(t *testing.T) []runtimeeffects.Registra
 
 func newNeutralEffectParityFixture(t *testing.T, store neutralEffectParityStore, db *sql.DB, sqlite bool) neutralEffectParityFixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	now := time.Now().UTC()
 	agentID := "neutral-effect-parity-agent"
 	runID := managedNormalEffectStoreTestRunID(agentID)
@@ -225,7 +225,7 @@ func proveCompletionOnlyAuthorityRejectsRegistration(t *testing.T, fixture neutr
 	t.Helper()
 	authority := completionOnlyAuthorityForParity(kind)
 	operationID := uuid.NewString()
-	ctx := runtimeeffects.WithAuthority(context.Background(), authority)
+	ctx := runtimeeffects.WithAuthority(testAuthorActivityContext(), authority)
 	_, err := controller.Authorize(ctx, runtimeeffects.AuthorizeRequest{
 		OperationID: operationID, Adapter: registration.Adapter,
 		RequestFingerprint: runtimeeffects.Fingerprint([]byte("hostile:" + registration.Adapter + ":" + string(kind))),
@@ -261,7 +261,7 @@ func completionOnlyAuthorityForParity(kind runtimeeffects.AuthorityKind) runtime
 		return runtimeeffects.Authority{
 			Kind: kind, ID: forkTurnID, ExecutionOwner: "hostile-forkchat", LeaseExpiresAt: now.Add(time.Minute), FenceGeneration: 1,
 			ForkChat: runtimeeffects.ConversationForkChatAuthority{
-				ForkTurnID: forkTurnID, ForkID: uuid.NewString(), ActorTokenID: "actor",
+				ForkTurnID: forkTurnID, ForkID: uuid.NewString(), BundleHash: authorActivityTestBundleHash, ActorTokenID: "actor",
 				RequestOccurrenceID: uuid.NewString(), RequestHash: "request",
 			},
 		}

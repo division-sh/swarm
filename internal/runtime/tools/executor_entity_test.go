@@ -1295,9 +1295,9 @@ accounts:
 	forkAt := at.Add(30 * time.Second)
 	ctx := unmanagedToolTestContext()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
-	`, sourceRunID, at.Add(-time.Minute)); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
+		VALUES ($1::uuid, 'running', $2, $3, $4, $5)
+	`, sourceRunID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -1394,9 +1394,9 @@ accounts:
 	forkAt := at.Add(30 * time.Second)
 	ctx := unmanagedToolTestContext()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
-	`, sourceRunID, at.Add(-time.Minute)); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
+		VALUES ($1::uuid, 'running', $2, $3, $4, $5)
+	`, sourceRunID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -2791,10 +2791,10 @@ const entityToolTestRunID = "11111111-1111-1111-1111-111111111111"
 func ensureEntityToolTestRun(t *testing.T, db *sql.DB) {
 	t.Helper()
 	if _, err := db.ExecContext(unmanagedToolTestContext(), `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
+		VALUES ($1::uuid, 'running', $2, $3, $4)
 		ON CONFLICT (run_id) DO NOTHING
-	`, entityToolTestRunID); err != nil {
+	`, entityToolTestRunID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint); err != nil {
 		t.Fatalf("seed entity tool test run: %v", err)
 	}
 }

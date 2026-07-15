@@ -21,6 +21,7 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	childID := "22222222-2222-2222-2222-222222222222"
 	grandchildID := "33333333-3333-3333-3333-333333333333"
 	pg := &store.PostgresStore{DB: db}
+	registerTestAuthorActivityCatalog(t, pg, "root.started", "child.started", "grandchild.done")
 	ctx := catalogRuntimeContext()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status)
@@ -56,7 +57,7 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	rootEventID := uuid.NewString()
 	childEventID := uuid.NewString()
 	grandchildEventID := uuid.NewString()
-	if err := pg.AppendEvent(context.Background(), eventtest.RootIngress(
+	if err := pg.AppendEvent(testAuthorActivityContext(context.Background()), eventtest.RootIngress(
 		rootEventID,
 		"root.started",
 		"",
@@ -70,7 +71,7 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	)); err != nil {
 		t.Fatalf("append root event: %v", err)
 	}
-	if err := pg.AppendEvent(context.Background(), eventtest.RootIngress(
+	if err := pg.AppendEvent(testAuthorActivityContext(context.Background()), eventtest.RootIngress(
 		childEventID,
 		"child.started",
 		"",
@@ -84,7 +85,7 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	)); err != nil {
 		t.Fatalf("append child event: %v", err)
 	}
-	if err := pg.AppendEvent(context.Background(), eventtest.RootIngress(
+	if err := pg.AppendEvent(testAuthorActivityContext(context.Background()), eventtest.RootIngress(
 		grandchildEventID,
 		"grandchild.done",
 		"",
@@ -213,7 +214,7 @@ func TestAssertEmittedEvents_AcceptsCrossFlowInheritDispatcherEmission(t *testin
 	h.bundle = bundle
 
 	insertCatalogAssertionEntityState(t, h, entityID, "dispatched")
-	if err := h.pg.AppendEvent(context.Background(), eventtest.RootIngress(
+	if err := h.pg.AppendEvent(testAuthorActivityContext(context.Background()), eventtest.RootIngress(
 		uuid.NewString(),
 		"score.requested",
 		"runtime",
@@ -243,11 +244,13 @@ func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
 	`, catalogRuntimeRunID); err != nil {
 		t.Fatalf("seed catalog assertion run: %v", err)
 	}
+	pg := &store.PostgresStore{DB: db}
+	registerTestAuthorActivityCatalog(t, pg, "score.requested")
 	return &runtimeHarness{
 		t:              t,
 		ctx:            ctx,
 		db:             db,
-		pg:             &store.PostgresStore{DB: db},
+		pg:             pg,
 		workflow:       runtimepipeline.NewWorkflowInstanceStore(db),
 		startedAt:      time.Now().UTC(),
 		publishedIDs:   map[string]struct{}{},
@@ -275,7 +278,7 @@ func insertCatalogAssertionEntityState(t *testing.T, h *runtimeHarness, entityID
 
 func insertCatalogAssertionDeadLetterEvent(t *testing.T, h *runtimeHarness, entityID string) {
 	t.Helper()
-	if err := h.pg.AppendEvent(context.Background(), eventtest.RootIngress(
+	if err := h.pg.AppendEvent(testAuthorActivityContext(context.Background()), eventtest.RootIngress(
 		uuid.NewString(),
 		"platform.dead_letter",
 		"runtime",

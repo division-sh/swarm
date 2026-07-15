@@ -21,7 +21,7 @@ import (
 func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext(context.Background())
 			cardStore, humanStore, idempotency, mailbox, workflowStore, db := newHumanTaskAckLossOwners(t, ctx, backend)
 			now := time.Date(2026, 7, 14, 14, 0, 0, 0, time.UTC)
 			runID := uuid.NewString()

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -166,6 +167,10 @@ func (startupManagerReplayRuntimeAgent) OnEvent(_ context.Context, evt events.Ev
 
 type startupRecoveryCapabilityEventStore struct{}
 
+func (startupRecoveryCapabilityEventStore) RegisterAuthorActivityEventCatalog(scope runtimeauthoractivity.Scope, descriptors []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {
+	return runtimeauthoractivity.NewEventCatalogRegistry().Register(scope, descriptors)
+}
+
 func (startupRecoveryCapabilityEventStore) CanonicalRuntimeLogCapability(context.Context) (bool, bool, error) {
 	return true, true, nil
 }
@@ -188,6 +193,10 @@ type startupRecoveryEventStore struct {
 	missing  []events.PersistedReplayEvent
 	routes   []runtimeflowidentity.Route
 	claimErr error
+}
+
+func (startupRecoveryEventStore) RegisterAuthorActivityEventCatalog(scope runtimeauthoractivity.Scope, descriptors []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {
+	return runtimeauthoractivity.NewEventCatalogRegistry().Register(scope, descriptors)
 }
 
 func (startupRecoveryEventStore) CanonicalRuntimeLogCapability(context.Context) (bool, bool, error) {
@@ -251,7 +260,7 @@ func testRecoveryDiagnosticsConfig(recoveryOnStartup bool) *config.Config {
 func latestStartupRecoveryDecisionLog(t *testing.T, db *sql.DB) (level, message string, failure *runtimefailures.Envelope, detail map[string]any) {
 	t.Helper()
 	var payloadRaw []byte
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT payload
 		FROM events
 		WHERE event_name = 'platform.runtime_log'
@@ -301,7 +310,7 @@ func requireNestedFailureCode(t testing.TB, detail map[string]any, key, code str
 
 func listRuntimeLogsByAction(t *testing.T, db *sql.DB, action string) []runtimeAftermathLog {
 	t.Helper()
-	rows, err := db.QueryContext(context.Background(), `
+	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), `
 		SELECT payload
 		FROM events
 		WHERE event_name = 'platform.runtime_log'
@@ -394,7 +403,7 @@ func assertContainsClass(t *testing.T, classes []string, want string) {
 }
 
 func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
@@ -408,7 +417,7 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 		}},
 	}
 
-	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false), Stores: Stores{
+	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
@@ -448,7 +457,7 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 }
 
 func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
@@ -466,7 +475,7 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 		}},
 	}
 
-	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false), Stores: Stores{
+	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
@@ -529,7 +538,7 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 }
 
 func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
@@ -543,7 +552,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 		}},
 	}
 
-	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
+	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
@@ -597,7 +606,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 }
 
 func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
@@ -632,7 +641,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 		},
 	}
 
-	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
+	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
@@ -729,7 +738,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 }
 
 func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
@@ -755,7 +764,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 		},
 	}
 
-	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
+	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
@@ -845,7 +854,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 }
 
 func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
@@ -856,7 +865,7 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 		claimErr: errors.New("claim failed"),
 	}
 
-	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
+	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
@@ -901,12 +910,12 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 }
 
 func TestRuntimeStart_RecoveryInspectionFailureDoesNotBlockRecoveryEnabledStartup(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
 
-	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
+	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
@@ -951,7 +960,7 @@ func TestRuntimeStart_RecoveryInspectionFailureDoesNotBlockRecoveryEnabledStartu
 }
 
 func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndDrop(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
@@ -982,7 +991,7 @@ func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndD
 		loadErr:           errors.New("load agents failed"),
 	}
 
-	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
+	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},

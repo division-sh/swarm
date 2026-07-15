@@ -290,7 +290,7 @@ func TestOperatorConversationReadSurfaceListRejectsRunIDFilterWithoutRunIDCapabi
 		},
 	}})
 
-	_, err = reader.ListOperatorConversations(context.Background(), OperatorConversationListOptions{
+	_, err = reader.ListOperatorConversations(testAuthorActivityContext(), OperatorConversationListOptions{
 		RunID: "11111111-1111-1111-1111-111111111111",
 	})
 	if !errors.Is(err, ErrOperatorConversationRunIDCapability) {
@@ -359,7 +359,7 @@ func TestOperatorConversationReadSurfaceListUsesCanonicalProjection(t *testing.T
 			"session_id", "agent_id", "run_id", "kind", "flow_instance", "memory_enabled", "memory_source", "status", "turn_count", "message_count", "runtime_state", "started_at", "ended_at", "updated_at",
 		}).AddRow("sess-1", "agent-1", runID, "live_session", "global", true, "authored", "active", 2, 4, []byte(`{"summary":"brief"}`), now, nil, now))
 
-	result, err := reader.ListOperatorConversations(context.Background(), OperatorConversationListOptions{
+	result, err := reader.ListOperatorConversations(testAuthorActivityContext(), OperatorConversationListOptions{
 		AgentID: "agent-1",
 		RunID:   runID,
 		Limit:   2,
@@ -407,7 +407,7 @@ func TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs(t *testing.
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0))
 
-	detail, err := reader.LoadOperatorAgent(context.Background(), "agent-1")
+	detail, err := reader.LoadOperatorAgent(testAuthorActivityContext(), "agent-1")
 	if err != nil {
 		t.Fatalf("LoadOperatorAgent: %v", err)
 	}
@@ -456,7 +456,7 @@ func TestOperatorAgentReadSurfaceListAgentsDoesNotDeriveStatusFromActiveLease(t 
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0))
 
-	result, err := reader.ListOperatorAgents(context.Background(), OperatorAgentListOptions{})
+	result, err := reader.ListOperatorAgents(testAuthorActivityContext(), OperatorAgentListOptions{})
 	if err != nil {
 		t.Fatalf("ListOperatorAgents: %v", err)
 	}
@@ -535,7 +535,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, runtimeState, 0, 0))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{QueueLimit: 1, QueueCursor: "cursor-1"})
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{QueueLimit: 1, QueueCursor: "cursor-1"})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
 	}
@@ -597,7 +597,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:            "agent-1",
@@ -731,7 +731,7 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:            "agent-1",
@@ -826,7 +826,7 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 }
 
 func TestSQLiteRuntimeStoreLoadAgentUsageSplitsExactAndEstimated(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-1", "active")
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-2", "active")
@@ -873,7 +873,7 @@ func TestSQLiteRuntimeStoreLoadAgentUsageSplitsExactAndEstimated(t *testing.T) {
 }
 
 func TestSQLiteRuntimeStoreLoadAgentUsageEmptyAndAgentExistence(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-empty", "active")
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-terminated", "terminated")
@@ -898,7 +898,7 @@ func TestSQLiteRuntimeStoreLoadAgentUsageEmptyAndAgentExistence(t *testing.T) {
 }
 
 func TestSQLiteRuntimeStoreLoadAgentUsageFailsClosedOnMalformedRows(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-1", "active")
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
@@ -944,7 +944,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsDoesNotRequireConve
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:            "agent-1",
@@ -996,7 +996,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	for _, agent := range []struct {
 		id   string
 		role string
@@ -1190,7 +1190,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 
 func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:            "agent-1",
@@ -1447,7 +1447,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsFailsClosedOnDeadLe
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:            "agent-1",
@@ -1510,7 +1510,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsAbsentLifecycle(t *testi
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
 	}
@@ -1657,7 +1657,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisDoesNotDeriveStatusFromActive
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
 	}
@@ -1688,7 +1688,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsActiveWithoutLatestTurn(
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{}`), 0, 0))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
 	}
@@ -1723,7 +1723,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsEmptyActiveOptionalRefs(
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{}`), 0, 0))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
 	}
@@ -1754,7 +1754,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedRuntime
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{"watchdog":{"state":"stale","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-05-12T09:05:00Z"}}`), 0, 0))
 
-	_, err = reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
+	_, err = reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err == nil || !strings.Contains(err.Error(), "decode latest agent session runtime_state") || !strings.Contains(err.Error(), "watchdog.state") {
 		t.Fatalf("LoadOperatorAgentDiagnosis err = %v, want runtime_state watchdog validation failure", err)
 	}
@@ -1782,7 +1782,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedLifecyc
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0))
 
-	_, err = reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
+	_, err = reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err == nil || !strings.Contains(err.Error(), "delivery_lifecycle.state") {
 		t.Fatalf("LoadOperatorAgentDiagnosis err = %v, want delivery_lifecycle.state failure", err)
 	}
@@ -1805,7 +1805,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisPropagatesCapabilityFailure(t
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
 	}, 0)
 
-	_, err = reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
+	_, err = reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err == nil || !strings.Contains(err.Error(), "events schema is unsupported") {
 		t.Fatalf("LoadOperatorAgentDiagnosis err = %v, want events capability failure", err)
 	}
@@ -1828,7 +1828,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedWithoutCanonicalTu
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
 	}, 0)
 
-	_, err = reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
+	_, err = reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err == nil || !strings.Contains(err.Error(), "agent_turns schema is unavailable") {
 		t.Fatalf("LoadOperatorAgentDiagnosis err = %v, want agent_turns capability failure", err)
 	}
@@ -1875,7 +1875,7 @@ func loadAgentDiagnosisWithLatestTurn(t *testing.T, turnID, taskID, entityID str
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "11111111-1111-1111-1111-111111111111", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 1, "", nil, []byte(`{}`), 0, 0))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if expectationsErr := mock.ExpectationsWereMet(); expectationsErr != nil {
 		t.Fatalf("expectations: %v", expectationsErr)
 	}

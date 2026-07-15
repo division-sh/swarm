@@ -203,10 +203,10 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 		res, err = tx.ExecContext(ctx, `
 			UPDATE conversation_fork_turns SET updated_at=updated_at
 			WHERE fork_turn_id=$1::uuid AND fork_id=$2::uuid AND actor_token_id=$3
-			  AND request_occurrence_id=$4::uuid AND request_hash=$5 AND state='executing'
-			  AND execution_owner=$6 AND fence_generation=$7 AND lease_expires_at>CURRENT_TIMESTAMP
+			  AND request_occurrence_id=$4::uuid AND request_hash=$5 AND bundle_hash=$6 AND state='executing'
+			  AND execution_owner=$7 AND fence_generation=$8 AND lease_expires_at>CURRENT_TIMESTAMP
 		`, forkchat.ForkTurnID, forkchat.ForkID, forkchat.ActorTokenID, forkchat.RequestOccurrenceID,
-			forkchat.RequestHash, authority.ExecutionOwner, authority.FenceGeneration)
+			forkchat.RequestHash, forkchat.BundleHash, authority.ExecutionOwner, authority.FenceGeneration)
 	case runtimeeffects.AuthorityStartupProbe:
 		startup := authority.StartupProbe
 		res, err = tx.ExecContext(ctx, `
@@ -252,10 +252,10 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 		res, err = tx.ExecContext(ctx, `
 			UPDATE conversation_fork_turns SET updated_at=updated_at
 			WHERE fork_turn_id=? AND fork_id=? AND actor_token_id=?
-			  AND request_occurrence_id=? AND request_hash=? AND state='executing'
+			  AND request_occurrence_id=? AND request_hash=? AND bundle_hash=? AND state='executing'
 			  AND execution_owner=? AND fence_generation=? AND `+sqliteCurrentLeaseSQL+`
 		`, forkchat.ForkTurnID, forkchat.ForkID, forkchat.ActorTokenID, forkchat.RequestOccurrenceID,
-			forkchat.RequestHash, authority.ExecutionOwner, authority.FenceGeneration)
+			forkchat.RequestHash, forkchat.BundleHash, authority.ExecutionOwner, authority.FenceGeneration)
 	case runtimeeffects.AuthorityStartupProbe:
 		startup := authority.StartupProbe
 		res, err = tx.ExecContext(ctx, `
@@ -431,38 +431,38 @@ func selectedRuntimeAuthorityMatches(authority runtimeeffects.Authority, current
 }
 
 func forkChatAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
-	var forkID, actor, occurrence, hash, state, owner string
+	var forkID, bundleHash, actor, occurrence, hash, state, owner string
 	var leaseCurrent bool
 	var fence uint64
-	err := q.QueryRowContext(ctx, `SELECT fork_id::text, actor_token_id, request_occurrence_id::text, request_hash, state, COALESCE(execution_owner,''), lease_expires_at > CURRENT_TIMESTAMP, fence_generation FROM conversation_fork_turns WHERE fork_turn_id=$1::uuid`, authority.ForkChat.ForkTurnID).
-		Scan(&forkID, &actor, &occurrence, &hash, &state, &owner, &leaseCurrent, &fence)
+	err := q.QueryRowContext(ctx, `SELECT fork_id::text, bundle_hash, actor_token_id, request_occurrence_id::text, request_hash, state, COALESCE(execution_owner,''), lease_expires_at > CURRENT_TIMESTAMP, fence_generation FROM conversation_fork_turns WHERE fork_turn_id=$1::uuid`, authority.ForkChat.ForkTurnID).
+		Scan(&forkID, &bundleHash, &actor, &occurrence, &hash, &state, &owner, &leaseCurrent, &fence)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return forkChatAuthorityMatches(authority, forkID, actor, occurrence, hash, state, owner, leaseCurrent, fence), nil
+	return forkChatAuthorityMatches(authority, forkID, bundleHash, actor, occurrence, hash, state, owner, leaseCurrent, fence), nil
 }
 
 func forkChatAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
-	var forkID, actor, occurrence, hash, state, owner string
+	var forkID, bundleHash, actor, occurrence, hash, state, owner string
 	var leaseCurrent bool
 	var fence uint64
-	err := q.QueryRowContext(ctx, `SELECT fork_id, actor_token_id, request_occurrence_id, request_hash, state, COALESCE(execution_owner,''), `+sqliteCurrentLeaseSQL+`, fence_generation FROM conversation_fork_turns WHERE fork_turn_id=?`, authority.ForkChat.ForkTurnID).
-		Scan(&forkID, &actor, &occurrence, &hash, &state, &owner, &leaseCurrent, &fence)
+	err := q.QueryRowContext(ctx, `SELECT fork_id, bundle_hash, actor_token_id, request_occurrence_id, request_hash, state, COALESCE(execution_owner,''), `+sqliteCurrentLeaseSQL+`, fence_generation FROM conversation_fork_turns WHERE fork_turn_id=?`, authority.ForkChat.ForkTurnID).
+		Scan(&forkID, &bundleHash, &actor, &occurrence, &hash, &state, &owner, &leaseCurrent, &fence)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return forkChatAuthorityMatches(authority, forkID, actor, occurrence, hash, state, owner, leaseCurrent, fence), nil
+	return forkChatAuthorityMatches(authority, forkID, bundleHash, actor, occurrence, hash, state, owner, leaseCurrent, fence), nil
 }
 
-func forkChatAuthorityMatches(authority runtimeeffects.Authority, forkID, actor, occurrence, hash, state, owner string, leaseCurrent bool, fence uint64) bool {
+func forkChatAuthorityMatches(authority runtimeeffects.Authority, forkID, bundleHash, actor, occurrence, hash, state, owner string, leaseCurrent bool, fence uint64) bool {
 	forkchat := authority.ForkChat
-	return forkID == forkchat.ForkID && actor == forkchat.ActorTokenID && occurrence == forkchat.RequestOccurrenceID && hash == forkchat.RequestHash &&
+	return forkID == forkchat.ForkID && bundleHash == forkchat.BundleHash && actor == forkchat.ActorTokenID && occurrence == forkchat.RequestOccurrenceID && hash == forkchat.RequestHash &&
 		state == "executing" && owner == authority.ExecutionOwner && fence == authority.FenceGeneration && leaseCurrent
 }
 
@@ -473,10 +473,11 @@ func claimOrValidateForkChatAuthorityPostgres(ctx context.Context, tx *sql.Tx, a
 		UPDATE conversation_fork_turns
 		SET state='executing', lease_expires_at=GREATEST(lease_expires_at,$4), updated_at=$5
 		WHERE fork_turn_id=$1::uuid AND fork_id=$6::uuid AND actor_token_id=$7
-		  AND request_occurrence_id=$8::uuid AND request_hash=$9 AND state IN ('prepared','executing')
+		  AND request_occurrence_id=$8::uuid AND request_hash=$9 AND bundle_hash=$10 AND state IN ('prepared','executing')
 		  AND execution_owner=$2 AND fence_generation=$3 AND lease_expires_at>CURRENT_TIMESTAMP
 	`, authority.ForkChat.ForkTurnID, authority.ExecutionOwner, authority.FenceGeneration, expires, now,
-		authority.ForkChat.ForkID, authority.ForkChat.ActorTokenID, authority.ForkChat.RequestOccurrenceID, authority.ForkChat.RequestHash)
+		authority.ForkChat.ForkID, authority.ForkChat.ActorTokenID, authority.ForkChat.RequestOccurrenceID, authority.ForkChat.RequestHash,
+		authority.ForkChat.BundleHash)
 	if err != nil {
 		return fmt.Errorf("claim forkchat authority: %w", err)
 	}
@@ -497,10 +498,10 @@ func claimOrValidateForkChatAuthoritySQLite(ctx context.Context, tx *sql.Tx, aut
 		UPDATE conversation_fork_turns
 		SET state='executing', lease_expires_at=CASE WHEN lease_expires_at>? THEN lease_expires_at ELSE ? END, updated_at=?
 		WHERE fork_turn_id=? AND fork_id=? AND actor_token_id=?
-		  AND request_occurrence_id=? AND request_hash=? AND state IN ('prepared','executing')
+		  AND request_occurrence_id=? AND request_hash=? AND bundle_hash=? AND state IN ('prepared','executing')
 		  AND execution_owner=? AND fence_generation=? AND `+sqliteCurrentLeaseSQL+`
 	`, expires, expires, now, authority.ForkChat.ForkTurnID, authority.ForkChat.ForkID, authority.ForkChat.ActorTokenID,
-		authority.ForkChat.RequestOccurrenceID, authority.ForkChat.RequestHash, authority.ExecutionOwner,
+		authority.ForkChat.RequestOccurrenceID, authority.ForkChat.RequestHash, authority.ForkChat.BundleHash, authority.ExecutionOwner,
 		authority.FenceGeneration)
 	if err != nil {
 		return fmt.Errorf("claim sqlite forkchat authority: %w", err)

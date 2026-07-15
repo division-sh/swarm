@@ -15,8 +15,8 @@ func TestPostgresStore_EventDeliveryRoutesPersistNodeTargetRows(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	ctx := context.Background()
-	pg := &PostgresStore{DB: db}
+	ctx := testAuthorActivityContext()
+	pg := newTestPostgresStore(t, db)
 	evt := eventtest.PersistedProjection(
 		uuid.NewString(),
 		events.EventType("child/output.done"),
@@ -75,7 +75,7 @@ func TestDeliveryRouteSyntheticProjectionRoundTripsOnBothBackends(t *testing.T) 
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, seed := tc.setup(t)
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
 			eventID := uuid.NewString()
 			if err := seed(ctx, runID, eventID); err != nil {

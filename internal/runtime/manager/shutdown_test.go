@@ -66,14 +66,14 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 		}
 		return agent, nil
 	})
-	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
+	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id},
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
-	am.Run(managedExecutionTestContext(t, context.Background()))
-	if err := bus.Publish(context.Background(), eventtest.RootIngress("evt-in-1",
+	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress("evt-in-1",
 		events.EventType("test.in"),
 		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -151,14 +151,14 @@ func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t
 	am := NewAgentManager(bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
 	})
-	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
+	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id},
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
-	am.Run(managedExecutionTestContext(t, context.Background()))
-	if err := bus.Publish(context.Background(), eventtest.RootIngress("evt-in-1",
+	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress("evt-in-1",
 		events.EventType("test.in"),
 		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -232,15 +232,15 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 	am := NewAgentManager(bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
 	})
-	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
+	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id},
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
-	am.Run(managedExecutionTestContext(t, context.Background()))
+	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
 	for _, eventID := range []string{"evt-in-1", "evt-in-2"} {
-		if err := bus.Publish(context.Background(), eventtest.RootIngress(eventID,
+		if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress(eventID,
 			events.EventType("test.in"),
 			"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 			t.Fatalf("Publish(%s): %v", eventID, err)
@@ -309,19 +309,19 @@ func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing
 	am := NewAgentManager(bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
 	})
-	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
+	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id},
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
-	am.Run(managedExecutionTestContext(t, context.Background()))
+	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
 	initialRunCtx, _, _ := am.lifecycle.runSnapshot()
 	if initialRunCtx == nil {
 		t.Fatal("expected initial run context")
 	}
 
-	if err := bus.Publish(context.Background(), eventtest.RootIngress("evt-in-1",
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress("evt-in-1",
 		events.EventType("test.in"),
 		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -346,7 +346,7 @@ func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	am.Run(managedExecutionTestContext(t, context.Background()))
+	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
 
 	currentRunCtx, _, running := am.lifecycle.runSnapshot()
 	shuttingDown := am.lifecycle.phaseSnapshot() == runtimeLifecycleShuttingDown

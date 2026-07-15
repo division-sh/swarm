@@ -45,6 +45,10 @@ func InsertFork(ctx context.Context, db DBTX, forkRunID, status, sourceRunID, fo
 	if err != nil {
 		return err
 	}
+	occurrenceScope, err := runtimeauthoractivity.BundleScopeForSource(ctx, opts.BundleHash)
+	if err != nil {
+		return fmt.Errorf("insert fork run: %w", err)
+	}
 
 	cols := []string{
 		"run_id",
@@ -86,7 +90,7 @@ func InsertFork(ctx context.Context, db DBTX, forkRunID, status, sourceRunID, fo
 	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindRunLifecycle, Transition: transition,
 		SourceOwner: "runs", SourceIdentity: forkRunID, DedupKey: "run-created:" + forkRunID,
-		OccurredAt: startedAt.UTC(), RunID: forkRunID,
+		OccurredAt: startedAt.UTC(), RunID: forkRunID, Scope: occurrenceScope,
 		Projection: runtimeauthoractivity.Projection{
 			SubjectType: "run", SubjectID: forkRunID, ParentRunID: sourceRunID, TriggerEventType: "run.fork",
 		},

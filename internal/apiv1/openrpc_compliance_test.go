@@ -391,7 +391,7 @@ func TestServiceDiscoveryPolicyDoesNotServeRPCDiscover(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"discover","method":"rpc.discover","params":{}}`))
 	req.Header.Set("Authorization", "Bearer "+testToken)
-	handler.ServeHTTP(rec, req)
+	handler.ServeHTTP(rec, testAuthorActivityRequest(req))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("/v1/rpc status = %d, want 200 body=%s", rec.Code, rec.Body.String())

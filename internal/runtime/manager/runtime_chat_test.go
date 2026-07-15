@@ -115,7 +115,7 @@ func (b *directiveTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLo
 func installDirectiveTestAgent(t *testing.T, am *AgentManager, agent Agent) {
 	t.Helper()
 	rec := PersistedAgent{Config: models.AgentConfig{ExecutionMode: "live", ID: agent.ID()}, Status: "active", HiredBy: "test"}
-	if err := am.lifecycle.registerExecution(context.Background(), rec, false, agent); err != nil {
+	if err := am.lifecycle.registerExecution(testAuthorActivityContext(context.Background()), rec, false, agent); err != nil {
 		t.Fatalf("register directive test agent: %v", err)
 	}
 	am.lifecycle.mu.Lock()
@@ -347,7 +347,7 @@ func TestAgentManager_ChatWithAgentPersistsDirectiveEventBeforeBoardStep(t *test
 	am := NewAgentManager(bus, nil, store)
 	installDirectiveTestAgent(t, am, agent)
 
-	got, err := am.ChatWithAgent(context.Background(), agent.id, "run corpus")
+	got, err := am.ChatWithAgent(testAuthorActivityContext(context.Background()), agent.id, "run corpus")
 	if err != nil {
 		t.Fatalf("ChatWithAgent: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestAgentManager_SendDirectivePersistsCanonicalDirectiveEventBeforeBoardSte
 	am := NewAgentManager(bus, nil, store)
 	installDirectiveTestAgent(t, am, agent)
 
-	result, err := am.SendDirective(context.Background(), runtimeagentcontrol.SendDirectiveRequest{
+	result, err := am.SendDirective(testAuthorActivityContext(context.Background()), runtimeagentcontrol.SendDirectiveRequest{
 		AgentID:    agent.id,
 		Directive:  "run corpus",
 		Source:     runtimeagentcontrol.DirectiveSourceV1RPC,
@@ -433,7 +433,7 @@ func TestAgentManager_SendDirectiveTargetErrorFailsBeforeBoardStep(t *testing.T)
 	am := NewAgentManager(bus, nil, store)
 	installDirectiveTestAgent(t, am, agent)
 
-	_, err := am.SendDirective(context.Background(), runtimeagentcontrol.SendDirectiveRequest{
+	_, err := am.SendDirective(testAuthorActivityContext(context.Background()), runtimeagentcontrol.SendDirectiveRequest{
 		AgentID:   agent.id,
 		Directive: "run corpus",
 		RunID:     "00000000-0000-0000-0000-000000000404",
@@ -471,7 +471,7 @@ func TestAgentManager_SendDirectiveConcurrentSameKeyExecutesBoardStepOnce(t *tes
 	firstResult := make(chan runtimeagentcontrol.SendDirectiveResult, 1)
 	firstErr := make(chan error, 1)
 	go func() {
-		result, err := am.SendDirective(context.Background(), req)
+		result, err := am.SendDirective(testAuthorActivityContext(context.Background()), req)
 		firstResult <- result
 		firstErr <- err
 	}()
@@ -481,7 +481,7 @@ func TestAgentManager_SendDirectiveConcurrentSameKeyExecutesBoardStepOnce(t *tes
 		t.Fatal("first BoardStep did not start")
 	}
 
-	if _, err := am.SendDirective(context.Background(), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveInProgress) {
+	if _, err := am.SendDirective(testAuthorActivityContext(context.Background()), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveInProgress) {
 		t.Fatalf("concurrent same-key error = %v, want in progress", err)
 	}
 	close(release)
@@ -532,7 +532,7 @@ func TestAgentManager_SendDirectiveHeartbeatTimeoutAvoidsSerializedOutcomeBounda
 	resultCh := make(chan runtimeagentcontrol.SendDirectiveResult, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		result, err := am.SendDirective(context.Background(), req)
+		result, err := am.SendDirective(testAuthorActivityContext(context.Background()), req)
 		resultCh <- result
 		errCh <- err
 	}()
@@ -560,14 +560,14 @@ func TestAgentManager_SendDirectiveHeartbeatTimeoutAvoidsSerializedOutcomeBounda
 	if result := <-resultCh; result.OK {
 		t.Fatalf("result=%#v, want no success after heartbeat shutdown timeout", result)
 	}
-	operation, ok, err := directiveStore.LoadDirectiveOperationByKey(context.Background(), runtimeagentcontrol.DirectiveOperationMethod, req.ActorTokenID, req.IdempotencyKey)
+	operation, ok, err := directiveStore.LoadDirectiveOperationByKey(testAuthorActivityContext(context.Background()), runtimeagentcontrol.DirectiveOperationMethod, req.ActorTokenID, req.IdempotencyKey)
 	if err != nil || !ok || operation.State != runtimeagentcontrol.DirectiveOperationExecuting {
 		t.Fatalf("durable operation=%#v ok=%v err=%v", operation, ok, err)
 	}
 	if directiveStore.recordExecutedCallCount() != 0 || directiveStore.finalizeFailureCallCount() != 0 || agent.calls != 1 {
 		t.Fatalf("post-timeout result/failure persistence calls=%d/%d BoardStep calls=%d, want 0/0/1", directiveStore.recordExecutedCallCount(), directiveStore.finalizeFailureCallCount(), agent.calls)
 	}
-	if _, err := am.SendDirective(context.Background(), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveInProgress) {
+	if _, err := am.SendDirective(testAuthorActivityContext(context.Background()), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveInProgress) {
 		t.Fatalf("same-key retry before lease expiry error = %v, want in progress", err)
 	}
 	if agent.calls != 1 {
@@ -585,11 +585,11 @@ func TestAgentManager_SendDirectiveHeartbeatTimeoutAvoidsSerializedOutcomeBounda
 	operation.ExecutionLeaseExpiresAt = time.Now().UTC().Add(-time.Second)
 	directiveStore.operations[operation.OperationID] = operation
 	directiveStore.mu.Unlock()
-	reconciled, ok, err := directiveStore.ReconcileDirectiveOperation(context.Background(), operation.OperationID, time.Now().UTC(), directiveOperationTTL)
+	reconciled, ok, err := directiveStore.ReconcileDirectiveOperation(testAuthorActivityContext(context.Background()), operation.OperationID, time.Now().UTC(), directiveOperationTTL)
 	if err != nil || !ok || reconciled.State != runtimeagentcontrol.DirectiveOperationIndeterminate {
 		t.Fatalf("reconciled operation=%#v ok=%v err=%v", reconciled, ok, err)
 	}
-	if _, err := am.SendDirective(context.Background(), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
+	if _, err := am.SendDirective(testAuthorActivityContext(context.Background()), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
 		t.Fatalf("same-key retry after lease reconciliation error = %v, want indeterminate", err)
 	}
 	if agent.calls != 1 || directiveStore.recordExecutedCallCount() != 0 || directiveStore.finalizeFailureCallCount() != 0 {
@@ -623,7 +623,7 @@ func TestAgentManager_SendDirectiveHeartbeatTimeoutSkipsSerializedFailurePersist
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := am.SendDirective(context.Background(), runtimeagentcontrol.SendDirectiveRequest{
+		_, err := am.SendDirective(testAuthorActivityContext(context.Background()), runtimeagentcontrol.SendDirectiveRequest{
 			AgentID:        agent.id,
 			Directive:      "run corpus",
 			ActorTokenID:   "operator-token",
@@ -703,7 +703,7 @@ func TestAgentManager_SendDirectiveCompliantHeartbeatReleasesSerializedOutcomeBo
 			resultCh := make(chan runtimeagentcontrol.SendDirectiveResult, 1)
 			errCh := make(chan error, 1)
 			go func() {
-				result, err := am.SendDirective(context.Background(), req)
+				result, err := am.SendDirective(testAuthorActivityContext(context.Background()), req)
 				resultCh <- result
 				errCh <- err
 			}()
@@ -731,7 +731,7 @@ func TestAgentManager_SendDirectiveCompliantHeartbeatReleasesSerializedOutcomeBo
 			default:
 				t.Fatal("context-compliant renewal did not release before outcome persistence")
 			}
-			operation, ok, loadErr := directiveStore.LoadDirectiveOperationByKey(context.Background(), runtimeagentcontrol.DirectiveOperationMethod, req.ActorTokenID, req.IdempotencyKey)
+			operation, ok, loadErr := directiveStore.LoadDirectiveOperationByKey(testAuthorActivityContext(context.Background()), runtimeagentcontrol.DirectiveOperationMethod, req.ActorTokenID, req.IdempotencyKey)
 			if loadErr != nil || !ok || operation.State != tc.wantState {
 				t.Fatalf("durable operation=%#v ok=%v err=%v", operation, ok, loadErr)
 			}
@@ -751,17 +751,17 @@ func TestAgentManager_SendDirectiveCompletionRepairDoesNotRepeatBoardStep(t *tes
 	installDirectiveTestAgent(t, am, agent)
 	req := runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, Directive: "run corpus", ActorTokenID: "operator-token", IdempotencyKey: "completion-key", RequestHash: "completion-hash"}
 
-	if _, err := am.SendDirective(context.Background(), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveCompletionPending) {
+	if _, err := am.SendDirective(testAuthorActivityContext(context.Background()), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveCompletionPending) {
 		t.Fatalf("first SendDirective error = %v, want completion pending", err)
 	}
-	operation, ok, err := directiveStore.LoadDirectiveOperationByKey(context.Background(), runtimeagentcontrol.DirectiveOperationMethod, req.ActorTokenID, req.IdempotencyKey)
+	operation, ok, err := directiveStore.LoadDirectiveOperationByKey(testAuthorActivityContext(context.Background()), runtimeagentcontrol.DirectiveOperationMethod, req.ActorTokenID, req.IdempotencyKey)
 	if err != nil || !ok || operation.State != runtimeagentcontrol.DirectiveOperationExecuted {
 		t.Fatalf("operation after failed finalization = %#v ok=%v err=%v", operation, ok, err)
 	}
 	directiveStore.mu.Lock()
 	directiveStore.finalizeSuccessErr = nil
 	directiveStore.mu.Unlock()
-	result, err := am.SendDirective(context.Background(), req)
+	result, err := am.SendDirective(testAuthorActivityContext(context.Background()), req)
 	if err != nil {
 		t.Fatalf("repair SendDirective: %v", err)
 	}
@@ -779,10 +779,10 @@ func TestAgentManager_SendDirectiveResultPersistenceFailureNeverReadmitsBoardSte
 	installDirectiveTestAgent(t, am, agent)
 	req := runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, Directive: "run corpus", ActorTokenID: "operator-token", IdempotencyKey: "indeterminate-key", RequestHash: "indeterminate-hash"}
 
-	if _, err := am.SendDirective(context.Background(), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
+	if _, err := am.SendDirective(testAuthorActivityContext(context.Background()), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
 		t.Fatalf("first SendDirective error = %v, want indeterminate", err)
 	}
-	operation, ok, err := directiveStore.LoadDirectiveOperationByKey(context.Background(), runtimeagentcontrol.DirectiveOperationMethod, req.ActorTokenID, req.IdempotencyKey)
+	operation, ok, err := directiveStore.LoadDirectiveOperationByKey(testAuthorActivityContext(context.Background()), runtimeagentcontrol.DirectiveOperationMethod, req.ActorTokenID, req.IdempotencyKey)
 	if err != nil || !ok || operation.State != runtimeagentcontrol.DirectiveOperationExecuting {
 		t.Fatalf("durable operation after result failure = %#v ok=%v err=%v", operation, ok, err)
 	}
@@ -791,7 +791,7 @@ func TestAgentManager_SendDirectiveResultPersistenceFailureNeverReadmitsBoardSte
 	directiveStore.operations[operation.OperationID] = operation
 	directiveStore.recordExecutedErr = nil
 	directiveStore.mu.Unlock()
-	if _, err := am.SendDirective(context.Background(), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
+	if _, err := am.SendDirective(testAuthorActivityContext(context.Background()), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
 		t.Fatalf("retry error = %v, want indeterminate", err)
 	}
 	if agent.calls != 1 || len(directiveStore.events) != 1 {
@@ -809,11 +809,11 @@ func TestAgentManager_SendDirectiveExecutionFailureIsDurableAndReplaySafe(t *tes
 	req := runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, Directive: "run corpus", ActorTokenID: "operator-token", IdempotencyKey: "failure-key", RequestHash: "failure-hash"}
 
 	for attempt := 0; attempt < 2; attempt++ {
-		if _, err := am.SendDirective(context.Background(), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveExecutionFailed) {
+		if _, err := am.SendDirective(testAuthorActivityContext(context.Background()), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveExecutionFailed) {
 			t.Fatalf("attempt %d error = %v, want execution failed", attempt+1, err)
 		}
 	}
-	operation, ok, err := directiveStore.LoadDirectiveOperationByKey(context.Background(), runtimeagentcontrol.DirectiveOperationMethod, req.ActorTokenID, req.IdempotencyKey)
+	operation, ok, err := directiveStore.LoadDirectiveOperationByKey(testAuthorActivityContext(context.Background()), runtimeagentcontrol.DirectiveOperationMethod, req.ActorTokenID, req.IdempotencyKey)
 	if err != nil || !ok || operation.State != runtimeagentcontrol.DirectiveOperationFailed || operation.Failure == nil || operation.Failure.Detail.Code != runtimeagentcontrol.DirectiveBoardStepFailedDetail {
 		t.Fatalf("failed operation = %#v ok=%v err=%v", operation, ok, err)
 	}
@@ -839,14 +839,14 @@ func TestAgentManager_SendDirectiveExpiredTerminalKeyStartsFreshOperation(t *tes
 			installDirectiveTestAgent(t, am, agent)
 			firstReq := runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, Directive: "old directive", ActorTokenID: "operator-token", IdempotencyKey: "expired-key", RequestHash: "old-hash"}
 
-			firstResult, err := am.SendDirective(context.Background(), firstReq)
+			firstResult, err := am.SendDirective(testAuthorActivityContext(context.Background()), firstReq)
 			if tc.firstErr == nil && err != nil {
 				t.Fatalf("first SendDirective: %v", err)
 			}
 			if tc.firstErr != nil && !errors.Is(err, runtimeagentcontrol.ErrDirectiveExecutionFailed) {
 				t.Fatalf("first SendDirective error = %v, want execution failed", err)
 			}
-			operation, ok, err := directiveStore.LoadDirectiveOperationByKey(context.Background(), runtimeagentcontrol.DirectiveOperationMethod, firstReq.ActorTokenID, firstReq.IdempotencyKey)
+			operation, ok, err := directiveStore.LoadDirectiveOperationByKey(testAuthorActivityContext(context.Background()), runtimeagentcontrol.DirectiveOperationMethod, firstReq.ActorTokenID, firstReq.IdempotencyKey)
 			if err != nil || !ok {
 				t.Fatalf("load first operation ok=%v err=%v", ok, err)
 			}
@@ -856,7 +856,7 @@ func TestAgentManager_SendDirectiveExpiredTerminalKeyStartsFreshOperation(t *tes
 			directiveStore.mu.Unlock()
 			agent.err = nil
 
-			secondResult, err := am.SendDirective(context.Background(), runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, Directive: "new directive", ActorTokenID: firstReq.ActorTokenID, IdempotencyKey: firstReq.IdempotencyKey, RequestHash: "new-hash"})
+			secondResult, err := am.SendDirective(testAuthorActivityContext(context.Background()), runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, Directive: "new directive", ActorTokenID: firstReq.ActorTokenID, IdempotencyKey: firstReq.IdempotencyKey, RequestHash: "new-hash"})
 			if err != nil {
 				t.Fatalf("fresh SendDirective after expiry: %v", err)
 			}
@@ -874,7 +874,7 @@ func TestAgentManager_ChatWithAgent_DeniesWhenRuntimeShutdownAdmissionClosed(t *
 	})
 	installDirectiveTestAgent(t, am, agent)
 
-	if _, err := am.ChatWithAgent(context.Background(), agent.id, "run corpus"); err == nil || err.Error() != "runtime shutting down" {
+	if _, err := am.ChatWithAgent(testAuthorActivityContext(context.Background()), agent.id, "run corpus"); err == nil || err.Error() != "runtime shutting down" {
 		t.Fatalf("ChatWithAgent err = %v, want runtime shutting down", err)
 	}
 	if agent.calls != 0 {

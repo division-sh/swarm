@@ -40,7 +40,7 @@ func TestImportBoundaryWildcardScopesImportedPackageToOwnSubtreeByDefault(t *tes
 	}
 
 	store := &routePersistenceTestStore{}
-	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestImportBoundaryWildcardObserveGrantAddsNarrowSiblingCandidate(t *testing
 	}
 
 	store := &routePersistenceTestStore{}
-	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestImportBoundaryWildcardBoundedGrantDeliversAcrossSurfaces(t *testing.T) 
 	}
 
 	store := &routePersistenceTestStore{}
-	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 				}
 			}
 			store := &routePersistenceTestStore{}
-			eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source, RouteTable: prebuilt})
+			eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source, RouteTable: prebuilt})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -446,7 +446,7 @@ func assertImportBoundaryWildcardAuthorizationDeliversAcrossSurfaces(t *testing.
 		t.Fatal("NodeEventHandler(worker-listener, producer/task.done) did not resolve through grant")
 	}
 	store := &routePersistenceTestStore{}
-	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -573,7 +573,7 @@ func assertImportBoundaryWildcardAuthorizationAmbiguityFailsClosedAcrossSurfaces
 	if !errors.As(err, &authorizationErr) || len(authorizationErr.Issues) != 1 {
 		t.Fatalf("DeriveRouteTable error = %v, want typed pub/sub authorization error", err)
 	}
-	if eb, err := runtimebus.NewEventBusWithOptions(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source}); err == nil || eb != nil {
+	if eb, err := newScopedTestEventBus(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source}); err == nil || eb != nil {
 		t.Fatalf("NewEventBusWithOptions = (%#v, %v), want fail-closed startup", eb, err)
 	}
 	validSource := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
@@ -583,7 +583,7 @@ func assertImportBoundaryWildcardAuthorizationAmbiguityFailsClosedAcrossSurfaces
 	if err != nil {
 		t.Fatalf("derive valid prebuilt route table: %v", err)
 	}
-	if eb, err := runtimebus.NewEventBusWithOptions(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source, RouteTable: prebuiltRoutes}); err == nil || eb != nil {
+	if eb, err := newScopedTestEventBus(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source, RouteTable: prebuiltRoutes}); err == nil || eb != nil {
 		t.Fatalf("NewEventBusWithOptions with prebuilt routes = (%#v, %v), want contract ambiguity to remain authoritative", eb, err)
 	}
 	return relations.Issues[0]

@@ -128,7 +128,7 @@ func TestSQLiteSchemaBootstrapFreshSecondBootAndDriftRejection(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = first.Close() })
-	if err := first.BootstrapSchema(context.Background(), request); err != nil {
+	if err := first.BootstrapSchema(testAuthorActivityContext(), request); err != nil {
 		t.Fatalf("fresh bootstrap: %v", err)
 	}
 	var createdAt string
@@ -137,7 +137,7 @@ func TestSQLiteSchemaBootstrapFreshSecondBootAndDriftRejection(t *testing.T) {
 	}
 	request.Origin.SwarmVersion = "later-build"
 	request.Origin.CreatedAt = request.Origin.CreatedAt.Add(time.Hour)
-	if err := first.BootstrapSchema(context.Background(), request); err != nil {
+	if err := first.BootstrapSchema(testAuthorActivityContext(), request); err != nil {
 		t.Fatalf("compatible second boot: %v", err)
 	}
 	var after string
@@ -150,7 +150,7 @@ func TestSQLiteSchemaBootstrapFreshSecondBootAndDriftRejection(t *testing.T) {
 	if _, err := first.DB.Exec(`ALTER TABLE timers ADD COLUMN drift_probe TEXT`); err != nil {
 		t.Fatal(err)
 	}
-	err = first.BootstrapSchema(context.Background(), request)
+	err = first.BootstrapSchema(testAuthorActivityContext(), request)
 	var incompatible *SchemaCompatibilityError
 	if !errors.As(err, &incompatible) {
 		t.Fatalf("drift bootstrap error = %v, want SchemaCompatibilityError", err)
@@ -168,7 +168,7 @@ func TestSQLiteSchemaBootstrapRejectsUnstampedWithoutWALMutation(t *testing.T) {
 	if _, err := store.DB.Exec(`CREATE TABLE legacy_state (id TEXT PRIMARY KEY)`); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.BootstrapSchema(context.Background(), request); err == nil {
+	if err := store.BootstrapSchema(testAuthorActivityContext(), request); err == nil {
 		t.Fatal("unstamped non-empty store was accepted")
 	}
 	var mode string
@@ -204,7 +204,7 @@ func TestSQLiteSchemaBootstrapConcurrentCreatorsConverge(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			errs[i] = stores[i].BootstrapSchema(context.Background(), request)
+			errs[i] = stores[i].BootstrapSchema(testAuthorActivityContext(), request)
 		}(i)
 	}
 	wg.Wait()
@@ -224,13 +224,13 @@ func TestPostgresSchemaBootstrapAcceptsCanonicalTemplateAndRejectsDrift(t *testi
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	store := &PostgresStore{DB: db}
-	if err := store.BootstrapSchema(context.Background(), request); err != nil {
+	if err := store.BootstrapSchema(testAuthorActivityContext(), request); err != nil {
 		t.Fatalf("compatible template boot: %v", err)
 	}
 	if _, err := db.Exec(`ALTER TABLE timers ADD COLUMN drift_probe TEXT`); err != nil {
 		t.Fatal(err)
 	}
-	err := store.BootstrapSchema(context.Background(), request)
+	err := store.BootstrapSchema(testAuthorActivityContext(), request)
 	var incompatible *SchemaCompatibilityError
 	if !errors.As(err, &incompatible) {
 		t.Fatalf("drift bootstrap error = %v, want SchemaCompatibilityError", err)
@@ -249,13 +249,13 @@ func TestSchemaBootstrapRejectsStageOnlyDecisionCardStoreBeforeMutation(t *testi
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = store.Close() })
-		if err := store.BootstrapSchema(context.Background(), legacy); err != nil {
+		if err := store.BootstrapSchema(testAuthorActivityContext(), legacy); err != nil {
 			t.Fatalf("bootstrap stage-only fixture: %v", err)
 		}
 
-		assertStageOnlyDecisionCardColumns(t, sqliteColumnSet(t, context.Background(), store.DB, "decision_cards"))
-		assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(context.Background(), current), SchemaDialectSQLite, path, current.Origin, &legacy.Origin, "decision_cards", "anchor_kind", "human_task_continuations", "proposed_effect_continuations")
-		assertStageOnlyDecisionCardColumns(t, sqliteColumnSet(t, context.Background(), store.DB, "decision_cards"))
+		assertStageOnlyDecisionCardColumns(t, sqliteColumnSet(t, testAuthorActivityContext(), store.DB, "decision_cards"))
+		assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(testAuthorActivityContext(), current), SchemaDialectSQLite, path, current.Origin, &legacy.Origin, "decision_cards", "anchor_kind", "human_task_continuations", "proposed_effect_continuations")
+		assertStageOnlyDecisionCardColumns(t, sqliteColumnSet(t, testAuthorActivityContext(), store.DB, "decision_cards"))
 		var continuations int
 		if err := store.DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='human_task_continuations'`).Scan(&continuations); err != nil {
 			t.Fatal(err)
@@ -275,18 +275,18 @@ func TestSchemaBootstrapRejectsStageOnlyDecisionCardStoreBeforeMutation(t *testi
 		_, db, cleanup := testutil.StartEmptyPostgres(t)
 		t.Cleanup(cleanup)
 		store := &PostgresStore{DB: db}
-		if err := store.BootstrapSchema(context.Background(), legacy); err != nil {
+		if err := store.BootstrapSchema(testAuthorActivityContext(), legacy); err != nil {
 			t.Fatalf("bootstrap stage-only fixture: %v", err)
 		}
 		var target string
 		if err := db.QueryRow(`SELECT current_database()`).Scan(&target); err != nil {
 			t.Fatal(err)
 		}
-		if !postgresColumnExists(t, context.Background(), db, "decision_cards", "flow_instance") || postgresColumnExists(t, context.Background(), db, "decision_cards", "anchor_kind") {
+		if !postgresColumnExists(t, testAuthorActivityContext(), db, "decision_cards", "flow_instance") || postgresColumnExists(t, testAuthorActivityContext(), db, "decision_cards", "anchor_kind") {
 			t.Fatal("stage-only PostgreSQL fixture has unexpected decision-card columns")
 		}
-		assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(context.Background(), current), SchemaDialectPostgres, target, current.Origin, &legacy.Origin, "decision_cards", "anchor_kind", "human_task_continuations", "proposed_effect_continuations")
-		if !postgresColumnExists(t, context.Background(), db, "decision_cards", "flow_instance") || postgresColumnExists(t, context.Background(), db, "decision_cards", "anchor_kind") {
+		assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(testAuthorActivityContext(), current), SchemaDialectPostgres, target, current.Origin, &legacy.Origin, "decision_cards", "anchor_kind", "human_task_continuations", "proposed_effect_continuations")
+		if !postgresColumnExists(t, testAuthorActivityContext(), db, "decision_cards", "flow_instance") || postgresColumnExists(t, testAuthorActivityContext(), db, "decision_cards", "anchor_kind") {
 			t.Fatal("incompatible bootstrap mutated stage-only decision-card columns")
 		}
 		var continuations bool
@@ -382,13 +382,13 @@ func TestSchemaBootstrapRejectsUnexpectedIndex(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = store.Close() })
-		if err := store.BootstrapSchema(context.Background(), request); err != nil {
+		if err := store.BootstrapSchema(testAuthorActivityContext(), request); err != nil {
 			t.Fatalf("fresh bootstrap: %v", err)
 		}
 		if _, err := store.DB.Exec(createUnexpectedIndex); err != nil {
 			t.Fatal(err)
 		}
-		assertUnexpectedIndexRejected(t, store.BootstrapSchema(context.Background(), request))
+		assertUnexpectedIndexRejected(t, store.BootstrapSchema(testAuthorActivityContext(), request))
 	})
 
 	t.Run("postgres", func(t *testing.T) {
@@ -398,7 +398,7 @@ func TestSchemaBootstrapRejectsUnexpectedIndex(t *testing.T) {
 		if _, err := db.Exec(createUnexpectedIndex); err != nil {
 			t.Fatal(err)
 		}
-		assertUnexpectedIndexRejected(t, store.BootstrapSchema(context.Background(), request))
+		assertUnexpectedIndexRejected(t, store.BootstrapSchema(testAuthorActivityContext(), request))
 	})
 }
 
@@ -421,7 +421,7 @@ func TestSQLiteSchemaBootstrapRejectsMalformedStoredOrigin(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	if err := store.BootstrapSchema(context.Background(), request); err != nil {
+	if err := store.BootstrapSchema(testAuthorActivityContext(), request); err != nil {
 		t.Fatalf("fresh bootstrap: %v", err)
 	}
 	cases := []malformedStoredOriginCase{
@@ -437,7 +437,7 @@ func TestSQLiteSchemaBootstrapRejectsMalformedStoredOrigin(t *testing.T) {
 		_, err := store.DB.Exec(`UPDATE runtime_store_metadata SET swarm_version = ?, platform_version = ?, created_at = ? WHERE id = 1`, request.Origin.SwarmVersion, request.Origin.PlatformVersion, request.Origin.CreatedAt.UTC().Format(time.RFC3339Nano))
 		return err
 	}, func() error {
-		return store.BootstrapSchema(context.Background(), request)
+		return store.BootstrapSchema(testAuthorActivityContext(), request)
 	}, SchemaDialectSQLite, path, request.Origin)
 }
 
@@ -462,7 +462,7 @@ func TestPostgresSchemaBootstrapRejectsMalformedStoredOrigin(t *testing.T) {
 		_, err := db.Exec(`UPDATE runtime_store_metadata SET swarm_version = $1, platform_version = $2, created_at = $3 WHERE id = 1`, request.Origin.SwarmVersion, request.Origin.PlatformVersion, request.Origin.CreatedAt)
 		return err
 	}, func() error {
-		return store.BootstrapSchema(context.Background(), request)
+		return store.BootstrapSchema(testAuthorActivityContext(), request)
 	}, SchemaDialectPostgres, target, request.Origin)
 }
 
@@ -513,7 +513,7 @@ func TestPostgresSchemaBootstrapConcurrentFreshCreatorsConverge(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			errs[i] = stores[i].BootstrapSchema(context.Background(), request)
+			errs[i] = stores[i].BootstrapSchema(testAuthorActivityContext(), request)
 		}(i)
 	}
 	wg.Wait()
@@ -536,7 +536,7 @@ func TestPostgresSchemaBootstrapRejectsBeforeExtensionOrSchemaMutation(t *testin
 		t.Fatal(err)
 	}
 	store := &PostgresStore{DB: db}
-	if err := store.BootstrapSchema(context.Background(), request); err == nil {
+	if err := store.BootstrapSchema(testAuthorActivityContext(), request); err == nil {
 		t.Fatal("unstamped non-empty PostgreSQL store was accepted")
 	}
 	var extensionExists bool
@@ -574,10 +574,10 @@ func TestSchemaBootstrapRollsBackFailedFreshCreation(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() { _ = store.Close() })
-				if err := store.BootstrapSchema(context.Background(), request); err == nil {
+				if err := store.BootstrapSchema(testAuthorActivityContext(), request); err == nil {
 					t.Fatal("invalid fresh bootstrap succeeded")
 				}
-				tables, err := sqliteUserTables(context.Background(), store.DB)
+				tables, err := sqliteUserTables(testAuthorActivityContext(), store.DB)
 				if err != nil || len(tables) != 0 {
 					t.Fatalf("failed SQLite bootstrap left objects %v, err=%v", tables, err)
 				}
@@ -586,10 +586,10 @@ func TestSchemaBootstrapRollsBackFailedFreshCreation(t *testing.T) {
 			_, db, cleanup := testutil.StartEmptyPostgres(t)
 			t.Cleanup(cleanup)
 			store := &PostgresStore{DB: db}
-			if err := store.BootstrapSchema(context.Background(), request); err == nil {
+			if err := store.BootstrapSchema(testAuthorActivityContext(), request); err == nil {
 				t.Fatal("invalid fresh bootstrap succeeded")
 			}
-			tables, err := postgresPublicTables(context.Background(), db)
+			tables, err := postgresPublicTables(testAuthorActivityContext(), db)
 			if err != nil || len(tables) != 0 {
 				t.Fatalf("failed PostgreSQL bootstrap left objects %v, err=%v", tables, err)
 			}
@@ -605,17 +605,17 @@ func TestSQLiteSchemaBootstrapCreatesThenValidatesGeneratedState(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	if err := store.BootstrapSchema(context.Background(), request); err != nil {
+	if err := store.BootstrapSchema(testAuthorActivityContext(), request); err != nil {
 		t.Fatalf("create generated state: %v", err)
 	}
-	storedOrigin, err := readRuntimeStoreOrigin(context.Background(), store.DB)
+	storedOrigin, err := readRuntimeStoreOrigin(testAuthorActivityContext(), store.DB)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.DB.Exec(`ALTER TABLE generated_probe_state ADD COLUMN drift_probe TEXT`); err != nil {
 		t.Fatal(err)
 	}
-	assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(context.Background(), request), SchemaDialectSQLite, store.path, request.Origin, storedOrigin, "generated state table generated_probe_state:", "drift_probe")
+	assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(testAuthorActivityContext(), request), SchemaDialectSQLite, store.path, request.Origin, storedOrigin, "generated state table generated_probe_state:", "drift_probe")
 }
 
 func TestPostgresSchemaBootstrapCreatesThenValidatesGeneratedState(t *testing.T) {
@@ -628,17 +628,17 @@ func TestPostgresSchemaBootstrapCreatesThenValidatesGeneratedState(t *testing.T)
 	if err := db.QueryRow(`SELECT current_database()`).Scan(&target); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.BootstrapSchema(context.Background(), request); err != nil {
+	if err := store.BootstrapSchema(testAuthorActivityContext(), request); err != nil {
 		t.Fatalf("create generated state: %v", err)
 	}
-	storedOrigin, err := readRuntimeStoreOrigin(context.Background(), db)
+	storedOrigin, err := readRuntimeStoreOrigin(testAuthorActivityContext(), db)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`ALTER TABLE generated_probe_state ADD COLUMN drift_probe TEXT`); err != nil {
 		t.Fatal(err)
 	}
-	assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(context.Background(), request), SchemaDialectPostgres, target, request.Origin, storedOrigin, "generated state table generated_probe_state:", "drift_probe")
+	assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(testAuthorActivityContext(), request), SchemaDialectPostgres, target, request.Origin, storedOrigin, "generated state table generated_probe_state:", "drift_probe")
 }
 
 func assertSchemaCompatibilityDiagnostic(t *testing.T, err error, backend SchemaDialect, target string, current RuntimeStoreOrigin, wantOrigin *RuntimeStoreOrigin, wantDrift ...string) {

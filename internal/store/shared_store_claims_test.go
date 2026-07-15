@@ -23,7 +23,7 @@ func TestPostgresPublicationClaimRetainsBorrowedConnectionAfterOriginalOwnerRetu
 			name = "parent_claim_owned_connection"
 		}
 		t.Run(name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			var parent runtimeownership.Lease
 			if withParentClaim {
 				var claimed bool
@@ -53,7 +53,7 @@ func TestPostgresPublicationClaimRetainsBorrowedConnectionAfterOriginalOwnerRetu
 				t.Fatalf("RunEventTransaction: %v", err)
 			}
 			if parent != nil {
-				if err := parent.Release(context.Background()); err != nil {
+				if err := parent.Release(testAuthorActivityContext()); err != nil {
 					t.Fatalf("release parent publication claim: %v", err)
 				}
 			}
@@ -66,15 +66,15 @@ func TestPostgresPublicationClaimRetainsBorrowedConnectionAfterOriginalOwnerRetu
 			if err := conn.QueryRowContext(childCtx, `SELECT 1`).Scan(&one); err != nil || one != 1 {
 				t.Fatalf("retained child connection query = %d, %v", one, err)
 			}
-			if err := child.Release(context.Background()); err != nil {
+			if err := child.Release(testAuthorActivityContext()); err != nil {
 				t.Fatalf("release child publication claim: %v", err)
 			}
 
-			replacement, claimed, err := store.ClaimPipelinePublication(context.Background(), childEventID)
+			replacement, claimed, err := store.ClaimPipelinePublication(testAuthorActivityContext(), childEventID)
 			if err != nil || !claimed || replacement == nil {
 				t.Fatalf("reclaim released child publication: claimed=%v lease=%T err=%v", claimed, replacement, err)
 			}
-			if err := replacement.Release(context.Background()); err != nil {
+			if err := replacement.Release(testAuthorActivityContext()); err != nil {
 				t.Fatalf("release replacement publication claim: %v", err)
 			}
 		})

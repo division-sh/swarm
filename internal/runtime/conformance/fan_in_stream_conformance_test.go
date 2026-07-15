@@ -27,7 +27,7 @@ import (
 
 func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.FanInStream)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	source := templatefanin.LoadSource(t, templatefanin.Options{})
 	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {
@@ -36,7 +36,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	proveFanInStreamProducerPath(t, source)
 
 	store := &fanInStreamMemoryStore{}
-	eb, err := bus.NewEventBusWithOptions(store, bus.EventBusOptions{
+	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
 		ContractBundle: source,
 		TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 			t.Fatal("fan-in stream routes to an explicit singleton; template activation is not authoritative")
@@ -111,7 +111,7 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 	t.Helper()
 	backend := storetest.StartSQLiteRuntimeStore(t)
 	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	seedFanInBarrierRun(t, ctx, backend, backend.DB, runID)
 	runtime := newFanInBarrierRuntime(t, backend, backend.DB, source)
 	if err := runtime.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
@@ -178,7 +178,7 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 }
 
 func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	source := templatefanin.LoadSource(t, templatefanin.Options{EventIDDedup: true})
 	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {
@@ -186,7 +186,7 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 	}
 
 	store := &fanInStreamMemoryStore{}
-	eb, err := bus.NewEventBusWithOptions(store, bus.EventBusOptions{
+	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
 		ContractBundle: source,
 		TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 			t.Fatal("fan-in stream routes to an explicit singleton; template activation is not authoritative")

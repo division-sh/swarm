@@ -49,6 +49,7 @@ func (e *StateError) Unwrap() error {
 type State struct {
 	RunID               string
 	Status              string
+	BundleHash          string
 	ControlStatus       string
 	Reason              string
 	ControlledBy        string

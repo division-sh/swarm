@@ -25,7 +25,7 @@ func runBootCatalogFixture(t *testing.T, fixtureRoot string) {
 	if loadErr != nil {
 		t.Fatalf("load workflow contract bundle %s: %v", fixtureRoot, loadErr)
 	}
-	report := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{})
+	report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), runtimebootverify.Options{})
 
 	switch strings.ToLower(strings.TrimSpace(expected.Expected.BootResult)) {
 	case "", "success":
@@ -48,7 +48,7 @@ func runBootCatalogFixture(t *testing.T, fixtureRoot string) {
 			t.Fatalf("expected warning %s containing %q, got %#v", expected.Expected.ErrorCategory, expected.Expected.ErrorContains, report.Warnings())
 		}
 		strictCatalogFixtureStartupPolicy().apply(t)
-		_, validationErr := runtime.ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), runtime.DefaultWorkflowContractValidationOptions(nil))
+		_, validationErr := runtime.ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), runtime.DefaultWorkflowContractValidationOptions(nil))
 		if validationErr != nil {
 			if _, err := newTier8Runtime(t, bundle); err == nil {
 				t.Fatal("expected NewRuntime to fail when authoritative startup validation fails")

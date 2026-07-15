@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -52,7 +51,7 @@ func TestPersistedAgentProjectionRejectsEnabledPlatformDefaultMemory(t *testing.
 }
 
 func TestFreshAgentsSchemaRejectsEnabledPlatformDefaultMemory(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, postgresDB, _ := testutil.StartPostgres(t)
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 
@@ -120,7 +119,7 @@ func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *test
 
 			_, db, _ := testutil.StartPostgres(t)
 			pg := &PostgresStore{DB: db}
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 
 			if _, err := db.ExecContext(ctx, `
 				INSERT INTO agents (

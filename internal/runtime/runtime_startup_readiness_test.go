@@ -92,7 +92,7 @@ func TestRuntimeStartWaitsForSystemNodeSubscriptionReadiness(t *testing.T) {
 	rt := newStartupReadinessTestRuntime(node)
 	startErr := make(chan error, 1)
 	go func() {
-		startErr <- rt.Start(context.Background())
+		startErr <- rt.Start(testAuthorActivityContext(context.Background()))
 	}()
 
 	select {
@@ -126,7 +126,7 @@ func TestRuntimeStartWaitsForSystemNodeSubscriptionReadiness(t *testing.T) {
 func TestRuntimeStartFailsClosedWhenSystemNodeSubscriptionReadinessIsCanceled(t *testing.T) {
 	node := newDelayedSubscriptionBackgroundNode()
 	rt := newStartupReadinessTestRuntime(node)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
 	startErr := make(chan error, 1)
 	go func() {
 		startErr <- rt.Start(ctx)
@@ -162,7 +162,7 @@ func (n *nonReportingBackgroundNode) Run(context.Context) {
 func TestRuntimeStartRejectsSystemNodeWithoutSubscriptionReadiness(t *testing.T) {
 	node := &nonReportingBackgroundNode{}
 	rt := newStartupReadinessTestRuntime(node)
-	err := rt.Start(context.Background())
+	err := rt.Start(testAuthorActivityContext(context.Background()))
 	if err == nil || !strings.Contains(err.Error(), "cannot report subscription readiness") {
 		t.Fatalf("Start error = %v, want subscription readiness reporting failure", err)
 	}

@@ -951,8 +951,10 @@ func testSelectedSource(selection store.RunForkContractSelection) semanticview.S
 
 func testLoadedSelectedSource(selection store.RunForkContractSelection) LoadedSelectedContractSource {
 	return LoadedSelectedContractSource{
-		Selection: selection,
-		Source:    testSelectedSource(selection),
+		Selection:    selection,
+		Source:       testSelectedSource(selection),
+		BundleHash:   runForkTestBundleHash,
+		BundleSource: "ephemeral",
 	}
 }
 

@@ -75,3 +75,17 @@ func (s *SQLiteRuntimeStore) ListAuthorActivity(ctx context.Context, opts runtim
 	}
 	return runtimeauthoractivity.List(ctx, s.DB, runtimeauthoractivity.DialectSQLite, opts)
 }
+
+func (s *PostgresStore) HeadAuthorActivity(ctx context.Context) (int64, error) {
+	if s == nil || s.DB == nil {
+		return 0, fmt.Errorf("postgres store is required")
+	}
+	return runtimeauthoractivity.Head(ctx, s.DB)
+}
+
+func (s *SQLiteRuntimeStore) HeadAuthorActivity(ctx context.Context) (int64, error) {
+	if s == nil || s.DB == nil {
+		return 0, fmt.Errorf("sqlite runtime store is required")
+	}
+	return runtimeauthoractivity.Head(ctx, s.DB)
+}

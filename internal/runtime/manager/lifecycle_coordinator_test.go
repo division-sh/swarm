@@ -90,16 +90,16 @@ func TestLifecycleCoordinatorReplayDoesNotReplaceSuccessfulGeneration(t *testing
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil)
 	rec := lifecycleTestPersistedAgent()
-	if err := coordinator.register(context.Background(), rec, true); err != nil {
+	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	coordinator.beginRun(context.Background(), AgentRunModeStandard)
+	coordinator.beginRun(testAuthorActivityContext(context.Background()), AgentRunModeStandard)
 	operationID := uuid.NewString()
-	loopCtx, token, done, err := coordinator.replaceLoop(context.Background(), rec.Config.ID, "restart", operationID, nil, runtimesessions.LifecycleMutationPlan{})
+	loopCtx, token, done, err := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), rec.Config.ID, "restart", operationID, nil, runtimesessions.LifecycleMutationPlan{})
 	if err != nil || loopCtx == nil {
 		t.Fatalf("first replacement ctx=%v token=%+v err=%v", loopCtx, token, err)
 	}
-	replayedCtx, replayedToken, replayedDone, err := coordinator.replaceLoop(context.Background(), rec.Config.ID, "restart", operationID, nil, runtimesessions.LifecycleMutationPlan{})
+	replayedCtx, replayedToken, replayedDone, err := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), rec.Config.ID, "restart", operationID, nil, runtimesessions.LifecycleMutationPlan{})
 	if err != nil {
 		t.Fatalf("replay replacement: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestLifecycleCoordinatorReconfigureOperationIdentityTracksTransitionOccurre
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil)
 	base := lifecycleTestPersistedAgent()
-	if err := coordinator.register(context.Background(), base, true); err != nil {
+	if err := coordinator.register(testAuthorActivityContext(context.Background()), base, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	plan := runtimesessions.LifecycleMutationPlan{
@@ -135,11 +135,11 @@ func TestLifecycleCoordinatorReconfigureOperationIdentityTracksTransitionOccurre
 	recB := base
 	recB.Config.Tools = []string{"tool-b"}
 	for i, rec := range []*PersistedAgent{&recA, &recB, &recA} {
-		if _, _, _, err := coordinator.replaceLoop(context.Background(), base.Config.ID, "reconfigure", "", rec, plan); err != nil {
+		if _, _, _, err := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), base.Config.ID, "reconfigure", "", rec, plan); err != nil {
 			t.Fatalf("reconfigure occurrence %d: %v", i+1, err)
 		}
 	}
-	if _, _, _, err := coordinator.replaceLoop(context.Background(), base.Config.ID, "reconfigure", "", &recA, plan); err != nil {
+	if _, _, _, err := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), base.Config.ID, "reconfigure", "", &recA, plan); err != nil {
 		t.Fatalf("same-current reconfigure: %v", err)
 	}
 
@@ -169,7 +169,7 @@ func TestLifecycleCoordinatorReconfigureOperationIdentityIsStableBeforeCommit(t 
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil)
 	base := lifecycleTestPersistedAgent()
-	if err := coordinator.register(context.Background(), base, true); err != nil {
+	if err := coordinator.register(testAuthorActivityContext(context.Background()), base, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	target := base
@@ -177,10 +177,10 @@ func TestLifecycleCoordinatorReconfigureOperationIdentityIsStableBeforeCommit(t 
 	probe.mu.Lock()
 	probe.failNext = fmt.Errorf("injected persistence failure")
 	probe.mu.Unlock()
-	if _, _, _, err := coordinator.replaceLoop(context.Background(), base.Config.ID, "reconfigure", "", &target, runtimesessions.LifecycleMutationPlan{}); err == nil {
+	if _, _, _, err := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), base.Config.ID, "reconfigure", "", &target, runtimesessions.LifecycleMutationPlan{}); err == nil {
 		t.Fatal("first reconfigure succeeded despite persistence failure")
 	}
-	if _, _, _, err := coordinator.replaceLoop(context.Background(), base.Config.ID, "reconfigure", "", &target, runtimesessions.LifecycleMutationPlan{}); err != nil {
+	if _, _, _, err := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), base.Config.ID, "reconfigure", "", &target, runtimesessions.LifecycleMutationPlan{}); err != nil {
 		t.Fatalf("retry reconfigure: %v", err)
 	}
 	requests := probe.requestsFor("reconfigure")
@@ -196,7 +196,7 @@ func TestLifecycleCoordinatorReconfigureRetryAdoptsCommittedOccurrence(t *testin
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil)
 	base := lifecycleTestPersistedAgent()
-	if err := coordinator.register(context.Background(), base, true); err != nil {
+	if err := coordinator.register(testAuthorActivityContext(context.Background()), base, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	target := base
@@ -204,7 +204,7 @@ func TestLifecycleCoordinatorReconfigureRetryAdoptsCommittedOccurrence(t *testin
 	probe.mu.Lock()
 	probe.failAfter = fmt.Errorf("injected response loss after commit")
 	probe.mu.Unlock()
-	if _, _, _, err := coordinator.replaceLoop(context.Background(), base.Config.ID, "reconfigure", "", &target, runtimesessions.LifecycleMutationPlan{}); err == nil {
+	if _, _, _, err := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), base.Config.ID, "reconfigure", "", &target, runtimesessions.LifecycleMutationPlan{}); err == nil {
 		t.Fatal("first reconfigure observed success despite injected response loss")
 	}
 	coordinator.mu.Lock()
@@ -214,7 +214,7 @@ func TestLifecycleCoordinatorReconfigureRetryAdoptsCommittedOccurrence(t *testin
 		Generation:   coordinator.cells[base.Config.ID].generation,
 	}
 	coordinator.mu.Unlock()
-	if _, _, _, err := coordinator.replaceLoop(context.Background(), base.Config.ID, "reconfigure", "", &target, runtimesessions.LifecycleMutationPlan{}); err != nil {
+	if _, _, _, err := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), base.Config.ID, "reconfigure", "", &target, runtimesessions.LifecycleMutationPlan{}); err != nil {
 		t.Fatalf("retry reconfigure: %v", err)
 	}
 	coordinator.mu.Lock()
@@ -233,18 +233,18 @@ func TestLifecycleCoordinatorPersistenceFailureLeavesPriorGenerationOwned(t *tes
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil)
 	rec := lifecycleTestPersistedAgent()
-	if err := coordinator.register(context.Background(), rec, true); err != nil {
+	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	coordinator.beginRun(context.Background(), AgentRunModeStandard)
-	loopCtx, token, done, err := coordinator.replaceLoop(context.Background(), rec.Config.ID, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+	coordinator.beginRun(testAuthorActivityContext(context.Background()), AgentRunModeStandard)
+	loopCtx, token, done, err := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), rec.Config.ID, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	probe.mu.Lock()
 	probe.failNext = fmt.Errorf("injected persistence failure")
 	probe.mu.Unlock()
-	if _, _, _, err := coordinator.replaceLoop(context.Background(), rec.Config.ID, "restart", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{}); err == nil {
+	if _, _, _, err := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), rec.Config.ID, "restart", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{}); err == nil {
 		t.Fatal("restart succeeded despite persistence failure")
 	}
 	select {
@@ -267,7 +267,7 @@ func TestLifecycleCoordinatorSpawnPersistenceFailurePublishesNoCell(t *testing.T
 	probe.failNext = fmt.Errorf("injected spawn persistence failure")
 	coordinator := newAgentLifecycleCoordinator(probe, nil)
 	rec := lifecycleTestPersistedAgent()
-	if err := coordinator.register(context.Background(), rec, true); err == nil {
+	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err == nil {
 		t.Fatal("register succeeded despite persistence failure")
 	}
 	coordinator.mu.Lock()
@@ -289,11 +289,11 @@ func TestLifecycleCoordinatorRecoveredGenerationZeroAdvancesFromDurableValue(t *
 	rec.LifecycleGeneration = 0
 	rec.LifecyclePhase = AgentLifecycleRegistered
 	rec.LifecycleRunMode = AgentRunModeStopped
-	if err := coordinator.registerExecution(context.Background(), rec, false, reconfigureTestAgent{id: rec.Config.ID}); err != nil {
+	if err := coordinator.registerExecution(testAuthorActivityContext(context.Background()), rec, false, reconfigureTestAgent{id: rec.Config.ID}); err != nil {
 		t.Fatalf("register recovered agent: %v", err)
 	}
-	coordinator.beginRun(context.Background(), AgentRunModeStandard)
-	loopCtx, token, done, err := coordinator.replaceLoop(context.Background(), rec.Config.ID, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+	coordinator.beginRun(testAuthorActivityContext(context.Background()), AgentRunModeStandard)
+	loopCtx, token, done, err := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), rec.Config.ID, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 	if err != nil {
 		t.Fatalf("start recovered generation zero: %v", err)
 	}
@@ -311,15 +311,15 @@ func TestLifecycleCoordinatorInMemoryEffectContextCarriesCurrentToken(t *testing
 	registry := runtimesessions.NewInMemoryRegistry(0)
 	coordinator := newAgentLifecycleCoordinator(nil, registry)
 	rec := lifecycleTestPersistedAgent()
-	if err := coordinator.registerExecution(context.Background(), rec, false, reconfigureTestAgent{id: rec.Config.ID}); err != nil {
+	if err := coordinator.registerExecution(testAuthorActivityContext(context.Background()), rec, false, reconfigureTestAgent{id: rec.Config.ID}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	coordinator.beginRun(managedExecutionTestContext(t, context.Background()), AgentRunModeStandard)
-	loopCtx, token, done, err := coordinator.replaceLoop(context.Background(), rec.Config.ID, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+	coordinator.beginRun(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())), AgentRunModeStandard)
+	loopCtx, token, done, err := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), rec.Config.ID, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	lease, err := coordinator.acquireExecution(context.Background(), rec.Config.ID, "test_effect_context", true)
+	lease, err := coordinator.acquireExecution(testAuthorActivityContext(context.Background()), rec.Config.ID, "test_effect_context", true)
 	if err != nil {
 		t.Fatalf("acquireExecution: %v", err)
 	}
@@ -342,18 +342,18 @@ func TestLifecycleCoordinatorTeardownPersistenceFailureLeavesLoopOwned(t *testin
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil)
 	rec := lifecycleTestPersistedAgent()
-	if err := coordinator.register(context.Background(), rec, true); err != nil {
+	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	coordinator.beginRun(context.Background(), AgentRunModeStandard)
-	loopCtx, token, done, err := coordinator.replaceLoop(context.Background(), rec.Config.ID, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+	coordinator.beginRun(testAuthorActivityContext(context.Background()), AgentRunModeStandard)
+	loopCtx, token, done, err := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), rec.Config.ID, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	probe.mu.Lock()
 	probe.failNext = fmt.Errorf("injected teardown persistence failure")
 	probe.mu.Unlock()
-	if err := coordinator.terminate(context.Background(), rec.Config.ID, "teardown", AgentLifecycleTerminated); err == nil {
+	if err := coordinator.terminate(testAuthorActivityContext(context.Background()), rec.Config.ID, "teardown", AgentLifecycleTerminated); err == nil {
 		t.Fatal("teardown succeeded despite persistence failure")
 	}
 	select {
@@ -374,11 +374,11 @@ func TestLifecycleCoordinatorRestartVersusTeardownNeverResurrectsLoop(t *testing
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil)
 	rec := lifecycleTestPersistedAgent()
-	if err := coordinator.register(context.Background(), rec, true); err != nil {
+	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	coordinator.beginRun(context.Background(), AgentRunModeStandard)
-	initialCtx, initialToken, initialDone, err := coordinator.replaceLoop(context.Background(), rec.Config.ID, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+	coordinator.beginRun(testAuthorActivityContext(context.Background()), AgentRunModeStandard)
+	initialCtx, initialToken, initialDone, err := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), rec.Config.ID, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -393,7 +393,7 @@ func TestLifecycleCoordinatorRestartVersusTeardownNeverResurrectsLoop(t *testing
 	go func() {
 		defer wg.Done()
 		<-start
-		loopCtx, token, done, restartErr := coordinator.replaceLoop(context.Background(), rec.Config.ID, "restart", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+		loopCtx, token, done, restartErr := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), rec.Config.ID, "restart", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 		if restartErr == nil && loopCtx != nil {
 			go func() {
 				<-loopCtx.Done()
@@ -404,7 +404,7 @@ func TestLifecycleCoordinatorRestartVersusTeardownNeverResurrectsLoop(t *testing
 	go func() {
 		defer wg.Done()
 		<-start
-		_ = coordinator.terminate(context.Background(), rec.Config.ID, "teardown", AgentLifecycleTerminated)
+		_ = coordinator.terminate(testAuthorActivityContext(context.Background()), rec.Config.ID, "teardown", AgentLifecycleTerminated)
 	}()
 	close(start)
 	wg.Wait()
@@ -433,11 +433,11 @@ func TestLifecycleCoordinatorSelfReleasePersistenceFailureFailsClosed(t *testing
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil)
 	rec := lifecycleTestPersistedAgent()
-	if err := coordinator.register(context.Background(), rec, true); err != nil {
+	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	coordinator.beginRun(context.Background(), AgentRunModeStandard)
-	_, token, done, err := coordinator.replaceLoop(context.Background(), rec.Config.ID, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+	coordinator.beginRun(testAuthorActivityContext(context.Background()), AgentRunModeStandard)
+	_, token, done, err := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), rec.Config.ID, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -450,7 +450,7 @@ func TestLifecycleCoordinatorSelfReleasePersistenceFailureFailsClosed(t *testing
 	if _, ok := coordinator.token(rec.Config.ID); ok {
 		t.Fatal("failed self-release remained available as a running generation")
 	}
-	if _, _, _, err := coordinator.replaceLoop(context.Background(), rec.Config.ID, "restart", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{}); err == nil {
+	if _, _, _, err := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), rec.Config.ID, "restart", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{}); err == nil {
 		t.Fatal("restart admitted over failed self-release")
 	}
 }
@@ -459,11 +459,11 @@ func TestLifecycleCoordinatorConcurrentReplacementsCommitAdjacentGenerations(t *
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil)
 	rec := lifecycleTestPersistedAgent()
-	if err := coordinator.register(context.Background(), rec, true); err != nil {
+	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	coordinator.beginRun(context.Background(), AgentRunModeStandard)
-	initialCtx, initialToken, initialDone, err := coordinator.replaceLoop(context.Background(), rec.Config.ID, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+	coordinator.beginRun(testAuthorActivityContext(context.Background()), AgentRunModeStandard)
+	initialCtx, initialToken, initialDone, err := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), rec.Config.ID, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 	if err != nil {
 		t.Fatalf("initial start: %v", err)
 	}
@@ -480,7 +480,7 @@ func TestLifecycleCoordinatorConcurrentReplacementsCommitAdjacentGenerations(t *
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			loopCtx, token, done, err := coordinator.replaceLoop(context.Background(), rec.Config.ID, "restart", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+			loopCtx, token, done, err := coordinator.replaceLoop(testAuthorActivityContext(context.Background()), rec.Config.ID, "restart", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 			if err != nil {
 				errs <- err
 				return

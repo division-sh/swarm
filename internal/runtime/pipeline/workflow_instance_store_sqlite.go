@@ -701,7 +701,7 @@ func insertSQLiteEntityMutationRecord(ctx context.Context, tx *sql.Tx, runID str
 	if field != "current_state" {
 		return nil
 	}
-	draft, admitted, err := runtimemutationlog.AuthorActivityDraft(runID, mutationID, rec, occurredAt)
+	draft, admitted, err := runtimemutationlog.AuthorActivityDraft(ctx, runID, mutationID, rec, occurredAt)
 	if err != nil {
 		return err
 	}

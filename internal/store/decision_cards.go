@@ -1268,6 +1268,10 @@ func recordDecisionCardChangeAuthorActivity(ctx context.Context, db decisionCard
 	if err != nil {
 		return err
 	}
+	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, card.BundleHash)
+	if err != nil {
+		return fmt.Errorf("decision card change author activity scope: %w", err)
+	}
 	anchorID, entityID, flowID, err := decisionCardAuthorActivityIdentity(card.Anchor)
 	if err != nil {
 		return err
@@ -1285,6 +1289,7 @@ func recordDecisionCardChangeAuthorActivity(ctx context.Context, db decisionCard
 	}
 	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindCardLifecycle, Transition: strings.TrimSpace(changeType),
+		Scope:       scope,
 		SourceOwner: "decision_card_changes", SourceIdentity: identity, DedupKey: "card-change:" + identity,
 		OccurredAt: now.UTC(), RunID: strings.TrimSpace(runID), EntityID: entityID, FlowID: flowID,
 		Projection: projection,
