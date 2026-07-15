@@ -365,12 +365,12 @@ func TestSelectedContractExecutionMaterializationAdmitsSameSourceDeliveryForkPoi
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
-			produced_by, produced_by_type, source_event_id, created_at
+			produced_by, produced_by_type, source_event_id, execution_mode, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'validation/vertical.ready_for_review', $3::uuid,
 			'', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
-			$4::uuid, $5
+			$4::uuid, 'live', $5
 		)
 	`, sourceRunID, forkPointEventID, entityID, sourceEventID, forkAt); err != nil {
 		t.Fatalf("seed fork point event: %v", err)
@@ -442,11 +442,11 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
-			produced_by, produced_by_type, created_at
+			produced_by, produced_by_type, execution_mode, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'unrelated.started', $3::uuid,
-			'', 'entity', '{}'::jsonb, 'source-runtime', 'platform', $4
+			'', 'entity', '{}'::jsonb, 'source-runtime', 'platform', 'live', $4
 		)
 	`, sourceRunID, unrelatedEventID, entityID, at.Add(10*time.Second)); err != nil {
 		t.Fatalf("seed unrelated event: %v", err)
@@ -463,12 +463,12 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
-			produced_by, produced_by_type, source_event_id, created_at
+			produced_by, produced_by_type, source_event_id, execution_mode, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'validation/vertical.ready_for_review', $3::uuid,
 			'', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
-			$4::uuid, $5
+			$4::uuid, 'live', $5
 		)
 	`, sourceRunID, forkPointEventID, entityID, sourceEventID, forkAt); err != nil {
 		t.Fatalf("seed fork point event: %v", err)
@@ -513,11 +513,11 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
-			produced_by, produced_by_type, created_at
+			produced_by, produced_by_type, execution_mode, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'unrelated.started', $3::uuid,
-			'', 'entity', '{}'::jsonb, 'source-runtime', 'platform', $4
+			'', 'entity', '{}'::jsonb, 'source-runtime', 'platform', 'live', $4
 		)
 	`, sourceRunID, unrelatedEventID, entityID, at.Add(10*time.Second)); err != nil {
 		t.Fatalf("seed unrelated event: %v", err)
@@ -533,12 +533,12 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
-			produced_by, produced_by_type, source_event_id, created_at
+			produced_by, produced_by_type, source_event_id, execution_mode, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'validation/vertical.ready_for_review', $3::uuid,
 			'', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
-			$4::uuid, $5
+			$4::uuid, 'live', $5
 		)
 	`, sourceRunID, forkPointEventID, entityID, sourceEventID, forkAt); err != nil {
 		t.Fatalf("seed fork point event: %v", err)
@@ -642,11 +642,11 @@ func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailC
 	forkAt := at.Add(30 * time.Second)
 	seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
 			produced_by, produced_by_type, source_event_id, created_at
 		)
-		VALUES (
+		VALUES ('live',
 			$1::uuid, $2::uuid, 'validation/vertical.ready_for_review', $3::uuid,
 			'', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
 			$4::uuid, $5
@@ -670,11 +670,11 @@ func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailC
 	}
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
 			produced_by, produced_by_type, created_at
 		)
-		VALUES (
+		VALUES ('live',
 			$1::uuid, $2::uuid, 'unrelated.started', $3::uuid,
 			'flow-a/1', 'entity', '{}'::jsonb, 'source-runtime', 'platform', $4
 		)
@@ -1456,10 +1456,10 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_turns (
 						turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-						trigger_event_id, trigger_event_type, task_id, created_at
+						trigger_event_id, trigger_event_type, task_id, execution_mode, created_at
 					)
 					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', FALSE, 'authored', $4::uuid,
-						$5::uuid, 'item.received', 'task-a', $6)
+						$5::uuid, 'item.received', 'task-a', 'live', $6)
 				`, uuid.NewString(), sourceRunID, uuid.NewString(), entityID, eventID, at.Add(time.Minute))
 				return err
 			},
@@ -1549,11 +1549,11 @@ func TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsB
 		t.Fatalf("seed in-progress source delivery: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
 			produced_by, produced_by_type, source_event_id, created_at
 		)
-		VALUES (
+		VALUES ('live',
 			$1::uuid, $2::uuid, 'validation/vertical.ready_for_review', $3::uuid,
 			'', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
 			$4::uuid, $5
@@ -1726,11 +1726,11 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 		t.Fatalf("seed selected agent delivery: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
 			produced_by, produced_by_type, created_at
 		)
-		VALUES (
+		VALUES ('live',
 			$1::uuid, $2::uuid, 'agent.follow_up', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb,
 			'agent-a', 'agent', $4
 		)
@@ -1765,12 +1765,12 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 		INSERT INTO agent_turns (
 			run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, available_tools, tool_calls, emitted_events,
-			mcp_servers, mcp_tools_listed, mcp_tools_visible, parse_ok, latency_ms, retry_count, created_at
+			mcp_servers, mcp_tools_listed, mcp_tools_visible, parse_ok, latency_ms, retry_count, execution_mode, created_at
 		)
 		VALUES (
 			$1::uuid, 'agent-a', $2::uuid, 'flow-a/1', TRUE, 'authored', $3::uuid,
 			$4::uuid, 'item.received', '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
-			'{}'::jsonb, '[]'::jsonb, '[]'::jsonb, true, 1, 0, $5
+			'{}'::jsonb, '[]'::jsonb, '[]'::jsonb, true, 1, 0, 'live', $5
 		)
 	`, materialized.ForkRunID, sessionID, entityID, forkEventID, at.Add(3*time.Second)); err != nil {
 		t.Fatalf("seed fork turn: %v", err)
@@ -1821,11 +1821,11 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEv
 		t.Fatalf("seed selected agent delivery: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
 			produced_by, produced_by_type, source_event_id, created_at
 		)
-		VALUES (
+		VALUES ('live',
 			$1::uuid, $2::uuid, 'platform.auth_required', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb,
 			'runtime', 'platform', $4::uuid, $5
 		)
@@ -1870,11 +1870,11 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *
 	}
 	forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
 			produced_by, produced_by_type, source_event_id, created_at
 		)
-		VALUES (
+		VALUES ('live',
 			$1::uuid, $2::uuid, 'platform.runtime_log', NULL, NULL, 'global',
 			'{"log_level":"warn","message":"selected-fork diagnostic","details":{"component":"eventbus","action":"outbox_replay_scope_unavailable"}}'::jsonb,
 			'runtime', 'platform', $3::uuid, $4
@@ -1920,11 +1920,11 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimePlatformContro
 	}
 	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
 			produced_by, produced_by_type, created_at
 		)
-		VALUES (
+		VALUES ('live',
 			$1::uuid, $2::uuid, 'platform.auth_required', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb,
 			'runtime', 'platform', $4
 		)
@@ -1969,11 +1969,11 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic(
 	}
 	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
 			produced_by, produced_by_type, created_at
 		)
-		VALUES (
+		VALUES ('live',
 			$1::uuid, $2::uuid, 'platform.runtime_log', NULL, NULL, 'global',
 			'{"log_level":"warn","message":"uncorrelated diagnostic","details":{"component":"eventbus","action":"outbox_replay_scope_unavailable"}}'::jsonb,
 			'runtime', 'platform', $3
@@ -2019,11 +2019,11 @@ func TestSelectedContractActivationRejectsUncausedForkLocalToolExecutorRuntimeLo
 	}
 	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
 			produced_by, produced_by_type, created_at
 		)
-		VALUES (
+		VALUES ('live',
 			$1::uuid, $2::uuid, 'platform.runtime_log', NULL, NULL, 'global',
 			'{"log_level":"info","message":"Tool read_validation_case_business_brief executed successfully","details":{"component":"tool-executor","action":"tool_execution_succeeded","tool_name":"read_validation_case_business_brief"}}'::jsonb,
 			'runtime', 'platform', $3
@@ -2069,11 +2069,11 @@ func TestSelectedContractActivationRejectsUnownedPlatformEventWithSelectedParent
 	}
 	forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
 			produced_by, produced_by_type, source_event_id, created_at
 		)
-		VALUES (
+		VALUES ('live',
 			$1::uuid, $2::uuid, 'platform.reset', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb,
 			'runtime', 'platform', $4::uuid, $5
 		)
@@ -2225,9 +2225,9 @@ func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourc
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, execution_mode, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'item.received', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ($1::uuid, $2::uuid, 'item.received', $3::uuid, '', 'entity', '{}'::jsonb, 'live', 'test', 'platform', $4)
 	`, sourceRunID, eventID, entityID, at); err != nil {
 		t.Fatalf("seed source event: %v", err)
 	}
@@ -2290,10 +2290,10 @@ func seedSelectedContractSourceConversationHistory(t *testing.T, db execContextD
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, created_at
+			trigger_event_id, trigger_event_type, task_id, execution_mode, created_at
 		)
 		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', TRUE, 'authored', $4::uuid,
-			$5::uuid, 'item.received', 'task-a', $6)
+			$5::uuid, 'item.received', 'task-a', 'live', $6)
 	`, turnID, sourceRunID, sessionID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed source turn: %v", err)
 	}
@@ -2320,11 +2320,11 @@ func seedSelectedContractPostForkSourceEvent(t *testing.T, db execContextDB, sou
 	if _, err := db.ExecContext(context.Background(), `
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, flow_instance, scope,
-			payload, produced_by, produced_by_type, created_at
+			payload, execution_mode, produced_by, produced_by_type, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'source.after', $3::uuid, 'flow-a/1', 'entity',
-			'{}'::jsonb, 'source-runtime', 'platform', $4
+			'{}'::jsonb, 'live', 'source-runtime', 'platform', $4
 		)
 	`, sourceRunID, eventID, entityID, at); err != nil {
 		t.Fatalf("seed post-fork source event: %v", err)
@@ -2543,9 +2543,9 @@ func seedSelectedContractExecutionForkLineage(t *testing.T, pg *PostgresStore, d
 	forkEventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, execution_mode, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'item.received', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, $4, 'platform', $5)
+		VALUES ($1::uuid, $2::uuid, 'item.received', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'live', $4, 'platform', $5)
 	`, forkRunID, forkEventID, entityID, RunForkSelectedContractExecutionOwner, at.Add(time.Second)); err != nil {
 		t.Fatalf("seed selected fork event: %v", err)
 	}

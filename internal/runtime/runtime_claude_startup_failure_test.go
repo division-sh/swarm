@@ -90,7 +90,7 @@ func TestStartupCallRejectsManualOrMutatedTransportBinding(t *testing.T) {
 func startupFailureTestBinding(t *testing.T, serverURL string) (context.Context, llm.MCPHTTPBinding) {
 	t.Helper()
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
-	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "startup-agent"})
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "startup-agent"})
 	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
 	binding, enabled, err := llm.BuildMCPHTTPBinding(
 		ctx,

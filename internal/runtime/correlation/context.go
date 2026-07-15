@@ -317,5 +317,5 @@ func CorrelateEvent(ctx context.Context, evt events.Event) (context.Context, eve
 		parentEventID,
 		evt.NormalizedEnvelope(),
 		evt.CreatedAt(),
-	)
+	).WithExecutionMode(evt.ExecutionMode())
 }

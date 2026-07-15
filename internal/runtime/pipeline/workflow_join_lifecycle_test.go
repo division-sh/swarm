@@ -14,7 +14,9 @@ import (
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -303,7 +305,8 @@ func workflowJoinStoreCases() []workflowJoinStoreCase {
 	return []workflowJoinStoreCase{
 		{name: "sqlite", open: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
 			db := newSQLiteWorkflowInstanceStoreTestDB(t)
-			return newSQLiteWorkflowInstanceStoreForTest(t, db), runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+			ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+			return newSQLiteWorkflowInstanceStoreForTest(t, db), runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 		}},
 		{name: "postgres", open: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
 			_, db, cleanup := testutil.StartPostgres(t)
@@ -312,7 +315,8 @@ func workflowJoinStoreCases() []workflowJoinStoreCase {
 			if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 				t.Fatal(err)
 			}
-			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(context.Background(), runID)
+			ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+			return NewWorkflowInstanceStore(db), runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 		}},
 	}
 }

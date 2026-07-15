@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
 )
 
@@ -90,7 +91,15 @@ type Authority struct {
 	FenceGeneration uint64
 	Target          UsageTarget
 	BudgetScopes    []BudgetAdmissionScope
+	ExecutionMode   ExecutionMode
 }
+
+type ExecutionMode = executionmode.Mode
+
+const (
+	ExecutionModeLive = executionmode.Live
+	ExecutionModeMock = executionmode.Mock
+)
 
 func NormalAgentAuthority(token LifecycleToken, executionOwner string, leaseExpiresAt time.Time) Authority {
 	return Authority{
@@ -100,11 +109,12 @@ func NormalAgentAuthority(token LifecycleToken, executionOwner string, leaseExpi
 		ExecutionOwner:  strings.TrimSpace(executionOwner),
 		LeaseExpiresAt:  leaseExpiresAt.UTC(),
 		FenceGeneration: token.Generation,
+		ExecutionMode:   ExecutionModeLive,
 	}
 }
 
 func (a Authority) Valid() bool {
-	if strings.TrimSpace(a.ID) == "" || strings.TrimSpace(a.ExecutionOwner) == "" || a.LeaseExpiresAt.IsZero() || a.FenceGeneration == 0 {
+	if strings.TrimSpace(a.ID) == "" || strings.TrimSpace(a.ExecutionOwner) == "" || a.LeaseExpiresAt.IsZero() || a.FenceGeneration == 0 || !a.ExecutionMode.Valid() {
 		return false
 	}
 	switch a.Kind {
@@ -148,6 +158,7 @@ func (a Authority) Evidence() map[string]any {
 		"authority_id":     strings.TrimSpace(a.ID),
 		"execution_owner":  strings.TrimSpace(a.ExecutionOwner),
 		"fence_generation": a.FenceGeneration,
+		"execution_mode":   a.ExecutionMode,
 	}
 	if a.Target.Valid() {
 		evidence["usage_target"] = map[string]any{
@@ -217,6 +228,27 @@ func (a Authority) ValidateCompletionAdapter(adapter string) error {
 }
 
 type authorityContextKey struct{}
+type executionModeContextKey struct{}
+
+func WithExecutionMode(ctx context.Context, mode ExecutionMode) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx = context.WithValue(ctx, executionModeContextKey{}, mode)
+	if authority, ok := AuthorityFromContext(ctx); ok {
+		authority.ExecutionMode = mode
+		ctx = context.WithValue(ctx, authorityContextKey{}, authority)
+	}
+	return ctx
+}
+
+func ExecutionModeFromContext(ctx context.Context) (ExecutionMode, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	mode, ok := ctx.Value(executionModeContextKey{}).(ExecutionMode)
+	return mode, ok && mode.Valid()
+}
 
 func WithAuthority(ctx context.Context, authority Authority) context.Context {
 	if ctx == nil {
@@ -243,6 +275,9 @@ func completionAuthorityFromContext(ctx context.Context) (Authority, bool) {
 	}
 	owner := fmt.Sprintf("agent:%s:%d:%d", token.AgentID, token.RuntimeEpoch, token.Generation)
 	authority := NormalAgentAuthority(token, owner, time.Now().UTC().Add(5*time.Minute))
+	if mode, found := ExecutionModeFromContext(ctx); found {
+		authority.ExecutionMode = mode
+	}
 	return authority, authority.Valid()
 }
 

@@ -171,7 +171,9 @@ func prepareCompletionContext(ctx context.Context, controller *runtimeeffects.Co
 		}
 	}
 	ctx = runtimeeffects.WithUsageTarget(ctx, target)
-	ctx = runtimeeffects.WithBudgetAdmissionScopes(ctx, completionBudgetScopes(cfg, entityID))
+	if mode, found := runtimeeffects.ExecutionModeFromContext(ctx); !found || mode != runtimeeffects.ExecutionModeMock {
+		ctx = runtimeeffects.WithBudgetAdmissionScopes(ctx, completionBudgetScopes(cfg, entityID))
+	}
 	authority, ok = runtimeeffects.CompletionAuthorityFromContext(ctx)
 	if !ok || !authority.Target.Valid() {
 		return ctx, "", runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_usage_target_missing", "llm-completion-authority", "prepare_completion", nil)

@@ -1,6 +1,7 @@
 package bootverify
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -14,6 +15,10 @@ import (
 const computeModuleCheckID = "compute_module_value_rows"
 
 func checkComputeModuleValueRows(c *checkerContext) []Finding {
+	ctx := c.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	findings := make([]Finding, 0)
 	nodes := c.source.NodeEntries()
 	for _, nodeID := range sortedNodeIDs(c.source) {
@@ -35,7 +40,7 @@ func checkComputeModuleValueRows(c *checkerContext) []Finding {
 					RuleIndex: idx,
 					RuleID:    strings.TrimSpace(rule.ID),
 				}
-				findings = append(findings, validateComputeModuleValueRow(c.source, ref, handler, rule)...)
+				findings = append(findings, validateComputeModuleValueRow(ctx, c.source, ref, handler, rule)...)
 			}
 		}
 	}
@@ -73,7 +78,7 @@ func policySheetRuleIsComputeModuleValueRow(rule runtimecontracts.HandlerRuleEnt
 	return rule.Compute != nil && rule.Compute.Operation == runtimecontracts.ComputeOpModule
 }
 
-func validateComputeModuleValueRow(source semanticview.Source, ref computeModuleRef, handler runtimecontracts.SystemNodeEventHandler, rule runtimecontracts.HandlerRuleEntry) []Finding {
+func validateComputeModuleValueRow(ctx context.Context, source semanticview.Source, ref computeModuleRef, handler runtimecontracts.SystemNodeEventHandler, rule runtimecontracts.HandlerRuleEntry) []Finding {
 	findings := make([]Finding, 0)
 	if rule.PolicyRow.Kind != runtimecontracts.PolicySheetRowKindModule {
 		findings = append(findings, computeModuleFinding(ref, "compute_module compute must originate from a policy-sheet compute_module row"))
@@ -107,7 +112,7 @@ func validateComputeModuleValueRow(source semanticview.Source, ref computeModule
 			moduleBytes, _, err := runtimecontracts.PolicyModuleBytes(bundle, module)
 			if err != nil {
 				findings = append(findings, computeModuleFinding(ref, fmt.Sprintf("module bytes unavailable: %v", err)))
-			} else if err := validateComputeModuleArtifact(ref, moduleID, module, moduleBytes); err != nil {
+			} else if err := validateComputeModuleArtifact(ctx, ref, moduleID, module, moduleBytes); err != nil {
 				findings = append(findings, computeModuleFinding(ref, fmt.Sprintf("module validation failed: %v", err)))
 			}
 		}
@@ -118,12 +123,12 @@ func validateComputeModuleValueRow(source semanticview.Source, ref computeModule
 	return findings
 }
 
-func validateComputeModuleArtifact(ref computeModuleRef, moduleID string, module runtimecontracts.PolicyModule, moduleBytes []byte) error {
+func validateComputeModuleArtifact(ctx context.Context, ref computeModuleRef, moduleID string, module runtimecontracts.PolicyModule, moduleBytes []byte) error {
 	switch computeModuleKind(module) {
 	case "wasm":
 		return computemodule.ValidateCoreJSONModule(moduleBytes, module.Entry, module.Limits.MemoryPages)
 	case pythonmodule.Kind:
-		return pythonmodule.ValidateSource(pythonmodule.Request{
+		return pythonmodule.ValidateSource(ctx, pythonmodule.Request{
 			ModuleID:    moduleID,
 			RowID:       ref.RowLabel(),
 			Digest:      strings.TrimSpace(module.Digest),

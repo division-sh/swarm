@@ -22,8 +22,8 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, run_id, event_name, payload, created_at)
-		VALUES ($1::uuid, $2::uuid, 'custom.stop', '{}'::jsonb, now())
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, payload, created_at)
+		VALUES ('live', $1::uuid, $2::uuid, 'custom.stop', '{}'::jsonb, now())
 	`, eventID, runID); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}

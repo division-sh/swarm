@@ -112,6 +112,7 @@ func newAPIHumanTaskAckLossCard(t *testing.T, runID string, now time.Time) (deci
 	})
 	card, err := decisioncard.New(decisioncard.Card{
 		CardID: uuid.NewString(), RunID: runID, Anchor: anchor, Snapshot: snapshot,
+		ExecutionMode:    "live",
 		BundleHash:       "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"}, CreatedAt: now,
 	})

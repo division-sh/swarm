@@ -69,7 +69,8 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 		})
 
 	actor := runtimeactors.AgentConfig{
-		ID: "market-research-agent",
+		ExecutionMode: "live",
+		ID:            "market-research-agent",
 		NativeTools: runtimeactors.NativeToolConfig{
 			FileIO: true,
 		},
@@ -149,7 +150,8 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 		})
 
 	actor := runtimeactors.AgentConfig{
-		ID: "market-research-agent",
+		ExecutionMode: "live",
+		ID:            "market-research-agent",
 		NativeTools: runtimeactors.NativeToolConfig{
 			FileIO: true,
 		},
@@ -214,7 +216,7 @@ exit 127
 			},
 		})
 
-	actor := runtimeactors.AgentConfig{ID: "market-research-agent"}
+	actor := runtimeactors.AgentConfig{ExecutionMode: "live", ID: "market-research-agent"}
 	_, err := runtime.ProbeStartupVisibleToolSurface(runtimeactors.WithActor(context.Background(), actor), actor, "system prompt", []ToolDefinition{{Name: "emit_event"}})
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_startup_probe_failed" {
@@ -262,7 +264,7 @@ exit 1
 			},
 		})
 
-	actor := runtimeactors.AgentConfig{ID: "market-research-agent"}
+	actor := runtimeactors.AgentConfig{ExecutionMode: "live", ID: "market-research-agent"}
 	_, err := runtime.ProbeStartupVisibleToolSurface(runtimeactors.WithActor(context.Background(), actor), actor, "system prompt", []ToolDefinition{{Name: "emit_event"}})
 	assertClaudeAuthenticationFailure(t, err)
 }

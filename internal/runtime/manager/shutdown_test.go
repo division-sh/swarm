@@ -67,7 +67,7 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 		return agent, nil
 	})
 	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
-		Config: runtimeactors.AgentConfig{ID: agent.id},
+		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id},
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t
 		return agent, nil
 	})
 	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
-		Config: runtimeactors.AgentConfig{ID: agent.id},
+		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id},
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 		return agent, nil
 	})
 	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
-		Config: runtimeactors.AgentConfig{ID: agent.id},
+		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id},
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing
 		return agent, nil
 	})
 	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
-		Config: runtimeactors.AgentConfig{ID: agent.id},
+		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id},
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}

@@ -10,11 +10,16 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/google/uuid"
 )
 
 func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.AgentTurnRecord) error {
+	executionMode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("agent turn execution mode is required")
+	}
 	plan, identity, err := validateTurnMemory(rec)
 	if err != nil {
 		return err
@@ -74,20 +79,20 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls, emitted_events,
 			mcp_servers, mcp_tools_listed, mcp_tools_visible, request_payload, response_payload, turn_blocks,
-			parse_ok, latency_ms, retry_count, failure, created_at
+			parse_ok, latency_ms, retry_count, execution_mode, failure, created_at
 		) VALUES (
 			$1::uuid,$2::uuid,$3,$4::uuid,NULLIF($5,''),$6,$7,NULLIF($8,'')::uuid,
 			NULLIF($9,'')::uuid,NULLIF($10,''),NULLIF($11,''),$12::jsonb,$13::jsonb,$14::jsonb,
 			$15::jsonb,$16::jsonb,$17::jsonb,CASE WHEN $18='' THEN NULL ELSE $18::jsonb END,
-			CASE WHEN $19='' THEN NULL ELSE $19::jsonb END,$20::jsonb,$21,$22,$23,
-			CASE WHEN $24='' THEN NULL ELSE $24::jsonb END,now()
+			CASE WHEN $19='' THEN NULL ELSE $19::jsonb END,$20::jsonb,$21,$22,$23,$24,
+			CASE WHEN $25='' THEN NULL ELSE $25::jsonb END,now()
 		)
 	`, turnID, identity.RunID, identity.AgentID, strings.TrimSpace(rec.SessionID), identity.FlowInstance,
 			plan.Enabled, string(plan.Source), strings.TrimSpace(rec.EntityID), strings.TrimSpace(rec.TriggerEventID),
 			strings.TrimSpace(rec.TriggerEventType), strings.TrimSpace(rec.TaskID), normalizeJSONArray(rec.AvailableTools),
 			normalizeJSONArray(rec.ToolCalls), normalizeJSONArray(rec.EmittedEvents), normalizeJSONObject(rec.MCPServers),
 			normalizeJSONArray(rec.MCPToolsListed), normalizeJSONArray(rec.MCPToolsVisible), normalizeJSONPayload(rec.RequestPayload),
-			normalizeJSONPayload(rec.ResponseRaw), normalizeJSONArray(rec.TurnBlocks), rec.ParseOK, latencyMS, rec.RetryCount, failurePayload)
+			normalizeJSONPayload(rec.ResponseRaw), normalizeJSONArray(rec.TurnBlocks), rec.ParseOK, latencyMS, rec.RetryCount, executionMode, failurePayload)
 		if err != nil {
 			return fmt.Errorf("insert agent turn: %w", err)
 		}
@@ -95,7 +100,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			TurnID: turnID, RunID: rec.RunID, AgentID: rec.AgentID, SessionID: rec.SessionID, EntityID: rec.EntityID,
 			FlowID: identity.FlowInstance, TriggerEventType: rec.TriggerEventType, Blocks: rec.TurnBlocks,
 			ParseOK: rec.ParseOK, DurationMS: latencyMS, RetryCount: rec.RetryCount, UsageExactness: "unavailable",
-			Failure: rec.Failure, OccurredAt: time.Now().UTC(),
+			ExecutionMode: string(executionMode), Failure: rec.Failure, OccurredAt: time.Now().UTC(),
 		})
 	})
 }

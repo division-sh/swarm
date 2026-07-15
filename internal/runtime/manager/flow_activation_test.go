@@ -1392,9 +1392,10 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	}
 	sharedAgent := flowActivationStubAgent{id: "shared-subject-agent"}
 	sharedConfig := models.AgentConfig{
-		ID:       "shared-subject-agent",
-		EntityID: req.Instance.EntityID,
-		FlowPath: "review/other-inst",
+		ExecutionMode: "live",
+		ID:            "shared-subject-agent",
+		EntityID:      req.Instance.EntityID,
+		FlowPath:      "review/other-inst",
 	}
 	if err := am.lifecycle.registerExecution(ctx, PersistedAgent{Config: sharedConfig, Status: "active", HiredBy: "test"}, false, sharedAgent); err != nil {
 		t.Fatalf("register shared-subject-agent: %v", err)

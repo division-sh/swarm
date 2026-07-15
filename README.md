@@ -16,7 +16,7 @@ Swarm runs fleets of LLM agents as a durable, stateful system. You declare it in
 
 More than a simple orchestrator that decides which agent runs next, Swarm runs the system around it. Work is modeled as entities (an order, a ticket, a candidate business) moving through a state machine you declare: the runtime schedules hundreds at once, keeps them isolated, meters their spend, persists their state, and resumes them after a crash, days later if a timer or a human kept them waiting. Any run can be replayed or forked from the log. Deterministic routing is one piece; the rest is the operating system.
 
-Single Go binary, local/dev SQLite by default with Postgres as a production opt-in. Multiple LLM backends ship today: the Anthropic API, the Claude CLI, OpenAI-compatible Chat Completions endpoints, and native OpenAI Responses.
+Single Go binary, local/dev SQLite by default with Postgres as a production opt-in. Multiple LLM backends ship today: the Anthropic API, the Claude CLI, OpenAI-compatible Chat Completions endpoints, native OpenAI Responses, and a credentialless deterministic Python mock runtime.
 
 **Long-term direction:** entire divisions (engineering, support, operations) running as autonomous Swarm flows. Humans in the loop where judgment is required; agents and deterministic system nodes everywhere else.
 
@@ -108,6 +108,29 @@ non-secret defaults, use [`swarm.example.yaml`](swarm.example.yaml) as the
 non-secret `swarm.yaml` reference. For contract
 credentials, use `swarm secrets set` and validate with `swarm secrets check`.
 
+For credentialless end-to-end agent runs, select `llm.backend: mock` and give each
+agent one contracts-root-relative Python performance:
+
+```yaml
+# agents.yaml
+reviewer:
+  id: reviewer
+  role: reviewer
+  prompt_ref: reviewer
+  model: regular
+  memory: false
+  subscriptions: [review.requested]
+  mock:
+    kind: python
+    module: mocks/reviewer.py
+```
+
+The module exports `handle(input)` and returns one JSON-compatible object with
+`text`, `calls`, or both. Mock turns use normal sessions, tools, routing,
+persistence, and readbacks, but the runtime rejects every external effect before
+launch. The compiled generation captures the module bytes and digest; it never
+rereads the source file while running.
+
 ---
 
 ## Core concepts
@@ -184,7 +207,7 @@ The static analyzer's refusal to boot on a half-finished contract is a feature i
 
 - Platform specification: **v0.7.0**, complete. See [`platform-spec.yaml`](platform-spec.yaml).
 - Engine: Go. Handler-first execution for the proven-safe subset; full handler-first execution in progress.
-- Conformance suite: **12 tiers, 200+ distinct test contract bundles** spanning primitives, accumulation, atomic event-loop semantics, composition, boot verification, runtime fork, and policy patterns. The suite runs against an internal scripted harness, so it doesn't cost LLM tokens to exercise the engine. A user-selectable scripted backend is on the roadmap.
+- Conformance suite: **12 tiers, 200+ distinct test contract bundles** spanning primitives, accumulation, atomic event-loop semantics, composition, boot verification, runtime fork, and policy patterns. The suite runs against an internal scripted harness, and the active Python mock backend provides credentialless full-runtime agent proof without live LLM spend.
 - Used internally to power autonomous multi-agent workflows. External use at your own risk.
 
 The trajectory points at running whole company divisions as autonomous flows. 

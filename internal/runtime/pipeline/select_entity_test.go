@@ -518,8 +518,8 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityFeedsEntityIDToArtifactRe
 	sourceEventID := "33333333-3333-3333-3333-333333333333"
 	payload := map[string]any{"artifact_key": "case-1", "request_id": "44444444-4444-4444-4444-444444444444", "namespace": "tenant-alpha", "partition_key": "project-42", "display_slug": "Demo Artifact", "mvp_yaml": "name: Demo\n"}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ($1::uuid, $2, $3::uuid, 'source/case-1', 'entity', $4::jsonb, 'test', 'node', to_timestamp(1700000000))
+		INSERT INTO events (execution_mode, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ('live', $1::uuid, $2, $3::uuid, 'source/case-1', 'entity', $4::jsonb, 'test', 'node', to_timestamp(1700000000))
 	`, sourceEventID, "spec_repo.commit_requested", "22222222-2222-2222-2222-222222222222", string(mustJSON(payload))); err != nil {
 		t.Fatalf("seed artifact event: %v", err)
 	}
@@ -961,8 +961,8 @@ func seedSelectEntitySpendEvent(t *testing.T, db *sql.DB, ctx context.Context, p
 	)
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ($1::uuid, $2, $3::uuid, 'opco/vertical-1', 'entity', $4::jsonb, 'opco', 'node', now())
+		INSERT INTO events (execution_mode, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ('live', $1::uuid, $2, $3::uuid, 'opco/vertical-1', 'entity', $4::jsonb, 'opco', 'node', now())
 	`, evt.ID(), string(evt.Type()), entityID, string(evt.Payload())); err != nil {
 		t.Fatalf("seed select_entity spend event: %v", err)
 	}

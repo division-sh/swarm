@@ -19,9 +19,10 @@ func TestAgentManagerSpawnAgentConsumesNativeToolAdmissionValidator(t *testing.T
 	})
 
 	err := am.SpawnAgent(models.AgentConfig{
-		ID:          "worker-1",
-		Role:        "worker",
-		NativeTools: models.NativeToolConfig{FileIO: true},
+		ExecutionMode: "live",
+		ID:            "worker-1",
+		Role:          "worker",
+		NativeTools:   models.NativeToolConfig{FileIO: true},
 	})
 	if err == nil || !strings.Contains(err.Error(), "native tool admission failed: native tool denied") {
 		t.Fatalf("SpawnAgent error = %v, want native tool admission failure", err)
@@ -42,12 +43,13 @@ func TestAgentManagerReconfigureConsumesNativeToolAdmissionValidator(t *testing.
 			return nil
 		},
 	})
-	if err := am.SpawnAgent(models.AgentConfig{ID: "worker-1", Role: "worker"}); err != nil {
+	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: "worker-1", Role: "worker"}); err != nil {
 		t.Fatalf("SpawnAgent setup: %v", err)
 	}
 
 	err := am.ReconfigureAgent("worker-1", models.AgentConfig{
-		NativeTools: models.NativeToolConfig{FileIO: true},
+		ExecutionMode: "live",
+		NativeTools:   models.NativeToolConfig{FileIO: true},
 	})
 	if err == nil || !strings.Contains(err.Error(), "native tool admission failed: native tool denied") {
 		t.Fatalf("ReconfigureAgent error = %v, want native tool admission failure", err)

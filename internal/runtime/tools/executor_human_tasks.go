@@ -184,6 +184,11 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 		return nil, err
 	}
 	provenanceMap := map[string]any{"requester_agent_id": actor.ID, "logical_operation_id": operationID}
+	executionMode, err := decisioncard.CausalExecutionMode(ctx)
+	if err != nil {
+		return nil, err
+	}
+	provenanceMap["execution_mode"] = executionMode
 	if sourceEventID != "" {
 		provenanceMap["source_event_id"] = sourceEventID
 	}
@@ -203,7 +208,8 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 	}
 	card, err := decisioncard.New(decisioncard.Card{
 		CardID: cardID, RunID: runID, Anchor: anchor, Snapshot: snapshot,
-		BundleHash: bundleHash, EffectiveCadence: cadence.Stamp(now), Provenance: provenance, CreatedAt: now,
+		ExecutionMode: executionMode,
+		BundleHash:    bundleHash, EffectiveCadence: cadence.Stamp(now), Provenance: provenance, CreatedAt: now,
 	})
 	if err != nil {
 		return nil, err

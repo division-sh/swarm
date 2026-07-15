@@ -580,6 +580,7 @@ func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, age
 			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
 			e.payload, e.created_at,
 			COALESCE(e.source_event_id::text, ''),
+			e.execution_mode,
 			CASE WHEN d.delivery_id IS NULL THEN FALSE ELSE TRUE END,
 			COALESCE(d.status, ''),
 			COALESCE(d.retry_count, 0),

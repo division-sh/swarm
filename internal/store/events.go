@@ -16,6 +16,7 @@ import (
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
@@ -847,30 +848,32 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 	q := `
 		INSERT INTO events (
 			event_id, event_name, entity_id, flow_instance, scope, payload,
-			chain_depth, produced_by, produced_by_type, source_event_id, created_at
+			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at
 		)
 		VALUES (
 			$1::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6::jsonb,
-			$7, NULLIF($8,''), $9, NULLIF($10,'')::uuid, $11
+			$7, $8, NULLIF($9,''), $10, NULLIF($11,'')::uuid, $12
 		)
 		ON CONFLICT (event_id) DO NOTHING
 	`
-	args := []any{id, name, entityID, flowInstance, scope, string(payload), chainDepth, producedBy, producedByType, sourceEventID, createdAt}
+	args := []any{id, name, entityID, flowInstance, scope, string(payload), evt.ExecutionMode(), chainDepth, producedBy, producedByType, sourceEventID, createdAt}
 	if caps.Events.LogRouteIdentity {
 		q = `
 			INSERT INTO events (
 				event_id, event_name, entity_id, flow_instance, scope, payload,
-				chain_depth, produced_by, produced_by_type, source_event_id, created_at,
+				execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
 				source_route, target_route, target_set
 			)
 			VALUES (
 				$1::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6::jsonb,
-				$7, NULLIF($8,''), $9, NULLIF($10,'')::uuid, $11,
-				$12::jsonb, $13::jsonb, $14::jsonb
+				$7, $8, NULLIF($9,''), $10, NULLIF($11,'')::uuid, $12,
+				$13::jsonb, $14::jsonb, $15::jsonb
 			)
 			ON CONFLICT (event_id) DO NOTHING
 		`
-		args = []any{id, name, entityID, flowInstance, scope, string(payload), chainDepth, producedBy, producedByType, sourceEventID, createdAt, string(sourceRoute), string(targetRoute), string(targetSet)}
+		args = []any{id, name, entityID, flowInstance, scope, string(payload), evt.ExecutionMode(), chainDepth, producedBy, producedByType, sourceEventID, createdAt, string(sourceRoute), string(targetRoute), string(targetSet)}
+	} else if eventHasRouteIdentity(evt) {
+		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("events source_route/target_route/target_set columns required for routed event")
 	}
 	if caps.Events.LogRunID {
 		var ensureErr error
@@ -898,30 +901,30 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 		q = `
 			INSERT INTO events (
 				event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
-				chain_depth, produced_by, produced_by_type, source_event_id, created_at
+				execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at
 			)
 			VALUES (
 				$1::uuid, NULLIF($2,'')::uuid, $3, NULLIF($4,'')::uuid, NULLIF($5,''), $6, $7::jsonb,
-				$8, NULLIF($9,''), $10, NULLIF($11,'')::uuid, $12
+				$8, $9, NULLIF($10,''), $11, NULLIF($12,'')::uuid, $13
 			)
 			ON CONFLICT (event_id) DO NOTHING
 		`
-		args = []any{id, runID, name, entityID, flowInstance, scope, string(payload), chainDepth, producedBy, producedByType, sourceEventID, createdAt}
+		args = []any{id, runID, name, entityID, flowInstance, scope, string(payload), evt.ExecutionMode(), chainDepth, producedBy, producedByType, sourceEventID, createdAt}
 		if caps.Events.LogRouteIdentity {
 			q = `
 				INSERT INTO events (
 					event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
-					chain_depth, produced_by, produced_by_type, source_event_id, created_at,
+					execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
 					source_route, target_route, target_set
 				)
 				VALUES (
 					$1::uuid, NULLIF($2,'')::uuid, $3, NULLIF($4,'')::uuid, NULLIF($5,''), $6, $7::jsonb,
-					$8, NULLIF($9,''), $10, NULLIF($11,'')::uuid, $12,
-					$13::jsonb, $14::jsonb, $15::jsonb
+					$8, $9, NULLIF($10,''), $11, NULLIF($12,'')::uuid, $13,
+					$14::jsonb, $15::jsonb, $16::jsonb
 				)
 				ON CONFLICT (event_id) DO NOTHING
 			`
-			args = []any{id, runID, name, entityID, flowInstance, scope, string(payload), chainDepth, producedBy, producedByType, sourceEventID, createdAt, string(sourceRoute), string(targetRoute), string(targetSet)}
+			args = []any{id, runID, name, entityID, flowInstance, scope, string(payload), evt.ExecutionMode(), chainDepth, producedBy, producedByType, sourceEventID, createdAt, string(sourceRoute), string(targetRoute), string(targetSet)}
 		}
 	}
 	res, err := execFn(ctx, q, args...)
@@ -1449,7 +1452,7 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 		SELECT
 			e.event_id::text, %s, e.event_name, COALESCE(e.produced_by, ''),
 			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
-			e.payload, e.created_at, COALESCE(e.source_event_id::text, ''),
+			e.payload, e.created_at, COALESCE(e.source_event_id::text, ''), e.execution_mode,
 			%s
 		FROM events e
 		LEFT JOIN event_receipts r
@@ -1473,7 +1476,7 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 
 	out := make([]events.PersistedReplayEvent, 0, limit)
 	for rows.Next() {
-		var eventID, runID, eventName, producedBy, sourceEventID string
+		var eventID, runID, eventName, producedBy, sourceEventID, executionMode string
 		var payload json.RawMessage
 		var createdAt time.Time
 		var entityID, flowInstance, scope string
@@ -1489,6 +1492,7 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 			&payload,
 			&createdAt,
 			&sourceEventID,
+			&executionMode,
 			&sourceRoute,
 			&targetRoute,
 			&targetSet,
@@ -1507,6 +1511,10 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 			eventEnvelopeFromStorage(entityID, flowInstance, scope, sourceRoute, targetRoute, targetSet),
 			createdAt,
 		)
+		evt, err = eventWithStoredExecutionMode(evt, executionMode)
+		if err != nil {
+			return nil, err
+		}
 		record := events.PersistedReplayEvent{Event: evt}
 		if !caps.Events.LogRunID {
 			record.ReplayFailure = replayAdmissionFailure("missing_run_id_schema_capability")
@@ -1534,7 +1542,7 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 		SELECT
 			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
 			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
-			e.payload, e.created_at, COALESCE(e.source_event_id::text, ''),
+			e.payload, e.created_at, COALESCE(e.source_event_id::text, ''), e.execution_mode,
 			%s
 		FROM events e
 		LEFT JOIN event_receipts r
@@ -1559,7 +1567,7 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 
 	out := make([]events.PersistedReplayEvent, 0, limit)
 	for rows.Next() {
-		var eventID, eventRunID, eventName, producedBy, sourceEventID string
+		var eventID, eventRunID, eventName, producedBy, sourceEventID, executionMode string
 		var payload json.RawMessage
 		var createdAt time.Time
 		var entityID, flowInstance, scope string
@@ -1575,6 +1583,7 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 			&payload,
 			&createdAt,
 			&sourceEventID,
+			&executionMode,
 			&sourceRoute,
 			&targetRoute,
 			&targetSet,
@@ -1593,6 +1602,10 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 			eventEnvelopeFromStorage(entityID, flowInstance, scope, sourceRoute, targetRoute, targetSet),
 			createdAt,
 		)
+		evt, err = eventWithStoredExecutionMode(evt, executionMode)
+		if err != nil {
+			return nil, err
+		}
 		record := events.PersistedReplayEvent{Event: evt}
 		if strings.TrimSpace(evt.RunID()) == "" {
 			record.ReplayFailure = replayAdmissionFailure("missing_canonical_run_id")
@@ -1618,7 +1631,7 @@ func (s *PostgresStore) listEventsWithPendingDeliveriesForRunSpec(ctx context.Co
 		SELECT
 			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
 			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
-			e.payload, e.created_at, COALESCE(e.source_event_id::text, ''),
+			e.payload, e.created_at, COALESCE(e.source_event_id::text, ''), e.execution_mode,
 			%s
 		FROM events e
 		WHERE e.run_id = $1::uuid
@@ -1641,7 +1654,7 @@ func (s *PostgresStore) listEventsWithPendingDeliveriesForRunSpec(ctx context.Co
 
 	out := make([]events.PersistedReplayEvent, 0, limit)
 	for rows.Next() {
-		var eventID, eventRunID, eventName, producedBy, sourceEventID string
+		var eventID, eventRunID, eventName, producedBy, sourceEventID, executionMode string
 		var payload json.RawMessage
 		var createdAt time.Time
 		var entityID, flowInstance, scope string
@@ -1657,6 +1670,7 @@ func (s *PostgresStore) listEventsWithPendingDeliveriesForRunSpec(ctx context.Co
 			&payload,
 			&createdAt,
 			&sourceEventID,
+			&executionMode,
 			&sourceRoute,
 			&targetRoute,
 			&targetSet,
@@ -1675,6 +1689,10 @@ func (s *PostgresStore) listEventsWithPendingDeliveriesForRunSpec(ctx context.Co
 			eventEnvelopeFromStorage(entityID, flowInstance, scope, sourceRoute, targetRoute, targetSet),
 			createdAt,
 		)
+		evt, err = eventWithStoredExecutionMode(evt, executionMode)
+		if err != nil {
+			return nil, err
+		}
 		record := events.PersistedReplayEvent{Event: evt}
 		if strings.TrimSpace(evt.RunID()) == "" {
 			record.ReplayFailure = replayAdmissionFailure("missing_canonical_run_id")
@@ -1692,6 +1710,14 @@ func chooseRowQueryer(db *sql.DB, tx *sql.Tx) rowQueryer {
 		return tx
 	}
 	return db
+}
+
+func eventWithStoredExecutionMode(event events.Event, raw string) (events.Event, error) {
+	mode, ok := executionmode.Parse(raw)
+	if !ok {
+		return events.EmptyEvent(), fmt.Errorf("persisted event %s has invalid execution_mode %q", event.ID(), strings.TrimSpace(raw))
+	}
+	return event.WithExecutionMode(mode), nil
 }
 
 func chooseExecQueryer(db *sql.DB, tx *sql.Tx) execQueryer {

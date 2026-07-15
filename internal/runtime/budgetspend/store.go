@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
 type Scope string
@@ -46,6 +48,7 @@ type SpendRecord struct {
 	CostUSD         float64
 	InvocationType  string
 	UsageAccounting string
+	ExecutionMode   executionmode.Mode
 	RecordedAt      time.Time
 }
 
@@ -64,4 +67,5 @@ type SpendQuery struct {
 	Scope    Scope
 	EntityID string
 	Since    time.Time
+	LiveOnly bool
 }

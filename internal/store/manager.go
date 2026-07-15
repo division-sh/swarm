@@ -9,7 +9,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 )
 
 type persistedAgentRuntimeDescriptor struct {
@@ -23,6 +25,8 @@ type persistedAgentRuntimeDescriptor struct {
 	NativeTools          runtimeactors.NativeToolConfig `json:"native_tools,omitempty"`
 	WorkspaceClass       string                         `json:"workspace_class,omitempty"`
 	ManagerFallback      string                         `json:"manager_fallback,omitempty"`
+	ExecutionMode        runtimeeffects.ExecutionMode   `json:"execution_mode"`
+	Mock                 mockperformance.Performance    `json:"mock,omitempty"`
 }
 
 type persistedAgentProjection struct {
@@ -87,6 +91,8 @@ var persistedAgentRuntimeDescriptorKeys = map[string]struct{}{
 	"native_tools":           {},
 	"workspace_class":        {},
 	"manager_fallback":       {},
+	"execution_mode":         {},
+	"mock":                   {},
 }
 
 func mergeAgentConfigJSON(cfg runtimeactors.AgentConfig) ([]byte, error) {
@@ -158,7 +164,7 @@ func projectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID st
 	if err != nil {
 		return persistedAgentProjection{}, fmt.Errorf("marshal agent config: %w", err)
 	}
-	runtimeDescriptorJSON, err := marshalPersistedAgentRuntimeDescriptor(cfg, modelAlias)
+	runtimeDescriptorJSON, err := marshalPersistedAgentRuntimeDescriptor(cfg, modelAlias, llmBackend)
 	if err != nil {
 		return persistedAgentProjection{}, fmt.Errorf("marshal agent runtime descriptor: %w", err)
 	}
@@ -212,6 +218,15 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 	if err != nil {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid runtime_descriptor: %w", strings.TrimSpace(row.AgentID), err)
 	}
+	if !descExecutionModeMatchesBackend(profile.ID, desc.ExecutionMode) {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s execution_mode %q conflicts with llm_backend %q", strings.TrimSpace(row.AgentID), desc.ExecutionMode, llmBackend)
+	}
+	if profile.ID == llmselection.BackendMock && !desc.Mock.Configured() {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s mock runtime descriptor is missing its performance artifact", strings.TrimSpace(row.AgentID))
+	}
+	if profile.ID != llmselection.BackendMock && desc.Mock.Configured() {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s live runtime descriptor carries a mock performance artifact", strings.TrimSpace(row.AgentID))
+	}
 	cfg := runtimeactors.AgentConfig{
 		ID:                   strings.TrimSpace(row.AgentID),
 		Type:                 desc.Type,
@@ -222,6 +237,8 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 		ResolvedModel:        strings.TrimSpace(desc.ResolvedModel),
 		ResolvedLLMProvider:  strings.TrimSpace(desc.ResolvedLLMProvider),
 		ResolvedLLMTransport: strings.TrimSpace(desc.ResolvedLLMTransport),
+		ExecutionMode:        desc.ExecutionMode,
+		Mock:                 desc.Mock,
 		Memory:               memory,
 		MaxTurnsPerTask:      desc.MaxTurnsPerTask,
 		Subscriptions:        decodeJSONStringList(row.SubscriptionsJSON),
@@ -244,7 +261,7 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 	return cfg, nil
 }
 
-func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, modelAlias string) ([]byte, error) {
+func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, modelAlias, llmBackend string) ([]byte, error) {
 	desc := persistedAgentRuntimeDescriptor{
 		Type:                 agentPersistedType(cfg, modelAlias),
 		FlowID:               strings.TrimSpace(cfg.FlowID),
@@ -256,6 +273,17 @@ func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, model
 		NativeTools:          cfg.NativeTools,
 		WorkspaceClass:       strings.TrimSpace(cfg.WorkspaceClass),
 		ManagerFallback:      strings.TrimSpace(cfg.ManagerFallback),
+		ExecutionMode:        cfg.ExecutionMode,
+		Mock:                 cfg.Mock,
+	}
+	if !descExecutionModeMatchesBackend(llmBackend, desc.ExecutionMode) {
+		return nil, fmt.Errorf("execution_mode %q conflicts with llm_backend %q", desc.ExecutionMode, strings.TrimSpace(llmBackend))
+	}
+	if desc.ExecutionMode == runtimeeffects.ExecutionModeMock && !desc.Mock.Configured() {
+		return nil, fmt.Errorf("mock runtime descriptor requires a captured performance artifact")
+	}
+	if desc.ExecutionMode == runtimeeffects.ExecutionModeLive && desc.Mock.Configured() {
+		return nil, fmt.Errorf("live runtime descriptor cannot carry a mock performance artifact")
 	}
 	if !desc.NativeTools.Any() {
 		desc.NativeTools = runtimeactors.NativeToolConfig{}
@@ -289,10 +317,24 @@ func decodePersistedAgentRuntimeDescriptor(raw []byte) (persistedAgentRuntimeDes
 	desc.ResolvedLLMTransport = strings.TrimSpace(desc.ResolvedLLMTransport)
 	desc.WorkspaceClass = strings.TrimSpace(desc.WorkspaceClass)
 	desc.ManagerFallback = strings.TrimSpace(desc.ManagerFallback)
+	desc.ExecutionMode = runtimeeffects.ExecutionMode(strings.TrimSpace(string(desc.ExecutionMode)))
+	desc.Mock.Kind = strings.TrimSpace(desc.Mock.Kind)
+	desc.Mock.Module = strings.TrimSpace(desc.Mock.Module)
+	desc.Mock.Digest = strings.TrimSpace(desc.Mock.Digest)
+	desc.Mock.SourcePath = strings.TrimSpace(desc.Mock.SourcePath)
+	desc.Mock.Source = append([]byte(nil), desc.Mock.Source...)
 	if desc.Type == "" {
 		return persistedAgentRuntimeDescriptor{}, fmt.Errorf("missing type")
 	}
 	return desc, nil
+}
+
+func descExecutionModeMatchesBackend(backend string, mode runtimeeffects.ExecutionMode) bool {
+	backend = strings.TrimSpace(backend)
+	if backend == llmselection.BackendMock {
+		return mode == runtimeeffects.ExecutionModeMock
+	}
+	return mode == runtimeeffects.ExecutionModeLive
 }
 
 func extractSubscriptions(raw []byte) []string {

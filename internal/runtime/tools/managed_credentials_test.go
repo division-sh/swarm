@@ -411,9 +411,10 @@ func TestExecutorHTTPToolManagedCredentialServedAndMCPTransportsUseSameOwner(t *
 
 func managedCredentialActor() models.AgentConfig {
 	return models.AgentConfig{
-		ID:       "worker-agent",
-		FlowPath: "worker/instance-1",
-		Tools:    []string{"send_provider"},
+		ExecutionMode: "live",
+		ID:            "worker-agent",
+		FlowPath:      "worker/instance-1",
+		Tools:         []string{"send_provider"},
 	}
 }
 

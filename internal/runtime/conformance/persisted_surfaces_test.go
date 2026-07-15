@@ -88,7 +88,7 @@ func acquireLiveConversationSession(t *testing.T, ctx context.Context, db *sql.D
 }
 
 func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *testing.T) {
-	ctx := context.Background()
+	ctx := runtimeeffects.WithExecutionMode(context.Background(), runtimeeffects.ExecutionModeLive)
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 
@@ -303,11 +303,12 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
 		return runtimeactors.WithActor(base, runtimeactors.AgentConfig{
-			ID:       "agent-1",
-			Type:     "stub",
-			Model:    "regular",
-			Memory:   agentmemory.Authored(true),
-			FlowPath: "support/inst-1",
+			ExecutionMode: "live",
+			ID:            "agent-1",
+			Type:          "stub",
+			Model:         "regular",
+			Memory:        agentmemory.Authored(true),
+			FlowPath:      "support/inst-1",
 		})
 	}
 
@@ -486,10 +487,11 @@ printf '{"result":"ok"}'
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
 		return runtimeactors.WithActor(base, runtimeactors.AgentConfig{
-			ID:       "agent-1",
-			Type:     "stub",
-			Memory:   agentmemory.Authored(true),
-			FlowPath: "support/inst-1",
+			ExecutionMode: "live",
+			ID:            "agent-1",
+			Type:          "stub",
+			Memory:        agentmemory.Authored(true),
+			FlowPath:      "support/inst-1",
 		})
 	}
 
@@ -545,7 +547,7 @@ func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testing.T) {
-	ctx := context.Background()
+	ctx := runtimeeffects.WithExecutionMode(context.Background(), runtimeeffects.ExecutionModeLive)
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 
@@ -1474,7 +1476,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 	module := loadConformanceRuntimeWorkflowModule(t)
 	managerStore := &conformanceManagerReplayStore{
 		agents: []runtimemanager.PersistedAgent{{
-			Config:    runtimeactors.AgentConfig{ID: "agent-a"},
+			Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-a"},
 			StartedAt: time.Now().UTC(),
 		}},
 		pending: map[string][]events.Event{
@@ -1662,9 +1664,9 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 
 	droppedEventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			$1::uuid, 'system.recover.drop', 'global', '{}'::jsonb, 'runtime', 'platform', now()
 		)
 	`, droppedEventID); err != nil {
@@ -1736,7 +1738,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 }
 
 func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProjection(t *testing.T) {
-	ctx := context.Background()
+	ctx := runtimeeffects.WithExecutionMode(context.Background(), runtimeeffects.ExecutionModeLive)
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 
@@ -1992,12 +1994,13 @@ func seedConformanceAgent(t *testing.T, ctx context.Context, pg *store.PostgresS
 	t.Helper()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:     agentID,
-			Role:   "tester",
-			FlowID: "global",
-			Type:   "stub",
-			Model:  "regular",
-			Config: []byte(`{"system_prompt":"x"}`),
+			ID:            agentID,
+			Role:          "tester",
+			FlowID:        "global",
+			Type:          "stub",
+			Model:         "regular",
+			ExecutionMode: "live",
+			Config:        []byte(`{"system_prompt":"x"}`),
 		},
 		Status:    "active",
 		HiredBy:   "conformance-test",
@@ -2207,10 +2210,11 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	})
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	ctx = runtimetools.WithActor(ctx, runtimeactors.AgentConfig{
-		ID:    "tester",
-		Type:  "internal",
-		Role:  "operator",
-		Tools: []string{"create_entity", "save_entity_field"},
+		ExecutionMode: "live",
+		ID:            "tester",
+		Type:          "internal",
+		Role:          "operator",
+		Tools:         []string{"create_entity", "save_entity_field"},
 	})
 	return ctx, exec, db, runID
 }

@@ -75,17 +75,17 @@ func insertDecisionCard(ctx context.Context, db decisionCardSQL, card decisionca
 	}
 	query := `
 			INSERT INTO decision_cards (
-				card_id, run_id, anchor_kind, anchor, status, snapshot,
+				card_id, run_id, anchor_kind, anchor, status, execution_mode, snapshot,
 				card_content_hash, effect_content_hash, decision_schema_hash, bundle_hash, workflow_version,
 				effective_cadence, provenance, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (card_id) DO NOTHING`
 	if postgres {
 		query = strings.ReplaceAll(query, "?", "$%d")
 		query = numberPostgresPlaceholders(query)
 	}
 	res, err := db.ExecContext(ctx, query,
-		card.CardID, card.RunID, card.Anchor.Kind(), string(anchor), card.Status, string(snapshot),
+		card.CardID, card.RunID, card.Anchor.Kind(), string(anchor), card.Status, card.ExecutionMode, string(snapshot),
 		card.CardContentHash, card.EffectContentHash, card.DecisionSchemaHash, card.BundleHash, nullString(card.WorkflowVersion),
 		string(cadence), string(provenance), card.CreatedAt.UTC(), card.UpdatedAt.UTC(),
 	)
@@ -131,7 +131,7 @@ func (s *SQLiteRuntimeStore) GetDecisionCard(ctx context.Context, id string) (de
 }
 
 const decisionCardSelect = `SELECT
-	card_id, run_id, anchor_kind, anchor, status, snapshot, card_content_hash,
+	card_id, run_id, anchor_kind, anchor, status, execution_mode, snapshot, card_content_hash,
 	COALESCE(effect_content_hash, ''), decision_schema_hash, bundle_hash, COALESCE(workflow_version, ''),
 	effective_cadence, provenance, COALESCE(verdict, ''), COALESCE(fields, '{}'),
 	COALESCE(decided_by, ''), decided_at, deferred_until,
@@ -160,7 +160,7 @@ func scanDecisionCard(row *sql.Row) (decisioncard.Card, error) {
 	var anchor, snapshot, cadence, provenance, fields []byte
 	var decidedAt, deferredUntil, createdAt, updatedAt any
 	err := row.Scan(
-		&card.CardID, &card.RunID, &anchorKind, &anchor, &card.Status, &snapshot, &card.CardContentHash,
+		&card.CardID, &card.RunID, &anchorKind, &anchor, &card.Status, &card.ExecutionMode, &snapshot, &card.CardContentHash,
 		&card.EffectContentHash, &card.DecisionSchemaHash, &card.BundleHash, &card.WorkflowVersion,
 		&cadence, &provenance, &card.Verdict, &fields, &card.DecidedBy, &decidedAt, &deferredUntil,
 		&card.DecisionEventID, &card.DeliveryReceiptID, &card.DeliveryRenderHash, &card.SupersededReason,
@@ -287,7 +287,7 @@ func listDecisionCards(ctx context.Context, db decisionCardSQL, opts decisioncar
 	if postgres {
 		limit = "$" + strconv.Itoa(len(args))
 	}
-	query := `SELECT card_id, run_id, anchor_kind, anchor,
+	query := `SELECT card_id, run_id, anchor_kind, anchor, execution_mode,
 			COALESCE(snapshot->>'title', ''), COALESCE(snapshot->>'decision', ''), status, deferred_until, created_at, updated_at
 		FROM decision_cards WHERE ` + strings.Join(clauses, " AND ") + ` ORDER BY created_at, card_id LIMIT ` + limit
 	if !postgres {
@@ -305,7 +305,7 @@ func listDecisionCards(ctx context.Context, db decisionCardSQL, opts decisioncar
 		var anchorKind string
 		var anchor []byte
 		var deferred, created, updated any
-		if err := rows.Scan(&row.CardID, &row.RunID, &anchorKind, &anchor,
+		if err := rows.Scan(&row.CardID, &row.RunID, &anchorKind, &anchor, &row.ExecutionMode,
 			&row.Title, &row.Decision, &row.Status, &deferred, &created, &updated); err != nil {
 			return nil, "", err
 		}
@@ -1181,6 +1181,7 @@ func recordDecisionCardChangeAuthorActivity(ctx context.Context, db decisionCard
 		SubjectType: "card", SubjectID: card.CardID, CardID: card.CardID,
 		AnchorKind: string(card.Anchor.Kind()), AnchorID: anchorID, DecisionID: card.DecisionEventID,
 		Verdict: card.Verdict, SupersedeReason: card.SupersededReason,
+		ExecutionMode: string(card.ExecutionMode),
 	}
 	if !card.DeferredUntil.IsZero() {
 		deferred := card.DeferredUntil.UTC()

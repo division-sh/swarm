@@ -5270,6 +5270,12 @@ engine:
           budget_usage_accounting: exact
           native_tool_policy: fallback-aware non-strict runtime
           protocol: native_openai_responses
+        mock:
+          provider: mock
+          transport: in_process
+          budget_usage_accounting: estimated_hypothetical
+          native_tool_policy: no provider-native or fallback external tools
+          protocol: mock_python_json
       split_boundaries:
       - Adding additional provider identities or protocol families such as OpenRouter, Ollama, Bedrock,
         Azure OpenAI, Vertex, or vLLM requires a separate provider implementation/parity gate that consumes llm_provider_selection_config_authority.
@@ -5381,9 +5387,24 @@ engine:
               Chat Completions-compatible HTTP JSON, not provider-hosted previous_response_id continuity, not OpenAI built-in
               tools/file/image/audio/prompt/conversation closure, not an OpenRouter/Ollama/Bedrock/Azure/Vertex/vLLM provider-matrix
               proof, and not a provider runtime implementation for any backend id named openai.
+          mock:
+            provider: mock
+            transport: in_process
+            provider_contract_runtime_mode: mock
+            protocol: A captured Python performance evaluated through the pinned python-json-v1 Wasmtime runtime.
+            legacy_backend_ids: []
+            credential_source:
+              secret_key: null
+              owner: none
+              legacy_env_var: null
+              required: false
+              resolution_rule: The mock profile is credentialless; provider credential resolution must not invent or require a key.
+            proof_boundary: >
+              This profile is the Python-only Tier-1 deterministic agent runtime. It consumes normal agent sessions,
+              visible tool schemas, tool results, persistence, lifecycle authority, and routing, but it never launches an
+              external effect. It is not fixture replay, a scenario-runner interpreter, a live provider emulator, a local
+              model backend, or a compatibility alias for any live provider.
         reserved_persisted_backend_profiles:
-          mock: Reserved persisted profile id for fixture replay. It is not a supported active runtime backend until a
-            dedicated provider/runtime owner lands.
           local: Reserved persisted profile id for local model execution. It is not a supported active runtime backend until
             a dedicated provider/runtime owner lands.
         rejected_target_names:
@@ -5392,6 +5413,64 @@ engine:
             may front OpenRouter or local-compatible endpoints. Native OpenAI Responses source authority is named
             and activated as openai_responses by #1229/#1224; provider identity openai remains intentionally separate from
             backend profile id and openai must not be accepted as a selector alias.
+      mock_agent_runtime:
+        promoted_by: '#2075'
+        implementation_status: python_only_tier_1_active
+        owner: internal/runtime/llm.MockRuntime behind internal/runtime/llm.ProviderContract
+        selection:
+          backend_profile: mock
+          execution_mode: mock
+          rule: >
+            Backend resolution assigns the typed live or mock execution mode before conversation, tool visibility,
+            completion authorization, or persistence. Missing or conflicting mode is invalid; no reader infers mode from
+            provider names, artifact presence, or persisted defaults.
+        authoring:
+          runtime_config: 'llm.backend: mock'
+          agent_performance:
+            shape: '{mock: {kind: python, module: <contracts-root-relative .py file>}}'
+            kind: python
+            entrypoint: handle
+            rule: >
+              Every agent selected by the mock backend must declare exactly one Python performance. The module must be a
+              regular non-symlink file below the contracts root. Contract compilation reads it once and captures its exact
+              path, bytes, and sha256 digest into the generation-owned agent descriptor; runtime execution never rereads the
+              ambient file.
+        python_abi:
+          runtime: cpython-wasi-3.13.14-wasi_sdk-24 through Wasmtime
+          input: >
+            One JSON object containing the current inbound event when present, system_prompt, ordered messages, visible
+            provider-normalized tools, tool_results, and the one-based round.
+          output: >
+            Exactly one JSON object with optional text, calls, and usage. At least text or one call is required. Every call
+            must name a tool visible on that turn and its arguments must satisfy that tool's schema. Usage token counts are
+            non-negative; absent usage is deterministically estimated from input/output bytes.
+          limits: >
+            Validation and execution use pinned fuel, memory-page, and output-byte bounds. Context cancellation interrupts
+            Python execution through the Wasmtime epoch mechanism; all Python consumers use that same cancellation owner.
+        effect_policy:
+          allowed_inside_platform: [conversation persistence, session persistence, event emission, entity reads, internal tool execution]
+          forbidden: all registered external-effect adapters except mock_python completion accounting
+          rule: >
+            The central external-effect authorization owner rejects mock-mode attempts before launch. A mock performance may
+            request visible internal tools and emit events, but it cannot call providers, HTTP tools, MCP, native commands,
+            workspace writes, relays, or live LLM adapters.
+        accounting:
+          invocation_type: mock_python
+          usage_accounting: estimated
+          cost_semantics: hypothetical mock estimate
+          rule: >
+            Mock completions use the normal durable operation/attempt and turn settlement path and write one mock-mode ledger
+            row. Mock rows remain visible in operator usage readback but are excluded from live system, global, and entity
+            budget-cap admission.
+        provenance:
+          rule: >
+            execution_mode is copied from execution authority into events, external-effect operations and attempts, turns,
+            conversation forks, spend rows, decision cards, mailbox/readback summaries, and author activity. Missing mode is
+            invalid and old rows without it are unsupported; no defaults, fallback readers, or mode reconstruction are allowed.
+        supported_surface_proof: >
+          A real served bundle, without LLM credentials, must exercise mock text, visible internal tool calls, emitted events,
+          decision-card/mailbox rendering, memory continuity across restart, hypothetical usage, and the pre-launch external
+          effect fence on both SQLite and Postgres.
       native_openai_responses_source_authority:
         promoted_by: '#1229'
         implementation_status: runtime_adapter_activated_first_subset
@@ -10929,12 +11008,12 @@ platform_tables:
         runtime recovery, admin commands). source_route, target_route, and target_set are the canonical pin-routing
         identities; legacy entity_id and flow_instance are receiver-context projections. idempotency_key for external
         dedup. source_event_id for causal chain tracing. run_id links every event to its execution context for observability
-        and fork/replay.'
+        and fork/replay. execution_mode is the causal live/mock fact copied from execution authority; downstream cards and readbacks never reconstruct it from provider or backend names.'
       ddl: "CREATE TABLE events (\n    event_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id            UUID\
         \ REFERENCES runs(run_id),\n    event_name        TEXT NOT NULL,\n    entity_id         UUID,\n    flow_instance\
         \     TEXT,\n    source_route      JSONB NOT NULL DEFAULT '{}',\n    target_route      JSONB NOT NULL DEFAULT '{}',\n\
         \    target_set        JSONB NOT NULL DEFAULT '[]',\n    scope             TEXT NOT NULL DEFAULT 'entity' CHECK (scope IN ('entity', 'flow', 'global')),\n\
-        \    payload           JSONB NOT NULL DEFAULT '{}',\n    chain_depth       INTEGER NOT NULL DEFAULT 0,\n\
+        \    payload           JSONB NOT NULL DEFAULT '{}',\n    execution_mode    TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),\n    chain_depth       INTEGER NOT NULL DEFAULT 0,\n\
         \    produced_by       TEXT,\n    produced_by_type  TEXT CHECK (produced_by_type IN ('node', 'agent',\
         \ 'platform', 'external')),\n    handler_node      TEXT,\n    idempotency_key   TEXT,\n    source_event_id   UUID,\n\
         \    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_events_run (run_id, created_at) WHERE\
@@ -11197,6 +11276,7 @@ platform_tables:
             operation_id       UUID PRIMARY KEY,
             effect_kind        TEXT NOT NULL,
             effect_class       TEXT NOT NULL CHECK (effect_class IN ('read_only', 'write_or_unknown')),
+            execution_mode     TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             authority_kind     TEXT NOT NULL CHECK (authority_kind IN ('normal_agent', 'selected_contract_fork', 'conversation_fork_chat')),
             authority_id       TEXT NOT NULL,
             agent_id           TEXT REFERENCES agents(agent_id),
@@ -11226,6 +11306,7 @@ platform_tables:
             attempt_ordinal    INTEGER NOT NULL CHECK (attempt_ordinal > 0),
             adapter            TEXT NOT NULL,
             transport          TEXT NOT NULL,
+            execution_mode     TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             runtime_epoch      BIGINT,
             generation         BIGINT NOT NULL CHECK (generation > 0),
             execution_owner    TEXT NOT NULL,
@@ -11435,7 +11516,7 @@ platform_tables:
         llm_backend stores the backend profile id owned by llm_provider_selection_config_authority. Active runtime profiles
         are anthropic (Anthropic API transport), claude_cli (Claude CLI transport), openai_compatible (Chat Completions-compatible
         HTTP transport), and openai_responses (native OpenAI Responses API transport); legacy api and cli_test persisted rows are migration/backfill inputs only and are not valid new
-        config/operator inputs. mock and local are reserved persisted profile ids and are not active runtimes until a dedicated provider/runtime owner lands. This value is provider-selection
+        config/operator inputs. mock is the active credentialless in-process Python performance runtime; local remains a reserved persisted profile id and is not an active runtime. This value is provider-selection
         deployment truth, not provider identity alone and not transport mode alone. This is a deployment/agent property.'
       ddl: "CREATE TABLE agents (\n    agent_id          TEXT PRIMARY KEY,\n    flow_instance     TEXT,\n    role        \
         \      TEXT NOT NULL,\n    model             TEXT NOT NULL,\n    llm_backend       TEXT NOT NULL DEFAULT 'anthropic' CHECK\
@@ -11509,6 +11590,7 @@ platform_tables:
             latency_ms                      INTEGER NOT NULL DEFAULT 0,
             retry_count                     INTEGER NOT NULL DEFAULT 0,
             completion_attempt_id           UUID UNIQUE REFERENCES runtime_external_effect_attempts(attempt_id),
+            execution_mode                  TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             resolved_model                  TEXT,
             usage_exactness                 TEXT CHECK (usage_exactness IS NULL OR usage_exactness IN ('exact', 'estimated', 'unavailable')),
             input_tokens                    BIGINT,
@@ -11620,6 +11702,7 @@ platform_tables:
             anchor_kind            TEXT NOT NULL CHECK (anchor_kind IN ('stage_gate', 'human_task', 'proposed_effect')),
             anchor                 JSONB NOT NULL,
             status                 TEXT NOT NULL CHECK (status IN ('pending', 'decided', 'superseded', 'expired')),
+            execution_mode         TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             snapshot               JSONB NOT NULL,
             card_content_hash      TEXT NOT NULL,
             effect_content_hash    TEXT,
@@ -11815,6 +11898,7 @@ platform_tables:
             fork_point_selected_at   TIMESTAMPTZ NOT NULL,
             source_turn              JSONB NOT NULL DEFAULT '{}',
             entity_snapshot          JSONB NOT NULL DEFAULT '[]',
+            source_agent_config      JSONB NOT NULL,
             snapshot_owner           TEXT NOT NULL CHECK (snapshot_owner = 'conversation.fork_chat.snapshot.v1'),
             created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             INDEX idx_conversation_fork_snapshots_source_run (source_run_id) WHERE source_run_id IS NOT NULL
@@ -11867,6 +11951,7 @@ platform_tables:
             fork_turn_id                   UUID NOT NULL REFERENCES conversation_fork_turns(fork_turn_id) ON DELETE CASCADE,
             ordinal                        INTEGER NOT NULL CHECK (ordinal > 0),
             attempt_id                     UUID NOT NULL UNIQUE REFERENCES runtime_external_effect_attempts(attempt_id),
+            execution_mode                 TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             resolved_model                 TEXT NOT NULL,
             usage_exactness                TEXT NOT NULL CHECK (usage_exactness IN ('exact', 'estimated', 'unavailable')),
             input_tokens                   BIGINT,
@@ -11923,6 +12008,7 @@ platform_tables:
         CREATE TABLE spend_ledger (
             ledger_id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             external_effect_attempt_id UUID UNIQUE REFERENCES runtime_external_effect_attempts(attempt_id),
+            execution_mode             TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             entity_id                  UUID,
             flow_instance              TEXT NOT NULL,
             agent_id                   TEXT NOT NULL,
@@ -16906,7 +16992,7 @@ test_specification:
         contract_validation: engine.boot_verification.checks plus existing event payload/schema validation owners
     non_goals:
     - No runtime/backend/provider implementation is promoted by this section.
-    - No active `mock` or `local` LLM backend profile is promoted.
+    - This runner does not select or implement the active `mock` backend, and no active `local` LLM backend profile is promoted.
     - The runner does not satisfy, weaken, or bypass internal/runtime/llm.ProviderContract.
     - The runner does not prove live agent sessions, tool-call translation, agent-memory behavior, turn/audit persistence,
       retry lineage, native-tool capability truth, or spend/budget accounting.
@@ -24298,11 +24384,12 @@ api_specification:
       DecisionCardSummary:
         type: object
         additionalProperties: false
-        required: [kind, card_id, run_id, anchor_kind, anchor, scope, title, status, created_at, updated_at]
+        required: [kind, card_id, run_id, execution_mode, anchor_kind, anchor, scope, title, status, created_at, updated_at]
         properties:
           kind: {type: string, const: decision_card}
           card_id: {$ref: '#/components/schemas/OpaqueId'}
           run_id: {$ref: '#/components/schemas/OpaqueId'}
+          execution_mode: {$ref: '#/components/schemas/ExecutionMode'}
           anchor_kind: {$ref: '#/components/schemas/DecisionCardAnchorKind'}
           anchor: {$ref: '#/components/schemas/DecisionCardAnchor'}
           scope: {$ref: '#/components/schemas/DecisionCardScope'}
@@ -24369,10 +24456,11 @@ api_specification:
       DecisionCard:
         type: object
         additionalProperties: true
-        required: [card_id, run_id, anchor_kind, anchor, scope, status, snapshot, card_content_hash, decision_schema_hash, bundle_hash, created_at, updated_at]
+        required: [card_id, run_id, execution_mode, anchor_kind, anchor, scope, status, snapshot, card_content_hash, decision_schema_hash, bundle_hash, created_at, updated_at]
         properties:
           card_id: {$ref: '#/components/schemas/OpaqueId'}
           run_id: {$ref: '#/components/schemas/OpaqueId'}
+          execution_mode: {$ref: '#/components/schemas/ExecutionMode'}
           anchor_kind: {$ref: '#/components/schemas/DecisionCardAnchorKind'}
           anchor: {$ref: '#/components/schemas/DecisionCardAnchor'}
           scope: {$ref: '#/components/schemas/DecisionCardScope'}
@@ -24615,6 +24703,9 @@ api_specification:
         enum:
         - authored
         - platform_default
+      ExecutionMode:
+        type: string
+        enum: [live, mock]
       AgentStatus:
         type: string
         enum:
@@ -24633,6 +24724,7 @@ api_specification:
         - model
         - memory
         - memory_source
+        - execution_mode
         - status
         properties:
           agent_id:
@@ -24648,6 +24740,8 @@ api_specification:
             description: Whether prior turns are loaded for this agent's exact run and flow instance. False does not imply that diagnostic turn evidence is absent.
           memory_source:
             $ref: '#/components/schemas/AgentMemorySource'
+          execution_mode:
+            $ref: '#/components/schemas/ExecutionMode'
           flow_instance:
             type: string
             minLength: 1
@@ -25041,6 +25135,7 @@ api_specification:
         type: object
         additionalProperties: false
         required:
+        - execution_mode
         - usage_accounting
         - invocation_type
         - model
@@ -25049,8 +25144,11 @@ api_specification:
         - provider
         - transport
         - resolved_model
+        - cost_display
         - totals
         properties:
+          execution_mode:
+            $ref: '#/components/schemas/ExecutionMode'
           usage_accounting:
             $ref: '#/components/schemas/UsageAccounting'
           invocation_type:
@@ -25081,6 +25179,10 @@ api_specification:
             type: string
             minLength: 1
             description: Concrete provider model resolved from model_alias for backend_profile at write time.
+          cost_display:
+            type: string
+            minLength: 1
+            description: Author-facing cost qualification; mock rows are always labeled hypothetical rather than provider-billed.
           totals:
             $ref: '#/components/schemas/AgentUsageTotals'
       AgentUsage:
@@ -25295,6 +25397,7 @@ api_specification:
         - duration_ms
         - activity_counts
         - parse_ok
+        - execution_mode
         properties:
           turn_id:
             $ref: '#/components/schemas/OpaqueId'
@@ -25319,6 +25422,8 @@ api_specification:
             type: string
           parse_ok:
             type: boolean
+          execution_mode:
+            $ref: '#/components/schemas/ExecutionMode'
           failure:
             $ref: '#/components/schemas/FailureEnvelope'
       Turn:
@@ -25331,6 +25436,7 @@ api_specification:
         - duration_ms
         - activity
         - parse_ok
+        - execution_mode
         properties:
           turn_id:
             $ref: '#/components/schemas/OpaqueId'
@@ -25361,6 +25467,8 @@ api_specification:
             type: string
           parse_ok:
             type: boolean
+          execution_mode:
+            $ref: '#/components/schemas/ExecutionMode'
           failure:
             $ref: '#/components/schemas/FailureEnvelope'
           assistant_visible_output:
@@ -25545,12 +25653,15 @@ api_specification:
         - turn_id
         - parse_ok
         - latency_ms
+        - execution_mode
         properties:
           turn_index:
             type: integer
             minimum: 1
           turn_id:
             $ref: '#/components/schemas/OpaqueId'
+          execution_mode:
+            $ref: '#/components/schemas/ExecutionMode'
           trigger_event_id:
             type: string
           trigger_event_type:

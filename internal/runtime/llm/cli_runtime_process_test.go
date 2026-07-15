@@ -59,7 +59,8 @@ func (s workspaceResolverStub) ResolveWorkspace(context.Context, runtimeactors.A
 func TestClaudeCLIRuntimeResolveWorkspace_RequiresResolver(t *testing.T) {
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil)
 	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
-		ID: "campaign-coordinator",
+		ExecutionMode: "live",
+		ID:            "campaign-coordinator",
 	})
 
 	_, err := runtime.resolveWorkspace(ctx)
@@ -71,7 +72,8 @@ func TestClaudeCLIRuntimeResolveWorkspace_RequiresResolver(t *testing.T) {
 func TestClaudeCLIRuntimeResolveWorkspace_RequiresContainerTarget(t *testing.T) {
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", workspaceResolverStub{}, nil, nil)
 	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
-		ID: "campaign-coordinator",
+		ExecutionMode: "live",
+		ID:            "campaign-coordinator",
 	})
 
 	_, err := runtime.resolveWorkspace(ctx)
@@ -289,7 +291,7 @@ func TestClaudeCLIRuntimePersistOversizedToolResultRelay_WritesWorkspaceVisibleF
 		gotArgs = append([]string(nil), args...)
 		return nil, nil, 0, nil
 	}
-	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "market-research-agent"})
+	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "market-research-agent"})
 
 	relay, err := runtime.PersistOversizedToolResultRelay(ctx, &Session{ID: "sess-1"}, "sql_execute", []byte(`{"blob":"hello"}`))
 	if err != nil {
@@ -320,7 +322,7 @@ func TestClaudeCLIRuntimePersistOversizedToolResultRelay_PropagatesWorkspaceWrit
 	runtime.execWorkspaceFn = func(context.Context, *workspace.Target, string, ...string) ([]byte, []byte, int, error) {
 		return nil, []byte("permission denied"), 1, errors.New("exit 1")
 	}
-	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "market-research-agent"})
+	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "market-research-agent"})
 
 	_, err := runtime.PersistOversizedToolResultRelay(ctx, &Session{ID: "sess-1"}, "sql_execute", []byte(`{"blob":"hello"}`))
 	failure, ok := runtimefailures.As(err)
@@ -338,12 +340,12 @@ func TestEffectiveCLITimeoutForConfigIgnoresRetiredEnvAndPreservesActorFloor(t *
 		t.Fatalf("timeout without actor = %v, want config timeout", got)
 	}
 
-	globalActorCtx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "global-agent"})
+	globalActorCtx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "global-agent"})
 	if got := effectiveCLITimeoutForConfig(globalActorCtx, cfg); got != 300*time.Second {
 		t.Fatalf("timeout for global/no-entity actor = %v, want floor", got)
 	}
 
-	entityActorCtx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "entity-agent", EntityID: "customer-1"})
+	entityActorCtx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "entity-agent", EntityID: "customer-1"})
 	if got := effectiveCLITimeoutForConfig(entityActorCtx, cfg); got != 45*time.Second {
 		t.Fatalf("timeout for entity actor = %v, want config timeout", got)
 	}

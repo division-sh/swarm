@@ -40,6 +40,9 @@ func admitPersistableEvent(evt Event, opts AdmissionOptions, allowProjectionDefa
 	if eventType == "" {
 		return Event{}, fmt.Errorf("event type is required for persistence admission")
 	}
+	if !evt.ExecutionMode().Valid() {
+		return Event{}, fmt.Errorf("event execution_mode must be live or mock for persistence admission")
+	}
 	if class == EventAdmissionProjection && !allowProjectionDefaults {
 		return admitAuthoritativeProjectionForPersistence(evt, opts, eventType)
 	}
@@ -102,7 +105,7 @@ func admitPersistableEvent(evt Event, opts AdmissionOptions, allowProjectionDefa
 		parentEventID,
 		evt.NormalizedEnvelope(),
 		createdAt,
-	).WithDeliveryContext(evt.DeliveryContext()), nil
+	).WithExecutionMode(evt.ExecutionMode()).WithDeliveryContext(evt.DeliveryContext()), nil
 }
 
 func admitAuthoritativeProjectionForPersistence(evt Event, opts AdmissionOptions, eventType EventType) (Event, error) {
@@ -134,7 +137,7 @@ func admitAuthoritativeProjectionForPersistence(evt Event, opts AdmissionOptions
 		parentEventID,
 		evt.NormalizedEnvelope(),
 		createdAt.UTC(),
-	).WithDeliveryContext(evt.DeliveryContext()), nil
+	).WithExecutionMode(evt.ExecutionMode()).WithDeliveryContext(evt.DeliveryContext()), nil
 }
 
 func normalizedAdmissionClass(class EventAdmissionClass) EventAdmissionClass {

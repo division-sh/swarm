@@ -1,6 +1,7 @@
 package pythonmodule
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,19 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 )
+
+func TestExecuteHonorsCancelledContext(t *testing.T) {
+	source := []byte("def handle(input):\n    return {'ok': True}\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := Execute(ctx, Request{
+		ModuleID: "cancelled", RowID: "cancelled", Digest: digestSource(source),
+		Entry: DefaultEntry, Source: source, Input: []byte(`{}`), Fuel: 100_000_000, MemoryPages: 256, OutputBytes: 1024,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Execute error = %v, want context cancellation", err)
+	}
+}
 
 func TestExecuteStructuredTransform(t *testing.T) {
 	source := []byte(`def handle(input):
@@ -38,7 +52,8 @@ func TestExecuteStructuredTransform(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := Execute(Request{
+	started := time.Now()
+	result, err := Execute(context.Background(), Request{
 		ModuleID:    "python_renderer",
 		RowID:       "render_bundle",
 		Digest:      digestSource(source),
@@ -52,6 +67,7 @@ func TestExecuteStructuredTransform(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
+	t.Logf("deterministic Python interpreter timing: %s", time.Since(started))
 	if result.Interpreter != Interpreter || result.InterpreterSHA != InterpreterDigest || result.SnapshotHash == "" || result.HarnessABI != HarnessABI || result.SourceHash != digestSource(source) {
 		t.Fatalf("runtime identity = %#v", result)
 	}
@@ -72,7 +88,7 @@ func TestExecuteStructuredTransform(t *testing.T) {
 
 func TestValidateSourceRejectsDeniedCapability(t *testing.T) {
 	source := []byte("import os\n\ndef handle(input):\n    return {\"cwd\": os.getcwd()}\n")
-	err := ValidateSource(Request{
+	err := ValidateSource(context.Background(), Request{
 		ModuleID:    "bad",
 		RowID:       "policy.modules.bad",
 		Digest:      digestSource(source),
@@ -90,7 +106,7 @@ func TestValidateSourceRejectsBuiltinEscape(t *testing.T) {
     os = __builtins__["__import__"].__globals__["builtins"].__import__("os")
     return {"cwd": os.getcwd()}
 `)
-	err := ValidateSource(Request{
+	err := ValidateSource(context.Background(), Request{
 		ModuleID:    "bad",
 		RowID:       "policy.modules.bad",
 		Digest:      digestSource(source),
@@ -155,7 +171,7 @@ def handle(input):
 `)
 	done := make(chan error, 1)
 	go func() {
-		_, err := Execute(Request{
+		_, err := Execute(context.Background(), Request{
 			ModuleID:    "sleep_probe",
 			RowID:       "sleep_probe",
 			Digest:      digestSource(source),
@@ -205,7 +221,7 @@ func TestExtractArtifactIgnoresPredictableStaleCache(t *testing.T) {
 
 func executeBoundaryProbe(t *testing.T, source []byte) Result {
 	t.Helper()
-	result, err := Execute(Request{
+	result, err := Execute(context.Background(), Request{
 		ModuleID:    "boundary_probe",
 		RowID:       "boundary_probe",
 		Digest:      digestSource(source),
@@ -271,7 +287,7 @@ func TestExecuteClassifiesExceptionOutputCapAndFuel(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Execute(Request{
+			_, err := Execute(context.Background(), Request{
 				ModuleID:    "bad",
 				RowID:       tc.name,
 				Digest:      digestSource(tc.source),

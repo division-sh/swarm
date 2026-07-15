@@ -342,6 +342,7 @@ func cloneAgentRegistryEntryMap(in map[string]AgentRegistryEntry) map[string]Age
 }
 func cloneAgentRegistryEntry(in AgentRegistryEntry) AgentRegistryEntry {
 	out := in
+	out.Mock.Source = append([]byte(nil), in.Mock.Source...)
 	out.AuthoredFields = cloneBoolMap(in.AuthoredFields)
 	out.EffectiveFieldSources = cloneStringMap(in.EffectiveFieldSources)
 	if len(in.EntityWrites) > 0 {

@@ -3,6 +3,7 @@ package pythonmodule
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"embed"
 	"encoding/binary"
@@ -89,7 +90,10 @@ func RuntimeIdentity() Identity {
 	}
 }
 
-func ValidateSource(req Request) error {
+func ValidateSource(ctx context.Context, req Request) error {
+	if err := contextError(ctx); err != nil {
+		return err
+	}
 	req.Entry = normalizeEntry(req.Entry)
 	if err := validateRequestShape(req); err != nil {
 		return err
@@ -101,7 +105,7 @@ func ValidateSource(req Request) error {
 	if fuel == 0 {
 		fuel = defaultValidateFuel
 	}
-	_, err := runHarness(req, harnessEnvelope{
+	_, err := runHarness(ctx, req, harnessEnvelope{
 		Mode:   "validate",
 		Source: string(req.Source),
 		Entry:  req.Entry,
@@ -109,7 +113,10 @@ func ValidateSource(req Request) error {
 	return err
 }
 
-func Execute(req Request) (Result, error) {
+func Execute(ctx context.Context, req Request) (Result, error) {
+	if err := contextError(ctx); err != nil {
+		return Result{}, err
+	}
 	req.Entry = normalizeEntry(req.Entry)
 	if err := validateRequestShape(req); err != nil {
 		return Result{}, err
@@ -127,7 +134,7 @@ func Execute(req Request) (Result, error) {
 	if input == nil {
 		return Result{}, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("input is not JSON object")}
 	}
-	wire, err := runHarness(req, harnessEnvelope{
+	wire, err := runHarness(ctx, req, harnessEnvelope{
 		Mode:   "execute",
 		Source: string(req.Source),
 		Entry:  req.Entry,
@@ -173,7 +180,10 @@ type harnessWireResult struct {
 	FuelConsumed uint64         `json:"-"`
 }
 
-func runHarness(req Request, envelope harnessEnvelope, fuel uint64) (harnessWireResult, error) {
+func runHarness(ctx context.Context, req Request, envelope harnessEnvelope, fuel uint64) (harnessWireResult, error) {
+	if err := contextError(ctx); err != nil {
+		return harnessWireResult{}, err
+	}
 	root, err := materializedArtifactDir()
 	if err != nil {
 		return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
@@ -200,6 +210,7 @@ func runHarness(req Request, envelope harnessEnvelope, fuel uint64) (harnessWire
 
 	cfg := wasmtime.NewConfig()
 	cfg.SetConsumeFuel(true)
+	cfg.SetEpochInterruption(true)
 	cfg.SetWasmBulkMemory(true)
 	cfg.SetWasmMemory64(false)
 	cfg.SetWasmMultiMemory(false)
@@ -212,6 +223,7 @@ func runHarness(req Request, envelope harnessEnvelope, fuel uint64) (harnessWire
 		return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
 	}
 	store := wasmtime.NewStore(engine)
+	store.SetEpochDeadline(1)
 	store.Limiter(memoryLimitBytes(req.MemoryPages), -1, -1, -1, -1)
 	if err := store.SetFuel(fuel); err != nil {
 		return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeFuel, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
@@ -251,7 +263,19 @@ func runHarness(req Request, envelope harnessEnvelope, fuel uint64) (harnessWire
 	if start == nil {
 		return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("embedded interpreter missing _start")}
 	}
+	callDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			engine.IncrementEpoch()
+		case <-callDone:
+		}
+	}()
 	_, callErr := start.Call(store)
+	close(callDone)
+	if err := ctx.Err(); err != nil {
+		return harnessWireResult{}, err
+	}
 	fuelConsumed := fuel
 	if remaining, err := store.GetFuel(); err == nil && remaining <= fuel {
 		fuelConsumed = fuel - remaining
@@ -275,6 +299,13 @@ func runHarness(req Request, envelope harnessEnvelope, fuel uint64) (harnessWire
 		return harnessWireResult{}, classifyPythonCallError(req, computemodule.CodeTrap, fmt.Errorf("%w; stderr=%s", callErr, strings.TrimSpace(string(stderr))))
 	}
 	return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("python harness emitted invalid response stdout=%q stderr=%q", strings.TrimSpace(string(stdout)), strings.TrimSpace(string(stderr)))}
+}
+
+func contextError(ctx context.Context) error {
+	if ctx == nil {
+		return fmt.Errorf("python execution context is required")
+	}
+	return ctx.Err()
 }
 
 func defineDeterministicWASI(linker *wasmtime.Linker) error {

@@ -19,12 +19,12 @@ func TestTurnContextRegistry_ResetIsScopedToRegistry(t *testing.T) {
 	registryB := NewTurnContextRegistry(nil)
 
 	registryA.PutTurnContextForTest("ctx-shared", TurnContext{
-		Actor:     models.AgentConfig{ID: "agent-a"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "agent-a"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
 	registryB.PutTurnContextForTest("ctx-shared", TurnContext{
-		Actor:     models.AgentConfig{ID: "agent-b"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "agent-b"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -46,7 +46,7 @@ func TestTurnContextRegistry_ResetIsScopedToRegistry(t *testing.T) {
 func TestTurnContextRegistryPreservesManagedEffectAuthority(t *testing.T) {
 	harness := effecttest.New()
 	registry := NewTurnContextRegistry(models.ActorFromContext)
-	ctx := models.WithActor(harness.Context("gateway-turn"), models.AgentConfig{ID: harness.Token.AgentID})
+	ctx := models.WithActor(harness.Context("gateway-turn"), models.AgentConfig{ExecutionMode: "live", ID: harness.Token.AgentID})
 	token := registry.RegisterTurnContext(ctx)
 	turn, ok := registry.ResolveTurnContext(token)
 	if !ok {
@@ -75,7 +75,7 @@ func TestTurnContextRegistryPreservesSiblingLogicalIdentityAndIgnoresMCPTranspor
 	registry := NewTurnContextRegistry(models.ActorFromContext)
 	register := func(identity string) TurnContext {
 		ctx := runtimeeffects.WithLogicalOperationIdentity(harness.Context("inbound-event"), identity)
-		ctx = models.WithActor(ctx, models.AgentConfig{ID: harness.Token.AgentID})
+		ctx = models.WithActor(ctx, models.AgentConfig{ExecutionMode: "live", ID: harness.Token.AgentID})
 		token := registry.RegisterTurnContext(ctx)
 		turn, ok := registry.ResolveTurnContext(token)
 		if !ok {
@@ -158,7 +158,7 @@ func TestMCPToolCallLogicalIdentityRequiresProviderCallCoordinateForManagedTurns
 
 func TestTurnContextRegistry_PreservesTypedRuntimeLineage(t *testing.T) {
 	registry := NewTurnContextRegistry(models.ActorFromContext)
-	ctx := models.WithActor(unmanagedMCPTestContext(), models.AgentConfig{ID: "selected-agent"})
+	ctx := models.WithActor(unmanagedMCPTestContext(), models.AgentConfig{ExecutionMode: "live", ID: "selected-agent"})
 	ctx = runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
 		Owner:               "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage",
 		RunID:               "9b06692c-353c-4479-8e92-70927f5e4937",

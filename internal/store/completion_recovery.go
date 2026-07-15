@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -20,6 +21,8 @@ type completionRecoveryAttempt struct {
 	AuthorityKind     string
 	AuthorityID       string
 	AuthorityEvidence string
+	OperationMode     string
+	AttemptMode       string
 	Adapter           string
 	Transport         string
 	State             string
@@ -29,8 +32,9 @@ type completionRecoveryAttempt struct {
 }
 
 type completionRecoveryAuthorityEvidence struct {
-	ActorTokenID string `json:"actor_token_id"`
-	UsageTarget  struct {
+	ActorTokenID  string `json:"actor_token_id"`
+	ExecutionMode string `json:"execution_mode"`
+	UsageTarget   struct {
 		Kind          string `json:"kind"`
 		ID            string `json:"id"`
 		Ordinal       int    `json:"ordinal"`
@@ -47,6 +51,7 @@ type completionRecoveryAuthorityEvidence struct {
 func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT o.operation_id::text,a.attempt_id::text,o.authority_kind,o.authority_id,o.authority_evidence::text,
+		       o.execution_mode,a.execution_mode,
 		       a.adapter,a.transport,a.state,a.usage_target_kind,a.usage_target_id::text,COALESCE(a.target_ordinal,0)
 		FROM runtime_external_effect_operations o
 		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
@@ -76,6 +81,7 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, now ti
 func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT o.operation_id,a.attempt_id,o.authority_kind,o.authority_id,o.authority_evidence,
+		       o.execution_mode,a.execution_mode,
 		       a.adapter,a.transport,a.state,a.usage_target_kind,a.usage_target_id,COALESCE(a.target_ordinal,0)
 		FROM runtime_external_effect_operations o
 		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
@@ -107,7 +113,7 @@ func scanCompletionRecoveryAttempts(rows *sql.Rows) ([]completionRecoveryAttempt
 	for rows.Next() {
 		var attempt completionRecoveryAttempt
 		if err := rows.Scan(&attempt.OperationID, &attempt.AttemptID, &attempt.AuthorityKind, &attempt.AuthorityID,
-			&attempt.AuthorityEvidence, &attempt.Adapter, &attempt.Transport, &attempt.State,
+			&attempt.AuthorityEvidence, &attempt.OperationMode, &attempt.AttemptMode, &attempt.Adapter, &attempt.Transport, &attempt.State,
 			&attempt.TargetKind, &attempt.TargetID, &attempt.TargetOrdinal); err != nil {
 			return nil, fmt.Errorf("scan completion attempt for recovery: %w", err)
 		}
@@ -184,6 +190,10 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 	if err := json.Unmarshal([]byte(recovered.AuthorityEvidence), &evidence); err != nil {
 		return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("decode completion recovery authority evidence for %s: %w", recovered.AttemptID, err)
 	}
+	mode, ok := executionmode.Parse(recovered.OperationMode)
+	if !ok || recovered.AttemptMode != recovered.OperationMode || evidence.ExecutionMode != recovered.OperationMode {
+		return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery execution mode conflicts for attempt %s", recovered.AttemptID)
+	}
 	if evidence.UsageTarget.Kind != recovered.TargetKind || evidence.UsageTarget.ID != recovered.TargetID || evidence.UsageTarget.Ordinal != recovered.TargetOrdinal {
 		return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery target evidence conflicts with attempt %s", recovered.AttemptID)
 	}
@@ -196,7 +206,7 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 	if !target.Valid() {
 		return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery target for attempt %s is invalid", recovered.AttemptID)
 	}
-	authority := runtimeeffects.Authority{Kind: runtimeeffects.AuthorityKind(recovered.AuthorityKind), ID: recovered.AuthorityID, Target: target}
+	authority := runtimeeffects.Authority{Kind: runtimeeffects.AuthorityKind(recovered.AuthorityKind), ID: recovered.AuthorityID, Target: target, ExecutionMode: mode}
 	if target.Kind == runtimeeffects.UsageTargetConversationForkCompletion {
 		authority.ForkChat.ForkTurnID = target.ID
 	}

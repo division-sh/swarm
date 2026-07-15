@@ -855,10 +855,10 @@ func appendActivityBoringEvent(ctx context.Context, db *sql.DB, kind activityBor
 		}
 		_, err := execer.ExecContext(ctx, `
 			INSERT OR IGNORE INTO events (
-				event_id, run_id, event_name, entity_id, flow_instance, scope,
+				execution_mode, event_id, run_id, event_name, entity_id, flow_instance, scope,
 				payload, chain_depth, produced_by_type, created_at
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'platform', ?)
+			VALUES ('live', ?, ?, ?, ?, ?, ?, ?, ?, 'platform', ?)
 		`, evt.ID(), runID, strings.TrimSpace(string(evt.Type())), entityID, flowInstance, scope, payload, evt.ChainDepth(), createdAt)
 		return err
 	case activityBoringStorePostgres:
@@ -870,11 +870,11 @@ func appendActivityBoringEvent(ctx context.Context, db *sql.DB, kind activityBor
 			return err
 		}
 		_, err := execer.ExecContext(ctx, `
-			INSERT INTO events (
+			INSERT INTO events (execution_mode,
 				event_id, run_id, event_name, entity_id, flow_instance, scope,
 				payload, chain_depth, produced_by_type, created_at
 			)
-			VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7::jsonb, $8, 'platform', $9)
+			VALUES ('live', $1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7::jsonb, $8, 'platform', $9)
 			ON CONFLICT (event_id) DO NOTHING
 		`, evt.ID(), runID, strings.TrimSpace(string(evt.Type())), entityID, flowInstance, scope, payload, evt.ChainDepth(), createdAt)
 		return err

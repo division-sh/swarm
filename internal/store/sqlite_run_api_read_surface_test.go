@@ -41,14 +41,14 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 		t.Fatalf("seed sqlite runs: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
+		INSERT INTO events (execution_mode, run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES
-			(?, ?, 'scan.requested', NULL, 'global', '{}', 'test', 'agent', ?),
-			(?, ?, 'scan.progressed', NULL, 'global', '{}', 'test', 'agent', ?),
-			(?, ?, 'scan.finished', NULL, 'global', '{}', 'test', 'agent', ?),
-			(?, ?, 'scan.completed', ?, 'global', '{}', 'test', 'agent', ?),
-			(?, ?, 'scan.replayed', ?, 'global', '{}', 'test', 'agent', ?),
-			(?, ?, 'platform.runtime_log', NULL, 'global', ?, 'runtime', 'platform', ?)
+			('live', ?, ?, 'scan.requested', NULL, 'global', '{}', 'test', 'agent', ?),
+			('live', ?, ?, 'scan.progressed', NULL, 'global', '{}', 'test', 'agent', ?),
+			('live', ?, ?, 'scan.finished', NULL, 'global', '{}', 'test', 'agent', ?),
+			('live', ?, ?, 'scan.completed', ?, 'global', '{}', 'test', 'agent', ?),
+			('live', ?, ?, 'scan.replayed', ?, 'global', '{}', 'test', 'agent', ?),
+			('live', ?, ?, 'platform.runtime_log', NULL, 'global', ?, 'runtime', 'platform', ?)
 	`, newer, newerEvent, now.Add(time.Second), newer, newerMiddleEvent, now.Add(2*time.Second), newer, newerLatestEvent, now.Add(3*time.Second), older, olderEvent, olderEntity, now.Add(-time.Hour+time.Second), older, uuid.NewString(), olderEventOnly, now.Add(-time.Hour+2*time.Second), newer, uuid.NewString(), runtimeLogPayload, now.Add(4*time.Second)); err != nil {
 		t.Fatalf("seed sqlite events: %v", err)
 	}
@@ -223,16 +223,16 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 		t.Fatalf("seed sqlite runs: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
 		VALUES
-			(?, ?, 'quiescence.active_delivery', 'global', '{}', 'test', 'platform', ?),
-			(?, ?, 'quiescence.missing_pipeline_receipt', 'global', '{}', 'test', 'platform', ?),
-			(?, ?, ?, 'global', '{}', 'test', 'platform', ?),
-			(?, ?, 'quiescence.ready', 'global', '{}', 'test', 'platform', ?),
-			(?, ?, ?, 'global', '{}', 'test', 'platform', ?),
-			(?, ?, ?, 'global', '{}', 'test', 'platform', ?)
+			('live', ?, ?, 'quiescence.active_delivery', 'global', '{}', 'test', 'platform', ?),
+			('live', ?, ?, 'quiescence.missing_pipeline_receipt', 'global', '{}', 'test', 'platform', ?),
+			('live', ?, ?, ?, 'global', '{}', 'test', 'platform', ?),
+			('live', ?, ?, 'quiescence.ready', 'global', '{}', 'test', 'platform', ?),
+			('live', ?, ?, ?, 'global', '{}', 'test', 'platform', ?),
+			('live', ?, ?, ?, 'global', '{}', 'test', 'platform', ?)
 	`, blockedRunID, activeEventID, now.Add(-50*time.Second),
 		blockedRunID, unsettledEventID, now.Add(-40*time.Second),
 		blockedRunID, runtimeLogEventID, runtimeLogEventName, now.Add(-30*time.Second),

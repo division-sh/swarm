@@ -38,9 +38,9 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO events (
-			event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
+			event_id, run_id, event_name, entity_id, scope, payload, execution_mode, produced_by, produced_by_type, created_at
 		) VALUES (
-			?, ?, 'operator.read', NULL, 'global', '{}', 'runtime', 'platform', ?
+			?, ?, 'operator.read', NULL, 'global', '{}', 'live', 'runtime', 'platform', ?
 		)
 	`, eventID, runID, base.Add(-4*time.Minute)); err != nil {
 		t.Fatalf("seed sqlite event: %v", err)
@@ -50,12 +50,12 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, failure, created_at
+			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, execution_mode, failure, created_at
 		) VALUES (
 			?, ?, ?, ?, 'flow/operator-read', 1, 'authored', NULL,
 			?, 'operator.read', 'task-operator-read', '[]', '[]',
 			'[]', '{}', '[]', '[]',
-			'{}', '{}', '[]', 1, 10, 0, NULL, ?
+			'{}', '{}', '[]', 1, 10, 0, 'live', NULL, ?
 		)
 	`, turnID, runID, agentID, sessionID, eventID, base); err != nil {
 		t.Fatalf("seed sqlite turn: %v", err)
@@ -123,12 +123,12 @@ func TestSQLiteConversationProjectionRejectsLegacyTurnsWithoutTurnBlocks(t *test
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, created_at
+			request_payload, response_payload, parse_ok, latency_ms, retry_count, execution_mode, failure, created_at
 		) VALUES (
 			?, ?, ?, ?, 'flow/legacy-turns', 1, 'authored', NULL,
 			?, 'operator.read', 'task-legacy-turns', '[]', '[]',
 			'[]', '{}', '[]', '[]',
-			'{}', '{}', 1, 10, 0, NULL, ?
+			'{}', '{}', 1, 10, 0, 'live', NULL, ?
 		)
 	`, uuid.NewString(), runID, agentID, sessionID, uuid.NewString(), base); err != nil {
 		t.Fatalf("seed sqlite legacy turn: %v", err)

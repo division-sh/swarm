@@ -24,6 +24,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -973,6 +974,7 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 			Turn: store.OperatorConversationTurn{
 				TurnIndex:       1,
 				TurnID:          "00000000-0000-0000-0000-000000000402",
+				ExecutionMode:   "live",
 				RequestPayload:  []byte(`{"message":"inspect fork"}`),
 				ResponsePayload: []byte(`{"message":"forkchat sandbox response: inspect fork"}`),
 				ParseOK:         true,
@@ -1613,7 +1615,8 @@ func newMutatingProbeDecisionCardStore(state *mutatingRuntimeProbeState) *mutati
 	}
 	return &mutatingProbeDecisionCardStore{state: state, card: decisioncard.Card{
 		CardID: "card-1", RunID: "00000000-0000-0000-0000-000000000101", Anchor: anchor,
-		Status: decisioncard.StatusPending, CardContentHash: "content-1", DecisionSchemaHash: "schema-1", BundleHash: runStartTestBundleHash,
+		ExecutionMode: executionmode.Live,
+		Status:        decisioncard.StatusPending, CardContentHash: "content-1", DecisionSchemaHash: "schema-1", BundleHash: runStartTestBundleHash,
 		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
 		Snapshot:         snapshot,
 		CreatedAt:        state.now, UpdatedAt: state.now,
@@ -1631,7 +1634,7 @@ func (s *mutatingProbeDecisionCardStore) ListDecisionCards(_ context.Context, op
 	if err != nil {
 		return nil, "", err
 	}
-	item := decisioncard.ListItem{Kind: decisioncard.KindDecisionCard, CardID: s.card.CardID, RunID: s.card.RunID, Anchor: s.card.Anchor, Scope: scope, Title: s.card.Snapshot.Title, Status: s.card.Status, DeferredUntil: s.card.DeferredUntil, CreatedAt: s.card.CreatedAt, UpdatedAt: s.card.UpdatedAt}
+	item := decisioncard.ListItem{Kind: decisioncard.KindDecisionCard, CardID: s.card.CardID, RunID: s.card.RunID, ExecutionMode: s.card.ExecutionMode, Anchor: s.card.Anchor, Scope: scope, Title: s.card.Snapshot.Title, Status: s.card.Status, DeferredUntil: s.card.DeferredUntil, CreatedAt: s.card.CreatedAt, UpdatedAt: s.card.UpdatedAt}
 	switch s.card.Anchor.Kind() {
 	case decisioncard.AnchorKindStageGate, decisioncard.AnchorKindProposedEffect:
 		item.Decision = s.card.Snapshot.Decision

@@ -511,9 +511,15 @@ func TestValidateLLMProviderLimits(t *testing.T) {
 			wantErr: "max_concurrency requires max_concurrency_max_wait",
 		},
 		{
-			name: "reserved profile rejected",
+			name: "active mock profile accepted",
 			limits: map[string]LLMProviderLimitPolicy{
 				"mock": {RateLimit: "1/s", RateLimitMaxWait: "1s"},
+			},
+		},
+		{
+			name: "reserved local profile rejected",
+			limits: map[string]LLMProviderLimitPolicy{
+				"local": {RateLimit: "1/s", RateLimitMaxWait: "1s"},
 			},
 			wantErr: "reserved",
 		},

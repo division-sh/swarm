@@ -9,11 +9,16 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/google/uuid"
 )
 
 func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm.AgentTurnRecord) error {
+	executionMode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("agent turn execution mode is required")
+	}
 	plan, identity, err := validateTurnMemory(rec)
 	if err != nil {
 		return err
@@ -58,14 +63,14 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 				turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 				trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls, emitted_events,
 				mcp_servers, mcp_tools_listed, mcp_tools_visible, request_payload, response_payload, turn_blocks,
-				parse_ok, latency_ms, retry_count, failure, created_at
-			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+				parse_ok, latency_ms, retry_count, execution_mode, failure, created_at
+			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		`, turnID, identity.RunID, identity.AgentID, strings.TrimSpace(rec.SessionID), sqliteNullString(identity.FlowInstance),
 			plan.Enabled, string(plan.Source), sqliteNullUUID(rec.EntityID), sqliteNullUUID(rec.TriggerEventID), sqliteNullString(rec.TriggerEventType),
 			sqliteNullString(rec.TaskID), normalizeJSONArray(rec.AvailableTools), normalizeJSONArray(rec.ToolCalls), normalizeJSONArray(rec.EmittedEvents),
 			normalizeJSONObject(rec.MCPServers), normalizeJSONArray(rec.MCPToolsListed), normalizeJSONArray(rec.MCPToolsVisible),
 			sqliteNullString(normalizeJSONPayload(rec.RequestPayload)), sqliteNullString(normalizeJSONPayload(rec.ResponseRaw)), normalizeJSONArray(rec.TurnBlocks),
-			rec.ParseOK, latencyMS, rec.RetryCount, sqliteNullString(failurePayload), now)
+			rec.ParseOK, latencyMS, rec.RetryCount, executionMode, sqliteNullString(failurePayload), now)
 		if err != nil {
 			return fmt.Errorf("insert sqlite agent turn: %w", err)
 		}
@@ -73,7 +78,7 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 			TurnID: turnID, RunID: rec.RunID, AgentID: rec.AgentID, SessionID: rec.SessionID, EntityID: rec.EntityID,
 			FlowID: identity.FlowInstance, TriggerEventType: rec.TriggerEventType, Blocks: rec.TurnBlocks,
 			ParseOK: rec.ParseOK, DurationMS: latencyMS, RetryCount: rec.RetryCount, UsageExactness: "unavailable",
-			Failure: rec.Failure, OccurredAt: now,
+			ExecutionMode: string(executionMode), Failure: rec.Failure, OccurredAt: now,
 		})
 	})
 }

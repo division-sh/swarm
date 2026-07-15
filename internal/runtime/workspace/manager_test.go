@@ -146,6 +146,7 @@ func TestResolveWorkspace_PerAgentMountsStandardPaths(t *testing.T) {
 	})
 	ctx := runtimecorrelation.WithRunID(context.Background(), "11111111-1111-1111-1111-111111111111")
 	target, err := manager.ResolveWorkspace(ctx, models.AgentConfig{
+		ExecutionMode:  "live",
 		ID:             "dedicated-agent",
 		WorkspaceClass: "dedicated",
 	})
@@ -212,6 +213,7 @@ func TestResolveWorkspace_BundleScopeDisambiguatesContainersVolumesAndLabels(t *
 	})
 	ctx := runtimecorrelation.WithRunID(context.Background(), "11111111-1111-1111-1111-111111111111")
 	target, err := manager.ResolveWorkspace(ctx, models.AgentConfig{
+		ExecutionMode:  "live",
 		ID:             "dedicated-agent",
 		WorkspaceClass: "dedicated",
 	})
@@ -288,6 +290,7 @@ func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
 	})
 	ctx := runtimecorrelation.WithRunID(context.Background(), "22222222-2222-2222-2222-222222222222")
 	target, err := manager.ResolveWorkspace(ctx, models.AgentConfig{
+		ExecutionMode:  "live",
 		ID:             "shared-work-lead",
 		WorkspaceClass: "shared_flow",
 		FlowPath:       "shared/work-001",
@@ -381,9 +384,10 @@ func TestResolveWorkspace_UsesInjectedSemanticSourceForRoleLookup(t *testing.T) 
 	})
 
 	target, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
-		ID:       "worker-1",
-		Role:     "worker",
-		FlowPath: "ops/instance-1",
+		ExecutionMode: "live",
+		ID:            "worker-1",
+		Role:          "worker",
+		FlowPath:      "ops/instance-1",
 	})
 	if err != nil {
 		t.Fatalf("ResolveWorkspace: %v", err)
@@ -396,6 +400,7 @@ func TestResolveWorkspace_UsesInjectedSemanticSourceForRoleLookup(t *testing.T) 
 func TestResolveWorkspace_FailsClosedWithoutInjectedSourceForWorkspaceClassScope(t *testing.T) {
 	manager := NewDockerManager(nil)
 	_, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
+		ExecutionMode:  "live",
 		ID:             "worker-1",
 		WorkspaceClass: "dedicated",
 	})

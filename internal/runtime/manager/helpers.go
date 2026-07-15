@@ -144,6 +144,12 @@ func MergeAgentConfig(base, patch runtimeactors.AgentConfig) runtimeactors.Agent
 	if patch.Model != "" {
 		out.Model = patch.Model
 	}
+	if patch.ExecutionMode.Valid() {
+		out.ExecutionMode = patch.ExecutionMode
+	}
+	if patch.Mock.Configured() {
+		out.Mock = patch.Mock
+	}
 	if strings.TrimSpace(string(patch.Memory.Source)) != "" {
 		out.Memory = patch.Memory
 	}

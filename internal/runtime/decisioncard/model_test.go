@@ -28,7 +28,7 @@ func TestPublicJSONOmitsUnsetOptionalTimestampsAndIncludesTransitions(t *testing
 	}
 	listItem := ListItem{
 		Kind: KindDecisionCard, CardID: card.CardID, RunID: card.RunID,
-		Anchor: card.Anchor, Scope: scope, Status: card.Status,
+		Anchor: card.Anchor, Scope: scope, Status: card.Status, ExecutionMode: card.ExecutionMode,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	for name, value := range map[string]any{
@@ -80,7 +80,7 @@ func TestNewStampsDefaultCadenceAndStableHashes(t *testing.T) {
 	now := time.Date(2026, time.July, 12, 10, 0, 0, 0, time.UTC)
 	input := Card{
 		CardID: uuid.NewString(), RunID: "run-1", Anchor: testStageAnchor(),
-		BundleHash: "bundle-hash", WorkflowVersion: "1", CreatedAt: now,
+		ExecutionMode: "live", BundleHash: "bundle-hash", WorkflowVersion: "1", CreatedAt: now,
 		Snapshot: testSnapshot(t, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 			"approve": {Verdict: "approve", AdvancesTo: "operating"},
 		}, nil),
@@ -134,6 +134,7 @@ func TestValidateNoticeShapeReservesDecisionCardAuthority(t *testing.T) {
 func TestNewRejectsInputDraftTTLBeyondReminderInterval(t *testing.T) {
 	_, err := New(Card{
 		CardID: uuid.NewString(), RunID: "run-1", Anchor: testStageAnchor(), BundleHash: "bundle-hash",
+		ExecutionMode:    "live",
 		EffectiveCadence: Cadence{InputDraftTTL: "25h", ReminderInterval: "24h"},
 		Snapshot: testSnapshot(t, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 			"approve": {Verdict: "approve", AdvancesTo: "operating"},
@@ -466,7 +467,7 @@ func baseTestDecisionCard(outcomes map[string]runtimecontracts.WorkflowGateOutco
 	}
 	return Card{
 		CardID: uuid.NewString(), RunID: "run-1", Anchor: testStageAnchor(),
-		BundleHash: "bundle-hash", WorkflowVersion: "1", CreatedAt: time.Date(2026, time.July, 13, 5, 0, 0, 0, time.UTC),
+		ExecutionMode: "live", BundleHash: "bundle-hash", WorkflowVersion: "1", CreatedAt: time.Date(2026, time.July, 13, 5, 0, 0, 0, time.UTC),
 		Snapshot: snapshot,
 	}
 }

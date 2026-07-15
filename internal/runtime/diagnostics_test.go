@@ -72,11 +72,11 @@ func (s runtimeLogCapabilityStub) PersistRuntimeLog(ctx context.Context, record 
 	parentEventID := strings.TrimSpace(record.ParentEventID)
 	if runID == "" {
 		_, err := s.db.ExecContext(ctx, `
-			INSERT INTO events (
+			INSERT INTO events (execution_mode,
 				event_id, event_name, entity_id, flow_instance, scope, payload,
 				chain_depth, produced_by, produced_by_type, source_event_id, created_at
 			)
-			VALUES (
+			VALUES ('live',
 				gen_random_uuid(), 'platform.runtime_log', NULL, NULL, 'global', $1::jsonb,
 				0, 'runtime', 'platform', NULLIF($2,'')::uuid, now()
 			)
@@ -88,11 +88,11 @@ func (s runtimeLogCapabilityStub) PersistRuntimeLog(ctx context.Context, record 
 			return err
 		}
 		if _, err := tx.ExecContext(storyctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
 			chain_depth, produced_by, produced_by_type, source_event_id, created_at
 		)
-		VALUES (
+		VALUES ('live',
 			NULLIF($1,'')::uuid, gen_random_uuid(), 'platform.runtime_log', NULL, NULL, 'global', $2::jsonb,
 			0, 'runtime', 'platform', NULLIF($3,'')::uuid, now()
 		)
@@ -878,10 +878,10 @@ func TestRuntimeLogger_Log_DerivesLineageFromPersistedSubjectEvent(t *testing.T)
 		t.Fatalf("ensure run row: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type
 		)
-		VALUES (
+		VALUES ('live',
 			$1::uuid, $2::uuid, 'validation/validation.package_ready', 'global', '{}'::jsonb,
 			'runtime.run_fork.selected_contract_execution', 'agent'
 		)
@@ -970,10 +970,10 @@ func TestRuntimeLogger_Log_PersistsTypedRuntimeLineage(t *testing.T) {
 		t.Fatalf("ensure run row: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type
 		)
-		VALUES (
+		VALUES ('live',
 			$1::uuid, $2::uuid, 'validation/validation.package_ready', 'global', '{}'::jsonb,
 			'runtime.run_fork.selected_contract_execution', 'agent'
 		)

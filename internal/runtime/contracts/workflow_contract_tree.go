@@ -16,7 +16,7 @@ func flowViewChildren(view *FlowContractView) []*FlowContractView {
 	}
 	return children
 }
-func loadProjectContractView(paths ProjectPackagePaths, manifest ProjectPackageDocument) (ProjectContractView, error) {
+func loadProjectContractView(contractsRoot string, paths ProjectPackagePaths, manifest ProjectPackageDocument) (ProjectContractView, error) {
 	view := ProjectContractView{
 		Paths:    paths,
 		Manifest: manifest,
@@ -39,7 +39,10 @@ func loadProjectContractView(paths ProjectPackagePaths, manifest ProjectPackageD
 	if err != nil {
 		return view, err
 	}
-	view.Agents = agents
+	view.Agents, err = materializeAgentMockPerformances(contractsRoot, paths.ProjectAgentsFile, agents)
+	if err != nil {
+		return view, err
+	}
 	if err := loadOptionalYAMLMap(paths.ProjectToolsFile, &view.Tools); err != nil {
 		return view, err
 	}
@@ -48,7 +51,7 @@ func loadProjectContractView(paths ProjectPackagePaths, manifest ProjectPackageD
 	}
 	return view, nil
 }
-func loadFlowContractView(paths FlowContractPaths, schema FlowSchemaDocument) (FlowContractView, error) {
+func loadFlowContractView(contractsRoot string, paths FlowContractPaths, schema FlowSchemaDocument) (FlowContractView, error) {
 	view := FlowContractView{
 		Paths:     paths,
 		Schema:    schema,
@@ -76,7 +79,10 @@ func loadFlowContractView(paths FlowContractPaths, schema FlowSchemaDocument) (F
 	if err != nil {
 		return view, err
 	}
-	view.Agents = agents
+	view.Agents, err = materializeAgentMockPerformances(contractsRoot, paths.AgentsFile, agents)
+	if err != nil {
+		return view, err
+	}
 	if err := loadOptionalYAMLMap(paths.ToolsFile, &view.Tools); err != nil {
 		return view, err
 	}

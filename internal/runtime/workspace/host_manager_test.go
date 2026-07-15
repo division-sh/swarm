@@ -69,6 +69,7 @@ func TestHostManagerResolveWorkspaceCreatesScopedHostTargets(t *testing.T) {
 	}))
 
 	dedicated, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
+		ExecutionMode:  "live",
 		ID:             "Dedicated Agent",
 		WorkspaceClass: "dedicated",
 	})
@@ -83,6 +84,7 @@ func TestHostManagerResolveWorkspaceCreatesScopedHostTargets(t *testing.T) {
 	}
 
 	shared, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
+		ExecutionMode:  "live",
 		ID:             "shared-agent",
 		FlowPath:       "flows/acme/review",
 		WorkspaceClass: "shared_flow",
@@ -183,7 +185,7 @@ func TestHostManagerRejectsSymlinkedWorkspaceChildEscape(t *testing.T) {
 		t.Fatalf("ValidateSource: %v", err)
 	}
 	manager.SetSemanticSource(source)
-	_, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{ID: "agent-1"})
+	_, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "agent-1"})
 	if err == nil || !strings.Contains(err.Error(), "escapes root") {
 		t.Fatalf("ResolveWorkspace error = %v, want symlink child escape rejection", err)
 	}
@@ -212,7 +214,7 @@ func TestHostManagerResolveWorkspaceValidatesRootBeforeCreate(t *testing.T) {
 	})
 	manager.SetSemanticSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
 
-	_, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{ID: "agent-1"})
+	_, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "agent-1"})
 	if err == nil || !strings.Contains(err.Error(), "must not overlap /data source") {
 		t.Fatalf("ResolveWorkspace error = %v, want validation-before-create overlap rejection", err)
 	}

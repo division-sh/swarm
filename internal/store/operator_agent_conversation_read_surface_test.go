@@ -126,8 +126,7 @@ func (s fakeAgentConversationReadSource) LoadOperatorPublicConversationTurn(_ co
 
 func TestOperatorAgentSummaryPublishesCanonicalMemoryFacts(t *testing.T) {
 	memorySummary := operatorAgentSummaryFromPersisted(runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			ID:       "memory-agent",
+		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "memory-agent",
 			Role:     "worker",
 			Type:     "managed",
 			Model:    "cheap",
@@ -156,8 +155,7 @@ func TestOperatorAgentSummaryPublishesCanonicalMemoryFacts(t *testing.T) {
 	}
 
 	defaultSummary := operatorAgentSummaryFromPersisted(runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			ID:     "stateless-agent",
+		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "stateless-agent",
 			Role:   "worker",
 			Type:   "managed",
 			Model:  "cheap",
@@ -322,11 +320,12 @@ func TestOperatorConversationReadSurfaceSanitizesRunIDProjectionDriverError(t *t
 func testOperatorAgent(agentID string) runtimemanager.PersistedAgent {
 	return runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:       agentID,
-			Role:     "researcher",
-			Type:     "managed",
-			Memory:   agentmemory.Authored(true),
-			FlowPath: "global",
+			ID:            agentID,
+			Role:          "researcher",
+			Type:          "managed",
+			ExecutionMode: "live",
+			Memory:        agentmemory.Authored(true),
+			FlowPath:      "global",
 		},
 		Status:    "active",
 		StartedAt: time.Date(2026, 5, 12, 8, 0, 0, 0, time.UTC),
@@ -601,12 +600,13 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 	ctx := context.Background()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:     "agent-1",
-			Role:   "researcher",
-			Type:   "managed",
-			Model:  "cheap",
-			Memory: agentmemory.PlatformDefault(),
-			Config: json.RawMessage(`{"system_prompt":"diagnose"}`),
+			ID:            "agent-1",
+			Role:          "researcher",
+			Type:          "managed",
+			Model:         "cheap",
+			ExecutionMode: "live",
+			Memory:        agentmemory.PlatformDefault(),
+			Config:        json.RawMessage(`{"system_prompt":"diagnose"}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -634,9 +634,9 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 		{otherAgentEventID, "task.other"},
 	} {
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (
+			INSERT INTO events (execution_mode,
 				event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
-			) VALUES (
+			) VALUES ('live',
 				$1::uuid, $2::uuid, $3, $4::uuid, 'global', '{}'::jsonb, 'runtime', 'agent', $5
 			)
 		`, event.id, runID, event.name, entityID, now.Add(-10*time.Minute)); err != nil {
@@ -734,12 +734,13 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 	ctx := context.Background()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:     "agent-1",
-			Role:   "researcher",
-			Type:   "managed",
-			Model:  "cheap",
-			Memory: agentmemory.PlatformDefault(),
-			Config: json.RawMessage(`{"system_prompt":"usage"}`),
+			ID:            "agent-1",
+			Role:          "researcher",
+			Type:          "managed",
+			Model:         "cheap",
+			ExecutionMode: "live",
+			Memory:        agentmemory.PlatformDefault(),
+			Config:        json.RawMessage(`{"system_prompt":"usage"}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -748,12 +749,13 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 	}
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:     "agent-2",
-			Role:   "other",
-			Type:   "managed",
-			Model:  "cheap",
-			Memory: agentmemory.PlatformDefault(),
-			Config: json.RawMessage(`{"system_prompt":"usage"}`),
+			ID:            "agent-2",
+			Role:          "other",
+			Type:          "managed",
+			Model:         "cheap",
+			ExecutionMode: "live",
+			Memory:        agentmemory.PlatformDefault(),
+			Config:        json.RawMessage(`{"system_prompt":"usage"}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -787,9 +789,9 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO spend_ledger (
 				flow_instance, agent_id, model, model_alias, backend_profile, provider, transport, resolved_model, input_tokens, output_tokens,
-				cost_usd, invocation_type, usage_accounting, created_at
+				cost_usd, invocation_type, usage_accounting, execution_mode, created_at
 			) VALUES (
-				'flow/a', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::numeric, $11, $12, $13
+				'flow/a', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::numeric, $11, $12, 'live', $13
 			)
 		`, row.agentID, row.model, row.modelAlias, row.backendProfile, row.provider, row.transport, row.resolvedModel, row.inputTokens, row.outputTokens, row.costUSD, row.invocationType, row.usageAccounting, row.createdAt); err != nil {
 			t.Fatalf("seed spend row %+v: %v", row, err)
@@ -832,10 +834,10 @@ func TestSQLiteRuntimeStoreLoadAgentUsageSplitsExactAndEstimated(t *testing.T) {
 	since := time.Date(2026, 5, 21, 9, 0, 0, 0, time.UTC)
 	until := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
 	records := []budgetspend.SpendRecord{
-		{FlowInstance: "flow/a", AgentID: "agent-1", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 100, OutputTokens: 25, CostUSD: 0.000675, InvocationType: "anthropic", UsageAccounting: AgentUsageAccountingExact, RecordedAt: since},
-		{FlowInstance: "flow/a", AgentID: "agent-1", Model: "sonnet", ModelAlias: "regular", BackendProfile: "claude_cli", Provider: "claude", Transport: "cli", ResolvedModel: "sonnet", InputTokens: 50, OutputTokens: 10, CostUSD: 0.000300, InvocationType: "claude_cli", UsageAccounting: AgentUsageAccountingEstimated, RecordedAt: since.Add(time.Minute)},
-		{FlowInstance: "flow/a", AgentID: "agent-1", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 7, OutputTokens: 3, CostUSD: 0.000010, InvocationType: "anthropic", UsageAccounting: AgentUsageAccountingExact, RecordedAt: until},
-		{FlowInstance: "flow/a", AgentID: "agent-2", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 999, OutputTokens: 999, CostUSD: 1.000000, InvocationType: "anthropic", UsageAccounting: AgentUsageAccountingExact, RecordedAt: since.Add(time.Minute)},
+		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 100, OutputTokens: 25, CostUSD: 0.000675, InvocationType: "anthropic", UsageAccounting: AgentUsageAccountingExact, RecordedAt: since},
+		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", Model: "sonnet", ModelAlias: "regular", BackendProfile: "claude_cli", Provider: "claude", Transport: "cli", ResolvedModel: "sonnet", InputTokens: 50, OutputTokens: 10, CostUSD: 0.000300, InvocationType: "claude_cli", UsageAccounting: AgentUsageAccountingEstimated, RecordedAt: since.Add(time.Minute)},
+		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 7, OutputTokens: 3, CostUSD: 0.000010, InvocationType: "anthropic", UsageAccounting: AgentUsageAccountingExact, RecordedAt: until},
+		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-2", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 999, OutputTokens: 999, CostUSD: 1.000000, InvocationType: "anthropic", UsageAccounting: AgentUsageAccountingExact, RecordedAt: since.Add(time.Minute)},
 	}
 	for _, rec := range records {
 		if err := sqliteStore.RecordSpend(ctx, rec); err != nil {
@@ -901,9 +903,9 @@ func TestSQLiteRuntimeStoreLoadAgentUsageFailsClosedOnMalformedRows(t *testing.T
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-1", "active")
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO spend_ledger (
-			flow_instance, agent_id, model, invocation_type, usage_accounting, created_at
+			flow_instance, agent_id, model, invocation_type, usage_accounting, execution_mode, created_at
 		) VALUES (
-			'flow/a', 'agent-1', '', 'anthropic', 'exact', ?
+			'flow/a', 'agent-1', '', 'anthropic', 'exact', 'live', ?
 		)
 	`, time.Date(2026, 5, 21, 9, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("seed malformed spend row: %v", err)
@@ -918,12 +920,13 @@ func seedOperatorAgentUsageAgent(t *testing.T, ctx context.Context, store *SQLit
 	t.Helper()
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:     agentID,
-			Role:   "researcher",
-			Type:   "managed",
-			Model:  "cheap",
-			Memory: agentmemory.PlatformDefault(),
-			Config: json.RawMessage(`{"system_prompt":"usage"}`),
+			ID:            agentID,
+			Role:          "researcher",
+			Type:          "managed",
+			Model:         "cheap",
+			ExecutionMode: "live",
+			Memory:        agentmemory.PlatformDefault(),
+			Config:        json.RawMessage(`{"system_prompt":"usage"}`),
 		},
 		Status:    status,
 		StartedAt: time.Now().UTC(),
@@ -944,12 +947,13 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsDoesNotRequireConve
 	ctx := context.Background()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:     "agent-1",
-			Role:   "researcher",
-			Type:   "managed",
-			Model:  "cheap",
-			Memory: agentmemory.PlatformDefault(),
-			Config: json.RawMessage(`{"system_prompt":"diagnose"}`),
+			ID:            "agent-1",
+			Role:          "researcher",
+			Type:          "managed",
+			Model:         "cheap",
+			ExecutionMode: "live",
+			Memory:        agentmemory.PlatformDefault(),
+			Config:        json.RawMessage(`{"system_prompt":"diagnose"}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -1002,12 +1006,13 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 	} {
 		if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 			Config: runtimeactors.AgentConfig{
-				ID:     agent.id,
-				Role:   agent.role,
-				Type:   "managed",
-				Model:  "cheap",
-				Memory: agentmemory.PlatformDefault(),
-				Config: json.RawMessage(`{"system_prompt":"lifecycle"}`),
+				ID:            agent.id,
+				Role:          agent.role,
+				Type:          "managed",
+				Model:         "cheap",
+				ExecutionMode: "live",
+				Memory:        agentmemory.PlatformDefault(),
+				Config:        json.RawMessage(`{"system_prompt":"lifecycle"}`),
 			},
 			Status:    "active",
 			StartedAt: time.Now().UTC(),
@@ -1044,9 +1049,9 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 		{otherAgentEventID, runID, "task.other_agent"},
 	} {
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (
+			INSERT INTO events (execution_mode,
 				event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
-			) VALUES (
+			) VALUES ('live',
 				$1::uuid, $2::uuid, $3, $4::uuid, 'global', '{}'::jsonb, 'runtime', 'agent', $5
 			)
 		`, event.id, event.runID, event.name, entityID, base.Add(-10*time.Minute)); err != nil {
@@ -1188,12 +1193,13 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 	ctx := context.Background()
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:     "agent-1",
-			Role:   "researcher",
-			Type:   "managed",
-			Model:  "cheap",
-			Memory: agentmemory.PlatformDefault(),
-			Config: json.RawMessage(`{"system_prompt":"lifecycle"}`),
+			ID:            "agent-1",
+			Role:          "researcher",
+			Type:          "managed",
+			Model:         "cheap",
+			ExecutionMode: "live",
+			Memory:        agentmemory.PlatformDefault(),
+			Config:        json.RawMessage(`{"system_prompt":"lifecycle"}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -1202,12 +1208,13 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 	}
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:     "agent-2",
-			Role:   "reviewer",
-			Type:   "managed",
-			Model:  "cheap",
-			Memory: agentmemory.PlatformDefault(),
-			Config: json.RawMessage(`{"system_prompt":"lifecycle"}`),
+			ID:            "agent-2",
+			Role:          "reviewer",
+			Type:          "managed",
+			Model:         "cheap",
+			ExecutionMode: "live",
+			Memory:        agentmemory.PlatformDefault(),
+			Config:        json.RawMessage(`{"system_prompt":"lifecycle"}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -1243,9 +1250,9 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 		{otherAgentEventID, runID, "task.other_agent"},
 	} {
 		if _, err := sqliteStore.DB.ExecContext(ctx, `
-			INSERT INTO events (
+			INSERT INTO events (execution_mode,
 				event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
-			) VALUES (
+			) VALUES ('live',
 				?, ?, ?, ?, 'global', '{}', 'runtime', 'agent', ?
 			)
 		`, event.id, event.runID, event.name, entityID, base.Add(-10*time.Minute)); err != nil {
@@ -1443,12 +1450,13 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsFailsClosedOnDeadLe
 	ctx := context.Background()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:     "agent-1",
-			Role:   "researcher",
-			Type:   "managed",
-			Model:  "cheap",
-			Memory: agentmemory.PlatformDefault(),
-			Config: json.RawMessage(`{"system_prompt":"diagnose"}`),
+			ID:            "agent-1",
+			Role:          "researcher",
+			Type:          "managed",
+			Model:         "cheap",
+			ExecutionMode: "live",
+			Memory:        agentmemory.PlatformDefault(),
+			Config:        json.RawMessage(`{"system_prompt":"diagnose"}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -1462,8 +1470,8 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsFailsClosedOnDeadLe
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ($1::uuid, $2::uuid, 'task.dead', 'global', '{}'::jsonb, 'runtime', 'agent', now())
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ('live', $1::uuid, $2::uuid, 'task.dead', 'global', '{}'::jsonb, 'runtime', 'agent', now())
 	`, eventID, runID); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -1850,6 +1858,7 @@ func loadAgentDiagnosisWithLatestTurn(t *testing.T, turnID, taskID, entityID str
 			EntityID:      entityID,
 			SessionID:     "11111111-1111-1111-1111-111111111111",
 			ParseOK:       parseOK,
+			ExecutionMode: "live",
 			TurnBlocksRaw: turnBlocks,
 			CreatedAt:     turnCompletedAt,
 		})

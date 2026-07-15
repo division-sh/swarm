@@ -11,8 +11,9 @@ import (
 type ProviderTransport string
 
 const (
-	ProviderTransportAPI ProviderTransport = "api"
-	ProviderTransportCLI ProviderTransport = "cli"
+	ProviderTransportAPI       ProviderTransport = "api"
+	ProviderTransportCLI       ProviderTransport = "cli"
+	ProviderTransportInProcess ProviderTransport = "in_process"
 )
 
 type BudgetUsageAccounting string
@@ -140,7 +141,7 @@ func (c ProviderContract) Validate() error {
 		return fmt.Errorf("llm provider contract provider is required")
 	}
 	switch c.Transport {
-	case ProviderTransportAPI, ProviderTransportCLI:
+	case ProviderTransportAPI, ProviderTransportCLI, ProviderTransportInProcess:
 	default:
 		return fmt.Errorf("llm provider contract %s has unsupported transport %q", c.RuntimeMode, c.Transport)
 	}

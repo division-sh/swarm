@@ -222,7 +222,11 @@ func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, en
 	if err != nil {
 		return decisioncard.Card{}, err
 	}
-	provenance, err := canonicaljson.FromGo(map[string]any{"source_event": activation.StartedByEvent, "flow_id": plan.FlowID, "stage": plan.Stage})
+	executionMode, err := decisioncard.CausalExecutionMode(ctx)
+	if err != nil {
+		return decisioncard.Card{}, err
+	}
+	provenance, err := canonicaljson.FromGo(map[string]any{"source_event": activation.StartedByEvent, "flow_id": plan.FlowID, "stage": plan.Stage, "execution_mode": executionMode})
 	if err != nil {
 		return decisioncard.Card{}, fmt.Errorf("admit decision card provenance: %w", err)
 	}
@@ -236,8 +240,9 @@ func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, en
 	}
 	card := decisioncard.Card{
 		CardID: activation.CardID, RunID: runID, Anchor: anchor,
-		Snapshot:   snapshot,
-		BundleHash: activation.BundleHash, WorkflowVersion: instance.WorkflowVersion,
+		ExecutionMode: executionMode,
+		Snapshot:      snapshot,
+		BundleHash:    activation.BundleHash, WorkflowVersion: instance.WorkflowVersion,
 		EffectiveCadence: pc.decisionCardCadence.Stamp(activation.OpenedAt),
 		Provenance:       provenance,
 		CreatedAt:        activation.OpenedAt,

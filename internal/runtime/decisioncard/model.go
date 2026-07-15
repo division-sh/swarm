@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
 )
@@ -186,6 +187,7 @@ type Card struct {
 	RunID              string              `json:"run_id"`
 	Anchor             Anchor              `json:"-"`
 	Status             string              `json:"status"`
+	ExecutionMode      executionmode.Mode  `json:"execution_mode"`
 	Snapshot           Snapshot            `json:"snapshot"`
 	CardContentHash    string              `json:"card_content_hash"`
 	EffectContentHash  string              `json:"effect_content_hash,omitempty"`
@@ -220,6 +222,7 @@ func (c Card) MarshalJSON() ([]byte, error) {
 		"card_id": c.CardID, "run_id": c.RunID, "anchor_kind": c.Anchor.Kind(),
 		"anchor": c.Anchor.SemanticValue().Interface(), "scope": scope,
 		"status": c.Status, "snapshot": json.RawMessage(snapshot),
+		"execution_mode":    c.ExecutionMode,
 		"card_content_hash": c.CardContentHash, "decision_schema_hash": c.DecisionSchemaHash,
 		"bundle_hash": c.BundleHash, "workflow_version": c.WorkflowVersion,
 		"effective_cadence": c.EffectiveCadence, "provenance": c.Provenance.Interface(),
@@ -227,6 +230,9 @@ func (c Card) MarshalJSON() ([]byte, error) {
 	}
 	if c.EffectContentHash != "" {
 		out["effect_content_hash"] = c.EffectContentHash
+	}
+	if c.ExecutionMode == executionmode.Mock {
+		out["execution_badge"] = "MOCK"
 	}
 	switch c.Anchor.Kind() {
 	case AnchorKindStageGate:
@@ -290,18 +296,19 @@ type ListOptions struct {
 }
 
 type ListItem struct {
-	Kind          string    `json:"kind"`
-	CardID        string    `json:"card_id"`
-	RunID         string    `json:"run_id"`
-	Anchor        Anchor    `json:"-"`
-	Scope         Scope     `json:"scope"`
-	Title         string    `json:"title"`
-	Decision      string    `json:"decision,omitempty"`
-	Category      string    `json:"category,omitempty"`
-	Status        string    `json:"status"`
-	DeferredUntil time.Time `json:"deferred_until,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	Kind          string             `json:"kind"`
+	CardID        string             `json:"card_id"`
+	RunID         string             `json:"run_id"`
+	Anchor        Anchor             `json:"-"`
+	Scope         Scope              `json:"scope"`
+	Title         string             `json:"title"`
+	Decision      string             `json:"decision,omitempty"`
+	Category      string             `json:"category,omitempty"`
+	Status        string             `json:"status"`
+	ExecutionMode executionmode.Mode `json:"execution_mode"`
+	DeferredUntil time.Time          `json:"deferred_until,omitempty"`
+	CreatedAt     time.Time          `json:"created_at"`
+	UpdatedAt     time.Time          `json:"updated_at"`
 }
 
 func (i ListItem) MarshalJSON() ([]byte, error) {
@@ -315,7 +322,8 @@ func (i ListItem) MarshalJSON() ([]byte, error) {
 		"kind": i.Kind, "card_id": i.CardID, "run_id": i.RunID,
 		"anchor_kind": i.Anchor.Kind(), "anchor": i.Anchor.SemanticValue().Interface(),
 		"scope": i.Scope, "title": i.Title, "status": i.Status,
-		"created_at": i.CreatedAt, "updated_at": i.UpdatedAt,
+		"execution_mode": i.ExecutionMode,
+		"created_at":     i.CreatedAt, "updated_at": i.UpdatedAt,
 	}
 	if deferredUntil != nil {
 		base["deferred_until"] = deferredUntil
@@ -325,6 +333,9 @@ func (i ListItem) MarshalJSON() ([]byte, error) {
 	}
 	if i.Category != "" {
 		base["category"] = i.Category
+	}
+	if i.ExecutionMode == executionmode.Mock {
+		base["execution_badge"] = "MOCK"
 	}
 	return canonicaljson.Bytes(base)
 }
@@ -409,6 +420,9 @@ func (c Card) Validate() error {
 	case StatusPending, StatusDecided, StatusSuperseded, StatusExpired:
 	default:
 		return fmt.Errorf("decision card status %q is invalid", c.Status)
+	}
+	if !c.ExecutionMode.Valid() {
+		return fmt.Errorf("decision card execution_mode must be live or mock")
 	}
 	if c.Status == StatusDecided && (strings.TrimSpace(c.Verdict) == "" || c.DecidedAt.IsZero() || strings.TrimSpace(c.DecisionEventID) == "") {
 		return fmt.Errorf("decided card is missing verdict evidence")

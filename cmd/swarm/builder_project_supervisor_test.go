@@ -1553,7 +1553,7 @@ func TestDashboardDynamicAgentControl_DeniesWhenRuntimeShutdownAdmissionClosed(t
 	}, runtimemanager.AgentManagerOptions{
 		RuntimeShutdownAdmissionClosed: func() bool { return true },
 	})
-	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ID: agent.id}); err != nil {
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 

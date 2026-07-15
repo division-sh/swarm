@@ -61,8 +61,8 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_CoversEveryCurrentStateLa
 	for index, tc := range cases {
 		eventID := uuid.NewString()
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type)
-			VALUES ($1::uuid, $2::uuid, 'task.completed', 'global', '{}'::jsonb, 'runtime', 'agent')
+			INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type)
+			VALUES ('live', $1::uuid, $2::uuid, 'task.completed', 'global', '{}'::jsonb, 'runtime', 'agent')
 		`, eventID, runID); err != nil {
 			t.Fatalf("seed event for %s: %v", tc.agentID, err)
 		}
@@ -116,9 +116,9 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalLiveLifecycl
 	oldDeadLetterEventID := uuid.NewString()
 	for _, eventID := range []string{activeEventID, oldDeadLetterEventID} {
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (
+			INSERT INTO events (execution_mode,
 				event_id, run_id, event_name, scope, payload, produced_by, produced_by_type
-			) VALUES (
+			) VALUES ('live',
 				$1::uuid, $2::uuid, 'task.completed', 'global', '{}'::jsonb, 'runtime', 'agent'
 			)
 		`, eventID, runID); err != nil {
@@ -166,9 +166,9 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalTerminalLife
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type
-		) VALUES (
+		) VALUES ('live',
 			$1::uuid, $2::uuid, 'task.completed', 'global', '{}'::jsonb, 'runtime', 'agent'
 		)
 	`, eventID, runID); err != nil {

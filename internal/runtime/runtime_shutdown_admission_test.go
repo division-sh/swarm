@@ -155,7 +155,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	testInbound := newTestInboundGateway(t, bus, nil, rt.shutdownAdmissionClosed, inboundStore)
 	rt.InboundGateway = testInbound.InboundGateway
 
-	if err := am.SpawnAgent(runtimeactors.AgentConfig{ID: agent.id}); err != nil {
+	if err := am.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	am.Run(context.Background())
@@ -245,7 +245,7 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 	})
 	rt.Manager = am
 
-	if err := am.SpawnAgent(runtimeactors.AgentConfig{ID: agent.id}); err != nil {
+	if err := am.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	am.Run(context.Background())

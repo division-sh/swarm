@@ -20,14 +20,15 @@ func seedRunDebugAgent(t *testing.T, pg *PostgresStore, ctx context.Context, age
 	t.Helper()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:       agentID,
-			Role:     agentID,
-			FlowID:   "operating",
-			Model:    "regular",
-			Memory:   memory,
-			FlowPath: flowPath,
-			EntityID: entityID,
-			Config:   json.RawMessage(`{"system_prompt":"You are a trace test agent.","tools":[],"subscriptions":["trace.*"]}`),
+			ID:            agentID,
+			Role:          agentID,
+			FlowID:        "operating",
+			Model:         "regular",
+			ExecutionMode: "live",
+			Memory:        memory,
+			FlowPath:      flowPath,
+			EntityID:      entityID,
+			Config:        json.RawMessage(`{"system_prompt":"You are a trace test agent.","tools":[],"subscriptions":["trace.*"]}`),
 		},
 		Status:    "active",
 		HiredBy:   "test",
@@ -67,13 +68,13 @@ func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T
 		t.Fatalf("seed runs: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'scan.requested', 'global', '{}'::jsonb, 'test', 'agent', $5),
-			($1::uuid, gen_random_uuid(), 'scan.completed', 'global', '{}'::jsonb, 'test', 'agent', $6),
-			($3::uuid, $4::uuid, 'scan.requested', 'global', '{}'::jsonb, 'test', 'agent', $7)
+			('live', $1::uuid, $2::uuid, 'scan.requested', 'global', '{}'::jsonb, 'test', 'agent', $5),
+			('live', $1::uuid, gen_random_uuid(), 'scan.completed', 'global', '{}'::jsonb, 'test', 'agent', $6),
+			('live', $3::uuid, $4::uuid, 'scan.requested', 'global', '{}'::jsonb, 'test', 'agent', $7)
 	`, olderRunID, olderEventID, newerRunID, newerEventID, now.Add(-119*time.Minute), now.Add(-91*time.Minute), now.Add(-59*time.Minute)); err != nil {
 		t.Fatalf("seed events: %v", err)
 	}
@@ -126,12 +127,12 @@ func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t
 		t.Fatalf("seed runs: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
 		VALUES
-			($1::uuid, gen_random_uuid(), 'scan.corpus_file_requested', 'global', '{}'::jsonb, 'builder', 'agent', $3),
-			($2::uuid, gen_random_uuid(), 'scan.requested', 'global', '{}'::jsonb, 'builder', 'agent', $4)
+			('live', $1::uuid, gen_random_uuid(), 'scan.corpus_file_requested', 'global', '{}'::jsonb, 'builder', 'agent', $3),
+			('live', $2::uuid, gen_random_uuid(), 'scan.requested', 'global', '{}'::jsonb, 'builder', 'agent', $4)
 	`, targetRunID, olderRunID, now.Add(time.Second), now.Add(-59*time.Minute)); err != nil {
 		t.Fatalf("seed events: %v", err)
 	}
@@ -168,12 +169,12 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 		}
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'scan.requested', $3::uuid, 'global', '{}'::jsonb, 'test', 'agent', $4),
-			($5::uuid, $6::uuid, 'scan.requested', $7::uuid, 'global', '{}'::jsonb, 'test', 'agent', $8)
+			('live', $1::uuid, $2::uuid, 'scan.requested', $3::uuid, 'global', '{}'::jsonb, 'test', 'agent', $4),
+			('live', $5::uuid, $6::uuid, 'scan.requested', $7::uuid, 'global', '{}'::jsonb, 'test', 'agent', $8)
 	`, targetRunID, targetEventID, targetEntityID, now.Add(-4*time.Minute), otherRunID, otherEventID, otherEntityID, now.Add(-3*time.Minute)); err != nil {
 		t.Fatalf("seed root events: %v", err)
 	}
@@ -196,10 +197,10 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 			t.Fatalf("marshal runtime log payload: %v", err)
 		}
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (
+			INSERT INTO events (execution_mode,
 				run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 			)
-			VALUES ($1::uuid, gen_random_uuid(), 'platform.runtime_log', 'global', $2::jsonb, 'test', 'agent', $3)
+			VALUES ('live', $1::uuid, gen_random_uuid(), 'platform.runtime_log', 'global', $2::jsonb, 'test', 'agent', $3)
 		`, runID, string(payload), createdAt); err != nil {
 			t.Fatalf("seed runtime log for run %s: %v", runID, err)
 		}
@@ -323,15 +324,15 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (
-			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+			execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'quiescence.active_delivery', 'global', '{}'::jsonb, 'test', 'platform', $6),
-			($1::uuid, $3::uuid, 'quiescence.missing_pipeline_receipt', 'global', '{}'::jsonb, 'test', 'platform', $7),
-			($1::uuid, $4::uuid, '`+runtimeLogEventName+`', 'global', '{}'::jsonb, 'test', 'platform', $8),
-			($9::uuid, $5::uuid, 'quiescence.ready', 'global', '{}'::jsonb, 'test', 'platform', $10),
-			($9::uuid, $11::uuid, '`+diagnosticDirectInboundRecord+`', 'global', '{}'::jsonb, 'test', 'platform', $10),
-			($9::uuid, $12::uuid, '`+diagnosticDirectAgentDirective+`', 'global', '{}'::jsonb, 'test', 'platform', $10)
+			('live', $1::uuid, $2::uuid, 'quiescence.active_delivery', 'global', '{}'::jsonb, 'test', 'platform', $6),
+			('live', $1::uuid, $3::uuid, 'quiescence.missing_pipeline_receipt', 'global', '{}'::jsonb, 'test', 'platform', $7),
+			('live', $1::uuid, $4::uuid, '`+runtimeLogEventName+`', 'global', '{}'::jsonb, 'test', 'platform', $8),
+			('live', $9::uuid, $5::uuid, 'quiescence.ready', 'global', '{}'::jsonb, 'test', 'platform', $10),
+			('live', $9::uuid, $11::uuid, '`+diagnosticDirectInboundRecord+`', 'global', '{}'::jsonb, 'test', 'platform', $10),
+			('live', $9::uuid, $12::uuid, '`+diagnosticDirectAgentDirective+`', 'global', '{}'::jsonb, 'test', 'platform', $10)
 	`, blockedRunID, activeEventID, unsettledEventID, runtimeLogEventID, readyEventID,
 		now.Add(-50*time.Second), now.Add(-40*time.Second), now.Add(-30*time.Second), readyRunID, now.Add(-20*time.Second),
 		inboundEvidenceEventID, directiveEvidenceEventID); err != nil {
@@ -426,10 +427,10 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'scan.requested', $3::uuid, 'entity', '{}'::jsonb, 'builder', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'scan.requested', $3::uuid, 'entity', '{}'::jsonb, 'builder', 'platform', $4)
 	`, runID, eventID, entityID, now); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -467,13 +468,13 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, created_at
+			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, execution_mode, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'agent-source', $3::uuid, 'flow-a', TRUE, 'authored', $4::uuid,
 			$5::uuid, 'scan.requested', 'task-1', '[]'::jsonb, '[]'::jsonb,
 			'[]'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb,
-			'{}'::jsonb, '{}'::jsonb, true, 12, 1, NULL, $6
+			'{}'::jsonb, '{}'::jsonb, true, 12, 1, NULL, 'live', $6
 		)
 	`, turnID, runID, sessionID, entityID, eventID, now.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed turn: %v", err)
@@ -537,10 +538,10 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'scan.requested', $3::uuid, 'entity', '{}'::jsonb, 'builder', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'scan.requested', $3::uuid, 'entity', '{}'::jsonb, 'builder', 'platform', $4)
 	`, runID, eventID, entityID, base); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -575,13 +576,13 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, created_at
+			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, execution_mode, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'agent-late', $3::uuid, 'flow-a', TRUE, 'authored', $4::uuid,
 			$5::uuid, 'scan.requested', 'task-late', '[]'::jsonb, '[]'::jsonb,
 			'[]'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb,
-			'{}'::jsonb, '{}'::jsonb, true, 12, 0, NULL, $6
+			'{}'::jsonb, '{}'::jsonb, true, 12, 0, NULL, 'live', $6
 		)
 	`, turnID, runID, sessionID, entityID, eventID, base.Add(3*time.Second)); err != nil {
 		t.Fatalf("seed late turn: %v", err)
@@ -620,10 +621,10 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'task.started', $3::uuid, 'entity', '{}'::jsonb, 'builder', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'task.started', $3::uuid, 'entity', '{}'::jsonb, 'builder', 'platform', $4)
 	`, runID, eventID, entityID, now); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -655,13 +656,13 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, created_at
+			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, execution_mode, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'agent-task', $3::uuid, 'flow-a', FALSE, 'platform_default', $4::uuid,
 			$5::uuid, 'task.started', 'task-2', '[]'::jsonb, '[]'::jsonb,
 			'[]'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb,
-			'{}'::jsonb, '{}'::jsonb, true, 8, 0, NULL, $6
+			'{}'::jsonb, '{}'::jsonb, true, 8, 0, NULL, 'live', $6
 		)
 	`, turnID, runID, sessionID, entityID, eventID, now.Add(3*time.Second)); err != nil {
 		t.Fatalf("seed turn: %v", err)

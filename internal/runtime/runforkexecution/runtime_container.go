@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store"
@@ -149,6 +150,21 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
+	mode := runtimeeffects.ExecutionModeLive
+	if cfg := req.AgentRuntime.Options.Config; cfg != nil {
+		profile, profileErr := cfg.LLMBackendProfile()
+		if profileErr != nil {
+			return selectedContractForkLocalRuntimeContainer{}, profileErr
+		}
+		if profile.ID == llmselection.BackendMock {
+			mode = runtimeeffects.ExecutionModeMock
+		}
+	}
+	for _, record := range req.AgentRuntime.Records {
+		if record.Config.ExecutionMode.Valid() && record.Config.ExecutionMode != mode {
+			return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("selected-contract agent %s execution mode %s conflicts with selected backend mode %s", record.Config.ID, record.Config.ExecutionMode, mode)
+		}
+	}
 	issued, err := req.Store.IssueRunForkSelectedContractRuntimeExecution(ctx, store.SelectedContractRuntimeExecutionIssueRequest{
 		Admission: req.Admission, ContainerPlanFingerprint: containerFingerprint,
 		ActorCensusFingerprint: actorFingerprint, EffectiveConfigFingerprint: configFingerprint,
@@ -161,6 +177,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
+	authority.ExecutionMode = mode
 	proof.RuntimeExecutionID = issued.ExecutionID
 	proof.RuntimeGeneration = issued.Generation
 	proof.AuthorityExecutionOwner = authorityOwner

@@ -9,14 +9,15 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
 const runtimeLogEventName = "platform.runtime_log"
 
-func runtimeLogEvent(record runtimepkg.RuntimeLogPersistenceRecord) events.Event {
-	return events.NewDiagnosticDirectEvent(
+func runtimeLogEvent(ctx context.Context, record runtimepkg.RuntimeLogPersistenceRecord) events.Event {
+	evt := events.NewDiagnosticDirectEvent(
 		"",
 		events.EventType(runtimeLogEventName),
 		"runtime",
@@ -28,6 +29,10 @@ func runtimeLogEvent(record runtimepkg.RuntimeLogPersistenceRecord) events.Event
 		events.EventEnvelope{},
 		time.Time{},
 	)
+	if mode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
+		evt = evt.WithExecutionMode(mode)
+	}
+	return evt
 }
 
 func (s *PostgresStore) RuntimeLogLineageParentEventID(ctx context.Context, runID, explicitParentEventID, subjectEventID string) (string, error) {
@@ -81,7 +86,7 @@ func (s *PostgresStore) PersistRuntimeLog(ctx context.Context, record runtimepkg
 	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
 		return err
 	}
-	evt, err := events.AdmitForPersistence(runtimeLogEvent(record), events.AdmissionOptions{})
+	evt, err := events.AdmitForPersistence(runtimeLogEvent(ctx, record), events.AdmissionOptions{})
 	if err != nil {
 		return err
 	}
@@ -142,7 +147,7 @@ func (s *SQLiteRuntimeStore) PersistRuntimeLog(ctx context.Context, record runti
 	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
 		return err
 	}
-	evt, err := events.AdmitForPersistence(runtimeLogEvent(record), events.AdmissionOptions{})
+	evt, err := events.AdmitForPersistence(runtimeLogEvent(ctx, record), events.AdmissionOptions{})
 	if err != nil {
 		return err
 	}

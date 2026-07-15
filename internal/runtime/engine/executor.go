@@ -1322,7 +1322,7 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 		trace.SnapshotDigest = identity.SnapshotDigest
 		trace.HarnessABI = identity.HarnessABI
 		trace.SourceHash = computemodule.HashBytes(moduleBytes)
-		result, err := pythonmodule.Execute(pythonmodule.Request{
+		result, err := pythonmodule.Execute(frame.tx.Context(), pythonmodule.Request{
 			ModuleID:    moduleID,
 			RowID:       rowID,
 			Digest:      strings.TrimSpace(module.Digest),

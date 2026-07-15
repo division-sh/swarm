@@ -265,8 +265,8 @@ func seedActivityReplyContext(t *testing.T, db *sql.DB, sqlite bool, runID, requ
 		return
 	}
 	if _, err := db.Exec(`
-		INSERT INTO events (run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ($1::uuid, $2::uuid, 'provider.requested', 'global', '{}'::jsonb, 'test', 'platform', now())
+		INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ('live', $1::uuid, $2::uuid, 'provider.requested', 'global', '{}'::jsonb, 'test', 'platform', now())
 	`, runID, requestEventID); err != nil {
 		t.Fatalf("seed postgres reply request event: %v", err)
 	}

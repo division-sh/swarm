@@ -167,6 +167,7 @@ func TestSourceProvider_ManagedAgentGraphUpdates(t *testing.T) {
 
 func testAgentConfig(id, role string, permissions []string, entityID, flowPath, managerFallback string) models.AgentConfig {
 	return models.AgentConfig{
+		ExecutionMode:   "live",
 		ID:              id,
 		Role:            role,
 		Permissions:     permissions,

@@ -32,12 +32,31 @@ func TestResolveActiveBackendProfiles(t *testing.T) {
 }
 
 func TestResolveActiveBackendRejectsReservedAndUnknown(t *testing.T) {
-	for _, raw := range []string{BackendMock, BackendLocal, LegacyBackendAPI, LegacyBackendCLITest, "openai"} {
+	for _, raw := range []string{BackendLocal, LegacyBackendAPI, LegacyBackendCLITest, "openai"} {
 		t.Run(raw, func(t *testing.T) {
 			if _, err := ResolveActiveBackend(raw); err == nil {
 				t.Fatal("expected error")
 			}
 		})
+	}
+}
+
+func TestResolveActiveMockBackendAndBuiltInAliases(t *testing.T) {
+	profile, err := ResolveActiveBackend(BackendMock)
+	if err != nil {
+		t.Fatalf("ResolveActiveBackend(mock): %v", err)
+	}
+	if profile.Provider != ProviderMock || profile.Transport != TransportMock || profile.Credential.Required {
+		t.Fatalf("mock profile = %#v", profile)
+	}
+	for _, alias := range BuiltInModelAliasNames() {
+		resolved, err := ResolveModel(profile, ModelResolution{Model: alias})
+		if err != nil {
+			t.Fatalf("ResolveModel(%s): %v", alias, err)
+		}
+		if resolved.ConcreteModel != "mock-"+alias {
+			t.Fatalf("ResolveModel(%s) = %q", alias, resolved.ConcreteModel)
+		}
 	}
 }
 

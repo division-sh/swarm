@@ -128,7 +128,7 @@ type SQLiteRuntimeStore struct {
 }
 
 func (s *SQLiteRuntimeStore) BadBypass(ctx context.Context) error {
-	_, err := s.DB.ExecContext(ctx, "INSERT INTO events(event_id) VALUES (?)", "evt")
+	_, err := s.DB.ExecContext(ctx, "INSERT INTO events(execution_mode, event_id) VALUES ('live', ?)", "evt")
 	return err
 }
 `
@@ -159,12 +159,12 @@ type SQLiteRuntimeStore struct {
 
 func (store *SQLiteRuntimeStore) BadMixedBypass(ctx context.Context) error {
 	if err := store.runRuntimeMutation(ctx, "valid write", func(txctx context.Context, tx *sql.Tx) error {
-		_, err := tx.ExecContext(txctx, "INSERT INTO events(event_id) VALUES (?)", "inside")
+		_, err := tx.ExecContext(txctx, "INSERT INTO events(execution_mode, event_id) VALUES ('live', ?)", "inside")
 		return err
 	}); err != nil {
 		return err
 	}
-	_, err := store.DB.ExecContext(ctx, "INSERT INTO events(event_id) VALUES (?)", "outside")
+	_, err := store.DB.ExecContext(ctx, "INSERT INTO events(execution_mode, event_id) VALUES ('live', ?)", "outside")
 	return err
 }
 `

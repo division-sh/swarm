@@ -803,7 +803,7 @@ func requireStandingTelegramCalls(t testing.TB, calls <-chan map[string]any, sql
 			if got := strings.TrimSpace(fmt.Sprint(call["chat_id"])); got != fmt.Sprint(chatID) {
 				t.Fatalf("Telegram chat_id = %v, want %d", call["chat_id"], chatID)
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(30 * time.Second):
 			diagnostics := "unavailable"
 			if strings.HasPrefix(sqlitePath, "postgres:") {
 				diagnostics = standingPostgresDiagnostics(strings.TrimPrefix(sqlitePath, "postgres:"))

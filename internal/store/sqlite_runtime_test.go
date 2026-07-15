@@ -63,13 +63,14 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:         "agent-1",
-			Role:       "operator",
-			FlowID:     "global",
-			Model:      "regular",
-			LLMBackend: "anthropic",
-			Memory:     agentmemory.PlatformDefault(),
-			Config:     json.RawMessage(`{"system_prompt":"You are an operator.","tools":[]}`),
+			ID:            "agent-1",
+			Role:          "operator",
+			FlowID:        "global",
+			Model:         "regular",
+			LLMBackend:    "anthropic",
+			ExecutionMode: "live",
+			Memory:        agentmemory.PlatformDefault(),
+			Config:        json.RawMessage(`{"system_prompt":"You are an operator.","tools":[]}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -258,8 +259,8 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
 	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES (?, ?, 'custom.stop', 'global', '{}', 'test', 'agent', ?)
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ('live', ?, ?, 'custom.stop', 'global', '{}', 'test', 'agent', ?)
 	`, eventID, runID, now); err != nil {
 		t.Fatalf("seed sqlite event: %v", err)
 	}
@@ -383,13 +384,14 @@ func TestSQLiteRuntimeStoreUpsertAgentConsumesActivePipelineTransaction(t *testi
 	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
 	if err := store.UpsertAgent(txctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:         "agent-in-pipeline-tx",
-			Role:       "worker",
-			FlowID:     "global",
-			Model:      "regular",
-			LLMBackend: "anthropic",
-			Memory:     agentmemory.PlatformDefault(),
-			Config:     json.RawMessage(`{"system_prompt":"tx-owned agent","tools":[]}`),
+			ID:            "agent-in-pipeline-tx",
+			Role:          "worker",
+			FlowID:        "global",
+			Model:         "regular",
+			LLMBackend:    "anthropic",
+			ExecutionMode: "live",
+			Memory:        agentmemory.PlatformDefault(),
+			Config:        json.RawMessage(`{"system_prompt":"tx-owned agent","tools":[]}`),
 		},
 		Status:    "active",
 		StartedAt: now,
@@ -1457,14 +1459,15 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:         "agent-1",
-			Role:       "operator",
-			FlowID:     "global",
-			Model:      "regular",
-			LLMBackend: "anthropic",
-			Memory:     agentmemory.Authored(true),
-			FlowPath:   "global",
-			Config:     json.RawMessage(`{"system_prompt":"test","tools":[]}`),
+			ID:            "agent-1",
+			Role:          "operator",
+			FlowID:        "global",
+			Model:         "regular",
+			LLMBackend:    "anthropic",
+			ExecutionMode: "live",
+			Memory:        agentmemory.Authored(true),
+			FlowPath:      "global",
+			Config:        json.RawMessage(`{"system_prompt":"test","tools":[]}`),
 		},
 		Status:    "active",
 		StartedAt: now,
@@ -1539,8 +1542,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	if err := store.MarkEventDeliveryInProgress(ctx, eventID, "agent-1", lease.SessionID); err != nil {
 		t.Fatalf("MarkEventDeliveryInProgress trace event: %v", err)
 	}
-	if err := store.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
-		AgentID:          "agent-1",
+	if err := store.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "agent-1",
 		Memory:           agentmemory.Authored(true),
 		SessionID:        lease.SessionID,
 		RunID:            runID,
@@ -1596,8 +1598,7 @@ func TestSQLiteRuntimeStore_StatelessAuditUsesExplicitMemoryPlan(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 
-	if err := store.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
-		AgentID:        "task-agent",
+	if err := store.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "task-agent",
 		Memory:         agentmemory.PlatformDefault(),
 		SessionID:      sessionID,
 		RunID:          runID,
@@ -1657,8 +1658,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsEntityMetadata(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 
-	if err := store.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
-		AgentID:        "task-agent",
+	if err := store.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "task-agent",
 		Memory:         agentmemory.Authored(false),
 		SessionID:      sessionID,
 		RunID:          runID,
@@ -1715,8 +1715,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsFlowInstanceMetadata(t *testin
 		t.Fatalf("seed run: %v", err)
 	}
 
-	if err := store.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
-		AgentID:        "task-agent",
+	if err := store.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "task-agent",
 		Memory:         agentmemory.PlatformDefault(),
 		SessionID:      sessionID,
 		RunID:          runID,
@@ -1775,14 +1774,15 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:         "agent-cleanup-1",
-			Role:       "operator",
-			FlowID:     "global",
-			Model:      "regular",
-			LLMBackend: "anthropic",
-			Memory:     agentmemory.Authored(true),
-			FlowPath:   "global",
-			Config:     json.RawMessage(`{"system_prompt":"test","tools":[]}`),
+			ID:            "agent-cleanup-1",
+			Role:          "operator",
+			FlowID:        "global",
+			Model:         "regular",
+			LLMBackend:    "anthropic",
+			ExecutionMode: "live",
+			Memory:        agentmemory.Authored(true),
+			FlowPath:      "global",
+			Config:        json.RawMessage(`{"system_prompt":"test","tools":[]}`),
 		},
 		Status:    "active",
 		StartedAt: now,
@@ -1806,8 +1806,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	}); err != nil {
 		t.Fatalf("UpsertConversation(memory): %v", err)
 	}
-	if err := store.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
-		SessionID:      uuid.NewString(),
+	if err := store.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{SessionID: uuid.NewString(),
 		AgentID:        identity.AgentID,
 		RunID:          identity.RunID,
 		FlowInstance:   identity.FlowInstance,

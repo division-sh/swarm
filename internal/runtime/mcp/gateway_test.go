@@ -417,7 +417,7 @@ func TestGatewayHandleMCP_ProviderCallCoordinateSeparatesSiblingsAndFencesReplay
 	controller := runtimeeffects.NewController(harness)
 	putTurn := func(token, identity string) {
 		putTestTurnContext(t, registry, token, TurnContext{
-			Actor:              models.AgentConfig{ID: harness.Token.AgentID},
+			Actor:              models.AgentConfig{ExecutionMode: "live", ID: harness.Token.AgentID},
 			LifecycleToken:     harness.Token,
 			HasLifecycleToken:  true,
 			EffectController:   controller,
@@ -508,7 +508,7 @@ func TestGatewayHandleMCP_ManagedCallWithoutProviderCoordinateFailsBeforeExecuto
 	harness := effecttest.New()
 	registry := newTestTurnContextRegistry()
 	putTestTurnContext(t, registry, "ctx-managed", TurnContext{
-		Actor:              models.AgentConfig{ID: harness.Token.AgentID},
+		Actor:              models.AgentConfig{ExecutionMode: "live", ID: harness.Token.AgentID},
 		LifecycleToken:     harness.Token,
 		HasLifecycleToken:  true,
 		EffectController:   runtimeeffects.NewController(harness),
@@ -576,7 +576,7 @@ func runGatewayTransportPair(t *testing.T, reqCtx context.Context) (gatewayCtxOb
 	})
 
 	putTestTurnContext(t, registry, "ctx-transport-probe", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -627,20 +627,22 @@ func TestGatewayHydrateActor_PrefersResolvedRuntimeConfig(t *testing.T) {
 				return models.AgentConfig{}, false
 			}
 			return models.AgentConfig{
-				ID:          "market-research-agent",
-				Role:        "market_research",
-				FlowID:      "discovery",
-				EntityID:    "entity-1",
-				Permissions: []string{"schedule"},
-				EmitEvents:  []string{"category.assessed", "market_research.scan_complete"},
+				ExecutionMode: "live",
+				ID:            "market-research-agent",
+				Role:          "market_research",
+				FlowID:        "discovery",
+				EntityID:      "entity-1",
+				Permissions:   []string{"schedule"},
+				EmitEvents:    []string{"category.assessed", "market_research.scan_complete"},
 			}, true
 		},
 	})
 
 	hydrated := g.hydrateActor(models.AgentConfig{
-		ID:     "market-research-agent",
-		Role:   "spoofed_role",
-		FlowID: "spoofed_mode",
+		ExecutionMode: "live",
+		ID:            "market-research-agent",
+		Role:          "spoofed_role",
+		FlowID:        "spoofed_mode",
 	})
 
 	if len(hydrated.EmitEvents) != 2 {
@@ -701,8 +703,9 @@ func TestGatewayMCPToolsForRequest_UsesHydratedActorRoleForEmitTools(t *testing.
 				return models.AgentConfig{}, false
 			}
 			return models.AgentConfig{
-				ID:   "campaign-coordinator",
-				Role: "campaign_coordinator",
+				ExecutionMode: "live",
+				ID:            "campaign-coordinator",
+				Role:          "campaign_coordinator",
 			}, true
 		},
 		EmitTools: func(role string) []llm.ToolDefinition {
@@ -719,7 +722,7 @@ func TestGatewayMCPToolsForRequest_UsesHydratedActorRoleForEmitTools(t *testing.
 	})
 
 	putTestTurnContext(t, registry, "ctx-hydrated-role", TurnContext{
-		Actor:     models.AgentConfig{ID: "campaign-coordinator"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -742,8 +745,9 @@ func TestGatewayMCPToolsForRequest_KeepsEmitToolsForDirectMCPContext(t *testing.
 				return models.AgentConfig{}, false
 			}
 			return models.AgentConfig{
-				ID:   "campaign-coordinator",
-				Role: "campaign_coordinator",
+				ExecutionMode: "live",
+				ID:            "campaign-coordinator",
+				Role:          "campaign_coordinator",
 			}, true
 		},
 		EmitTools: func(role string) []llm.ToolDefinition {
@@ -760,7 +764,7 @@ func TestGatewayMCPToolsForRequest_KeepsEmitToolsForDirectMCPContext(t *testing.
 	})
 
 	putTestTurnContext(t, registry, "ctx-1", TurnContext{
-		Actor:     models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -787,15 +791,16 @@ func TestGatewayMCPToolsForRequest_PrefersActorScopedToolDefinitions(t *testing.
 	}, "", GatewayHooks{
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
 			return models.AgentConfig{
-				ID:   agentID,
-				Role: "analysis",
+				ExecutionMode: "live",
+				ID:            agentID,
+				Role:          "analysis",
 			}, true
 		},
 		ResolveTurnContext: registry.ResolveTurnContext,
 	})
 
 	putTestTurnContext(t, registry, "ctx-actor-scoped", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -816,7 +821,7 @@ func TestGatewayMCPToolsForRequest_PrefersActorScopedToolDefinitions(t *testing.
 func TestGatewayMCPToolsForRequest_ExposesFlowDataOnlyFromActorScopedCatalog(t *testing.T) {
 	registry := newTestTurnContextRegistry()
 	putTestTurnContext(t, registry, "ctx-flow-data", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -831,7 +836,7 @@ func TestGatewayMCPToolsForRequest_ExposesFlowDataOnlyFromActorScopedCatalog(t *
 		},
 	}, "", GatewayHooks{
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
-			return models.AgentConfig{ID: agentID, Role: "analysis"}, true
+			return models.AgentConfig{ExecutionMode: "live", ID: agentID, Role: "analysis"}, true
 		},
 		ResolveTurnContext: registry.ResolveTurnContext,
 	})
@@ -851,7 +856,7 @@ func TestGatewayMCPToolsForRequest_ExposesFlowDataOnlyFromActorScopedCatalog(t *
 		actorDefs: nil,
 	}, "", GatewayHooks{
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
-			return models.AgentConfig{ID: agentID, Role: "analysis"}, true
+			return models.AgentConfig{ExecutionMode: "live", ID: agentID, Role: "analysis"}, true
 		},
 		ResolveTurnContext: registry.ResolveTurnContext,
 	})
@@ -870,13 +875,13 @@ func TestGatewayMCPToolsForRequest_DoesNotFallbackToRuntimeWideToolsForEmptyActo
 		actorDefs: nil,
 	}, "", GatewayHooks{
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
-			return models.AgentConfig{ID: agentID, Role: "validation_orchestrator"}, true
+			return models.AgentConfig{ExecutionMode: "live", ID: agentID, Role: "validation_orchestrator"}, true
 		},
 		ResolveTurnContext: registry.ResolveTurnContext,
 	})
 
 	putTestTurnContext(t, registry, "ctx-role-scoped-empty", TurnContext{
-		Actor:     models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -910,12 +915,12 @@ func TestGatewayMCPToolsForRoleScopedActor_RetiresLegacyEntitySurface(t *testing
 		callCount: &executeCount,
 	}, testGatewayToken, GatewayHooks{
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
-			return models.AgentConfig{ID: agentID, Role: "validation_orchestrator"}, true
+			return models.AgentConfig{ExecutionMode: "live", ID: agentID, Role: "validation_orchestrator"}, true
 		},
 		ResolveTurnContext: registry.ResolveTurnContext,
 	})
 
-	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator"}
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator"}
 	putTestTurnContext(t, registry, "ctx-role-scoped-generated", TurnContext{
 		Actor:     actor,
 		CreatedAt: time.Now().UTC(),
@@ -1012,7 +1017,7 @@ func TestGatewayMCPToolsForRequest_FiltersRoleScopedToolsByTurnEntityEligibility
 		WithActor:          models.WithActor,
 		WithInboundEvent:   runtimebus.WithInboundEvent,
 	})
-	actor := models.AgentConfig{ID: "market-research-agent", Role: "market_research"}
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "market-research-agent", Role: "market_research"}
 	putTestTurnContext(t, registry, "ctx-invalid-current-entity", TurnContext{
 		Actor: actor,
 		Inbound: eventtest.RootIngress(
@@ -1110,13 +1115,13 @@ func TestGatewayMCPToolsForRequest_IgnoresCallerAllowlist(t *testing.T) {
 		},
 	}, "", GatewayHooks{
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
-			return models.AgentConfig{ID: agentID, Role: "analysis"}, true
+			return models.AgentConfig{ExecutionMode: "live", ID: agentID, Role: "analysis"}, true
 		},
 		ResolveTurnContext: registry.ResolveTurnContext,
 	})
 
 	putTestTurnContext(t, registry, "ctx-ignore-allowlist", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -1141,13 +1146,13 @@ func TestGatewayMCPToolsForRequest_DoesNotTrustUnknownCallerAllowlist(t *testing
 		},
 	}, "", GatewayHooks{
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
-			return models.AgentConfig{ID: agentID, Role: "analysis"}, true
+			return models.AgentConfig{ExecutionMode: "live", ID: agentID, Role: "analysis"}, true
 		},
 		ResolveTurnContext: registry.ResolveTurnContext,
 	})
 
 	putTestTurnContext(t, registry, "ctx-unknown-allowlist", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -1212,7 +1217,7 @@ func TestGatewayHandleMCP_ToolsListUsesResolvedTurnContext(t *testing.T) {
 	})
 
 	putTestTurnContext(t, registry, "ctx-list", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -1257,7 +1262,7 @@ func TestGatewayHandleMCP_ToolsListUsesResolvedTurnContext(t *testing.T) {
 func TestMarkEmitUsed(t *testing.T) {
 	registry := newTestTurnContextRegistry()
 	putTestTurnContext(t, registry, "ctx-emit", TurnContext{
-		Actor:     models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -1273,7 +1278,7 @@ func TestMarkEmitUsed(t *testing.T) {
 func TestMarkEmitKeyUsed_AllowsDistinctKeysPerTurn(t *testing.T) {
 	registry := newTestTurnContextRegistry()
 	putTestTurnContext(t, registry, "ctx-emit-keys", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -1301,7 +1306,7 @@ func TestGatewayHandleMCP_AllowsDistinctEmitPayloadsPerTurn(t *testing.T) {
 	})
 
 	putTestTurnContext(t, registry, "ctx-emit-gateway", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -1355,7 +1360,7 @@ func TestGatewayHandleMCP_AllowsPrefixedToolNameFromRuntimeOwnedTurnContext(t *t
 	})
 
 	putTestTurnContext(t, registry, "ctx-prefixed-emit", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		Allowed:   map[string]struct{}{"emit_score_dimension_complete": {}},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
@@ -1403,7 +1408,7 @@ func TestGatewayHandleMCP_DoesNotLetCallerAllowlistGrantToolAccess(t *testing.T)
 	})
 
 	putTestTurnContext(t, registry, "ctx-denied-allowlist", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		Allowed:   map[string]struct{}{"query_entities": {}},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
@@ -1451,7 +1456,7 @@ func TestGatewayHandleMCP_ToolsCallIncludesStructuredRuntimeErrorPayload(t *test
 	})
 
 	putTestTurnContext(t, registry, "ctx-runtime-error", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -1512,7 +1517,7 @@ func TestGatewayExecutionFailureEnvelopeParityAcrossToolsAndMCP(t *testing.T) {
 				return nil, tt.err
 			}), testGatewayToken, GatewayHooks{ResolveTurnContext: registry.ResolveTurnContext})
 			putTestTurnContext(t, registry, "ctx-parity", TurnContext{
-				Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+				Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 				Allowed:   map[string]struct{}{"query_entities": {}},
 				CreatedAt: time.Now().UTC(),
 				ExpiresAt: time.Now().UTC().Add(time.Hour),
@@ -1586,7 +1591,7 @@ func TestGatewayHandleMCP_ToolsCallRelaysOversizedReadFileResultsForHelperPath(t
 	})
 
 	putTestTurnContext(t, registry, "ctx-relay-read-file", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -1668,7 +1673,7 @@ func TestGatewayHandleMCP_ToolsCallSuppressesRuntimeReadFileFollowUpWithoutReadF
 	})
 
 	putTestTurnContext(t, registry, "ctx-query-only", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		Allowed:   map[string]struct{}{"query_entities": {}},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
@@ -1836,7 +1841,7 @@ func TestGatewayHandleMCP_ToolsCallPreservesLargeRelayPathReadInline(t *testing.
 	})
 
 	putTestTurnContext(t, registry, "ctx-read-relay-file", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -1891,7 +1896,7 @@ func TestGatewayHandleMCP_ToolsCallIncludesExplicitStartupProbeSuccessOutcome(t 
 	})
 
 	putTestTurnContext(t, registry, "ctx-startup-probe-success", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -1941,7 +1946,7 @@ func TestGatewayHandleMCP_ToolsCallIncludesExplicitStartupProbeValidationOnlyOut
 	})
 
 	putTestTurnContext(t, registry, "ctx-startup-probe-validation", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -2046,7 +2051,7 @@ func TestGatewayExecutionContext_UsesInboundTraceNotRequestTraceOnResolvedTurn(t
 		},
 	})
 	putTestTurnContext(t, registry, "ctx-trace", TurnContext{
-		Actor:      models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:      models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		Inbound:    eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{}),
 		HasInbound: true,
 		CreatedAt:  time.Now().UTC(),
@@ -2069,7 +2074,7 @@ func TestGatewayExecutionContext_RestoresTypedRuntimeLineageOnResolvedTurn(t *te
 		WithInboundEvent:   runtimebus.WithInboundEvent,
 	})
 	putTestTurnContext(t, registry, "ctx-lineage", TurnContext{
-		Actor: models.AgentConfig{ID: "validation-coordinator", Role: "validation"},
+		Actor: models.AgentConfig{ExecutionMode: "live", ID: "validation-coordinator", Role: "validation"},
 		Inbound: eventtest.RootIngress("3134bdf0-2ce0-4260-93bd-f0a45371b7d7",
 			events.EventType("validation/validation.package_ready"), "", "", nil, 0, "a6f6861a-d154-4d38-a2d6-1388f5bb6daf", "", events.EventEnvelope{}, time.Time{}),
 
@@ -2113,7 +2118,7 @@ func TestGatewayMCPExecutionContext_KeepsOtherRegistryTokensValidAfterGlobalEpoc
 	registryA := newTestTurnContextRegistry()
 	registryB := newTestTurnContextRegistry()
 	registryB.PutTurnContextForTest("ctx-b", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -2237,7 +2242,7 @@ func TestGatewayHandleMCP_DeniesToolCallWhenRuntimeShutdownAdmissionClosed(t *te
 		WithCurrentRuntimeEpoch:        runtimebus.WithCurrentRuntimeEpoch,
 	})
 	putTestTurnContext(t, registry, "ctx-shutdown", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -2370,7 +2375,7 @@ func TestGatewayHandleTool_IgnoresCallerSuppliedPrivilegeFields(t *testing.T) {
 	})
 
 	putTestTurnContext(t, registry, "ctx-analysis", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -2405,7 +2410,7 @@ func TestGatewayHandleTool_AllowsLegitimateRuntimeOwnedActorContext(t *testing.T
 	})
 
 	putTestTurnContext(t, registry, "ctx-coordinator", TurnContext{
-		Actor:     models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -2485,7 +2490,7 @@ func TestGatewayTransports_RejectLegacyQueryContextTokenCarrier(t *testing.T) {
 	})
 
 	putTestTurnContext(t, registry, "ctx-query-only", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -2539,7 +2544,7 @@ func TestGatewayTransports_AlignReadOnlyToolSuccessWithResolvedTurnContext(t *te
 	})
 
 	putTestTurnContext(t, registry, "ctx-query", TurnContext{
-		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})

@@ -20,7 +20,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -37,6 +39,10 @@ const (
 	gateRecoveryBundle = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	otherGateBundle    = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
+
+func withLiveGateExecution(ctx context.Context) context.Context {
+	return runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
+}
 
 type gateRecoveryModule struct {
 	source semanticview.Source
@@ -327,7 +333,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 
 			runID, entityID := uuid.NewString(), uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(context.Background(), runID))
 			if err := selected.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
 				Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "root", "instance_id": entityID},
@@ -604,6 +610,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				}
 				card, err := decisioncard.New(decisioncard.Card{
 					CardID: continuation.CardID, RunID: runID, Anchor: anchor, Snapshot: snapshot,
+					ExecutionMode:     "live",
 					EffectContentHash: continuation.EffectContentHash, BundleHash: gateRecoveryBundle,
 					WorkflowVersion: "1", CreatedAt: now,
 				})
@@ -720,7 +727,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 
 			runID, entityID := uuid.NewString(), uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(context.Background(), runID))
 			if err := selected.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
 				Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "root", "instance_id": entityID},
@@ -1016,7 +1023,7 @@ func testDecisionRouteSettlementRetry(t *testing.T, selected gateRecoveryStoreCa
 	ctx := context.Background()
 	runID, entityID := uuid.NewString(), uuid.NewString()
 	insertGateRecoveryRun(t, selected, runID)
-	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 	bundle := gateRecoveryTerminalContractBundle()
 	setupBus, err := runtimebus.NewEventBusWithOptions(selected.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
 	if err != nil {
@@ -1180,7 +1187,7 @@ type gateRecoveryForegroundFixture struct {
 
 func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, runID string, at time.Time) gateRecoveryForegroundFixture {
 	t.Helper()
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := withLiveGateExecution(runtimecorrelation.WithRunID(context.Background(), runID))
 	entityID := uuid.NewString()
 	bundle := gateRecoveryContractBundle()
 	setupBus, err := runtimebus.NewEventBusWithOptions(tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
@@ -1252,8 +1259,9 @@ func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, run
 	}
 	card, err := decisioncard.New(decisioncard.Card{
 		CardID: uuid.NewString(), RunID: runID, Anchor: anchor,
-		Snapshot:   snapshot,
-		BundleHash: gateRecoveryBundle, EffectiveCadence: decisioncard.Cadence{ReminderInterval: "24h", InputDraftTTL: "15m"}, CreatedAt: at,
+		ExecutionMode: "live",
+		Snapshot:      snapshot,
+		BundleHash:    gateRecoveryBundle, EffectiveCadence: decisioncard.Cadence{ReminderInterval: "24h", InputDraftTTL: "15m"}, CreatedAt: at,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1339,7 +1347,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	ctx := context.Background()
 	runID, entityID := uuid.NewString(), uuid.NewString()
 	insertGateRecoveryRun(t, tc, runID)
-	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 	bundle := gateRecoveryTerminalContractBundle()
 	bus, err := runtimebus.NewEventBusWithOptions(tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
 	if err != nil {
@@ -1416,7 +1424,7 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	insertGateRecoveryRun(t, tc, runID)
-	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 
 	bundle := gateRecoveryContractBundle()
 	bus, err := runtimebus.NewEventBusWithOptions(tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})

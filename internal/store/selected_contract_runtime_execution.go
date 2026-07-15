@@ -255,7 +255,7 @@ func claimSelectedContractRuntimeExecutionTx(ctx context.Context, tx *sql.Tx, sq
 	}
 	authority := runtimeeffects.Authority{
 		Kind: runtimeeffects.AuthoritySelectedContractFork, ID: issued.ExecutionID, ExecutionOwner: owner, LeaseExpiresAt: expires,
-		FenceGeneration: issued.FenceGeneration,
+		FenceGeneration: issued.FenceGeneration, ExecutionMode: runtimeeffects.ExecutionModeLive,
 		SelectedFork: runtimeeffects.SelectedContractForkAuthority{ExecutionID: issued.ExecutionID, ForkRunID: issued.ForkRunID, Generation: issued.Generation,
 			AdmissionFingerprint: issued.AdmissionFingerprint, ContainerPlanFingerprint: issued.ContainerPlanFingerprint,
 			ActorCensusFingerprint: issued.ActorCensusFingerprint, EffectiveConfigFingerprint: issued.EffectiveConfigFingerprint},

@@ -229,12 +229,12 @@ func (s *SQLiteRuntimeStore) AppendEventTxOutcome(ctx context.Context, tx *sql.T
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO events (
 			event_id, run_id, event_name, entity_id, flow_instance, source_route, target_route, target_set,
-			scope, payload, chain_depth, produced_by, produced_by_type, source_event_id, created_at
+			scope, payload, execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(event_id) DO NOTHING
 	`, id, sqliteNullUUID(runID), name, sqliteNullUUID(entityID), sqliteNullString(flowInstance), string(sourceRoute), string(targetRoute), string(targetSet),
-		scope, string(payload), chainDepth, sqliteNullString(producedBy), producedByType, sqliteNullUUID(sourceEventID), createdAt.UTC())
+		scope, string(payload), evt.ExecutionMode(), chainDepth, sqliteNullString(producedBy), producedByType, sqliteNullUUID(sourceEventID), createdAt.UTC())
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("append sqlite event: %w", err)
 	}

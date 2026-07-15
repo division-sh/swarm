@@ -271,6 +271,7 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 	}
 	card, err := decisioncard.New(decisioncard.Card{
 		CardID: continuation.CardID, RunID: runID, Anchor: anchor, Snapshot: snapshot,
+		ExecutionMode:     "live",
 		EffectContentHash: continuation.EffectContentHash, BundleHash: fact.BundleHash,
 		WorkflowVersion: workflowVersion, CreatedAt: now,
 	})

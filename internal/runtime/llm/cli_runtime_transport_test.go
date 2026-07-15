@@ -66,6 +66,7 @@ func TestClaudeDisallowedBuiltinToolsArgForActor_DefaultsToAllKnownBuiltins(t *t
 
 func TestClaudeDisallowedBuiltinToolsArgForActor_MapsNativeCapabilities(t *testing.T) {
 	got := claudeDisallowedBuiltinToolsArgForActor(models.AgentConfig{
+		ExecutionMode: "live",
 		NativeTools: models.NativeToolConfig{
 			Bash:      true,
 			WebSearch: true,
@@ -87,7 +88,8 @@ func TestClaudeDisallowedBuiltinToolsArgForActor_MapsNativeCapabilities(t *testi
 
 func TestClaudeAllowedToolsArgForActor_IncludesPostCompositionAndNativeTools(t *testing.T) {
 	got := claudeAllowedToolsArgForActor(models.AgentConfig{
-		NativeTools: models.NativeToolConfig{FileIO: true},
+		ExecutionMode: "live",
+		NativeTools:   models.NativeToolConfig{FileIO: true},
 	}, []ToolDefinition{
 		{Name: "emit_category_assessed"},
 		{Name: "emit_market_research_scan_complete"},
@@ -118,6 +120,7 @@ func TestClaudeAllowedToolsArgForActor_IncludesPostCompositionAndNativeTools(t *
 
 func TestClaudeToolSurface_UsesProviderNativeBuiltinsWithoutFallbackInjection(t *testing.T) {
 	actor := models.AgentConfig{
+		ExecutionMode: "live",
 		NativeTools: models.NativeToolConfig{
 			FileIO:    true,
 			Bash:      true,
@@ -196,6 +199,7 @@ func TestClaudeToolSurface_UsesProviderNativeBuiltinsWithoutFallbackInjection(t 
 
 func TestCLIExecutionToolSurface_CanonicalizesProviderBuiltins(t *testing.T) {
 	surface := cliExecutionToolSurfaceForActor(models.AgentConfig{
+		ExecutionMode: "live",
 		NativeTools: models.NativeToolConfig{
 			FileIO:    true,
 			WebSearch: true,
@@ -225,7 +229,7 @@ func TestCLIExecutionToolSurface_CanonicalizesProviderBuiltins(t *testing.T) {
 }
 
 func TestCLIExecutionToolSurface_DoesNotInjectRetiredLegacyEntityTools(t *testing.T) {
-	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator"}
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator"}
 	tools := []ToolDefinition{
 		{Name: "read_validation_case"},
 		{Name: "read_validation_case_business_brief"},
@@ -274,6 +278,7 @@ func TestCLIExecutionToolSurface_DoesNotInjectRetiredLegacyEntityTools(t *testin
 
 func TestCLIExecutionToolSurface_FileIONativeSurfaceRemovesFallbackRuntimeTools(t *testing.T) {
 	surface := cliExecutionToolSurfaceForActor(models.AgentConfig{
+		ExecutionMode: "live",
 		NativeTools: models.NativeToolConfig{
 			FileIO: true,
 		},
@@ -316,9 +321,10 @@ func TestBuildMCPConfigArg_UsesContextTokenWithoutLegacyCorrelationPropagation(t
 		},
 	}
 	ctx := models.WithActor(context.Background(), models.AgentConfig{
-		ID:     "market-research-agent",
-		Role:   "market_research",
-		FlowID: "discovery",
+		ExecutionMode: "live",
+		ID:            "market-research-agent",
+		Role:          "market_research",
+		FlowID:        "discovery",
 	})
 	s := &Session{
 		AgentID: "market-research-agent",
@@ -373,7 +379,8 @@ func TestBuildMCPHTTPBinding_DisablesBridgeForNativeBuiltinOnlySurface(t *testin
 	registered := false
 	binding, enabled, err := BuildMCPHTTPBinding(
 		models.WithActor(context.Background(), models.AgentConfig{
-			ID: "analysis-agent",
+			ExecutionMode: "live",
+			ID:            "analysis-agent",
 			NativeTools: models.NativeToolConfig{
 				FileIO:    true,
 				Bash:      true,
@@ -422,7 +429,7 @@ func TestBuildMCPHTTPBindingRequiresConstructionProvenanceBeforeRegistration(t *
 	}
 	registered := false
 	_, enabled, err := BuildMCPHTTPBinding(
-		models.WithActor(context.Background(), models.AgentConfig{ID: "analysis-agent"}),
+		models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent"}),
 		&config.Config{},
 		mcpTurnContextStoreStub{register: func(context.Context, time.Duration, []string) string {
 			registered = true
@@ -443,7 +450,7 @@ func TestBuildMCPHTTPBindingRequiresConstructionProvenanceBeforeRegistration(t *
 func TestBuildMCPHTTPBindingRequiresFreshNonEmptyContextToken(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	binding, enabled, err := BuildMCPHTTPBinding(
-		models.WithActor(context.Background(), models.AgentConfig{ID: "analysis-agent"}),
+		models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent"}),
 		&config.Config{},
 		mcpTurnContextStoreStub{register: func(context.Context, time.Duration, []string) string { return "" }},
 		&Session{AgentID: "analysis-agent", Tools: []ToolDefinition{{Name: "query_entities"}}},
@@ -461,7 +468,7 @@ func TestBuildMCPHTTPBindingRequiresFreshNonEmptyContextToken(t *testing.T) {
 func TestBuildMCPHTTPBindingProvenanceInvalidatesOnCopiedFieldMutation(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	binding, enabled, err := BuildMCPHTTPBinding(
-		models.WithActor(context.Background(), models.AgentConfig{ID: "analysis-agent"}),
+		models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent"}),
 		&config.Config{},
 		mcpTurnContextStoreStub{register: func(context.Context, time.Duration, []string) string { return "ctx-token" }},
 		&Session{AgentID: "analysis-agent", Tools: []ToolDefinition{{Name: "query_entities"}}},
@@ -489,9 +496,10 @@ func TestBuildMCPConfigArg_PreservesNonLoopbackGatewayURLForContainerExecution(t
 		},
 	}
 	ctx := models.WithActor(context.Background(), models.AgentConfig{
-		ID:     "market-research-agent",
-		Role:   "market_research",
-		FlowID: "discovery",
+		ExecutionMode: "live",
+		ID:            "market-research-agent",
+		Role:          "market_research",
+		FlowID:        "discovery",
 	})
 	s := &Session{
 		AgentID: "market-research-agent",
@@ -525,8 +533,9 @@ func TestBuildMCPConfigArg_FailsClosedWithoutTurnContextStore(t *testing.T) {
 		toolGateway: testToolGatewayBinding("http://127.0.0.1:18082", "http://host.docker.internal:18082", "gateway-token"),
 	}
 	ctx := models.WithActor(context.Background(), models.AgentConfig{
-		ID:   "market-research-agent",
-		Role: "market_research",
+		ExecutionMode: "live",
+		ID:            "market-research-agent",
+		Role:          "market_research",
 	})
 	s := &Session{
 		AgentID: "market-research-agent",
@@ -541,8 +550,9 @@ func TestBuildMCPConfigArg_FailsClosedWithoutTurnContextStore(t *testing.T) {
 
 func TestValidateCLIResponseToolCallsForTurn_FailsClosedForNonEmitToolOutsideObservedSurface(t *testing.T) {
 	actor := models.AgentConfig{
-		ID:          "market-research-agent",
-		NativeTools: models.NativeToolConfig{FileIO: true},
+		ExecutionMode: "live",
+		ID:            "market-research-agent",
+		NativeTools:   models.NativeToolConfig{FileIO: true},
 	}
 	err := validateCLIResponseToolCallsForTurn(actor, []ToolDefinition{
 		{Name: "emit_category_assessed"},
@@ -562,8 +572,9 @@ func TestValidateCLIResponseToolCallsForTurn_FailsClosedForNonEmitToolOutsideObs
 
 func TestValidateCLIResponseToolCallsForTurn_AllowsObservedMCPToolAndEmitFallback(t *testing.T) {
 	actor := models.AgentConfig{
-		ID:          "market-research-agent",
-		NativeTools: models.NativeToolConfig{FileIO: true},
+		ExecutionMode: "live",
+		ID:            "market-research-agent",
+		NativeTools:   models.NativeToolConfig{FileIO: true},
 	}
 	err := validateCLIResponseToolCallsForTurn(actor, []ToolDefinition{
 		{Name: "emit_category_assessed"},
@@ -588,7 +599,8 @@ func TestValidateCLIResponseToolCallsForTurn_AllowsObservedMCPToolAndEmitFallbac
 
 func TestValidateCLIResponseToolCallsForTurn_AllowsPlannedNonEmitSurfaceWhenObservedMetadataIsAbsent(t *testing.T) {
 	actor := models.AgentConfig{
-		ID: "market-research-agent",
+		ExecutionMode: "live",
+		ID:            "market-research-agent",
 	}
 	err := validateCLIResponseToolCallsForTurn(actor, []ToolDefinition{
 		{Name: "query_entities"},

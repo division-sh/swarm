@@ -766,12 +766,13 @@ func seedActiveRuntimeBusAgent(t *testing.T, ctx context.Context, pg *store.Post
 	t.Helper()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:     agentID,
-			Role:   "observer",
-			FlowID: "global",
-			Type:   "stub",
-			Model:  "regular",
-			Config: []byte(`{}`),
+			ID:            agentID,
+			Role:          "observer",
+			FlowID:        "global",
+			Type:          "stub",
+			Model:         "regular",
+			ExecutionMode: "live",
+			Config:        []byte(`{}`),
 		},
 		Status:    "active",
 		HiredBy:   "test",
@@ -2135,6 +2136,7 @@ func seedReplayPoolEvent(t *testing.T, selected *store.PostgresStore, runID stri
 		}
 		card, err := decisioncard.New(decisioncard.Card{
 			CardID: uuid.NewString(), RunID: runID, Anchor: anchor,
+			ExecutionMode:    "live",
 			Snapshot:         snapshot,
 			BundleHash:       "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			EffectiveCadence: decisioncard.Cadence{ReminderInterval: "24h", InputDraftTTL: "15m"}, CreatedAt: time.Now().UTC(),

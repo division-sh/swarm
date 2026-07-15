@@ -12,8 +12,7 @@ import (
 
 func TestPersistedAgentProjectionRejectsEnabledPlatformDefaultMemory(t *testing.T) {
 	illegal := agentmemory.Plan{Enabled: true, Source: agentmemory.SourcePlatformDefault}
-	_, err := projectPersistedAgentConfig(runtimeactors.AgentConfig{
-		ID:       "agent-invalid-memory",
+	_, err := projectPersistedAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-invalid-memory",
 		Role:     "reviewer",
 		Model:    "regular",
 		FlowPath: "review/one",

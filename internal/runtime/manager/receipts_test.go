@@ -65,7 +65,7 @@ func (projectedEmergencyBudgetGuard) IsThrottle(string) bool        { return tru
 
 func TestProjectedBudgetEmergencySuppressesDeliveryButNotThresholdEvent(t *testing.T) {
 	am := NewAgentManagerWithOptions(&recordingReceiptBus{}, nil, AgentManagerOptions{Budget: projectedEmergencyBudgetGuard{}})
-	registerReceiptTestAgent(t, am, runtimeactors.AgentConfig{ID: "agent-a", EntityID: "entity-a"})
+	registerReceiptTestAgent(t, am, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-a", EntityID: "entity-a"})
 	work := eventtest.RootIngress("evt-work", events.EventType("work.requested"), "source", "", nil, 0, "", "", events.EventEnvelope{}, time.Now())
 	if suppressed, reason := am.shouldSuppressForBudget("agent-a", work); !suppressed || reason != "suppressed by budget emergency guardrail" {
 		t.Fatalf("projected emergency suppression=%v reason=%q", suppressed, reason)
@@ -223,9 +223,10 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 		},
 	})
 	registerReceiptTestAgent(t, am, runtimeactors.AgentConfig{
-		ID:       "agent-a",
-		EntityID: "ent-123",
-		FlowPath: "review/inst-1",
+		ExecutionMode: "live",
+		ID:            "agent-a",
+		EntityID:      "ent-123",
+		FlowPath:      "review/inst-1",
 	})
 
 	inbound := eventtest.RootIngress("evt-1",
@@ -393,9 +394,10 @@ func TestMaybeEscalateDeadLetter_PublishesTypedFlowInstanceEnvelope(t *testing.T
 	am := NewAgentManager(bus, nil)
 	am.store = store
 	registerReceiptTestAgent(t, am, runtimeactors.AgentConfig{
-		ID:       "agent-a",
-		EntityID: "ent-123",
-		FlowPath: "review/inst-1",
+		ExecutionMode: "live",
+		ID:            "agent-a",
+		EntityID:      "ent-123",
+		FlowPath:      "review/inst-1",
 	})
 
 	for i := 0; i < deadLetterEscalationThreshold; i++ {
@@ -428,9 +430,10 @@ func TestHandleAgentLoopPanic_PublishesTypedFlowInstanceEnvelope(t *testing.T) {
 	bus := &recordingReceiptBus{}
 	am := NewAgentManager(bus, nil)
 	registerReceiptTestAgent(t, am, runtimeactors.AgentConfig{
-		ID:       "agent-a",
-		EntityID: "ent-123",
-		FlowPath: "review/inst-1",
+		ExecutionMode: "live",
+		ID:            "agent-a",
+		EntityID:      "ent-123",
+		FlowPath:      "review/inst-1",
 	})
 
 	am.handleAgentLoopPanic(context.Background(), panicStubAgent{id: "agent-a"}, 5, "scan.requested", "boom", "stack")

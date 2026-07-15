@@ -25,7 +25,7 @@ const (
 
 	TransportAPI   = "api"
 	TransportCLI   = "cli"
-	TransportMock  = "mock"
+	TransportMock  = "in_process"
 	TransportLocal = "local"
 
 	ProviderContractRuntimeModeAPI             = "api"
@@ -114,18 +114,21 @@ var builtInModelAliases = ModelAliases{
 		BackendClaudeCLI:        "haiku",
 		BackendOpenAICompatible: "gpt-compatible-mini",
 		BackendOpenAIResponses:  "gpt-5.4-nano",
+		BackendMock:             "mock-cheap",
 	},
 	ModelAliasRegular: {
 		BackendAnthropic:        "claude-3-5-sonnet",
 		BackendClaudeCLI:        "sonnet",
 		BackendOpenAICompatible: "gpt-compatible",
 		BackendOpenAIResponses:  "gpt-5.4",
+		BackendMock:             "mock-regular",
 	},
 	ModelAliasFrontier: {
 		BackendAnthropic:        "claude-3-opus",
 		BackendClaudeCLI:        "opus",
 		BackendOpenAICompatible: "gpt-compatible-frontier",
 		BackendOpenAIResponses:  "gpt-5.5",
+		BackendMock:             "mock-frontier",
 	},
 }
 
@@ -190,11 +193,11 @@ var profiles = map[string]Profile{
 		Active: true,
 	},
 	BackendMock: {
-		ID:           BackendMock,
-		Provider:     ProviderMock,
-		Transport:    TransportMock,
-		RuntimeMode:  BackendMock,
-		ReservedNote: "mock fixture replay backend is a persisted value only; no active runtime provider is shipped",
+		ID:          BackendMock,
+		Provider:    ProviderMock,
+		Transport:   TransportMock,
+		RuntimeMode: BackendMock,
+		Active:      true,
 	},
 	BackendLocal: {
 		ID:           BackendLocal,

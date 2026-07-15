@@ -26,10 +26,10 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES
-			($1::uuid, $2::uuid, 'task.failed', $3::uuid, 'entity', '{"entity_id":"`+entityID+`","n":1}'::jsonb, 'agent-a', 'agent', $4),
-			($5::uuid, $2::uuid, 'task.completed', $3::uuid, 'entity', '{"entity_id":"`+entityID+`","n":2}'::jsonb, 'agent-b', 'agent', $6)
+			('live', $1::uuid, $2::uuid, 'task.failed', $3::uuid, 'entity', '{"entity_id":"`+entityID+`","n":1}'::jsonb, 'agent-a', 'agent', $4),
+			('live', $5::uuid, $2::uuid, 'task.completed', $3::uuid, 'entity', '{"entity_id":"`+entityID+`","n":2}'::jsonb, 'agent-b', 'agent', $6)
 	`, olderEventID, runID, entityID, base, newerEventID, base.Add(time.Minute)); err != nil {
 		t.Fatalf("seed events: %v", err)
 	}
@@ -147,16 +147,16 @@ func TestOperatorObservabilityEventOwnerDoesNotPromotePayloadEntityIdentity(t *t
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ($1::uuid, $2::uuid, 'task.payload_only', 'global',
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ('live', $1::uuid, $2::uuid, 'task.payload_only', 'global',
 			jsonb_build_object('entity_id', $3::text, 'marker', 'payload-only'),
 			'agent-a', 'agent', $4)
 	`, payloadOnlyEventID, runID, targetEntityID, base); err != nil {
 		t.Fatalf("seed payload-only event: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ($1::uuid, $2::uuid, 'task.canonical_entity', $3::uuid, 'entity',
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ('live', $1::uuid, $2::uuid, 'task.canonical_entity', $3::uuid, 'entity',
 			jsonb_build_object('entity_id', 'payload-business-value', 'marker', 'canonical'),
 			'agent-b', 'agent', $4)
 	`, canonicalEventID, runID, targetEntityID, base.Add(time.Second)); err != nil {
@@ -227,8 +227,8 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 			}
 		}`
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ($1::uuid, $2::uuid, 'platform.runtime_log', 'global', $3::jsonb, 'runtime', 'platform', $4)
+			INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+			VALUES ('live', $1::uuid, $2::uuid, 'platform.runtime_log', 'global', $3::jsonb, 'runtime', 'platform', $4)
 		`, eventID, runID, payload, createdAt); err != nil {
 			t.Fatalf("seed runtime log: %v", err)
 		}
@@ -297,8 +297,8 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 
 	bulkFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassInternalFailure, "bulk_code", nil))
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-		SELECT gen_random_uuid(), $1::uuid, 'platform.runtime_log', 'global',
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		SELECT 'live', gen_random_uuid(), $1::uuid, 'platform.runtime_log', 'global',
 			jsonb_build_object(
 				'log_level', 'error',
 				'message', 'bulk runtime failed',
@@ -360,8 +360,8 @@ func TestPostgresRuntimeLogSourceFilterMatchesProjectionFallback(t *testing.T) {
 			producer = *producedBy
 		}
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ($1::uuid, $2::uuid, 'platform.runtime_log', 'global', $3::jsonb, $4, 'platform', $5)
+			INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+			VALUES ('live', $1::uuid, $2::uuid, 'platform.runtime_log', 'global', $3::jsonb, $4, 'platform', $5)
 		`, eventID, runID, payload, producer, createdAt); err != nil {
 			t.Fatalf("seed runtime log: %v", err)
 		}
@@ -499,8 +499,8 @@ func TestOperatorRuntimeLogsFilterBySessionAndTimeWindow(t *testing.T) {
 			}
 		}`
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ($1::uuid, $2::uuid, 'platform.runtime_log', 'global', $3::jsonb, 'runtime', 'platform', $4)
+			INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+			VALUES ('live', $1::uuid, $2::uuid, 'platform.runtime_log', 'global', $3::jsonb, 'runtime', 'platform', $4)
 		`, eventID, runID, payload, createdAt); err != nil {
 			t.Fatalf("seed runtime log: %v", err)
 		}
@@ -564,8 +564,8 @@ func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 			}
 		}`
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ($1::uuid, $2::uuid, 'platform.runtime_log', 'global', $3::jsonb, 'runtime', 'platform', $4)
+			INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+			VALUES ('live', $1::uuid, $2::uuid, 'platform.runtime_log', 'global', $3::jsonb, 'runtime', 'platform', $4)
 		`, eventID, runID, payload, createdAt); err != nil {
 			t.Fatalf("seed runtime log: %v", err)
 		}
@@ -625,10 +625,10 @@ func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 	firstEvent := uuid.NewString()
 	secondEvent := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES
-			($1::uuid, $2::uuid, 'first.event', 'global', '{}'::jsonb, 'runtime', 'platform', $3),
-			($4::uuid, $2::uuid, 'second.event', 'global', '{}'::jsonb, 'runtime', 'platform', $5)
+			('live', $1::uuid, $2::uuid, 'first.event', 'global', '{}'::jsonb, 'runtime', 'platform', $3),
+			('live', $4::uuid, $2::uuid, 'second.event', 'global', '{}'::jsonb, 'runtime', 'platform', $5)
 	`, firstEvent, runID, base, secondEvent, base.Add(time.Second)); err != nil {
 		t.Fatalf("seed trace events: %v", err)
 	}
@@ -708,10 +708,10 @@ func TestRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES
-			($1::uuid, $3::uuid, 'item.received', 'global', '{}'::jsonb, 'runtime', 'platform', $4),
-			($2::uuid, $3::uuid, 'platform.runtime_log', 'global', '{}'::jsonb, 'runtime', 'platform', $5)
+			('live', $1::uuid, $3::uuid, 'item.received', 'global', '{}'::jsonb, 'runtime', 'platform', $4),
+			('live', $2::uuid, $3::uuid, 'platform.runtime_log', 'global', '{}'::jsonb, 'runtime', 'platform', $5)
 	`, businessEvent, runtimeLogEvent, runID, base, base.Add(time.Millisecond)); err != nil {
 		t.Fatalf("seed trace rows: %v", err)
 	}
@@ -750,10 +750,10 @@ func TestRunDebugTracePageTypedFilters(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES
-			($1::uuid, $2::uuid, 'first.event', $3::uuid, 'entity', '{}'::jsonb, 'runtime', 'platform', $4),
-			($5::uuid, $2::uuid, 'second.event', $6::uuid, 'entity', '{}'::jsonb, 'runtime', 'platform', $7)
+			('live', $1::uuid, $2::uuid, 'first.event', $3::uuid, 'entity', '{}'::jsonb, 'runtime', 'platform', $4),
+			('live', $5::uuid, $2::uuid, 'second.event', $6::uuid, 'entity', '{}'::jsonb, 'runtime', 'platform', $7)
 	`, firstEvent, runID, entityOne, base, secondEvent, entityTwo, base.Add(time.Second)); err != nil {
 		t.Fatalf("seed trace events: %v", err)
 	}

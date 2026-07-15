@@ -77,9 +77,9 @@ func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *tes
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			$1::uuid, $2::uuid, 'task.completed', $3::uuid, 'entity', '{"entity_id": "`+entityID+`"}'::jsonb, 'runtime', 'agent', $4
 		)
 	`, eventID, runID, entityID, time.Unix(1700000000, 0).UTC()); err != nil {
@@ -162,9 +162,9 @@ func TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity(t *tes
 		t.Helper()
 		eventID := uuid.NewString()
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (
+			INSERT INTO events (execution_mode,
 				event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-			) VALUES (
+			) VALUES ('live',
 				$1::uuid, $2::uuid, $3, 'global', '{}'::jsonb, 'runtime', 'agent', $4
 			)
 		`, eventID, runID, eventName, at.UTC()); err != nil {
@@ -219,9 +219,9 @@ func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T)
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			$1::uuid, $2::uuid, 'task.completed', 'global', '{}'::jsonb, 'runtime', 'agent', now()
 		)
 	`, eventID, runID); err != nil {
@@ -278,16 +278,16 @@ func TestSQLObservabilityReader_EventIdentityDoesNotPromotePayloadEntity(t *test
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ($1::uuid, $2::uuid, 'task.payload_only', 'global',
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ('live', $1::uuid, $2::uuid, 'task.payload_only', 'global',
 			jsonb_build_object('entity_id', $3::text, 'marker', 'payload-only'),
 			'agent-a', 'agent', $4)
 	`, payloadOnlyEventID, runID, targetEntityID, base); err != nil {
 		t.Fatalf("seed payload-only event: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ($1::uuid, $2::uuid, 'task.canonical_entity', $3::uuid, 'entity',
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ('live', $1::uuid, $2::uuid, 'task.canonical_entity', $3::uuid, 'entity',
 			jsonb_build_object('entity_id', 'payload-business-value', 'marker', 'canonical'),
 			'agent-b', 'agent', $4)
 	`, canonicalEventID, runID, targetEntityID, base.Add(time.Second)); err != nil {
@@ -401,9 +401,9 @@ func TestSQLObservabilityReader_ListRuntimeLogs_ProjectsDeliveryLifecycleFields(
 			}
 		}`
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (
+			INSERT INTO events (execution_mode,
 				event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-			) VALUES (
+			) VALUES ('live',
 				gen_random_uuid(), 'platform.runtime_log', 'global', $1::jsonb, 'runtime', 'platform', $2
 			)
 		`, payload, createdAt); err != nil {
@@ -444,9 +444,9 @@ func TestSQLObservabilityReader_ListRuntimeLogs_FailsClosedOnMalformedCanonicalP
 		"details":"not-an-object"
 	}`
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			gen_random_uuid(), 'platform.runtime_log', 'global', $1::jsonb, 'runtime', 'platform', now()
 		)
 	`, payload); err != nil {
@@ -468,9 +468,9 @@ func TestSQLObservabilityReader_ListIncidents_UsesCanonicalRuntimeLogPayloads(t 
 		t.Helper()
 		payload := canonicalRuntimeLogTestPayload(t, component, action, "retry_exhausted", "runtime incident", agentID)
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (
+			INSERT INTO events (execution_mode,
 				event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-			) VALUES (
+			) VALUES ('live',
 				gen_random_uuid(), 'platform.runtime_log', 'global', $1::jsonb, 'runtime', 'platform', $2
 			)
 		`, payload, createdAt); err != nil {
@@ -510,9 +510,9 @@ func TestSQLObservabilityReader_ListIncidents_FailsClosedOnMissingCanonicalCompo
 
 	payload := canonicalRuntimeLogTestPayload(t, "", "request_failed", "retry_exhausted", "incomplete runtime incident", "")
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			gen_random_uuid(), 'platform.runtime_log', 'global', $1::jsonb, 'runtime', 'platform', now()
 		)
 	`, payload); err != nil {
@@ -539,9 +539,9 @@ func TestSQLObservabilityReader_ListIncidents_IgnoresErrorLogsWithoutCanonicalFa
 		}
 	}`
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			gen_random_uuid(), 'platform.runtime_log', 'global', $1::jsonb, 'runtime', 'platform', now()
 		)
 	`, payload); err != nil {
@@ -567,9 +567,9 @@ func TestSQLObservabilityReader_ListIncidents_SortsByRawLastSeenBeforeLimit(t *t
 		t.Helper()
 		payload := canonicalRuntimeLogTestPayload(t, "diagnostics", "same_second_order", code, message, "")
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (
+			INSERT INTO events (execution_mode,
 				event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-			) VALUES (
+			) VALUES ('live',
 				gen_random_uuid(), 'platform.runtime_log', 'global', $1::jsonb, 'runtime', 'platform', $2
 			)
 		`, payload, createdAt); err != nil {

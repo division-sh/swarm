@@ -179,7 +179,7 @@ func TestManagedEffectRegistrationsAreCompleteAndLive(t *testing.T) {
 			strings.TrimSpace(registration.Transport) == "" || strings.TrimSpace(registration.LaunchSite) == "" ||
 			strings.TrimSpace(registration.LaunchObserved) == "" || strings.TrimSpace(registration.OutcomeMapping) == "" ||
 			strings.TrimSpace(registration.CanonicalEvidence) == "" || strings.TrimSpace(registration.SettlementRecovery) == "" ||
-			strings.TrimSpace(registration.Proof) == "" || len(registration.PrimitiveKeys) == 0 ||
+			strings.TrimSpace(registration.Proof) == "" ||
 			registration.PrelaunchFailure == "" || registration.PostlaunchFailure == "" {
 			t.Fatalf("incomplete effect registration: %#v", registration)
 		}
@@ -187,6 +187,9 @@ func TestManagedEffectRegistrationsAreCompleteAndLive(t *testing.T) {
 			t.Fatalf("duplicate effect adapter registration %q", registration.Adapter)
 		}
 		seen[registration.Adapter] = struct{}{}
+		if len(registration.PrimitiveKeys) == 0 && (registration.Transport != "in_process" || registration.Class != EffectReadOnly) {
+			t.Fatalf("adapter without a direct primitive must be deterministic in-process read-only execution: %#v", registration)
+		}
 		raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(registration.LaunchSite)))
 		if err != nil {
 			t.Fatalf("read launch site for %s: %v", registration.Adapter, err)

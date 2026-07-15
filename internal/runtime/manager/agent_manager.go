@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -372,6 +373,14 @@ func (am *AgentManager) resolveAgentModel(cfg *models.AgentConfig) error {
 	cfg.ResolvedModel = resolved.ConcreteModel
 	cfg.ResolvedLLMProvider = resolved.Provider
 	cfg.ResolvedLLMTransport = resolved.Transport
+	if profile.ID == llmselection.BackendMock {
+		cfg.ExecutionMode = runtimeeffects.ExecutionModeMock
+		if !cfg.Mock.Configured() {
+			return fmt.Errorf("agent %s selects llm_backend %q but does not declare a mock performance", strings.TrimSpace(cfg.ID), profile.ID)
+		}
+	} else {
+		cfg.ExecutionMode = runtimeeffects.ExecutionModeLive
+	}
 	return nil
 }
 

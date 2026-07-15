@@ -27,6 +27,7 @@ func TestSQLiteRuntimeStoreBudgetSpendPersistence(t *testing.T) {
 	seedSQLiteBudgetEntity(t, ctx, store, runID, terminalEntity, "flow/done", "done", now)
 
 	if err := store.RecordSpend(ctx, budgetspend.SpendRecord{
+		ExecutionMode:   "live",
 		EntityID:        activeEntity,
 		FlowInstance:    "flow/active",
 		AgentID:         "agent-1",
@@ -46,6 +47,7 @@ func TestSQLiteRuntimeStoreBudgetSpendPersistence(t *testing.T) {
 		t.Fatalf("RecordSpend(entity): %v", err)
 	}
 	if err := store.RecordSpend(ctx, budgetspend.SpendRecord{
+		ExecutionMode:   "live",
 		FlowInstance:    "global",
 		AgentID:         "agent-global",
 		Model:           "claude-cli",
@@ -122,9 +124,10 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 	recordedAt := time.Now().UTC().Truncate(time.Second)
 
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO spend_ledger")).
-		WithArgs(entityID, "flow/1", "agent-1", "claude-sonnet", "regular", "anthropic", "anthropic", "api", "claude-sonnet", 10, 4, 1.25, "anthropic", "exact", recordedAt).
+		WithArgs("live", entityID, "flow/1", "agent-1", "claude-sonnet", "regular", "anthropic", "anthropic", "api", "claude-sonnet", 10, 4, 1.25, "anthropic", "exact", recordedAt).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	if err := pg.RecordSpend(ctx, budgetspend.SpendRecord{
+		ExecutionMode:   "live",
 		EntityID:        entityID,
 		FlowInstance:    "flow/1",
 		AgentID:         "agent-1",
@@ -169,7 +172,7 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 
 	since := recordedAt.Add(-time.Hour)
 	mock.ExpectQuery("FROM spend_ledger").
-		WithArgs(entityID, since).
+		WithArgs(entityID, since, false).
 		WillReturnRows(sqlmock.NewRows([]string{"sum"}).AddRow(1.25))
 	spent, err := pg.SumSpendUSD(ctx, budgetspend.SpendQuery{Scope: budgetspend.ScopeEntity, EntityID: entityID, Since: since})
 	if err != nil {

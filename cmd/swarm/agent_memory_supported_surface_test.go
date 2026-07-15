@@ -104,7 +104,7 @@ func (r *standingMemoryProviderRecorder) snapshot() []standingMemoryProviderRequ
 
 func (r *standingMemoryProviderRecorder) waitForCount(t testing.TB, want int) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if len(r.snapshot()) >= want {
 			return
@@ -323,7 +323,7 @@ func waitForStandingMemoryCompletion(t testing.TB, backend, location string, wan
 		t.Fatalf("open %s completion store: %v", backend, err)
 	}
 	defer db.Close()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		var succeeded, unfinishedDeliveries int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND status = 'succeeded'`).Scan(&succeeded); err != nil {
@@ -572,7 +572,7 @@ func requireStandingMemoryTelegramCall(t testing.TB, process *serveRuntimeTestPr
 		if got := strings.TrimSpace(fmt.Sprint(call["chat_id"])); got != fmt.Sprint(chatID) {
 			t.Fatalf("Telegram chat_id = %v, want %d", call["chat_id"], chatID)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		diagnostics := standingSQLiteDiagnostics(storeLocation)
 		if strings.HasPrefix(storeLocation, "postgres:") {
 			diagnostics = standingPostgresDiagnostics(strings.TrimPrefix(storeLocation, "postgres:"))

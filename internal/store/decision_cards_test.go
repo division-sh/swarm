@@ -48,6 +48,7 @@ func TestDecisionCardStoreLifecycleParity(t *testing.T) {
 			now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
 			card, err := decisioncard.New(decisioncard.Card{
 				CardID: uuid.NewString(), RunID: runID, Anchor: newDecisionCardTestStageAnchor("launch/review-1", "launch", uuid.NewString(), "awaiting_review", uuid.NewString()),
+				ExecutionMode: "live",
 				Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 					"accept": {Verdict: "accept", AdvancesTo: "operating"},
 					"revise": {Verdict: "revise", AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
@@ -198,6 +199,7 @@ func TestDecisionCardStoreRejectsStructuralSnapshotDriftAtEveryTypedLevelOnBothS
 			cardStore, runID := decisionCardTestStore(t, backend)
 			card, err := decisioncard.New(decisioncard.Card{
 				CardID: uuid.NewString(), RunID: runID, Anchor: newDecisionCardTestStageAnchor("launch/review", "launch", uuid.NewString(), "awaiting_review", uuid.NewString()),
+				ExecutionMode: "live",
 				Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 					"revise": {
 						Verdict: "revise",
@@ -249,6 +251,7 @@ func TestDecisionCardStoreEnforcesSafeNumericSnapshotCarriersOnBothStores(t *tes
 			cardStore, runID := decisionCardTestStore(t, backend)
 			card, err := decisioncard.New(decisioncard.Card{
 				CardID: uuid.NewString(), RunID: runID, Anchor: newDecisionCardTestStageAnchor("launch/review", "launch", uuid.NewString(), "awaiting_review", uuid.NewString()),
+				ExecutionMode: "live",
 				Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", map[string]any{"large_integer": safeInteger, "subnormal": math.SmallestNonzeroFloat64}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 					"approve": {
 						Verdict: "approve", AdvancesTo: "operating",
@@ -419,6 +422,7 @@ func TestDecisionCardInvalidFrozenOutcomeNeverCommitsOnBothStores(t *testing.T) 
 			now := time.Date(2026, 7, 13, 5, 30, 0, 0, time.UTC)
 			card, err := decisioncard.New(decisioncard.Card{
 				CardID: uuid.NewString(), RunID: runID, Anchor: newDecisionCardTestStageAnchor("root", "launch", uuid.NewString(), "awaiting_review", uuid.NewString()),
+				ExecutionMode: "live",
 				Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", nil, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 					"approve": {
 						Verdict: "approve",
@@ -1232,6 +1236,7 @@ func newDecisionCardTestCard(t *testing.T, runID string, now time.Time) decision
 	t.Helper()
 	card, err := decisioncard.New(decisioncard.Card{
 		CardID: uuid.NewString(), RunID: runID, Anchor: newDecisionCardTestStageAnchor("launch/review", "launch", uuid.NewString(), "awaiting_review", uuid.NewString()),
+		ExecutionMode: "live",
 		Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 			"accept": {Verdict: "accept", AdvancesTo: "operating"},
 			"revise": {Verdict: "revise", AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},

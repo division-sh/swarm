@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
 const (
@@ -51,6 +53,7 @@ type OperatorAgentUsageTotals struct {
 }
 
 type OperatorAgentUsageBreakdown struct {
+	ExecutionMode   string                   `json:"execution_mode"`
 	UsageAccounting string                   `json:"usage_accounting"`
 	InvocationType  string                   `json:"invocation_type"`
 	Model           string                   `json:"model"`
@@ -59,6 +62,7 @@ type OperatorAgentUsageBreakdown struct {
 	Provider        string                   `json:"provider"`
 	Transport       string                   `json:"transport"`
 	ResolvedModel   string                   `json:"resolved_model"`
+	CostDisplay     string                   `json:"cost_display"`
 	Totals          OperatorAgentUsageTotals `json:"totals"`
 }
 
@@ -170,7 +174,7 @@ func (s *PostgresStore) requireAgentUsageCapabilities(ctx context.Context) error
 			"agent_id", "status",
 		},
 		"spend_ledger": {
-			"agent_id", "model", "input_tokens", "output_tokens", "cost_usd",
+			"agent_id", "execution_mode", "model", "input_tokens", "output_tokens", "cost_usd",
 			"invocation_type", "usage_accounting", "model_alias", "backend_profile",
 			"provider", "transport", "resolved_model", "created_at",
 		},
@@ -203,7 +207,7 @@ func (s *SQLiteRuntimeStore) requireAgentUsageCapabilities(ctx context.Context) 
 			"agent_id", "status",
 		},
 		"spend_ledger": {
-			"agent_id", "model", "input_tokens", "output_tokens", "cost_usd",
+			"agent_id", "execution_mode", "model", "input_tokens", "output_tokens", "cost_usd",
 			"invocation_type", "usage_accounting", "model_alias", "backend_profile",
 			"provider", "transport", "resolved_model", "created_at",
 		},
@@ -264,6 +268,7 @@ func (s *PostgresStore) loadAgentUsageBreakdown(ctx context.Context, agentID str
 	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
 		WITH usage_rows AS (
 			SELECT
+				execution_mode,
 				usage_accounting,
 				invocation_type,
 				model,
@@ -280,6 +285,7 @@ func (s *PostgresStore) loadAgentUsageBreakdown(ctx context.Context, agentID str
 			  %s
 		)
 		SELECT
+			execution_mode,
 			usage_accounting,
 			invocation_type,
 			model,
@@ -293,8 +299,8 @@ func (s *PostgresStore) loadAgentUsageBreakdown(ctx context.Context, agentID str
 			COALESCE(SUM(output_tokens), 0)::bigint,
 			COALESCE(SUM(cost_usd), 0)::float8
 		FROM usage_rows
-		GROUP BY usage_accounting, invocation_type, model, model_alias, backend_profile, provider, transport, resolved_model
-		ORDER BY CASE usage_accounting WHEN 'exact' THEN 0 WHEN 'estimated' THEN 1 ELSE 2 END ASC, invocation_type ASC, model ASC, model_alias ASC
+		GROUP BY execution_mode, usage_accounting, invocation_type, model, model_alias, backend_profile, provider, transport, resolved_model
+		ORDER BY CASE execution_mode WHEN 'live' THEN 0 ELSE 1 END ASC, CASE usage_accounting WHEN 'exact' THEN 0 WHEN 'estimated' THEN 1 ELSE 2 END ASC, invocation_type ASC, model ASC, model_alias ASC
 	`, windowClause.String()), args...)
 	if err != nil {
 		return nil, fmt.Errorf("load agent usage breakdown: %w", err)
@@ -305,6 +311,7 @@ func (s *PostgresStore) loadAgentUsageBreakdown(ctx context.Context, agentID str
 	for rows.Next() {
 		var row OperatorAgentUsageBreakdown
 		if err := rows.Scan(
+			&row.ExecutionMode,
 			&row.UsageAccounting,
 			&row.InvocationType,
 			&row.Model,
@@ -321,6 +328,7 @@ func (s *PostgresStore) loadAgentUsageBreakdown(ctx context.Context, agentID str
 			return nil, fmt.Errorf("scan agent usage breakdown: %w", err)
 		}
 		row.UsageAccounting = strings.TrimSpace(row.UsageAccounting)
+		row.ExecutionMode = strings.TrimSpace(row.ExecutionMode)
 		row.InvocationType = strings.TrimSpace(row.InvocationType)
 		row.Model = strings.TrimSpace(row.Model)
 		row.ModelAlias = strings.TrimSpace(row.ModelAlias)
@@ -328,6 +336,7 @@ func (s *PostgresStore) loadAgentUsageBreakdown(ctx context.Context, agentID str
 		row.Provider = strings.TrimSpace(row.Provider)
 		row.Transport = strings.TrimSpace(row.Transport)
 		row.ResolvedModel = strings.TrimSpace(row.ResolvedModel)
+		row.CostDisplay = operatorUsageCostDisplay(row.ExecutionMode, row.Totals.EstimatedCostUSD)
 		if err := validateOperatorAgentUsageBreakdown(row); err != nil {
 			return nil, err
 		}
@@ -353,6 +362,7 @@ func (s *SQLiteRuntimeStore) loadAgentUsageBreakdown(ctx context.Context, agentI
 	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
 		WITH usage_rows AS (
 			SELECT
+				execution_mode,
 				usage_accounting,
 				invocation_type,
 				model,
@@ -369,6 +379,7 @@ func (s *SQLiteRuntimeStore) loadAgentUsageBreakdown(ctx context.Context, agentI
 			  %s
 		)
 		SELECT
+			execution_mode,
 			usage_accounting,
 			invocation_type,
 			model,
@@ -382,8 +393,8 @@ func (s *SQLiteRuntimeStore) loadAgentUsageBreakdown(ctx context.Context, agentI
 			COALESCE(SUM(output_tokens), 0),
 			COALESCE(SUM(cost_usd), 0)
 		FROM usage_rows
-		GROUP BY usage_accounting, invocation_type, model, model_alias, backend_profile, provider, transport, resolved_model
-		ORDER BY CASE usage_accounting WHEN 'exact' THEN 0 WHEN 'estimated' THEN 1 ELSE 2 END ASC, invocation_type ASC, model ASC, model_alias ASC
+		GROUP BY execution_mode, usage_accounting, invocation_type, model, model_alias, backend_profile, provider, transport, resolved_model
+		ORDER BY CASE execution_mode WHEN 'live' THEN 0 ELSE 1 END ASC, CASE usage_accounting WHEN 'exact' THEN 0 WHEN 'estimated' THEN 1 ELSE 2 END ASC, invocation_type ASC, model ASC, model_alias ASC
 	`, windowClause.String()), args...)
 	if err != nil {
 		return nil, fmt.Errorf("load agent usage breakdown: %w", err)
@@ -394,6 +405,7 @@ func (s *SQLiteRuntimeStore) loadAgentUsageBreakdown(ctx context.Context, agentI
 	for rows.Next() {
 		var row OperatorAgentUsageBreakdown
 		if err := rows.Scan(
+			&row.ExecutionMode,
 			&row.UsageAccounting,
 			&row.InvocationType,
 			&row.Model,
@@ -410,6 +422,7 @@ func (s *SQLiteRuntimeStore) loadAgentUsageBreakdown(ctx context.Context, agentI
 			return nil, fmt.Errorf("scan agent usage breakdown: %w", err)
 		}
 		row.UsageAccounting = strings.TrimSpace(row.UsageAccounting)
+		row.ExecutionMode = strings.TrimSpace(row.ExecutionMode)
 		row.InvocationType = strings.TrimSpace(row.InvocationType)
 		row.Model = strings.TrimSpace(row.Model)
 		row.ModelAlias = strings.TrimSpace(row.ModelAlias)
@@ -417,6 +430,7 @@ func (s *SQLiteRuntimeStore) loadAgentUsageBreakdown(ctx context.Context, agentI
 		row.Provider = strings.TrimSpace(row.Provider)
 		row.Transport = strings.TrimSpace(row.Transport)
 		row.ResolvedModel = strings.TrimSpace(row.ResolvedModel)
+		row.CostDisplay = operatorUsageCostDisplay(row.ExecutionMode, row.Totals.EstimatedCostUSD)
 		if err := validateOperatorAgentUsageBreakdown(row); err != nil {
 			return nil, err
 		}
@@ -429,6 +443,9 @@ func (s *SQLiteRuntimeStore) loadAgentUsageBreakdown(ctx context.Context, agentI
 }
 
 func validateOperatorAgentUsageBreakdown(row OperatorAgentUsageBreakdown) error {
+	if mode, ok := executionmode.Parse(row.ExecutionMode); !ok || string(mode) != row.ExecutionMode {
+		return fmt.Errorf("agent usage read owner returned unsupported execution_mode %q", row.ExecutionMode)
+	}
 	switch row.UsageAccounting {
 	case AgentUsageAccountingExact, AgentUsageAccountingEstimated:
 	default:
@@ -459,4 +476,11 @@ func validateOperatorAgentUsageBreakdown(row OperatorAgentUsageBreakdown) error 
 		return fmt.Errorf("agent usage read owner returned negative totals")
 	}
 	return nil
+}
+
+func operatorUsageCostDisplay(mode string, cost float64) string {
+	if strings.TrimSpace(mode) == string(executionmode.Mock) {
+		return fmt.Sprintf("~$%.6f (mock estimate)", cost)
+	}
+	return fmt.Sprintf("$%.6f", cost)
 }

@@ -36,10 +36,10 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.before', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.before', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, sourceRunID, firstEventID, entityID, at); err != nil {
 		t.Fatalf("seed first event: %v", err)
 	}
@@ -74,10 +74,10 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.field_only', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.field_only', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, sourceRunID, secondEventID, entityID, fieldOnlyAt); err != nil {
 		t.Fatalf("seed selected event: %v", err)
 	}
@@ -101,10 +101,10 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.after', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.after', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, sourceRunID, thirdEventID, entityID, afterAt); err != nil {
 		t.Fatalf("seed later event: %v", err)
 	}
@@ -302,10 +302,10 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.no_event_flow', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.no_event_flow', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, sourceRunID, eventID, entityID, at); err != nil {
 		t.Fatalf("seed selected event: %v", err)
 	}
@@ -336,10 +336,10 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.post_flow', $3::uuid, 'post-flow/ignored', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.post_flow', $3::uuid, 'post-flow/ignored', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, sourceRunID, postEventID, entityID, afterAt); err != nil {
 		t.Fatalf("seed later event: %v", err)
 	}
@@ -417,10 +417,10 @@ func TestRunForkPlanner_FailsClosedWithoutSourceAtTEntitySnapshotMetadata(t *tes
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.no_metadata', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.no_metadata', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, sourceRunID, eventID, entityID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -487,10 +487,10 @@ func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeHasNoSourceMetadataAuthori
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.event_flow_only', $3::uuid, 'event-flow/at-T', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.event_flow_only', $3::uuid, 'event-flow/at-T', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, sourceRunID, eventID, entityID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -534,10 +534,10 @@ func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeConflictsWithSourceMetadat
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.conflicting_entity_type', $3::uuid, 'event-flow/at-T', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.conflicting_entity_type', $3::uuid, 'event-flow/at-T', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, sourceRunID, eventID, entityID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -775,10 +775,10 @@ func TestRunForkMaterializer_FailsClosedOnRepeatAndUnsupportedBlockers(t *testin
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.pending', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.pending', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, sourceRunID, eventID, entityID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -838,10 +838,10 @@ func TestRunForkMaterializer_FailsClosedOnRepeatAndUnsupportedBlockers(t *testin
 		t.Fatalf("clear pending delivery: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.delivery_cleared', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.delivery_cleared', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, sourceRunID, clearEventID, entityID, at.Add(time.Second)); err != nil {
 		t.Fatalf("seed clear-frontier event: %v", err)
 	}
@@ -1193,10 +1193,10 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 					t.Fatalf("seed foreign run: %v", err)
 				}
 				if _, err := db.ExecContext(ctx, `
-					INSERT INTO events (
+					INSERT INTO events (execution_mode,
 						run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 					)
-					VALUES ($1::uuid, $2::uuid, 'foreign.ready', 'global', '{}'::jsonb, 'test', 'platform', $3)
+					VALUES ('live', $1::uuid, $2::uuid, 'foreign.ready', 'global', '{}'::jsonb, 'test', 'platform', $3)
 				`, foreignRunID, foreignEventID, at); err != nil {
 					t.Fatalf("seed foreign event: %v", err)
 				}
@@ -1417,10 +1417,10 @@ func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.after', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.after', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, sourceRunID, afterEventID, entityID, at.Add(time.Second)); err != nil {
 		t.Fatalf("seed post-fork event: %v", err)
 	}
@@ -1520,10 +1520,10 @@ func TestRunForkActivation_FailsClosedForForkReplayStateWithTaxonomy(t *testing.
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.replay_state', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.replay_state', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, materialized.ForkRunID, forkEventID, at.Add(time.Second)); err != nil {
 		t.Fatalf("seed fork event: %v", err)
 	}
@@ -1580,9 +1580,9 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 			seed: func(ctx context.Context, db *sql.DB, forkRunID string, at time.Time) error {
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_turns (
-						turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, created_at
+						turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, execution_mode, created_at
 					)
-					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'fork-state', FALSE, 'platform_default', $4)
+					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'fork-state', FALSE, 'platform_default', 'live', $4)
 				`, uuid.NewString(), forkRunID, uuid.NewString(), at)
 				return err
 			},
@@ -1759,10 +1759,10 @@ func seedActivationReadySourceRun(t *testing.T, db *sql.DB, sourceRunID, entityI
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-			VALUES ($1::uuid, $2::uuid, 'fork.ready', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+			VALUES ('live', $1::uuid, $2::uuid, 'fork.ready', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, sourceRunID, eventID, entityID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}

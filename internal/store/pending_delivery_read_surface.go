@@ -273,6 +273,7 @@ func (s *PostgresStore) listPendingAgentDeliveryRecordsSpec(ctx context.Context,
 			e.payload,
 			e.created_at,
 			COALESCE(e.source_event_id::text, ''),
+			e.execution_mode,
 			TRUE,
 			COALESCE(d.status, ''),
 			COALESCE(d.retry_count, 0),
@@ -315,6 +316,7 @@ func scanPendingAgentDeliveryRecords(rows *sql.Rows) ([]pendingAgentDeliveryReco
 			payload                json.RawMessage
 			createdAt              time.Time
 			sourceEventID          string
+			executionMode          string
 			entityID, flowInstance string
 			scope                  string
 		)
@@ -330,6 +332,7 @@ func scanPendingAgentDeliveryRecords(rows *sql.Rows) ([]pendingAgentDeliveryReco
 			&payload,
 			&createdAt,
 			&sourceEventID,
+			&executionMode,
 			&record.DeliveryFound,
 			&record.DeliveryStatus,
 			&record.DeliveryRetryCount,
@@ -356,6 +359,11 @@ func scanPendingAgentDeliveryRecords(rows *sql.Rows) ([]pendingAgentDeliveryReco
 			},
 			createdAt,
 		)
+		var err error
+		record.Event, err = eventWithStoredExecutionMode(record.Event, executionMode)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, record)
 	}
 	if err := rows.Err(); err != nil {

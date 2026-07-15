@@ -277,8 +277,8 @@ func setupPostgresReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurf
 				eventName = "provider.requested"
 			}
 			if _, err := db.ExecContext(ctx, `
-				INSERT INTO events (run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-				VALUES ($1::uuid, $2::uuid, $3, 'global', '{}'::jsonb, 'test', 'platform', now())
+				INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+				VALUES ('live', $1::uuid, $2::uuid, $3, 'global', '{}'::jsonb, 'test', 'platform', now())
 			`, runID, eventID, eventName); err != nil {
 				return err
 			}
@@ -300,8 +300,8 @@ func setupSQLiteReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurfac
 				eventName = "provider.requested"
 			}
 			if _, err := store.DB.ExecContext(ctx, `
-				INSERT INTO events (run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-				VALUES (?, ?, ?, 'global', '{}', 'test', 'platform', ?)
+				INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+				VALUES ('live', ?, ?, ?, 'global', '{}', 'test', 'platform', ?)
 			`, runID, eventID, eventName, time.Now().UTC()); err != nil {
 				return fmt.Errorf("insert sqlite event: %w", err)
 			}

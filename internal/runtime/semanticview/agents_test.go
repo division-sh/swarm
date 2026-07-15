@@ -31,9 +31,10 @@ func TestResolveAgentRegistryEntryRoleFallbackUsesFlowID(t *testing.T) {
 	}
 
 	logicalID, entry, ok := ResolveAgentRegistryEntry(Wrap(bundle), models.AgentConfig{
-		ID:     "materialized-responder",
-		Role:   "responder",
-		FlowID: "support",
+		ExecutionMode: "live",
+		ID:            "materialized-responder",
+		Role:          "responder",
+		FlowID:        "support",
 	})
 	if !ok {
 		t.Fatal("ResolveAgentRegistryEntry did not resolve the flow-owned role fallback")

@@ -408,6 +408,7 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 		)`,
 		`CREATE TABLE events (
 			event_id TEXT PRIMARY KEY,
+			execution_mode TEXT NOT NULL,
 			run_id TEXT,
 			event_name TEXT,
 			entity_id TEXT,

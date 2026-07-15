@@ -222,6 +222,7 @@ func seedProviderTriggerSmokeRuntime(
 			FlowID:        "global",
 			Type:          "stub",
 			Model:         "regular",
+			ExecutionMode: "live",
 			Config:        []byte(`{}`),
 			Subscriptions: []string{"inbound." + provider},
 		},

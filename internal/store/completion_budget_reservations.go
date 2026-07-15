@@ -113,11 +113,11 @@ func completionBudgetUsagePostgres(ctx context.Context, tx *sql.Tx, period time.
 	var err error
 	switch scope.Kind {
 	case "system":
-		err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd),0) FROM spend_ledger WHERE created_at >= $1`, period).Scan(&spent)
+		err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd),0) FROM spend_ledger WHERE created_at >= $1 AND execution_mode = 'live'`, period).Scan(&spent)
 	case "global":
-		err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd),0) FROM spend_ledger WHERE entity_id IS NULL AND created_at >= $1`, period).Scan(&spent)
+		err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd),0) FROM spend_ledger WHERE entity_id IS NULL AND created_at >= $1 AND execution_mode = 'live'`, period).Scan(&spent)
 	case "entity":
-		err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd),0) FROM spend_ledger WHERE entity_id=$1::uuid AND created_at >= $2`, scope.Key, period).Scan(&spent)
+		err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd),0) FROM spend_ledger WHERE entity_id=$1::uuid AND created_at >= $2 AND execution_mode = 'live'`, scope.Key, period).Scan(&spent)
 	}
 	if err != nil {
 		return 0, 0, fmt.Errorf("read completion retained spend: %w", err)
@@ -134,11 +134,11 @@ func completionBudgetUsageSQLite(ctx context.Context, tx *sql.Tx, period time.Ti
 	var err error
 	switch scope.Kind {
 	case "system":
-		err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd),0) FROM spend_ledger WHERE created_at >= ?`, period).Scan(&spent)
+		err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd),0) FROM spend_ledger WHERE created_at >= ? AND execution_mode = 'live'`, period).Scan(&spent)
 	case "global":
-		err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd),0) FROM spend_ledger WHERE entity_id IS NULL AND created_at >= ?`, period).Scan(&spent)
+		err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd),0) FROM spend_ledger WHERE entity_id IS NULL AND created_at >= ? AND execution_mode = 'live'`, period).Scan(&spent)
 	case "entity":
-		err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd),0) FROM spend_ledger WHERE entity_id=? AND created_at >= ?`, scope.Key, period).Scan(&spent)
+		err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd),0) FROM spend_ledger WHERE entity_id=? AND created_at >= ? AND execution_mode = 'live'`, scope.Key, period).Scan(&spent)
 	}
 	if err != nil {
 		return 0, 0, fmt.Errorf("read sqlite completion retained spend: %w", err)

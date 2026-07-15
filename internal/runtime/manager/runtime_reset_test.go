@@ -69,12 +69,12 @@ func TestResetRuntimeState_OnlyResetsOwnedTurnContextRegistry(t *testing.T) {
 	registryB := runtimemcp.NewTurnContextRegistry(nil)
 
 	registryA.PutTurnContextForTest("ctx-shared", runtimemcp.TurnContext{
-		Actor:     runtimeactors.AgentConfig{ID: "agent-a"},
+		Actor:     runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-a"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
 	registryB.PutTurnContextForTest("ctx-shared", runtimemcp.TurnContext{
-		Actor:     runtimeactors.AgentConfig{ID: "agent-b"},
+		Actor:     runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-b"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})

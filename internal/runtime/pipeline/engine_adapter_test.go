@@ -1673,11 +1673,11 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughO
 	}
 	sourceEvent := testProjectionEventWithSourceAgent(execCtx.Request.Event, "test")
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
 			produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, '', 'entity', $5::jsonb, $6, 'agent', $7)
+		VALUES ('live', $1::uuid, $2::uuid, $3, $4::uuid, '', 'entity', $5::jsonb, $6, 'agent', $7)
 	`, testPipelineRunID, sourceEvent.ID(), string(sourceEvent.Type()), entityID, string(sourceEvent.Payload()), sourceEvent.SourceAgent(), sourceEvent.CreatedAt()); err != nil {
 		t.Fatalf("seed source event: %v", err)
 	}
@@ -1747,11 +1747,11 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughO
 	action.ArtifactRepo.Files[0].Path = runtimecontracts.LiteralExpression("../escape.yaml")
 	sourceEvent := testProjectionEventWithSourceAgent(execCtx.Request.Event, "test")
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
 			produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, '', 'entity', $5::jsonb, $6, 'agent', $7)
+		VALUES ('live', $1::uuid, $2::uuid, $3, $4::uuid, '', 'entity', $5::jsonb, $6, 'agent', $7)
 	`, testPipelineRunID, sourceEvent.ID(), string(sourceEvent.Type()), entityID, string(sourceEvent.Payload()), sourceEvent.SourceAgent(), sourceEvent.CreatedAt()); err != nil {
 		t.Fatalf("seed source event: %v", err)
 	}
@@ -1828,11 +1828,11 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureR
 	action.ArtifactRepo.Files[0].Path = runtimecontracts.LiteralExpression("../escape.yaml")
 	sourceEvent := testProjectionEventWithSourceAgent(execCtx.Request.Event, "test")
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
 			produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, '', 'entity', $5::jsonb, $6, 'agent', $7)
+		VALUES ('live', $1::uuid, $2::uuid, $3, $4::uuid, '', 'entity', $5::jsonb, $6, 'agent', $7)
 	`, testPipelineRunID, sourceEvent.ID(), string(sourceEvent.Type()), entityID, string(sourceEvent.Payload()), sourceEvent.SourceAgent(), sourceEvent.CreatedAt()); err != nil {
 		t.Fatalf("seed source event: %v", err)
 	}

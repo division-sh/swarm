@@ -193,6 +193,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				},
 			},
 			Breakdown: []store.OperatorAgentUsageBreakdown{{
+				ExecutionMode:   "live",
 				UsageAccounting: store.AgentUsageAccountingExact,
 				InvocationType:  "anthropic",
 				Model:           "claude-3-5-sonnet",
@@ -201,6 +202,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				Provider:        "anthropic",
 				Transport:       "api",
 				ResolvedModel:   "claude-3-5-sonnet",
+				CostDisplay:     "$0.000675 estimated",
 				Totals: store.OperatorAgentUsageTotals{
 					LedgerEntries:    1,
 					InputTokens:      100,
@@ -208,6 +210,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 					EstimatedCostUSD: 0.000675,
 				},
 			}, {
+				ExecutionMode:   "live",
 				UsageAccounting: store.AgentUsageAccountingEstimated,
 				InvocationType:  "claude_cli",
 				Model:           "sonnet",
@@ -216,6 +219,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				Provider:        "claude",
 				Transport:       "cli",
 				ResolvedModel:   "sonnet",
+				CostDisplay:     "$0.000300 estimated",
 				Totals: store.OperatorAgentUsageTotals{
 					LedgerEntries:    1,
 					InputTokens:      50,

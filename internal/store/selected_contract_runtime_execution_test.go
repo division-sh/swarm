@@ -552,8 +552,8 @@ func TestSelectedForkDiscardRejectsLiveDependentForkPostgres(t *testing.T) {
 		t.Fatalf("seed selected fork lineage: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id,run_id,event_name,scope,produced_by_type,created_at)
-		VALUES ($1::uuid,$2::uuid,'fork.dependency','global','platform',$3)
+		INSERT INTO events (event_id,run_id,event_name,scope,execution_mode,produced_by_type,created_at)
+		VALUES ($1::uuid,$2::uuid,'fork.dependency','global','live','platform',$3)
 	`, forkEventID, forkRunID, now); err != nil {
 		t.Fatalf("seed selected fork event: %v", err)
 	}
@@ -657,7 +657,7 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at) VALUES (?,'running',?),(?,'paused',?)`, sourceRun, now, forkRun, now); err != nil {
 			t.Fatalf("seed selected runs: %v", err)
 		}
-		if _, err := db.ExecContext(ctx, `INSERT INTO events (event_id,run_id,event_name,scope,created_at) VALUES (?,?,'selected.test','global',?)`, eventID, sourceRun, now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO events (event_id,run_id,event_name,scope,execution_mode,created_at) VALUES (?,?,'selected.test','global','live',?)`, eventID, sourceRun, now); err != nil {
 			t.Fatalf("seed selected event: %v", err)
 		}
 		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_event_id,mode,contracts_root,workflow_name,workflow_version,created_at) VALUES (?,?,?,?,'selected_contracts','/tmp/contracts','workflow','v1',?)`, bindingID, forkRun, sourceRun, eventID, now); err != nil {
@@ -667,7 +667,7 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at) VALUES ($1::uuid,'running',$3),($2::uuid,'paused',$3)`, sourceRun, forkRun, now); err != nil {
 			t.Fatalf("seed selected runs: %v", err)
 		}
-		if _, err := db.ExecContext(ctx, `INSERT INTO events (event_id,run_id,event_name,scope,created_at) VALUES ($1::uuid,$2::uuid,'selected.test','global',$3)`, eventID, sourceRun, now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO events (event_id,run_id,event_name,scope,execution_mode,created_at) VALUES ($1::uuid,$2::uuid,'selected.test','global','live',$3)`, eventID, sourceRun, now); err != nil {
 			t.Fatalf("seed selected event: %v", err)
 		}
 		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_event_id,mode,contracts_root,workflow_name,workflow_version,created_at) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'selected_contracts','/tmp/contracts','workflow','v1',$5)`, bindingID, forkRun, sourceRun, eventID, now); err != nil {

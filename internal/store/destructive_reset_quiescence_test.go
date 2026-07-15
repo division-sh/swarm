@@ -471,9 +471,9 @@ func seedSQLiteServeAbandonEvent(t *testing.T, ctx context.Context, store *SQLit
 	t.Helper()
 	eventID := uuid.NewString()
 	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			?, ?, ?, 'global', '{}', 'test', 'agent', ?
 		)
 	`, eventID, runID, name, at.UTC()); err != nil {
@@ -537,9 +537,9 @@ func seedDestructiveResetEvent(t *testing.T, ctx context.Context, pg *PostgresSt
 	t.Helper()
 	eventID := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			$1::uuid, $2::uuid, $3, 'global', '{}'::jsonb, 'test', 'agent', now()
 		)
 	`, eventID, runID, name); err != nil {

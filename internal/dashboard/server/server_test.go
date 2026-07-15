@@ -383,12 +383,13 @@ func TestHandler_AgentHandlersDoNotExposeUnsupportedMetricStubs(t *testing.T) {
 	h := &Handler{
 		agents: stubAgents{rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:       "agent-1",
-				Role:     "worker",
-				Type:     "managed",
-				Model:    "cheap",
-				Memory:   agentmemory.Authored(true),
-				FlowPath: "research/inst-1",
+				ExecutionMode: "live",
+				ID:            "agent-1",
+				Role:          "worker",
+				Type:          "managed",
+				Model:         "cheap",
+				Memory:        agentmemory.Authored(true),
+				FlowPath:      "research/inst-1",
 			},
 			Status:    "active",
 			StartedAt: now,
@@ -1226,12 +1227,13 @@ func TestHandler_AgentDirective_UsesLiveFactoryCreatedEmitToolSurface(t *testing
 	factory := runtimeagents.NewLLMAgentFactory(&directiveSurfaceRuntime{requiredTool: "emit_scan_requested"}, exec, nil, runtimeagents.LLMAgentOptions{})
 	manager := runtimemanager.NewAgentManager(nil, factory)
 	if err := manager.SpawnAgent(runtimeactors.AgentConfig{
-		ID:         "review-coordinator-inst-1",
-		Role:       "review_coordinator",
-		FlowID:     "review",
-		FlowPath:   "review/inst-1",
-		EmitEvents: []string{"review/inst-1/scan.requested"},
-		Config:     runtimemanager.MustJSON(map[string]any{"system_prompt": "Coordinate review startup."}),
+		ExecutionMode: "live",
+		ID:            "review-coordinator-inst-1",
+		Role:          "review_coordinator",
+		FlowID:        "review",
+		FlowPath:      "review/inst-1",
+		EmitEvents:    []string{"review/inst-1/scan.requested"},
+		Config:        runtimemanager.MustJSON(map[string]any{"system_prompt": "Coordinate review startup."}),
 	}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
@@ -1267,7 +1269,7 @@ func TestHandler_LegacyDashboardRoutesFailClosedWithoutAuthBoundary(t *testing.T
 		},
 		AuthToken: testOperatorAuthToken,
 		Agents: stubAgents{rows: []runtimemanager.PersistedAgent{{
-			Config: runtimeactors.AgentConfig{ID: "agent-1"},
+			Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1"},
 		}}},
 		Runtime: &stubRuntimeControl{},
 	})
@@ -1501,10 +1503,11 @@ func TestSQLAgentReader_ListGenericAgents_UsesCanonicalTurnSummary(t *testing.T)
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:     "agent-1",
-				Role:   "researcher",
-				FlowID: "global",
-				Type:   "managed",
+				ExecutionMode: "live",
+				ID:            "agent-1",
+				Role:          "researcher",
+				FlowID:        "global",
+				Type:          "managed",
 			},
 			Status: "active",
 		}},
@@ -1561,10 +1564,11 @@ func TestSQLAgentReader_ListGenericAgents_ConsumesSafeTurnWithoutSummaryBlock(t 
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:     "agent-1",
-				Role:   "researcher",
-				FlowID: "global",
-				Type:   "managed",
+				ExecutionMode: "live",
+				ID:            "agent-1",
+				Role:          "researcher",
+				FlowID:        "global",
+				Type:          "managed",
 			},
 			Status: "active",
 		}},
@@ -1600,10 +1604,11 @@ func TestSQLAgentReader_ListGenericAgents_PropagatesSafeTurnProjectionFailure(t 
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:     "agent-1",
-				Role:   "researcher",
-				FlowID: "global",
-				Type:   "managed",
+				ExecutionMode: "live",
+				ID:            "agent-1",
+				Role:          "researcher",
+				FlowID:        "global",
+				Type:          "managed",
 			},
 			Status: "active",
 		}},
@@ -1634,10 +1639,11 @@ func TestSQLAgentReader_ListGenericAgents_PropagatesMalformedPublicActivityFailu
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:     "agent-1",
-				Role:   "researcher",
-				FlowID: "global",
-				Type:   "managed",
+				ExecutionMode: "live",
+				ID:            "agent-1",
+				Role:          "researcher",
+				FlowID:        "global",
+				Type:          "managed",
 			},
 			Status: "active",
 		}},
@@ -1668,10 +1674,11 @@ func TestSQLAgentReader_ListGenericAgents_UsesOperatorProjectionAsCanonicalOwner
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:     "agent-1",
-				Role:   "researcher",
-				FlowID: "global",
-				Type:   "managed",
+				ExecutionMode: "live",
+				ID:            "agent-1",
+				Role:          "researcher",
+				FlowID:        "global",
+				Type:          "managed",
 			},
 			Status: "terminated",
 		}},
@@ -1731,10 +1738,11 @@ func TestSQLAgentReader_GetGenericAgent_UsesCanonicalLifecycleProjection(t *test
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:     "agent-1",
-				Role:   "researcher",
-				FlowID: "global",
-				Type:   "managed",
+				ExecutionMode: "live",
+				ID:            "agent-1",
+				Role:          "researcher",
+				FlowID:        "global",
+				Type:          "managed",
 			},
 			Status: "active",
 		}},
@@ -1782,10 +1790,11 @@ func TestSQLAgentReader_ListGenericAgents_DoesNotDeriveLifecycleFromActiveLeaseW
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:     "agent-1",
-				Role:   "researcher",
-				FlowID: "global",
-				Type:   "managed",
+				ExecutionMode: "live",
+				ID:            "agent-1",
+				Role:          "researcher",
+				FlowID:        "global",
+				Type:          "managed",
 			},
 			Status: "active",
 		}},
@@ -1834,10 +1843,11 @@ func TestSQLAgentReader_GetGenericAgent_DoesNotDeriveLifecycleFromActiveLeaseWhe
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:     "agent-1",
-				Role:   "researcher",
-				FlowID: "global",
-				Type:   "managed",
+				ExecutionMode: "live",
+				ID:            "agent-1",
+				Role:          "researcher",
+				FlowID:        "global",
+				Type:          "managed",
 			},
 			Status: "active",
 		}},
@@ -1898,10 +1908,11 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutOperatorProjection(t
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:     "agent-1",
-				Role:   "researcher",
-				FlowID: "global",
-				Type:   "managed",
+				ExecutionMode: "live",
+				ID:            "agent-1",
+				Role:          "researcher",
+				FlowID:        "global",
+				Type:          "managed",
 			},
 			Status: "active",
 		}},
@@ -1935,10 +1946,11 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutCanonicalReceiptCapa
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:     "agent-1",
-				Role:   "researcher",
-				FlowID: "global",
-				Type:   "managed",
+				ExecutionMode: "live",
+				ID:            "agent-1",
+				Role:          "researcher",
+				FlowID:        "global",
+				Type:          "managed",
 			},
 			Status: "active",
 		}},
@@ -1962,10 +1974,11 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutCapabilityOwner(t *t
 
 	reader := NewSQLAgentReader(db, stubAgents{rows: []runtimemanager.PersistedAgent{{
 		Config: runtimeactors.AgentConfig{
-			ID:     "agent-1",
-			Role:   "researcher",
-			FlowID: "global",
-			Type:   "managed",
+			ExecutionMode: "live",
+			ID:            "agent-1",
+			Role:          "researcher",
+			FlowID:        "global",
+			Type:          "managed",
 		},
 		Status: "active",
 	}}}, 12)
@@ -1988,10 +2001,11 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutCanonicalTurnCapabil
 	reader := NewSQLAgentReader(db, stubSQLAgents{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:     "agent-1",
-				Role:   "researcher",
-				FlowID: "global",
-				Type:   "managed",
+				ExecutionMode: "live",
+				ID:            "agent-1",
+				Role:          "researcher",
+				FlowID:        "global",
+				Type:          "managed",
 			},
 			Status: "active",
 		}},
@@ -2016,10 +2030,11 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutLifecycleFactOwner(t
 	reader := NewSQLAgentReader(db, stubSQLAgentsWithoutLifecycle{
 		rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
-				ID:     "agent-1",
-				Role:   "researcher",
-				FlowID: "global",
-				Type:   "managed",
+				ExecutionMode: "live",
+				ID:            "agent-1",
+				Role:          "researcher",
+				FlowID:        "global",
+				Type:          "managed",
 			},
 			Status: "active",
 		}},
@@ -2054,12 +2069,13 @@ func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelec
 	ctx := context.Background()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:     "agent-1",
-			Role:   "researcher",
-			FlowID: "global",
-			Type:   "managed",
-			Model:  "regular",
-			Config: json.RawMessage(`{"system_prompt":"You are an operator agent."}`),
+			ID:            "agent-1",
+			Role:          "researcher",
+			FlowID:        "global",
+			Type:          "managed",
+			Model:         "regular",
+			ExecutionMode: "live",
+			Config:        json.RawMessage(`{"system_prompt":"You are an operator agent."}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -2077,9 +2093,9 @@ func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelec
 	deadEventID := uuid.NewString()
 	for _, eventID := range []string{pendingEventID, failedEventID, inProgressNoReceiptEventID, deadEventID} {
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (
+			INSERT INTO events (execution_mode,
 				event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-			) VALUES (
+			) VALUES ('live',
 				$1::uuid, $2::uuid, 'task.completed', 'global', '{}'::jsonb, 'runtime', 'agent', now() - interval '5 minutes'
 			)
 		`, eventID, runID); err != nil {
@@ -2163,12 +2179,13 @@ func TestSQLAgentReader_ListGenericAgents_UsesFullPendingDeliveryFactHorizon(t *
 	ctx := context.Background()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:     "agent-1",
-			Role:   "researcher",
-			FlowID: "global",
-			Type:   "managed",
-			Model:  "regular",
-			Config: json.RawMessage(`{"system_prompt":"You are an operator agent."}`),
+			ID:            "agent-1",
+			Role:          "researcher",
+			FlowID:        "global",
+			Type:          "managed",
+			Model:         "regular",
+			ExecutionMode: "live",
+			Config:        json.RawMessage(`{"system_prompt":"You are an operator agent."}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -2182,9 +2199,9 @@ func TestSQLAgentReader_ListGenericAgents_UsesFullPendingDeliveryFactHorizon(t *
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			$1::uuid, $2::uuid, 'task.completed', 'global', '{}'::jsonb, 'runtime', 'agent', now() - interval '45 days'
 		)
 	`, eventID, runID); err != nil {
@@ -2243,13 +2260,14 @@ func TestSQLAgentReader_ListGenericAgents_ScopesLiveTurnToSelectedActiveSession(
 	ctx := context.Background()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:       "agent-1",
-			Role:     "researcher",
-			FlowID:   "entity",
-			FlowPath: "entity",
-			Type:     "managed",
-			Model:    "regular",
-			Memory:   agentmemory.Authored(true),
+			ID:            "agent-1",
+			Role:          "researcher",
+			FlowID:        "entity",
+			FlowPath:      "entity",
+			Type:          "managed",
+			Model:         "regular",
+			ExecutionMode: "live",
+			Memory:        agentmemory.Authored(true),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -2279,10 +2297,10 @@ func TestSQLAgentReader_ListGenericAgents_ScopesLiveTurnToSelectedActiveSession(
 	selectedTurnBlocks := `[{"kind":"tool_result","tool_name":"selected_tool","output":{"status":"selected"},"data":{"tool_use_id":"toolu-selected"}},{"kind":"turn_summary","data":{"assistant_visible_output":"selected session turn","outcome":"waiting","tool_results":[{"tool_name":"selected_tool","tool_use_id":"toolu-selected","output":{"status":"selected"}}]}}]`
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, task_id, turn_blocks, parse_ok, created_at
+			execution_mode, turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, task_id, turn_blocks, parse_ok, created_at
 		) VALUES
-			($1::uuid, $8::uuid, 'agent-1', $2::uuid, 'entity/older', TRUE, 'authored', 'task-older', $3::jsonb, true, $5),
-			($4::uuid, $8::uuid, 'agent-1', $6::uuid, 'entity/selected', TRUE, 'authored', 'task-selected', $7::jsonb, true, $9)
+			('live', $1::uuid, $8::uuid, 'agent-1', $2::uuid, 'entity/older', TRUE, 'authored', 'task-older', $3::jsonb, true, $5),
+			('live', $4::uuid, $8::uuid, 'agent-1', $6::uuid, 'entity/selected', TRUE, 'authored', 'task-selected', $7::jsonb, true, $9)
 	`, uuid.NewString(), sessionOlder, olderTurnBlocks, uuid.NewString(), selectedUpdatedAt.Add(2*time.Minute), sessionSelected, selectedTurnBlocks, runID, selectedUpdatedAt.Add(-1*time.Minute)); err != nil {
 		t.Fatalf("seed agent_turns: %v", err)
 	}

@@ -815,7 +815,7 @@ func projectEventForDeliveryRoute(evt events.Event, route events.DeliveryRoute) 
 		evt.ParentEventID(),
 		envelope,
 		evt.CreatedAt(),
-	).WithDeliveryContext(route.Context), nil
+	).WithExecutionMode(evt.ExecutionMode()).WithDeliveryContext(route.Context), nil
 }
 
 func (eb *EventBus) withBundleFingerprint(ctx context.Context) context.Context {
