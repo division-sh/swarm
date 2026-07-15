@@ -459,6 +459,19 @@ func TestOperatorEventPublishPostgresUsesPublisherScopeWithPlainRequestContext(t
 	if got.ID() != eventID {
 		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
 	}
+
+	explicit := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithBundleHash("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-publish-explicit-bundle"))
+	if explicit.Error != nil {
+		t.Fatalf("event.publish explicit active bundle scope error = %#v", explicit.Error)
+	}
+	explicitResult := asMap(t, explicit.Result)
+	explicitEventID := stringValue(t, explicitResult["event_id"], "event_id")
+	explicitRunID := stringValue(t, explicitResult["run_id"], "run_id")
+	assertEventPublishPersistence(t, db, explicitRunID, explicitEventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+	explicitEvent := requireAPIV1RuntimeBusEvent(t, ch, "explicit-bundle event.publish delivery")
+	if explicitEvent.ID() != explicitEventID {
+		t.Fatalf("explicit-bundle delivered event = %s, want %s", explicitEvent.ID(), explicitEventID)
+	}
 }
 
 func TestOperatorEventPublishSQLiteUsesPublisherScopeWithPlainRequestContext(t *testing.T) {
@@ -485,6 +498,19 @@ func TestOperatorEventPublishSQLiteUsesPublisherScopeWithPlainRequestContext(t *
 	got := requireAPIV1RuntimeBusEvent(t, ch, "sqlite event.publish delivery")
 	if got.ID() != eventID {
 		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
+	}
+
+	explicit := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithBundleHash("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-sqlite-publish-explicit-bundle"))
+	if explicit.Error != nil {
+		t.Fatalf("sqlite event.publish explicit active bundle scope error = %#v", explicit.Error)
+	}
+	explicitResult := asMap(t, explicit.Result)
+	explicitEventID := stringValue(t, explicitResult["event_id"], "event_id")
+	explicitRunID := stringValue(t, explicitResult["run_id"], "run_id")
+	assertSQLiteEventPublishRows(t, sqliteStore.DB, explicitRunID, explicitEventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+	explicitEvent := requireAPIV1RuntimeBusEvent(t, ch, "sqlite explicit-bundle event.publish delivery")
+	if explicitEvent.ID() != explicitEventID {
+		t.Fatalf("sqlite explicit-bundle delivered event = %s, want %s", explicitEvent.ID(), explicitEventID)
 	}
 }
 
