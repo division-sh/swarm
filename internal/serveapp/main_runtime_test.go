@@ -54,7 +54,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
-	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -900,25 +899,22 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	}
 	captureRunForkCLIRevision(t, db, advancedSourceRunID, runforkrevision.FamilyEvents)
 
-	var stdout, stderr bytes.Buffer
-	cliOpts := defaultRootCommandOptions()
-	cliOpts.apiRPCEndpointOverride = "http://" + apiAddr + "/v1/rpc"
-	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{
+	stdout, stderr, code := runServedCLICommand(t, "http://"+apiAddr+"/v1/rpc", []string{
 		"run", "fork", advancedSourceRunID,
 		"--at-event", advancedSourceEventID,
 		"--confirm-source-freeze",
 		"--idempotency-key", "db-loaded-serve-advanced-fork",
 		"--json",
-	}, &stdout, &stderr, cliOpts)
+	})
 	if code != 0 {
-		t.Fatalf("advanced swarm run fork code=%d stderr=%s stdout=%s\nserve output:\n%s", code, stderr.String(), stdout.String(), serve.outputString())
+		t.Fatalf("advanced swarm run fork code=%d stderr=%s stdout=%s\nserve output:\n%s", code, stderr, stdout, serve.outputString())
 	}
-	if strings.TrimSpace(stderr.String()) != "" {
-		t.Fatalf("advanced swarm run fork stderr=%q, want empty", stderr.String())
+	if strings.TrimSpace(stderr) != "" {
+		t.Fatalf("advanced swarm run fork stderr=%q, want empty", stderr)
 	}
 	var advancedResult apiv1.RunForkExecutionResult
-	if err := json.Unmarshal(stdout.Bytes(), &advancedResult); err != nil {
-		t.Fatalf("decode advanced swarm run fork json: %v\n%s", err, stdout.String())
+	if err := json.Unmarshal([]byte(stdout), &advancedResult); err != nil {
+		t.Fatalf("decode advanced swarm run fork json: %v\n%s", err, stdout)
 	}
 	if advancedResult.SourceRunID != advancedSourceRunID || advancedResult.SourceFrozen || advancedResult.SourceRunStatus != "running" || advancedResult.ForkRunStatus != store.RunForkActivatedStatus {
 		t.Fatalf("advanced run.fork result = %#v, want preserved running source and activated fork", advancedResult)
