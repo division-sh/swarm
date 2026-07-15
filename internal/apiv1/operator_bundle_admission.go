@@ -59,7 +59,9 @@ func resolveEventPublicationBundleScope(
 		params.BundleSource = runAvailability.BundleSource
 	}
 	if resolvedHash == "" && identity.LegacyFingerprint == "" && !hasRunContext && runtimeContextManager(opts) == nil {
-		currentFact, hasCurrentFact := eventPublicationRuntimeSourceFact(ctx, opts.Events)
+		var currentFact runtimecorrelation.BundleSourceFact
+		var hasCurrentFact bool
+		ctx, currentFact, hasCurrentFact = eventPublicationRuntimeSourceContext(ctx, opts.Events)
 		currentFact = currentFact.Normalized()
 		if hasCurrentFact &&
 			currentFact.BundleHash != "" &&
@@ -103,7 +105,9 @@ func resolveEventPublicationBundleScope(
 		params.BundleFingerprint = currentFact.BundleFingerprint
 		return ctx, selectedOpts, params, nil
 	}
-	currentFact, hasCurrentFact := eventPublicationRuntimeSourceFact(ctx, opts.Events)
+	var currentFact runtimecorrelation.BundleSourceFact
+	var hasCurrentFact bool
+	ctx, currentFact, hasCurrentFact = eventPublicationRuntimeSourceContext(ctx, opts.Events)
 	if !hasCurrentFact || strings.TrimSpace(currentFact.BundleHash) == "" {
 		return ctx, opts, params, NewApplicationError(BundleUnavailableCode, false, map[string]any{
 			"bundle_hash": resolvedHash,
@@ -139,16 +143,13 @@ func eventPublicationSourceContext(ctx context.Context, fact runtimecorrelation.
 	return runtimeauthoractivity.WithScope(ctx, scope), nil
 }
 
-func eventPublicationRuntimeSourceFact(ctx context.Context, publisher EventPublisher) (runtimecorrelation.BundleSourceFact, bool) {
-	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
-		return fact, true
-	}
+func eventPublicationRuntimeSourceContext(ctx context.Context, publisher EventPublisher) (context.Context, runtimecorrelation.BundleSourceFact, bool) {
 	provider, ok := publisher.(runtimeBundleSourceFactProvider)
-	if !ok || provider == nil {
-		return runtimecorrelation.BundleSourceFact{}, false
+	if ok && provider != nil {
+		ctx = provider.WithBundleFingerprint(ctx)
 	}
-	enriched := provider.WithBundleFingerprint(ctx)
-	return runtimecorrelation.BundleSourceFactFromContext(enriched)
+	fact, found := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	return ctx, fact, found
 }
 
 func eventPublicationRunBundleContext(
