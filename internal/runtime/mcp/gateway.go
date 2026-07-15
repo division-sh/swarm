@@ -894,6 +894,9 @@ func (g *Gateway) baseContextForResolvedTurn(ctx context.Context, turn TurnConte
 	if turn.HasBundleSourceFact {
 		ctx = runtimecorrelation.WithBundleSourceFact(ctx, turn.BundleSourceFact)
 	}
+	if turn.HasExecutionMode {
+		ctx = runtimeeffects.WithExecutionMode(ctx, turn.ExecutionMode)
+	}
 	if turn.HasExecutionAdmission {
 		ctx = managedexecution.WithAdmission(ctx, turn.ExecutionAdmission)
 	}

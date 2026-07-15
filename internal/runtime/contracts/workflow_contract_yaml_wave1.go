@@ -1602,7 +1602,7 @@ func buildFlatEventPayloadSpec(node *yaml.Node) (EventPayloadSpec, error) {
 			continue
 		}
 		switch key {
-		case "description", "swarm", "emitter", "emitter_type", "producer", "_producer", "alternate_emitters", "consumer", "_consumer", "consumer_type", "_consumer_type", "_source", "_status", "_note", "intercepted", "passthrough", "runtime_handling", "owning_node", "delivery_channel", "required":
+		case "description", "swarm", "emitter", "emitter_type", "producer", "_producer", "alternate_emitters", "consumer", "_consumer", "consumer_type", "_consumer_type", "_source", "_status", "_note", "intercepted", "passthrough", "runtime_handling", "owning_node", "delivery_channel", "required", "author_summary_field":
 			continue
 		}
 		var field EventFieldSpec

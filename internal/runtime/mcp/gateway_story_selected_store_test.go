@@ -83,12 +83,13 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 			}
 			scope := runtimeauthoractivity.BundleScope(runtimeInstanceID, sourceFact.BundleHash)
 			actor := models.AgentConfig{
-				ID:       "story-writer",
-				Type:     "internal",
-				Role:     "story-writer",
-				FlowID:   "story",
-				FlowPath: "story/instance-1",
-				Tools:    []string{"send_story"},
+				ExecutionMode: "live",
+				ID:            "story-writer",
+				Type:          "internal",
+				Role:          "story-writer",
+				FlowID:        "story",
+				FlowPath:      "story/instance-1",
+				Tools:         []string{"send_story"},
 			}
 			seedGatewayStoryRuntime(t, selected, runID, actor.ID, sourceFact)
 			source := loadGatewayStorySource(t, server.URL)
@@ -137,6 +138,7 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 func gatewayStoryManagedTurnContext(ctx context.Context, selected gatewayStorySelectedStore, actor models.AgentConfig, runID string, scope runtimeauthoractivity.Scope, sourceFact runtimecorrelation.BundleSourceFact, identity string) context.Context {
 	ctx = models.WithActor(ctx, actor)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
+	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 	if scope.Kind != "" {
 		ctx = runtimeauthoractivity.WithScope(ctx, scope)
 	}
@@ -305,13 +307,28 @@ func gatewayStoryResponseIsError(result map[string]any) bool {
 
 func assertGatewayStoryEffectAndOccurrence(t *testing.T, selected gatewayStorySelectedStore, scope runtimeauthoractivity.Scope, want int) {
 	t.Helper()
-	query := `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id WHERE a.adapter = ? AND a.state = 'settled'`
+	query := `SELECT o.bundle_hash, o.execution_mode, a.execution_mode FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id WHERE a.adapter = ? AND a.state = 'settled'`
 	if selected.postgres {
-		query = `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id WHERE a.adapter = $1 AND a.state = 'settled'`
+		query = `SELECT o.bundle_hash, o.execution_mode, a.execution_mode FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id WHERE a.adapter = $1 AND a.state = 'settled'`
 	}
-	var count int
-	if err := selected.db.QueryRowContext(context.Background(), query, "authored_http_tool").Scan(&count); err != nil {
-		t.Fatalf("count authored HTTP effects: %v", err)
+	rows, err := selected.db.QueryContext(context.Background(), query, "authored_http_tool")
+	if err != nil {
+		t.Fatalf("read authored HTTP effects: %v", err)
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var bundleHash, operationMode, attemptMode string
+		if err := rows.Scan(&bundleHash, &operationMode, &attemptMode); err != nil {
+			t.Fatalf("scan authored HTTP effect: %v", err)
+		}
+		if bundleHash != scope.BundleHash || operationMode != string(runtimeeffects.ExecutionModeLive) || attemptMode != string(runtimeeffects.ExecutionModeLive) {
+			t.Fatalf("authored HTTP effect semantics = bundle:%q operation_mode:%q attempt_mode:%q, want %q/live/live", bundleHash, operationMode, attemptMode, scope.BundleHash)
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate authored HTTP effects: %v", err)
 	}
 	if count != want {
 		t.Fatalf("settled authored HTTP effects = %d, want %d", count, want)

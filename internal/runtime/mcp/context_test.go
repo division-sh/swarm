@@ -161,9 +161,10 @@ func TestTurnContextRegistryPreservesAuthorActivityScopeAndRequiredSourceIdentit
 		BundleSource:      "test-bundle",
 		BundleFingerprint: "bundle-fingerprint",
 	}
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "selected-agent"})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "selected-agent"})
 	ctx = runtimeauthoractivity.WithScope(ctx, scope)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, source)
+	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 
 	token := registry.RegisterTurnContext(ctx)
 	turn, ok := registry.ResolveTurnContext(token)
@@ -176,6 +177,9 @@ func TestTurnContextRegistryPreservesAuthorActivityScopeAndRequiredSourceIdentit
 	if !turn.HasBundleSourceFact || turn.BundleSourceFact != source {
 		t.Fatalf("bundle source fact = %#v present=%v, want %#v", turn.BundleSourceFact, turn.HasBundleSourceFact, source)
 	}
+	if !turn.HasExecutionMode || turn.ExecutionMode != runtimeeffects.ExecutionModeLive {
+		t.Fatalf("execution mode = %q present=%v, want live", turn.ExecutionMode, turn.HasExecutionMode)
+	}
 
 	restored := (&Gateway{}).baseContextForResolvedTurn(context.Background(), turn)
 	if got, ok := runtimeauthoractivity.ScopeFromContext(restored); !ok || got != scope {
@@ -183,6 +187,9 @@ func TestTurnContextRegistryPreservesAuthorActivityScopeAndRequiredSourceIdentit
 	}
 	if got, ok := runtimecorrelation.BundleSourceFactFromContext(restored); !ok || got != source {
 		t.Fatalf("restored bundle source fact = %#v present=%v, want %#v", got, ok, source)
+	}
+	if got, ok := runtimeeffects.ExecutionModeFromContext(restored); !ok || got != runtimeeffects.ExecutionModeLive {
+		t.Fatalf("restored execution mode = %q present=%v, want live", got, ok)
 	}
 }
 

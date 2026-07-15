@@ -921,6 +921,26 @@ composite_score:
 	}
 }
 
+func TestEventCatalogEntryDecode_AuthorSummaryFieldIsMetadataNotPayload(t *testing.T) {
+	var entry EventCatalogEntry
+	if err := yaml.Unmarshal([]byte(`
+chat_id: text
+text: text
+author_summary_field: text
+`), &entry); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if entry.AuthorSummaryField != "text" {
+		t.Fatalf("AuthorSummaryField = %q, want text", entry.AuthorSummaryField)
+	}
+	if _, exists := entry.Payload.Properties["author_summary_field"]; exists {
+		t.Fatalf("author_summary_field leaked into payload schema: %#v", entry.Payload.Properties)
+	}
+	if _, exists := entry.Payload.Properties["text"]; !exists {
+		t.Fatalf("text payload field missing: %#v", entry.Payload.Properties)
+	}
+}
+
 func TestEventCatalogEntryDecode_RejectsMixedPayloadBlockAndFlatFields(t *testing.T) {
 	var entry EventCatalogEntry
 	err := yaml.Unmarshal([]byte(`

@@ -976,6 +976,7 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 		OwningNode         string                 `yaml:"owning_node"`
 		DeliveryChannel    yaml.Node              `yaml:"delivery_channel"`
 		Required           []string               `yaml:"required"`
+		AuthorSummaryField string                 `yaml:"author_summary_field"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
@@ -1076,6 +1077,7 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 	e.DeliveryChannel = deliveryChannel
 	e.Payload = payload
 	e.Required = normalizeStrings(aux.Required)
+	e.AuthorSummaryField = strings.TrimSpace(aux.AuthorSummaryField)
 	return nil
 }
 

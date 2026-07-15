@@ -26,6 +26,23 @@ type scriptedServeStoryReader struct {
 	calls     []runtimeauthoractivity.ListOptions
 }
 
+type mutableServeAuthorActivityScope struct {
+	mu     sync.RWMutex
+	hashes []string
+}
+
+func (s *mutableServeAuthorActivityScope) BundleHashes() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]string(nil), s.hashes...)
+}
+
+func (s *mutableServeAuthorActivityScope) replace(hashes ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hashes = append([]string(nil), hashes...)
+}
+
 func (r *scriptedServeStoryReader) HeadAuthorActivity(context.Context) (int64, error) { return 0, nil }
 
 func (r *scriptedServeStoryReader) ListAuthorActivity(_ context.Context, opts runtimeauthoractivity.ListOptions) (runtimeauthoractivity.ListResult, error) {
@@ -101,8 +118,9 @@ func TestServeAuthorActivityFollowerRetriesUnchangedCursorAndExactScope(t *testi
 	out := &synchronizedBuffer{}
 	presenter := newServeLifecyclePresenter(serveOptions{Output: out, ErrorOutput: &errOut, Dev: true})
 	ctx, cancel := context.WithCancel(context.Background())
+	scope := &mutableServeAuthorActivityScope{hashes: []string{"bundle-a", "bundle-b"}}
 	follower := newServeAuthorActivityFollower(
-		ctx, reader, presenter, "runtime-a", []string{"bundle-a", "bundle-b"}, 10,
+		ctx, reader, presenter, "runtime-a", scope, 10,
 		runtimeauthoractivity.NewHumanRenderer(runtimeauthoractivity.RenderOptions{Mode: runtimeauthoractivity.RenderPlain, Width: 120}),
 	)
 	waitForServeStory(t, func() bool { return strings.Contains(out.String(), "telegram-sender ✓ sent") })
@@ -157,8 +175,9 @@ func TestServeAuthorActivityFollowerRetriesWriteAndFlushesBeforeReturn(t *testin
 	out := &failOnceWriter{}
 	var errOut bytes.Buffer
 	presenter := newServeLifecyclePresenter(serveOptions{Output: out, ErrorOutput: &errOut, Dev: true})
+	scope := &mutableServeAuthorActivityScope{hashes: []string{"bundle-a"}}
 	follower := newServeAuthorActivityFollower(
-		context.Background(), reader, presenter, "runtime-a", []string{"bundle-a"}, 20,
+		context.Background(), reader, presenter, "runtime-a", scope, 20,
 		runtimeauthoractivity.NewHumanRenderer(runtimeauthoractivity.RenderOptions{Mode: runtimeauthoractivity.RenderPlain, Width: 120}),
 	)
 	waitForServeStory(t, func() bool { return strings.Contains(out.String(), "(2nd time)") })
@@ -174,6 +193,99 @@ func TestServeAuthorActivityFollowerRetriesWriteAndFlushesBeforeReturn(t *testin
 	if len(calls) < 2 || calls[0].AfterSequence != 20 || calls[1].AfterSequence != 20 {
 		t.Fatalf("write retry cursors = %#v", calls)
 	}
+}
+
+func TestServeAuthorActivityFollowerRefreshesExactScopeAfterRuntimeReload(t *testing.T) {
+	withFastServeStoryPolling(t)
+	initial := serveStoryOccurrence(t, 31, "delivered", time.Date(2026, 7, 14, 19, 9, 2, 0, time.UTC))
+	replacement := initial
+	replacement.OccurrenceID = uuid.NewString()
+	replacement.Sequence = 32
+	replacement.SourceIdentity = "delivery-replacement"
+	replacement.DedupKey = "delivery-replacement:delivered"
+	replacement.Scope = runtimeauthoractivity.BundleScope("runtime-a", "bundle-replacement")
+	replacement.AuthorSafeSummary = "replacement activity"
+	unrelated := replacement
+	unrelated.OccurrenceID = uuid.NewString()
+	unrelated.Sequence = 33
+	unrelated.SourceIdentity = "delivery-unrelated"
+	unrelated.DedupKey = "delivery-unrelated:delivered"
+	unrelated.Scope = runtimeauthoractivity.BundleScope("runtime-a", "bundle-unrelated")
+	unrelated.AuthorSafeSummary = "must stay hidden"
+
+	reader := &scopeFilteringServeStoryReader{occurrences: []runtimeauthoractivity.Occurrence{initial, replacement, unrelated}}
+	scope := &mutableServeAuthorActivityScope{hashes: []string{"bundle-a"}}
+	out := &synchronizedBuffer{}
+	var errOut bytes.Buffer
+	presenter := newServeLifecyclePresenter(serveOptions{Output: out, ErrorOutput: &errOut, Dev: true})
+	follower := newServeAuthorActivityFollower(
+		context.Background(), reader, presenter, "runtime-a", scope, 30,
+		runtimeauthoractivity.NewHumanRenderer(runtimeauthoractivity.RenderOptions{Mode: runtimeauthoractivity.RenderPlain, Width: 120}),
+	)
+	waitForServeStory(t, func() bool { return strings.Contains(out.String(), "how are you") })
+	scope.replace("bundle-replacement")
+	waitForServeStory(t, func() bool { return strings.Contains(out.String(), "replacement activity") })
+	follower.StopAndWait()
+
+	if strings.Contains(out.String(), "must stay hidden") {
+		t.Fatalf("unrelated bundle activity leaked into feed: %q", out.String())
+	}
+	calls := reader.snapshotCalls()
+	if !serveStoryCallsContainExactScope(calls, "bundle-a") || !serveStoryCallsContainExactScope(calls, "bundle-replacement") {
+		t.Fatalf("follower scopes = %#v, want initial and replacement bundle hashes", calls)
+	}
+	for _, call := range calls {
+		if strings.Join(call.BundleHashes, ",") == "bundle-unrelated" {
+			t.Fatalf("follower admitted unrelated scope: %#v", call)
+		}
+	}
+}
+
+type scopeFilteringServeStoryReader struct {
+	mu          sync.Mutex
+	occurrences []runtimeauthoractivity.Occurrence
+	calls       []runtimeauthoractivity.ListOptions
+}
+
+func (r *scopeFilteringServeStoryReader) HeadAuthorActivity(context.Context) (int64, error) {
+	return 0, nil
+}
+
+func (r *scopeFilteringServeStoryReader) ListAuthorActivity(_ context.Context, opts runtimeauthoractivity.ListOptions) (runtimeauthoractivity.ListResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, opts)
+	allowed := make(map[string]struct{}, len(opts.BundleHashes))
+	for _, hash := range opts.BundleHashes {
+		allowed[hash] = struct{}{}
+	}
+	result := runtimeauthoractivity.ListResult{NextCursor: opts.AfterSequence}
+	for _, occurrence := range r.occurrences {
+		if occurrence.Sequence <= opts.AfterSequence || occurrence.Scope.RuntimeInstanceID != opts.RuntimeInstanceID {
+			continue
+		}
+		if _, ok := allowed[occurrence.Scope.BundleHash]; !ok {
+			continue
+		}
+		result.Occurrences = append(result.Occurrences, occurrence)
+		result.NextCursor = occurrence.Sequence
+	}
+	return result, nil
+}
+
+func (r *scopeFilteringServeStoryReader) snapshotCalls() []runtimeauthoractivity.ListOptions {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]runtimeauthoractivity.ListOptions(nil), r.calls...)
+}
+
+func serveStoryCallsContainExactScope(calls []runtimeauthoractivity.ListOptions, hash string) bool {
+	for _, call := range calls {
+		if strings.Join(call.BundleHashes, ",") == hash {
+			return true
+		}
+	}
+	return false
 }
 
 func TestServeNoFeedRequiresDevBeforeSideEffects(t *testing.T) {

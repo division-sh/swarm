@@ -22,6 +22,10 @@ type serveAuthorActivityReader interface {
 	ListAuthorActivity(context.Context, runtimeauthoractivity.ListOptions) (runtimeauthoractivity.ListResult, error)
 }
 
+type serveAuthorActivityScope interface {
+	BundleHashes() []string
+}
+
 type serveAuthorActivityFollower struct {
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -33,7 +37,7 @@ func newServeAuthorActivityFollower(
 	reader serveAuthorActivityReader,
 	presenter *serveLifecyclePresenter,
 	runtimeInstanceID string,
-	bundleHashes []string,
+	scope serveAuthorActivityScope,
 	cursor int64,
 	renderer runtimeauthoractivity.HumanRenderer,
 ) *serveAuthorActivityFollower {
@@ -41,7 +45,7 @@ func newServeAuthorActivityFollower(
 	follower := &serveAuthorActivityFollower{cancel: cancel, done: make(chan struct{})}
 	go func() {
 		defer close(follower.done)
-		runServeAuthorActivityFollower(ctx, reader, presenter, runtimeInstanceID, bundleHashes, cursor, renderer)
+		runServeAuthorActivityFollower(ctx, reader, presenter, runtimeInstanceID, scope, cursor, renderer)
 	}()
 	return follower
 }
@@ -59,7 +63,7 @@ func runServeAuthorActivityFollower(
 	reader serveAuthorActivityReader,
 	presenter *serveLifecyclePresenter,
 	runtimeInstanceID string,
-	bundleHashes []string,
+	scope serveAuthorActivityScope,
 	cursor int64,
 	renderer runtimeauthoractivity.HumanRenderer,
 ) {
@@ -93,6 +97,10 @@ func runServeAuthorActivityFollower(
 		warn(fmt.Errorf("author activity reader is unavailable"))
 		return
 	}
+	if scope == nil {
+		warn(fmt.Errorf("author activity runtime context scope is unavailable"))
+		return
+	}
 	ticker := time.NewTicker(serveAuthorActivityPollInterval)
 	defer ticker.Stop()
 	for {
@@ -115,7 +123,7 @@ func runServeAuthorActivityFollower(
 		renderer = next
 		page, err := reader.ListAuthorActivity(ctx, runtimeauthoractivity.ListOptions{
 			AfterSequence: cursor, Limit: serveAuthorActivityPageSize,
-			RuntimeInstanceID: strings.TrimSpace(runtimeInstanceID), BundleHashes: bundleHashes, IncludeRuntimeScope: true,
+			RuntimeInstanceID: strings.TrimSpace(runtimeInstanceID), BundleHashes: scope.BundleHashes(), IncludeRuntimeScope: true,
 		})
 		if err != nil {
 			warn(err)
