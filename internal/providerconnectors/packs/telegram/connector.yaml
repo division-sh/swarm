@@ -27,3 +27,140 @@ tools:
       body:
         chat_id: "{{input.chat_id}}"
         text: "{{input.text}}"
+  telegram.send_interactive:
+    category: provider_connector
+    description: send a Telegram direct-message presentation with optional actions
+    handler_type: http
+    effect_class: non_idempotent_write
+    credentials: [telegram_bot_token]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [chat_id, text, reply_markup]
+      properties:
+        chat_id: {type: string, pattern: '^-?[0-9]+$', minLength: 1, maxLength: 17}
+        text: {type: string, minLength: 1, maxLength: 4096}
+        reply_markup:
+          type: object
+          additionalProperties: false
+          required: [inline_keyboard]
+          properties:
+            inline_keyboard:
+              type: array
+              minItems: 0
+              maxItems: 8
+              items:
+                type: array
+                minItems: 1
+                maxItems: 1
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [text, callback_data]
+                  properties:
+                    text: {type: string, minLength: 1, maxLength: 64}
+                    callback_data: {type: string, pattern: '^[A-Za-z0-9_-]+$', minLength: 1, maxLength: 64}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [message_id]
+      properties:
+        message_id: {type: integer}
+    response_success:
+      kind: json_field_equals
+      path: response.body.ok
+      equals: true
+    response_mapping:
+      message_id: "{{response.body.result.message_id}}"
+    http:
+      method: POST
+      url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/sendMessage
+      body:
+        chat_id: "{{input.chat_id}}"
+        text: "{{input.text}}"
+        reply_markup: "{{input.reply_markup}}"
+  telegram.edit_message:
+    category: provider_connector
+    description: replace a Telegram direct-message presentation and controls
+    handler_type: http
+    effect_class: non_idempotent_write
+    credentials: [telegram_bot_token]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [chat_id, message_id, text, reply_markup]
+      properties:
+        chat_id: {type: string, pattern: '^-?[0-9]+$', minLength: 1, maxLength: 17}
+        message_id: {type: integer, minimum: 1, maximum: 2147483647}
+        text: {type: string, minLength: 1, maxLength: 4096}
+        reply_markup:
+          type: object
+          additionalProperties: false
+          required: [inline_keyboard]
+          properties:
+            inline_keyboard:
+              type: array
+              minItems: 0
+              maxItems: 8
+              items:
+                type: array
+                minItems: 1
+                maxItems: 1
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [text, callback_data]
+                  properties:
+                    text: {type: string, minLength: 1, maxLength: 64}
+                    callback_data: {type: string, pattern: '^[A-Za-z0-9_-]+$', minLength: 1, maxLength: 64}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [message_id]
+      properties:
+        message_id: {type: integer}
+    response_success:
+      kind: json_field_equals
+      path: response.body.ok
+      equals: true
+    response_mapping:
+      message_id: "{{response.body.result.message_id}}"
+    http:
+      method: POST
+      url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/editMessageText
+      body:
+        chat_id: "{{input.chat_id}}"
+        message_id: "{{input.message_id}}"
+        text: "{{input.text}}"
+        reply_markup: "{{input.reply_markup}}"
+  telegram.answer_callback:
+    category: provider_connector
+    description: acknowledge one Telegram callback interaction
+    handler_type: http
+    effect_class: non_idempotent_write
+    credentials: [telegram_bot_token]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [callback_query_id]
+      properties:
+        callback_query_id: {type: string, minLength: 1}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [acknowledged]
+      properties:
+        acknowledged:
+          type: boolean
+          enum: [true]
+    response_success:
+      kind: json_field_equals
+      path: response.body.ok
+      equals: true
+    response_mapping:
+      acknowledged: "{{response.body.result}}"
+    http:
+      method: POST
+      url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/answerCallbackQuery
+      body:
+        callback_query_id: "{{input.callback_query_id}}"

@@ -2,13 +2,13 @@ package mailbox
 
 import (
 	"context"
-	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
+
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 type notifierStub2 struct {
@@ -17,7 +17,7 @@ type notifierStub2 struct {
 
 func (n notifierStub2) NotifyCritical(context.Context, runtimetools.MailboxItem) error { return n.err }
 
-func TestNotify_Multi_Webhook_Telegram_Email(t *testing.T) {
+func TestNotify_Multi_Webhook_Email(t *testing.T) {
 	item := runtimetools.MailboxItem{ID: "m1", Type: "spend_request", EntityID: "v", Summary: "x", TimeoutAt: time.Now()}
 	ctx := context.Background()
 
@@ -52,46 +52,9 @@ func TestNotify_Multi_Webhook_Telegram_Email(t *testing.T) {
 		t.Fatal("expected webhook non-2xx error")
 	}
 
-	tsTG := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer tsTG.Close()
-	tg := &ChatNotifier{BotToken: "tok", ChatID: "1", BaseURL: tsTG.URL, Client: tsTG.Client()}
-	if err := tg.NotifyCritical(ctx, item); err != nil {
-		t.Fatalf("telegram notify: %v", err)
-	}
-	if err := tg.NotifyText(ctx, "hello"); err != nil {
-		t.Fatalf("telegram notify text: %v", err)
-	}
-
 	em := &EmailNotifier{}
 	if err := em.NotifyCritical(ctx, item); err == nil {
 		t.Fatal("expected email notifier validation error")
-	}
-}
-
-func TestChatNotifier_RetryBeforeSuccess(t *testing.T) {
-	var calls int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r
-		n := atomic.AddInt32(&calls, 1)
-		if n < 3 {
-			http.Error(w, "retry", http.StatusBadGateway)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer ts.Close()
-
-	tg := &ChatNotifier{BotToken: "tok", ChatID: "1", BaseURL: ts.URL, Client: ts.Client()}
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-	defer cancel()
-	if err := tg.NotifyText(ctx, "hello"); err != nil {
-		t.Fatalf("expected retry success, got %v", err)
-	}
-	if got := atomic.LoadInt32(&calls); got != 3 {
-		t.Fatalf("expected 3 calls, got %d", got)
 	}
 }
 

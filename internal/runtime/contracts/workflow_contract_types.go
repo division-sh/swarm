@@ -1126,6 +1126,11 @@ type ToolInputSchema struct {
 	AdditionalProperties ToolAdditionalProperties   `yaml:"additionalProperties,omitempty"`
 	Minimum              *float64                   `yaml:"minimum,omitempty"`
 	Maximum              *float64                   `yaml:"maximum,omitempty"`
+	Pattern              string                     `yaml:"pattern,omitempty"`
+	MinLength            *int                       `yaml:"minLength,omitempty"`
+	MaxLength            *int                       `yaml:"maxLength,omitempty"`
+	MinItems             *int                       `yaml:"minItems,omitempty"`
+	MaxItems             *int                       `yaml:"maxItems,omitempty"`
 }
 type ProjectPackagePaths struct {
 	Key               string
@@ -2040,21 +2045,34 @@ func (e AgentRegistryEntry) ConfiguredTools() []string {
 }
 
 type ToolSchemaEntry struct {
-	Category           string                `yaml:"category,omitempty"`
-	Description        string                `yaml:"description,omitempty"`
-	HandlerType        string                `yaml:"handler_type,omitempty"`
-	EffectClass        string                `yaml:"effect_class,omitempty"`
-	Permission         string                `yaml:"permission,omitempty"`
-	RequiredPermission string                `yaml:"required_permission,omitempty"`
-	RateLimit          string                `yaml:"rate_limit,omitempty"`
-	RateLimitMaxWait   string                `yaml:"rate_limit_max_wait,omitempty"`
-	InputSchema        ToolInputSchema       `yaml:"input_schema,omitempty"`
-	OutputSchema       ToolInputSchema       `yaml:"output_schema,omitempty"`
-	HTTP               *HTTPToolSpec         `yaml:"http,omitempty"`
-	ResponseMapping    map[string]any        `yaml:"response_mapping,omitempty"`
-	ResponseSuccess    *HTTPResponseSuccess  `yaml:"response_success,omitempty"`
-	Credentials        []string              `yaml:"credentials,omitempty"`
-	ManagedCredential  *ManagedCredentialRef `yaml:"managed_credential,omitempty"`
+	Category           string                    `yaml:"category,omitempty"`
+	Description        string                    `yaml:"description,omitempty"`
+	HandlerType        string                    `yaml:"handler_type,omitempty"`
+	EffectClass        string                    `yaml:"effect_class,omitempty"`
+	Permission         string                    `yaml:"permission,omitempty"`
+	RequiredPermission string                    `yaml:"required_permission,omitempty"`
+	RateLimit          string                    `yaml:"rate_limit,omitempty"`
+	RateLimitMaxWait   string                    `yaml:"rate_limit_max_wait,omitempty"`
+	InputSchema        ToolInputSchema           `yaml:"input_schema,omitempty"`
+	OutputSchema       ToolInputSchema           `yaml:"output_schema,omitempty"`
+	HTTP               *HTTPToolSpec             `yaml:"http,omitempty"`
+	ResponseMapping    map[string]any            `yaml:"response_mapping,omitempty"`
+	ResponseSuccess    *HTTPResponseSuccess      `yaml:"response_success,omitempty"`
+	Credentials        []string                  `yaml:"credentials,omitempty"`
+	ManagedCredential  *ManagedCredentialRef     `yaml:"managed_credential,omitempty"`
+	CompiledResult     *CompiledResultProjection `yaml:"-"`
+}
+
+// CompiledResultProjection is runtime-only adapter data. It is never authored
+// in a workflow or connector manifest.
+type CompiledResultProjection struct {
+	Fields       map[string]CompiledResultField
+	OutputSchema ToolInputSchema
+}
+
+type CompiledResultField struct {
+	From    string
+	Convert string
 }
 
 type HTTPResponseSuccess struct {
@@ -2073,6 +2091,7 @@ type PlatformSpecDocument struct {
 	PermissionsModel struct {
 		Permissions []string `yaml:"permissions"`
 	} `yaml:"permissions_model"`
+	Interfaces map[string]map[string]PackInterfaceDefinition `yaml:"interfaces"`
 	Vocabulary struct {
 		Participant struct {
 			Types map[string]struct {
@@ -2106,6 +2125,29 @@ type PlatformSpecDocument struct {
 	FileLayout       struct {
 		MigrationNote string `yaml:"migration_note"`
 	} `yaml:"file_layout"`
+}
+
+type PackInterfaceDefinition struct {
+	Kind       string                            `yaml:"kind"`
+	Schemas    map[string]ToolInputSchema        `yaml:"schemas"`
+	Operations map[string]PackInterfaceOperation `yaml:"operations"`
+	Events     map[string]PackInterfaceEvent     `yaml:"events"`
+}
+
+type PackInterfaceOperation struct {
+	EffectClass string                        `yaml:"effect_class"`
+	Input       map[string]PackInterfaceField `yaml:"input,omitempty"`
+	Context     map[string]PackInterfaceField `yaml:"context,omitempty"`
+	Output      map[string]PackInterfaceField `yaml:"output,omitempty"`
+}
+
+type PackInterfaceEvent struct {
+	RequiredFields map[string]PackInterfaceField `yaml:"required_fields"`
+}
+
+type PackInterfaceField struct {
+	Schema string `yaml:"schema,omitempty"`
+	Opaque string `yaml:"opaque,omitempty"`
 }
 
 func (s ConfigFromSpec) ConfigEntries() []ConfigBinding {

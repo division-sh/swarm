@@ -280,7 +280,7 @@ func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 	}
 	store := &recordingInboundStore{inserted: true}
 	gateway := newTestInboundGateway(t, bus, nil, nil, store)
-	body := []byte(`{"update_id":123,"message":{"message_id":7,"chat":{"id":42},"text":"hello"}}`)
+	body := []byte(`{"update_id":123,"message":{"message_id":7,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"hello"}}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/chat/telegram", strings.NewReader(string(body)))
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
 	rec := httptest.NewRecorder()
@@ -2347,7 +2347,7 @@ func TestInboundGateway_TelegramManifestOwnsTokenDeliveryIDLiteralEventAndAck(t 
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
 
-	body := []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":42},"text":"hello"}}`)
+	body := []byte(`{"update_id":123456789,"message":{"message_id":7,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"hello"}}`)
 	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", "telegram-secret", body)
 	responseDone := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
@@ -2461,7 +2461,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 		},
 		{
 			name:       "chat id conversion failure",
-			body:       []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":"not-a-number"},"text":"hello"}}`),
+			body:       []byte(`{"update_id":123456789,"message":{"message_id":7,"from":{"id":42},"chat":{"id":"not-a-number","type":"private"},"text":"hello"}}`),
 			configure:  func(*http.Request, []byte) {},
 			wantStatus: http.StatusBadRequest,
 			wantBodyParts: []string{
@@ -2472,18 +2472,18 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 		},
 		{
 			name:       "message id type failure",
-			body:       []byte(`{"update_id":123456789,"message":{"message_id":"seven","chat":{"id":42},"text":"hello"}}`),
+			body:       []byte(`{"update_id":123456789,"message":{"message_id":"seven","from":{"id":42},"chat":{"id":42,"type":"private"},"text":"hello"}}`),
 			configure:  func(*http.Request, []byte) {},
 			wantStatus: http.StatusBadRequest,
 			wantBodyParts: []string{
 				"provider.telegram", "version=0.1.0", "manifest_hash=sha256:",
 				`normalized event "inbound.telegram.text_message"`, `path "message.message_id"`,
-				"value type string is incompatible with integer and implicit conversion is forbidden",
+				"number_to_text requires a numeric value, got string",
 			},
 		},
 		{
 			name:       "message text type failure",
-			body:       []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":42},"text":99}}`),
+			body:       []byte(`{"update_id":123456789,"message":{"message_id":7,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":99}}`),
 			configure:  func(*http.Request, []byte) {},
 			wantStatus: http.StatusBadRequest,
 			wantBodyParts: []string{

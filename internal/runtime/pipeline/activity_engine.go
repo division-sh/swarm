@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +28,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -894,17 +897,20 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 }
 
 type preparedActivityHTTPTool struct {
-	toolName    string
-	method      string
-	url         string
-	headers     http.Header
-	body        []byte
-	timeout     time.Duration
-	client      *http.Client
-	secrets     []string
-	managedAuth *activityManagedHTTPAuth
-	success     *runtimecontracts.HTTPResponseSuccess
-	inputHash   string
+	toolName        string
+	method          string
+	url             string
+	headers         http.Header
+	body            []byte
+	timeout         time.Duration
+	client          *http.Client
+	secrets         []string
+	managedAuth     *activityManagedHTTPAuth
+	success         *runtimecontracts.HTTPResponseSuccess
+	responseMapping map[string]any
+	outputSchema    runtimecontracts.ToolInputSchema
+	compiledResult  *runtimecontracts.CompiledResultProjection
+	inputHash       string
 }
 
 func (d pipelineActivityDispatcher) executeActivityHTTPTool(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (any, error) {
@@ -921,9 +927,6 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 	}
 	if strings.TrimSpace(tool.RateLimit) != "" || strings.TrimSpace(tool.RateLimitMaxWait) != "" {
 		return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "rate_limit_unsupported")
-	}
-	if len(tool.ResponseMapping) > 0 {
-		return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "response_mapping_unsupported")
 	}
 	credentials := map[string]any{}
 	secrets := []string{}
@@ -1008,17 +1011,20 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 		secrets = append(secrets, managedAuth.SecretValues()...)
 	}
 	return preparedActivityHTTPTool{
-		toolName:    intent.Tool,
-		method:      method,
-		url:         url,
-		headers:     headers,
-		body:        body,
-		timeout:     timeout,
-		client:      client,
-		secrets:     secrets,
-		managedAuth: managedAuth,
-		success:     cloneActivityResponseSuccess(tool.ResponseSuccess),
-		inputHash:   activityInputHash(intent.Input),
+		toolName:        intent.Tool,
+		method:          method,
+		url:             url,
+		headers:         headers,
+		body:            body,
+		timeout:         timeout,
+		client:          client,
+		secrets:         secrets,
+		managedAuth:     managedAuth,
+		success:         cloneActivityResponseSuccess(tool.ResponseSuccess),
+		responseMapping: cloneActivityTemplateMap(tool.ResponseMapping),
+		outputSchema:    tool.OutputSchema,
+		compiledResult:  cloneCompiledResultProjection(tool.CompiledResult),
+		inputHash:       activityInputHash(intent.Input),
 	}, nil
 }
 
@@ -1103,7 +1109,28 @@ func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActiv
 		if err := httpresponsesuccess.Evaluate("activity http tool "+strings.TrimSpace(prepared.toolName), prepared.success, responseEnv, prepared.secrets); err != nil {
 			return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "provider_response_rejected", "activity-runtime", "validate_http_response", map[string]any{"tool": prepared.toolName, "status": resp.StatusCode}, err)
 		}
-		return parsed, nil
+		result := parsed
+		if len(prepared.responseMapping) > 0 {
+			mapped, err := resolveActivityTemplateTree(prepared.responseMapping, responseEnv)
+			if err != nil {
+				return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "provider_response_projection_failed", "activity-runtime", "project_http_response", map[string]any{"tool": prepared.toolName, "status": resp.StatusCode}, redactActivityError(err, prepared.secrets))
+			}
+			result = mapped
+		}
+		if prepared.compiledResult != nil {
+			if err := eventschema.ValidateValueAgainstSchema(runtimecontracts.ToolInputSchemaJSONSchema(prepared.outputSchema), result); err != nil {
+				return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "provider_response_schema_invalid", "activity-runtime", "validate_projected_response", map[string]any{"tool": prepared.toolName, "status": resp.StatusCode}, redactActivityError(err, prepared.secrets))
+			}
+			projected, err := projectCompiledActivityResult(result, *prepared.compiledResult)
+			if err != nil {
+				return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "channel_result_projection_failed", "activity-runtime", "project_channel_result", map[string]any{"tool": prepared.toolName, "status": resp.StatusCode}, err)
+			}
+			if err := eventschema.ValidateValueAgainstSchema(runtimecontracts.ToolInputSchemaJSONSchema(prepared.compiledResult.OutputSchema), projected); err != nil {
+				return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "channel_result_schema_invalid", "activity-runtime", "validate_channel_result", map[string]any{"tool": prepared.toolName, "status": resp.StatusCode}, err)
+			}
+			result = projected
+		}
+		return result, nil
 	}
 }
 
@@ -1131,6 +1158,131 @@ func cloneActivityResponseSuccess(check *runtimecontracts.HTTPResponseSuccess) *
 	}
 	out := *check
 	return &out
+}
+
+func cloneActivityTemplateMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = cloneActivityTemplateValue(value)
+	}
+	return out
+}
+
+func cloneActivityTemplateValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneActivityTemplateMap(typed)
+	case []any:
+		out := make([]any, len(typed))
+		for index, item := range typed {
+			out[index] = cloneActivityTemplateValue(item)
+		}
+		return out
+	default:
+		return typed
+	}
+}
+
+func cloneCompiledResultProjection(in *runtimecontracts.CompiledResultProjection) *runtimecontracts.CompiledResultProjection {
+	if in == nil {
+		return nil
+	}
+	out := &runtimecontracts.CompiledResultProjection{
+		Fields:       make(map[string]runtimecontracts.CompiledResultField, len(in.Fields)),
+		OutputSchema: in.OutputSchema,
+	}
+	for target, field := range in.Fields {
+		out.Fields[target] = field
+	}
+	return out
+}
+
+func projectCompiledActivityResult(result any, projection runtimecontracts.CompiledResultProjection) (map[string]any, error) {
+	out := map[string]any{}
+	targets := make([]string, 0, len(projection.Fields))
+	for target := range projection.Fields {
+		targets = append(targets, target)
+	}
+	sort.Strings(targets)
+	for _, target := range targets {
+		field := projection.Fields[target]
+		value, ok := activityValueAtPath(result, strings.TrimPrefix(strings.TrimSpace(field.From), "result."))
+		if !ok {
+			return nil, fmt.Errorf("compiled result source %q is missing", field.From)
+		}
+		converted, err := convertCompiledActivityResult(value, field.Convert)
+		if err != nil {
+			return nil, fmt.Errorf("compiled result source %q: %w", field.From, err)
+		}
+		if err := setActivityValueAtPath(out, target, converted); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func activityValueAtPath(value any, path string) (any, bool) {
+	current := value
+	if strings.TrimSpace(path) == "" {
+		return current, true
+	}
+	for _, segment := range strings.Split(path, ".") {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		current, ok = object[segment]
+		if !ok {
+			return nil, false
+		}
+	}
+	return current, true
+}
+
+func setActivityValueAtPath(out map[string]any, path string, value any) error {
+	parts := strings.Split(strings.TrimSpace(path), ".")
+	if len(parts) == 0 || parts[0] == "" {
+		return fmt.Errorf("compiled result target is required")
+	}
+	current := out
+	for _, segment := range parts[:len(parts)-1] {
+		next, exists := current[segment]
+		if !exists {
+			object := map[string]any{}
+			current[segment] = object
+			current = object
+			continue
+		}
+		object, ok := next.(map[string]any)
+		if !ok {
+			return fmt.Errorf("compiled result target %q overlaps another target", path)
+		}
+		current = object
+	}
+	leaf := parts[len(parts)-1]
+	if _, exists := current[leaf]; exists {
+		return fmt.Errorf("compiled result target %q is assigned more than once", path)
+	}
+	current[leaf] = value
+	return nil
+}
+
+func convertCompiledActivityResult(value any, conversion string) (any, error) {
+	switch strings.TrimSpace(conversion) {
+	case "":
+		return value, nil
+	case runtimecontracts.FieldProjectionConvertNumberToText:
+		number, ok := value.(float64)
+		if !ok || math.IsNaN(number) || math.IsInf(number, 0) || math.Trunc(number) != number || math.Abs(number) > semanticvalue.MaxSafeInteger {
+			return nil, fmt.Errorf("number_to_text requires an exact I-JSON-safe integer")
+		}
+		return strconv.FormatFloat(number, 'f', 0, 64), nil
+	default:
+		return nil, fmt.Errorf("compiled result conversion %q is unsupported", conversion)
+	}
 }
 
 func flattenActivityHTTPHeaders(headers http.Header) map[string]any {

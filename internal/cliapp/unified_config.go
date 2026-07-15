@@ -653,8 +653,28 @@ func unifiedConfigRule(pathParts []string) (unifiedConfigKeyRule, bool) {
 	if rule, ok := unifiedConfigProviderLimitRule(pathParts); ok {
 		return rule, true
 	}
+	if rule, ok := unifiedConfigChannelRule(pathParts); ok {
+		return rule, true
+	}
 	if path == "sharding" || strings.HasPrefix(path, "sharding.") {
 		return unifiedConfigKeyRule{Split: "tracked split: runtime sharding has no supported production consumer; no supported replacement"}, true
+	}
+	return unifiedConfigKeyRule{}, false
+}
+
+func unifiedConfigChannelRule(pathParts []string) (unifiedConfigKeyRule, bool) {
+	if len(pathParts) < 3 || pathParts[0] != "channels" || pathParts[1] != "bindings" {
+		return unifiedConfigKeyRule{}, false
+	}
+	elevatedSection := unifiedConfigKeyRule{Container: true, Elevated: true}
+	switch len(pathParts) {
+	case 3:
+		return elevatedSection, true
+	case 4:
+		switch pathParts[3] {
+		case "pack", "destination":
+			return unifiedConfigKeyRule{Elevated: true}, true
+		}
 	}
 	return unifiedConfigKeyRule{}, false
 }
@@ -769,6 +789,11 @@ func unifiedConfigRules() map[string]unifiedConfigKeyRule {
 		"provider_triggers.packs":                 section,
 		"provider_triggers.packs.platform_dirs":   {Elevated: true},
 		"provider_triggers.packs.external_dirs":   {ProjectContainedPath: true},
+		"channels":                                section,
+		"channels.packs":                          section,
+		"channels.packs.platform_dirs":            {Elevated: true},
+		"channels.packs.external_dirs":            {ProjectContainedPath: true},
+		"channels.bindings":                       elevatedSection,
 		"budget":                                  section,
 		"budget.global_monthly_cap":               {},
 		"budget.per_entity_monthly_cap":           {},

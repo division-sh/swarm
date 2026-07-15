@@ -1,6 +1,67 @@
 platform:
   name: swarm-orchestrator
   version: 0.7.0
+interfaces:
+  swarm.hitl-channel:
+    v1:
+      kind: pack_channel
+      schemas:
+        presentation:
+          type: object
+          additionalProperties: false
+          required: [text]
+          properties:
+            text: {type: string, minLength: 1}
+        actions:
+          type: array
+          minItems: 0
+          items:
+            type: object
+            additionalProperties: false
+            required: [label, token]
+            properties:
+              label: {type: string, minLength: 1}
+              token: {type: string, minLength: 1}
+        nonempty_text: {type: string, minLength: 1}
+        inbound_text: {type: string, minLength: 1}
+      operations:
+        deliver:
+          effect_class: non_idempotent_write
+          input:
+            presentation: {schema: presentation}
+            actions: {schema: actions}
+          context:
+            destination: {opaque: destination}
+          output:
+            delivery_reference: {opaque: delivery_reference}
+        edit:
+          effect_class: non_idempotent_write
+          input:
+            delivery_reference: {opaque: delivery_reference}
+            presentation: {schema: presentation}
+            actions: {schema: actions}
+          context:
+            destination: {opaque: destination}
+          output:
+            delivery_receipt: {opaque: delivery_receipt}
+        acknowledge_interaction:
+          effect_class: non_idempotent_write
+          input:
+            interaction_reference: {opaque: interaction_reference}
+      events:
+        action:
+          required_fields:
+            token: {schema: nonempty_text}
+            interaction_reference: {opaque: interaction_reference}
+            external_account_reference: {opaque: external_account_reference}
+            conversation_reference: {opaque: conversation_reference}
+            provider_message_reference: {opaque: delivery_reference}
+        text:
+          required_fields:
+            text: {schema: inbound_text}
+            external_account_reference: {opaque: external_account_reference}
+            conversation_reference: {opaque: conversation_reference}
+            provider_message_reference: {opaque: delivery_reference}
 spec_authority:
   merge_bearing_owner: platform-spec.yaml
   rule: |
@@ -7620,6 +7681,8 @@ tool_model:
       kinds:
         provider_trigger: accepted provider-trigger manifest packaged by the verified trigger pack
         provider_connector: effective ToolSchemaEntry or installed connector-pack action
+        channel_pack: accepted channel pack whose exact interface, trigger, connector, and adapter generations structurally satisfy one compiled plan
+        channel_outbound_binding: selected channel operation binding whose connector credentials determine outbound-only readiness
       source_values:
         trigger_pack: verified platform or external trigger pack
         trigger_pack_binding: effective standing ingress target compiled from one exact verified trigger pack identity
@@ -7627,6 +7690,8 @@ tool_model:
         connector_pack_import: explicitly imported connector action
         connector_pack: installed but not imported connector action
         flow_local: flow-local ToolSchemaEntry with category provider_connector
+        channel_pack: structurally satisfied immutable channel plan
+        channel_outbound_binding: selected outbound binding projected from that same plan
       applicability_values:
         effective: compiled ingress target or callable connector declaration selected by the contract
         installed: verified pack inventory that is not an effective callable connector
@@ -7657,6 +7722,8 @@ tool_model:
       - call_provider_action
       - lower_through_activity
       - journal_activity_attempts
+      - satisfy_pack_interface
+      - deliver_channel_outbound
       unknown_projection: Unknown capability codes remain verbatim in human output and structured JSON.
     guarantee_enforcement_registry:
       claims:
@@ -8111,6 +8178,114 @@ tool_model:
       generated JWTs, installation tokens, provider errors containing those values, and transport/proxy errors that echo
       generated Authorization headers MUST NOT be returned through logs, events, dead letters, tool results, metadata, or
       CLI/API/status surfaces. Supported readback surfaces return only redacted metadata and failure evidence.
+  hitl_channel_pack_interface:
+    issue: '#1981'
+    interface_identity: swarm.hitl-channel/v1
+    owners:
+      immutable_interface: platform-spec.yaml interfaces.swarm.hitl-channel.v1
+      universal_envelope: internal/packs
+      accepted_trigger_inventory: internal/providertriggers.CatalogSnapshot
+      accepted_connector_inventory: internal/providerconnectors.PackRegistry
+      structural_compiler: internal/packs.CompileChannelInventory
+      outbound_binding: internal/packs.OutboundBindingPlan
+      durable_execution: internal/runtime/pipeline activity attempt owner
+    contract: >
+      A channel pack is a universal-envelope satisfier of one immutable provider-neutral interface. The interface owns
+      presentation, ordered actions, operation/event names, effects, and required semantic fields. It does not own provider
+      request paths, identifier topology, transport limits, credentials, ingress targets, signing, callback registration,
+      operator binding, or provider-specific branches. One accepted trigger generation, one accepted connector generation,
+      and one accepted channel generation compile into one immutable structural plan; verify, preflight, doctor, runtime
+      construction and reload, human/JSON capability readback, selected constraints, and outbound status consume that plan.
+    opaque_reference_slots:
+      exact:
+      - destination
+      - delivery_reference
+      - delivery_receipt
+      - interaction_reference
+      - external_account_reference
+      - conversation_reference
+      rule: >
+        Each satisfier binds every slot exactly once to either a non-empty string schema or a closed object schema whose
+        leaves are all required. Generic channel code validates and carries these semantic values but must not inspect their
+        provider-owned fields or assume scalar, decimal, message-id, account-id, conversation-id, or callback-token shapes.
+        Provider-native conversation-kind vocabulary does not cross the v1 interface; direct-message admission remains a
+        provider trigger predicate.
+    operation_model:
+      exact_operations:
+      - deliver
+      - edit
+      - acknowledge_interaction
+      effect: non_idempotent_write
+      presentation: closed non-empty text
+      actions: ordered closed label/token rows; an empty list is valid and edit with an empty list clears controls
+      acknowledgement_context: >
+        acknowledge_interaction consumes only interaction_reference. Bound destination or any other ambient context must
+        not be injected into the operation.
+    finite_directional_compiler:
+      rules:
+      - resolve exactly one trigger and connector dependency by immutable pack id and role from the accepted inventory
+      - reject duplicate pack ids across trigger, connector, and channel roles
+      - require exact operation and event key sets; missing, duplicate, or unknown rows fail admission
+      - require exact non_idempotent_write effect equality between interface operation and connector tool
+      - require every interface input/context source to be consumed once and every required connector target to be assigned once
+      - permit only scalar identity, one ordered each-item object projection, number_to_text, and decimal_text_to_int32 mappings
+      - reject caller-supplied provider context, ambient values, defaults, functions, concatenation, conditions, or partial mappings
+      - validate connector output first, then apply the compiled channel output projection, then validate the satisfier-bound opaque result
+      - require every exact normalized trigger field and its declared type before compiling an interface event mapping
+      selected_constraints: >
+        Runtime authoring limits are the intersection of interface invariants and the selected connector schemas for deliver
+        and edit. Text length, action count, action-label length, and action-token length require finite maxima; absent or
+        equal patterns are composable and conflicting patterns fail satisfaction. Inputs outside selected bounds fail before
+        provider dispatch and are never truncated.
+    telegram_satisfier:
+      outbound:
+        deliver: telegram.send_interactive
+        edit: telegram.edit_message
+        acknowledge_interaction: telegram.answer_callback
+        constraints: {text_max: 4096, action_count_max: 8, label_max: 64, token_max: 64}
+      inbound:
+        action: inbound.telegram.callback_action
+        text: inbound.telegram.text_message
+        direct_private_predicate: 'when.equals: {message.chat.type: private} or {callback_query.message.chat.type: private}'
+        branch_exclusivity: callback uses callback_query exists/message absent; text uses message exists/callback_query absent
+        numeric_projection: external account, conversation, and provider message integers use number_to_text
+      rule: >
+        Telegram is one data-defined satisfier. Generic pack, runtime, status, and activity code must contain no Telegram
+        branch. A structurally different satisfier with object/scalar reference differences and tighter limits must pass the
+        same production compiler.
+    configuration:
+      pack_roots:
+      - channels.packs.platform_dirs
+      - channels.packs.external_dirs
+      outbound_binding_shape: 'channels.bindings.<id>: {pack: <channel-pack-id>, destination: <provider-owned semantic value>}'
+      trust: >
+        Platform pack directories and binding identities/destinations are elevated operator configuration. External pack
+        directories are project-contained paths. Missing dependencies, malformed packs, duplicate inventory, invalid
+        destinations, or unusable connector requirements fail closed before runtime construction.
+    status:
+      structural:
+        kind: channel_pack
+        state: AVAILABLE
+        meaning: exact immutable interface, trigger, connector, and channel generations compiled successfully
+      outbound:
+        kind: channel_outbound_binding
+        states: [READY, NOT_READY]
+        meaning: selected destination is valid and connector credential requirements are satisfied or named
+      exclusions: >
+        This owner never emits aggregate channel READY and never selects an InboundTarget, signing binding, event route,
+        callback registration, or operator identity. Target-scoped ingress readiness remains #1944 and connected-channel
+        composition remains #2079.
+    durable_result_contract: >
+      Channel runtime tools lower through the existing activity-attempt owner. The provider response success policy and
+      connector response mapping run first; the connector result schema validates second; the compiled channel result and
+      opaque output schema validate third; only that semantic result is journaled. Restart/replay reuses the terminal attempt
+      without provider redispatch. A non-idempotent acknowledgment-loss outcome remains outcome_uncertain and must never
+      auto-retry.
+    retired_owners:
+    - hard-coded required provider-trigger identity inventory and completeness checks
+    - mailbox-owned direct Telegram HTTP notifier and retry loop
+    - provider-specific runtime channel branches
+    compatibility: none; pre-1.0 selected configuration must use the canonical pack and binding owners
   provider_trigger_adapters:
     description: >
       Source authority for first-class provider webhook triggers on top of the existing `inbound.webhook` gateway. The
@@ -8235,48 +8410,20 @@ tool_model:
     pack_envelope_source_authority:
       owner: internal/packs universal envelope plus body-specific verifiers such as internal/providertriggers and internal/providerconnectors
       status: >
-        E5 source-authority path. Provider-trigger packs and provider-connector packs wrap their body-specific canonical
+        E5 source-authority path. Provider-trigger, provider-connector, and channel packs wrap their body-specific canonical
         vocabulary in a universal pack envelope before registration/import. The envelope is a trust/admission artifact, not
-        a provider-specific adapter and not a new body vocabulary owner. First-party configured-provider manifests are
-        filesystem-distributed platform packs, never embedded/default trust fixtures. Elevated runtime config declares their
-        required complete inventory at `provider_triggers.packs.platform_dirs`; an absent/empty key, an omitted required
-        identity, or an unexpected platform identity fails before store selection. Project config cannot select that
+        a provider-specific adapter and not a new body vocabulary owner. Configured-provider manifests are selected
+        filesystem pack inventory, never an executable hard-coded identity list. Elevated runtime config declares platform
+        provider-trigger pack directories at `provider_triggers.packs.platform_dirs`; project config cannot select that
         platform-authored capability source. Runtime config declares external provider-trigger packs separately at
         `provider_triggers.packs.external_dirs`. Relative paths in both lists resolve against the config layer that declares
-        the effective key. `swarm serve` verifies the complete declared set before runtime construction and injects one
+        the effective key. `swarm serve` verifies the declared set before runtime construction and injects one
         immutable catalog snapshot generation into every runtime and Builder replacement runtime. Missing, malformed,
         incompatible, tampered, or
         colliding declared packs fail boot; no executable-relative, current-directory, source-checkout, embedded, package-
         global default, or nil-catalog discovery fallback exists. Connector packs in this first slice are platform packs
         explicitly imported by package.yaml `connector_packs.imports[]`; external connector-pack directories require a later
         gated surface.
-      required_platform_inventory:
-        owner: internal/providertriggers.RequiredPlatformPackIdentities
-        platform_version: 0.7.x
-        identities:
-        - id: provider.github
-          provider: github
-        - id: provider.intercom
-          provider: intercom
-        - id: provider.shopify
-          provider: shopify
-        - id: provider.slack
-          provider: slack
-        - id: provider.stripe
-          provider: stripe
-        - id: provider.telegram
-          provider: telegram
-        - id: provider.twilio
-          provider: twilio
-        - id: provider.typeform
-          provider: typeform
-        admission: >
-          This is the exact first-party provider-trigger identity set required for the current platform minor. The elevated
-          directory declaration selects filesystem locations but cannot weaken identity completeness. Boot loads platform
-          directories through the common verifier, then requires every listed `(id, provider)` pair exactly once and rejects
-          missing, unexpected, or mismatched platform identities before external-pack composition, registry construction,
-          store selection, or runtime construction. External packs cannot satisfy a missing platform identity. Changing this
-          set is a platform release/spec change and must update the runtime owner and drift proof in the same PR.
       envelope_fields:
         id: >
           Required stable pack identity. Values must be normalized ASCII identifiers and must not be inferred from directory
@@ -8286,8 +8433,7 @@ tool_model:
           Required compatibility range checked with the same platform-version constraint grammar used by package admission.
           Missing, malformed, or incompatible ranges fail pack import before provider registration.
         type: >
-          Required pack body type. Supported body types are `trigger` and `connector`. New body types require their own
-          gated proof cases.
+          Required pack body type. Supported body types are `trigger`, `connector`, and `channel`.
         manifest_hash: >
           Required SHA-256 hash of the exact body manifest bytes carried by the pack, formatted as `sha256:<hex>`.
           Implementations MUST NOT hash re-serialized YAML or semantic object forms because those are not stable contract
@@ -8308,8 +8454,8 @@ tool_model:
           a later gated harness; current behavioral proof remains the provider-trigger conformance/runtime suite.
       verification_order:
       - >
-        require the elevated `provider_triggers.packs.platform_dirs` key, read its platform pack directories and the external
-        directories from `provider_triggers.packs.external_dirs`, preserving each effective key's declaring config layer
+        read configured platform pack directories and external directories while preserving each effective key's declaring
+        config layer
       - >
         require platform directory envelopes to declare `provenance.source: platform` and external directory envelopes to
         declare `provenance.source: external`
@@ -8321,7 +8467,6 @@ tool_model:
       - derive body capabilities and requires mechanically from the manifest
       - compare declared capabilities/requires to derived values
       - reject competing immutable identities and duplicate universal pack ids across the composed set
-      - require the exact current-platform first-party `(pack id, provider)` inventory from `required_platform_inventory`
       - reject provider-name/tool-name collisions independently according to the body-specific collision rule
       - construct one immutable CatalogSnapshot and compile every effective ingress plan only from that snapshot
       trust_tiers: >
@@ -18775,7 +18920,7 @@ cli_specification:
               phrases: {pending: pending, in_progress: in progress, delivered: delivered, failed: failed, dead_letter: dead letter}
             provider_subject_kind:
               machine_owner: internal/packs SubjectKind
-              phrases: {provider_trigger: provider trigger pack, provider_connector: provider connector}
+              phrases: {provider_trigger: provider trigger pack, provider_connector: provider connector, channel_pack: channel pack, channel_outbound_binding: channel outbound binding}
             provider_subject_status:
               machine_owner: internal/packs NormalizeSubjects derived SubjectStatus
               phrases: {READY: READY, NOT_READY: NOT READY, AVAILABLE: AVAILABLE}
@@ -18789,6 +18934,8 @@ cli_specification:
                 call_provider_action: call provider action
                 lower_through_activity: lower through platform.activity_requested
                 journal_activity_attempts: journal non-idempotent attempts in activity_attempts
+                satisfy_pack_interface: satisfy pack interface
+                deliver_channel_outbound: deliver channel outbound
             provider_guarantee:
               machine_owner: tool_model.provider_capability_surface.guarantee_enforcement_registry.claims
               phrases:

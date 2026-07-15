@@ -51,7 +51,6 @@ func TestValidateSourceRejectsUnsupportedProviderConnectorShape(t *testing.T) {
 	for _, want := range []string{
 		"effect_class must be non_idempotent_write",
 		"must declare exactly one credential binding mode",
-		"uses response_mapping",
 		"uses rate_limit",
 	} {
 		if !strings.Contains(joined, want) {
@@ -432,6 +431,9 @@ func TestCapabilitySubjectsEnumerateExactInstalledInventoryWithoutMakingToolsEff
 		"microsoft_graph.send_mail",
 		"notion.append_block_children",
 		"slack.post_message",
+		"telegram.answer_callback",
+		"telegram.edit_message",
+		"telegram.send_interactive",
 		"telegram.send_message",
 	}
 	if len(subjects) != len(want) {
@@ -458,7 +460,7 @@ func TestCapabilitySubjectsEffectiveFlowLocalIdentityReplacesAvailableTeachingRo
 	if err != nil {
 		t.Fatalf("CapabilitySubjects: %v", err)
 	}
-	if len(subjects) != 7 {
+	if len(subjects) != 10 {
 		t.Fatalf("subjects = %#v, want one effective identity replacing its installed row", subjects)
 	}
 	for _, subject := range subjects {
@@ -877,7 +879,7 @@ func TestProviderConnectorPackVerificationFailsClosed(t *testing.T) {
 		{
 			name: "retired scalar action capability",
 			mutate: func(t *testing.T, files fstest.MapFS) {
-				replaceConnectorPackFile(t, files, "pack.yaml", "call_provider_actions:\n      - telegram.send_message", "call_provider_action: telegram.send_message")
+				replaceConnectorPackFile(t, files, "pack.yaml", "call_provider_actions:\n      - telegram.answer_callback\n      - telegram.edit_message\n      - telegram.send_interactive\n      - telegram.send_message", "call_provider_action: telegram.send_message")
 			},
 			want: "field call_provider_action not found",
 		},

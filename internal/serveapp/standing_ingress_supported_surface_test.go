@@ -93,10 +93,10 @@ func (telegramPhraseBotLLMRuntime) ContinueSession(ctx context.Context, session 
 	if err := decoder.Decode(&payload); err != nil {
 		return nil, fmt.Errorf("decode phrase-bot event payload: %w", err)
 	}
-	chatID := strings.TrimSpace(fmt.Sprint(payload["chat_id"]))
+	chatID := strings.TrimSpace(fmt.Sprint(payload["conversation_reference"]))
 	messageText := strings.TrimSpace(fmt.Sprint(payload["text"]))
 	if chatID == "" || messageText == "" {
-		return nil, fmt.Errorf("phrase-bot requires chat_id and text")
+		return nil, fmt.Errorf("phrase-bot requires conversation_reference and text")
 	}
 	call := runtimellm.ToolCall{
 		ID:   "reply-" + chatID,
@@ -844,7 +844,7 @@ func requireChangedStandingColdStartReconciled(t *testing.T, opts cliapp.ServeOp
 
 func requireStandingTelegramUnavailable(t testing.TB, baseURL string, updateID int) {
 	t.Helper()
-	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"chat":{"id":42},"text":"hello %d"}}`, updateID, updateID, updateID))
+	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"hello %d"}}`, updateID, updateID, updateID))
 	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/webhooks/chat/telegram", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("new suspended webhook request: %v", err)
@@ -874,7 +874,7 @@ func requireStandingLifecycleTelegramCall(t testing.TB, calls <-chan struct{}, b
 
 func sendStandingTelegramUpdate(t testing.TB, baseURL string, updateID, chatID int) string {
 	t.Helper()
-	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"chat":{"id":%d},"text":"hello %d"}}`, updateID, updateID, chatID, updateID))
+	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":%d},"chat":{"id":%d,"type":"private"},"text":"hello %d"}}`, updateID, updateID, chatID, chatID, updateID))
 	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/webhooks/chat/telegram", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("new webhook request: %v", err)

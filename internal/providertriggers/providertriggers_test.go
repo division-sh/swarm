@@ -97,65 +97,22 @@ func TestPlatformPackInventoryIsCompleteFilesystemOnlyAndFreshlyStamped(t *testi
 	}
 }
 
-func TestRequiredPlatformPackInventoryAdmission(t *testing.T) {
+func TestConfiguredPlatformPackInventoryHasNoHardCodedCompletenessAuthority(t *testing.T) {
 	dirs := testPlatformPackDirs(t)
-	registry, loaded, err := NewCatalogSnapshotFromRequiredPlatformPackDirs("0.7.0", dirs, nil)
+	registry, loaded, err := NewCatalogSnapshotFromPackDirs("0.7.0", dirs[:1], nil)
 	if err != nil {
-		t.Fatalf("load complete required platform inventory: %v", err)
+		t.Fatalf("load configured platform inventory: %v", err)
 	}
-	if registry == nil || len(loaded) != len(RequiredPlatformPackIdentities()) {
-		t.Fatalf("required platform inventory result = registry:%v loaded:%d", registry != nil, len(loaded))
+	if registry == nil || len(loaded) != 1 {
+		t.Fatalf("configured platform inventory result = registry:%v loaded:%d", registry != nil, len(loaded))
 	}
-
-	omitted := make([]string, 0, len(dirs)-1)
-	for _, dir := range dirs {
-		if filepath.Base(dir) != "stripe" {
-			omitted = append(omitted, dir)
-		}
-	}
-	_, _, err = NewCatalogSnapshotFromRequiredPlatformPackDirs("0.7.0", omitted, []string{"/external/must-not-be-read-before-platform-completeness"})
-	if err == nil {
-		t.Fatal("required platform inventory accepted omitted Stripe pack")
-	}
-	for _, want := range []string{"required provider trigger platform inventory mismatch", "missing identities", `"provider.stripe" provider="stripe"`, "provider_triggers.packs.platform_dirs"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("omitted platform identity error = %q, want containing %q", err, want)
-		}
-	}
-
-	platformPacks, err := LoadPlatformPackDirs("0.7.0", dirs...)
+	body, err := os.ReadFile("providertriggers.go")
 	if err != nil {
-		t.Fatalf("load platform packs for hostile inventory cases: %v", err)
+		t.Fatalf("read provider trigger owner: %v", err)
 	}
-	unexpected := append(append([]LoadedPack(nil), platformPacks...), LoadedPack{
-		Envelope:   packs.Envelope{ID: "provider.acme", Provenance: packs.Provenance{Source: packs.ProvenancePlatform}},
-		Manifest:   Manifest{Provider: "acme"},
-		SourcePath: "/platform/acme",
-	})
-	if err := validateRequiredPlatformPackInventory(unexpected); err == nil {
-		t.Fatal("required platform inventory accepted unexpected platform identity")
-	} else {
-		for _, want := range []string{"unexpected identities", "provider.acme", "provider=\"acme\"", "/platform/acme", "provenance=platform"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Fatalf("unexpected platform identity error = %q, want containing %q", err, want)
-			}
-		}
-	}
-
-	mismatched := append([]LoadedPack(nil), platformPacks...)
-	for i := range mismatched {
-		if mismatched[i].Envelope.ID == "provider.github" {
-			mismatched[i].Manifest.Provider = "acme"
-			mismatched[i].SourcePath = "/platform/github-mismatch"
-		}
-	}
-	if err := validateRequiredPlatformPackInventory(mismatched); err == nil {
-		t.Fatal("required platform inventory accepted pack/provider identity mismatch")
-	} else {
-		for _, want := range []string{"identity/provider mismatches", "provider.github", "provider=\"acme\"", "expected provider=\"github\"", "/platform/github-mismatch"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Fatalf("platform identity/provider mismatch error = %q, want containing %q", err, want)
-			}
+	for _, retired := range []string{"requiredPlatformPackIdentities", "RequiredPlatformPackIdentities", "NewCatalogSnapshotFromRequiredPlatformPackDirs"} {
+		if strings.Contains(string(body), retired) {
+			t.Fatalf("provider trigger owner retains hard-coded inventory authority %q", retired)
 		}
 	}
 }

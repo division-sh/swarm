@@ -91,6 +91,7 @@ type localPreflightRequest struct {
 	ContractSecretSeverity LocalPreflightSeverity
 	ProviderTriggerPacks   []providertriggers.LoadedPack
 	ProviderTriggerCatalog *providertriggers.CatalogSnapshot
+	ChannelPacks           ChannelPackLoad
 }
 
 func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) LocalPreflightReport {
@@ -249,6 +250,7 @@ func loadLocalPreflightCapabilitySource(ctx context.Context, req localPreflightR
 	}
 	appendProviderConnectorCapabilitySubjects(ctx, report, source)
 	appendEffectiveProviderTriggerCapabilitySubjects(report, source, req.ProviderTriggerCatalog)
+	appendChannelCapabilitySubjects(report, req.ChannelPacks)
 	return source, contractsRoot, true
 }
 
@@ -591,7 +593,7 @@ func serveLocalPreflightMode(opts ServeOptions) string {
 	return "serve"
 }
 
-func RunServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts ServeOptions, cfg *config.Config, resolvedPaths CLIContractPlatformSpecPaths, workspaceBackend WorkspaceBackendSelection, mountSources WorkspaceMountSources, providerTriggerPacks []providertriggers.LoadedPack, providerTriggerCatalog *providertriggers.CatalogSnapshot) LocalPreflightReport {
+func RunServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts ServeOptions, cfg *config.Config, resolvedPaths CLIContractPlatformSpecPaths, workspaceBackend WorkspaceBackendSelection, mountSources WorkspaceMountSources, providerTriggerPacks []providertriggers.LoadedPack, providerTriggerCatalog *providertriggers.CatalogSnapshot, channelPacks ChannelPackLoad) LocalPreflightReport {
 	mode := serveLocalPreflightMode(opts)
 	return runLocalClaudeCLIPreflight(ctx, localPreflightRequest{
 		Mode:                   mode,
@@ -609,5 +611,6 @@ func RunServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts Serv
 		ContractSecretSeverity: localPreflightCommandSeverityForContractSecrets(mode),
 		ProviderTriggerPacks:   providerTriggerPacks,
 		ProviderTriggerCatalog: providerTriggerCatalog,
+		ChannelPacks:           channelPacks,
 	})
 }

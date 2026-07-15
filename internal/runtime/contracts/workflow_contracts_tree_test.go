@@ -686,6 +686,20 @@ additionalProperties: false
 	if got := strings.TrimSpace(schema.Properties["metadata"].AdditionalProperties.Schema.Type); got != "string" {
 		t.Fatalf("expected nested additionalProperties schema type string, got %q", got)
 	}
+	raw, err := yaml.Marshal(schema)
+	if err != nil {
+		t.Fatalf("marshal tool schema: %v", err)
+	}
+	var roundTrip ToolInputSchema
+	if err := loadYAMLBytes(raw, &roundTrip); err != nil {
+		t.Fatalf("reload marshaled tool schema: %v\n%s", err, raw)
+	}
+	if roundTrip.AdditionalProperties.Allowed == nil || *roundTrip.AdditionalProperties.Allowed {
+		t.Fatalf("round-trip additionalProperties = %+v, want false", roundTrip.AdditionalProperties)
+	}
+	if nested := roundTrip.Properties["metadata"].AdditionalProperties.Schema; nested == nil || strings.TrimSpace(nested.Type) != "string" {
+		t.Fatalf("round-trip nested additionalProperties = %+v, want string schema", nested)
+	}
 }
 
 func TestToolSchemaEntryDecode_RejectsRetiredSchemaAliases(t *testing.T) {

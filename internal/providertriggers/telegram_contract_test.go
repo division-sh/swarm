@@ -47,7 +47,8 @@ func TestTelegramSelectedTextMessageContractUsesShippedPack(t *testing.T) {
 		"update_id": 101,
 		"message": map[string]any{
 			"message_id": 7,
-			"chat":       map[string]any{"id": -1001234567890},
+			"from":       map[string]any{"id": 12345},
+			"chat":       map[string]any{"id": -1001234567890, "type": "private"},
 			"text":       "hello",
 		},
 	}))
@@ -65,18 +66,38 @@ func TestTelegramSelectedTextMessageContractUsesShippedPack(t *testing.T) {
 		t.Fatalf("normalized event = %#v", normalized)
 	}
 	wantPayload := map[string]any{
-		"chat_id": "-1001234567890", "message_id": json.Number("7"), "text": "hello",
-		"raw": map[string]any{
-			"message_id": json.Number("7"),
-			"chat":       map[string]any{"id": json.Number("-1001234567890")},
-			"text":       "hello",
-		},
+		"external_account_reference": "12345", "conversation_reference": "-1001234567890",
+		"provider_message_reference": "7", "text": "hello",
 	}
 	if !reflect.DeepEqual(normalized.Payload, wantPayload) {
 		t.Fatalf("normalized payload = %#v, want %#v", normalized.Payload, wantPayload)
 	}
 	if err := catalog.VerifyProviderOutputAuthorization(normalized.Authorization); err != nil {
 		t.Fatalf("VerifyProviderOutputAuthorization: %v", err)
+	}
+}
+
+func TestTelegramSelectedCallbackActionContractUsesShippedPack(t *testing.T) {
+	_, _, plan := telegramPlatformContract(t)
+	delivery, err := plan.Accept(telegramContractRequest(t, map[string]any{
+		"update_id": 102,
+		"callback_query": map[string]any{
+			"id": "callback-1", "data": "approve_1", "from": map[string]any{"id": 12345},
+			"message": map[string]any{"message_id": 8, "chat": map[string]any{"id": 67890, "type": "private"}},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Accept selected Telegram callback action: %v", err)
+	}
+	if len(delivery.Events) != 2 || delivery.Events[1].Name != "inbound.telegram.callback_action" {
+		t.Fatalf("events = %#v, want raw plus callback_action", delivery.Events)
+	}
+	want := map[string]any{
+		"token": "approve_1", "interaction_reference": "callback-1", "external_account_reference": "12345",
+		"conversation_reference": "67890", "provider_message_reference": "8",
+	}
+	if !reflect.DeepEqual(delivery.Events[1].Payload, want) {
+		t.Fatalf("callback payload = %#v, want %#v", delivery.Events[1].Payload, want)
 	}
 }
 
@@ -255,11 +276,21 @@ func telegramSelectedTriggerDescriptors() []packs.TriggerEventDescriptor {
 			},
 		},
 		{
+			Event: "inbound.telegram.callback_action", Kind: "normalized",
+			Fields: []packs.TriggerEventFieldDescriptor{
+				{Name: "conversation_reference", Type: "text", Required: true, CarryEligible: true},
+				{Name: "external_account_reference", Type: "text", Required: true, CarryEligible: true},
+				{Name: "interaction_reference", Type: "text", Required: true, CarryEligible: true},
+				{Name: "provider_message_reference", Type: "text", Required: true, CarryEligible: true},
+				{Name: "token", Type: "text", Required: true, CarryEligible: true},
+			},
+		},
+		{
 			Event: "inbound.telegram.text_message", Kind: "normalized",
 			Fields: []packs.TriggerEventFieldDescriptor{
-				{Name: "chat_id", Type: "text", Required: true, CarryEligible: true},
-				{Name: "message_id", Type: "integer", Required: true, CarryEligible: true},
-				{Name: "raw", Type: "json"},
+				{Name: "conversation_reference", Type: "text", Required: true, CarryEligible: true},
+				{Name: "external_account_reference", Type: "text", Required: true, CarryEligible: true},
+				{Name: "provider_message_reference", Type: "text", Required: true, CarryEligible: true},
 				{Name: "text", Type: "text", Required: true, CarryEligible: true},
 			},
 		},

@@ -13,6 +13,8 @@ type SubjectKind string
 const (
 	SubjectProviderTrigger   SubjectKind = "provider_trigger"
 	SubjectProviderConnector SubjectKind = "provider_connector"
+	SubjectChannelPack       SubjectKind = "channel_pack"
+	SubjectChannelOutbound   SubjectKind = "channel_outbound_binding"
 )
 
 type SubjectStatus string
@@ -49,6 +51,8 @@ const (
 	CapabilityCallProviderAction   = "call_provider_action"
 	CapabilityLowerThroughActivity = "lower_through_activity"
 	CapabilityJournalAttempts      = "journal_activity_attempts"
+	CapabilitySatisfyPackInterface = "satisfy_pack_interface"
+	CapabilityDeliverChannel       = "deliver_channel_outbound"
 )
 
 const (
@@ -175,6 +179,7 @@ func ProviderHumanCodeValues() map[userfacing.HumanCodeFamily][]string {
 	out := map[userfacing.HumanCodeFamily][]string{
 		userfacing.HumanCodeProviderSubjectKind: {
 			string(SubjectProviderTrigger), string(SubjectProviderConnector),
+			string(SubjectChannelPack), string(SubjectChannelOutbound),
 		},
 		userfacing.HumanCodeProviderSubjectStatus: {
 			string(StatusReady), string(StatusNotReady), string(StatusAvailable),
@@ -183,6 +188,7 @@ func ProviderHumanCodeValues() map[userfacing.HumanCodeFamily][]string {
 			CapabilityReceiveHTTPSRoute, CapabilityVerifySecret, CapabilityEmitEvent,
 			CapabilityPersistDedupeMarkers, CapabilityCallProviderAction,
 			CapabilityLowerThroughActivity, CapabilityJournalAttempts,
+			CapabilitySatisfyPackInterface, CapabilityDeliverChannel,
 		},
 	}
 	for code := range guaranteeRegistry {
@@ -407,6 +413,30 @@ func normalizeSubject(subject *Subject) error {
 		}
 		if subject.Applicability == "installed" && !hasImport {
 			return fmt.Errorf("installed provider connector subject %q must carry an import requirement", subject.ID)
+		}
+	case SubjectChannelPack:
+		if subject.Source != "channel_pack" || subject.Applicability != "installed" {
+			return fmt.Errorf("channel pack subject %q must use channel_pack/installed authority", subject.ID)
+		}
+		if len(subject.Requirements) != 0 {
+			return fmt.Errorf("channel pack subject %q must not carry runtime requirements", subject.ID)
+		}
+		derivedStatus = StatusAvailable
+	case SubjectChannelOutbound:
+		if subject.Source != "channel_binding" || subject.Applicability != "effective" {
+			return fmt.Errorf("channel outbound subject %q must use channel_binding/effective authority", subject.ID)
+		}
+		derivedStatus = StatusReady
+		for _, requirement := range subject.Requirements {
+			if err := validateConnectorRequirement(subject.ID, requirement); err != nil {
+				return err
+			}
+			if requirement.Kind == RequirementImport {
+				return fmt.Errorf("channel outbound subject %q must not carry package import requirements", subject.ID)
+			}
+			if requirement.Satisfied != nil && !*requirement.Satisfied {
+				derivedStatus = StatusNotReady
+			}
 		}
 	default:
 		return fmt.Errorf("capability subject %q has unsupported kind %q", subject.ID, subject.Kind)

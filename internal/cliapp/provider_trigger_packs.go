@@ -24,7 +24,7 @@ func (l ProviderTriggerPackLoad) Reload() (*providertriggers.CatalogSnapshot, er
 	if err != nil {
 		return nil, err
 	}
-	catalog, _, err := providertriggers.NewCatalogSnapshotFromRequiredPlatformPackDirs(runningVersion, l.PlatformDirs, l.ExternalDirs)
+	catalog, _, err := providertriggers.NewCatalogSnapshotFromPackDirs(runningVersion, l.PlatformDirs, l.ExternalDirs)
 	return catalog, err
 }
 
@@ -33,16 +33,13 @@ func LoadConfiguredProviderTriggerPacks(repo string, cfgResult RuntimeConfigLoad
 		return ProviderTriggerPackLoad{}, fmt.Errorf("runtime config is required")
 	}
 	configuredPlatformDirs := cfgResult.Config.ProviderTriggers.Packs.PlatformDirs
-	if len(configuredPlatformDirs) == 0 {
-		return ProviderTriggerPackLoad{}, fmt.Errorf("provider_triggers.packs.platform_dirs is required and must declare the complete first-party platform pack inventory (%s); add this key to elevated operator configuration", requiredProviderTriggerPlatformPackIDs())
-	}
 	runningVersion, err := platform.PlatformVersion()
 	if err != nil {
 		return ProviderTriggerPackLoad{}, err
 	}
 	platformDirs := resolveProviderTriggerPackDirs(repo, providerTriggerPackConfigOrigin(cfgResult, "provider_triggers.packs.platform_dirs"), configuredPlatformDirs)
 	externalDirs := resolveProviderTriggerPackDirs(repo, providerTriggerPackConfigOrigin(cfgResult, "provider_triggers.packs.external_dirs"), cfgResult.Config.ProviderTriggers.Packs.ExternalDirs)
-	catalog, loaded, err := providertriggers.NewCatalogSnapshotFromRequiredPlatformPackDirs(runningVersion, platformDirs, externalDirs)
+	catalog, loaded, err := providertriggers.NewCatalogSnapshotFromPackDirs(runningVersion, platformDirs, externalDirs)
 	if err != nil {
 		return ProviderTriggerPackLoad{}, err
 	}
@@ -52,14 +49,6 @@ func LoadConfiguredProviderTriggerPacks(repo string, cfgResult RuntimeConfigLoad
 		PlatformDirs: platformDirs,
 		ExternalDirs: externalDirs,
 	}, nil
-}
-func requiredProviderTriggerPlatformPackIDs() string {
-	identities := providertriggers.RequiredPlatformPackIdentities()
-	ids := make([]string, 0, len(identities))
-	for _, identity := range identities {
-		ids = append(ids, strings.TrimSpace(identity.ID))
-	}
-	return strings.Join(ids, ", ")
 }
 
 func providerTriggerPackConfigOrigin(cfgResult RuntimeConfigLoadResult, key string) string {

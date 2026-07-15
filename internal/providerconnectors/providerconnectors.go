@@ -40,6 +40,66 @@ type CapabilityOptions struct {
 	IncludeInstalled   bool
 }
 
+// RequirementsForTool evaluates deployment-owned connector requirements for a
+// compiled caller that is not flow-local, such as an outbound channel binding.
+func RequirementsForTool(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, opts CapabilityOptions) ([]packs.Requirement, error) {
+	requires := make([]packs.Requirement, 0, len(tool.Credentials)+1)
+	for _, raw := range tool.Credentials {
+		key := strings.TrimSpace(raw)
+		if key == "" {
+			continue
+		}
+		descriptor, err := runtimecredentials.Describe(ctx, opts.StaticCredentials, nil, key)
+		if err != nil {
+			return nil, err
+		}
+		status := packs.RequirementStatusUnbound
+		if descriptor.Present {
+			status = packs.RequirementStatusBound
+		}
+		requires = append(requires, packs.RequirementWithStatus(packs.RequirementSecret, key, "deployment", status, descriptor.Source))
+	}
+	if tool.ManagedCredential == nil {
+		return requires, nil
+	}
+	key := strings.TrimSpace(tool.ManagedCredential.Key)
+	if key == "" {
+		return nil, fmt.Errorf("provider connector tool %q managed credential key is required", toolID)
+	}
+	descriptors, err := runtimemanagedcredentials.ListRequirementDescriptors(ctx, opts.ManagedCredentials, nil)
+	if err != nil {
+		return nil, err
+	}
+	descriptor := runtimemanagedcredentials.RequirementDescriptor{Descriptor: runtimemanagedcredentials.Descriptor{Key: key, Status: runtimemanagedcredentials.StatusUnconnected}}
+	for _, candidate := range descriptors {
+		if strings.TrimSpace(candidate.Key) == key {
+			descriptor = candidate
+			break
+		}
+	}
+	required := runtimemanagedcredentials.Requirement{
+		Kind: "tool", Name: strings.TrimSpace(toolID),
+		GrantType:           runtimemanagedcredentials.NormalizeGrantType(tool.ManagedCredential.GrantType),
+		Scopes:              append([]string(nil), tool.ManagedCredential.Scopes...),
+		GrantModel:          managedcredentialmodel.NormalizeGrantModel(tool.ManagedCredential.GrantModel),
+		TokenRequest:        managedcredentialmodel.NormalizeTokenRequestProfile(tool.ManagedCredential.TokenRequest),
+		InstallationIDInput: strings.TrimSpace(tool.ManagedCredential.InstallationIDInput),
+	}
+	evaluation := runtimemanagedcredentials.EvaluateRequirement(descriptor, required)
+	status := strings.ToUpper(strings.TrimSpace(evaluation.Descriptor.Status))
+	if status == "" {
+		status = packs.RequirementStatusUnconnected
+	}
+	requirement := packs.RequirementWithStatus(packs.RequirementManagedCredential, key, "deployment", status, "managed_credential_store")
+	requirement.GrantType = required.GrantType
+	requirement.Scopes = normalizeStringSet(required.Scopes)
+	requirement.GrantModel = required.GrantModel
+	profile := tokenRequestFields(required.TokenRequest)
+	requirement.TokenRequest = &profile
+	requirement.InstallationIDInput = required.InstallationIDInput
+	return append(requires, requirement), nil
+}
+
 func ValidateSource(source semanticview.Source) []error {
 	if source == nil {
 		return nil
@@ -177,9 +237,6 @@ func validateTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error 
 		if err := managedcredentialmodel.ValidateTokenRequestProfile(tool.ManagedCredential.TokenRequest); err != nil {
 			errs = append(errs, fmt.Errorf("%s managed_credential.%s", context, err.Error()))
 		}
-	}
-	if len(tool.ResponseMapping) > 0 {
-		errs = append(errs, fmt.Errorf("%s uses response_mapping; connector activity response mapping is split", context))
 	}
 	if tool.ResponseSuccess == nil {
 		errs = append(errs, fmt.Errorf("%s must declare exactly one response_success policy", context))

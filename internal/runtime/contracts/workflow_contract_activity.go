@@ -494,6 +494,21 @@ func toolInputSchemaToJSONSchema(schema ToolInputSchema) map[string]any {
 	if schema.Maximum != nil {
 		out["maximum"] = *schema.Maximum
 	}
+	if value := strings.TrimSpace(schema.Pattern); value != "" {
+		out["pattern"] = value
+	}
+	if schema.MinLength != nil {
+		out["minLength"] = *schema.MinLength
+	}
+	if schema.MaxLength != nil {
+		out["maxLength"] = *schema.MaxLength
+	}
+	if schema.MinItems != nil {
+		out["minItems"] = *schema.MinItems
+	}
+	if schema.MaxItems != nil {
+		out["maxItems"] = *schema.MaxItems
+	}
 	return out
 }
 

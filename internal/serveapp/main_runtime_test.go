@@ -8732,7 +8732,7 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOpti
 	if err != nil {
 		t.Fatalf("load provider packs for preflight proof: %v", err)
 	}
-	report := cliapp.RunServeLocalClaudeCLIPreflight(context.Background(), cliapp.RepoRoot(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, cliapp.WorkspaceMountSources{DataSource: t.TempDir(), DataSourceSource: "test"}, providerPacks.Loaded, providerPacks.Catalog)
+	report := cliapp.RunServeLocalClaudeCLIPreflight(context.Background(), cliapp.RepoRoot(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, cliapp.WorkspaceMountSources{DataSource: t.TempDir(), DataSourceSource: "test"}, providerPacks.Loaded, providerPacks.Catalog, cliapp.ChannelPackLoad{})
 	if report.Mode != wantMode {
 		t.Fatalf("preflight mode = %q, want %q", report.Mode, wantMode)
 	}
@@ -8744,8 +8744,8 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOpti
 	if report.HasBlockers() {
 		t.Fatalf("stale local gateway URL env produced blockers, want warnings only:\n%#v", report)
 	}
-	if len(report.CapabilitySubjects) != 15 {
-		t.Fatalf("%s capability subjects = %#v, want eight triggers plus seven connector actions", wantMode, report.CapabilitySubjects)
+	if len(report.CapabilitySubjects) != 18 {
+		t.Fatalf("%s capability subjects = %#v, want eight triggers plus ten connector actions", wantMode, report.CapabilitySubjects)
 	}
 }
 

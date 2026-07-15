@@ -25,6 +25,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const standingMemoryAsyncProofTimeout = 30 * time.Second
+
 type standingMemoryProviderMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -79,7 +81,7 @@ func (r *standingMemoryProviderRecorder) ServeHTTP(w http.ResponseWriter, req *h
 		http.Error(w, "missing event payload", http.StatusBadRequest)
 		return
 	}
-	chatID := strings.TrimSpace(fmt.Sprint(payload["chat_id"]))
+	chatID := strings.TrimSpace(fmt.Sprint(payload["conversation_reference"]))
 	text := strings.TrimSpace(fmt.Sprint(payload["text"]))
 	arguments, _ := json.Marshal(map[string]any{"chat_id": chatID, "text": "Swarm heard: " + text})
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -105,7 +107,7 @@ func (r *standingMemoryProviderRecorder) snapshot() []standingMemoryProviderRequ
 
 func (r *standingMemoryProviderRecorder) waitForCount(t testing.TB, want int) {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(standingMemoryAsyncProofTimeout)
 	for time.Now().Before(deadline) {
 		if len(r.snapshot()) >= want {
 			return
@@ -324,7 +326,7 @@ func waitForStandingMemoryCompletion(t testing.TB, backend, location string, wan
 		t.Fatalf("open %s completion store: %v", backend, err)
 	}
 	defer db.Close()
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(standingMemoryAsyncProofTimeout)
 	for time.Now().Before(deadline) {
 		var succeeded, unfinishedDeliveries int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND status = 'succeeded'`).Scan(&succeeded); err != nil {
@@ -573,7 +575,7 @@ func requireStandingMemoryTelegramCall(t testing.TB, process *serveRuntimeTestPr
 		if got := strings.TrimSpace(fmt.Sprint(call["chat_id"])); got != fmt.Sprint(chatID) {
 			t.Fatalf("Telegram chat_id = %v, want %d", call["chat_id"], chatID)
 		}
-	case <-time.After(30 * time.Second):
+	case <-time.After(standingMemoryAsyncProofTimeout):
 		diagnostics := standingSQLiteDiagnostics(storeLocation)
 		if strings.HasPrefix(storeLocation, "postgres:") {
 			diagnostics = standingPostgresDiagnostics(strings.TrimPrefix(storeLocation, "postgres:"))

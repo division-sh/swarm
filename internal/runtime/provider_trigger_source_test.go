@@ -25,8 +25,18 @@ func TestSourceWithProviderTriggerEventsImportsEffectivePackSchemasWithoutAuthor
 		t.Fatal("pack event was misclassified as authored")
 	}
 	resolved, name, ok := wrapped.ResolveFlowEventCatalogEntry("coordinator", "inbound.telegram.text_message")
-	if !ok || name != "inbound.telegram.text_message" || resolved.Payload.Properties["chat_id"].Type != "text" {
+	wantFields := []string{"conversation_reference", "external_account_reference", "provider_message_reference", "text"}
+	if !ok || name != "inbound.telegram.text_message" || len(resolved.Payload.Properties) != len(wantFields) {
 		t.Fatalf("flow catalog resolution = (%#v, %q, %v)", resolved, name, ok)
+	}
+	for _, field := range wantFields {
+		spec, exists := resolved.Payload.Properties[field]
+		if !exists || spec.Type != "text" {
+			t.Fatalf("flow catalog field %q = (%#v, %v), want text", field, spec, exists)
+		}
+	}
+	if strings.Join(resolved.Payload.Required, ",") != strings.Join(wantFields, ",") {
+		t.Fatalf("flow catalog required fields = %q, want %q", resolved.Payload.Required, wantFields)
 	}
 	if _, err := ResolveStandingTargetDeclarations(wrapped, catalog); err != nil {
 		t.Fatalf("standing declarations rejected pack-composed source: %v", err)

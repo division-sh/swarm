@@ -36,8 +36,9 @@ type AuthorSubjectManifest struct {
 }
 
 type NormalizedEventWhen struct {
-	Exists []string `yaml:"exists,omitempty"`
-	Absent []string `yaml:"absent,omitempty"`
+	Exists []string          `yaml:"exists,omitempty"`
+	Absent []string          `yaml:"absent,omitempty"`
+	Equals map[string]string `yaml:"equals,omitempty"`
 }
 
 type OutputManifest struct {
@@ -184,6 +185,14 @@ func validateNormalizedWhen(provider, eventName string, declared NormalizedEvent
 			return NormalizedEventWhen{}, fmt.Errorf("%s normalized event %q when path: %w", provider, eventName, err)
 		}
 	}
+	for path, value := range when.Equals {
+		if _, err := runtimepaths.ParseStrictRelative(path); err != nil {
+			return NormalizedEventWhen{}, fmt.Errorf("%s normalized event %q when.equals path: %w", provider, eventName, err)
+		}
+		if value == "" {
+			return NormalizedEventWhen{}, fmt.Errorf("%s normalized event %q when.equals[%q] must be non-empty", provider, eventName, path)
+		}
+	}
 	for _, exists := range when.Exists {
 		for _, absent := range when.Absent {
 			if pathIsSameOrDescendant(exists, absent) {
@@ -201,7 +210,18 @@ func (w NormalizedEventWhen) normalized(fields map[string]runtimecontracts.Field
 			exists = append(exists, field.From)
 		}
 	}
-	return NormalizedEventWhen{Exists: normalizedPaths(exists), Absent: normalizedPaths(w.Absent)}
+	equals := make(map[string]string, len(w.Equals))
+	for path, value := range w.Equals {
+		path = strings.TrimSpace(path)
+		value = strings.TrimSpace(value)
+		if path != "" {
+			equals[path] = value
+		}
+	}
+	if len(equals) == 0 {
+		equals = nil
+	}
+	return NormalizedEventWhen{Exists: normalizedPaths(exists), Absent: normalizedPaths(w.Absent), Equals: equals}
 }
 
 func normalizedPaths(in []string) []string {
@@ -314,6 +334,16 @@ func normalizedWhenMatches(payload any, when NormalizedEventWhen) bool {
 	}
 	for _, path := range when.Absent {
 		if _, ok := valueFromRelativePath(payload, path); ok {
+			return false
+		}
+	}
+	for path, want := range when.Equals {
+		got, ok := valueFromRelativePath(payload, path)
+		if !ok {
+			return false
+		}
+		text, ok := got.(string)
+		if !ok || text != want {
 			return false
 		}
 	}
