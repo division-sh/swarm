@@ -7579,7 +7579,15 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 	if bundleHash == "" {
 		bundleHash = "bundle-v1:sha256:" + strings.Repeat("a", 64)
 	}
-	activation, err := gateruntime.New(runID, "root", entityID, "", "awaiting_review", "launch_review", bundleHash, sourceEventID, now)
+	outcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {Verdict: "approve", AdvancesTo: "done"},
+		"reject":  {Verdict: "reject", AdvancesTo: "rework"},
+	}
+	routes, err := gateruntime.FreezeRoutes(outcomes)
+	if err != nil {
+		t.Fatalf("freeze %s run.stop gate routes: %v", rt.Backend, err)
+	}
+	activation, err := gateruntime.New(runID, "root", entityID, "", "awaiting_review", "launch_review", bundleHash, routes, sourceEventID, now)
 	if err != nil {
 		t.Fatalf("new %s run.stop gate activation: %v", rt.Backend, err)
 	}
@@ -7607,10 +7615,7 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 	}); err != nil {
 		t.Fatalf("seed %s run.stop gated workflow instance: %v", rt.Backend, err)
 	}
-	snapshot, err := decisioncard.FreezeSnapshot(activation.DecisionID, "Run stop review", map[string]any{"operation": "run.stop"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
-		"approve": {Verdict: "approve", AdvancesTo: "done"},
-		"reject":  {Verdict: "reject", AdvancesTo: "rework"},
-	})
+	snapshot, err := decisioncard.FreezeSnapshot(activation.DecisionID, "Run stop review", map[string]any{"operation": "run.stop"}, outcomes)
 	if err != nil {
 		t.Fatalf("freeze %s run.stop decision-card snapshot: %v", rt.Backend, err)
 	}

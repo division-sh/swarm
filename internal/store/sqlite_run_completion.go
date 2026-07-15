@@ -394,6 +394,7 @@ func (s *SQLiteRuntimeStore) sqliteNormalRunCompletionRunReadyTx(
 		sqliteNormalRunCompletionTimersSettledTx,
 		s.sqliteNormalRunCompletionSessionLeasesSettledTx,
 		sqliteNormalRunCompletionHumanTasksSettledTx,
+		sqliteNormalRunCompletionProposedEffectsSettledTx,
 		sqliteNormalRunCompletionGateObligationsSettledTx,
 	}
 	for _, check := range checks {
@@ -403,6 +404,38 @@ func (s *SQLiteRuntimeStore) sqliteNormalRunCompletionRunReadyTx(
 		}
 	}
 	return sqliteNormalRunCompletionEntitiesTerminalTx(ctx, tx, runID, workflowTerminals, flowTerminals)
+}
+
+func sqliteNormalRunCompletionProposedEffectsSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
+	var unresolved bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM decision_cards c
+			LEFT JOIN proposed_effect_continuations p ON p.card_id = c.card_id
+			WHERE c.run_id = ?
+			  AND c.anchor_kind = 'proposed_effect'
+			  AND (
+				p.card_id IS NULL
+				OR p.run_id <> c.run_id
+				OR (
+					c.status = 'decided'
+					AND (
+						p.state NOT IN ('request_released', 'outcome_dispatched')
+						OR p.decision_event_id IS NULL
+						OR p.route_event_id IS NULL
+						OR c.decision_event_id IS NULL
+						OR c.decision_event_id <> p.decision_event_id
+					)
+				)
+				OR (c.status = 'superseded' AND p.state <> 'superseded')
+				OR c.status NOT IN ('decided', 'superseded')
+			  )
+		)
+	`, runID).Scan(&unresolved); err != nil {
+		return false, fmt.Errorf("check sqlite normal run proposed-effect settlement: %w", err)
+	}
+	return !unresolved, nil
 }
 
 func sqliteNormalRunCompletionHumanTasksSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {

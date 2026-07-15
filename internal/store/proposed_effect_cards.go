@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -16,7 +15,6 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
-	"github.com/google/uuid"
 )
 
 var _ decisioncard.ProposedEffectStore = (*PostgresStore)(nil)
@@ -407,10 +405,6 @@ func supersedeProposedEffectsForLoopGenerations(ctx context.Context, tx *sql.Tx,
 		if continuation.EntityID != entityID || !continuation.Generation.Valid() || generationStillCurrent(continuation.Generation, current) {
 			continue
 		}
-		card, err := loadDecisionCard(ctx, tx, cardID, postgres, true)
-		if err != nil {
-			return err
-		}
 		if err := supersedeProposedEffectContinuation(ctx, tx, cardID, reason, at, postgres); err != nil {
 			return err
 		}
@@ -426,19 +420,6 @@ func supersedeProposedEffectsForLoopGenerations(ctx context.Context, tx *sql.Tx,
 			return decisioncard.ErrAlreadyTerminal
 		}
 		if _, err := appendDecisionCardChangeDTO(ctx, tx, runID, cardID, decisioncard.ChangeSuperseded, map[string]any{"reason": reason}, at, postgres); err != nil {
-			return err
-		}
-		payload, err := canonicaljson.Bytes(map[string]any{"card_id": card.CardID, "anchor_kind": card.Anchor.Kind(), "reason": reason})
-		if err != nil {
-			return err
-		}
-		scope, err := card.Anchor.Scope()
-		if err != nil {
-			return err
-		}
-		evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_superseded"), "platform", "", payload, 0, card.RunID, "",
-			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance), at)
-		if err := insertDecisionCardLifecycleOutbox(ctx, tx, card, evt, postgres); err != nil {
 			return err
 		}
 	}

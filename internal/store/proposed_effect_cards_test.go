@@ -93,6 +93,98 @@ func TestProposedEffectCardLifecycleParity(t *testing.T) {
 	}
 }
 
+func TestNormalRunCompletionRequiresSettledProposedEffectsParity(t *testing.T) {
+	testCases := []struct {
+		name          string
+		state         string
+		wantCompleted bool
+	}{
+		{name: "missing_continuation", state: "missing"},
+		{name: "pending", state: decisioncard.ProposedEffectPending},
+		{name: "decision_committed", state: decisioncard.ProposedEffectDecisionCommitted},
+		{name: "request_released", state: decisioncard.ProposedEffectRequestReleased, wantCompleted: true},
+		{name: "outcome_dispatched", state: decisioncard.ProposedEffectOutcomeDispatched, wantCompleted: true},
+		{name: "superseded", state: decisioncard.ProposedEffectSuperseded, wantCompleted: true},
+	}
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, testCase := range testCases {
+			backend, testCase := backend, testCase
+			t.Run(backend+"/"+testCase.name, func(t *testing.T) {
+				ctx := context.Background()
+				cards, runID := decisionCardTestStore(t, backend)
+				store := cards.(decisioncard.ProposedEffectStore)
+				db, postgres := decisionCardStoreDB(t, cards)
+				now := time.Date(2026, 7, 14, 18, 0, 0, 0, time.UTC)
+				generation := attemptgeneration.Generation{
+					LoopID: "revision", ActivationID: uuid.NewString(), RevisionField: "revision_id",
+					RevisionID: uuid.NewString(), Attempt: 1,
+				}
+				card, continuation := newProposedEffectTestCard(t, runID, now, generation)
+				if testCase.state == "missing" {
+					if err := cards.CreateDecisionCard(ctx, card); err != nil {
+						t.Fatalf("CreateDecisionCard malformed proposed effect: %v", err)
+					}
+				} else if err := store.CreateProposedEffectCard(ctx, card, continuation); err != nil {
+					t.Fatalf("CreateProposedEffectCard: %v", err)
+				}
+
+				switch testCase.state {
+				case decisioncard.ProposedEffectDecisionCommitted, decisioncard.ProposedEffectRequestReleased, decisioncard.ProposedEffectOutcomeDispatched:
+					verdict := "approve"
+					if testCase.state == decisioncard.ProposedEffectOutcomeDispatched {
+						verdict = "reject"
+					}
+					decisionEventID := uuid.NewString()
+					if _, err := cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
+						CardID: card.CardID, Verdict: verdict, Fields: semanticvalue.EmptyObject(), ActorTokenID: "operator",
+						ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute),
+					}); err != nil {
+						t.Fatalf("DecideDecisionCard: %v", err)
+					}
+					if testCase.state != decisioncard.ProposedEffectDecisionCommitted {
+						routeEventID := uuid.NewString()
+						if verdict == "approve" {
+							routeEventID = continuation.RequestEventID
+						}
+						if _, err := store.CompleteProposedEffectRoute(ctx, card.CardID, routeEventID, now.Add(2*time.Minute)); err != nil {
+							t.Fatalf("CompleteProposedEffectRoute: %v", err)
+						}
+					}
+				case decisioncard.ProposedEffectSuperseded:
+					next := generation
+					next.RevisionID = uuid.NewString()
+					next.Attempt++
+					if err := store.SupersedeProposedEffectsForLoopGenerations(ctx, runID, continuation.EntityID, []attemptgeneration.Generation{next}, "loop_generation_superseded", now.Add(2*time.Minute)); err != nil {
+						t.Fatalf("SupersedeProposedEffectsForLoopGenerations: %v", err)
+					}
+				}
+
+				entityID := uuid.NewString()
+				seedDecisionCardCompletionEntity(t, db, postgres, runID, entityID, "done", now)
+				eventID := seedDecisionCardCompletionEvent(t, ctx, cards, runID, entityID, now.Add(3*time.Hour))
+				if err := convergeDecisionCardRunCompletion(ctx, cards, eventID); err != nil {
+					t.Fatalf("ConvergeNormalRunCompletion: %v", err)
+				}
+				query := `SELECT status FROM runs WHERE run_id = ?`
+				if postgres {
+					query = `SELECT status FROM runs WHERE run_id = $1::uuid`
+				}
+				var status string
+				if err := db.QueryRowContext(ctx, query, runID).Scan(&status); err != nil {
+					t.Fatalf("load run status: %v", err)
+				}
+				wantStatus := "running"
+				if testCase.wantCompleted {
+					wantStatus = "completed"
+				}
+				if status != wantStatus {
+					t.Fatalf("run status = %q, want %q", status, wantStatus)
+				}
+			})
+		}
+	}
+}
+
 func assertProposedEffectAuthorActivity(t *testing.T, cards decisioncard.Store, runID, cardID, requestEventID string, wantTransitions []string, verdict, supersedeReason string) {
 	t.Helper()
 	reader, ok := cards.(interface {
@@ -296,7 +388,8 @@ func TestProposedEffectDecisionAndSupersessionWinnerParity(t *testing.T) {
 						next.Attempt++
 						return store.SupersedeProposedEffectsForLoopGenerations(ctx, runID, continuation.EntityID, []attemptgeneration.Generation{next}, "loop_generation_superseded", now.Add(2*time.Minute))
 					default:
-						return cards.SupersedeDecisionCardsForRun(ctx, runID, "run_terminated", now.Add(2*time.Minute))
+						_, err := markDecisionCardRunTerminal(ctx, cards, runID, "cancelled", now.Add(2*time.Minute))
+						return err
 					}
 				}
 				if winner == "decision" {
@@ -330,7 +423,7 @@ func TestProposedEffectDecisionAndSupersessionWinnerParity(t *testing.T) {
 				} else if storedCard.Status != decisioncard.StatusSuperseded || storedContinuation.State != decisioncard.ProposedEffectSuperseded {
 					t.Fatalf("supersession winner = card:%s continuation:%s", storedCard.Status, storedContinuation.State)
 				} else {
-					reason := "run_terminated"
+					reason := "run_cancelled"
 					if winner == "loop_supersession" {
 						reason = "loop_generation_superseded"
 					}

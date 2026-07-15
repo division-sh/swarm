@@ -727,7 +727,7 @@ func TestTerminalDecisionCardSupersessionStateChangeOnlyProducerParity(t *testin
 				db, postgres := decisionCardStoreDB(t, cardStore)
 				now := time.Date(2026, 7, 14, 4, 0, 0, 0, time.UTC)
 				entityID := uuid.NewString()
-				activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "state:awaiting_review", now)
+				activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", testGateRoutes(t), "state:awaiting_review", now)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -767,7 +767,7 @@ func TestNormalRunCompletionDecisionGateAuthorityParity(t *testing.T) {
 				db, postgres := decisionCardStoreDB(t, cardStore)
 				now := time.Date(2026, 7, 14, 16, 0, 0, 0, time.UTC)
 				entityID := uuid.NewString()
-				activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "state:awaiting_review", now)
+				activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", testGateRoutes(t), "state:awaiting_review", now)
 				if err != nil {
 					t.Fatal(err)
 				}
