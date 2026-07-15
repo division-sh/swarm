@@ -73,7 +73,7 @@ func TestMockCompletionSpendDoesNotConsumeLiveAdmissionCap(t *testing.T) {
 			mockAuthority := fixture.normal.authority
 			mockAuthority.ExecutionMode = runtimeeffects.ExecutionModeMock
 			mockAuthority.Target.ID = uuid.NewString()
-			mockCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(context.Background(), mockAuthority), runtimeeffects.NewController(fixture.primary))
+			mockCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), mockAuthority), runtimeeffects.NewController(fixture.primary))
 			mockCtx = runtimeeffects.WithExecutionMode(mockCtx, runtimeeffects.ExecutionModeMock)
 			mockCtx = withManagedCompletionTestSurface(t, mockCtx, mockAuthority, "mock_python")
 			mockCtx = runtimeeffects.WithLogicalOperationIdentity(mockCtx, "mock-spend-before-live-cap")
@@ -96,7 +96,7 @@ func TestMockCompletionSpendDoesNotConsumeLiveAdmissionCap(t *testing.T) {
 			liveAuthority := fixture.normal.authority
 			liveAuthority.Target.ID = uuid.NewString()
 			liveAuthority.BudgetScopes = []runtimeeffects.BudgetAdmissionScope{{Kind: "system", CapUSD: 1}}
-			liveCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(context.Background(), liveAuthority), runtimeeffects.NewController(fixture.primary))
+			liveCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), liveAuthority), runtimeeffects.NewController(fixture.primary))
 			liveCtx = runtimeeffects.WithExecutionMode(liveCtx, runtimeeffects.ExecutionModeLive)
 			liveCtx = withManagedCompletionTestSurface(t, liveCtx, liveAuthority, "openai_compatible")
 			liveCtx = runtimeeffects.WithLogicalOperationIdentity(liveCtx, "live-cap-after-mock-spend")

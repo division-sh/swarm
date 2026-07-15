@@ -31,6 +31,8 @@ type TurnContext struct {
 	HasAuthorActivityScope bool
 	BundleSourceFact       runtimecorrelation.BundleSourceFact
 	HasBundleSourceFact    bool
+	ExecutionMode          runtimeeffects.ExecutionMode
+	HasExecutionMode       bool
 	LifecycleToken         runtimeeffects.LifecycleToken
 	HasLifecycleToken      bool
 	EffectController       *runtimeeffects.Controller
@@ -107,6 +109,7 @@ func (r *TurnContextRegistry) RegisterTurnContextWithCapabilitySurface(ctx conte
 	lineage, hasLineage := runtimecorrelation.RuntimeLineageFromContext(ctx)
 	authorActivityScope, hasAuthorActivityScope := runtimeauthoractivity.ScopeFromContext(ctx)
 	bundleSourceFact, hasBundleSourceFact := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	executionMode, hasExecutionMode := runtimeeffects.ExecutionModeFromContext(ctx)
 	lifecycleToken, hasLifecycleToken := runtimeeffects.LifecycleTokenFromContext(ctx)
 	effectController, _ := runtimeeffects.ControllerFromContext(ctx)
 	executionAdmission, hasExecutionAdmission := managedexecution.FromContext(ctx)
@@ -122,6 +125,8 @@ func (r *TurnContextRegistry) RegisterTurnContextWithCapabilitySurface(ctx conte
 		HasAuthorActivityScope: hasAuthorActivityScope,
 		BundleSourceFact:       bundleSourceFact,
 		HasBundleSourceFact:    hasBundleSourceFact,
+		ExecutionMode:          executionMode,
+		HasExecutionMode:       hasExecutionMode,
 		LifecycleToken:         lifecycleToken,
 		HasLifecycleToken:      hasLifecycleToken,
 		EffectController:       effectController,
