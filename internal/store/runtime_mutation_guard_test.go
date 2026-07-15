@@ -239,25 +239,25 @@ func badSQLitePipelineHelper(ctx context.Context, db *sql.DB) error {
 
 func TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary(t *testing.T) {
 	root := repoRootForRuntimeWriterGuard(t)
-	mainData, err := os.ReadFile(filepath.Join(root, "cmd", "swarm", "main.go"))
+	mainData, err := os.ReadFile(filepath.Join(root, "internal", "serveapp", "main.go"))
 	if err != nil {
-		t.Fatalf("read cmd/swarm/main.go: %v", err)
+		t.Fatalf("read internal/serveapp/main.go: %v", err)
 	}
 	mainText := string(mainData)
 	if !strings.Contains(mainText, "NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)") {
-		t.Fatal("cmd/swarm SQLite store construction must wire WorkflowInstanceStore through SQLiteRuntimeStore.RunRuntimeMutation")
+		t.Fatal("serve runtime SQLite store construction must wire WorkflowInstanceStore through SQLiteRuntimeStore.RunRuntimeMutation")
 	}
 	if strings.Contains(mainText, "NewSQLiteWorkflowInstanceStore(sqliteStore.DB)") {
-		t.Fatal("cmd/swarm SQLite store construction uses legacy WorkflowInstanceStore without the runtime mutation boundary")
+		t.Fatal("serve runtime SQLite store construction uses legacy WorkflowInstanceStore without the runtime mutation boundary")
 	}
 	sqliteBlock := runtimeWriterSnippetAfter(mainText, "case storebackend.BackendSQLite:", "default:")
 	if strings.Contains(sqliteBlock, "RuntimeSQLDB:") {
 		t.Fatal("SQLite runtime construction must not expose raw runtime SQLDB to runtime.Stores")
 	}
 
-	facadeData, err := os.ReadFile(filepath.Join(root, "cmd", "swarm", "store_facade.go"))
+	facadeData, err := os.ReadFile(filepath.Join(root, "internal", "serveapp", "store_facade.go"))
 	if err != nil {
-		t.Fatalf("read cmd/swarm/store_facade.go: %v", err)
+		t.Fatalf("read internal/serveapp/store_facade.go: %v", err)
 	}
 	facadeText := string(facadeData)
 	if !strings.Contains(facadeText, "SQLDB:               s.RuntimeSQLDB,") {

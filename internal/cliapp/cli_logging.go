@@ -1,0 +1,141 @@
+package cliapp
+
+import (
+	"flag"
+	"fmt"
+	"strings"
+
+	"github.com/spf13/cobra"
+)
+
+const (
+	cliLogLevelFlag     = "log-level"
+	cliLogLevelFlagHelp = "Set CLI diagnostic logging level: debug, info, warn, error"
+	cliLogLevelDefault  = "info"
+)
+
+type cliLogLevel string
+
+const (
+	cliLogLevelDebug cliLogLevel = "debug"
+	cliLogLevelInfo  cliLogLevel = "info"
+	cliLogLevelWarn  cliLogLevel = "warn"
+	cliLogLevelError cliLogLevel = "error"
+)
+
+type cliLoggingOptions struct {
+	level string
+}
+
+type cliLoggingPolicy struct {
+	level cliLogLevel
+}
+
+func defaultCLILoggingOptions() cliLoggingOptions {
+	return cliLoggingOptions{level: cliLogLevelDefault}
+}
+
+func bindCLILoggingFlags(cmd *cobra.Command, opts *cliLoggingOptions) {
+	*opts = defaultCLILoggingOptions()
+	cmd.Flags().StringVar(&opts.level, cliLogLevelFlag, opts.level, cliLogLevelFlagHelp)
+}
+
+func bindCLILoggingFlagSet(fs *flag.FlagSet, opts *cliLoggingOptions) {
+	*opts = defaultCLILoggingOptions()
+	fs.StringVar(&opts.level, cliLogLevelFlag, opts.level, cliLogLevelFlagHelp)
+}
+
+func applyCLILoggingFlagSetArgs(args []string, opts *cliLoggingOptions) error {
+	level := opts.level
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--":
+			i = len(args)
+		case arg == "--"+cliLogLevelFlag:
+			if i+1 >= len(args) {
+				return fmt.Errorf("flag needs an argument: -%s", cliLogLevelFlag)
+			}
+			level = args[i+1]
+			i++
+		case strings.HasPrefix(arg, "--"+cliLogLevelFlag+"="):
+			level = strings.TrimPrefix(arg, "--"+cliLogLevelFlag+"=")
+		}
+	}
+	opts.level = level
+	return opts.validate()
+}
+
+func validateCLILoggingFlagPlacement(args []string) error {
+	stripped := stripRootPersistentFlags(args)
+	index, flag := firstCLILoggingFlagIndex(stripped)
+	if index < 0 || cliLoggingFlagAfterSupportedLeafCommand(stripped[:index]) || cliLoggingFlagUnderRetiredNamespace(stripped[:index]) || cliTopologyRetiredOrGroupPrefix(stripped[:index]) {
+		return nil
+	}
+	return fmt.Errorf("unknown flag: %s", flag)
+}
+
+func firstCLILoggingFlagIndex(args []string) (int, string) {
+	for i, arg := range args {
+		switch {
+		case arg == "--":
+			return -1, ""
+		case arg == "--"+cliLogLevelFlag:
+			return i, "--" + cliLogLevelFlag
+		case strings.HasPrefix(arg, "--"+cliLogLevelFlag+"="):
+			return i, "--" + cliLogLevelFlag
+		}
+	}
+	return -1, ""
+}
+
+func cliLoggingFlagAfterSupportedLeafCommand(prefix []string) bool {
+	leafCommands := [][]string{
+		{"version"},
+		{"verify"},
+		{"run", "list"},
+		{"health"},
+		{"run", "status"},
+		{"conversation", "list"},
+		{"conversation", "view"},
+		{"conversation", "turn"},
+	}
+	for _, command := range leafCommands {
+		if argsHaveCommandPrefix(prefix, command) {
+			return true
+		}
+	}
+	return false
+}
+
+func cliLoggingFlagUnderRetiredNamespace(prefix []string) bool {
+	return len(prefix) > 0 && prefix[0] == "investigate"
+}
+
+func (opts cliLoggingOptions) validate() error {
+	_, err := opts.resolve()
+	return err
+}
+
+func (opts cliLoggingOptions) resolve() (cliLoggingPolicy, error) {
+	level, err := parseCLILogLevel(opts.level)
+	if err != nil {
+		return cliLoggingPolicy{}, err
+	}
+	return cliLoggingPolicy{level: level}, nil
+}
+
+func parseCLILogLevel(raw string) (cliLogLevel, error) {
+	switch cliLogLevel(raw) {
+	case cliLogLevelDebug:
+		return cliLogLevelDebug, nil
+	case cliLogLevelInfo:
+		return cliLogLevelInfo, nil
+	case cliLogLevelWarn:
+		return cliLogLevelWarn, nil
+	case cliLogLevelError:
+		return cliLogLevelError, nil
+	default:
+		return "", fmt.Errorf("--log-level must be one of debug, info, warn, error")
+	}
+}

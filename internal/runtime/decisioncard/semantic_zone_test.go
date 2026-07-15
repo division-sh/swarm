@@ -106,8 +106,8 @@ func TestRegisteredAnchorKindsStaySynchronizedWithDeclaredConsumers(t *testing.T
 		forbid   string
 	}{
 		{path: "internal/apiv1/operator_mailbox.go", required: "decisioncard.IsRegisteredAnchorKind", forbid: `kind != "stage_gate"`},
-		{path: "cmd/swarm/test_command.go", required: "decisioncard.IsRegisteredAnchorKind", forbid: `anchorKind != "stage_gate"`},
-		{path: "cmd/swarm/control_mailbox.go", required: "decisioncard.RegisteredAnchorKindDescription", forbid: "anchor_kind must be stage_gate"},
+		{path: "internal/cliapp/test_command.go", required: "decisioncard.IsRegisteredAnchorKind", forbid: `anchorKind != "stage_gate"`},
+		{path: "internal/cliapp/control_mailbox.go", required: "decisioncard.RegisteredAnchorKindDescription", forbid: "anchor_kind must be stage_gate"},
 	} {
 		raw, err := os.ReadFile(filepath.Join(root, consumer.path))
 		if err != nil {

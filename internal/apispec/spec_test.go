@@ -539,8 +539,7 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "omitted or false force performs non-force deletion")
 
 	for _, relPath := range []string{
-		filepath.Join("cmd", "swarm", "main.go"),
-		filepath.Join("cmd", "swarm", "fork.go"),
+		filepath.Join("internal", "cliapp", "fork.go"),
 	} {
 		raw, err := os.ReadFile(filepath.Join(repoRoot(t), relPath))
 		if err != nil {

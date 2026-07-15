@@ -14400,7 +14400,7 @@ platform_events:
         produced_by_type: platform
         locations:
         - internal/runtime/runstalled/monitor.go
-        - cmd/swarm/run_stalled_monitor.go
+        - internal/serveapp/run_stalled_monitor.go
       routing_class: event_loop_routable
       scope: flow or global
       payload:
@@ -18185,7 +18185,7 @@ cli_specification:
         arg_count_diagnostics:
           promoted_by: '#1818'
           canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract.diagnostic_convention.arg_count_diagnostics
-          implementation_owner: cmd/swarm/cli_arg_count.go
+          implementation_owner: internal/cli/argcount/arg_count.go
           scope: >
             Shared source authority for public positional argument-count diagnostics on promoted CLI commands. This
             covers too-few and too-many positional args for commands that previously used raw Cobra
@@ -18208,14 +18208,14 @@ cli_specification:
             a safety diagnostic and MUST NOT use the generic quoted-token evidence path because that would echo
             secret material.
           conformance_guard: >
-            `cmd/swarm/cli_output_conformance_registry_test.go` structurally rejects raw
+            `internal/cliapp/cli_output_conformance_registry_test.go` structurally rejects raw
             `cobra.ExactArgs`/`cobra.MaximumNArgs`/`cobra.MinimumNArgs`/`cobra.RangeArgs` uses and stale raw Cobra
             `accepts N arg(s)` expectations for promoted CLI arg-count diagnostics.
       identifier_resolution:
         promoted_by: '#1815'
         canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract.identifier_resolution
-        implementation_owner: cmd/swarm/cli_identifier_registry.go, cmd/swarm/cli_identifier_resolver.go, and the
-          family-aware identifier cells in cmd/swarm/cli_output.go
+        implementation_owner: internal/cliapp/cli_identifier_registry.go, internal/cliapp/cli_identifier_resolver.go, and the
+          family-aware identifier cells in internal/cliapp/cli_output.go
         status: implemented_registry_first_slice
         scope: >
           Shared source authority for classifying every public CLI input that selects or filters an existing resource
@@ -18439,7 +18439,7 @@ cli_specification:
           connections_installation: {command: swarm connections connect, selector: 'flag:installation-id', family: none, mode: different_concept, scope_rule: external provider installation identifier}
           event_publish_emitter: {command: swarm event publish, selector: 'flag:emitter', family: none, mode: different_concept, scope_rule: producer label}
         conformance_guard: >
-          `cmd/swarm/cli_identifier_registry_test.go` compares this registry with the production registry, inventories
+          `internal/cliapp/cli_identifier_registry_test.go` compares this registry with the production registry, inventories
           visible Cobra positional signatures and direct/indirect string flags, requires explicit different-concept
           accounting instead of an identifier-name regex, rejects unsupported family-policy enums and invalid
           family/source/scope/normalization combinations, binds resolver callsites to non-safety resolver rows, requires
@@ -18544,7 +18544,7 @@ cli_specification:
         human_code_projection:
           promoted_by: '#1817'
           canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract.shared_renderer_contract.human_code_projection
-          implementation_owner: internal/userfacing/human_code_projection.go ProjectHumanCode and HumanCodePhrases; cmd/swarm/cli_output.go formatCLIHumanCode is the CLI adapter
+          implementation_owner: internal/userfacing/human_code_projection.go ProjectHumanCode and HumanCodePhrases; internal/cliapp/cli_output.go formatCLIHumanCode is the CLI adapter
           scope: >
             Authoritative human projection for current public status, mode, state, layer, action, outcome, and
             blocking-reason codes rendered by CLI detail, table, summary, stream, mutation, fork, and identifier
@@ -18698,7 +18698,7 @@ cli_specification:
         output_conformance_registry:
           promoted_by: '#1821'
           canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract.command_support.output_conformance_registry
-          implementation_owner: cmd/swarm/cli_output_conformance_registry_test.go
+          implementation_owner: internal/cliapp/cli_output_conformance_registry_test.go
           status: implemented
           rule: >
             This registry is the single living current-state authority for CLI command output-route conformance.
@@ -20089,8 +20089,8 @@ cli_specification:
       schema_inventory:
         flag: --schema-inventory
         canonical_owner: platform-spec.yaml#cli_specification.command_catalog.doctor.schema_inventory
-        implementation_owner: cmd/swarm/doctor_schema_inventory.go doctorSchemaInventory
-        source_owner: cmd/swarm/main.go stateStoreSchemaPlans
+        implementation_owner: internal/cliapp/doctor_schema_inventory.go doctorSchemaInventory
+        source_owner: internal/cliapp/state_store_schema.go StateStoreSchemaPlans
         behavior: >
           Explicitly derives the generated platform and node state-store table plans from the selected contract bundle and
           platform spec without starting runtime or reading/writing runtime database state. Human output renders sorted table
@@ -20639,7 +20639,7 @@ cli_specification:
         - '`--log-level` is governed by cli_specification.foundations.cli_logging_policy, not listener topology.'
       boot_observability:
         implemented_by: '#802/#2010 boot-presentation first slice'
-        canonical_presentation_owner: cmd/swarm/serve_lifecycle_presentation.go serveLifecyclePresenter
+        canonical_presentation_owner: internal/serveapp/serve_lifecycle_presentation.go serveLifecyclePresenter
         flags:
         - --verbose
         - '-v'
@@ -22258,7 +22258,7 @@ cli_specification:
         - --order
       output:
         semantic_projection:
-          canonical_owner: cmd/swarm/runtime_log_projection.go projectRuntimeLogEntry
+          canonical_owner: internal/cliapp/runtime_log_projection.go projectRuntimeLogEntry
           consumers:
           - swarm logs snapshot
           - swarm logs --follow
