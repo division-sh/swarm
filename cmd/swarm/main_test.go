@@ -6302,8 +6302,10 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		t.Fatalf("new decision card anchor: %v", err)
 	}
 	card, err := decisioncard.New(decisioncard.Card{
-		CardID: activation.CardID, RunID: runID, Anchor: anchor,
+		CardID:        activation.CardID,
+		RunID:         runID,
 		ExecutionMode: executionmode.Live,
+		Anchor:        anchor,
 		Snapshot:      snapshot,
 		BundleHash:    bundleHash, WorkflowVersion: "1.0.0",
 		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
@@ -7665,7 +7667,7 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 		t.Fatalf("new %s run.stop decision-card anchor: %v", rt.Backend, err)
 	}
 	card, err := decisioncard.New(decisioncard.Card{
-		CardID: activation.CardID, RunID: runID, Anchor: anchor,
+		CardID: activation.CardID, RunID: runID, ExecutionMode: executionmode.Live, Anchor: anchor,
 		Snapshot: snapshot, BundleHash: bundleHash, WorkflowVersion: "1.0.0",
 		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
 		Provenance:       provenance, CreatedAt: now,

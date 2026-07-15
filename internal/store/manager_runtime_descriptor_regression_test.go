@@ -7,8 +7,21 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/testutil"
 )
+
+func TestPersistedAgentProjectionRejectsLiveDescriptorWithMockArtifact(t *testing.T) {
+	_, err := projectPersistedAgentConfig(runtimeactors.AgentConfig{
+		ID: "live-agent-with-inactive-artifact", Role: "reviewer", Model: "regular", LLMBackend: "anthropic",
+		ExecutionMode: runtimeeffects.ExecutionModeLive, Memory: agentmemory.PlatformDefault(),
+		Mock: mockperformance.Performance{Kind: mockperformance.KindPython, Module: "mocks/reviewer.py", Source: []byte("def handle(input): return {'text': 'mock'}\n"), Digest: "sha256:test"},
+	}, "")
+	if err == nil || !strings.Contains(err.Error(), "live runtime descriptor cannot carry a mock performance artifact") {
+		t.Fatalf("projectPersistedAgentConfig error = %v, want live/mock artifact conflict", err)
+	}
+}
 
 func TestPersistedAgentProjectionRejectsEnabledPlatformDefaultMemory(t *testing.T) {
 	illegal := agentmemory.Plan{Enabled: true, Source: agentmemory.SourcePlatformDefault}

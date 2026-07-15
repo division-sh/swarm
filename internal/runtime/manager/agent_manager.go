@@ -15,6 +15,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -380,6 +381,7 @@ func (am *AgentManager) resolveAgentModel(cfg *models.AgentConfig) error {
 		}
 	} else {
 		cfg.ExecutionMode = runtimeeffects.ExecutionModeLive
+		cfg.Mock = mockperformance.Performance{}
 	}
 	return nil
 }

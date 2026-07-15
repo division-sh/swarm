@@ -5427,7 +5427,9 @@ engine:
           rule: >
             Backend resolution assigns the typed live or mock execution mode before conversation, tool visibility,
             completion authorization, or persistence. Missing or conflicting mode is invalid; no reader infers mode from
-            provider names, artifact presence, or persisted defaults.
+            provider names, artifact presence, or persisted defaults. Source-level mock artifact presence is not backend
+            selection: live profiles omit that inactive alternative from the selected runtime descriptor, while the mock
+            profile retains and requires the exact generation-captured artifact.
         authoring:
           runtime_config: 'llm.backend: mock'
           agent_performance:

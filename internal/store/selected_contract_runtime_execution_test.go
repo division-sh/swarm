@@ -423,8 +423,8 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 	}
 	seedEventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id,run_id,event_name,scope,produced_by_type)
-		VALUES ($1::uuid,$2::uuid,'selected.discard.seed','global','platform')
+		INSERT INTO events (execution_mode,event_id,run_id,event_name,scope,produced_by_type)
+		VALUES ('live',$1::uuid,$2::uuid,'selected.discard.seed','global','platform')
 	`, seedEventID, fixture.forkRun); err != nil {
 		t.Fatalf("seed selected discard event: %v", err)
 	}
@@ -440,8 +440,8 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 	defer func() { _ = allocationTx.Rollback() }()
 	concurrentEventID := uuid.NewString()
 	if _, err := allocationTx.ExecContext(ctx, `
-		INSERT INTO events (event_id,run_id,event_name,scope,produced_by_type)
-		VALUES ($1::uuid,$2::uuid,'selected.discard.concurrent','global','platform')
+		INSERT INTO events (execution_mode,event_id,run_id,event_name,scope,produced_by_type)
+		VALUES ('live',$1::uuid,$2::uuid,'selected.discard.concurrent','global','platform')
 	`, concurrentEventID, fixture.forkRun); err != nil {
 		t.Fatalf("stage competing selected event: %v", err)
 	}
