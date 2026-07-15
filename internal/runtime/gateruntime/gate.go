@@ -136,6 +136,18 @@ func (a *Activation) Supersede(reason string, now time.Time) bool {
 	return a.Validate() == nil
 }
 
+// Freeze retires open or committed-but-unrouted authority while preserving any
+// committed decision event as lineage evidence.
+func (a *Activation) Freeze(reason string, now time.Time) bool {
+	if a == nil || (a.Status != StatusOpen && a.Status != StatusDecisionCommitted) {
+		return false
+	}
+	a.Status = StatusSuperseded
+	a.SupersededReason = strings.TrimSpace(reason)
+	a.UpdatedAt = normalizedNow(now)
+	return a.Validate() == nil
+}
+
 func Store(buckets map[string]map[string]any, activation Activation) error {
 	if buckets == nil {
 		return fmt.Errorf("gate state buckets are nil")

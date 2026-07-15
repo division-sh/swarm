@@ -31,16 +31,16 @@ type flowInstancePersistence interface {
 	LoadRouteRecoveryProjection(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)
 }
 
-type flowInstanceRouteInstaller interface {
-	AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest) error
-}
-
 type flowInstanceRouteContextInstaller interface {
 	AddFlowInstanceRouteContext(context.Context, runtimebus.FlowInstanceRouteMaterializationRequest) error
 }
 
-type flowInstanceRouteRemover interface {
-	RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) error
+type persistedFlowInstanceRouteRestorer interface {
+	RestorePersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest) error
+}
+
+type flowInstanceRouteContextRemover interface {
+	RemoveFlowInstanceRouteContext(context.Context, runtimeflowidentity.Route) error
 }
 
 type terminalFlowInstanceSideEffectPlan struct {
@@ -48,7 +48,8 @@ type terminalFlowInstanceSideEffectPlan struct {
 	FlowPath   string
 	AgentIDs   []string
 	Route      runtimeflowidentity.Route
-	Remover    flowInstanceRouteRemover
+	RunID      string
+	Remover    flowInstanceRouteContextRemover
 	FinalState string
 }
 
@@ -236,10 +237,7 @@ func (am *AgentManager) installFlowInstanceRoute(ctx context.Context, req runtim
 	if installer, ok := am.bus.(flowInstanceRouteContextInstaller); ok && installer != nil {
 		return installer.AddFlowInstanceRouteContext(ctx, request)
 	}
-	if installer, ok := am.bus.(flowInstanceRouteInstaller); ok && installer != nil {
-		return installer.AddFlowInstanceRoute(request)
-	}
-	return fmt.Errorf("event bus does not support derived flow-instance routing for %s", instance.InstancePath)
+	return fmt.Errorf("event bus does not support context-aware derived flow-instance routing for %s", instance.InstancePath)
 }
 
 func (am *AgentManager) logFlowInstanceActivationSideEffectFailure(req runtimepipeline.FlowInstanceActivationRequest, err error) {
@@ -570,15 +568,20 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 		agentIDs = append(agentIDs, strings.TrimSpace(cfg.ID))
 	}
 	sort.Strings(agentIDs)
-	remover, ok := am.bus.(flowInstanceRouteRemover)
+	remover, ok := am.bus.(flowInstanceRouteContextRemover)
 	if !ok || remover == nil {
 		return fmt.Errorf("event bus does not support derived flow-instance route removal for %s", canonicalFlowPath)
+	}
+	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	if runID == "" {
+		return fmt.Errorf("derived flow-instance route removal requires canonical run_id for %s", canonicalFlowPath)
 	}
 	plan := terminalFlowInstanceSideEffectPlan{
 		EntityID:   entityID,
 		FlowPath:   canonicalFlowPath,
 		AgentIDs:   agentIDs,
 		Route:      canonicalRoute,
+		RunID:      runID,
 		Remover:    remover,
 		FinalState: req.FinalState,
 	}
@@ -604,7 +607,9 @@ func (am *AgentManager) applyTerminalFlowInstanceSideEffects(plan terminalFlowIn
 	}
 	if plan.Remover == nil {
 		return fmt.Errorf("event bus does not support derived flow-instance route removal for %s", plan.FlowPath)
-	} else if err := plan.Remover.RemoveFlowInstanceRoute(plan.Route); err != nil {
+	}
+	ctx := runtimecorrelation.WithRunID(context.Background(), plan.RunID)
+	if err := plan.Remover.RemoveFlowInstanceRouteContext(ctx, plan.Route); err != nil {
 		return fmt.Errorf("remove flow instance route %s: %w", plan.FlowPath, err)
 	}
 	return nil

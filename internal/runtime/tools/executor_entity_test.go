@@ -1446,7 +1446,7 @@ accounts:
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
-	activated, err := pg.ActivateRunFork(ctx, store.RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	activated, err := pg.ActivateRunFork(ctx, store.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, ConfirmSourceFreeze: true})
 	if err != nil {
 		t.Fatalf("ActivateRunFork: %v", err)
 	}

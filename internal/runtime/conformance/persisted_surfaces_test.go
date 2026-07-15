@@ -96,6 +96,9 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 	seedConformanceAgent(t, ctx, pg, "agent-1")
 
 	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 	sessionID := uuid.NewString()
 	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
 		AgentID:   "agent-1",
@@ -1746,6 +1749,9 @@ func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProj
 	seedConformanceAgent(t, ctx, pg, "agent-1")
 
 	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 	sessionID := uuid.NewString()
 	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
 		AgentID:   "agent-1",

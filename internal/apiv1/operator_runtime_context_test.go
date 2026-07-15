@@ -340,7 +340,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForUnloadedBundle(t *testing.T)
 		}),
 	})
 	forkResp := rpcCall(t, forkHandler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"bundle_hash":%q,"idempotency_key":"fork-unloaded-context"}}`,
+		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"bundle_hash":%q,"confirm_source_freeze":true,"idempotency_key":"fork-unloaded-context"}}`,
 		runForkTestSourceRunID,
 		runtimeContextTestBundleHashC,
 	))
@@ -405,7 +405,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForDeactivatedBundle(t *testing
 		}),
 	})
 	forkResp := rpcCall(t, forkHandler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"bundle_hash":%q,"idempotency_key":"fork-deactivated-context"}}`,
+		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"bundle_hash":%q,"confirm_source_freeze":true,"idempotency_key":"fork-deactivated-context"}}`,
 		runForkTestSourceRunID,
 		runtimeContextTestBundleHashB,
 	))
@@ -501,7 +501,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 		}),
 	})
 	forkResp := rpcCall(t, forkHandler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"bundle_hash":%q,"idempotency_key":"fork-context"}}`,
+		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"bundle_hash":%q,"confirm_source_freeze":true,"idempotency_key":"fork-context"}}`,
 		runForkTestSourceRunID,
 		runtimeContextTestBundleHashB,
 	))
@@ -512,6 +512,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 		t.Fatalf("run.fork executor calls = %d, want 1", executor.calls)
 	}
 	if executor.last.BundleHash != runtimeContextTestBundleHashB ||
+		!executor.last.ConfirmSourceFreeze ||
 		executor.last.ContractSelection.Mode != store.RunForkContractSelectionModeBundleHash ||
 		executor.last.ContractSelection.BundleHash != runtimeContextTestBundleHashB {
 		t.Fatalf("run.fork executor request = %#v", executor.last)

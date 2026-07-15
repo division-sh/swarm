@@ -35,6 +35,7 @@ func TestForkCommandUsesRunForkRPCAndRenders(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
 		"run", "fork", sourceRunID,
+		"--confirm-source-freeze",
 		"--bundle-hash", bundleHash,
 		"--at-event", forkEventID,
 		"--idempotency-key", "idem-fork-1",
@@ -43,10 +44,11 @@ func TestForkCommandUsesRunForkRPCAndRenders(t *testing.T) {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	assertForkRequest(t, captured, map[string]any{
-		"source_run_id":   sourceRunID,
-		"bundle_hash":     bundleHash,
-		"fork_event_id":   forkEventID,
-		"idempotency_key": "idem-fork-1",
+		"source_run_id":         sourceRunID,
+		"confirm_source_freeze": true,
+		"bundle_hash":           bundleHash,
+		"fork_event_id":         forkEventID,
+		"idempotency_key":       "idem-fork-1",
 	})
 	for _, want := range []string{"Fork created", "source_run_id=" + sourceRunID, "fork_run_id=33333333-3333-3333-3333-333333333333", "bundle_hash=" + bundleHash, "owner=run.fork.selected_contracts.v1"} {
 		if !strings.Contains(stdout.String(), want) {
@@ -72,11 +74,11 @@ func TestForkCommandJSONPreservesAPIShape(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "fork", sourceRunID, "--json"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "fork", sourceRunID, "--confirm-source-freeze", "--json"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	assertForkRequest(t, captured, map[string]any{"source_run_id": sourceRunID})
+	assertForkRequest(t, captured, map[string]any{"source_run_id": sourceRunID, "confirm_source_freeze": true})
 	var decoded map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatalf("decode stdout json: %v\n%s", err, stdout.String())
@@ -206,12 +208,77 @@ func TestForkCommandFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "fork", sourceRunID}, &stdout, &stderr, testRootCommandOptions(server))
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "fork", sourceRunID, "--confirm-source-freeze"}, &stdout, &stderr, testRootCommandOptions(server))
 			if code != tc.wantCode {
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
 			}
 			if !strings.Contains(stderr.String(), tc.wantStderr) {
 				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tc.wantStderr)
+			}
+		})
+	}
+}
+
+func TestForkCommandConfirmsOnlyActiveSourceFreeze(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	const sourceRunID = "11111111-1111-1111-1111-111111111111"
+	bundleHash := validBundleHash("a")
+
+	for _, tc := range []struct {
+		name          string
+		status        string
+		args          []string
+		input         string
+		stdinTerminal bool
+		wantCode      int
+		wantCalls     int
+		wantConfirmed bool
+		wantStderr    string
+	}{
+		{name: "active non tty requires flag", status: "running", args: []string{"run", "fork", sourceRunID}, wantCode: cliExitValidation, wantCalls: 1, wantStderr: "pass --confirm-source-freeze"},
+		{name: "active tty refusal aborts", status: "paused", args: []string{"run", "fork", sourceRunID}, input: "n\n", stdinTerminal: true, wantCode: cliExitValidation, wantCalls: 1, wantStderr: "source run was not frozen"},
+		{name: "active tty confirmation proceeds", status: "running", args: []string{"run", "fork", sourceRunID}, input: "yes\n", stdinTerminal: true, wantCalls: 2, wantConfirmed: true, wantStderr: "Continue? [y/N]"},
+		{name: "terminal source needs no ceremony", status: "completed", args: []string{"run", "fork", sourceRunID}, wantCalls: 2},
+		{name: "explicit flag bypasses preflight", status: "running", args: []string{"run", "fork", sourceRunID, "--confirm-source-freeze"}, wantCalls: 1, wantConfirmed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls []jsonRPCRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				calls = append(calls, req)
+				switch req.Method {
+				case runCommandMethodGet:
+					writeJSONRPCResult(t, w, req.ID, map[string]any{"run": validDiagnosticRunHeaderWithStatus(sourceRunID, tc.status)})
+				case runForkMethod:
+					writeJSONRPCResult(t, w, req.ID, validRunForkResult(sourceRunID, bundleHash))
+				default:
+					t.Errorf("unexpected method %q", req.Method)
+				}
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			opts := testRootCommandOptions(server)
+			opts.input = strings.NewReader(tc.input)
+			opts.stdinIsTerminal = func() bool { return tc.stdinTerminal }
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, opts)
+			if code != tc.wantCode {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
+			}
+			if len(calls) != tc.wantCalls {
+				t.Fatalf("RPC calls = %d, want %d", len(calls), tc.wantCalls)
+			}
+			if tc.wantStderr != "" && !strings.Contains(stderr.String(), tc.wantStderr) {
+				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tc.wantStderr)
+			}
+			if tc.wantCalls > 0 && calls[len(calls)-1].Method == runForkMethod {
+				confirmed, _ := calls[len(calls)-1].Params["confirm_source_freeze"].(bool)
+				if confirmed != tc.wantConfirmed {
+					t.Fatalf("confirm_source_freeze = %v, want %v", confirmed, tc.wantConfirmed)
+				}
 			}
 		})
 	}

@@ -904,7 +904,7 @@ func TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonical
 	targetFlowInstance := "operating/inst-1"
 	targetEntityID := runtimeflowidentity.EntityID(targetFlowInstance)
 	seedEventPublishEntityState(t, db, runID, targetEntityID, targetFlowInstance, "waiting")
-	if err := bus.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
+	if err := bus.AddFlowInstanceRouteContext(runtimecorrelation.WithRunID(ctx, runID), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 
@@ -1019,7 +1019,7 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 	targetFlowInstance := "operating/inst-1"
 	targetEntityID := runtimeflowidentity.EntityID(targetFlowInstance)
 	seedEventPublishEntityState(t, db, runID, targetEntityID, targetFlowInstance, "waiting")
-	if err := bus.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
+	if err := bus.AddFlowInstanceRouteContext(runtimecorrelation.WithRunID(ctx, runID), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	mismatchEntityID := uuid.NewString()

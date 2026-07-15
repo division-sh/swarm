@@ -182,7 +182,7 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	for _, route := range mustFanInBarrierRoutes(t, backend) {
-		if err := eventBus.AddFlowInstanceRouteContext(context.Background(), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route.Identity}); err != nil {
+		if err := eventBus.RestorePersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route.Identity}); err != nil {
 			t.Fatalf("restore fan-in route %s: %v", route.Identity.InstancePath, err)
 		}
 	}

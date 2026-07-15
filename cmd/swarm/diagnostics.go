@@ -152,6 +152,7 @@ type diagnosticRunHeader struct {
 	StartedAt        string                    `json:"started_at"`
 	EndedAt          string                    `json:"ended_at,omitempty"`
 	ForkedFromRunID  string                    `json:"forked_from_run_id,omitempty"`
+	ContinuedAsRunID string                    `json:"continued_as_run_id,omitempty"`
 	Failure          *runtimefailures.Envelope `json:"failure,omitempty"`
 	ControlReason    string                    `json:"control_reason,omitempty"`
 }
@@ -1361,6 +1362,13 @@ func validateDiagnosticRunHeader(prefix string, run diagnosticRunHeader) error {
 	if status == "cancelled" && strings.TrimSpace(run.ControlReason) == "" {
 		return fmt.Errorf("malformed run header: %s.control_reason is required for cancelled status", prefix)
 	}
+	continuedAsRunID := strings.TrimSpace(run.ContinuedAsRunID)
+	if status == "forked" && continuedAsRunID == "" {
+		return fmt.Errorf("malformed run header: %s.continued_as_run_id is required for forked status", prefix)
+	}
+	if status != "forked" && continuedAsRunID != "" {
+		return fmt.Errorf("malformed run header: %s.continued_as_run_id is forbidden for status %s", prefix, status)
+	}
 	return nil
 }
 
@@ -1394,7 +1402,7 @@ func writeDiagnosticRunList(out io.Writer, result diagnosticRunListResult) {
 	for _, run := range result.Runs {
 		rows = append(rows, []string{
 			run.RunID,
-			formatCLIHumanCode(cliHumanCodeRunStatus, run.Status),
+			diagnosticRunStatusLabel(run),
 			run.StartedAt,
 			fmt.Sprintf("%d", intPointerValue(run.EventCount)),
 			fmt.Sprintf("%d", intPointerValue(run.EntityCount)),
@@ -1425,7 +1433,7 @@ func writeDiagnosticRunHeader(out io.Writer, run diagnosticRunHeader) {
 		return
 	}
 	writeCLILabeledDetail(out, cliLabeledDetail{
-		Title: fmt.Sprintf("Run %s  %s", run.RunID, formatCLIHumanCode(cliHumanCodeRunStatus, run.Status)),
+		Title: fmt.Sprintf("Run %s  %s", run.RunID, diagnosticRunStatusLabel(run)),
 		Rows:  diagnosticRunHeaderRows(run),
 	})
 }
@@ -1436,7 +1444,7 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result diagnosticRunDiagnosisRes
 	}
 	rows := diagnosticRunHeaderRows(result.Run)
 	state := stringPointerValue(result.OperationalState)
-	if projectedRunStatus := formatCLIHumanCode(cliHumanCodeRunStatus, result.Run.Status); projectedRunStatus != formatCLIHumanCode(cliHumanCodeOperationalState, state) {
+	if projectedRunStatus := diagnosticRunStatusLabel(result.Run); projectedRunStatus != formatCLIHumanCode(cliHumanCodeOperationalState, state) {
 		rows = append(rows, cliLabeledDetailRow{Label: "run status", Value: projectedRunStatus})
 	}
 	if result.TestQuiescence != nil {
@@ -1481,14 +1489,26 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result diagnosticRunDiagnosisRes
 		}
 		failures = append(failures, value)
 	}
+	titleState := formatCLIHumanCode(cliHumanCodeOperationalState, state)
+	if strings.EqualFold(strings.TrimSpace(state), "forked") {
+		titleState = diagnosticRunStatusLabel(result.Run)
+	}
 	writeCLILabeledDetail(out, cliLabeledDetail{
-		Title: fmt.Sprintf("Run %s  %s", result.Run.RunID, formatCLIHumanCode(cliHumanCodeOperationalState, state)),
+		Title: fmt.Sprintf("Run %s  %s", result.Run.RunID, titleState),
 		Rows:  rows,
 		Sections: []cliLabeledDetailSection{
 			{Label: "notes", Items: result.Heuristics},
 			{Label: "failed deliveries", Items: failures},
 		},
 	})
+}
+
+func diagnosticRunStatusLabel(run diagnosticRunHeader) string {
+	status := formatCLIHumanCode(cliHumanCodeRunStatus, run.Status)
+	if strings.EqualFold(strings.TrimSpace(run.Status), "forked") && strings.TrimSpace(run.ContinuedAsRunID) != "" {
+		return fmt.Sprintf("%s - continued as run %s", status, strings.TrimSpace(run.ContinuedAsRunID))
+	}
+	return status
 }
 
 func diagnosticRunHeaderRows(run diagnosticRunHeader) []cliLabeledDetailRow {
@@ -1506,6 +1526,9 @@ func diagnosticRunHeaderRows(run diagnosticRunHeader) []cliLabeledDetailRow {
 	}
 	if run.ForkedFromRunID != "" {
 		rows = append(rows, cliLabeledDetailRow{Label: "forked from", Value: run.ForkedFromRunID})
+	}
+	if run.ContinuedAsRunID != "" {
+		rows = append(rows, cliLabeledDetailRow{Label: "continued as", Value: run.ContinuedAsRunID})
 	}
 	if run.Failure != nil {
 		rows = append(rows,

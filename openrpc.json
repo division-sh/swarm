@@ -6160,6 +6160,15 @@
           }
         },
         {
+          "name": "confirm_source_freeze",
+          "required": false,
+          "description": "Must be true when the selected operation freezes a running or paused source. The mutation rechecks source activity and this acknowledgment in the source-freeze transaction. Terminal sources refuse without requiring confirmation.",
+          "schema": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        {
           "name": "idempotency_key",
           "required": false,
           "schema": {
@@ -12697,6 +12706,10 @@
       "RunHeader": {
         "additionalProperties": false,
         "properties": {
+          "continued_as_run_id": {
+            "$ref": "#/components/schemas/OpaqueId",
+            "description": "Present on a source frozen by a freeze-style fork; identifies the one run that continues its state."
+          },
           "control_reason": {
             "description": "Separate lifecycle-control reason from run_control_state; for cancelled runs this is the terminal reason and never a failure class.",
             "type": "string"

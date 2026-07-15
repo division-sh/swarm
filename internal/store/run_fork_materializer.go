@@ -133,6 +133,9 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req RunForkMater
 		return RunForkMaterialization{}, err
 	}
 	ctx = storyctx
+	if err := storerunlifecycle.RequireActive(ctx, tx, plan.SourceRunID, storerunlifecycle.DialectPostgres); err != nil {
+		return RunForkMaterialization{}, fmt.Errorf("admit fork materialization source: %w", err)
+	}
 
 	if err := ensureRunForkNotAlreadyMaterialized(ctx, tx, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID); err != nil {
 		return RunForkMaterialization{}, err

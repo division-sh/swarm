@@ -13,6 +13,7 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -77,6 +78,9 @@ func (s *SQLiteRuntimeStore) acquireSQLiteLiveSession(ctx context.Context, ident
 	var lease *runtimesessions.Lease
 	var conversation runtimellm.ConversationRecord
 	if err := s.runRuntimeMutation(ctx, "sqlite session acquire", func(txctx context.Context, tx *sql.Tx) error {
+		if err := storerunlifecycle.RequireActive(txctx, tx, identity.RunID, storerunlifecycle.DialectSQLite); err != nil {
+			return err
+		}
 		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity.AgentID, "acquire_hydrate", false); err != nil {
 			return err
 		}
@@ -152,6 +156,9 @@ func (s *SQLiteRuntimeStore) Release(ctx context.Context, lease *runtimesessions
 	defer s.sessionMu.Unlock()
 	var rows int64
 	if err := s.runRuntimeMutation(ctx, "sqlite session release", func(txctx context.Context, tx *sql.Tx) error {
+		if err := storerunlifecycle.RequireActive(txctx, tx, identity.RunID, storerunlifecycle.DialectSQLite); err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(txctx, `
 			UPDATE agent_sessions SET lease_holder=NULL, lease_expires_at=NULL, updated_at=?
 			WHERE run_id=? AND agent_id=? AND flow_instance=? AND session_id=? AND lease_holder=? AND status='active'
@@ -185,6 +192,9 @@ func (s *SQLiteRuntimeStore) Rotate(ctx context.Context, identity agentmemory.Id
 	defer s.sessionMu.Unlock()
 	var lease *runtimesessions.Lease
 	if err := s.runRuntimeMutation(ctx, "sqlite session rotate", func(txctx context.Context, tx *sql.Tx) error {
+		if err := storerunlifecycle.RequireActive(txctx, tx, identity.RunID, storerunlifecycle.DialectSQLite); err != nil {
+			return err
+		}
 		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity.AgentID, "rotate", false); err != nil {
 			return err
 		}
@@ -239,6 +249,9 @@ func (s *SQLiteRuntimeStore) IncrementTurn(ctx context.Context, identity agentme
 	}
 	var rows int64
 	if err := s.runRuntimeMutation(ctx, "sqlite session turn increment", func(txctx context.Context, tx *sql.Tx) error {
+		if err := storerunlifecycle.RequireActive(txctx, tx, identity.RunID, storerunlifecycle.DialectSQLite); err != nil {
+			return err
+		}
 		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity.AgentID, "increment_turn", false); err != nil {
 			return err
 		}
@@ -269,6 +282,9 @@ func (s *SQLiteRuntimeStore) AdoptSessionID(ctx context.Context, identity agentm
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
 	return s.runRuntimeMutation(ctx, "sqlite adopt session id", func(txctx context.Context, tx *sql.Tx) error {
+		if err := storerunlifecycle.RequireActive(txctx, tx, identity.RunID, storerunlifecycle.DialectSQLite); err != nil {
+			return err
+		}
 		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity.AgentID, "adopt_provider_session", false); err != nil {
 			return err
 		}

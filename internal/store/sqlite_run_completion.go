@@ -279,12 +279,12 @@ func (s *SQLiteRuntimeStore) sqliteMarkRunTerminalTx(ctx context.Context, tx *sq
 		if !sameSQLiteRunFailure(current.Failure, failure) {
 			return storerunlifecycle.Snapshot{}, fmt.Errorf("run %s already terminal with conflicting failure", runID)
 		}
-		if err := supersedeDecisionCardsForRun(ctx, tx, runID, "run_"+status, endedAt, false); err != nil {
+		if err := supersedeDecisionCardsForRun(ctx, tx, runID, "run_"+status, endedAt, false, false); err != nil {
 			return storerunlifecycle.Snapshot{}, err
 		}
 		return current, nil
 	}
-	if err := supersedeDecisionCardsForRun(ctx, tx, runID, "run_"+status, endedAt, false); err != nil {
+	if err := supersedeDecisionCardsForRun(ctx, tx, runID, "run_"+status, endedAt, false, false); err != nil {
 		return storerunlifecycle.Snapshot{}, err
 	}
 	snapshot, err := s.sqliteLoadRunLifecycleSnapshot(ctx, tx, runID)

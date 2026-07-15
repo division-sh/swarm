@@ -119,7 +119,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			}
 			loader := &fakeSelectedContractSourceLoader{loaded: selectedContractActivityLoadedSource(source, selection)}
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-				SourceRunID: sourceRunID, At: sourceRequestEventID, Store: pg,
+				SourceRunID: sourceRunID, At: sourceRequestEventID, ConfirmSourceFreeze: true, Store: pg,
 				SourceLoader: loader, ContractSelection: selection,
 			})
 			if err != nil {

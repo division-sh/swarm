@@ -412,6 +412,7 @@ func TestHandleWorkflowStageTimerFireDeactivatesTerminalTemplateFlow(t *testing.
 	runID := uuid.NewString()
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
+	ensurePipelineTestRun(t, store, runID)
 	source := semanticview.Wrap(stageTimerTemplateLifecycleBundle())
 	var deactivated FlowInstanceDeactivationRequest
 	pc := &PipelineCoordinator{
@@ -480,6 +481,7 @@ func TestPipelineEngineStateRepoSaveStateArmsInitialStageTimersWithSQLiteStore(t
 	runID := uuid.NewString()
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
+	ensurePipelineTestRun(t, store, runID)
 	schedules := &recordingSchedulePersistence{}
 	source := semanticview.Wrap(stageTimerLifecycleBundle())
 	pc := &PipelineCoordinator{

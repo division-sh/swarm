@@ -246,7 +246,7 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 			t.Fatalf("ListFlowInstanceRoutes: %v", err)
 		}
 		for _, route := range routes {
-			if err := eventBus.AddFlowInstanceRouteContext(context.Background(), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route}); err != nil {
+			if err := eventBus.RestorePersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route}); err != nil {
 				t.Fatalf("restore flow-instance route %s: %v", route.InstancePath, err)
 			}
 		}

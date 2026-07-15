@@ -20,6 +20,7 @@ const (
 
 type RunForkActivateRequest struct {
 	ForkRunID                         string
+	ConfirmSourceFreeze               bool
 	HistoricalReplayExecutionAdmitter RunForkHistoricalReplayExecutionAdmitter
 }
 
@@ -62,7 +63,7 @@ func RequireRunForkActivationCapabilities(caps StoreSchemaCapabilities, catalog 
 		return err
 	}
 	required := map[string][]string{
-		"runs":                          {"run_id", "status", "forked_from_run_id", "forked_from_event_id", "ended_at"},
+		"runs":                          {"run_id", "status", "forked_from_run_id", "forked_from_event_id", "continued_as_run_id", "ended_at"},
 		"entity_state":                  {"run_id", "entity_id", "flow_instance", "updated_at"},
 		runForkDeliveryEventReplayTable: {"fork_run_id", "source_run_id", "source_event_id", "source_delivery_id", "fork_event_id", "fork_delivery_id", "subscriber_type", "subscriber_id"},
 	}
@@ -190,20 +191,6 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 	}
 
 	now := time.Now().UTC()
-	sourceResult, err := tx.ExecContext(ctx, `
-		UPDATE runs
-		SET status = $2, ended_at = COALESCE(ended_at, $3)
-		WHERE run_id = $1::uuid
-		  AND status IN ('running', 'paused')
-	`, lineage.SourceRunID, RunForkSourceFrozenStatus, now)
-	if err != nil {
-		return result, fmt.Errorf("freeze source run: %w", err)
-	}
-	if affected, err := sourceResult.RowsAffected(); err != nil {
-		return result, fmt.Errorf("confirm source freeze: %w", err)
-	} else if affected != 1 {
-		return result, fmt.Errorf("fork activation blocked: source_run_freeze_not_applied")
-	}
 	replayResult := RunForkDeliveryEventReplayResult{
 		Owner:       RunForkDeliveryEventReplayOwner,
 		SourceRunID: lineage.SourceRunID,
@@ -215,21 +202,7 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 			return result, err
 		}
 	}
-	forkResult, err := tx.ExecContext(ctx, `
-		UPDATE runs
-		SET status = $2, ended_at = NULL
-		WHERE run_id = $1::uuid
-		  AND status = $3
-	`, lineage.ForkRunID, RunForkActivatedStatus, RunForkMaterializedStatus)
-	if err != nil {
-		return result, fmt.Errorf("activate fork run: %w", err)
-	}
-	if affected, err := forkResult.RowsAffected(); err != nil {
-		return result, fmt.Errorf("confirm fork activation: %w", err)
-	} else if affected != 1 {
-		return result, fmt.Errorf("fork activation blocked: fork_run_activation_not_applied")
-	}
-	if err := recordRunForkActivationAuthorActivity(ctx, lineage, now, true); err != nil {
+	if err := applyRunForkSourceFreeze(ctx, tx, lineage, now, req.ConfirmSourceFreeze); err != nil {
 		return result, err
 	}
 	if err := commitRunForkAuthorActivityTransaction(ctx, tx); err != nil {

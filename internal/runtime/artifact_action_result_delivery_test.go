@@ -90,7 +90,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 			case <-time.After(2 * time.Second):
 				t.Fatal("workflow runtime did not subscribe")
 			}
-			if err := bus.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("repo-scaffold", "inst-1")}); err != nil {
+			if err := bus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("repo-scaffold", "inst-1")}); err != nil {
 				t.Fatalf("AddFlowInstanceRoute: %v", err)
 			}
 

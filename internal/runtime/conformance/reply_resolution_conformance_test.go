@@ -19,6 +19,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -280,6 +281,7 @@ func TestReplyResolutionConformance_DurableRestartRoutesOverlappingRequestsOnBot
 			backend := tc.setup(t)
 			runID := uuid.NewString()
 			seedDurableReplyConformanceRun(t, ctx, backend, runID)
+			ctx = runtimecorrelation.WithRunID(ctx, runID)
 
 			requestBus := newDurableReplyConformanceBus(t, ctx, backend, source)
 			type requestCase struct {
@@ -384,6 +386,7 @@ func TestReplyResolutionConformance_DurableExplicitCorrelationFailsClosedOnBothB
 			backend := backendCase.setup(t)
 			runID := uuid.NewString()
 			seedDurableReplyConformanceRun(t, ctx, backend, runID)
+			ctx = runtimecorrelation.WithRunID(ctx, runID)
 			eb := newDurableReplyConformanceBus(t, ctx, backend, source)
 
 			for _, invalid := range []struct {
@@ -488,6 +491,7 @@ func TestReplyResolutionConformance_TypedHumanTaskPreservesReplyAuthorityAcrossR
 			}
 			runID := uuid.NewString()
 			seedDurableReplyConformanceRun(t, ctx, backend, runID)
+			ctx = runtimecorrelation.WithRunID(ctx, runID)
 
 			requestBus := newDurableReplyConformanceBus(t, ctx, backend, source)
 			requestID := uuid.NewString()
@@ -760,6 +764,7 @@ func receiveReplyConformanceHumanTaskOutcome(t *testing.T, outcomes <-chan event
 
 type durableReplyConformanceStore interface {
 	bus.EventStore
+	bus.FlowInstanceRoutePersistence
 	runtimereplycontext.Store
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 }
@@ -773,11 +778,26 @@ func newDurableReplyConformanceBus(t *testing.T, ctx context.Context, backend du
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	persisted, err := backend.ListFlowInstanceRoutes(ctx)
+	if err != nil {
+		t.Fatalf("ListFlowInstanceRoutes: %v", err)
+	}
+	persistedByPath := make(map[string]struct{}, len(persisted))
+	for _, route := range persisted {
+		persistedByPath[route.InstancePath] = struct{}{}
+	}
 	for _, accountID := range []string{"account-a", "account-b"} {
-		if err := eb.AddFlowInstanceRouteContext(ctx, bus.FlowInstanceRouteMaterializationRequest{
+		req := bus.FlowInstanceRouteMaterializationRequest{
 			Identity:            runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, accountID, templatereply.RequesterFlowID+"/"+accountID),
 			ActivationVariables: map[string]string{"account_id": accountID},
-		}); err != nil {
+		}
+		var err error
+		if _, exists := persistedByPath[req.Identity.InstancePath]; exists {
+			err = eb.RestorePersistedFlowInstanceRoute(req)
+		} else {
+			err = eb.AddFlowInstanceRouteContext(ctx, req)
+		}
+		if err != nil {
 			t.Fatalf("materialize requester route %s: %v", accountID, err)
 		}
 	}

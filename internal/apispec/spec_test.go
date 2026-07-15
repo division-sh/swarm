@@ -381,7 +381,7 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 
 	cliSurface := mustMappingValue(t, multi, "cli_surface")
 	runFork := mustMappingValue(t, cliSurface, "run_fork")
-	const runForkCommand = "swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]"
+	const runForkCommand = "swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--confirm-source-freeze] [--idempotency-key <key>]"
 	assertScalarValue(t, mustMappingValue(t, runFork, "command"), runForkCommand)
 	if strings.Contains(runForkCommand, "--bundle ") {
 		t.Fatal("run fork command promoted legacy --bundle spelling")

@@ -92,6 +92,23 @@ type terminalAdmissionCompletionOwner interface {
 	ConvergeNormalRunCompletion(context.Context, string, []string, map[string][]string) error
 }
 
+func seedCanonicalForkedRunForAdmissionTest(ctx context.Context, db *sql.DB, postgres bool, runID string) error {
+	continuedAsRunID := uuid.NewString()
+	now := time.Now().UTC()
+	if postgres {
+		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, ended_at) VALUES ($1::uuid, 'completed', $2, $2)`, continuedAsRunID, now); err != nil {
+			return err
+		}
+		_, err := db.ExecContext(ctx, `UPDATE runs SET status = 'forked', ended_at = $2, continued_as_run_id = $3::uuid WHERE run_id = $1::uuid`, runID, now, continuedAsRunID)
+		return err
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, ended_at) VALUES (?, 'completed', ?, ?)`, continuedAsRunID, now, now); err != nil {
+		return err
+	}
+	_, err := db.ExecContext(ctx, `UPDATE runs SET status = 'forked', ended_at = ?, continued_as_run_id = ? WHERE run_id = ?`, now, continuedAsRunID, runID)
+	return err
+}
+
 func convergeTerminalAdmissionRun(
 	ctx context.Context,
 	db *sql.DB,
@@ -142,6 +159,9 @@ func TestPostgresTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 			})
 		},
 		markTerminal: func(ctx context.Context, runID, eventID, status string) error {
+			if status == "forked" {
+				return seedCanonicalForkedRunForAdmissionTest(ctx, db, true, runID)
+			}
 			if status == "completed" {
 				return convergeTerminalAdmissionRun(ctx, db, true, pg, runID, eventID)
 			}
@@ -185,6 +205,9 @@ func TestSQLiteTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 			})
 		},
 		markTerminal: func(ctx context.Context, runID, eventID, status string) error {
+			if status == "forked" {
+				return seedCanonicalForkedRunForAdmissionTest(ctx, sqliteStore.DB, false, runID)
+			}
 			if status == "completed" {
 				return convergeTerminalAdmissionRun(ctx, sqliteStore.DB, false, sqliteStore, runID, eventID)
 			}
@@ -239,6 +262,8 @@ func TestPostgresRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 				return err
 			case "completed":
 				return convergeTerminalAdmissionRun(ctx, db, true, store, runID, eventID)
+			case "forked":
+				return seedCanonicalForkedRunForAdmissionTest(ctx, db, true, runID)
 			default:
 				failure := terminalEventAdmissionFailure(status)
 				_, err := store.MarkRunTerminal(ctx, runID, status, failure, time.Now().UTC())
@@ -320,6 +345,8 @@ func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 				return err
 			case "completed":
 				return convergeTerminalAdmissionRun(ctx, store.DB, false, store, runID, eventID)
+			case "forked":
+				return seedCanonicalForkedRunForAdmissionTest(ctx, store.DB, false, runID)
 			default:
 				failure := terminalEventAdmissionFailure(status)
 				_, err := store.MarkRunTerminal(ctx, runID, status, failure, time.Now().UTC())

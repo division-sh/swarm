@@ -21,9 +21,10 @@ type SelectedContractActivationStore interface {
 }
 
 type SelectedContractActivationGateRequest struct {
-	ForkRunID    string
-	Store        SelectedContractActivationStore
-	SourceLoader SelectedContractSourceLoader
+	ForkRunID           string
+	ConfirmSourceFreeze bool
+	Store               SelectedContractActivationStore
+	SourceLoader        SelectedContractSourceLoader
 }
 
 type SelectedContractActivationGateResult struct {
@@ -57,6 +58,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if !ok {
 		activation, err := req.Store.ActivateRunFork(ctx, store.RunForkActivateRequest{
 			ForkRunID:                         forkRunID,
+			ConfirmSourceFreeze:               req.ConfirmSourceFreeze,
 			HistoricalReplayExecutionAdmitter: HistoricalReplayExecutionAdmitter{},
 		})
 		return SelectedContractActivationGateResult{RunForkActivation: activation}, err
@@ -236,6 +238,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		}
 		activation, err := pgStore.ActivateRunForkForSelectedContractExecution(ctx, store.RunForkSelectedContractExecutionActivateRequest{
 			ForkRunID:             forkRunID,
+			ConfirmSourceFreeze:   req.ConfirmSourceFreeze,
 			AllowedSourceEventIDs: sourceEventIDs,
 			FrontierAdmission:     frontier,
 			RouteTopology:         routeTopology,
@@ -262,6 +265,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 
 	activation, err := req.Store.ActivateRunFork(ctx, store.RunForkActivateRequest{
 		ForkRunID:                         forkRunID,
+		ConfirmSourceFreeze:               req.ConfirmSourceFreeze,
 		HistoricalReplayExecutionAdmitter: HistoricalReplayExecutionAdmitter{},
 	})
 	result.RunForkActivation = activation

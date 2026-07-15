@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 func insertDecisionRouteObligation(ctx context.Context, tx *sql.Tx, card decisioncard.Card, now time.Time, postgres bool) error {
@@ -33,7 +34,7 @@ func (s *PostgresStore) ListDueDecisionRouteObligations(ctx context.Context, now
 		limit = 200
 	}
 	var pending bool
-	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM decision_card_route_obligations WHERE status = 'pending' AND next_attempt_at <= $1)`, now.UTC()).Scan(&pending); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM decision_card_route_obligations o JOIN runs run ON run.run_id = o.run_id WHERE o.status = 'pending' AND o.next_attempt_at <= $1 AND run.status <> 'forked')`, now.UTC()).Scan(&pending); err != nil {
 		return nil, err
 	}
 	if !pending {
@@ -48,7 +49,8 @@ func (s *PostgresStore) ListDueDecisionRouteObligations(ctx context.Context, now
 			COALESCE(e.target_set, '[]'::jsonb)
 		FROM decision_card_route_obligations o
 		JOIN events e ON e.event_id = o.event_id
-		WHERE o.status = 'pending' AND o.next_attempt_at <= $1
+		JOIN runs run ON run.run_id = o.run_id
+		WHERE o.status = 'pending' AND o.next_attempt_at <= $1 AND run.status <> 'forked'
 		ORDER BY o.attempt_count ASC, o.next_attempt_at ASC, o.created_at ASC, o.event_id ASC
 		LIMIT $2
 	`, now.UTC(), limit)
@@ -63,7 +65,7 @@ func (s *SQLiteRuntimeStore) ListDueDecisionRouteObligations(ctx context.Context
 		limit = 200
 	}
 	var pending int
-	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM decision_card_route_obligations WHERE status = 'pending' AND next_attempt_at <= ?)`, now.UTC()).Scan(&pending); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM decision_card_route_obligations o JOIN runs run ON run.run_id = o.run_id WHERE o.status = 'pending' AND o.next_attempt_at <= ? AND run.status <> 'forked')`, now.UTC()).Scan(&pending); err != nil {
 		return nil, err
 	}
 	if pending == 0 {
@@ -78,7 +80,8 @@ func (s *SQLiteRuntimeStore) ListDueDecisionRouteObligations(ctx context.Context
 			COALESCE(e.target_set, '[]')
 		FROM decision_card_route_obligations o
 		JOIN events e ON e.event_id = o.event_id
-		WHERE o.status = 'pending' AND o.next_attempt_at <= ?
+		JOIN runs run ON run.run_id = o.run_id
+		WHERE o.status = 'pending' AND o.next_attempt_at <= ? AND run.status <> 'forked'
 		ORDER BY o.attempt_count ASC, o.next_attempt_at ASC, o.created_at ASC, o.event_id ASC
 		LIMIT ?
 	`, now.UTC(), limit)
@@ -134,6 +137,13 @@ func (s *SQLiteRuntimeStore) DeferDecisionRouteObligation(ctx context.Context, e
 }
 
 func deferDecisionRouteObligation(ctx context.Context, db decisionCardSQL, eventID string, nextAttemptAt time.Time, failure *runtimefailures.Envelope, postgres bool) error {
+	dialect := storerunlifecycle.DialectSQLite
+	if postgres {
+		dialect = storerunlifecycle.DialectPostgres
+	}
+	if err := requireEventRunNotForked(ctx, db, eventID, dialect, false); err != nil {
+		return err
+	}
 	raw, err := json.Marshal(failure)
 	if err != nil {
 		return err
@@ -181,6 +191,9 @@ func storedDecisionRouteFailure(failure *runtimefailures.Envelope) string {
 
 func (s *PostgresStore) CompleteDecisionRouteObligation(ctx context.Context, eventID string, completedAt time.Time) error {
 	return runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
+		if err := requireEventRunNotForked(txctx, tx, eventID, storerunlifecycle.DialectPostgres, false); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(txctx, `UPDATE decision_card_route_obligations SET status = 'completed', completed_at = $2, updated_at = $2 WHERE event_id = $1 AND status = 'pending'`, strings.TrimSpace(eventID), completedAt.UTC())
 		return err
 	})
@@ -188,6 +201,9 @@ func (s *PostgresStore) CompleteDecisionRouteObligation(ctx context.Context, eve
 
 func (s *SQLiteRuntimeStore) CompleteDecisionRouteObligation(ctx context.Context, eventID string, completedAt time.Time) error {
 	return s.runDecisionCardMutation(ctx, "sqlite complete decision route obligation", func(txctx context.Context, tx *sql.Tx) error {
+		if err := requireEventRunNotForked(txctx, tx, eventID, storerunlifecycle.DialectSQLite, false); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(txctx, `UPDATE decision_card_route_obligations SET status = 'completed', completed_at = ?, updated_at = ? WHERE event_id = ? AND status = 'pending'`, completedAt.UTC(), completedAt.UTC(), strings.TrimSpace(eventID))
 		return err
 	})

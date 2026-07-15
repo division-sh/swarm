@@ -23,18 +23,30 @@ var _ decisioncard.ProposedEffectStore = (*SQLiteRuntimeStore)(nil)
 
 func (s *PostgresStore) CreateProposedEffectCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation) error {
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		if err := requireActiveDecisionRun(ctx, tx, card.RunID, true); err != nil {
+			return err
+		}
 		return insertProposedEffectCard(ctx, tx, card, continuation, true)
 	}
 	return runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
+		if err := requireActiveDecisionRun(txctx, tx, card.RunID, true); err != nil {
+			return err
+		}
 		return insertProposedEffectCard(txctx, tx, card, continuation, true)
 	})
 }
 
 func (s *SQLiteRuntimeStore) CreateProposedEffectCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation) error {
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		if err := requireActiveDecisionRun(ctx, tx, card.RunID, false); err != nil {
+			return err
+		}
 		return insertProposedEffectCard(ctx, tx, card, continuation, false)
 	}
 	return s.runDecisionCardMutation(ctx, "sqlite create proposed-effect card", func(txctx context.Context, tx *sql.Tx) error {
+		if err := requireActiveDecisionRun(txctx, tx, card.RunID, false); err != nil {
+			return err
+		}
 		return insertProposedEffectCard(txctx, tx, card, continuation, false)
 	})
 }
@@ -311,6 +323,9 @@ func completeProposedEffectRoute(ctx context.Context, tx *sql.Tx, cardID, routeE
 	if at.IsZero() {
 		return decisioncard.ProposedEffectContinuation{}, fmt.Errorf("proposed-effect route completion requires an authoritative timestamp")
 	}
+	if err := requireActiveDecisionCardRun(ctx, tx, cardID, postgres); err != nil {
+		return decisioncard.ProposedEffectContinuation{}, err
+	}
 	card, err := loadDecisionCard(ctx, tx, cardID, postgres, true)
 	if err != nil {
 		return decisioncard.ProposedEffectContinuation{}, err
@@ -397,6 +412,9 @@ func supersedeProposedEffectsForLoopGenerations(ctx context.Context, tx *sql.Tx,
 	if runID == "" || entityID == "" || reason == "" || at.IsZero() {
 		return fmt.Errorf("loop-generation proposed-effect supersession identity is incomplete")
 	}
+	if err := requireActiveDecisionRun(ctx, tx, runID, postgres); err != nil {
+		return err
+	}
 	query := `SELECT p.card_id FROM proposed_effect_continuations p JOIN decision_cards c ON c.card_id = p.card_id
 		WHERE c.run_id = ? AND c.status = 'pending' AND p.state = 'pending' ORDER BY p.card_id`
 	if postgres {
@@ -430,7 +448,7 @@ func supersedeProposedEffectsForLoopGenerations(ctx context.Context, tx *sql.Tx,
 		if continuation.EntityID != entityID || !continuation.Generation.Valid() || generationStillCurrent(continuation.Generation, current) {
 			continue
 		}
-		if err := supersedeProposedEffectContinuation(ctx, tx, cardID, reason, at, postgres); err != nil {
+		if err := supersedeProposedEffectContinuation(ctx, tx, cardID, reason, at, false, postgres); err != nil {
 			return err
 		}
 		update := `UPDATE decision_cards SET status = ?, superseded_reason = ?, updated_at = ? WHERE card_id = ? AND status = 'pending'`
@@ -460,10 +478,14 @@ func generationStillCurrent(candidate attemptgeneration.Generation, current []at
 	return false
 }
 
-func supersedeProposedEffectContinuation(ctx context.Context, tx *sql.Tx, cardID, reason string, at time.Time, postgres bool) error {
-	query := `UPDATE proposed_effect_continuations SET state = 'superseded', superseded_reason = ?, updated_at = ? WHERE card_id = ? AND state = 'pending'`
+func supersedeProposedEffectContinuation(ctx context.Context, tx *sql.Tx, cardID, reason string, at time.Time, includeCommitted bool, postgres bool) error {
+	states := `('pending')`
+	if includeCommitted {
+		states = `('pending', 'decision_committed', 'request_released')`
+	}
+	query := `UPDATE proposed_effect_continuations SET state = 'superseded', superseded_reason = ?, updated_at = ? WHERE card_id = ? AND state IN ` + states
 	if postgres {
-		query = `UPDATE proposed_effect_continuations SET state = 'superseded', superseded_reason = $1, updated_at = $2 WHERE card_id = $3 AND state = 'pending'`
+		query = `UPDATE proposed_effect_continuations SET state = 'superseded', superseded_reason = $1, updated_at = $2 WHERE card_id = $3 AND state IN ` + states
 	}
 	result, err := tx.ExecContext(ctx, query, strings.TrimSpace(reason), decisioncard.CanonicalTimestamp(at), strings.TrimSpace(cardID))
 	if err != nil {

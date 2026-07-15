@@ -15,9 +15,23 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
+const directiveOperationTestRunID = "00000000-0000-0000-0000-000000001000"
+
+func seedDirectiveOperationRun(t *testing.T, db *sql.DB, postgres bool) {
+	t.Helper()
+	query := `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`
+	if postgres {
+		query = `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`
+	}
+	if _, err := db.Exec(query, directiveOperationTestRunID, time.Now().UTC()); err != nil {
+		t.Fatalf("seed directive operation run: %v", err)
+	}
+}
+
 func TestSQLiteDirectiveOperationOwnsReservationExecutionAndCompletion(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	seedDirectiveOperationRun(t, store.DB, false)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	req := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001001", "00000000-0000-0000-0000-000000001002", "idem-1", "hash-1", now)
 
@@ -88,6 +102,7 @@ func TestSQLiteDirectiveOperationOwnsReservationExecutionAndCompletion(t *testin
 func TestSQLiteDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	seedDirectiveOperationRun(t, store.DB, false)
 	now := time.Date(2026, 7, 10, 13, 0, 0, 0, time.UTC)
 
 	executingReq := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001101", "00000000-0000-0000-0000-000000001102", "idem-recovery", "hash-recovery", now)
@@ -148,6 +163,7 @@ func TestSQLiteDirectiveOperationConcurrentSameKeyHasOneReservation(t *testing.T
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "directive.db")
 	first := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
+	seedDirectiveOperationRun(t, first.DB, false)
 	second, err := NewSQLiteRuntimeStore(path)
 	if err != nil {
 		t.Fatalf("NewSQLiteRuntimeStore second handle: %v", err)
@@ -210,6 +226,7 @@ func TestSQLiteDirectiveOperationFinalizationFailuresRollbackToExecuted(t *testi
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+			seedDirectiveOperationRun(t, store.DB, false)
 			now := time.Date(2026, 7, 10, 14, 30, 0, 0, time.UTC)
 			reserved := reserveAndRecordExecutedDirectiveForTest(t, ctx, store, now)
 			if _, err := store.DB.Exec(tc.triggerSQL); err != nil {
@@ -249,6 +266,7 @@ func TestSQLiteDirectiveOperationFinalizationFailuresRollbackToExecuted(t *testi
 func TestSQLiteDirectiveOperationResultPersistenceFailureBecomesIndeterminate(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	seedDirectiveOperationRun(t, store.DB, false)
 	now := time.Date(2026, 7, 10, 14, 45, 0, 0, time.UTC)
 	req := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001251", "00000000-0000-0000-0000-000000001252", "result-failure", "result-hash", now)
 	reserved, err := store.ReserveDirectiveOperation(ctx, req)
@@ -286,6 +304,7 @@ func TestSQLiteDirectiveOperationResultPersistenceFailureBecomesIndeterminate(t 
 func TestSQLiteDirectiveOperationReservationFailureRollsBackEveryFact(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	seedDirectiveOperationRun(t, store.DB, false)
 	now := time.Date(2026, 7, 10, 14, 50, 0, 0, time.UTC)
 	if _, err := store.DB.Exec(`CREATE TRIGGER fail_directive_event BEFORE INSERT ON events WHEN NEW.event_name = 'platform.agent_directive' BEGIN SELECT RAISE(ABORT, 'injected event failure'); END`); err != nil {
 		t.Fatalf("create event trigger: %v", err)
@@ -297,7 +316,6 @@ func TestSQLiteDirectiveOperationReservationFailureRollsBackEveryFact(t *testing
 	for _, query := range []string{
 		`SELECT COUNT(*) FROM agent_directive_operations`,
 		`SELECT COUNT(*) FROM events WHERE event_name = 'platform.agent_directive'`,
-		`SELECT COUNT(*) FROM runs WHERE run_id = '00000000-0000-0000-0000-000000001000'`,
 	} {
 		var count int
 		if err := store.DB.QueryRow(query).Scan(&count); err != nil {
@@ -314,6 +332,7 @@ func TestPostgresDirectiveOperationOwnsReservationExecutionAndCompletion(t *test
 	t.Cleanup(cleanup)
 	ctx := context.Background()
 	store := &PostgresStore{DB: db}
+	seedDirectiveOperationRun(t, db, true)
 	now := time.Date(2026, 7, 10, 15, 0, 0, 0, time.UTC)
 	req := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001301", "00000000-0000-0000-0000-000000001302", "pg-idem", "pg-hash", now)
 	reserved, err := store.ReserveDirectiveOperation(ctx, req)
@@ -349,6 +368,7 @@ func TestPostgresDirectiveOperationConcurrentSameKeyHasOneReservationAndAdmissio
 	t.Cleanup(cleanup)
 	ctx := context.Background()
 	stores := []*PostgresStore{{DB: db}, {DB: db}}
+	seedDirectiveOperationRun(t, db, true)
 	now := time.Date(2026, 7, 10, 15, 15, 0, 0, time.UTC)
 	requests := []runtimeagentcontrol.ReserveDirectiveOperationRequest{
 		directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001311", "00000000-0000-0000-0000-000000001312", "pg-same-key", "pg-same-hash", now),
@@ -403,6 +423,7 @@ func TestPostgresDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *te
 	t.Cleanup(cleanup)
 	ctx := context.Background()
 	store := &PostgresStore{DB: db}
+	seedDirectiveOperationRun(t, db, true)
 	now := time.Date(2026, 7, 10, 15, 30, 0, 0, time.UTC)
 
 	executing, err := store.ReserveDirectiveOperation(ctx, directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001321", "00000000-0000-0000-0000-000000001322", "pg-recovery", "pg-recovery-hash", now))
@@ -462,6 +483,7 @@ func TestPostgresDirectiveOperationFinalizationFailuresRollbackToExecuted(t *tes
 			t.Cleanup(cleanup)
 			ctx := context.Background()
 			store := &PostgresStore{DB: db}
+			seedDirectiveOperationRun(t, db, true)
 			now := time.Date(2026, 7, 10, 15, 45, 0, 0, time.UTC)
 			reserved := reserveAndRecordExecutedPostgresDirectiveForTest(t, ctx, store, now)
 			dropTrigger := installPostgresDirectiveRejectInsertTrigger(t, db, tc.triggerName, tc.table)
@@ -496,6 +518,7 @@ func TestPostgresDirectiveOperationResultPersistenceFailureBecomesIndeterminate(
 	t.Cleanup(cleanup)
 	ctx := context.Background()
 	store := &PostgresStore{DB: db}
+	seedDirectiveOperationRun(t, db, true)
 	now := time.Date(2026, 7, 10, 16, 0, 0, 0, time.UTC)
 	reserved, err := store.ReserveDirectiveOperation(ctx, directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001341", "00000000-0000-0000-0000-000000001342", "pg-result-failure", "pg-result-hash", now))
 	if err != nil {
@@ -527,6 +550,7 @@ func TestPostgresDirectiveOperationReservationFailureRollsBackEveryFact(t *testi
 	t.Cleanup(cleanup)
 	ctx := context.Background()
 	store := &PostgresStore{DB: db}
+	seedDirectiveOperationRun(t, db, true)
 	dropTrigger := installPostgresDirectiveRejectInsertTrigger(t, db, "fail_pg_directive_event", "events")
 	defer dropTrigger()
 	now := time.Date(2026, 7, 10, 16, 15, 0, 0, time.UTC)
@@ -537,7 +561,6 @@ func TestPostgresDirectiveOperationReservationFailureRollsBackEveryFact(t *testi
 	for _, query := range []string{
 		`SELECT COUNT(*) FROM agent_directive_operations`,
 		`SELECT COUNT(*) FROM events WHERE event_name = 'platform.agent_directive'`,
-		`SELECT COUNT(*) FROM runs WHERE run_id = '00000000-0000-0000-0000-000000001000'::uuid`,
 	} {
 		var count int
 		if err := db.QueryRow(query).Scan(&count); err != nil {
@@ -551,7 +574,7 @@ func TestPostgresDirectiveOperationReservationFailureRollsBackEveryFact(t *testi
 
 func directiveOperationReservationForTest(t *testing.T, operationID, eventID, key, hash string, now time.Time) runtimeagentcontrol.ReserveDirectiveOperationRequest {
 	t.Helper()
-	runID := "00000000-0000-0000-0000-000000001000"
+	runID := directiveOperationTestRunID
 	req := runtimeagentcontrol.SendDirectiveRequest{AgentID: "agent-1", Directive: "continue", RunID: runID, Source: runtimeagentcontrol.DirectiveSourceV1RPC, OperatorID: "actor-1"}
 	event, err := runtimeagentcontrol.NewDirectiveEvent(req, runtimeagentcontrol.RunTargetResolution{RunID: runID, Mode: runtimeagentcontrol.RunResolutionSpecified}, operationID, eventID, now)
 	if err != nil {

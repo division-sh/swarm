@@ -312,6 +312,21 @@ func (eb *EventBus) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationReq
 	return eb.AddFlowInstanceRouteContext(context.Background(), req)
 }
 
+// RestorePersistedFlowInstanceRoute rebuilds the in-memory route table from
+// already-persisted route truth without rewriting that truth during startup.
+func (eb *EventBus) RestorePersistedFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest) error {
+	if eb == nil {
+		return errors.New("event bus is required")
+	}
+	eb.mu.RLock()
+	table := eb.routeTable
+	eb.mu.RUnlock()
+	if table == nil {
+		return errors.New("route table is not initialized")
+	}
+	return table.AddFlowInstanceRoute(req.Normalized())
+}
+
 func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowInstanceRouteMaterializationRequest) error {
 	if eb == nil {
 		return errors.New("event bus is required")
@@ -403,6 +418,10 @@ func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowIns
 }
 
 func (eb *EventBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) error {
+	return eb.RemoveFlowInstanceRouteContext(context.Background(), identity)
+}
+
+func (eb *EventBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity runtimeflowidentity.Route) error {
 	if eb == nil {
 		return errors.New("event bus is required")
 	}
@@ -420,7 +439,7 @@ func (eb *EventBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) 
 		return nil
 	}
 	if persister, ok := eb.store.(FlowInstanceRoutePersistence); ok {
-		if err := persister.DeleteFlowInstanceRoute(context.Background(), owner); err != nil {
+		if err := persister.DeleteFlowInstanceRoute(ctx, owner); err != nil {
 			return err
 		}
 	}

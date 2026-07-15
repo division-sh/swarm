@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -12,16 +14,17 @@ import (
 
 const (
 	runForkMethod       = "run.fork"
-	runForkCommandShape = "swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]"
+	runForkCommandShape = "swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--confirm-source-freeze] [--idempotency-key <key>]"
 )
 
 type forkCommandOptions struct {
 	apiOptions rootCommandOptions
 	output     cliOutputOptions
 
-	bundleHash     string
-	atEvent        string
-	idempotencyKey string
+	bundleHash          string
+	atEvent             string
+	confirmSourceFreeze bool
+	idempotencyKey      string
 
 	bundleHashSet     bool
 	atEventSet        bool
@@ -59,6 +62,7 @@ func newForkCommand(opts rootCommandOptions) *cobra.Command {
 	setCLIArgDiscoveryHint(cmd, "List run ids with `swarm run list`.")
 	cmd.Flags().StringVar(&forkOpts.bundleHash, "bundle-hash", "", "Target bundle hash for run.fork selection")
 	cmd.Flags().StringVar(&forkOpts.atEvent, "at-event", "", "Fork at this source event id")
+	cmd.Flags().BoolVar(&forkOpts.confirmSourceFreeze, "confirm-source-freeze", false, "Confirm that an active source run will be permanently frozen")
 	cmd.Flags().StringVar(&forkOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for retry-safe fork creation")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIOutputFlags(cmd, &forkOpts.output)
@@ -74,6 +78,19 @@ func runForkCommand(ctx context.Context, out, errOut io.Writer, opts forkCommand
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
 		return returnCLIAPIError(errOut, err, runForkAPIErrorClassifier())
+	}
+	if !opts.confirmSourceFreeze {
+		sourceRunID, _ := params["source_run_id"].(string)
+		run, err := runCommandGet(ctx, client, sourceRunID)
+		if err != nil {
+			return returnCLIAPIError(errOut, err, runForkAPIErrorClassifier())
+		}
+		if runForkSourceStatusActive(run.Status) {
+			if err := requireRunForkSourceFreezeConfirmation(opts.apiOptions, sourceRunID, errOut); err != nil {
+				return err
+			}
+			params["confirm_source_freeze"] = true
+		}
 	}
 	var result runForkResult
 	if err := client.call(ctx, runForkMethod, params, &result); err != nil {
@@ -95,6 +112,9 @@ func (opts forkCommandOptions) params(rawSourceRunID string) (map[string]any, er
 		return nil, err
 	}
 	params := map[string]any{"source_run_id": sourceRunID}
+	if opts.confirmSourceFreeze {
+		params["confirm_source_freeze"] = true
+	}
 
 	bundleHash, err := optionalNonEmptyFlag("--bundle-hash", opts.bundleHash, opts.bundleHashSet)
 	if err != nil {
@@ -127,6 +147,36 @@ func (opts forkCommandOptions) params(rawSourceRunID string) (map[string]any, er
 		params["idempotency_key"] = idempotencyKey
 	}
 	return params, nil
+}
+
+func runForkSourceStatusActive(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "running", "paused":
+		return true
+	default:
+		return false
+	}
+}
+
+func requireRunForkSourceFreezeConfirmation(opts rootCommandOptions, sourceRunID string, errOut io.Writer) error {
+	if !controlStdinIsTerminal(opts) {
+		return returnCLIValidationError(errOut, fmt.Errorf("run %s is active; pass --confirm-source-freeze for non-TTY invocations", sourceRunID))
+	}
+	fmt.Fprintf(errOut, "WARNING: this permanently freezes run %s; its state continues as the fork.\n", sourceRunID)
+	fmt.Fprint(errOut, "Continue? [y/N] ")
+	input := opts.input
+	if input == nil {
+		input = strings.NewReader("")
+	}
+	line, err := bufio.NewReader(input).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return returnCLIValidationError(errOut, fmt.Errorf("read confirmation: %w", err))
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	if answer != "y" && answer != "yes" {
+		return returnCLIValidationError(errOut, fmt.Errorf("aborted; source run was not frozen"))
+	}
+	return nil
 }
 
 func runForkAPIErrorClassifier() cliAPIErrorClassifier {

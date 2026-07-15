@@ -15,6 +15,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/lib/pq"
 )
 
@@ -168,6 +169,11 @@ func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, caps StoreSc
 				return fmt.Errorf("upsert event receipt: delivery row required for event %s agent %s", strings.TrimSpace(eventID), strings.TrimSpace(agentID))
 			}
 			if !activeRunQuiescenceDeliveryTerminal(delivery.status, delivery.reasonCode) {
+				if strings.TrimSpace(delivery.runID) != "" {
+					if err := storerunlifecycle.RequireActive(txctx, tx, delivery.runID, storerunlifecycle.DialectPostgres); err != nil {
+						return err
+					}
+				}
 				state, err := buildAgentReceiptWriteState(delivery.retryCount, status, failure)
 				if err != nil {
 					return err
@@ -450,6 +456,11 @@ func (s *PostgresStore) markEventDeliveryInProgressSpec(ctx context.Context, eve
 		}
 		if activeRunQuiescenceDeliveryTerminal(delivery.status, delivery.reasonCode) {
 			return nil
+		}
+		if strings.TrimSpace(delivery.runID) != "" {
+			if err := storerunlifecycle.RequireActive(txctx, tx, delivery.runID, storerunlifecycle.DialectPostgres); err != nil {
+				return err
+			}
 		}
 		transitionAt := time.Now().UTC()
 		res, err := tx.ExecContext(txctx, q, eventID, agentID, sessionID, pq.Array(activeRunQuiescenceTerminalReasonCodes()), transitionAt)

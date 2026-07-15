@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -40,7 +41,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 
 	return s.runAuthorActivityMutation(ctx, "postgres append agent turn", func(txctx context.Context, tx *sql.Tx) error {
 		ctx = txctx
-		if err := s.ensureRunRow(ctx, caps, tx, identity.RunID, "", ""); err != nil {
+		if err := storerunlifecycle.RequireActive(ctx, tx, identity.RunID, storerunlifecycle.DialectPostgres); err != nil {
 			return err
 		}
 		if plan.Enabled {
@@ -160,7 +161,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	}
 	return s.runAuthorActivityMutation(ctx, "postgres upsert exact conversation", func(txctx context.Context, tx *sql.Tx) error {
 		ctx = txctx
-		if err := s.ensureRunRow(ctx, caps, tx, identity.RunID, "", ""); err != nil {
+		if err := storerunlifecycle.RequireActive(ctx, tx, identity.RunID, storerunlifecycle.DialectPostgres); err != nil {
 			return err
 		}
 		if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.AgentID, "upsert_conversation", false); err != nil {
@@ -230,9 +231,12 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, identity age
 	var conversation, runtimeState []byte
 	var turnCount int
 	err := s.DB.QueryRowContext(ctx, `
-		SELECT session_id::text,status,COALESCE(conversation,'[]'::jsonb),COALESCE(runtime_state,'{}'::jsonb),turn_count
-		FROM agent_sessions WHERE run_id=$1::uuid AND agent_id=$2 AND flow_instance=$3
-		  AND memory_enabled=TRUE AND status='active'
+		SELECT s.session_id::text,s.status,COALESCE(s.conversation,'[]'::jsonb),COALESCE(s.runtime_state,'{}'::jsonb),s.turn_count
+		FROM agent_sessions s
+		JOIN runs run ON run.run_id = s.run_id
+		WHERE s.run_id=$1::uuid AND s.agent_id=$2 AND s.flow_instance=$3
+		  AND s.memory_enabled=TRUE AND s.status='active'
+		  AND run.status IN ('running', 'paused')
 	`, identity.RunID, identity.AgentID, identity.FlowInstance).Scan(&sessionID, &status, &conversation, &runtimeState, &turnCount)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimellm.ConversationRecord{}, false, nil
@@ -264,6 +268,9 @@ func (s *PostgresStore) UpdateLiveSessionWatchdog(ctx context.Context, update ru
 		return err
 	}
 	defer tx.Rollback()
+	if err := storerunlifecycle.RequireActive(ctx, tx, identity.RunID, storerunlifecycle.DialectPostgres); err != nil {
+		return err
+	}
 	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.AgentID, "update_watchdog", false); err != nil {
 		return err
 	}

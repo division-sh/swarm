@@ -413,8 +413,12 @@ func TestSQLiteRuntimeStoreUpsertAgentConsumesActivePipelineTransaction(t *testi
 }
 
 func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *testing.T) {
-	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+		t.Fatalf("seed activation run: %v", err)
+	}
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 	bus := &sqliteFlowActivationBus{}
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
@@ -453,8 +457,12 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 }
 
 func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T) {
-	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+		t.Fatalf("seed fan-out run: %v", err)
+	}
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 	bus := &sqliteFlowActivationBus{}
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
@@ -562,6 +570,10 @@ func (b *sqliteFlowActivationBus) LogRuntime(_ context.Context, entry runtimepip
 }
 
 func (b *sqliteFlowActivationBus) AddFlowInstanceRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
+	return b.AddFlowInstanceRouteContext(context.Background(), req)
+}
+
+func (b *sqliteFlowActivationBus) AddFlowInstanceRouteContext(_ context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.routeRequests = append(b.routeRequests, req.Normalized())
@@ -984,6 +996,9 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+		t.Fatalf("seed workflow instance run: %v", err)
+	}
 	owner := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	entityID := runtimepipeline.FlowInstanceEntityID("root/acme")
 	if err := owner.Create(ctx, runtimepipeline.WorkflowInstance{

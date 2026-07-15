@@ -20,18 +20,30 @@ var _ decisioncard.HumanTaskStore = (*SQLiteRuntimeStore)(nil)
 
 func (s *PostgresStore) CreateHumanTaskCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) error {
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		if err := requireActiveDecisionRun(ctx, tx, card.RunID, true); err != nil {
+			return err
+		}
 		return insertHumanTaskCard(ctx, tx, card, continuation, true)
 	}
 	return runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
+		if err := requireActiveDecisionRun(txctx, tx, card.RunID, true); err != nil {
+			return err
+		}
 		return insertHumanTaskCard(txctx, tx, card, continuation, true)
 	})
 }
 
 func (s *SQLiteRuntimeStore) CreateHumanTaskCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) error {
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		if err := requireActiveDecisionRun(ctx, tx, card.RunID, false); err != nil {
+			return err
+		}
 		return insertHumanTaskCard(ctx, tx, card, continuation, false)
 	}
 	return s.runDecisionCardMutation(ctx, "sqlite create human-task card", func(txctx context.Context, tx *sql.Tx) error {
+		if err := requireActiveDecisionRun(txctx, tx, card.RunID, false); err != nil {
+			return err
+		}
 		return insertHumanTaskCard(txctx, tx, card, continuation, false)
 	})
 }
@@ -123,6 +135,9 @@ func completeHumanTaskOutcome(ctx context.Context, tx *sql.Tx, cardID, eventID s
 	if at.IsZero() {
 		return decisioncard.HumanTaskContinuation{}, fmt.Errorf("human-task outcome completion requires an authoritative timestamp")
 	}
+	if err := requireActiveDecisionCardRun(ctx, tx, cardID, postgres); err != nil {
+		return decisioncard.HumanTaskContinuation{}, err
+	}
 	card, err := loadDecisionCard(ctx, tx, cardID, postgres, true)
 	if err != nil {
 		return decisioncard.HumanTaskContinuation{}, err
@@ -198,11 +213,11 @@ func expireHumanTaskCards(ctx context.Context, tx *sql.Tx, now time.Time, limit 
 	if limit <= 0 || limit > 200 {
 		limit = 200
 	}
-	query := `SELECT h.card_id FROM human_task_continuations h JOIN decision_cards c ON c.card_id = h.card_id
-		WHERE h.state = 'pending' AND c.status = 'pending' AND h.deadline_at <= ? ORDER BY h.deadline_at, h.card_id LIMIT ?`
+	query := `SELECT h.card_id FROM human_task_continuations h JOIN decision_cards c ON c.card_id = h.card_id JOIN runs run ON run.run_id = h.run_id
+		WHERE h.state = 'pending' AND c.status = 'pending' AND run.status IN ('running', 'paused') AND h.deadline_at <= ? ORDER BY h.deadline_at, h.card_id LIMIT ?`
 	if postgres {
-		query = `SELECT h.card_id FROM human_task_continuations h JOIN decision_cards c ON c.card_id = h.card_id
-			WHERE h.state = 'pending' AND c.status = 'pending' AND h.deadline_at <= $1 ORDER BY h.deadline_at, h.card_id LIMIT $2 FOR UPDATE OF h, c SKIP LOCKED`
+		query = `SELECT h.card_id FROM human_task_continuations h JOIN decision_cards c ON c.card_id = h.card_id JOIN runs run ON run.run_id = h.run_id
+			WHERE h.state = 'pending' AND c.status = 'pending' AND run.status IN ('running', 'paused') AND h.deadline_at <= $1 ORDER BY h.deadline_at, h.card_id LIMIT $2 FOR UPDATE OF h, c, run SKIP LOCKED`
 	}
 	rows, err := tx.QueryContext(ctx, query, now, limit)
 	if err != nil {
@@ -413,11 +428,15 @@ func deferHumanTaskContinuation(ctx context.Context, tx *sql.Tx, cardID string, 
 	return nil
 }
 
-func supersedeHumanTaskContinuation(ctx context.Context, tx *sql.Tx, cardID string, now time.Time, postgres bool) error {
+func supersedeHumanTaskContinuation(ctx context.Context, tx *sql.Tx, cardID string, now time.Time, includeCommitted bool, postgres bool) error {
 	now = decisioncard.CanonicalTimestamp(now)
-	query := `UPDATE human_task_continuations SET state = 'superseded', deferred_until = NULL, updated_at = ? WHERE card_id = ? AND state = 'pending'`
+	states := `('pending')`
+	if includeCommitted {
+		states = `('pending', 'decision_committed', 'expired')`
+	}
+	query := `UPDATE human_task_continuations SET state = 'superseded', deferred_until = NULL, updated_at = ? WHERE card_id = ? AND state IN ` + states
 	if postgres {
-		query = `UPDATE human_task_continuations SET state = 'superseded', deferred_until = NULL, updated_at = $1 WHERE card_id = $2 AND state = 'pending'`
+		query = `UPDATE human_task_continuations SET state = 'superseded', deferred_until = NULL, updated_at = $1 WHERE card_id = $2 AND state IN ` + states
 	}
 	result, err := tx.ExecContext(ctx, query, now, strings.TrimSpace(cardID))
 	if err != nil {

@@ -293,6 +293,7 @@ SELECT
 	r.started_at,
 	r.ended_at,
 	COALESCE(r.forked_from_run_id, ''),
+	COALESCE(r.continued_as_run_id, ''),
 	r.failure,
 	COALESCE(rc.reason, '')
 FROM runs r
@@ -314,6 +315,7 @@ func scanSQLiteRunHeader(row runHeaderScanner) (RunHeader, error) {
 		&startedRaw,
 		&endedRaw,
 		&header.ForkedFromRunID,
+		&header.ContinuedAsRunID,
 		&failureRaw,
 		&header.ControlReason,
 	); err != nil {
@@ -335,6 +337,7 @@ func scanSQLiteRunHeader(row runHeaderScanner) (RunHeader, error) {
 	header.TriggerEventType = strings.TrimSpace(header.TriggerEventType)
 	header.TriggerEventID = strings.TrimSpace(header.TriggerEventID)
 	header.ForkedFromRunID = strings.TrimSpace(header.ForkedFromRunID)
+	header.ContinuedAsRunID = strings.TrimSpace(header.ContinuedAsRunID)
 	header.ControlReason = strings.TrimSpace(header.ControlReason)
 	failure, err := decodeStoredFailure(failureRaw)
 	if err != nil {

@@ -237,7 +237,7 @@ func (s *PostgresStore) stopRunControlTx(ctx context.Context, tx *sql.Tx, caps S
 	if err != nil {
 		return runtimeruncontrol.State{}, err
 	}
-	if err := supersedeDecisionCardsForRun(ctx, tx, state.RunID, "run_stopped", req.Now.UTC(), true); err != nil {
+	if err := supersedeDecisionCardsForRun(ctx, tx, state.RunID, "run_stopped", req.Now.UTC(), false, true); err != nil {
 		return runtimeruncontrol.State{}, err
 	}
 	if _, err := storerunlifecycle.MarkTerminal(ctx, tx, state.RunID, "cancelled", nil, req.Now.UTC(), runLifecycleOptions(caps)); err != nil {

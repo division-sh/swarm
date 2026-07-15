@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -39,7 +40,7 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 	}
 	now := s.now()
 	return s.runAuthorActivityMutation(ctx, "sqlite append agent turn", func(txctx context.Context, tx *sql.Tx) error {
-		if err := sqliteEnsureActiveRunRow(txctx, tx, identity.RunID, "", "", now); err != nil {
+		if err := storerunlifecycle.RequireActive(txctx, tx, identity.RunID, storerunlifecycle.DialectSQLite); err != nil {
 			return err
 		}
 		if plan.Enabled {
@@ -111,7 +112,7 @@ func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, rec runtime
 		return err
 	}
 	return s.runAuthorActivityMutation(ctx, "sqlite upsert exact conversation", func(txctx context.Context, tx *sql.Tx) error {
-		if err := sqliteEnsureActiveRunRow(txctx, tx, identity.RunID, "", "", s.now()); err != nil {
+		if err := storerunlifecycle.RequireActive(txctx, tx, identity.RunID, storerunlifecycle.DialectSQLite); err != nil {
 			return err
 		}
 		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity.AgentID, "upsert_conversation", false); err != nil {
@@ -142,9 +143,12 @@ func (s *SQLiteRuntimeStore) LoadActiveConversation(ctx context.Context, identit
 	var conversation, runtimeState any
 	var turnCount int
 	err := s.DB.QueryRowContext(ctx, `
-		SELECT session_id,status,COALESCE(conversation,'[]'),COALESCE(runtime_state,'{}'),turn_count
-		FROM agent_sessions WHERE run_id=? AND agent_id=? AND flow_instance=?
-		  AND memory_enabled=1 AND status='active'
+		SELECT s.session_id,s.status,COALESCE(s.conversation,'[]'),COALESCE(s.runtime_state,'{}'),s.turn_count
+		FROM agent_sessions s
+		JOIN runs run ON run.run_id = s.run_id
+		WHERE s.run_id=? AND s.agent_id=? AND s.flow_instance=?
+		  AND s.memory_enabled=1 AND s.status='active'
+		  AND run.status IN ('running', 'paused')
 	`, identity.RunID, identity.AgentID, identity.FlowInstance).Scan(&sessionID, &status, &conversation, &runtimeState, &turnCount)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimellm.ConversationRecord{}, false, nil
@@ -172,6 +176,9 @@ func (s *SQLiteRuntimeStore) UpdateLiveSessionWatchdog(ctx context.Context, upda
 		return err
 	}
 	return s.runRuntimeMutation(ctx, "sqlite update exact memory watchdog", func(txctx context.Context, tx *sql.Tx) error {
+		if err := storerunlifecycle.RequireActive(txctx, tx, identity.RunID, storerunlifecycle.DialectSQLite); err != nil {
+			return err
+		}
 		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity.AgentID, "update_watchdog", false); err != nil {
 			return err
 		}

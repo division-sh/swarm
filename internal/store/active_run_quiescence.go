@@ -198,7 +198,7 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 		if !activeRunQuiescenceRunStatusActive(run.Status) {
 			continue
 		}
-		if err := supersedeDecisionCardsForRun(ctx, tx, run.RunID, "run_quiesced", now, true); err != nil {
+		if err := supersedeDecisionCardsForRun(ctx, tx, run.RunID, "run_quiesced", now, false, true); err != nil {
 			return runtimerunquiescence.Result{}, err
 		}
 		if _, err := storerunlifecycle.MarkTerminal(ctx, tx, run.RunID, "cancelled", nil, now, runLifecycleOptions(caps)); err != nil {

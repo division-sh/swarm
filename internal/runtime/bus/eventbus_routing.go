@@ -778,7 +778,10 @@ func (eb *EventBus) settleProcessedDecisionRouteIfPresent(ctx context.Context, e
 	if err != nil || !processed {
 		return false, err
 	}
-	return true, eb.SettleRecoveredPipelineEvent(ctx, evt)
+	if err := eb.ConvergeNormalRunCompletionForEvent(ctx, evt.ID()); err != nil {
+		return true, err
+	}
+	return true, eb.completeDecisionRouteObligation(ctx, evt.ID())
 }
 
 // QuarantineRecoveredPipelineEvent atomically records a terminal pipeline

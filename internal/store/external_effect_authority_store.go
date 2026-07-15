@@ -7,13 +7,18 @@ import (
 	"strings"
 	"time"
 
+	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
 	if !authority.Valid() {
 		return false, nil
+	}
+	if current, err := externalEffectRunCurrent(ctx, q, authority, storerunlifecycle.DialectPostgres); err != nil || !current {
+		return current, err
 	}
 	switch authority.Kind {
 	case runtimeeffects.AuthorityNormalAgent:
@@ -52,6 +57,9 @@ func externalEffectAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, 
 	if !authority.Valid() {
 		return false, nil
 	}
+	if current, err := externalEffectRunCurrent(ctx, q, authority, storerunlifecycle.DialectSQLite); err != nil || !current {
+		return current, err
+	}
 	switch authority.Kind {
 	case runtimeeffects.AuthorityNormalAgent:
 		var epoch, generation int64
@@ -89,6 +97,9 @@ func requireExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.Tx, aut
 	if !authority.Valid() {
 		return invalidExternalAuthority(authority, "invalid")
 	}
+	if err := requireExternalEffectRunActive(ctx, tx, authority, storerunlifecycle.DialectPostgres); err != nil {
+		return err
+	}
 	if authority.Kind == runtimeeffects.AuthorityConversationForkChat && authorize {
 		return claimOrValidateForkChatAuthorityPostgres(ctx, tx, authority)
 	}
@@ -99,10 +110,65 @@ func requireExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx, autho
 	if !authority.Valid() {
 		return invalidExternalAuthority(authority, "invalid")
 	}
+	if err := requireExternalEffectRunActive(ctx, tx, authority, storerunlifecycle.DialectSQLite); err != nil {
+		return err
+	}
 	if authority.Kind == runtimeeffects.AuthorityConversationForkChat && authorize {
 		return claimOrValidateForkChatAuthoritySQLite(ctx, tx, authority)
 	}
 	return requireCurrentExternalEffectAuthoritySQLite(ctx, tx, authority)
+}
+
+func requireExternalEffectRunActive(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, dialect storerunlifecycle.Dialect) error {
+	if authority.Kind == runtimeeffects.AuthorityConversationForkChat {
+		return nil
+	}
+	runID := strings.TrimSpace(authority.SelectedFork.ForkRunID)
+	if authority.Kind == runtimeeffects.AuthorityNormalAgent {
+		runID = strings.TrimSpace(authority.Target.RunID)
+		if runID == "" {
+			var ok bool
+			var err error
+			runID, ok, err = runtimecurrentstate.RunIDFromContext(ctx)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return nil
+			}
+		}
+	}
+	return storerunlifecycle.RequireActive(ctx, tx, runID, dialect)
+}
+
+func externalEffectRunCurrent(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority, dialect storerunlifecycle.Dialect) (bool, error) {
+	if authority.Kind == runtimeeffects.AuthorityConversationForkChat {
+		return true, nil
+	}
+	runID := strings.TrimSpace(authority.SelectedFork.ForkRunID)
+	if authority.Kind == runtimeeffects.AuthorityNormalAgent {
+		runID = strings.TrimSpace(authority.Target.RunID)
+		if runID == "" {
+			var ok bool
+			var err error
+			runID, ok, err = runtimecurrentstate.RunIDFromContext(ctx)
+			if err != nil {
+				return false, err
+			}
+			if !ok {
+				return true, nil
+			}
+		}
+	}
+	query := `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id=$1::uuid AND status IN ('running','paused'))`
+	if dialect == storerunlifecycle.DialectSQLite {
+		query = `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id=? AND status IN ('running','paused'))`
+	}
+	var active bool
+	if err := q.QueryRowContext(ctx, query, runID).Scan(&active); err != nil {
+		return false, err
+	}
+	return active, nil
 }
 
 func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority) error {
