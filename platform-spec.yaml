@@ -8755,7 +8755,7 @@ flow_model:
         - resolver plumbing
         - fail-closed verification
         revise: parent-owned correlate_by/cardinality as the main authoring syntax
-        prefer: connect + instance key mapping + explicit delivery
+        prefer: edge-only connect + receiver-owned address/resolution semantics
       split_children:
         output_pin_key_carries: '#1544'
         connect_to_instance_route_planning: '#1545'

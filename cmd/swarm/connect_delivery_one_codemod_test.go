@@ -107,3 +107,71 @@ func TestMigrateConnectDeliveryOneCommandLeavesManualCasesUntouched(t *testing.T
 		})
 	}
 }
+
+func TestMigrateConnectDeliveryOneCommandMixedRowsFailAtomically(t *testing.T) {
+	tests := []struct {
+		name    string
+		blocker canonicalrouting.RetiredConnectMigrationBlocker
+		want    string
+	}{
+		{name: "many", blocker: canonicalrouting.RetiredConnectDeliveryMany, want: "only removes delivery: one"},
+		{name: "broadcast", blocker: canonicalrouting.RetiredConnectDeliveryBroadcast, want: "only removes delivery: one"},
+		{name: "reply delivery", blocker: canonicalrouting.RetiredConnectDeliveryReply, want: "only removes delivery: one"},
+		{name: "reply map", blocker: canonicalrouting.RetiredConnectReplyMap, want: "requires manual migration"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repoRoot := canonicalrouting.RepoRoot(t)
+			root := canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect)
+			canonicalrouting.ApplyRetiredConnectDeliveryOneThenBlockerMutation(t, root, tc.blocker)
+			packageFile := filepath.Join(root, "package.yaml")
+			before, err := os.ReadFile(packageFile)
+			if err != nil {
+				t.Fatalf("read package.yaml before migration: %v", err)
+			}
+
+			var out bytes.Buffer
+			var errOut bytes.Buffer
+			code := executeRootCommand(context.Background(), repoRoot, []string{
+				"migrate-connect-delivery-one",
+				"--contracts", root,
+			}, &out, &errOut)
+			if code == 0 || !strings.Contains(errOut.String(), tc.want) {
+				t.Fatalf("migrate code/stderr = %d/%q, want failure containing %q", code, errOut.String(), tc.want)
+			}
+			after, err := os.ReadFile(packageFile)
+			if err != nil {
+				t.Fatalf("read package.yaml after migration: %v", err)
+			}
+			if !bytes.Equal(after, before) {
+				t.Fatalf("mixed-row migration changed package.yaml\nbefore:\n%s\nafter:\n%s", before, after)
+			}
+		})
+	}
+}
+
+func TestMigrateConnectDeliveryOneCommandRemovesMultipleRows(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	root := canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect)
+	canonicalrouting.ApplyRetiredConnectDeliveryOnePairMutation(t, root)
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	code := executeRootCommand(context.Background(), repoRoot, []string{
+		"migrate-connect-delivery-one",
+		"--contracts", root,
+	}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("migrate command code = %d, stderr = %q", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "removed 2 retired connect.delivery: one declarations") {
+		t.Fatalf("stdout = %q, want two-row removal report", out.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "package.yaml"))
+	if err != nil {
+		t.Fatalf("read rewritten package.yaml: %v", err)
+	}
+	if strings.Contains(string(raw), "delivery:") {
+		t.Fatalf("rewritten package.yaml retains delivery:\n%s", raw)
+	}
+}
