@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -682,7 +683,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 
 	g := newTestInboundGateway(t, bus, nil, nil, pg)
 
-	body := []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":42},"text":"hello"}}`)
+	body := []byte(`{"update_id":123456789,"undeclared_root":"root-must-not-enter-author-story","message":{"message_id":7,"chat":{"id":42},"text":"hello","undeclared_private":"private-must-not-enter-author-story"}}`)
 	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body)
 	rec := httptest.NewRecorder()
 	handleBoundedProviderDelivery(t, g, bus, pg, rec, req, runID, entityID, provider, webhookSecret)
@@ -706,6 +707,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 	if got := countPostgresAgentDeliveriesForEvent(t, ctx, db, eventID, agentID); got != 1 {
 		t.Fatalf("agent delivery rows = %d, want 1", got)
 	}
+	requireInboundGatewayAuthorProjection(t, ctx, pg, runID, entityID, "hello", "chat", "42")
 	select {
 	case got := <-ch:
 		if got.ID() != eventID || got.Type() != events.EventType(providerEventName) {
@@ -743,7 +745,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 
 	g := newTestInboundGateway(t, bus, nil, nil, sqliteStore)
 
-	body := []byte(`{"update_id":987654321,"message":{"message_id":8,"chat":{"id":42},"text":"hello sqlite"}}`)
+	body := []byte(`{"update_id":987654321,"undeclared_root":"root-must-not-enter-author-story","message":{"message_id":8,"chat":{"id":42},"text":"hello sqlite","undeclared_private":"private-must-not-enter-author-story"}}`)
 	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body)
 	rec := httptest.NewRecorder()
 	handleBoundedProviderDelivery(t, g, bus, sqliteStore, rec, req, runID, entityID, provider, webhookSecret)
@@ -767,6 +769,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 	if got := countSQLiteAgentDeliveriesForEvent(t, ctx, sqliteStore, eventID, agentID); got != 1 {
 		t.Fatalf("agent delivery rows = %d, want 1", got)
 	}
+	requireInboundGatewayAuthorProjection(t, ctx, sqliteStore, runID, entityID, "hello sqlite", "chat", "42")
 	select {
 	case got := <-ch:
 		if got.ID() != eventID || got.Type() != events.EventType(providerEventName) {
@@ -777,6 +780,61 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 		// evidence and supported store admission.
 	}
 	waitForInboundBusQuiescence(t, bus)
+}
+
+type inboundAuthorActivityReader interface {
+	ListAuthorActivity(context.Context, runtimeauthoractivity.ListOptions) (runtimeauthoractivity.ListResult, error)
+}
+
+func requireInboundGatewayAuthorProjection(
+	t *testing.T,
+	ctx context.Context,
+	reader inboundAuthorActivityReader,
+	runID string,
+	entityID string,
+	wantSummary string,
+	wantSubjectType string,
+	wantSubjectID string,
+) {
+	t.Helper()
+	result, err := reader.ListAuthorActivity(ctx, runtimeauthoractivity.ListOptions{RunID: runID, Limit: 100})
+	if err != nil {
+		t.Fatalf("ListAuthorActivity: %v", err)
+	}
+	var matches []runtimeauthoractivity.Occurrence
+	for _, occurrence := range result.Occurrences {
+		if occurrence.Kind == runtimeauthoractivity.KindInboundReceived && occurrence.Transition == "received" {
+			matches = append(matches, occurrence)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("inbound author occurrences = %d, want one: %#v", len(matches), result.Occurrences)
+	}
+	occurrence := matches[0]
+	if occurrence.EntityID != entityID {
+		t.Fatalf("inbound author entity_id = %q, want %q", occurrence.EntityID, entityID)
+	}
+	if occurrence.AuthorSafeSummary != wantSummary {
+		t.Fatalf("inbound author summary = %q, want declared %q", occurrence.AuthorSafeSummary, wantSummary)
+	}
+	if occurrence.Projection.AuthorSubjectType != wantSubjectType || occurrence.Projection.AuthorSubjectID != wantSubjectID {
+		t.Fatalf(
+			"inbound author subject = %q/%q, want declared %q/%q",
+			occurrence.Projection.AuthorSubjectType,
+			occurrence.Projection.AuthorSubjectID,
+			wantSubjectType,
+			wantSubjectID,
+		)
+	}
+	encoded, err := json.Marshal(occurrence)
+	if err != nil {
+		t.Fatalf("marshal inbound author occurrence: %v", err)
+	}
+	for _, forbidden := range []string{"root-must-not-enter-author-story", "private-must-not-enter-author-story", "undeclared_root", "undeclared_private"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("inbound author occurrence leaked undeclared payload marker %q: %s", forbidden, encoded)
+		}
+	}
 }
 
 func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDelivery(t *testing.T) {

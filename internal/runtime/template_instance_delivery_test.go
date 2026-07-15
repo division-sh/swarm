@@ -944,7 +944,8 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 				batch := providerRollbackInboundBatch()
 				runner := eventStore.(runtimebus.EventMutationRunner)
 				err = runner.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
-					_, prepareErr := bus.PrepareInboundDeliveryBatchInMutation(mutation.Context(), batch)
+					prepareCtx := runtimeauthoractivity.WithInboundProjection(mutation.Context(), runtimeauthoractivity.InboundProjection{})
+					_, prepareErr := bus.PrepareInboundDeliveryBatchInMutation(prepareCtx, batch)
 					return prepareErr
 				})
 				if err == nil || !strings.Contains(err.Error(), "injected provider rollback checkpoint") {
@@ -954,7 +955,8 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 
 				if checkpoint.retry {
 					err := runner.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
-						_, prepareErr := bus.PrepareInboundDeliveryBatchInMutation(mutation.Context(), batch)
+						prepareCtx := runtimeauthoractivity.WithInboundProjection(mutation.Context(), runtimeauthoractivity.InboundProjection{})
+						_, prepareErr := bus.PrepareInboundDeliveryBatchInMutation(prepareCtx, batch)
 						return prepareErr
 					})
 					if err != nil {
