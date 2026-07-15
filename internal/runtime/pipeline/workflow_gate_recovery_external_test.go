@@ -17,6 +17,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -82,6 +83,9 @@ type proposedEffectRouteProofBus struct {
 	publishContexts []events.DeliveryContext
 	outbox          []runtimeengine.EmitIntent
 	dispatched      []runtimeengine.EmitIntent
+	eventStore      interface {
+		AppendEventTx(context.Context, *sql.Tx, events.Event) error
+	}
 }
 
 type proposedEffectRouteProofOutbox struct{ bus *proposedEffectRouteProofBus }
@@ -105,14 +109,30 @@ func (b *proposedEffectRouteProofBus) EngineDispatcher() runtimeengine.PostCommi
 	return proposedEffectRouteProofDispatcher{bus: b}
 }
 func (b *proposedEffectRouteProofBus) PublishInMutation(ctx context.Context, evt events.Event) error {
-	if _, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); !ok {
+	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
+	if !ok || tx == nil {
 		return errors.New("proposed-effect proof publication requires pipeline transaction")
+	}
+	if b.eventStore == nil {
+		return errors.New("proposed-effect proof publication requires event store")
+	}
+	if err := b.eventStore.AppendEventTx(ctx, tx, evt); err != nil {
+		return err
 	}
 	b.published = append(b.published, evt)
 	b.publishContexts = append(b.publishContexts, events.DeliveryContextFromContext(ctx))
 	return nil
 }
-func (o proposedEffectRouteProofOutbox) WriteOutbox(_ context.Context, intents []runtimeengine.EmitIntent) error {
+func (o proposedEffectRouteProofOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.EmitIntent) error {
+	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
+	if !ok || tx == nil || o.bus.eventStore == nil {
+		return errors.New("proposed-effect proof outbox requires pipeline event mutation")
+	}
+	for _, intent := range intents {
+		if err := o.bus.eventStore.AppendEventTx(ctx, tx, intent.Event); err != nil {
+			return err
+		}
+	}
 	o.bus.outbox = append(o.bus.outbox, intents...)
 	return nil
 }
@@ -541,7 +561,11 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				if err != nil {
 					t.Fatal(err)
 				}
-				requestEventID := uuid.NewString()
+				sourceEventID := uuid.NewString()
+				requestEventID := activityidentity.RequestEventID(activityidentity.Fact{
+					RunID: runID, SourceEventID: sourceEventID, EntityID: entityID, NodeID: "support",
+					HandlerEventKey: "support.reply_drafted", ActivityID: "send_support_reply", Tool: "provider_write", Attempt: 1,
+				})
 				continuation := decisioncard.ProposedEffectContinuation{
 					CardID: decisioncard.ProposedEffectCardID(requestEventID, "support_reply"), RunID: runID,
 					RequestEventID: requestEventID, ActivityID: "send_support_reply", Tool: "provider_write",
@@ -551,7 +575,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					RevisionEvent: "send_support_reply.revision_requested", RejectedEvent: "send_support_reply.rejected",
 					RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
 					EntityID: entityID, NodeID: "support", FlowInstance: "root", HandlerEventKey: "support.reply_drafted",
-					SourceEventID: uuid.NewString(), SourceRunID: runID, SourceTaskID: "task-1",
+					SourceEventID: sourceEventID, SourceRunID: runID, SourceTaskID: "task-1",
 					ReplyContextID: "reply-context-route-proof", State: decisioncard.ProposedEffectPending,
 					CreatedAt: now, UpdatedAt: now,
 				}.Canonical()
@@ -607,7 +631,9 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				decisionEvent := eventtest.RuntimeControl(decisionEventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
 					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "root"), now.Add(time.Minute))
 				source := semanticview.Wrap(proposedEffectProofBundle("http://127.0.0.1:1"))
-				bus := &proposedEffectRouteProofBus{}
+				bus := &proposedEffectRouteProofBus{eventStore: selected.cards.(interface {
+					AppendEventTx(context.Context, *sql.Tx, events.Event) error
+				})}
 				coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
 					Module: gateRecoveryModule{source: source}, WorkflowStore: selected.workflowStore,
 					DecisionCards: selected.cards, BundleFingerprint: gateRecoveryBundle,

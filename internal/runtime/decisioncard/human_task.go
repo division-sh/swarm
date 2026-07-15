@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/google/uuid"
 )
 
 const (
@@ -35,6 +36,11 @@ type HumanTaskContinuation struct {
 	OutcomeEventID    string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+}
+
+func HumanTaskOutcomeEventID(cardID, outcomeEventID string) string {
+	identity := strings.TrimSpace(cardID) + "\x00" + strings.TrimSpace(outcomeEventID)
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.human-task.outcome.v1\x00"+identity)).String()
 }
 
 func (c HumanTaskContinuation) Canonical() HumanTaskContinuation {

@@ -80,7 +80,8 @@ func (pc *PipelineCoordinator) handleProposedEffectDecisionCard(ctx context.Cont
 			return err
 		}
 		if continuation.RouteEventID == evt.ID() && (continuation.State == decisioncard.ProposedEffectRequestReleased || continuation.State == decisioncard.ProposedEffectOutcomeDispatched) {
-			return nil
+			_, err := store.CompleteProposedEffectRoute(txctx, card.CardID, evt.ID(), card.DecidedAt)
+			return err
 		}
 		if continuation.State != decisioncard.ProposedEffectDecisionCommitted {
 			return fmt.Errorf("proposed-effect continuation is not ready to route")
@@ -198,7 +199,7 @@ func proposedEffectOutcomeEvent(card decisioncard.Card, parent events.Event, con
 		return noEvent, fmt.Errorf("proposed-effect %s event is missing", card.Verdict)
 	}
 	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, continuation.EntityID), continuation.FlowInstance)
-	eventID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.proposed-effect.outcome.v1\x00"+card.CardID+"\x00"+parent.ID()+"\x00"+card.Verdict)).String()
+	eventID := decisioncard.ProposedEffectOutcomeEventID(card.CardID, parent.ID(), card.Verdict)
 	return events.NewChildEvent(eventID, events.EventType(eventType), runtimeWorkflowID, continuation.SourceTaskID, raw,
 		parent.ChainDepth()+1, parent, envelope, card.DecidedAt.UTC()), nil
 }
@@ -301,9 +302,6 @@ func (pc *PipelineCoordinator) handleDecisionCardExpiredEvent(ctx context.Contex
 	product := events.NewChildEvent(productID, "human_task.expired", runtimeWorkflowID, "", payload, evt.ChainDepth()+1, evt,
 		humanTaskRequesterOutcomeEnvelope(continuation), card.DecidedAt.UTC())
 	return nil, pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
-		if _, err := store.CompleteHumanTaskOutcome(txctx, card.CardID, evt.ID(), card.DecidedAt); err != nil {
-			return err
-		}
 		if continuation.ReplyContextID != "" {
 			delivery := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: continuation.ReplyContextID}}
 			product = product.WithDeliveryContext(delivery)
@@ -313,7 +311,11 @@ func (pc *PipelineCoordinator) handleDecisionCardExpiredEvent(ctx context.Contex
 		if !ok || publisher == nil {
 			return fmt.Errorf("transactional direct event publisher is required for human-task expiry")
 		}
-		return publisher.PublishDirectInMutation(txctx, product, []string{anchor.RequesterAgentID})
+		if err := publisher.PublishDirectInMutation(txctx, product, []string{anchor.RequesterAgentID}); err != nil {
+			return err
+		}
+		_, err = store.CompleteHumanTaskOutcome(txctx, card.CardID, evt.ID(), card.DecidedAt)
+		return err
 	})
 }
 
@@ -418,11 +420,11 @@ func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, 
 		return nil, err
 	}
 	return nil, pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
-		continuation, err := store.CompleteHumanTaskOutcome(txctx, card.CardID, evt.ID(), card.DecidedAt)
+		continuation, err := store.LoadHumanTaskContinuation(txctx, card.CardID)
 		if err != nil {
 			return err
 		}
-		productEventID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.human-task.outcome.v1\x00"+card.CardID+"\x00"+evt.ID())).String()
+		productEventID := decisioncard.HumanTaskOutcomeEventID(card.CardID, evt.ID())
 		product := events.NewChildEvent(productEventID, eventType, runtimeWorkflowID, "", payload, evt.ChainDepth()+1, evt,
 			humanTaskRequesterOutcomeEnvelope(continuation), card.DecidedAt.UTC())
 		if continuation.ReplyContextID != "" {
@@ -434,7 +436,11 @@ func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, 
 		if !ok || publisher == nil {
 			return fmt.Errorf("transactional direct event publisher is required for human-task outcome")
 		}
-		return publisher.PublishDirectInMutation(txctx, product, []string{anchor.RequesterAgentID})
+		if err := publisher.PublishDirectInMutation(txctx, product, []string{anchor.RequesterAgentID}); err != nil {
+			return err
+		}
+		_, err = store.CompleteHumanTaskOutcome(txctx, card.CardID, evt.ID(), card.DecidedAt)
+		return err
 	})
 }
 

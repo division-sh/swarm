@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -75,9 +76,22 @@ func TestProposedEffectCardLifecycleParity(t *testing.T) {
 					t.Fatalf("committed continuation = %#v, %v", committed, err)
 				}
 				assertProposedEffectAuthorActivity(t, cards, runID, card.CardID, continuation.RequestEventID, []string{"created", "decided"}, verdict, "")
-				if _, err := store.CompleteProposedEffectRoute(ctx, card.CardID, decisionEventID, now.Add(2*time.Minute)); err != nil {
-					t.Fatalf("CompleteProposedEffectRoute: %v", err)
+				if _, err := store.CompleteProposedEffectRoute(ctx, card.CardID, decisionEventID, now.Add(2*time.Minute)); err == nil || !strings.Contains(err.Error(), "active pipeline transaction") {
+					t.Fatalf("standalone CompleteProposedEffectRoute error = %v", err)
 				}
+				if err := runDecisionCardTestPipelineMutation(t, ctx, cards, func(txctx context.Context, _ *sql.Tx) error {
+					_, err := store.CompleteProposedEffectRoute(txctx, card.CardID, decisionEventID, now.Add(2*time.Minute))
+					return err
+				}); err == nil || !strings.Contains(err.Error(), "outcome event is not persisted") {
+					t.Fatalf("eventless CompleteProposedEffectRoute error = %v", err)
+				}
+				if err := runDecisionCardTestPipelineMutation(t, ctx, cards, func(txctx context.Context, _ *sql.Tx) error {
+					_, err := store.CompleteProposedEffectRoute(txctx, card.CardID, uuid.NewString(), now.Add(2*time.Minute))
+					return err
+				}); err == nil {
+					t.Fatal("mismatched proposed-effect route identity was accepted")
+				}
+				completeProposedEffectRouteInTestMutation(t, ctx, cards, card.CardID, decisionEventID, now.Add(2*time.Minute))
 				readback, err = store.ProposedEffectReadback(ctx, card.CardID)
 				wantDispatch := "released"
 				wantContinuation := decisioncard.ProposedEffectRequestReleased
@@ -103,6 +117,8 @@ func TestNormalRunCompletionRequiresSettledProposedEffectsParity(t *testing.T) {
 		{name: "pending", state: decisioncard.ProposedEffectPending},
 		{name: "decision_committed", state: decisioncard.ProposedEffectDecisionCommitted},
 		{name: "request_released", state: decisioncard.ProposedEffectRequestReleased, wantCompleted: true},
+		{name: "request_released_without_event", state: "request_released_without_event"},
+		{name: "request_released_mismatched_route", state: "request_released_mismatched_route"},
 		{name: "outcome_dispatched", state: decisioncard.ProposedEffectOutcomeDispatched, wantCompleted: true},
 		{name: "superseded", state: decisioncard.ProposedEffectSuperseded, wantCompleted: true},
 	}
@@ -129,7 +145,8 @@ func TestNormalRunCompletionRequiresSettledProposedEffectsParity(t *testing.T) {
 				}
 
 				switch testCase.state {
-				case decisioncard.ProposedEffectDecisionCommitted, decisioncard.ProposedEffectRequestReleased, decisioncard.ProposedEffectOutcomeDispatched:
+				case decisioncard.ProposedEffectDecisionCommitted, decisioncard.ProposedEffectRequestReleased, decisioncard.ProposedEffectOutcomeDispatched,
+					"request_released_without_event", "request_released_mismatched_route":
 					verdict := "approve"
 					if testCase.state == decisioncard.ProposedEffectOutcomeDispatched {
 						verdict = "reject"
@@ -141,14 +158,31 @@ func TestNormalRunCompletionRequiresSettledProposedEffectsParity(t *testing.T) {
 					}); err != nil {
 						t.Fatalf("DecideDecisionCard: %v", err)
 					}
-					if testCase.state != decisioncard.ProposedEffectDecisionCommitted {
-						routeEventID := uuid.NewString()
-						if verdict == "approve" {
-							routeEventID = continuation.RequestEventID
+					if testCase.state == "request_released_without_event" {
+						query := `UPDATE proposed_effect_continuations SET state = 'request_released', route_event_id = ? WHERE card_id = ?`
+						if postgres {
+							query = `UPDATE proposed_effect_continuations SET state = 'request_released', route_event_id = $1::uuid WHERE card_id = $2`
 						}
-						if _, err := store.CompleteProposedEffectRoute(ctx, card.CardID, routeEventID, now.Add(2*time.Minute)); err != nil {
-							t.Fatalf("CompleteProposedEffectRoute: %v", err)
+						if _, err := db.ExecContext(ctx, query, decisionEventID, card.CardID); err != nil {
+							t.Fatal(err)
 						}
+					} else if testCase.state == "request_released_mismatched_route" {
+						completeProposedEffectRouteInTestMutation(t, ctx, cards, card.CardID, decisionEventID, now.Add(2*time.Minute))
+						query := `UPDATE proposed_effect_continuations SET route_event_id = ? WHERE card_id = ?`
+						if postgres {
+							query = `UPDATE proposed_effect_continuations SET route_event_id = $1::uuid WHERE card_id = $2`
+						}
+						if _, err := db.ExecContext(ctx, query, uuid.NewString(), card.CardID); err != nil {
+							t.Fatal(err)
+						}
+						if err := runDecisionCardTestPipelineMutation(t, ctx, cards, func(txctx context.Context, _ *sql.Tx) error {
+							_, err := store.CompleteProposedEffectRoute(txctx, card.CardID, decisionEventID, now.Add(3*time.Minute))
+							return err
+						}); err == nil || !strings.Contains(err.Error(), "inconsistent route identity") {
+							t.Fatalf("inconsistent persisted route identity error = %v", err)
+						}
+					} else if testCase.state != decisioncard.ProposedEffectDecisionCommitted {
+						completeProposedEffectRouteInTestMutation(t, ctx, cards, card.CardID, decisionEventID, now.Add(2*time.Minute))
 					}
 				case decisioncard.ProposedEffectSuperseded:
 					next := generation
@@ -299,9 +333,7 @@ func TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothSt
 				}); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := store.CompleteProposedEffectRoute(ctx, card.CardID, decisionEventID, now.Add(2*time.Minute)); err != nil {
-					t.Fatal(err)
-				}
+				completeProposedEffectRouteInTestMutation(t, ctx, cards, card.CardID, decisionEventID, now.Add(2*time.Minute))
 
 				journal := proposedEffectTestJournal(cards)
 				started, inserted, err := journal.StartActivityAttempt(ctx, runtimepipeline.ActivityAttemptRecord{
