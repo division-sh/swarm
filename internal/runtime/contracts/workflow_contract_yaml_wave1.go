@@ -339,13 +339,11 @@ var flowPackageRequiresPolicyFieldOptions = map[string]struct{}{
 }
 
 var flowPackageConnectFieldOptions = map[string]struct{}{
-	"from":     {},
-	"to":       {},
-	"adapter":  {},
-	"using":    {},
-	"map":      {},
-	"delivery": {},
-	"reply":    {},
+	"from":    {},
+	"to":      {},
+	"adapter": {},
+	"using":   {},
+	"map":     {},
 }
 
 var flowPackageConnectUsingFieldOptions = map[string]struct{}{
@@ -742,13 +740,9 @@ func (c *FlowPackageConnect) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("connect.map: %w", err)
 			}
 		case "delivery":
-			if err := value.Decode(&out.Delivery); err != nil {
-				return fmt.Errorf("connect.delivery: %w", err)
-			}
+			return NewRetiredConnectDeliveryDiagnostic()
 		case "reply":
-			if err := value.Decode(&out.Reply); err != nil {
-				return fmt.Errorf("connect.reply: %w", err)
-			}
+			return NewRetiredConnectReplyDiagnostic()
 		default:
 			return NewUndefinedFieldDiagnostic("connect", key, flowPackageConnectFieldOptions)
 		}

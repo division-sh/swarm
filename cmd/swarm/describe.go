@@ -504,7 +504,7 @@ func writeRoutingTopologyText(out io.Writer, topology routingtopology.Topology) 
 			fmt.Fprintf(out, "    connect: %s -> %s (%s)\n", edge.Boundary.From, edge.Boundary.To, edge.Boundary.AuthoredLocation)
 		}
 		if edge.Resolution != nil {
-			fmt.Fprintf(out, "    resolution: mode=%s delivery=%s target=%s%s\n", formatCLIHumanCode(cliHumanCodeRoutingTopology, edge.Resolution.Mode), formatCLIHumanCode(cliHumanCodeRoutingTopology, edge.Resolution.Delivery), formatCLIHumanCode(cliHumanCodeRoutingTopology, edge.Resolution.TargetKind), routingResolutionDetail(edge.Resolution))
+			fmt.Fprintf(out, "    resolution: mode=%s target=%s%s\n", formatCLIHumanCode(cliHumanCodeRoutingTopology, edge.Resolution.Mode), formatCLIHumanCode(cliHumanCodeRoutingTopology, edge.Resolution.TargetKind), routingResolutionDetail(edge.Resolution))
 		}
 	}
 	if len(topology.BoundaryExposures) > 0 {

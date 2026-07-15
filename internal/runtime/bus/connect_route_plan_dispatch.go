@@ -171,9 +171,6 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		out.DeliveryIntents = append(out.DeliveryIntents, routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerConnectRoutePlan)...)
 		out.LiveRecipients = append(out.LiveRecipients, connectRoutePlanLiveRecipients(routes)...)
 		out.RoutedRecipients = append(out.RoutedRecipients, subscribers...)
-		if len(plan.Reply) > 0 {
-			out.ExtraDetail["connect_route_plan_reply"] = cloneStringMap(plan.Reply)
-		}
 	}
 	out.LiveRecipients = normalizeRoutePlanLiveRecipients(out.LiveRecipients)
 	out.DeliveryIntents = normalizeRoutePlanDeliveryIntents(out.DeliveryIntents)

@@ -134,6 +134,26 @@ func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{
 	}
 }
 
+func NewRetiredConnectDeliveryDiagnostic() *LoaderDiagnostic {
+	return NewExpectedShapeDiagnostic(
+		"contract_loader.retired_connect_delivery",
+		"package.yaml.connect.delivery",
+		"connect.delivery is retired.",
+		"Remove delivery. A connect row declares one inter-flow edge; use multiple rows for static fan-out, and declare instance selection or cardinality on the receiver input resolution.",
+		nil,
+	)
+}
+
+func NewRetiredConnectReplyDiagnostic() *LoaderDiagnostic {
+	return NewExpectedShapeDiagnostic(
+		"contract_loader.retired_connect_reply",
+		"package.yaml.connect.reply",
+		"connect.reply is retired.",
+		"Remove reply and declare receiver input resolution mode reply with replies_to; request and response remain separate connect edges.",
+		nil,
+	)
+}
+
 func NewExpectedShapeDiagnostic(code, yamlPath, problem, remediation string, cause error) *LoaderDiagnostic {
 	return &LoaderDiagnostic{
 		Code:        strings.TrimSpace(code),

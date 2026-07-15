@@ -83,7 +83,7 @@ func validateCompositionConnect(source semanticview.Source, connect runtimecontr
 	findings = append(findings, validateCompositionConnectSyntheticCarryCollisions(source, connect, from, outputPin, inputPin)...)
 
 	instanceKeyFindings := validateCompositionConnectInstanceKey(source, connect, outputPin, inputPin, from.FlowID, to.FlowID)
-	findings = append(findings, validateCompositionConnectDelivery(connect, inputPin, receiverSchema, to.FlowID, len(instanceKeyFindings) == 0)...)
+	findings = append(findings, validateCompositionConnectReceiverAddress(connect, inputPin, receiverSchema, to.FlowID, len(instanceKeyFindings) == 0)...)
 	if len(instanceKeyFindings) > 0 {
 		findings = append(findings, instanceKeyFindings...)
 	} else {
@@ -200,22 +200,10 @@ func compositionConnectEventCompatible(source semanticview.Source, connect runti
 	return false
 }
 
-func validateCompositionConnectDelivery(connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, receiverSchema runtimecontracts.FlowSchemaDocument, receiverFlowID string, hasInstanceKeyRoute bool) []Finding {
+func validateCompositionConnectReceiverAddress(connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, receiverSchema runtimecontracts.FlowSchemaDocument, receiverFlowID string, hasInstanceKeyRoute bool) []Finding {
 	var findings []Finding
-	delivery := strings.TrimSpace(connect.Delivery)
-	if delivery == "" && inputPin.Address != nil {
-		delivery = strings.TrimSpace(inputPin.Address.Cardinality)
-	}
-	switch delivery {
-	case "", "one", "many", "broadcast", "reply":
-	default:
-		findings = append(findings, compositionConnectFinding(connect, "delivery_topology_invalid", fmt.Sprintf("delivery %q is not one, many, broadcast, or reply", delivery), receiverFlowID))
-	}
-	if delivery == "reply" && len(connect.Reply) == 0 {
-		findings = append(findings, compositionConnectFinding(connect, "reply_lineage_missing", "reply delivery requires a reply lineage declaration", receiverFlowID))
-	}
 	if inputPin.Address == nil {
-		if compositionReceiverAddressRequired(receiverSchema) && !hasInstanceKeyRoute && delivery != "broadcast" {
+		if compositionReceiverAddressRequired(receiverSchema) && !hasInstanceKeyRoute {
 			findings = append(findings, compositionConnectFinding(connect, "receiver_route_key_missing", fmt.Sprintf("receiver flow %s requires a matching instance key route or an explicit addressed input pin", receiverFlowID), receiverFlowID))
 		}
 		return findings
@@ -225,15 +213,6 @@ func validateCompositionConnectDelivery(connect runtimecontracts.FlowPackageConn
 	case "one", "many":
 	default:
 		findings = append(findings, compositionConnectFinding(connect, "delivery_topology_invalid", fmt.Sprintf("input pin address cardinality %q is not one or many", cardinality), receiverFlowID))
-	}
-	if delivery == "one" && cardinality == "many" {
-		findings = append(findings, compositionConnectFinding(connect, "delivery_topology_invalid", "delivery one is incompatible with address cardinality many", receiverFlowID))
-	}
-	if delivery == "many" && cardinality == "one" {
-		findings = append(findings, compositionConnectFinding(connect, "delivery_topology_invalid", "delivery many is incompatible with address cardinality one", receiverFlowID))
-	}
-	if delivery == "broadcast" && cardinality == "one" {
-		findings = append(findings, compositionConnectFinding(connect, "delivery_topology_invalid", "delivery broadcast is incompatible with address cardinality one", receiverFlowID))
 	}
 	mode := strings.TrimSpace(inputPin.Address.Mode)
 	switch mode {
@@ -251,12 +230,6 @@ func compositionReceiverAddressRequired(schema runtimecontracts.FlowSchemaDocume
 func validateCompositionConnectInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, outputPin runtimecontracts.FlowOutputEventPin, inputPin runtimecontracts.FlowInputEventPin, producerFlowID, receiverFlowID string) []Finding {
 	adapter := connect.Using.Instance
 	if !inputPin.Resolution.Empty() {
-		switch inputPin.Resolution.Mode {
-		case runtimecontracts.FlowInputResolutionModeCreate, runtimecontracts.FlowInputResolutionModeSelect, runtimecontracts.FlowInputResolutionModeSelectOrCreate, runtimecontracts.FlowInputResolutionModeFanIn:
-			if strings.TrimSpace(connect.Delivery) != "" && strings.TrimSpace(connect.Delivery) != "one" {
-				return []Finding{compositionConnectFinding(connect, "instance_resolution_invalid", fmt.Sprintf("resolution mode %s requires delivery one", inputPin.Resolution.Mode), receiverFlowID)}
-			}
-		}
 		if adapter.Declared {
 			return []Finding{compositionConnectFinding(connect, "instance_resolution_invalid", "connect.using.instance is incompatible with input pin resolution", receiverFlowID)}
 		}
@@ -268,12 +241,6 @@ func validateCompositionConnectInstanceKey(source semanticview.Source, connect r
 	if inputPin.Address != nil {
 		if adapter.Declared {
 			return []Finding{compositionConnectFinding(connect, "connect_key_adapter_invalid", "connect.using.instance is valid only for addressless template receiver instance-key routes", receiverFlowID)}
-		}
-		return nil
-	}
-	if strings.TrimSpace(connect.Delivery) == "broadcast" {
-		if adapter.Declared {
-			return []Finding{compositionConnectFinding(connect, "connect_key_adapter_invalid", "connect.using.instance is incompatible with delivery broadcast", receiverFlowID)}
 		}
 		return nil
 	}

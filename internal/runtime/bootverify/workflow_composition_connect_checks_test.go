@@ -189,11 +189,6 @@ func TestRun_FailsClosedForInvalidSelectInputResolution(t *testing.T) {
 			opts: selectResolutionCompositionFixtureOptions{receiverMode: "static"},
 			want: "INVALID-TEMPLATE-INSTANCE",
 		},
-		{
-			name: "wrong delivery",
-			opts: selectResolutionCompositionFixtureOptions{delivery: "many"},
-			want: "requires delivery one",
-		},
 	}
 	for _, mode := range []string{runtimecontracts.FlowInputResolutionModeSelect, runtimecontracts.FlowInputResolutionModeSelectOrCreate} {
 		for _, tc := range tests {
@@ -307,7 +302,6 @@ func TestRun_FailsClosedForInvalidFanInStreamInputResolution(t *testing.T) {
 		{name: "missing accumulate", opts: templatefanin.Options{MissingAccumulate: true}, want: "for fan-in input must declare accumulate"},
 		{name: "accumulator dedup redeclaration", opts: templatefanin.Options{AccumulateDedupMismatch: true}, want: "accumulate.dedup_by \"payload.period_id\" must not redeclare fan-in dedup_by"},
 		{name: "accumulator window redeclaration", opts: templatefanin.Options{AccumulateWindowMismatch: true}, want: "accumulate.window \"payload.operating_id\" must not redeclare fan-in window"},
-		{name: "wrong delivery", opts: templatefanin.Options{DeliveryMany: true}, want: "requires delivery one"},
 		{name: "legacy map", opts: templatefanin.Options{LegacyConnectMap: true}, want: "connect.map is incompatible with input pin resolution"},
 	}
 	for _, tc := range tests {
@@ -594,9 +588,6 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 		{name: "incompatible address key types", variant: canonicalrouting.CompositionConnectIncompatibleKeyType, want: "key_types_incompatible"},
 		{name: "unindexed business-field target", variant: canonicalrouting.CompositionConnectUnindexedTarget, want: "receiver_address_rule_invalid", wantExtra: "indexed: true"},
 		{name: "nested business-field target", variant: canonicalrouting.CompositionConnectNestedTarget, want: "receiver_address_rule_invalid", wantExtra: "top-level indexed entity fields"},
-		{name: "invalid delivery topology", variant: canonicalrouting.CompositionConnectDeliveryMany, want: "delivery_topology_invalid"},
-		{name: "broadcast delivery with singular address", variant: canonicalrouting.CompositionConnectDeliveryBroadcast, want: "delivery_topology_invalid", wantExtra: "broadcast"},
-		{name: "missing reply lineage", variant: canonicalrouting.CompositionConnectDeliveryReply, want: "reply_lineage_missing"},
 		{name: "template receiver missing address rule", variant: canonicalrouting.CompositionConnectTemplateMissingAddress, want: "receiver_instance_key_invalid"},
 		{name: "template instance key route rejects renamed connect map", variant: canonicalrouting.CompositionConnectTemplateLegacyMap, want: "connect_key_adapter_unsupported"},
 	}
@@ -773,7 +764,6 @@ type selectResolutionCompositionFixtureOptions struct {
 	instanceKey   string
 	carryType     string
 	receiverMode  string
-	delivery      string
 	compositeKey  bool
 	legacyAddress bool
 	usingInstance bool
@@ -802,8 +792,6 @@ func writeSelectResolutionCompositionConnectFixture(t *testing.T, opts selectRes
 		invalidity = canonicalrouting.SelectResolutionLegacyConnectMap
 	case strings.TrimSpace(opts.receiverMode) == "static":
 		invalidity = canonicalrouting.SelectResolutionStaticReceiver
-	case strings.TrimSpace(opts.delivery) == "many":
-		invalidity = canonicalrouting.SelectResolutionManyDelivery
 	}
 	return canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{Mode: mode, Invalidity: invalidity})
 }

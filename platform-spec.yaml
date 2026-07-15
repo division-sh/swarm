@@ -1142,7 +1142,7 @@ contract_formats:
           supported_surface:
           - static receiver singular delivery
           - identity-style template/dynamic receiver fanout through supported descriptor targets
-          - reply delivery metadata preservation
+          - typed reply-resolution context preservation
           - persisted delivery rows, pipeline receipts, and committed replay scope as separate owners
           unsupported_or_split:
             business_field_descriptor_targets: 'Declared top-level receiver entity fields with indexed: true are implemented by #1479; nested entity paths, arbitrary, undeclared, unindexed, config, and instance business-field descriptor targets remain split to #1466 or later gated children.'
@@ -3888,8 +3888,8 @@ engine:
       No subsystem may implement its own name resolution logic.'
   cross_flow_routing:
     description: 'Composition-first pin routing is the canonical cross-flow routing surface. Parent package
-      connect entries own inter-flow delivery topology, output pins declare the event identity being produced,
-      input pins declare the receiver address resolution contract, and the analyzer lowers the connection into
+      connect entries own only the inter-flow edge, output pins declare the event identity being produced,
+      input pins declare receiver selection, lifecycle, cardinality, and reply resolution, and the analyzer lowers those facts into
       concrete route-plan facts. For pin-declared outputs, the platform routes by resolved source/target
       identity, not by unconstrained event-type broadcast.'
     canonical_owner: platform-spec.yaml#flow_model.flow_package.composition_routing
@@ -9504,7 +9504,7 @@ flow_model:
         Parent-authored composition routing is the canonical source authority for common cross-flow pin delivery.
         Output pins declare the event identity and producer interface/key evidence; input pins declare the receiver interface;
         template receiver `instance.by` declares the normal receiver instance key; explicit input-pin `address` declares
-        separately approved addressed-input descriptor routing. Parent package.yaml `connect` entries declare inter-flow delivery topology.
+        separately approved addressed-input descriptor routing. Parent package.yaml `connect` entries declare only inter-flow edges.
         The analyzer verifies those authored facts, infers only safe and unambiguous defaults, rejects ambiguity
         fail-closed, and lowers each accepted connection into concrete route-plan facts consumed by runtime RoutePlan.
         Producer emit sites MUST NOT own consumer routing on the common composed path.
@@ -9566,7 +9566,7 @@ flow_model:
           location: parent package.yaml connect
           canonical_form: >
             `connect` is a list of structured connections. Each entry binds one producer output pin to one receiver
-            input pin, optionally names an alias/adapter, and declares or confirms delivery topology. `from` uses either
+            input pin and optionally names an alias/adapter. `from` uses either
             flow-id plus local pin name or the explicit package-root endpoint form `.{root_output_pin_name}`. `to` uses
             flow-id plus local input pin name in this slice. Connect refs are not handler keys and not runtime instance paths.
           fields:
@@ -9574,24 +9574,26 @@ flow_model:
             to: Required receiver reference `{receiver_flow_id}.{input_pin_name}`.
             adapter: Optional named payload/event adapter when producer output and receiver input names or payload keys differ.
             map: Optional explicit map from receiver address keys to source/target expressions. Required when inference would be ambiguous or names differ.
-            delivery: Optional delivery topology; valid values are one, many, broadcast, and reply. If omitted, the analyzer may infer only when unambiguous from the addressed input pin cardinality.
-            reply: Optional reply lineage declaration for response routing; required when delivery is reply and usable request lineage is not otherwise provable.
+          retired_fields:
+            delivery: Retired on presence. Cardinality and instance selection belong to the receiver input; static fan-out is authored as multiple connect rows.
+            reply: >
+              Retired on presence. Reply routing belongs to receiver input
+              `resolution: {mode: reply, replies_to: ...}` and paired connect edges.
           example: |
             connect:
               - from: holding_devops.deploy_completed
                 to: operating.deploy_completed
-                delivery: one
                 map:
                   vertical_id:
                     source: payload.vertical_id
                     target: entity.vertical_id
               - from: .root_ready
                 to: operating.root_ready
-                delivery: one
       ownership_split:
         output_pins: Output pins own producer event identity and public producer key/carries evidence for instance-key composition.
         input_pins: Input pins own receiver interface and receiver address resolution requirements.
-        parent_connect: Parent connect owns inter-flow delivery topology, including point-to-point, broadcast/fan-out, and reply/sender routing.
+        parent_connect: Parent connect owns only the directed inter-flow edge and optional payload/event adaptation.
+        receiver_input_resolution: Receiver input pins own instance selection, lifecycle, cardinality, fan-in, and reply resolution.
         analyzer: Analyzer owns validation, safe inference, alias/adapter expansion, and lowering to concrete route-plan facts.
         route_plan: Runtime RoutePlan owns publish-time concrete recipient authority after lowering; it consumes authored topology and MUST NOT reconstruct it from live subscribers.
         producer_emit_target: Producer `emit.target` owns only exceptional dynamic routing and MUST NOT be used as the common parent-composed routing surface.
@@ -9611,8 +9613,7 @@ flow_model:
           instance-key routing, or declare an explicit addressed input-pin route surface. Stateful/static receivers that
           need no runtime selection may lower to a statically unique receiver.
         key_types_compatible: Source and target key types must be compatible before route-plan lowering.
-        delivery_topology_valid: The declared delivery topology must match addressed input cardinality and available receiver instances.
-        reply_lineage_usable: Reply delivery must prove usable request lineage; missing or ambiguous lineage fails closed.
+        receiver_resolution_valid: Receiver-owned address/resolution cardinality, lifecycle, and reply facts must be internally valid and unambiguous.
         inference_unambiguous: Analyzer inference is allowed only when exactly one producer, receiver, key, adapter, and topology match is possible.
         lowered_route_plan_concrete: Accepted connections must lower to concrete route-plan inputs; no runtime path may recover by broadcasting or reinterpreting raw pin names.
       route_plan_lowering:
@@ -9631,15 +9632,36 @@ flow_model:
         - receiver instance-key evidence on same-name template receiver connect plans
         - external persisted event identity
         - receiver-local handler event identity
-        - 'concrete target route for delivery: one'
-        - 'concrete target_set routes for delivery: many or broadcast'
-        - 'reply route lineage for delivery: reply'
+        - concrete target or target_set routes derived from receiver-owned address/resolution facts
+        - typed reply resolution derived from receiver input resolution and paired connect edges
         - typed failure reason when lowering cannot produce a concrete plan
-        delivery_mapping:
-          one: Lower to a singular event.target and one delivery row.
-          many: Lower to event.target_set and one delivery row per concrete recipient.
-          broadcast: Lower to explicit parent-authored fan-out route facts; producer broadcast:true is not required.
-          reply: Lower through the recorded request lineage; missing or ambiguous lineage fails closed.
+        target_mapping:
+          singular: Receiver-owned singular resolution lowers to event.target and one delivery row.
+          set: Receiver-owned set cardinality lowers to event.target_set and one delivery row per concrete recipient.
+          reply: >
+            Receiver `resolution.mode: reply` lowers through typed paired-edge request lineage;
+            missing or ambiguous lineage fails closed.
+        implementation_slice_1827_connect_delivery_reply_retirement:
+          status: merge_bearing_aggressive_retirement
+          canonical_code_owner: internal/runtime/contracts.FlowPackageConnect + internal/runtime/core/pinrouting.ConnectRoutePlan
+          rule: >
+            Authored `connect.delivery` and `connect.reply` are invalid on presence. FlowPackageConnect and
+            ConnectRoutePlan expose no delivery or raw reply compatibility fields. Connect lowering consumes only
+            the directed edge and optional adaptation from connect; target cardinality and typed reply resolution
+            derive from receiver input address/resolution. Runtime dispatch, persistence, replay, topology readback,
+            and describe output consume only target/target_set and typed ReplyResolution facts.
+          migration:
+            delivery_one: Delete the field; one connect row already declares one edge.
+            delivery_many_or_broadcast: Use multiple connect rows for static fan-out or an approved receiver-owned resolution surface; no authored connect fan-out compatibility path exists.
+            delivery_reply_and_reply_map: >
+              Use receiver `resolution.mode: reply` with `replies_to` and separate request/response connect edges.
+          fail_closed:
+          - delivery or reply present with any scalar, mapping, sequence, empty, or malformed value
+          - runtime attempt to reconstruct retired delivery or raw reply authority
+          preserved:
+          - receiver address cardinality lowering to target or target_set
+          - receiver resolution create, select, select-or-create, fan-in, and reply
+          - derived DeliveryRoute persistence, replay, and typed reply context
         implementation_slice_1472:
           status: merge_bearing_runtime_artifact
           canonical_code_owner: internal/runtime/core/pinrouting.ConnectRoutePlan
@@ -9655,23 +9677,20 @@ flow_model:
             producer_endpoint: Producer semantic flow id/path or package-root marker, output pin name, local output event identity, and scoped resolved event identity.
             receiver_endpoint: Receiver semantic flow id/path/mode, input pin name, local receiver event identity, and scoped resolved event identity.
             adapter_and_map: Explicit adapter plus sorted address-key map entries used for alias/key adaptation.
-            delivery: one, many, broadcast, or reply after analyzer/default inference.
-            target_kind: target for singular delivery, target_set for fanout/broadcast, reply for reply-lineage delivery.
+            target_kind: target for singular receiver resolution or target_set for receiver-owned set cardinality.
             resolution_kind: |
-              static, address, instance_key, or broadcast; materialization MUST
+              static, address, instance_key, or reply; materialization MUST
               consume this discriminant and MUST NOT select route authority from
-              nil-field ordering. Explicit addressed-input routes remain
-              `address`; explicit parent-authored `delivery: broadcast` remains
-              `broadcast` for addressless fan-out and MUST NOT be shadowed by
-              producer key/carries or receiver instance.by evidence.
+              nil-field ordering. Explicit addressed-input routes remain `address`;
+              reply is derived only from receiver input resolution and paired edges.
             address_rule: Receiver-owned address key, source expression, target expression, cardinality, and mode when runtime descriptor materialization is required.
             instance_key_rule: Receiver-owned template instance fields, on_missing, and on_conflict when an addressless template receiver is selected by producer key/carries plus receiver instance.by.
-            reply_lineage: 'The explicit reply lineage map for delivery: reply.'
+            reply_resolution: The typed request/response role and correlation facts derived from receiver input resolution and paired edges.
             static_target_route: Static receiver flows may lower immediately to a concrete target or single target_set member using the receiver flow path and canonical flow-instance entity id.
             runtime_resolution_flag: Template or dynamic receivers keep an explicit runtime-resolution requirement instead of fabricating concrete delivery rows.
           materialization_boundary:
             static_receivers: Static receivers can materialize target route facts during lowering because the receiver flow path is concrete.
-            template_receivers: Template/dynamic receivers may materialize route facts from receiver instance keys plus runtime descriptors, from explicit addressed-input keys and runtime descriptors, or for delivery:broadcast by enumerating receiver-scope descriptors; descriptor materialization remains pre-dispatch route evidence, not delivery execution.
+            template_receivers: Template/dynamic receivers may materialize route facts from receiver instance keys plus runtime descriptors or from explicit addressed-input keys and runtime descriptors; descriptor materialization remains pre-dispatch route evidence, not delivery execution.
             descriptor_scope: Descriptor materialization MUST reject descriptors whose flow_instance is not the receiver semantic flow path or a child instance under that path before stamping the receiver flow id onto the route.
             supported_descriptor_targets:
             - entity_id / _entity.id
@@ -9694,11 +9713,7 @@ flow_model:
             pin declares `address`, lowering MUST keep `ResolutionKind: address`
             and MUST NOT also select the addressless instance-key route; the
             addressed-input descriptor model remains the canonical owner for
-            that explicit addressed surface. If the parent connect declares
-            `delivery: broadcast`, lowering MUST keep `ResolutionKind: broadcast`
-            for addressless template fan-out and MUST NOT select instance-key
-            materialization even when producer key/carries and receiver
-            instance.by evidence are present.
+            that explicit addressed surface.
 
             Runtime materialization MUST derive key material from the inbound
             event payload using TemplateInstanceContract.CanonicalKeyMaterial,
@@ -9711,7 +9726,6 @@ flow_model:
             MUST fail closed with zero executable routes.
           non_authoritative_for_this_slice:
           - receiver input-pin address for the addressless normal instance-key path
-          - receiver instance-key materialization for explicit parent-authored broadcast fan-out
           - receiver select_entity/select_or_create_entity
           - producer target.match
           - producer broadcast:true
@@ -9892,7 +9906,6 @@ flow_model:
               - type-incompatible carried key
               - combined legacy input address
               - combined connect.using.instance or connect.map
-              - delivery topology other than one
               - unavailable template lifecycle activator
               - producer-authored payload collision with the synthetic carry
               - malformed, missing, or conflicting persisted route projection
@@ -9924,7 +9937,6 @@ flow_model:
               - type-incompatible carried key
               - combined legacy input address
               - combined connect.using.instance or connect.map
-              - delivery topology other than one
               - missing target instance
               - ambiguous target instance
               - any activation attempt for a missing target
@@ -9955,7 +9967,6 @@ flow_model:
               - type-incompatible carried key
               - combined legacy input address
               - combined connect.using.instance or connect.map
-              - delivery topology other than one
               - ambiguous target instance
               - unavailable template lifecycle activator
               - activation/create race that cannot reload exactly one matching instance
@@ -10007,7 +10018,6 @@ flow_model:
               - barrier join authors members.by or window.by instead of consuming derived pin identity
               - combined legacy input address
               - combined connect.using.instance or connect.map
-              - delivery topology other than one
               - producer target.flow / target.match / broadcast rescue
             fan-out:
               status: spec_locked_not_runnable_in_1835_pr1
@@ -10359,7 +10369,7 @@ flow_model:
         rule: >
           Import-boundary `requires`/`bind` pin aliases from #1452 are lower-level name-adaptation inputs to connect
           lowering. They may rename the parent-facing input/output pin, but they do not rewrite source event identity,
-          replay scope, target metadata, broadcast semantics, correlation, cardinality, or delivery topology.
+          replay scope, target metadata, receiver resolution, correlation, or cardinality.
         owner_consumed: platform-spec.yaml#flow_model.flow_package.import_boundary.pin_alias_delivery
       emit_target_escape_hatch:
         role: >
@@ -16469,12 +16479,9 @@ static_analyzer:
       output_carries_address_key: The producer output pin key/carries declaration must prove the top-level payload key
         consumed by the receiver address or explicit connect.map source; event payload schema and connect.map are
         validation inputs, not the producer evidence owner.
-      receiver_address_rule_present: Template or instance-addressed receivers must declare an addressed input pin unless
-        delivery is an explicit broadcast.
+      receiver_address_rule_present: Template or instance-addressed receivers must declare an addressed input pin or a supported receiver resolution.
       key_types_compatible: Payload/config/entity/instance source and target key types must be compatible before lowering.
-      delivery_topology_valid: Delivery must be one, many, broadcast, or reply and must match addressed input cardinality;
-        fan-out delivery such as many or broadcast is invalid for a singular addressed input pin.
-      reply_lineage_usable: reply delivery must declare usable reply lineage; missing lineage fails closed.
+      receiver_resolution_valid: Receiver address/resolution cardinality, lifecycle, and typed reply lineage must be valid and unambiguous.
       event_topology_roles_consume_connect: Verify-time producer/consumer and dead-event schema checks must treat valid
         connect output/input facts as authored event roles so parent topology does not require runtime reconstruction to
         silence missing producer, missing consumer, or dead-schema diagnostics.

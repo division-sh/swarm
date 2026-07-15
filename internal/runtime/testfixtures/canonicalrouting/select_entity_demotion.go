@@ -43,7 +43,7 @@ func CopySelectEntityDemotion(t testing.TB, opts SelectEntityDemotionOptions) st
 		if opts.RenameReceiverPin && targetFlow == "consumer" {
 			targetPin = "deploy_completed"
 		}
-		connect = "\nconnect:\n  - from: producer.deploy_done\n    to: " + targetFlow + "." + targetPin + "\n    delivery: one"
+		connect = "\nconnect:\n  - from: producer.deploy_done\n    to: " + targetFlow + "." + targetPin
 		if !opts.TemplateReceiver {
 			connect += "\n    map:\n      vertical_id:\n        source: payload.vertical_id\n        target: entity.vertical_id"
 		}

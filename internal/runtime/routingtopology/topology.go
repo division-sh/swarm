@@ -140,7 +140,6 @@ type Boundary struct {
 
 type Resolution struct {
 	Mode        string       `json:"mode"`
-	Delivery    string       `json:"delivery"`
 	TargetKind  string       `json:"target_kind"`
 	Address     *Address     `json:"address,omitempty"`
 	InstanceKey *InstanceKey `json:"instance_key,omitempty"`
@@ -559,7 +558,6 @@ func connectEndpointRef(endpoint pinrouting.ConnectRoutePlanEndpoint) string {
 func resolutionView(plan pinrouting.ConnectRoutePlan) *Resolution {
 	resolution := &Resolution{
 		Mode:       string(plan.ResolutionKind),
-		Delivery:   string(plan.Delivery),
 		TargetKind: string(plan.TargetKind),
 	}
 	if plan.Address != nil {

@@ -26,7 +26,6 @@ flows:
 connect:
   - from: .root_ready
     to: consumer.ready
-    delivery: one
 `)
 	rootInput := ""
 	rootNodes := "{}\n"
@@ -76,7 +75,6 @@ flows:
 connect:
   - from: .root_ready
     to: consumer.ready
-    delivery: one
     map:
       entity_id:
         source: payload.entity_id

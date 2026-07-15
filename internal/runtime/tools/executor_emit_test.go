@@ -915,9 +915,8 @@ func TestHandleEmitTool_RootSchemaPinOutputStillRequiresTarget(t *testing.T) {
 
 func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t *testing.T) {
 	source := emitRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
-		From:     "producer.deploy_done",
-		To:       "consumer.deploy_completed",
-		Delivery: "one",
+		From: "producer.deploy_done",
+		To:   "consumer.deploy_completed",
 	})
 	store := newEmitRoutePlanStore()
 	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})

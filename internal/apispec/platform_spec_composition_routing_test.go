@@ -34,9 +34,15 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, connect, "canonical_form"), "`connect` is a list")
 	assertScalarContains(t, mustYAMLPath(t, connect, "fields", "from"), "producer")
 	assertScalarContains(t, mustYAMLPath(t, connect, "fields", "to"), "receiver")
+	if hasMappingKey(mustMappingValue(t, connect, "fields"), "delivery") || hasMappingKey(mustMappingValue(t, connect, "fields"), "reply") {
+		t.Fatal("parent connect fields retain retired delivery/reply authoring")
+	}
+	assertScalarContains(t, mustYAMLPath(t, connect, "retired_fields", "delivery"), "Retired on presence")
+	assertScalarContains(t, mustYAMLPath(t, connect, "retired_fields", "reply"), "resolution")
 
 	ownership := mustMappingValue(t, composition, "ownership_split")
-	assertScalarContains(t, mustMappingValue(t, ownership, "parent_connect"), "owns inter-flow delivery topology")
+	assertScalarContains(t, mustMappingValue(t, ownership, "parent_connect"), "owns only the directed inter-flow edge")
+	assertScalarContains(t, mustMappingValue(t, ownership, "receiver_input_resolution"), "cardinality")
 	assertScalarContains(t, mustMappingValue(t, ownership, "output_pins"), "key/carries evidence")
 	assertScalarContains(t, mustMappingValue(t, ownership, "input_pins"), "receiver interface")
 	assertScalarContains(t, mustMappingValue(t, ownership, "producer_emit_target"), "exceptional dynamic routing")
@@ -51,8 +57,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 		"output_carries_address_key",
 		"receiver_route_key_present",
 		"key_types_compatible",
-		"delivery_topology_valid",
-		"reply_lineage_usable",
+		"receiver_resolution_valid",
 		"inference_unambiguous",
 		"lowered_route_plan_concrete",
 	} {
@@ -75,9 +80,8 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"concrete target route for delivery: one",
-		"concrete target_set routes for delivery: many or broadcast",
-		"reply route lineage for delivery: reply",
+		"concrete target or target_set routes derived from receiver-owned address/resolution facts",
+		"typed reply resolution derived from receiver input resolution and paired connect edges",
 	} {
 		if !sequenceContainsScalar(mustMappingValue(t, lowering, "produces"), want) {
 			t.Fatalf("route_plan_lowering produces missing %q", want)
@@ -99,15 +103,17 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, slice1545, "canonical_code_owner"), "ConnectRoutePlan.InstanceKey")
 	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "ResolutionKind: instance_key")
 	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "ResolutionKind: address")
-	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "ResolutionKind: broadcast")
 	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "WorkflowContractBundle.ResolveFlowTemplateInstance")
 	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "TemplateInstanceContract.CanonicalKeyMaterial")
 	if !sequenceContainsScalar(mustMappingValue(t, slice1545, "non_authoritative_for_this_slice"), "receiver input-pin address for the addressless normal instance-key path") {
 		t.Fatal("implementation_slice_1545 must classify receiver input-pin address as non-authoritative only for normal instance-key routing")
 	}
-	if !sequenceContainsScalar(mustMappingValue(t, slice1545, "non_authoritative_for_this_slice"), "receiver instance-key materialization for explicit parent-authored broadcast fan-out") {
-		t.Fatal("implementation_slice_1545 must classify instance-key materialization as non-authoritative for explicit parent broadcast")
-	}
+
+	retirement := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1827_connect_delivery_reply_retirement")
+	assertScalarValue(t, mustMappingValue(t, retirement, "status"), "merge_bearing_aggressive_retirement")
+	assertScalarContains(t, mustMappingValue(t, retirement, "rule"), "ConnectRoutePlan expose no delivery or raw reply compatibility fields")
+	assertScalarContains(t, mustYAMLPath(t, retirement, "migration", "delivery_one"), "Delete the field")
+	assertScalarContains(t, mustYAMLPath(t, retirement, "migration", "delivery_reply_and_reply_map"), "resolution.mode: reply")
 
 	slice1546 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1546")
 	assertScalarValue(t, mustMappingValue(t, slice1546, "status"), "merge_bearing_runtime_behavior")

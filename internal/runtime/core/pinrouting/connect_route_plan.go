@@ -16,21 +16,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-type ConnectRoutePlanDelivery string
-
-const (
-	ConnectDeliveryOne       ConnectRoutePlanDelivery = "one"
-	ConnectDeliveryMany      ConnectRoutePlanDelivery = "many"
-	ConnectDeliveryBroadcast ConnectRoutePlanDelivery = "broadcast"
-	ConnectDeliveryReply     ConnectRoutePlanDelivery = "reply"
-)
-
 type ConnectRoutePlanTargetKind string
 
 const (
 	ConnectTargetKindTarget    ConnectRoutePlanTargetKind = "target"
 	ConnectTargetKindTargetSet ConnectRoutePlanTargetKind = "target_set"
-	ConnectTargetKindReply     ConnectRoutePlanTargetKind = "reply"
 )
 
 type ConnectRoutePlanResolutionKind string
@@ -39,7 +29,6 @@ const (
 	ConnectResolutionStatic      ConnectRoutePlanResolutionKind = "static"
 	ConnectResolutionAddress     ConnectRoutePlanResolutionKind = "address"
 	ConnectResolutionInstanceKey ConnectRoutePlanResolutionKind = "instance_key"
-	ConnectResolutionBroadcast   ConnectRoutePlanResolutionKind = "broadcast"
 	ConnectResolutionReply       ConnectRoutePlanResolutionKind = "reply"
 )
 
@@ -138,7 +127,6 @@ type ConnectRoutePlan struct {
 	Source                      ConnectRoutePlanEndpoint
 	Receiver                    ConnectRoutePlanEndpoint
 	Adapter                     string
-	Delivery                    ConnectRoutePlanDelivery
 	TargetKind                  ConnectRoutePlanTargetKind
 	ResolutionKind              ConnectRoutePlanResolutionKind
 	Address                     *ConnectRoutePlanAddress
@@ -146,7 +134,6 @@ type ConnectRoutePlan struct {
 	FanIn                       *ConnectRoutePlanFanIn
 	ReplyResolution             *ConnectRoutePlanReplyResolution
 	Map                         []ConnectRoutePlanMapEntry
-	Reply                       map[string]string
 	Target                      events.RouteIdentity
 	TargetSet                   []events.RouteIdentity
 	RequiresRuntimeResolution   bool
@@ -235,11 +222,11 @@ func LowerTargetFreeInputRoutePlans(source semanticview.Source, authorizations [
 			if !ok {
 				continue
 			}
-			connect := runtimecontracts.FlowPackageConnect{To: flowID + "." + inputPin.PinName(), Delivery: string(ConnectDeliveryOne)}
+			connect := runtimecontracts.FlowPackageConnect{To: flowID + "." + inputPin.PinName()}
 			var instanceKey *ConnectRoutePlanInstanceKey
 			if receiverRequiresRuntimeResolution(scope) {
 				var issue ConnectRoutePlanIssue
-				instanceKey, issue = connectResolutionInstanceKey(source, connect, inputPin, inputPin.Resolution, ConnectDeliveryOne, flowID)
+				instanceKey, issue = connectResolutionInstanceKey(source, connect, inputPin, inputPin.Resolution, flowID)
 				if issue.Failure != "" {
 					issue.AuthoredLocation = flowID + "." + inputPin.PinName()
 					issue.ProviderOutputAuthorization = &authorization
@@ -256,8 +243,8 @@ func LowerTargetFreeInputRoutePlans(source semanticview.Source, authorizations [
 					FlowID: flowID, FlowPath: strings.Trim(strings.TrimSpace(scope.Path), "/"), Mode: strings.TrimSpace(scope.Mode),
 					Pin: inputPin.PinName(), Event: eventidentity.Normalize(inputPin.EventType()), ResolvedEvent: resolved,
 				},
-				Delivery: ConnectDeliveryOne, TargetKind: ConnectTargetKindTarget,
-				ResolutionKind:              connectResolutionKind(scope, ConnectDeliveryOne, nil, instanceKey),
+				TargetKind:                  ConnectTargetKindTarget,
+				ResolutionKind:              connectResolutionKind(scope, nil, instanceKey),
 				InstanceKey:                 instanceKey,
 				ProviderOutputAuthorization: &authorization,
 			}
@@ -325,16 +312,12 @@ func lowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 	if !ok {
 		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReceiverInputPinMissing, Detail: connect.To}
 	}
-	delivery, failure := connectDelivery(connect, inputPin)
-	if failure != "" {
-		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: failure, Detail: strings.TrimSpace(connect.Delivery)}
-	}
 	address := connectAddress(connect, inputPin)
-	instanceKey, instanceKeyIssue := connectInstanceKey(source, connect, outputPin, inputPin, delivery, to.FlowID)
+	instanceKey, instanceKeyIssue := connectInstanceKey(source, connect, outputPin, inputPin, to.FlowID)
 	if instanceKeyIssue.Failure != "" {
 		return ConnectRoutePlan{}, instanceKeyIssue
 	}
-	fanIn, fanInIssue := connectFanIn(source, connect, inputPin, delivery, to.FlowID)
+	fanIn, fanInIssue := connectFanIn(source, connect, inputPin, to.FlowID)
 	if fanInIssue.Failure != "" {
 		return ConnectRoutePlan{}, fanInIssue
 	}
@@ -342,10 +325,10 @@ func lowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 	if replyIssue.Failure != "" {
 		return ConnectRoutePlan{}, replyIssue
 	}
-	if receiverRequiresRuntimeResolution(receiverScope) && address == nil && instanceKey == nil && delivery != ConnectDeliveryBroadcast && (replyResolution == nil || replyResolution.Role != ConnectReplyRoleResponse) {
+	if receiverRequiresRuntimeResolution(receiverScope) && address == nil && instanceKey == nil && (replyResolution == nil || replyResolution.Role != ConnectReplyRoleResponse) {
 		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReceiverAddressRuleMissing, Detail: to.FlowID}
 	}
-	targetKind := connectTargetKind(delivery)
+	targetKind := connectTargetKind(address)
 	plan := ConnectRoutePlan{
 		PackageKey:       strings.TrimSpace(connect.PackageKey),
 		AuthoredLocation: connect.AuthoredLocation(),
@@ -359,11 +342,9 @@ func lowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 			ResolvedEvent: eventidentity.Normalize(source.ResolveFlowEventReference(to.FlowID, inputPin.EventType())),
 		},
 		Adapter:    strings.TrimSpace(connect.Adapter),
-		Delivery:   delivery,
 		TargetKind: targetKind,
 		ResolutionKind: connectResolutionKind(
 			receiverScope,
-			delivery,
 			address,
 			instanceKey,
 		),
@@ -372,7 +353,6 @@ func lowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 		FanIn:           fanIn,
 		ReplyResolution: replyResolution,
 		Map:             connectMapEntries(connect.Map),
-		Reply:           cloneStringMap(connect.Reply),
 	}
 	if replyResolution != nil && replyResolution.Role == ConnectReplyRoleResponse {
 		plan.ResolutionKind = ConnectResolutionReply
@@ -386,7 +366,7 @@ func lowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 		}
 		if !route.Empty() {
 			switch targetKind {
-			case ConnectTargetKindTarget, ConnectTargetKindReply:
+			case ConnectTargetKindTarget:
 				plan.Target = route
 			case ConnectTargetKindTargetSet:
 				plan.TargetSet = []events.RouteIdentity{route}
@@ -442,8 +422,6 @@ func MaterializeConnectRoutePlan(plan ConnectRoutePlan, input ConnectRoutePlanMa
 		return ConnectRoutePlanMaterialization{TargetSet: append([]events.RouteIdentity{}, plan.TargetSet...)}
 	}
 	switch connectRoutePlanResolutionKind(plan) {
-	case ConnectResolutionBroadcast:
-		return materializeBroadcastConnectRoutePlan(plan, input.Descriptors)
 	case ConnectResolutionAddress:
 		return materializeAddressConnectRoutePlan(plan, input)
 	case ConnectResolutionInstanceKey:
@@ -474,7 +452,7 @@ func materializeAddressConnectRoutePlan(plan ConnectRoutePlan, input ConnectRout
 		return ConnectRoutePlanMaterialization{Failure: ConnectFailureTargetUnresolved}
 	}
 	switch plan.TargetKind {
-	case ConnectTargetKindTarget, ConnectTargetKindReply:
+	case ConnectTargetKindTarget:
 		if len(routes) > 1 {
 			return ConnectRoutePlanMaterialization{Failure: ConnectFailureTargetAmbiguous}
 		}
@@ -484,22 +462,6 @@ func materializeAddressConnectRoutePlan(plan ConnectRoutePlan, input ConnectRout
 	default:
 		return ConnectRoutePlanMaterialization{Failure: ConnectFailureDeliveryTopologyInvalid}
 	}
-}
-
-func materializeBroadcastConnectRoutePlan(plan ConnectRoutePlan, descriptors []Descriptor) ConnectRoutePlanMaterialization {
-	routes := make([]events.RouteIdentity, 0, len(descriptors))
-	for _, descriptor := range descriptors {
-		route := descriptorRouteForReceiver(plan, descriptor)
-		if route.Empty() {
-			continue
-		}
-		routes = append(routes, route)
-	}
-	routes = uniqueRoutes(routes)
-	if len(routes) == 0 {
-		return ConnectRoutePlanMaterialization{Failure: ConnectFailureTargetUnresolved}
-	}
-	return ConnectRoutePlanMaterialization{TargetSet: routes}
 }
 
 func materializeInstanceKeyConnectRoutePlan(plan ConnectRoutePlan, input ConnectRoutePlanMaterializationInput) ConnectRoutePlanMaterialization {
@@ -522,7 +484,7 @@ func materializeInstanceKeyConnectRoutePlan(plan ConnectRoutePlan, input Connect
 		return ConnectRoutePlanMaterialization{Failure: ConnectFailureTargetUnresolved}
 	}
 	switch plan.TargetKind {
-	case ConnectTargetKindTarget, ConnectTargetKindReply:
+	case ConnectTargetKindTarget:
 		if len(routes) > 1 {
 			return ConnectRoutePlanMaterialization{Failure: ConnectFailureTargetAmbiguous}
 		}
@@ -644,46 +606,6 @@ func InstanceKeyDescriptorRoutesForConnectRoutePlan(plan ConnectRoutePlan, keyMa
 	return uniqueRoutes(routes)
 }
 
-func connectDelivery(connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin) (ConnectRoutePlanDelivery, ConnectRoutePlanFailure) {
-	delivery := strings.TrimSpace(connect.Delivery)
-	cardinality := ""
-	if inputPin.Address != nil {
-		cardinality = strings.TrimSpace(inputPin.Address.Cardinality)
-	}
-	if delivery == "" {
-		switch cardinality {
-		case "one", "many":
-			delivery = cardinality
-		default:
-			delivery = string(ConnectDeliveryOne)
-		}
-	}
-	switch ConnectRoutePlanDelivery(delivery) {
-	case ConnectDeliveryOne:
-		if cardinality == "many" {
-			return "", ConnectFailureDeliveryTopologyInvalid
-		}
-		return ConnectDeliveryOne, ""
-	case ConnectDeliveryMany:
-		if cardinality == "one" {
-			return "", ConnectFailureDeliveryTopologyInvalid
-		}
-		return ConnectDeliveryMany, ""
-	case ConnectDeliveryBroadcast:
-		if cardinality == "one" {
-			return "", ConnectFailureDeliveryTopologyInvalid
-		}
-		return ConnectDeliveryBroadcast, ""
-	case ConnectDeliveryReply:
-		if len(connect.Reply) == 0 {
-			return "", ConnectFailureReplyLineageMissing
-		}
-		return ConnectDeliveryReply, ""
-	default:
-		return "", ConnectFailureDeliveryTopologyInvalid
-	}
-}
-
 func connectAddress(connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin) *ConnectRoutePlanAddress {
 	if inputPin.Address == nil {
 		return nil
@@ -707,7 +629,7 @@ func connectAddress(connect runtimecontracts.FlowPackageConnect, inputPin runtim
 	return &out
 }
 
-func connectInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, outputPin runtimecontracts.FlowOutputEventPin, inputPin runtimecontracts.FlowInputEventPin, delivery ConnectRoutePlanDelivery, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
+func connectInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, outputPin runtimecontracts.FlowOutputEventPin, inputPin runtimecontracts.FlowInputEventPin, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
 	adapter := connect.Using.Instance
 	if source == nil {
 		return nil, ConnectRoutePlanIssue{}
@@ -723,17 +645,11 @@ func connectInstanceKey(source semanticview.Source, connect runtimecontracts.Flo
 		if len(connect.Map) > 0 {
 			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "connect.map is incompatible with input pin resolution"}
 		}
-		return connectResolutionInstanceKey(source, connect, inputPin, resolution, delivery, receiverFlowID)
+		return connectResolutionInstanceKey(source, connect, inputPin, resolution, receiverFlowID)
 	}
 	if inputPin.Address != nil {
 		if adapter.Declared {
 			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceKeyAdapterInvalid, Detail: "connect.using.instance requires an addressless receiver input"}
-		}
-		return nil, ConnectRoutePlanIssue{}
-	}
-	if delivery == ConnectDeliveryBroadcast {
-		if adapter.Declared {
-			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceKeyAdapterInvalid, Detail: "connect.using.instance is incompatible with delivery broadcast"}
 		}
 		return nil, ConnectRoutePlanIssue{}
 	}
@@ -781,12 +697,12 @@ func connectInstanceKey(source semanticview.Source, connect runtimecontracts.Flo
 	}, ConnectRoutePlanIssue{}
 }
 
-func connectResolutionInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, resolution runtimecontracts.FlowInputPinResolution, delivery ConnectRoutePlanDelivery, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
+func connectResolutionInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, resolution runtimecontracts.FlowInputPinResolution, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
 	switch resolution.Mode {
 	case runtimecontracts.FlowInputResolutionModeCreate:
-		return connectCreateResolutionInstanceKey(source, connect, resolution, delivery, receiverFlowID)
+		return connectCreateResolutionInstanceKey(source, connect, resolution, receiverFlowID)
 	case runtimecontracts.FlowInputResolutionModeSelect, runtimecontracts.FlowInputResolutionModeSelectOrCreate:
-		return connectCarriedKeyResolutionInstanceKey(source, connect, inputPin, resolution, delivery, receiverFlowID)
+		return connectCarriedKeyResolutionInstanceKey(source, connect, inputPin, resolution, receiverFlowID)
 	case runtimecontracts.FlowInputResolutionModeFanIn:
 		return nil, ConnectRoutePlanIssue{}
 	case runtimecontracts.FlowInputResolutionModeReply:
@@ -865,14 +781,11 @@ func connectReplyResolution(source semanticview.Source, connect runtimecontracts
 	return nil, ConnectRoutePlanIssue{}
 }
 
-func connectFanIn(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, delivery ConnectRoutePlanDelivery, receiverFlowID string) (*ConnectRoutePlanFanIn, ConnectRoutePlanIssue) {
+func connectFanIn(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, receiverFlowID string) (*ConnectRoutePlanFanIn, ConnectRoutePlanIssue) {
 	if inputPin.Resolution.Empty() || inputPin.Resolution.Mode != runtimecontracts.FlowInputResolutionModeFanIn {
 		return nil, ConnectRoutePlanIssue{}
 	}
 	resolution := inputPin.Resolution
-	if delivery != ConnectDeliveryOne {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureDeliveryTopologyInvalid, Detail: "resolution mode fan-in requires delivery one"}
-	}
 	if !resolution.InstanceKey.Empty() || resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "resolution mode fan-in may only declare aggregation, window, dedup_by, singleton, and carries"}
 	}
@@ -933,10 +846,7 @@ func connectFanInPayloadFieldSupported(path string) bool {
 	return field != "" && !strings.Contains(field, ".")
 }
 
-func connectCreateResolutionInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, resolution runtimecontracts.FlowInputPinResolution, delivery ConnectRoutePlanDelivery, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
-	if delivery != ConnectDeliveryOne {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureDeliveryTopologyInvalid, Detail: "resolution mode create requires delivery one"}
-	}
+func connectCreateResolutionInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, resolution runtimecontracts.FlowInputPinResolution, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureLifecycleUnavailable, Detail: "receiver instance contract owner is unavailable"}
@@ -966,11 +876,8 @@ func connectCreateResolutionInstanceKey(source semanticview.Source, connect runt
 	}, ConnectRoutePlanIssue{}
 }
 
-func connectCarriedKeyResolutionInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, resolution runtimecontracts.FlowInputPinResolution, delivery ConnectRoutePlanDelivery, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
+func connectCarriedKeyResolutionInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, resolution runtimecontracts.FlowInputPinResolution, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
 	mode := strings.TrimSpace(resolution.Mode)
-	if delivery != ConnectDeliveryOne {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureDeliveryTopologyInvalid, Detail: fmt.Sprintf("resolution mode %s requires delivery one", mode)}
-	}
 	if resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" || resolution.RepliesTo != "" || resolution.CorrelationKey != "" || strings.TrimSpace(resolution.InstanceKey.Mint) != "" || strings.TrimSpace(resolution.InstanceKey.As) != "" {
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode %s may only declare instance_key and carries", mode)}
 	}
@@ -1130,15 +1037,12 @@ func normalizedAdapterFields(in []string) []string {
 	return out
 }
 
-func connectResolutionKind(scope semanticview.FlowScope, delivery ConnectRoutePlanDelivery, address *ConnectRoutePlanAddress, instanceKey *ConnectRoutePlanInstanceKey) ConnectRoutePlanResolutionKind {
+func connectResolutionKind(scope semanticview.FlowScope, address *ConnectRoutePlanAddress, instanceKey *ConnectRoutePlanInstanceKey) ConnectRoutePlanResolutionKind {
 	if !receiverRequiresRuntimeResolution(scope) {
 		return ConnectResolutionStatic
 	}
 	if address != nil {
 		return ConnectResolutionAddress
-	}
-	if delivery == ConnectDeliveryBroadcast {
-		return ConnectResolutionBroadcast
 	}
 	if instanceKey != nil {
 		return ConnectResolutionInstanceKey
@@ -1158,9 +1062,6 @@ func connectRoutePlanResolutionKind(plan ConnectRoutePlan) ConnectRoutePlanResol
 	}
 	if plan.InstanceKey != nil {
 		return ConnectResolutionInstanceKey
-	}
-	if plan.TargetKind == ConnectTargetKindTargetSet && plan.Delivery == ConnectDeliveryBroadcast {
-		return ConnectResolutionBroadcast
 	}
 	return ""
 }
@@ -1189,15 +1090,11 @@ func connectMapEntries(in map[string]runtimecontracts.FlowPackageConnectMap) []C
 	return out
 }
 
-func connectTargetKind(delivery ConnectRoutePlanDelivery) ConnectRoutePlanTargetKind {
-	switch delivery {
-	case ConnectDeliveryMany, ConnectDeliveryBroadcast:
+func connectTargetKind(address *ConnectRoutePlanAddress) ConnectRoutePlanTargetKind {
+	if address != nil && strings.TrimSpace(address.Cardinality) == "many" {
 		return ConnectTargetKindTargetSet
-	case ConnectDeliveryReply:
-		return ConnectTargetKindReply
-	default:
-		return ConnectTargetKindTarget
 	}
+	return ConnectTargetKindTarget
 }
 
 func receiverRequiresRuntimeResolution(scope semanticview.FlowScope) bool {

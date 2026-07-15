@@ -202,7 +202,7 @@ func TestBuildProjectsReplyAsPairedEdges(t *testing.T) {
 	}
 }
 
-func TestResolutionViewPreservesCreateStaticAddressAndBroadcastDeclarations(t *testing.T) {
+func TestResolutionViewPreservesCreateStaticAndAddressDeclarations(t *testing.T) {
 	tests := []struct {
 		name string
 		plan pinrouting.ConnectRoutePlan
@@ -214,7 +214,6 @@ func TestResolutionViewPreservesCreateStaticAddressAndBroadcastDeclarations(t *t
 		}},
 		{name: "static", want: string(pinrouting.ConnectResolutionStatic), plan: pinrouting.ConnectRoutePlan{ResolutionKind: pinrouting.ConnectResolutionStatic}},
 		{name: "address", want: string(pinrouting.ConnectResolutionAddress), plan: pinrouting.ConnectRoutePlan{ResolutionKind: pinrouting.ConnectResolutionAddress, Address: &pinrouting.ConnectRoutePlanAddress{By: "key", Source: "payload.id", Target: "entity.id", Cardinality: "one", Mode: "select"}}},
-		{name: "broadcast", want: string(pinrouting.ConnectResolutionBroadcast), plan: pinrouting.ConnectRoutePlan{ResolutionKind: pinrouting.ConnectResolutionBroadcast, Delivery: pinrouting.ConnectDeliveryBroadcast, TargetKind: pinrouting.ConnectTargetKindTargetSet}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

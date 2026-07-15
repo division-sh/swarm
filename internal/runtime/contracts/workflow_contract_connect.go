@@ -182,8 +182,6 @@ func (c FlowPackageConnect) normalized() FlowPackageConnect {
 		Adapter:    strings.TrimSpace(c.Adapter),
 		Using:      c.Using.normalized(),
 		Map:        cloneFlowPackageConnectMap(c.Map),
-		Delivery:   strings.TrimSpace(c.Delivery),
-		Reply:      normalizeStringMap(c.Reply),
 	}
 }
 
