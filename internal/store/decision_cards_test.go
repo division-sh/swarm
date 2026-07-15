@@ -726,7 +726,7 @@ func TestTerminalDecisionCardSupersessionStateChangeOnlyProducerParity(t *testin
 		for _, producer := range producers {
 			backend, producer := backend, producer
 			t.Run(backend+"/"+producer.name, func(t *testing.T) {
-				ctx := context.Background()
+				ctx := testAuthorActivityContext()
 				cardStore, runID := decisionCardTestStore(t, backend)
 				db, postgres := decisionCardStoreDB(t, cardStore)
 				now := time.Date(2026, 7, 14, 4, 0, 0, 0, time.UTC)
@@ -766,7 +766,7 @@ func TestNormalRunCompletionDecisionGateAuthorityParity(t *testing.T) {
 		for _, gateStatus := range []string{string(gateruntime.StatusOpen), string(gateruntime.StatusDecisionCommitted)} {
 			backend, gateStatus := backend, gateStatus
 			t.Run(backend+"/"+gateStatus, func(t *testing.T) {
-				ctx := context.Background()
+				ctx := testAuthorActivityContext()
 				cardStore, runID := decisionCardTestStore(t, backend)
 				db, postgres := decisionCardStoreDB(t, cardStore)
 				now := time.Date(2026, 7, 14, 16, 0, 0, 0, time.UTC)
@@ -820,7 +820,7 @@ func TestNormalRunCompletionDecisionGateAuthorityParity(t *testing.T) {
 
 		backend := backend
 		t.Run(backend+"/eligible_no_gate", func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
 			db, postgres := decisionCardStoreDB(t, cardStore)
 			now := time.Date(2026, 7, 14, 16, 0, 0, 0, time.UTC)
@@ -1359,6 +1359,7 @@ func decisionCardTestStore(t *testing.T, backend string) (decisioncard.Store, st
 		if err := store.EnsureSchemaTables(ctx, plans); err != nil {
 			t.Fatalf("EnsureSchemaTables sqlite: %v", err)
 		}
+		registerTestAuthorActivityCatalog(t, store)
 		if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
 			t.Fatalf("insert sqlite run: %v", err)
 		}
@@ -1369,6 +1370,7 @@ func decisionCardTestStore(t *testing.T, backend string) (decisioncard.Store, st
 		if err := store.EnsureSchemaTables(ctx, plans); err != nil {
 			t.Fatalf("EnsureSchemaTables postgres: %v", err)
 		}
+		registerTestAuthorActivityCatalog(t, store)
 		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 			t.Fatalf("insert postgres run: %v", err)
 		}

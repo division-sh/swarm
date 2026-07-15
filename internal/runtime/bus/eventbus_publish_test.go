@@ -55,7 +55,7 @@ func eventBusTestRunContext(t *testing.T, db *sql.DB) context.Context {
 func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -81,7 +81,7 @@ func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres(t *tes
 
 func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerSQLite(t *testing.T) {
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
 	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, time.Now().UTC()); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -116,7 +116,10 @@ type eventBusExactDuplicateState struct {
 func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
-	ctx := context.Background()
+	if _, err := newScopedTestEventBus(pg); err != nil {
+		t.Fatalf("register author activity catalog: %v", err)
+	}
+	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -155,7 +158,10 @@ func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 
 func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
-	ctx := context.Background()
+	if _, err := newScopedTestEventBus(sqliteStore); err != nil {
+		t.Fatalf("register author activity catalog: %v", err)
+	}
+	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
 	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, time.Now().UTC()); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -201,7 +207,7 @@ func assertEventBusExactDuplicateIsOperationNoOp(
 	markTerminal func() error,
 ) {
 	t.Helper()
-	eb, err := runtimebus.NewEventBusWithOptions(eventStore, runtimebus.EventBusOptions{})
+	eb, err := newScopedTestEventBus(eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -228,7 +234,7 @@ func assertEventBusExactDuplicateIsOperationNoOp(
 				if err != nil {
 					t.Fatalf("load state before duplicate: %v", err)
 				}
-				if err := publish(context.Background(), evt); err != nil {
+				if err := publish(testAuthorActivityContext(context.Background()), evt); err != nil {
 					t.Fatalf("publish exact duplicate: %v", err)
 				}
 				after, err := loadState()
@@ -283,7 +289,7 @@ func assertEventBusDiagnosticDirectRefusal(
 	loadEventCount func(string) (int, error),
 ) {
 	t.Helper()
-	eb, err := runtimebus.NewEventBusWithOptions(eventStore, runtimebus.EventBusOptions{})
+	eb, err := newScopedTestEventBus(eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -336,11 +342,11 @@ func assertEventBusTerminalRunRefusal(
 	loadState func(string) (string, int, int, error),
 ) {
 	t.Helper()
-	eb, err := runtimebus.NewEventBusWithOptions(eventStore, runtimebus.EventBusOptions{})
+	eb, err := newScopedTestEventBus(eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	writers := map[string]func(context.Context, events.Event) error{
 		"publish":              eb.Publish,
 		"publish_acknowledged": eb.PublishAcknowledged,

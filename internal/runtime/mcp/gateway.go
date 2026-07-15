@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -887,6 +888,12 @@ func (g *Gateway) runtimeTurnContextForRequest(r *http.Request, operation string
 }
 
 func (g *Gateway) baseContextForResolvedTurn(ctx context.Context, turn TurnContext) context.Context {
+	if turn.HasAuthorActivityScope {
+		ctx = runtimeauthoractivity.WithScope(ctx, turn.AuthorActivityScope)
+	}
+	if turn.HasBundleSourceFact {
+		ctx = runtimecorrelation.WithBundleSourceFact(ctx, turn.BundleSourceFact)
+	}
 	if turn.HasExecutionAdmission {
 		ctx = managedexecution.WithAdmission(ctx, turn.ExecutionAdmission)
 	}

@@ -47,7 +47,7 @@ func (eb *EventBus) PrepareInboundDeliveryBatchInMutation(ctx context.Context, b
 	if !ok || mutation == nil {
 		return nil, fmt.Errorf("typed event mutation context is required for inbound delivery")
 	}
-	txctx, err := eb.withTransactionRouteOverlay(mutation.Context())
+	txctx, err := eb.withTransactionRouteOverlay(ctx)
 	if err != nil {
 		return nil, err
 	}

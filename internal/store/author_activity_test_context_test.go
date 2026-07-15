@@ -16,6 +16,12 @@ func testAuthorActivityContext() context.Context {
 	return testAuthorActivityContextForBundle(authorActivityTestBundleHash)
 }
 
+func testAuthorActivityRuntimeContext() context.Context {
+	return runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.RuntimeScope(
+		authorActivityTestRuntimeInstanceID,
+	))
+}
+
 func testAuthorActivityContextForBundle(bundleHash string) context.Context {
 	return runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
@@ -41,10 +47,12 @@ func registerTestAuthorActivityCatalogForContext(t *testing.T, target testAuthor
 	eventTypes := []string{
 		"child.event", "child/output.done", "company.scanned", "example.started", "fork.ready",
 		"deadletter.test", "inbound.alert", "inbound.child", "inbound.root", "inbound.test", "item.failed", "item.received",
-		"legacy.filled", "legacy.followup", "legacy.requested", "mailbox.card_superseded", "mailbox.review_requested", "parent.event", "pin.output",
+		"github.push.normalized", "inbound.github.push",
+		"human_task.approved", "human_task.expired", "human_task.rejected",
+		"launch.completed", "legacy.filled", "legacy.followup", "legacy.requested", "mailbox.card_superseded", "mailbox.review_requested", "parent.event", "pin.output",
 		"phrase.completed", "review.requested", "scan.completed", "scan.dev", "scan.followup", "scan.requested", "scoring.requested",
-		"subscription.visible", "system.directive", "system.parent", "system.started", "task.completed",
-		"test.delivery_receipt", "test.delivery_requested", "test.direct_dead_letter", "test.event", "test.started", "test.terminal_delivery",
+		"subscription.visible", "support_reply.rejected", "support_reply.revision_requested", "system.directive", "system.parent", "system.started", "task.completed",
+		"test.delivery_receipt", "test.delivery_requested", "test.direct_dead_letter", "test.event", "test.started", "test.terminal_admission", "test.terminal_delivery",
 		"trace.visible", "validation/validation.package_ready", "workflow.executable",
 	}
 	sort.Strings(eventTypes)

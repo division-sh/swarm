@@ -114,7 +114,7 @@ func TestNormalRunCompletionRequiresSettledHumanTasksParity(t *testing.T) {
 		for _, testCase := range testCases {
 			backend, testCase := backend, testCase
 			t.Run(backend+"/"+testCase.name, func(t *testing.T) {
-				ctx := context.Background()
+				ctx := testAuthorActivityContext()
 				cardStore, runID := decisionCardTestStore(t, backend)
 				humanStore := cardStore.(decisioncard.HumanTaskStore)
 				db, postgres := decisionCardStoreDB(t, cardStore)
