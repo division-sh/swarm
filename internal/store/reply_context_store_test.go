@@ -274,7 +274,7 @@ func TestReplyContextStore_ForkedSourceRejectsCreateAndClaimWithoutDestroyingLin
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, seed := tc.setup(t)
-			ctx := context.Background()
+			ctx := testAuthorActivityBundleSourceContext()
 			runID := uuid.NewString()
 			requestEventID := uuid.NewString()
 			replyEventID := uuid.NewString()
@@ -319,7 +319,7 @@ func TestReplyContextStore_ForkFreezeSerializesBothCreateAndClaimCommitOrders(t 
 			for _, winner := range []string{"operation", "freeze"} {
 				t.Run(tc.name+"/"+operation+"_commits_first_"+winner, func(t *testing.T) {
 					store, seed := tc.setup(t)
-					ctx := context.Background()
+					ctx := testAuthorActivityBundleSourceContext()
 					runID := uuid.NewString()
 					requestEventID := uuid.NewString()
 					replyEventID := uuid.NewString()
@@ -388,10 +388,14 @@ func freezeReplyContextTestRun(t *testing.T, ctx context.Context, store replyCon
 	forkRunID := uuid.NewString()
 	switch backend := store.(type) {
 	case *PostgresStore:
-		if _, err := backend.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id, started_at) VALUES ($1::uuid, 'paused', $2::uuid, $3::uuid, $4)`, forkRunID, runID, uuid.NewString(), now); err != nil {
+		if _, err := backend.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'paused', $2::uuid, $3::uuid, $4, 'ephemeral', $5)`, forkRunID, runID, uuid.NewString(), authorActivityTestBundleHash, now); err != nil {
 			t.Fatal(err)
 		}
-		lineage := runForkActivationLineage{SourceRunID: runID, ForkRunID: forkRunID, ForkEventID: uuid.NewString(), ForkEventName: "reply.freeze", ForkEventTime: now, ForkStatus: "paused", SourceRunStatus: "running"}
+		lineage := runForkActivationLineage{
+			SourceRunID: runID, ForkRunID: forkRunID, ForkEventID: uuid.NewString(),
+			ForkEventName: "reply.freeze", ForkEventTime: now, ForkStatus: "paused", SourceRunStatus: "running",
+			SourceBundleHash: authorActivityTestBundleHash, ForkBundleHash: authorActivityTestBundleHash,
+		}
 		if err := commitRunForkSourceFreezeForTest(ctx, backend.DB, lineage, now, true); err != nil {
 			t.Fatal(err)
 		}
@@ -401,7 +405,7 @@ func freezeReplyContextTestRun(t *testing.T, ctx context.Context, store replyCon
 			t.Fatal(err)
 		}
 		defer func() { _ = tx.Rollback() }()
-		if _, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id, started_at) VALUES (?, 'paused', ?, ?, ?)`, forkRunID, runID, uuid.NewString(), now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id, bundle_hash, bundle_source, started_at) VALUES (?, 'paused', ?, ?, ?, 'ephemeral', ?)`, forkRunID, runID, uuid.NewString(), authorActivityTestBundleHash, now); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = 'forked', ended_at = ?, continued_as_run_id = ? WHERE run_id = ? AND status IN ('running', 'paused')`, now, forkRunID, runID); err != nil {
@@ -424,7 +428,7 @@ func setupPostgresReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurf
 	t.Cleanup(cleanup)
 	store := &PostgresStore{DB: db}
 	return store, func(ctx context.Context, runID string, eventIDs ...string) error {
-		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', now())`, runID); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'running', $2, 'ephemeral', now())`, runID, authorActivityTestBundleHash); err != nil {
 			return err
 		}
 		for i, eventID := range eventIDs {
@@ -447,7 +451,7 @@ func setupSQLiteReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurfac
 	t.Helper()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	return store, func(ctx context.Context, runID string, eventIDs ...string) error {
-		if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, time.Now().UTC()); err != nil {
+		if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES (?, 'running', ?, 'ephemeral', ?)`, runID, authorActivityTestBundleHash, time.Now().UTC()); err != nil {
 			return err
 		}
 		for i, eventID := range eventIDs {

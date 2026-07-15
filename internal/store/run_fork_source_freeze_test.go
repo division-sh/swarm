@@ -22,7 +22,7 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 	for _, backend := range []string{"postgres", "sqlite"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityBundleSourceContext()
 			runID := uuid.NewString()
 			now := time.Now().UTC()
 			var db *sql.DB
@@ -72,7 +72,7 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 func TestRunForkSourceFreezeCommitsCoupledLifecycleDecisionAndActivityOutcome(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityBundleSourceContext()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	lineage := seedRunForkSourceFreezePair(t, db, "running", RunForkMaterializedStatus, now)
 
@@ -159,7 +159,7 @@ func TestRunForkSourceFreezeCommitsCoupledLifecycleDecisionAndActivityOutcome(t 
 func TestRunForkSourceFreezeRollbackLeavesNoPartialOutcome(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityBundleSourceContext()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	lineage := seedRunForkSourceFreezePair(t, db, "running", "completed", now)
 	card := newDecisionCardTestCard(t, lineage.SourceRunID, now)
@@ -195,7 +195,7 @@ func TestRunForkSourceFreezeRollbackLeavesNoPartialOutcome(t *testing.T) {
 
 func TestRunForkSourceFreezeRequiresConfirmationBeforeMutation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityBundleSourceContext()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	lineage := seedRunForkSourceFreezePair(t, db, "running", RunForkMaterializedStatus, now)
 
@@ -208,7 +208,7 @@ func TestRunForkSourceFreezeRequiresConfirmationBeforeMutation(t *testing.T) {
 
 func TestRunForkSourceFreezeRejectsCompletedSourceWithoutConfirmationCeremony(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityBundleSourceContext()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	lineage := seedRunForkSourceFreezePair(t, db, "completed", RunForkMaterializedStatus, now)
 
@@ -241,7 +241,7 @@ func TestRunForkSourceFreezeBlocksOnlyLiveExecutionAuthority(t *testing.T) {
 			}
 			t.Run(test.name+"/"+label, func(t *testing.T) {
 				_, db, _ := testutil.StartPostgres(t)
-				ctx := context.Background()
+				ctx := testAuthorActivityBundleSourceContext()
 				now := time.Now().UTC().Truncate(time.Microsecond)
 				lineage := seedRunForkSourceFreezePair(t, db, "running", RunForkMaterializedStatus, now)
 				test.seed(t, ctx, db, lineage, now, live)
@@ -402,15 +402,15 @@ func seedRunForkFreezeExternalEffectAuthority(t *testing.T, ctx context.Context,
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runtime_external_effect_operations (
-			operation_id, effect_kind, effect_class, execution_mode, authority_kind, authority_id,
+			operation_id, effect_kind, effect_class, execution_mode, bundle_hash, authority_kind, authority_id,
 			agent_id, runtime_epoch, generation, capability_plan_fingerprint, authority_evidence, lineage, request_fingerprint,
 			state, created_at, updated_at, completed_at
 		) VALUES (
-			$1::uuid, 'tool', 'write_or_unknown', 'live', 'normal_agent', $2,
-			$2, 1, 1, $3, '{}'::jsonb, jsonb_build_object('run_id', $4::text), 'fingerprint',
-			$5, $6, $6, $7
+			$1::uuid, 'tool', 'write_or_unknown', 'live', $2, 'normal_agent', $3,
+			$3, 1, 1, $4, '{}'::jsonb, jsonb_build_object('run_id', $5::text), 'fingerprint',
+			$6, $7, $7, $8
 		)
-	`, operationID, agentID, capabilityPlanFingerprint, lineage.SourceRunID, operationState, now, completedAt); err != nil {
+	`, operationID, authorActivityTestBundleHash, agentID, capabilityPlanFingerprint, lineage.SourceRunID, operationState, now, completedAt); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -435,21 +435,22 @@ func seedRunForkSourceFreezePair(t *testing.T, db *sql.DB, sourceStatus, forkSta
 		SourceRunID: uuid.NewString(), ForkRunID: uuid.NewString(), ForkEventID: uuid.NewString(),
 		ForkEventName: "source.freeze.requested", ForkEventTime: now, ForkEventRevision: 1,
 		SourceRunStatus: sourceStatus, ForkStatus: forkStatus,
+		SourceBundleHash: authorActivityTestBundleHash, ForkBundleHash: authorActivityTestBundleHash,
 	}
 	endedAt := any(nil)
 	if sourceStatus != "running" && sourceStatus != "paused" {
 		endedAt = now
 	}
 	if _, err := db.ExecContext(context.Background(), `
-		INSERT INTO runs (run_id, status, started_at, ended_at)
-		VALUES ($1::uuid, $2, $3, $4)
-	`, lineage.SourceRunID, sourceStatus, now.Add(-time.Hour), endedAt); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at, ended_at)
+		VALUES ($1::uuid, $2, $3, 'ephemeral', $4, $5)
+	`, lineage.SourceRunID, sourceStatus, authorActivityTestBundleHash, now.Add(-time.Hour), endedAt); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(context.Background(), `
-		INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id, started_at, ended_at)
-		VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::timestamptz, CASE WHEN $2 IN ('running', 'paused') THEN NULL ELSE $5::timestamptz END)
-	`, lineage.ForkRunID, forkStatus, lineage.SourceRunID, lineage.ForkEventID, now); err != nil {
+		INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id, bundle_hash, bundle_source, started_at, ended_at)
+		VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5, 'ephemeral', $6::timestamptz, CASE WHEN $2 IN ('running', 'paused') THEN NULL ELSE $6::timestamptz END)
+	`, lineage.ForkRunID, forkStatus, lineage.SourceRunID, lineage.ForkEventID, authorActivityTestBundleHash, now); err != nil {
 		t.Fatalf("seed fork run: %v", err)
 	}
 	return lineage

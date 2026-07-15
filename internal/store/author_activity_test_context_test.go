@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
@@ -27,6 +29,14 @@ func testAuthorActivityContextForBundle(bundleHash string) context.Context {
 		authorActivityTestRuntimeInstanceID,
 		bundleHash,
 	))
+}
+
+func testAuthorActivityBundleSourceContext() context.Context {
+	ctx := runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(), runtimecorrelation.BundleSourceFact{
+		BundleHash:   authorActivityTestBundleHash,
+		BundleSource: storerunlifecycle.BundleSourceEphemeral,
+	})
+	return ctx
 }
 
 type testAuthorActivityCatalogRegistrar interface {

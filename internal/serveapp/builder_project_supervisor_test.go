@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -1154,6 +1155,91 @@ func TestRuntimeProjectSupervisorCloseProjectWithShutdownOptionsUsesConfiguredGr
 	}
 	if got := supervisor.CurrentRuntime(); got != nil {
 		t.Fatalf("CurrentRuntime after close = %p, want nil", got)
+	}
+}
+
+func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *testing.T) {
+	type backend struct {
+		name string
+		open func(*testing.T) storeBundle
+	}
+	backends := []backend{
+		{name: "sqlite", open: func(t *testing.T) storeBundle {
+			stores, err := buildStores(context.Background(), storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "runtime.sqlite")}, &config.Config{})
+			if err != nil {
+				t.Fatalf("build SQLite stores: %v", err)
+			}
+			t.Cleanup(func() { _ = stores.SQLDB.Close() })
+			return stores
+		}},
+		{name: "postgres", open: func(t *testing.T) storeBundle {
+			dsn, _, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			pg, err := store.NewPostgresStore(dsn)
+			if err != nil {
+				t.Fatalf("NewPostgresStore: %v", err)
+			}
+			t.Cleanup(func() { _ = pg.DB.Close() })
+			return selectedPostgresStoreBundle(pg, &config.Config{})
+		}},
+	}
+	for _, backend := range backends {
+		backend := backend
+		t.Run(backend.name, func(t *testing.T) {
+			stores := backend.open(t)
+			bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier8-boot-verification/test-boot-success")
+			if _, err := initializeStateStores(context.Background(), stores, bundle); err != nil {
+				t.Fatalf("initializeStateStores: %v", err)
+			}
+			source := semanticview.Wrap(bundle)
+			providerRegistry := testProviderTriggerCatalog(t)
+			runtimeInstanceID := "11111111-1111-4111-8111-111111111111"
+			facts := []runtimecorrelation.BundleSourceFact{
+				{BundleHash: runtimeContextTestHash("c"), BundleSource: storerunlifecycle.BundleSourceEphemeral},
+				{BundleHash: runtimeContextTestHash("d"), BundleSource: storerunlifecycle.BundleSourceEphemeral},
+			}
+			contexts := make([]serveRuntimeBundleContext, 0, len(facts))
+			for _, fact := range facts {
+				rt, err := runtimepkg.NewRuntime(context.Background(), runtimepkg.RuntimeDeps{
+					Config: &config.Config{},
+					Stores: stores.runtimeStores(),
+					Options: runtimepkg.RuntimeOptions{
+						SelfCheck:                        false,
+						WorkflowModule:                   stubWorkflowModule{source: source},
+						LLMRuntime:                       runtimellm.NoopRuntime{},
+						DisablePersistentStartupRecovery: true,
+						ProviderTriggerCatalog:           providerRegistry,
+						RuntimeInstanceID:                runtimeInstanceID,
+						BundleSourceFact:                 fact,
+					},
+				})
+				if err != nil {
+					t.Fatalf("NewRuntime(%s): %v", fact.BundleHash, err)
+				}
+				contexts = append(contexts, serveRuntimeBundleContext{runtime: rt, bundleSourceFact: fact})
+			}
+			contexts[0].runtime.CloseAdmission()
+			if err := startServeRuntimeContexts(context.Background(), contexts, nil); err == nil || !strings.Contains(err.Error(), "shutdown already started") {
+				t.Fatalf("startServeRuntimeContexts error = %v, want shutdown admission failure", err)
+			}
+
+			registrar, ok := stores.runtimeStores().EventStore.(interface {
+				RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
+			})
+			if !ok {
+				t.Fatalf("selected %s event store lacks author activity catalog registry", backend.name)
+			}
+			for _, fact := range facts {
+				scope := runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash)
+				lease, err := registrar.RegisterAuthorActivityEventCatalog(scope, []runtimeauthoractivity.EventDescriptor{{
+					EventType: "rollback.probe", Disposition: runtimeauthoractivity.StoryDifferent,
+				}})
+				if err != nil {
+					t.Fatalf("prepared catalog for %s remained leased after startup rollback: %v", fact.BundleHash, err)
+				}
+				lease.Release()
+			}
+		})
 	}
 }
 

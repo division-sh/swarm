@@ -32,7 +32,7 @@ func newForkedPipelineBackend(t *testing.T, backend string) forkedPipelineBacken
 		store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 		ensurePipelineTestRun(t, store, runID)
 		return forkedPipelineBackend{
-			db: db, store: store, ctx: runtimecorrelation.WithRunID(context.Background(), runID),
+			db: db, store: store, ctx: runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID),
 			runID: runID, sqlite: true, frozenAt: frozenAt,
 		}
 	}
@@ -42,7 +42,7 @@ func newForkedPipelineBackend(t *testing.T, backend string) forkedPipelineBacken
 		t.Fatal(err)
 	}
 	return forkedPipelineBackend{
-		db: db, store: NewWorkflowInstanceStore(db), ctx: runtimecorrelation.WithRunID(context.Background(), runID),
+		db: db, store: NewWorkflowInstanceStore(db), ctx: runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID),
 		runID: runID, frozenAt: frozenAt,
 	}
 }
