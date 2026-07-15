@@ -65,10 +65,14 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 		"session_id", "run_id", "agent_id", "entity_id", "flow_instance", "memory_enabled", "memory_source",
 		"conversation", "turn_count", "runtime_state", "status", "created_at", "updated_at",
 	)
+	addColumns("managed_agent_capability_surfaces",
+		"surface_id", "integrity_hash", "authority_kind", "authority_id", "execution_kind",
+		"execution_authority_id", "run_id", "actor_id", "provider", "transport", "surface", "created_at",
+	)
 	addColumns("agent_turns",
 		"turn_id", "run_id", "agent_id", "session_id", "flow_instance", "memory_enabled", "memory_source", "entity_id",
-		"trigger_event_id", "trigger_event_type", "task_id", "available_tools", "tool_calls",
-		"emitted_events", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible",
+		"trigger_event_id", "trigger_event_type", "task_id", "capability_surface_id", "tool_calls",
+		"emitted_events",
 		"request_payload", "response_payload", "turn_blocks", "parse_ok", "latency_ms",
 		"retry_count", "execution_mode", "failure", "created_at",
 	)

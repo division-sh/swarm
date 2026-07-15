@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/google/uuid"
 )
 
@@ -26,7 +28,7 @@ func (s *PostgresStore) SettleCompletion(ctx context.Context, attempt runtimeeff
 		if err := requireExternalEffectAuthorityPostgres(txctx, tx, attempt.Authority, false); err != nil {
 			return err
 		}
-		if err := requireCompletionAttemptPostgres(txctx, tx, attempt); err != nil {
+		if err := requireCompletionAttemptPostgres(txctx, tx, attempt, attemptSettlement); err != nil {
 			return err
 		}
 		if attemptSettlement.ProviderHead != nil {
@@ -75,7 +77,7 @@ func (s *SQLiteRuntimeStore) SettleCompletion(ctx context.Context, attempt runti
 		if err := requireExternalEffectAuthoritySQLite(txctx, tx, attempt.Authority, false); err != nil {
 			return err
 		}
-		if err := requireCompletionAttemptSQLite(txctx, tx, attempt); err != nil {
+		if err := requireCompletionAttemptSQLite(txctx, tx, attempt, attemptSettlement); err != nil {
 			return err
 		}
 		if attemptSettlement.ProviderHead != nil {
@@ -153,32 +155,36 @@ func completionProviderHeadSettlement(attempt runtimeeffects.Attempt, settlement
 	}
 }
 
-func requireCompletionAttemptPostgres(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt) error {
-	var kind, authorityID, operationMode, attemptMode, owner, state string
+func requireCompletionAttemptPostgres(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) error {
+	var kind, authorityID, operationMode, attemptMode, owner, state, capabilitySurfaceID string
 	var fence int64
 	err := tx.QueryRowContext(ctx, `
-		SELECT o.authority_kind, o.authority_id, o.execution_mode, a.execution_mode, a.execution_owner, a.fence_generation, a.state
+		SELECT o.authority_kind, o.authority_id, o.execution_mode, a.execution_mode,
+		       a.execution_owner, a.fence_generation, a.state,
+		       COALESCE(a.capability_surface_id::text,'')
 		FROM runtime_external_effect_attempts a
 		JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
 		WHERE a.attempt_id=$1::uuid AND a.operation_id=$2::uuid
 		FOR UPDATE
-	`, attempt.AttemptID, attempt.OperationID).Scan(&kind, &authorityID, &operationMode, &attemptMode, &owner, &fence, &state)
-	return validateCompletionAttemptRow(attempt, kind, authorityID, operationMode, attemptMode, owner, uint64(fence), state, err)
+	`, attempt.AttemptID, attempt.OperationID).Scan(&kind, &authorityID, &operationMode, &attemptMode, &owner, &fence, &state, &capabilitySurfaceID)
+	return validateCompletionAttemptRow(attempt, settlement, kind, authorityID, operationMode, attemptMode, owner, uint64(fence), state, capabilitySurfaceID, err)
 }
 
-func requireCompletionAttemptSQLite(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt) error {
-	var kind, authorityID, operationMode, attemptMode, owner, state string
+func requireCompletionAttemptSQLite(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) error {
+	var kind, authorityID, operationMode, attemptMode, owner, state, capabilitySurfaceID string
 	var fence int64
 	err := tx.QueryRowContext(ctx, `
-		SELECT o.authority_kind, o.authority_id, o.execution_mode, a.execution_mode, a.execution_owner, a.fence_generation, a.state
+		SELECT o.authority_kind, o.authority_id, o.execution_mode, a.execution_mode,
+		       a.execution_owner, a.fence_generation, a.state,
+		       COALESCE(a.capability_surface_id,'')
 		FROM runtime_external_effect_attempts a
 		JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
 		WHERE a.attempt_id=? AND a.operation_id=?
-	`, attempt.AttemptID, attempt.OperationID).Scan(&kind, &authorityID, &operationMode, &attemptMode, &owner, &fence, &state)
-	return validateCompletionAttemptRow(attempt, kind, authorityID, operationMode, attemptMode, owner, uint64(fence), state, err)
+	`, attempt.AttemptID, attempt.OperationID).Scan(&kind, &authorityID, &operationMode, &attemptMode, &owner, &fence, &state, &capabilitySurfaceID)
+	return validateCompletionAttemptRow(attempt, settlement, kind, authorityID, operationMode, attemptMode, owner, uint64(fence), state, capabilitySurfaceID, err)
 }
 
-func validateCompletionAttemptRow(attempt runtimeeffects.Attempt, kind, authorityID, operationMode, attemptMode, owner string, fence uint64, state string, err error) error {
+func validateCompletionAttemptRow(attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement, kind, authorityID, operationMode, attemptMode, owner string, fence uint64, state, capabilitySurfaceID string, err error) error {
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("completion attempt %s does not exist", attempt.AttemptID)
@@ -188,6 +194,13 @@ func validateCompletionAttemptRow(attempt runtimeeffects.Attempt, kind, authorit
 	mode := string(attempt.Authority.ExecutionMode)
 	if kind != string(attempt.Authority.Kind) || authorityID != attempt.Authority.ID || operationMode != mode || attemptMode != mode || owner != attempt.Authority.ExecutionOwner || fence != attempt.Authority.FenceGeneration {
 		return fmt.Errorf("completion attempt authority or fence is stale")
+	}
+	expectedSurfaceID := ""
+	if settlement.AgentTurn != nil {
+		expectedSurfaceID = strings.TrimSpace(settlement.AgentTurn.CapabilitySurfaceID)
+	}
+	if strings.TrimSpace(capabilitySurfaceID) != expectedSurfaceID {
+		return fmt.Errorf("completion attempt capability surface does not match settlement")
 	}
 	switch runtimeeffects.State(state) {
 	case runtimeeffects.StateAuthorized, runtimeeffects.StateLaunched, runtimeeffects.StateResponseObserved:
@@ -202,6 +215,19 @@ func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, attempt run
 		return insertForkCompletionPostgres(ctx, tx, attempt, settlement)
 	}
 	t := settlement.AgentTurn
+	if err := prepareCompletionTurnMemoryPostgres(ctx, tx, t); err != nil {
+		return err
+	}
+	surface, err := insertManagedCapabilitySurfacePostgres(ctx, tx, t.CapabilitySurface)
+	if err != nil {
+		return err
+	}
+	if surface.ID != strings.TrimSpace(t.CapabilitySurfaceID) || surface.Authority.ID != strings.TrimSpace(t.TurnID) {
+		return fmt.Errorf("completion turn capability surface identity mismatch")
+	}
+	if err := validateManagedAgentTurnSurface(surface, t.AgentID, t.SessionID, t.RunID); err != nil {
+		return err
+	}
 	failure, err := completionFailureJSON(t.Failure)
 	if err != nil {
 		return err
@@ -210,20 +236,20 @@ func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, attempt run
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
-			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
+			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
+			emitted_events,
 			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count,
 			completion_attempt_id, execution_mode, resolved_model, usage_exactness, input_tokens, output_tokens,
 			cache_read_input_tokens, cache_creation_input_tokens, cache_creation_5m_input_tokens,
 			cache_creation_1h_input_tokens, provider_reported_cost_usd, failure, created_at
 		) VALUES (
 			$1::uuid,$2::uuid,$3,$4::uuid,NULLIF($5,''),$6,$7,NULLIF($8,'')::uuid,
-			NULLIF($9,'')::uuid,NULLIF($10,''),NULLIF($11,''),$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16::jsonb,$17::jsonb,
-			$18::jsonb,$19::jsonb,$20::jsonb,$21,$22,$23,$24::uuid,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35::jsonb,$36
+			NULLIF($9,'')::uuid,NULLIF($10,''),NULLIF($11,''),$12::uuid,$13::jsonb,$14::jsonb,
+			$15::jsonb,$16::jsonb,$17::jsonb,$18,$19,$20,$21::uuid,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32::jsonb,$33
 		)
 	`, t.TurnID, t.RunID, t.AgentID, t.SessionID, t.FlowInstance, t.Memory.Enabled, string(t.Memory.Source), t.EntityID,
-		t.TriggerEventID, t.TriggerEventType, t.TaskID, completionJSON(t.AvailableTools, `[]`), completionJSON(t.ToolCalls, `[]`),
-		completionJSON(t.EmittedEvents, `[]`), completionJSON(t.MCPServers, `{}`), completionJSON(t.MCPToolsListed, `[]`), completionJSON(t.MCPToolsVisible, `[]`),
+		t.TriggerEventID, t.TriggerEventType, t.TaskID, t.CapabilitySurfaceID, completionJSON(t.ToolCalls, `[]`),
+		completionJSON(t.EmittedEvents, `[]`),
 		completionNullableJSON(t.RequestPayload), completionNullableJSON(t.ResponsePayload), completionJSON(t.TurnBlocks, `[]`), t.ParseOK, t.LatencyMS, t.RetryCount,
 		attempt.AttemptID, attempt.Authority.ExecutionMode, u.ResolvedModel, string(u.Exactness), u.InputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens,
 		u.CacheCreation5mInputTokens, u.CacheCreation1hInputTokens, u.ProviderReportedCostUSD, nullableJSON(failure), settlement.Now.UTC())
@@ -238,6 +264,19 @@ func insertCompletionTargetSQLite(ctx context.Context, tx *sql.Tx, attempt runti
 		return insertForkCompletionSQLite(ctx, tx, attempt, settlement)
 	}
 	t := settlement.AgentTurn
+	if err := prepareCompletionTurnMemorySQLite(ctx, tx, t, settlement.Now.UTC()); err != nil {
+		return err
+	}
+	surface, err := insertManagedCapabilitySurfaceSQLite(ctx, tx, t.CapabilitySurface)
+	if err != nil {
+		return err
+	}
+	if surface.ID != strings.TrimSpace(t.CapabilitySurfaceID) || surface.Authority.ID != strings.TrimSpace(t.TurnID) {
+		return fmt.Errorf("sqlite completion turn capability surface identity mismatch")
+	}
+	if err := validateManagedAgentTurnSurface(surface, t.AgentID, t.SessionID, t.RunID); err != nil {
+		return err
+	}
 	failure, err := completionFailureJSON(t.Failure)
 	if err != nil {
 		return err
@@ -246,21 +285,74 @@ func insertCompletionTargetSQLite(ctx context.Context, tx *sql.Tx, attempt runti
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
-			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
+			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
+			emitted_events,
 			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count,
 			completion_attempt_id, execution_mode, resolved_model, usage_exactness, input_tokens, output_tokens,
 			cache_read_input_tokens, cache_creation_input_tokens, cache_creation_5m_input_tokens,
 			cache_creation_1h_input_tokens, provider_reported_cost_usd, failure, created_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 	`, t.TurnID, sqliteNullString(t.RunID), t.AgentID, t.SessionID, sqliteNullString(t.FlowInstance), t.Memory.Enabled, string(t.Memory.Source), sqliteNullString(t.EntityID),
-		sqliteNullString(t.TriggerEventID), sqliteNullString(t.TriggerEventType), sqliteNullString(t.TaskID), completionJSON(t.AvailableTools, `[]`), completionJSON(t.ToolCalls, `[]`),
-		completionJSON(t.EmittedEvents, `[]`), completionJSON(t.MCPServers, `{}`), completionJSON(t.MCPToolsListed, `[]`), completionJSON(t.MCPToolsVisible, `[]`),
+		sqliteNullString(t.TriggerEventID), sqliteNullString(t.TriggerEventType), sqliteNullString(t.TaskID), t.CapabilitySurfaceID, completionJSON(t.ToolCalls, `[]`),
+		completionJSON(t.EmittedEvents, `[]`),
 		completionNullableJSON(t.RequestPayload), completionNullableJSON(t.ResponsePayload), completionJSON(t.TurnBlocks, `[]`), t.ParseOK, t.LatencyMS, t.RetryCount,
 		attempt.AttemptID, attempt.Authority.ExecutionMode, u.ResolvedModel, string(u.Exactness), u.InputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens,
 		u.CacheCreation5mInputTokens, u.CacheCreation1hInputTokens, u.ProviderReportedCostUSD, sqliteNullableJSON(failure), settlement.Now.UTC())
 	if err != nil {
 		return fmt.Errorf("insert sqlite completion agent turn: %w", err)
+	}
+	return nil
+}
+
+func completionTurnRecord(t *runtimeeffects.CompletionAgentTurn) runtimellm.AgentTurnRecord {
+	return runtimellm.AgentTurnRecord{
+		RunID: t.RunID, AgentID: t.AgentID, SessionID: t.SessionID, Memory: t.Memory,
+		FlowInstance: t.FlowInstance, EntityID: t.EntityID,
+	}
+}
+
+func prepareCompletionTurnMemoryPostgres(ctx context.Context, tx *sql.Tx, t *runtimeeffects.CompletionAgentTurn) error {
+	rec := completionTurnRecord(t)
+	plan, identity, err := validateTurnMemory(rec)
+	if err != nil {
+		return err
+	}
+	if !plan.Enabled {
+		return ensurePostgresStatelessAuditTx(ctx, tx, rec, plan, identity)
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE agent_sessions SET updated_at=now()
+		WHERE session_id=$1::uuid AND run_id=$2::uuid AND agent_id=$3 AND flow_instance=$4
+		  AND memory_enabled=TRUE AND status='active'
+	`, t.SessionID, identity.RunID, identity.AgentID, identity.FlowInstance)
+	if err != nil {
+		return fmt.Errorf("touch completion live memory row: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return fmt.Errorf("no exact active memory row found for completion run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID, identity.FlowInstance, t.SessionID)
+	}
+	return nil
+}
+
+func prepareCompletionTurnMemorySQLite(ctx context.Context, tx *sql.Tx, t *runtimeeffects.CompletionAgentTurn, now time.Time) error {
+	rec := completionTurnRecord(t)
+	plan, identity, err := validateTurnMemory(rec)
+	if err != nil {
+		return err
+	}
+	if !plan.Enabled {
+		return ensureSQLiteStatelessAuditTx(ctx, tx, rec, plan, identity, now)
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE agent_sessions SET updated_at=?
+		WHERE session_id=? AND run_id=? AND agent_id=? AND flow_instance=?
+		  AND memory_enabled=1 AND status='active'
+	`, now, t.SessionID, identity.RunID, identity.AgentID, identity.FlowInstance)
+	if err != nil {
+		return fmt.Errorf("touch sqlite completion live memory row: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return fmt.Errorf("no exact active sqlite memory row found for completion run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID, identity.FlowInstance, t.SessionID)
 	}
 	return nil
 }

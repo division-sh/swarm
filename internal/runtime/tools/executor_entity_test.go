@@ -386,16 +386,6 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 		t.Fatalf("generated save schema missing value: %#v", saveSchema)
 	}
 
-	surface := llm.AgentVisibleToolSurfaceForActor(actor, defs)
-	for _, name := range legacyNames {
-		if containsString(surface.RuntimeToolNames, name) || containsString(surface.NonEmitToolNames, name) {
-			t.Fatalf("legacy entity tool %q remained in agent-visible surface: %#v", name, surface)
-		}
-	}
-	if len(surface.WritableEntityPaths) != 0 {
-		t.Fatalf("save_entity_field writable path summary remained visible for role-scoped actor: %#v", surface.WritableEntityPaths)
-	}
-
 	capabilityNames := append([]string{"read_validation_case"}, legacyNames...)
 	caps := exec.ToolCapabilitiesForActor(actor, capabilityNames, nil)
 	if cap, ok := caps.Capability("read_validation_case"); !ok || !cap.Visible || !cap.Callable {

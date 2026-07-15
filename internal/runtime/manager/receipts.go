@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -58,6 +60,19 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 	record := startupManagerReplayRecord{
 		Event:   evt,
 		AgentID: agent.ID(),
+	}
+	if strings.EqualFold(strings.TrimSpace(agent.Type()), "llm") {
+		if authority, managed := runtimeeffects.AuthorityFromContext(ctx); managed {
+			admission, ok := managedexecution.FromContext(ctx)
+			if !ok || (authority.Kind == runtimeeffects.AuthorityNormalAgent && !admission.AuthorizesNormal()) ||
+				(authority.Kind == runtimeeffects.AuthoritySelectedContractFork && !admission.AuthorizesSelected(authority.SelectedFork.ExecutionID, authority.SelectedFork.ForkRunID, authority.SelectedFork.Generation)) {
+				err := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_execution_admission_missing", "agent-manager", "process_event", map[string]any{"agent_id": agent.ID(), "authority_kind": authority.Kind})
+				record.Outcome = startupManagerReplayOutcomeDropped
+				record.ReasonCode = startupManagerReplayReasonProcessFailed
+				record.Failure = failureEnvelope(err, "agent-manager", "process_event")
+				return eventProcessResult{record: record, err: err}
+			}
+		}
 	}
 	if !am.markEventInFlight(agent.ID(), evt.ID()) {
 		record.Outcome = startupManagerReplayOutcomeSkipped

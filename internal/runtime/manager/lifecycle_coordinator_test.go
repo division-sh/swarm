@@ -10,6 +10,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
@@ -313,7 +314,7 @@ func TestLifecycleCoordinatorInMemoryEffectContextCarriesCurrentToken(t *testing
 	if err := coordinator.registerExecution(context.Background(), rec, false, reconfigureTestAgent{id: rec.Config.ID}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	coordinator.beginRun(context.Background(), AgentRunModeStandard)
+	coordinator.beginRun(managedExecutionTestContext(t, context.Background()), AgentRunModeStandard)
 	loopCtx, token, done, err := coordinator.replaceLoop(context.Background(), rec.Config.ID, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 	if err != nil {
 		t.Fatalf("start: %v", err)
@@ -325,6 +326,9 @@ func TestLifecycleCoordinatorInMemoryEffectContextCarriesCurrentToken(t *testing
 	got, ok := runtimeeffects.LifecycleTokenFromContext(lease.Context)
 	if !ok || got != token {
 		t.Fatalf("effect token = %+v ok=%v, want %+v", got, ok, token)
+	}
+	if admission, ok := managedexecution.FromContext(lease.Context); !ok || !admission.AuthorizesNormal() {
+		t.Fatalf("effect admission = %+v ok=%v, want normal runtime admission", admission, ok)
 	}
 	lease.Release()
 	coordinator.cancelShutdownWork()

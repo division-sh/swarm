@@ -12,6 +12,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -59,6 +60,7 @@ type selectedContractForkLocalRuntimeContainer struct {
 	proof     SelectedContractForkLocalRuntimeContainer
 	req       publishSelectedContractForkEventsRequest
 	authority runtimeeffects.Authority
+	admission managedexecution.Admission
 }
 
 func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req publishSelectedContractForkEventsRequest) (selectedContractForkLocalRuntimeContainer, error) {
@@ -185,7 +187,13 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	proof.ContainerPlanFingerprint = issued.ContainerPlanFingerprint
 	proof.ActorCensusFingerprint = issued.ActorCensusFingerprint
 	proof.EffectiveConfigFingerprint = issued.EffectiveConfigFingerprint
-	return selectedContractForkLocalRuntimeContainer{proof: proof, req: req, authority: authority}, nil
+	admission, err := managedexecution.New(managedexecution.KindSelectedContractFork, authority.SelectedFork.ExecutionID,
+		authority.SelectedFork.Generation, authority.SelectedFork.ForkRunID, issued.ActorCensusFingerprint,
+		issued.EffectiveConfigFingerprint, nil)
+	if err != nil {
+		return selectedContractForkLocalRuntimeContainer{}, err
+	}
+	return selectedContractForkLocalRuntimeContainer{proof: proof, req: req, authority: authority, admission: admission}, nil
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Proof() SelectedContractForkLocalRuntimeContainer {
@@ -233,6 +241,8 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 
 	runCtx := selectedContractRuntimeContainerLineageContext(ctx, c.proof)
 	runCtx = runtimeeffects.WithAuthority(runCtx, c.authority)
+	runCtx = runtimeeffects.WithController(runCtx, runtimeeffects.NewController(req.Store))
+	runCtx = managedexecution.WithAdmission(runCtx, c.admission)
 	runCtx, cancelRuntime := context.WithCancel(runCtx)
 	defer cancelRuntime()
 	heartbeatErr := make(chan error, 1)
@@ -256,10 +266,11 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 			}
 		}
 	}()
-	agentRuntime, err := startSelectedContractAgentRuntime(runCtx, req, bus)
+	agentRuntime, admission, err := startSelectedContractAgentRuntime(runCtx, req, bus)
 	if err != nil {
 		return nil, err
 	}
+	runCtx = managedexecution.WithAdmission(runCtx, admission)
 	if agentRuntime == nil || agentRuntime.manager == nil {
 		return nil, fmt.Errorf("selected-contract fork-local lifecycle manager was not materialized")
 	}

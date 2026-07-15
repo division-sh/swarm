@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -296,15 +297,37 @@ type startupVisibleSurfaceProbeStub struct {
 	calls []string
 }
 
-func (s *startupVisibleSurfaceProbeStub) ProbeStartupVisibleToolSurface(_ context.Context, actor runtimeactors.AgentConfig, _ string, _ []llm.ToolDefinition) (*llm.Response, error) {
+func (s *startupVisibleSurfaceProbeStub) ProbeStartupVisibleToolSurface(ctx context.Context, actor runtimeactors.AgentConfig, _ string, _ []llm.ToolDefinition) (*llm.Response, error) {
 	s.calls = append(s.calls, strings.TrimSpace(actor.ID))
 	if s.err != nil {
 		return nil, s.err
 	}
-	if s.resp == nil {
-		return &llm.Response{}, nil
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		return nil, errors.New("startup probe capability surface missing")
 	}
-	return s.resp, nil
+	resp := s.resp
+	if resp == nil {
+		resp = &llm.Response{
+			ProviderVisibleTools: surface.PlannedBindingNames(managedcapabilities.BindingProviderBuiltin),
+			MCPVisibleTools:      surface.PlannedBindingNames(managedcapabilities.BindingMCPProvider),
+		}
+	}
+	if len(resp.MCPVisibleTools) == 0 {
+		resp.MCPVisibleTools = surface.PlannedBindingNames(managedcapabilities.BindingMCPProvider)
+	}
+	if len(resp.MCPVisibleTools) > 0 && resp.MCPServers == nil {
+		resp.MCPServers = map[string]string{"runtime-tools": "connected"}
+	}
+	observed, err := llm.ObserveCLIResponseCapabilitySurface(surface, resp)
+	if err != nil {
+		return nil, err
+	}
+	if err := llm.ValidateCLIProviderCapabilitySurface(observed, resp); err != nil {
+		return nil, errors.New("unexpected visible tool surface: " + err.Error())
+	}
+	resp.CapabilitySurface = &observed
+	return resp, nil
 }
 
 func startupProbeDefs() []llm.ToolDefinition {
@@ -672,7 +695,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnConfiguredGatewayTo
 	}
 }
 
-func TestValidateClaudeMCPToolsForManagedAgents_FailsOnEmptyVisibleToolSurface(t *testing.T) {
+func TestValidateClaudeMCPToolsForManagedAgents_AcceptsFullyDeniedToolPlan(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := runtimemanager.NewAgentManager(nil, nil)
@@ -697,8 +720,8 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsOnEmptyVisibleToolSurface(t
 	probe := &startupVisibleSurfaceProbeStub{}
 
 	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
-	if err == nil || !strings.Contains(err.Error(), "found no visible tools") {
-		t.Fatalf("expected empty visible tools error, got %v", err)
+	if err != nil {
+		t.Fatalf("fully denied tool plan: %v", err)
 	}
 	if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {
 		t.Fatalf("probe calls = %#v, want CLI startup proof before empty visible-surface failure", probe.calls)
@@ -781,7 +804,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_ComparesProviderNativeSurfaceOnl
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 	probe := &startupVisibleSurfaceProbeStub{
 		resp: &llm.Response{
-			VisibleTools: []string{"WebSearch"},
+			VisibleTools: []string{"WebFetch", "WebSearch"},
 		},
 	}
 

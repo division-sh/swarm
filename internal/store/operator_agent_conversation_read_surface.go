@@ -303,11 +303,7 @@ type OperatorConversationTurn struct {
 	MemorySource           string                           `json:"-"`
 	EntityID               string                           `json:"-"`
 	TaskID                 string                           `json:"-"`
-	AvailableTools         []string                         `json:"-"`
 	EmittedEvents          []string                         `json:"-"`
-	MCPServers             map[string]string                `json:"-"`
-	MCPToolsListed         []string                         `json:"-"`
-	MCPToolsVisible        []string                         `json:"-"`
 	AssistantVisibleOutput string                           `json:"-"`
 	ReasoningBlocks        []string                         `json:"-"`
 	ProgressUpdates        []string                         `json:"-"`

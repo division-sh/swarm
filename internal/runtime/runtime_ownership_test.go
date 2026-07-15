@@ -18,20 +18,73 @@ type fakeRuntimeStartupOwnershipStore struct {
 	acquire func(context.Context, string) (runtimestartupownership.Lease, error)
 }
 
-func (f fakeRuntimeStartupOwnershipStore) AcquireRuntimeStartupOwnership(ctx context.Context, ownerID string) (runtimestartupownership.Lease, error) {
+func (f fakeRuntimeStartupOwnershipStore) AcquireRuntimeStartupOwnership(ctx context.Context, req runtimestartupownership.AcquireRequest) (runtimestartupownership.Lease, error) {
 	if f.acquire == nil {
 		return nil, nil
 	}
-	return f.acquire(ctx, ownerID)
+	lease, err := f.acquire(ctx, req.OwnerID)
+	if typed, ok := lease.(*fakeRuntimeStartupOwnershipLease); ok && err == nil {
+		if err := typed.initialize(req); err != nil {
+			return nil, err
+		}
+	}
+	return lease, err
 }
 
 type fakeRuntimeStartupOwnershipLease struct {
 	released atomic.Int32
+	lease    runtimestartupownership.Lease
 }
 
-func (f *fakeRuntimeStartupOwnershipLease) Release(context.Context) error {
-	f.released.Add(1)
-	return nil
+func (f *fakeRuntimeStartupOwnershipLease) initialize(req runtimestartupownership.AcquireRequest) error {
+	if f.lease != nil {
+		return nil
+	}
+	authority, err := runtimestartupownership.NewColdAuthority(req, "test")
+	if err != nil {
+		return err
+	}
+	f.lease, err = runtimestartupownership.NewLease(authority, nil, func(context.Context) error {
+		f.released.Add(1)
+		return nil
+	})
+	return err
+}
+
+func (f *fakeRuntimeStartupOwnershipLease) Authority() (runtimestartupownership.Authority, error) {
+	if f.lease == nil {
+		return runtimestartupownership.Authority{}, fmt.Errorf("fake startup ownership lease is not initialized")
+	}
+	return f.lease.Authority()
+}
+
+func (f *fakeRuntimeStartupOwnershipLease) MarkProbesSettled(ctx context.Context, surfaceIDs []string) (runtimestartupownership.Authority, error) {
+	if f.lease == nil {
+		return runtimestartupownership.Authority{}, fmt.Errorf("fake startup ownership lease is not initialized")
+	}
+	return f.lease.MarkProbesSettled(ctx, surfaceIDs)
+}
+
+func (f *fakeRuntimeStartupOwnershipLease) AdmitExecution(ctx context.Context) (runtimestartupownership.Authority, error) {
+	if f.lease == nil {
+		return runtimestartupownership.Authority{}, fmt.Errorf("fake startup ownership lease is not initialized")
+	}
+	return f.lease.AdmitExecution(ctx)
+}
+
+func (f *fakeRuntimeStartupOwnershipLease) PrepareHandoff(ctx context.Context, req runtimestartupownership.HandoffRequest) (runtimestartupownership.Handoff, error) {
+	if f.lease == nil {
+		return nil, fmt.Errorf("fake startup ownership lease is not initialized")
+	}
+	return f.lease.PrepareHandoff(ctx, req)
+}
+
+func (f *fakeRuntimeStartupOwnershipLease) Release(ctx context.Context) error {
+	if f.lease == nil {
+		f.released.Add(1)
+		return nil
+	}
+	return f.lease.Release(ctx)
 }
 
 func TestRuntimeStart_FailsWhenSharedStoreOwnershipAlreadyHeld(t *testing.T) {
@@ -271,7 +324,9 @@ func TestRuntimeReplacementBorrowsAndCommitsStartupOwnershipWithoutReacquire(t *
 	if err := predecessor.Shutdown(); err == nil || !strings.Contains(err.Error(), "handoff is pending") {
 		t.Fatalf("predecessor shutdown during visibility commit error = %v", err)
 	}
-	handoff.Finalize()
+	if err := handoff.Finalize(); err != nil {
+		t.Fatalf("finalize handoff: %v", err)
+	}
 	if err := predecessor.Shutdown(); err != nil {
 		t.Fatalf("shutdown predecessor: %v", err)
 	}

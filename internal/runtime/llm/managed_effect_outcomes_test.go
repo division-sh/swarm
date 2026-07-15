@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -175,12 +177,21 @@ func settleEffectTestCompletionFailure(t *testing.T, ctx context.Context, dispat
 	}
 	failure := runtimefailures.FromError(cause, "effect-test", "settle_completion")
 	target := dispatch.handle.Attempt().Authority.Target
-	err := dispatch.handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		t.Fatal("managed capability surface is missing from completion context")
+	}
+	surfaceJSON, err := json.Marshal(surface)
+	if err != nil {
+		t.Fatalf("marshal managed capability surface: %v", err)
+	}
+	err = dispatch.handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: state, Failure: &failure.Failure},
 		Usage:      runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageUnavailable},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
-			Memory: target.Memory, FlowInstance: target.FlowInstance, Failure: &failure.Failure,
+			Memory: target.Memory, FlowInstance: target.FlowInstance, CapabilitySurfaceID: surface.ID,
+			CapabilitySurface: surfaceJSON, Failure: &failure.Failure,
 		},
 		Spend: runtimeeffects.CompletionSpend{
 			FlowInstance: "global", AgentID: target.AgentID, Model: "test-model",
@@ -198,7 +209,7 @@ func TestManagedRelayEffectOutcomes(t *testing.T) {
 	harness := effecttest.New()
 	runtime := &ClaudeCLIRuntime{cfg: &config.Config{Workspace: config.WorkspaceConfig{DockerBin: "/definitely/missing/swarm-docker"}}}
 	target := &workspace.Target{Backend: workspace.BackendDocker, Container: "effect-container", Workdir: workspace.LogicalWorkspaceMount}
-	if _, _, _, err := runtime.runWorkspaceCommand(harness.Context("claude-relay"), target, "payload", "sh", "-lc", "true"); err == nil {
+	if _, _, _, err := runtime.runWorkspaceCommand(harness.CompletionContext("claude-relay"), target, "payload", "sh", "-lc", "true"); err == nil {
 		t.Fatal("missing relay process returned nil")
 	}
 	if err := harness.RequireState("claude_tool_result_relay", runtimeeffects.StateTerminalFailure); err != nil {
@@ -207,7 +218,7 @@ func TestManagedRelayEffectOutcomes(t *testing.T) {
 
 	stale := effecttest.New()
 	stale.AuthorizeErr = errors.New("superseded generation")
-	if _, _, _, err := runtime.runWorkspaceCommand(stale.Context("claude-relay-stale"), target, "payload", "sh", "-lc", "true"); err == nil {
+	if _, _, _, err := runtime.runWorkspaceCommand(stale.CompletionContext("claude-relay-stale"), target, "payload", "sh", "-lc", "true"); err == nil {
 		t.Fatal("stale relay process was admitted")
 	}
 	if _, launched := stale.StateForAdapter("claude_tool_result_relay"); launched {

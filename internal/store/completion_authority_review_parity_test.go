@@ -94,6 +94,7 @@ func proveSelectedCurrentAuthorityTransition(t *testing.T, sqlite bool) {
 		runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, providerAuthority), runtimeeffects.NewController(fixture.store)),
 		"review:selected-live-attempt",
 	)
+	providerCtx = withManagedCompletionTestSurface(t, providerCtx, providerAuthority, "anthropic_api")
 	handle, err := runtimeeffects.BeginCompletion(providerCtx, "anthropic_api", []byte("review-selected"), nil)
 	if err != nil {
 		t.Fatalf("authorize selected live attempt: %v", err)
@@ -152,13 +153,14 @@ func proveClaudeRetryGenerationAuthority(t *testing.T, sqlite bool) {
 	fixture := newCompletionReviewFixture(t, sqlite)
 	logicalID := "review:claude-generation"
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, logicalID)
+	ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "claude_cli")
 	handle, err := runtimeeffects.BeginCompletion(ctx, "claude_cli", []byte("retry-generation"), nil)
 	if err != nil {
 		t.Fatalf("authorize generation-1 Claude attempt: %v", err)
 	}
 	failureErr := runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "claude_cli_process_start_failed", "review", "start", map[string]any{"launch_rejected": true})
 	failure, _ := runtimefailures.EnvelopeFromError(failureErr)
-	settlement := completionSettlementForTest(handle.Attempt().Authority.Target, fixture, "", "")
+	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "claude_cli", "", "")
 	settlement.ProviderHead = nil
 	settlement.Settlement = runtimeeffects.Settlement{State: runtimeeffects.StateTerminalFailure, Failure: &failure, Evidence: map[string]any{"launch_rejected": true}}
 	settlement.Usage = runtimeeffects.CompletionUsage{ResolvedModel: "claude-test", Exactness: runtimeeffects.CompletionUsageUnavailable}
@@ -176,6 +178,7 @@ func proveClaudeRetryGenerationAuthority(t *testing.T, sqlite bool) {
 		runtimeeffects.WithController(runtimeeffects.WithAuthority(context.Background(), nextAuthority), runtimeeffects.NewController(fixture.store)),
 		logicalID,
 	)
+	nextCtx = withManagedCompletionTestSurface(t, nextCtx, nextAuthority, "claude_cli")
 	if _, err := runtimeeffects.BeginCompletion(nextCtx, "claude_cli", []byte("retry-generation"), nil); err == nil {
 		t.Fatal("generation-2 authority retried a generation-1 operation")
 	}
@@ -212,7 +215,7 @@ func proveCommittedCompletionBudgetProjection(t *testing.T, sqlite bool) {
 		"review:budget-projection",
 	)
 	handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "budget-projection")
-	settlement := completionSettlementForTest(handle.Attempt().Authority.Target, fixture, "", "")
+	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "anthropic_api", "", "")
 	settlement.ProviderHead = nil
 	if err := handle.SettleCompletion(ctx, settlement); err != nil {
 		t.Fatalf("settle projected completion: %v", err)

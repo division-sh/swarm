@@ -228,7 +228,7 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{WorkflowInstances: workflowInstances}, store)
 
-	if err := am.Recover(context.Background()); err != nil {
+	if err := am.Recover(managedExecutionTestContext(t, context.Background())); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	if len(bus.restored) != 1 || bus.restored[0] != "review/inst-1" {
@@ -252,7 +252,7 @@ func TestDirectiveReconciliationPrecedesGenericPipelineRecovery(t *testing.T) {
 	if err := am.ReconcileDirectiveOperations(context.Background()); err != nil {
 		t.Fatalf("ReconcileDirectiveOperations: %v", err)
 	}
-	if err := am.Recover(context.Background()); err != nil {
+	if err := am.Recover(managedExecutionTestContext(t, context.Background())); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	if len(bus.order) < 2 || bus.order[0] != "directive" || bus.order[1] != "pipeline" {
@@ -271,7 +271,7 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, &recoveryTestStore{})
 
-	if err := am.Recover(context.Background()); err != nil {
+	if err := am.Recover(managedExecutionTestContext(t, context.Background())); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	snapshot := am.SelectedContractRouteRecoverySnapshot()
@@ -516,7 +516,7 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, store)
 
-	if err := am.Recover(context.Background()); err != nil {
+	if err := am.Recover(managedExecutionTestContext(t, context.Background())); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	if hydrated.ID != "reviewer-inst-1" {
@@ -556,7 +556,7 @@ func TestRecover_UsesCanonicalPipelineReplayAftermathDiagnostics(t *testing.T) {
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, &recoveryTestStore{})
 
-	if err := am.Recover(context.Background()); err != nil {
+	if err := am.Recover(managedExecutionTestContext(t, context.Background())); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	if len(bus.direct) != 1 || bus.direct[0].ID() != childID {
@@ -603,7 +603,7 @@ func TestRecoverWithStartupReplayDiagnostics_LogsCanonicalManagerReplayAftermath
 	}, store)
 	am.inFlight["agent-a|evt-inflight"] = struct{}{}
 
-	summary, err := am.RecoverWithStartupReplayDiagnostics(context.Background())
+	summary, err := am.RecoverWithStartupReplayDiagnostics(managedExecutionTestContext(t, context.Background()))
 	if err != nil {
 		t.Fatalf("RecoverWithStartupReplayDiagnostics: %v", err)
 	}

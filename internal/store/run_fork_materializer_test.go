@@ -1579,12 +1579,15 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 		{
 			name: "fork turn",
 			seed: func(ctx context.Context, db *sql.DB, forkRunID string, at time.Time) error {
+				turnID := uuid.NewString()
+				sessionID := uuid.NewString()
+				capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, &PostgresStore{DB: db}, forkRunID, "agent-a", sessionID, turnID, "session", "global")
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_turns (
-						turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, execution_mode, created_at
+						turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, capability_surface_id, execution_mode, created_at
 					)
-					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'fork-state', FALSE, 'platform_default', 'live', $4)
-				`, uuid.NewString(), forkRunID, uuid.NewString(), at)
+					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'fork-state', FALSE, 'platform_default', $4::uuid, 'live', $5)
+				`, turnID, forkRunID, sessionID, capabilitySurfaceID, at)
 				return err
 			},
 			wantCode:  "fork_turns_already_exist",

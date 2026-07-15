@@ -32,6 +32,9 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 	if caps.Conversations.Turns != SchemaFlavorCanonical {
 		return unsupportedSchemaCapability("agent_turns", caps.Conversations.Turns)
 	}
+	if caps.Conversations.CapabilitySurfaces != SchemaFlavorCanonical {
+		return unsupportedSchemaCapability("managed_agent_capability_surfaces", caps.Conversations.CapabilitySurfaces)
+	}
 	if plan.Enabled && caps.Conversations.Sessions != SchemaFlavorCanonical {
 		return unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
 	}
@@ -60,6 +63,13 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			return err
 		}
 
+		if rec.CapabilitySurface == nil {
+			return fmt.Errorf("agent turn requires exact managed capability surface")
+		}
+		capabilitySurfacePayload, err := json.Marshal(rec.CapabilitySurface)
+		if err != nil {
+			return fmt.Errorf("encode agent turn managed capability surface: %w", err)
+		}
 		rec = runtimellm.CanonicalizeTurnForPersistence(rec)
 		if _, err := runtimellm.DecodeCanonicalRuntimeLogTurnBlocks(rec.TurnBlocks); err != nil {
 			return fmt.Errorf("validate canonical runtime_log turn_blocks: %w", err)
@@ -74,31 +84,37 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		if latencyMS < 0 {
 			latencyMS = 0
 		}
-		turnID := uuid.NewString()
+		if !caps.Conversations.TurnRunID || !caps.Conversations.TurnBlocks {
+			return fmt.Errorf("agent turn persistence requires canonical run_id and turn_blocks schema")
+		}
+		surface, err := insertManagedCapabilitySurfacePostgres(ctx, tx, capabilitySurfacePayload)
+		if err != nil {
+			return err
+		}
+		if err := validateManagedAgentTurnSurface(surface, identity.AgentID, rec.SessionID, identity.RunID); err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx, `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls, emitted_events,
-			mcp_servers, mcp_tools_listed, mcp_tools_visible, request_payload, response_payload, turn_blocks,
-			parse_ok, latency_ms, retry_count, execution_mode, failure, created_at
-		) VALUES (
-			$1::uuid,$2::uuid,$3,$4::uuid,NULLIF($5,''),$6,$7,NULLIF($8,'')::uuid,
-			NULLIF($9,'')::uuid,NULLIF($10,''),NULLIF($11,''),$12::jsonb,$13::jsonb,$14::jsonb,
-			$15::jsonb,$16::jsonb,$17::jsonb,CASE WHEN $18='' THEN NULL ELSE $18::jsonb END,
-			CASE WHEN $19='' THEN NULL ELSE $19::jsonb END,$20::jsonb,$21,$22,$23,$24,
-			CASE WHEN $25='' THEN NULL ELSE $25::jsonb END,now()
-		)
-	`, turnID, identity.RunID, identity.AgentID, strings.TrimSpace(rec.SessionID), identity.FlowInstance,
+			INSERT INTO agent_turns (
+				turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
+				trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
+				emitted_events, request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, execution_mode, failure, created_at
+			) VALUES (
+				$1::uuid,$2::uuid,$3,$4::uuid,NULLIF($5,''),$6,$7,NULLIF($8,'')::uuid,
+				NULLIF($9,'')::uuid,NULLIF($10,''),NULLIF($11,''),$12::uuid,$13::jsonb,$14::jsonb,
+				CASE WHEN $15='' THEN NULL ELSE $15::jsonb END,CASE WHEN $16='' THEN NULL ELSE $16::jsonb END,
+				$17::jsonb,$18,$19,$20,$21,CASE WHEN $22='' THEN NULL ELSE $22::jsonb END,now()
+			)
+		`, surface.Authority.ID, identity.RunID, identity.AgentID, strings.TrimSpace(rec.SessionID), identity.FlowInstance,
 			plan.Enabled, string(plan.Source), strings.TrimSpace(rec.EntityID), strings.TrimSpace(rec.TriggerEventID),
-			strings.TrimSpace(rec.TriggerEventType), strings.TrimSpace(rec.TaskID), normalizeJSONArray(rec.AvailableTools),
-			normalizeJSONArray(rec.ToolCalls), normalizeJSONArray(rec.EmittedEvents), normalizeJSONObject(rec.MCPServers),
-			normalizeJSONArray(rec.MCPToolsListed), normalizeJSONArray(rec.MCPToolsVisible), normalizeJSONPayload(rec.RequestPayload),
-			normalizeJSONPayload(rec.ResponseRaw), normalizeJSONArray(rec.TurnBlocks), rec.ParseOK, latencyMS, rec.RetryCount, executionMode, failurePayload)
+			strings.TrimSpace(rec.TriggerEventType), strings.TrimSpace(rec.TaskID), surface.ID, normalizeJSONArray(rec.ToolCalls),
+			normalizeJSONArray(rec.EmittedEvents), normalizeJSONPayload(rec.RequestPayload), normalizeJSONPayload(rec.ResponseRaw),
+			normalizeJSONArray(rec.TurnBlocks), rec.ParseOK, latencyMS, rec.RetryCount, executionMode, failurePayload)
 		if err != nil {
 			return fmt.Errorf("insert agent turn: %w", err)
 		}
 		return recordAuthorActivityTurn(ctx, authorActivityTurn{
-			TurnID: turnID, RunID: rec.RunID, AgentID: rec.AgentID, SessionID: rec.SessionID, EntityID: rec.EntityID,
+			TurnID: surface.Authority.ID, RunID: identity.RunID, AgentID: identity.AgentID, SessionID: rec.SessionID, EntityID: rec.EntityID,
 			FlowID: identity.FlowInstance, TriggerEventType: rec.TriggerEventType, Blocks: rec.TurnBlocks,
 			ParseOK: rec.ParseOK, DurationMS: latencyMS, RetryCount: rec.RetryCount, UsageExactness: "unavailable",
 			ExecutionMode: string(executionMode), Failure: rec.Failure, OccurredAt: time.Now().UTC(),

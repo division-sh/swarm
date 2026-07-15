@@ -1235,10 +1235,12 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	`, uuid.NewString(), uuid.NewString(), sessionID, uuid.NewString(), runA, uuid.NewString(), uuid.NewString()); err != nil {
 		t.Fatalf("seed conversation forks: %v", err)
 	}
+	turnID := uuid.NewString()
+	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, pg, runA, "agent-a", sessionID, turnID, "session", "agent-a:global")
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO agent_turns (run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, execution_mode)
-		VALUES ($1::uuid, 'agent-a', $2::uuid, 'cleanup', TRUE, 'authored', 'live')
-	`, runA, sessionID); err != nil {
+		INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, capability_surface_id, execution_mode)
+		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'cleanup', TRUE, 'authored', $4::uuid, 'live')
+	`, turnID, runA, sessionID, capabilitySurfaceID); err != nil {
 		t.Fatalf("seed agent turn: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `

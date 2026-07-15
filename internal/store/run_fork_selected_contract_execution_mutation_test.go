@@ -1455,14 +1455,17 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			name: "turn",
 			code: "source_turns_advanced_after_fork_point",
 			seed: func(ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
+				turnID := uuid.NewString()
+				sessionID := uuid.NewString()
+				capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, &PostgresStore{DB: db}, sourceRunID, "agent-a", sessionID, turnID, "task", entityID)
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_turns (
 						turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-						trigger_event_id, trigger_event_type, task_id, execution_mode, created_at
+						trigger_event_id, trigger_event_type, task_id, capability_surface_id, execution_mode, created_at
 					)
 					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', FALSE, 'authored', $4::uuid,
-						$5::uuid, 'item.received', 'task-a', 'live', $6)
-				`, uuid.NewString(), sourceRunID, uuid.NewString(), entityID, eventID, at.Add(time.Minute))
+						$5::uuid, 'item.received', 'task-a', $6::uuid, 'live', $7)
+				`, turnID, sourceRunID, sessionID, entityID, eventID, capabilitySurfaceID, at.Add(time.Minute))
 				return err
 			},
 		},
@@ -1763,18 +1766,20 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 	`, uuid.NewString(), materialized.ForkRunID, entityID, at.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed fork conversation audit: %v", err)
 	}
+	turnID := uuid.NewString()
+	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, pg, materialized.ForkRunID, "agent-a", sessionID, turnID, "task", "agent-a:entity")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, available_tools, tool_calls, emitted_events,
-			mcp_servers, mcp_tools_listed, mcp_tools_visible, parse_ok, latency_ms, retry_count, execution_mode, created_at
+			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
+			trigger_event_id, trigger_event_type, capability_surface_id, tool_calls, emitted_events,
+			parse_ok, latency_ms, retry_count, execution_mode, created_at
 		)
 		VALUES (
-			$1::uuid, 'agent-a', $2::uuid, 'flow-a/1', TRUE, 'authored', $3::uuid,
-			$4::uuid, 'item.received', '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
-			'{}'::jsonb, '[]'::jsonb, '[]'::jsonb, true, 1, 0, 'live', $5
+			$1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', TRUE, 'authored', $4::uuid,
+			$5::uuid, 'item.received', $6::uuid, '[]'::jsonb, '[]'::jsonb,
+			true, 1, 0, 'live', $7
 		)
-	`, materialized.ForkRunID, sessionID, entityID, forkEventID, at.Add(3*time.Second)); err != nil {
+	`, turnID, materialized.ForkRunID, sessionID, entityID, forkEventID, capabilitySurfaceID, at.Add(3*time.Second)); err != nil {
 		t.Fatalf("seed fork turn: %v", err)
 	}
 
@@ -2262,7 +2267,7 @@ func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourc
 	}
 }
 
-func seedSelectedContractSourceConversationHistory(t *testing.T, db execContextDB, sourceRunID, entityID, eventID, sessionID, auditID, turnID string, at time.Time) {
+func seedSelectedContractSourceConversationHistory(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID, sessionID, auditID, turnID string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
@@ -2292,14 +2297,15 @@ func seedSelectedContractSourceConversationHistory(t *testing.T, db execContextD
 	`, auditID, sourceRunID, entityID, at); err != nil {
 		t.Fatalf("seed source conversation audit: %v", err)
 	}
+	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, &PostgresStore{DB: db}, sourceRunID, "agent-a", sessionID, turnID, "session_per_entity", entityID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, execution_mode, created_at
+			trigger_event_id, trigger_event_type, task_id, capability_surface_id, execution_mode, created_at
 		)
 		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', TRUE, 'authored', $4::uuid,
-			$5::uuid, 'item.received', 'task-a', 'live', $6)
-	`, turnID, sourceRunID, sessionID, entityID, eventID, at); err != nil {
+			$5::uuid, 'item.received', 'task-a', $6::uuid, 'live', $7)
+	`, turnID, sourceRunID, sessionID, entityID, eventID, capabilitySurfaceID, at); err != nil {
 		t.Fatalf("seed source turn: %v", err)
 	}
 }

@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/config"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
@@ -196,15 +198,7 @@ var claudeProviderBuiltinToolNames = []string{
 	"Write",
 }
 
-type AgentVisibleToolSurface struct {
-	RuntimeToolNames    []string
-	EmitToolNames       []string
-	NonEmitToolNames    []string
-	NativeBuiltinTools  []string
-	WritableEntityPaths []string
-}
-
-type CLIExecutionToolSurface struct {
+type conversationForkSandboxTransportSurface struct {
 	CanonicalVisibleTools []string
 	RuntimeToolNames      []string
 	PromptRuntimeTools    []string
@@ -228,7 +222,7 @@ func cliNativeCapabilityToolSet(actor models.AgentConfig) map[string]struct{} {
 	return out
 }
 
-func cliExecutionToolSurfaceForActor(actor models.AgentConfig, tools []ToolDefinition) CLIExecutionToolSurface {
+func conversationForkSandboxTransportSurfaceForActor(actor models.AgentConfig, tools []ToolDefinition) conversationForkSandboxTransportSurface {
 	rawRuntimeNames := toolNames(tools)
 	nativeCapabilityTools := cliNativeCapabilityToolSet(actor)
 	runtimeNames := make([]string, 0, len(rawRuntimeNames))
@@ -307,7 +301,7 @@ func cliExecutionToolSurfaceForActor(actor models.AgentConfig, tools []ToolDefin
 	slices.Sort(providerMCPTools)
 	slices.Sort(localFallbackTools)
 
-	return CLIExecutionToolSurface{
+	return conversationForkSandboxTransportSurface{
 		CanonicalVisibleTools: canonicalVisible,
 		RuntimeToolNames:      runtimeNames,
 		PromptRuntimeTools:    promptRuntime,
@@ -315,80 +309,6 @@ func cliExecutionToolSurfaceForActor(actor models.AgentConfig, tools []ToolDefin
 		ProviderMCPTools:      providerMCPTools,
 		LocalFallbackTools:    localFallbackTools,
 	}
-}
-
-func AgentVisibleToolSurfaceForActor(actor models.AgentConfig, tools []ToolDefinition) AgentVisibleToolSurface {
-	surface := cliExecutionToolSurfaceForActor(actor, tools)
-	runtimeNames := append([]string(nil), surface.CanonicalVisibleTools...)
-	runtimeNames = runtimeNames[:0]
-	runtimeNames = append(runtimeNames, surface.RuntimeToolNames...)
-
-	runtimeSet := make(map[string]struct{}, len(runtimeNames))
-	for _, name := range runtimeNames {
-		runtimeSet[name] = struct{}{}
-	}
-
-	emitNames := make([]string, 0, len(runtimeNames))
-	nonEmitNames := make([]string, 0, len(runtimeNames))
-	for _, name := range runtimeNames {
-		if strings.HasPrefix(strings.TrimSpace(name), "emit_") {
-			emitNames = append(emitNames, name)
-			continue
-		}
-		nonEmitNames = append(nonEmitNames, name)
-	}
-
-	return AgentVisibleToolSurface{
-		RuntimeToolNames:    runtimeNames,
-		EmitToolNames:       emitNames,
-		NonEmitToolNames:    nonEmitNames,
-		NativeBuiltinTools:  append([]string(nil), surface.ProviderBuiltinTools...),
-		WritableEntityPaths: saveEntityFieldWritablePaths(tools),
-	}
-}
-
-func saveEntityFieldWritablePaths(tools []ToolDefinition) []string {
-	for _, tool := range tools {
-		if toolidentity.CanonicalName(tool.Name) != "save_entity_field" {
-			continue
-		}
-		schema, ok := tool.Schema.(map[string]any)
-		if !ok {
-			return nil
-		}
-		properties, ok := schema["properties"].(map[string]any)
-		if !ok {
-			return nil
-		}
-		fieldSchema, ok := properties["field"].(map[string]any)
-		if !ok {
-			return nil
-		}
-		enumValues, ok := fieldSchema["enum"].([]any)
-		if !ok {
-			return nil
-		}
-		out := make([]string, 0, len(enumValues))
-		seen := make(map[string]struct{}, len(enumValues))
-		for _, value := range enumValues {
-			path, ok := value.(string)
-			if !ok {
-				continue
-			}
-			path = strings.TrimSpace(path)
-			if path == "" {
-				continue
-			}
-			if _, ok := seen[path]; ok {
-				continue
-			}
-			seen[path] = struct{}{}
-			out = append(out, path)
-		}
-		slices.Sort(out)
-		return out
-	}
-	return nil
 }
 
 func claudeControlToolNames() []string {
@@ -408,11 +328,11 @@ func isCLIControlToolName(name string) bool {
 	return false
 }
 
-func filterCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition, observed []string) []string {
+func conversationForkSandboxObservedCanonicalTools(actor models.AgentConfig, tools []ToolDefinition, observed []string) []string {
 	if len(observed) == 0 {
 		return nil
 	}
-	surface := cliExecutionToolSurfaceForActor(actor, tools)
+	surface := conversationForkSandboxTransportSurfaceForActor(actor, tools)
 	if len(surface.CanonicalVisibleTools) == 0 {
 		return nil
 	}
@@ -440,62 +360,8 @@ func filterCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []ToolD
 	return filtered
 }
 
-func providerNativeCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
-	surface := cliExecutionToolSurfaceForActor(actor, tools)
-	if len(surface.ProviderBuiltinTools) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(surface.ProviderBuiltinTools))
-	seen := make(map[string]struct{}, len(surface.ProviderBuiltinTools))
-	for _, name := range surface.ProviderBuiltinTools {
-		canonical := toolidentity.CanonicalName(name)
-		if canonical == "" {
-			continue
-		}
-		if _, ok := seen[canonical]; ok {
-			continue
-		}
-		seen[canonical] = struct{}{}
-		out = append(out, canonical)
-	}
-	slices.Sort(out)
-	return out
-}
-
-func filterProviderNativeVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition, observed []string) []string {
-	if len(observed) == 0 {
-		return nil
-	}
-	providerNative := make(map[string]struct{}, len(claudeProviderBuiltinToolNames))
-	for _, name := range claudeProviderBuiltinToolNames {
-		canonical := toolidentity.CanonicalName(name)
-		if canonical == "" {
-			continue
-		}
-		providerNative[canonical] = struct{}{}
-	}
-	filtered := make([]string, 0, len(observed))
-	seen := make(map[string]struct{}, len(observed))
-	for _, name := range observed {
-		canonical := toolidentity.CanonicalName(name)
-		if canonical == "" || isCLIControlToolName(canonical) {
-			continue
-		}
-		if _, ok := providerNative[canonical]; !ok {
-			continue
-		}
-		if _, ok := seen[canonical]; ok {
-			continue
-		}
-		seen[canonical] = struct{}{}
-		filtered = append(filtered, canonical)
-	}
-	slices.Sort(filtered)
-	return filtered
-}
-
-func claudeAllowedToolNamesForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
-	surface := cliExecutionToolSurfaceForActor(actor, tools)
+func conversationForkSandboxAllowedToolNames(actor models.AgentConfig, tools []ToolDefinition) []string {
+	surface := conversationForkSandboxTransportSurfaceForActor(actor, tools)
 	allowed := make([]string, 0, len(surface.ProviderMCPTools)+len(surface.LocalFallbackTools)+len(surface.ProviderBuiltinTools)+len(claudeControlToolNames()))
 	seen := make(map[string]struct{}, cap(allowed))
 	addAllowed := func(name string) {
@@ -525,8 +391,8 @@ func claudeAllowedToolNamesForActor(actor models.AgentConfig, tools []ToolDefini
 	return allowed
 }
 
-func claudeDisallowedBuiltinToolsArgForActor(actor models.AgentConfig, tools []ToolDefinition) string {
-	surface := cliExecutionToolSurfaceForActor(actor, tools)
+func conversationForkSandboxDisallowedBuiltinTools(actor models.AgentConfig, tools []ToolDefinition) string {
+	surface := conversationForkSandboxTransportSurfaceForActor(actor, tools)
 	allowed := make(map[string]struct{}, len(surface.ProviderBuiltinTools))
 	for _, name := range surface.ProviderBuiltinTools {
 		allowed[name] = struct{}{}
@@ -542,179 +408,112 @@ func claudeDisallowedBuiltinToolsArgForActor(actor models.AgentConfig, tools []T
 	return strings.Join(names, ",")
 }
 
-func claudeAllowedToolsArgForActor(actor models.AgentConfig, tools []ToolDefinition) string {
-	allowed := claudeAllowedToolNamesForActor(actor, tools)
+func conversationForkSandboxAllowedTools(actor models.AgentConfig, tools []ToolDefinition) string {
+	allowed := conversationForkSandboxAllowedToolNames(actor, tools)
 	if len(allowed) == 0 {
 		return ""
 	}
 	return strings.Join(allowed, ",")
 }
 
-const cliToolInvocationMarker = "## Swarm Tool Invocation"
-const deliveryToolSurfaceMarker = "## Swarm Tool Surface"
-
-func AgentVisibleToolSummaryLinesForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
-	surface := AgentVisibleToolSurfaceForActor(actor, tools)
-	lines := make([]string, 0, 4)
-	emitLine := "(none declared)"
-	if len(surface.EmitToolNames) > 0 {
-		emitLine = strings.Join(surface.EmitToolNames, ", ")
-	}
-	lines = append(lines, "Available emit tools in this turn: "+emitLine)
-	if len(surface.NonEmitToolNames) > 0 {
-		lines = append(lines, "Available non-emit tools in this turn: "+strings.Join(surface.NonEmitToolNames, ", "))
-	}
-	if len(surface.NativeBuiltinTools) > 0 {
-		lines = append(lines, "Available native CLI tools in this turn: "+strings.Join(surface.NativeBuiltinTools, ", "))
-	}
-	if len(surface.WritableEntityPaths) > 0 {
-		lines = append(lines, "Writable entity paths for save_entity_field in this turn: "+strings.Join(surface.WritableEntityPaths, ", "))
-	}
-	return lines
-}
-
-func augmentAgentSystemPrompt(systemPrompt string, actor models.AgentConfig, tools []ToolDefinition) string {
-	systemPrompt = strings.TrimSpace(systemPrompt)
-	if systemPrompt == "" {
-		return systemPrompt
-	}
-	if strings.Contains(systemPrompt, deliveryToolSurfaceMarker) {
-		return systemPrompt
-	}
-	lines := AgentVisibleToolSummaryLinesForActor(actor, tools)
-	if len(lines) == 0 {
-		return systemPrompt
-	}
-	var b strings.Builder
-	b.WriteString(systemPrompt)
-	b.WriteString("\n\n")
-	b.WriteString(deliveryToolSurfaceMarker)
-	b.WriteString("\n")
-	b.WriteString("Use only the tool definitions delivered in this session.\n")
-	b.WriteString("Publish events by calling the matching emit_* tool directly.\n")
-	b.WriteString("Do not return JSON envelopes as a substitute for event emission.\n")
-	for _, line := range lines {
-		b.WriteString("- ")
-		b.WriteString(line)
-		b.WriteString("\n")
-	}
-	return strings.TrimSpace(b.String())
-}
-
-func augmentCLISystemPrompt(systemPrompt string, actor models.AgentConfig, tools []ToolDefinition) string {
-	systemPrompt = strings.TrimSpace(systemPrompt)
-	if systemPrompt == "" {
-		return systemPrompt
-	}
-	if strings.Contains(systemPrompt, cliToolInvocationMarker) {
-		return systemPrompt
-	}
-	surface := cliExecutionToolSurfaceForActor(actor, tools)
-	controlTools := claudeControlToolNames()
-	if len(surface.PromptRuntimeTools) == 0 && len(controlTools) == 0 {
-		return systemPrompt
-	}
-	summaryLines := AgentVisibleToolSummaryLinesForActor(actor, tools)
-	var b strings.Builder
-	b.WriteString(systemPrompt)
-	b.WriteString("\n\n")
-	b.WriteString(cliToolInvocationMarker)
-	b.WriteString("\n")
-	if len(surface.PromptRuntimeTools) > 0 {
-		b.WriteString("Call Swarm runtime tools by these exact names when they are available in this turn:\n")
-		for _, name := range surface.PromptRuntimeTools {
-			b.WriteString("- ")
-			b.WriteString(name)
-			b.WriteString("\n")
+func claudeToolArgumentsForContext(ctx context.Context, actor models.AgentConfig, tools []ToolDefinition) (string, string, error) {
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		if managedAgentExecutionContext(ctx) {
+			return "", "", fmt.Errorf("managed Claude dispatch requires exact capability surface")
 		}
+		return conversationForkSandboxAllowedTools(actor, tools), conversationForkSandboxDisallowedBuiltinTools(actor, tools), nil
 	}
-	nonEmitProviderTools := make([]string, 0, len(surface.ProviderMCPTools))
-	localFallbackSet := make(map[string]struct{}, len(surface.LocalFallbackTools))
-	for _, name := range surface.LocalFallbackTools {
-		localFallbackSet[strings.TrimSpace(name)] = struct{}{}
+	if surface.ActorID != strings.TrimSpace(actor.ID) {
+		return "", "", fmt.Errorf("managed Claude capability surface actor mismatch")
 	}
-	for _, name := range surface.ProviderMCPTools {
-		canonical := toolidentity.CanonicalName(name)
-		if _, ok := localFallbackSet[canonical]; ok {
+	allowed := make([]string, 0)
+	seenAllowed := map[string]struct{}{}
+	providerBuiltins := map[string]struct{}{}
+	for _, tool := range surface.Tools {
+		if !tool.Capability.Visible || !tool.Capability.Callable {
 			continue
 		}
-		nonEmitProviderTools = append(nonEmitProviderTools, name)
-	}
-	if len(nonEmitProviderTools) > 0 {
-		b.WriteString("Provider-callable non-emit workflow tools are exposed through these exact MCP names:\n")
-		for _, name := range nonEmitProviderTools {
-			b.WriteString("- ")
-			b.WriteString(name)
-			b.WriteString("\n")
+		for _, binding := range tool.Bindings {
+			switch binding.Kind {
+			case managedcapabilities.BindingProviderBuiltin, managedcapabilities.BindingMCPTool:
+			default:
+				continue
+			}
+			name := strings.TrimSpace(binding.ExactName)
+			if name == "" {
+				continue
+			}
+			if binding.Kind == managedcapabilities.BindingProviderBuiltin {
+				providerBuiltins[name] = struct{}{}
+			}
+			if _, duplicate := seenAllowed[name]; duplicate {
+				continue
+			}
+			seenAllowed[name] = struct{}{}
+			allowed = append(allowed, name)
 		}
 	}
-	if len(surface.PromptRuntimeTools) > 0 || len(nonEmitProviderTools) > 0 {
-		b.WriteString("Non-emit workflow tools are exposed through MCP-prefixed names like `mcp__runtime-tools__...`. Raw `emit_*` calls remain local runtime fallbacks.\n")
+	for _, name := range claudeControlToolNames() {
+		if _, duplicate := seenAllowed[name]; !duplicate {
+			seenAllowed[name] = struct{}{}
+			allowed = append(allowed, name)
+		}
 	}
-	if len(controlTools) > 0 {
-		b.WriteString("Claude CLI control tools available in this turn: ")
-		b.WriteString(strings.Join(controlTools, ", "))
-		b.WriteString(".\n")
+	disallowed := make([]string, 0, len(claudeProviderBuiltinToolNames))
+	for _, name := range claudeProviderBuiltinToolNames {
+		if _, permitted := providerBuiltins[name]; !permitted {
+			disallowed = append(disallowed, name)
+		}
 	}
-	for _, line := range summaryLines {
-		b.WriteString("- ")
-		b.WriteString(line)
-		b.WriteString("\n")
-	}
-	if hasToolPrefix(surface.LocalFallbackTools, "emit_") {
-		b.WriteString("When you need to publish an event, call the matching `emit_*` tool directly. Emit tools may not appear as MCP-prefixed variants in Claude CLI; Swarm will execute the exact `emit_*` call locally. Do not write JSON files under `/workspace/events` as a substitute for emission.\n")
-	}
-	return strings.TrimSpace(b.String())
+	slices.Sort(allowed)
+	slices.Sort(disallowed)
+	return strings.Join(allowed, ","), strings.Join(disallowed, ","), nil
 }
 
-func observedCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition, resp *Response) []string {
+func conversationForkSandboxObservedToolsForTurn(actor models.AgentConfig, tools []ToolDefinition, resp *Response) []string {
 	if resp == nil {
 		return nil
 	}
 	observed := append([]string(nil), resp.VisibleTools...)
 	observed = append(observed, resp.MCPVisibleTools...)
-	return filterCanonicalVisibleToolsForActor(actor, tools, observed)
+	return conversationForkSandboxObservedCanonicalTools(actor, tools, observed)
 }
 
-func cliTurnContextAllowedToolsForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
-	surface := cliExecutionToolSurfaceForActor(actor, tools)
-	return append([]string(nil), surface.RuntimeToolNames...)
-}
-
-func plannedCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
-	surface := cliExecutionToolSurfaceForActor(actor, tools)
+func conversationForkSandboxPlannedTools(actor models.AgentConfig, tools []ToolDefinition) []string {
+	surface := conversationForkSandboxTransportSurfaceForActor(actor, tools)
 	return append([]string(nil), surface.CanonicalVisibleTools...)
 }
 
-func cliLocalFallbackVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
-	surface := cliExecutionToolSurfaceForActor(actor, tools)
+func conversationForkSandboxLocalFallbackTools(actor models.AgentConfig, tools []ToolDefinition) []string {
+	surface := conversationForkSandboxTransportSurfaceForActor(actor, tools)
 	return append([]string(nil), surface.LocalFallbackTools...)
 }
 
-func resolvedCLIUsableToolsForTurn(actor models.AgentConfig, tools []ToolDefinition, resp *Response) []string {
-	usable := appendCanonicalToolNames(nil, cliLocalFallbackVisibleToolsForActor(actor, tools))
-	if observed := observedCanonicalVisibleToolsForActor(actor, tools, resp); len(observed) > 0 {
+func conversationForkSandboxUsableToolsForTurn(actor models.AgentConfig, tools []ToolDefinition, resp *Response) []string {
+	usable := appendCanonicalToolNames(nil, conversationForkSandboxLocalFallbackTools(actor, tools))
+	if observed := conversationForkSandboxObservedToolsForTurn(actor, tools, resp); len(observed) > 0 {
 		return appendCanonicalToolNames(usable, observed)
 	}
-	if hasObservedCLIExecutionSurface(resp) {
+	if conversationForkSandboxHasObservedSurface(resp) {
 		return usable
 	}
-	return appendCanonicalToolNames(usable, plannedCanonicalVisibleToolsForActor(actor, tools))
+	return appendCanonicalToolNames(usable, conversationForkSandboxPlannedTools(actor, tools))
 }
 
-func hasObservedCLIExecutionSurface(resp *Response) bool {
+func conversationForkSandboxHasObservedSurface(resp *Response) bool {
 	if resp == nil {
 		return false
 	}
 	return len(resp.VisibleTools) > 0 || len(resp.MCPVisibleTools) > 0 || len(resp.MCPServers) > 0
 }
 
-func cliToolCallAllowedForTurn(actor models.AgentConfig, tools []ToolDefinition, resp *Response, name string) bool {
+func conversationForkSandboxToolCallAllowed(actor models.AgentConfig, tools []ToolDefinition, resp *Response, name string) bool {
 	name = toolidentity.CanonicalName(name)
 	if name == "" {
 		return false
 	}
-	for _, visible := range resolvedCLIUsableToolsForTurn(actor, tools, resp) {
+	for _, visible := range conversationForkSandboxUsableToolsForTurn(actor, tools, resp) {
 		if visible == name {
 			return true
 		}
@@ -747,19 +546,6 @@ func appendCanonicalToolNames(dst []string, names []string) []string {
 	}
 	slices.Sort(dst)
 	return dst
-}
-
-func hasToolPrefix(names []string, prefix string) bool {
-	prefix = strings.TrimSpace(prefix)
-	if prefix == "" {
-		return false
-	}
-	for _, name := range names {
-		if strings.HasPrefix(strings.TrimSpace(name), prefix) {
-			return true
-		}
-	}
-	return false
 }
 
 func toolNamesCSV(tools []ToolDefinition) string {

@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
@@ -88,6 +89,7 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 	cfg.LLM.ClaudeCLI.Command = "claude"
 
 	var allowedTools []string
+	var listedSurface managedcapabilities.Surface
 	effects := effecttest.New()
 	effects.Token.AgentID = "market-research-agent"
 	runtime := NewClaudeCLIRuntimeWithOptions(
@@ -103,10 +105,34 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 			ToolGateway:          testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", "gateway-token"),
 			ProviderCredentials:  testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token"),
 			MCPTurnContextStore: mcpTurnContextStoreStub{
-				register: func(_ context.Context, _ time.Duration, got []string) string {
-					allowedTools = append([]string(nil), got...)
+				registerSurface: func(registerCtx context.Context, _ time.Duration, surface managedcapabilities.Surface) string {
+					authority, ok := runtimeeffects.AuthorityFromContext(registerCtx)
+					if !ok || !runtimeeffects.ProviderTurnTargetMatchesCapabilitySurface(authority.Target, surface) {
+						t.Fatalf("Claude CLI registered MCP context without exact provider-turn target: authority=%#v surface=%#v", authority, surface)
+					}
+					var evidence []managedcapabilities.DeliveryEvidence
+					var currentAllowed []string
+					for _, tool := range surface.Tools {
+						for _, binding := range tool.Bindings {
+							if binding.Kind != managedcapabilities.BindingMCPTool {
+								continue
+							}
+							currentAllowed = append(currentAllowed, tool.Name)
+							evidence = append(evidence, managedcapabilities.DeliveryEvidence{
+								BindingKind: binding.Kind, ExactName: binding.ExactName,
+								Kind: evidenceMCPListed, Status: managedcapabilities.EvidenceConfirmed,
+							})
+						}
+					}
+					var err error
+					listedSurface, err = surface.Observe(evidence...)
+					if err != nil {
+						t.Fatalf("observe MCP tools/list evidence: %v", err)
+					}
+					allowedTools = currentAllowed
 					return "ctx-token-368"
 				},
+				resolve:    func(string) (managedcapabilities.Surface, bool) { return listedSurface, true },
 				unregister: func(string) {},
 			},
 		})
@@ -140,11 +166,10 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(
-		withTestMemory(runtimeactors.WithActor(effects.Context("claude-supported-read-file"), runtimeactors.AgentConfig{
-			ExecutionMode: "live",
-			ID:            "market-research-agent",
-			FlowPath:      "market/inst-1",
-			Memory:        testMemory(),
+		withTestMemory(runtimeactors.WithActor(effects.CompletionContext("claude-supported-read-file"), runtimeactors.AgentConfig{
+			ID:       "market-research-agent",
+			FlowPath: "market/inst-1",
+			Memory:   testMemory(),
 			NativeTools: runtimeactors.NativeToolConfig{
 				FileIO: true,
 			},
@@ -170,19 +195,16 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 		t.Fatalf("completion settlements = %#v, want two atomic agent turns", settlements)
 	}
 	first := settlements[0].AgentTurn
-	var firstAvailableTools []string
-	if err := json.Unmarshal(first.AvailableTools, &firstAvailableTools); err != nil {
-		t.Fatalf("decode first turn available_tools: %v", err)
+	var firstSurface managedcapabilities.Surface
+	if err := json.Unmarshal(first.CapabilitySurface, &firstSurface); err != nil {
+		t.Fatalf("decode first turn capability surface: %v", err)
 	}
+	firstAvailableTools := firstSurface.EffectiveNames()
 	if !slices.Equal(firstAvailableTools, []string{"emit_category_assessed", "read_file", "write_file"}) {
 		t.Fatalf("first turn available_tools = %#v", firstAvailableTools)
 	}
-	var firstMCPToolsListed []string
-	if err := json.Unmarshal(first.MCPToolsListed, &firstMCPToolsListed); err != nil {
-		t.Fatalf("decode first turn mcp_tools_listed: %v", err)
-	}
-	if !slices.Equal(firstMCPToolsListed, []string{"mcp__runtime-tools__emit_category_assessed"}) {
-		t.Fatalf("first turn mcp_tools_listed = %#v", firstMCPToolsListed)
+	if firstMCPToolsListed := firstSurface.BindingNames(managedcapabilities.BindingMCPTool); !slices.Equal(firstMCPToolsListed, []string{"mcp__runtime-tools__emit_category_assessed"}) {
+		t.Fatalf("first turn MCP bindings = %#v, want exact authored emit binding", firstMCPToolsListed)
 	}
 	if !slices.Equal(exec.calls, []string{"read_file"}) {
 		t.Fatalf("tool exec calls = %#v", exec.calls)
@@ -309,6 +331,7 @@ func runFirstTurnFakeDockerHelper() int {
 		return 2
 	}
 	if isReadFileToolResultPayload(input) {
+		fmt.Fprintf(os.Stdout, "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":%q,\"mcp_servers\":[{\"name\":\"runtime-tools\",\"status\":\"connected\"}],\"tools\":[\"mcp__runtime-tools__emit_category_assessed\",\"Read\",\"Write\",\"Edit\"]}\n", providerSessionID)
 		fmt.Fprintf(os.Stdout, "{\"type\":\"result\",\"result\":\"done\",\"session_id\":%q}\n", providerSessionID)
 		return 0
 	}

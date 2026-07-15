@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -571,7 +572,7 @@ type conversationForkSourceFixture struct {
 
 const conversationForkSourceFlowInstance = "review"
 
-func seedConversationForkSource(t *testing.T, db execQueryer, base time.Time) conversationForkSourceFixture {
+func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conversationForkSourceFixture {
 	t.Helper()
 	source := conversationForkSourceFixture{
 		runID:     uuid.NewString(),
@@ -603,15 +604,17 @@ func seedConversationForkSource(t *testing.T, db execQueryer, base time.Time) co
 	`, source.sessionID, source.runID, source.agentID, conversationForkSourceFlowInstance, base.Add(-3*time.Minute)); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
+	capability1 := seedManagedAgentTurnCapabilitySurface(t, &PostgresStore{DB: db}, source.runID, source.agentID, source.sessionID, source.turn1ID, "session", "global")
+	capability2 := seedManagedAgentTurnCapabilitySurface(t, &PostgresStore{DB: db}, source.runID, source.agentID, source.sessionID, source.turn2ID, "session", "global")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source,
-			trigger_event_id, trigger_event_type, parse_ok, execution_mode, created_at
+			trigger_event_id, trigger_event_type, capability_surface_id, parse_ok, execution_mode, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, $3, $4::uuid, $5, TRUE, 'authored', $6::uuid, 'task.ready', true, 'live', $7),
-			($8::uuid, $2::uuid, $3, $4::uuid, $5, TRUE, 'authored', $9::uuid, 'task.done', true, 'live', $10)
-	`, source.turn1ID, source.runID, source.agentID, source.sessionID, conversationForkSourceFlowInstance, source.event1ID, source.turn1At, source.turn2ID, source.event2ID, source.turn2At); err != nil {
+			($1::uuid, $2::uuid, $3, $4::uuid, $5, TRUE, 'authored', $6::uuid, 'task.ready', $7::uuid, true, 'live', $8),
+			($9::uuid, $2::uuid, $3, $4::uuid, $5, TRUE, 'authored', $10::uuid, 'task.done', $11::uuid, true, 'live', $12)
+	`, source.turn1ID, source.runID, source.agentID, source.sessionID, conversationForkSourceFlowInstance, source.event1ID, capability1, source.turn1At, source.turn2ID, source.event2ID, capability2, source.turn2At); err != nil {
 		t.Fatalf("seed turns: %v", err)
 	}
 	return source

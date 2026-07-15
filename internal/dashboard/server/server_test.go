@@ -24,6 +24,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
@@ -2296,13 +2297,17 @@ func TestSQLAgentReader_ListGenericAgents_ScopesLiveTurnToSelectedActiveSession(
 
 	olderTurnBlocks := `[{"kind":"tool_result","tool_name":"older_tool","output":{"status":"old"},"data":{"tool_use_id":"toolu-old"}},{"kind":"turn_summary","data":{"assistant_visible_output":"older session turn","outcome":"working","tool_results":[{"tool_name":"older_tool","tool_use_id":"toolu-old","output":{"status":"old"}}]}}]`
 	selectedTurnBlocks := `[{"kind":"tool_result","tool_name":"selected_tool","output":{"status":"selected"},"data":{"tool_use_id":"toolu-selected"}},{"kind":"turn_summary","data":{"assistant_visible_output":"selected session turn","outcome":"waiting","tool_results":[{"tool_name":"selected_tool","tool_use_id":"toolu-selected","output":{"status":"selected"}}]}}]`
+	olderTurnID := uuid.NewString()
+	selectedTurnID := uuid.NewString()
+	olderCapabilityID := seedDashboardTurnCapabilitySurface(t, ctx, pg, olderTurnID, sessionOlder, "agent-1", "session_per_entity")
+	selectedCapabilityID := seedDashboardTurnCapabilitySurface(t, ctx, pg, selectedTurnID, sessionSelected, "agent-1", "session_per_entity")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			execution_mode, turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, task_id, turn_blocks, parse_ok, created_at
+			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, task_id, capability_surface_id, turn_blocks, parse_ok, execution_mode, created_at
 		) VALUES
-			('live', $1::uuid, $8::uuid, 'agent-1', $2::uuid, 'entity/older', TRUE, 'authored', 'task-older', $3::jsonb, true, $5),
-			('live', $4::uuid, $8::uuid, 'agent-1', $6::uuid, 'entity/selected', TRUE, 'authored', 'task-selected', $7::jsonb, true, $9)
-	`, uuid.NewString(), sessionOlder, olderTurnBlocks, uuid.NewString(), selectedUpdatedAt.Add(2*time.Minute), sessionSelected, selectedTurnBlocks, runID, selectedUpdatedAt.Add(-1*time.Minute)); err != nil {
+			($1::uuid, $11::uuid, 'agent-1', $2::uuid, 'entity/older', TRUE, 'authored', 'task-older', $3::uuid, $4::jsonb, true, 'live', $5),
+			($6::uuid, $11::uuid, 'agent-1', $7::uuid, 'entity/selected', TRUE, 'authored', 'task-selected', $8::uuid, $9::jsonb, true, 'live', $10)
+	`, olderTurnID, sessionOlder, olderCapabilityID, olderTurnBlocks, selectedUpdatedAt.Add(2*time.Minute), selectedTurnID, sessionSelected, selectedCapabilityID, selectedTurnBlocks, selectedUpdatedAt.Add(-1*time.Minute), runID); err != nil {
 		t.Fatalf("seed agent_turns: %v", err)
 	}
 
@@ -2332,6 +2337,26 @@ func TestSQLAgentReader_ListGenericAgents_ScopesLiveTurnToSelectedActiveSession(
 	if items[0].LastTool == nil || items[0].LastTool.Name != "selected_tool" || items[0].LastTool.ToolUseID != "toolu-selected" {
 		t.Fatalf("last_tool = %#v", items[0].LastTool)
 	}
+}
+
+func seedDashboardTurnCapabilitySurface(t testing.TB, ctx context.Context, pg *store.PostgresStore, turnID, sessionID, agentID, runtimeMode string) string {
+	t.Helper()
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{
+		ActorID: agentID, RuntimeMode: runtimeMode, Provider: "test", Transport: "api", ProviderContract: "dashboard-test",
+		Authority: managedcapabilities.Authority{
+			Kind: managedcapabilities.AuthorityProviderTurn, ID: turnID,
+			ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: "dashboard-test-runtime",
+			SessionID: sessionID, TurnOrdinal: 1,
+		},
+		CreatedAt: time.Unix(1, 0).UTC(),
+	})
+	if err != nil {
+		t.Fatalf("build dashboard capability surface: %v", err)
+	}
+	if err := pg.SaveManagedCapabilitySurface(ctx, surface); err != nil {
+		t.Fatalf("persist dashboard capability surface: %v", err)
+	}
+	return surface.ID
 }
 
 type pendingFactsOverrideStore struct {

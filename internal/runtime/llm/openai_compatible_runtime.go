@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -113,7 +114,6 @@ func (r *OpenAICompatibleRuntime) PersistConversationSnapshot(ctx context.Contex
 }
 
 func (r *OpenAICompatibleRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
-	actor, _ := runtimeactors.ActorFromContext(ctx)
 	lease, hydrated, resolved, err := startMemory(ctx, r.sessions, r.conversations, agentID, r.lockOwner)
 	if err != nil {
 		return nil, err
@@ -152,7 +152,7 @@ func (r *OpenAICompatibleRuntime) StartSession(ctx context.Context, agentID, sys
 			}
 			return ""
 		}(),
-		SystemPrompt: augmentAgentSystemPrompt(systemPrompt, actor, tools),
+		SystemPrompt: strings.TrimSpace(systemPrompt),
 		Tools:        tools,
 		Messages:     append([]Message(nil), hydrated.Messages...),
 		TurnCount:    hydrated.TurnCount,
@@ -216,6 +216,14 @@ func (r *OpenAICompatibleRuntime) ContinueSession(ctx context.Context, s *Sessio
 	reqBody, err := r.buildRequest(ctx, s, message)
 	if err != nil {
 		return nil, err
+	}
+	deliveredTools := make([]ToolDefinition, 0, len(reqBody.Tools))
+	for _, tool := range reqBody.Tools {
+		deliveredTools = append(deliveredTools, ToolDefinition{Name: tool.Function.Name, Description: tool.Function.Description, Schema: tool.Function.Parameters})
+	}
+	ctx, _, err = withObservedAPIRequestCapabilitySurface(ctx, deliveredTools)
+	if err != nil {
+		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "managed_capability_api_request_mismatch", "openai-compatible-adapter", "build_request", nil, err)
 	}
 	reqJSON, err := json.Marshal(reqBody)
 	if err != nil {
@@ -307,6 +315,9 @@ func (r *OpenAICompatibleRuntime) ContinueSession(ctx context.Context, s *Sessio
 		return nil, err
 	}
 	resp.Raw = rawResp
+	if surface, ok := managedcapabilities.FromContext(ctx); ok {
+		resp.CapabilitySurface = &surface
+	}
 
 	turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
 		AgentID:        s.AgentID,

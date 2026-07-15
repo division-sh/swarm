@@ -196,10 +196,14 @@ func platformTableOrder(name string) int {
 		return 57
 	case "agent_sessions":
 		return 60
-	case "runtime_external_effect_operations":
+	case "runtime_startup_authority_facts":
 		return 61
-	case "runtime_external_effect_attempts":
+	case "managed_agent_capability_surfaces":
 		return 62
+	case "runtime_external_effect_operations":
+		return 63
+	case "runtime_external_effect_attempts":
+		return 64
 	case "agent_turns":
 		return 65
 	case "conversation_fork_turn_completions":

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	storepkg "github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
@@ -45,19 +46,20 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	`, eventID, runID, base.Add(-4*time.Minute)); err != nil {
 		t.Fatalf("seed sqlite event: %v", err)
 	}
+	capabilitySurfaceID := seedSQLiteOperatorReadCapabilitySurface(t, ctx, sqliteStore, runID, turnID, sessionID, agentID, "session")
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
-			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, execution_mode, failure, created_at
+			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
+			emitted_events,
+			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, failure, execution_mode, created_at
 		) VALUES (
 			?, ?, ?, ?, 'flow/operator-read', 1, 'authored', NULL,
-			?, 'operator.read', 'task-operator-read', '[]', '[]',
-			'[]', '{}', '[]', '[]',
-			'{}', '{}', '[]', 1, 10, 0, 'live', NULL, ?
+			?, 'operator.read', 'task-operator-read', ?, '[]',
+			'[]',
+			'{}', '{}', '[]', 1, 10, 0, NULL, 'live', ?
 		)
-	`, turnID, runID, agentID, sessionID, eventID, base); err != nil {
+	`, turnID, runID, agentID, sessionID, eventID, capabilitySurfaceID, base); err != nil {
 		t.Fatalf("seed sqlite turn: %v", err)
 	}
 
@@ -118,19 +120,21 @@ func TestSQLiteConversationProjectionRejectsLegacyTurnsWithoutTurnBlocks(t *test
 	`, sessionID, runID, agentID, base.Add(-5*time.Minute), base); err != nil {
 		t.Fatalf("seed sqlite session: %v", err)
 	}
+	turnID := uuid.NewString()
+	capabilitySurfaceID := seedSQLiteOperatorReadCapabilitySurface(t, ctx, sqliteStore, runID, turnID, sessionID, agentID, "session")
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
-			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-			request_payload, response_payload, parse_ok, latency_ms, retry_count, execution_mode, failure, created_at
+			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
+			emitted_events,
+			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, execution_mode, created_at
 		) VALUES (
 			?, ?, ?, ?, 'flow/legacy-turns', 1, 'authored', NULL,
-			?, 'operator.read', 'task-legacy-turns', '[]', '[]',
-			'[]', '{}', '[]', '[]',
-			'{}', '{}', 1, 10, 0, 'live', NULL, ?
+			?, 'operator.read', 'task-legacy-turns', ?, '[]',
+			'[]',
+			'{}', '{}', 1, 10, 0, NULL, 'live', ?
 		)
-	`, uuid.NewString(), runID, agentID, sessionID, uuid.NewString(), base); err != nil {
+	`, turnID, runID, agentID, sessionID, uuid.NewString(), capabilitySurfaceID, base); err != nil {
 		t.Fatalf("seed sqlite legacy turn: %v", err)
 	}
 
@@ -138,6 +142,26 @@ func TestSQLiteConversationProjectionRejectsLegacyTurnsWithoutTurnBlocks(t *test
 	if err == nil || !strings.Contains(err.Error(), "canonical agent_turns.turn_blocks") {
 		t.Fatalf("ListOperatorConversationTurns error = %v, want canonical turn_blocks requirement", err)
 	}
+}
+
+func seedSQLiteOperatorReadCapabilitySurface(t testing.TB, ctx context.Context, sqliteStore *storepkg.SQLiteRuntimeStore, runID, turnID, sessionID, agentID, runtimeMode string) string {
+	t.Helper()
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{
+		ActorID: agentID, RuntimeMode: runtimeMode, Provider: "test", Transport: "api", ProviderContract: "sqlite-operator-read-test",
+		Authority: managedcapabilities.Authority{
+			Kind: managedcapabilities.AuthorityProviderTurn, ID: turnID,
+			ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: "sqlite-operator-read-runtime",
+			RunID: runID, SessionID: sessionID, TurnOrdinal: 1,
+		},
+		CreatedAt: time.Unix(1, 0).UTC(),
+	})
+	if err != nil {
+		t.Fatalf("build sqlite operator-read capability surface: %v", err)
+	}
+	if err := sqliteStore.SaveManagedCapabilitySurface(ctx, surface); err != nil {
+		t.Fatalf("persist sqlite operator-read capability surface: %v", err)
+	}
+	return surface.ID
 }
 
 func TestSQLiteBundleCatalogOwnerBacksSupportedAPISurface(t *testing.T) {

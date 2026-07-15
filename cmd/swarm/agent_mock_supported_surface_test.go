@@ -252,15 +252,16 @@ func waitForMockAgentTurns(t testing.TB, backend, location string, want int) {
 		SubscriberID string
 		Status       string
 		ReasonCode   sql.NullString
+		Failure      sql.NullString
 	}
-	deliveryRows, err := db.Query(`SELECT subscriber_id, status, reason_code FROM event_deliveries WHERE subscriber_type = 'agent' ORDER BY created_at`)
+	deliveryRows, err := db.Query(`SELECT subscriber_id, status, reason_code, CAST(failure AS TEXT) FROM event_deliveries WHERE subscriber_type = 'agent' ORDER BY created_at`)
 	if err != nil {
 		t.Fatalf("%s mock path did not reach %d turns; turns=%#v inspect deliveries: %v", backend, want, turns, err)
 	}
 	var deliveries []deliveryFact
 	for deliveryRows.Next() {
 		var fact deliveryFact
-		if scanErr := deliveryRows.Scan(&fact.SubscriberID, &fact.Status, &fact.ReasonCode); scanErr != nil {
+		if scanErr := deliveryRows.Scan(&fact.SubscriberID, &fact.Status, &fact.ReasonCode, &fact.Failure); scanErr != nil {
 			_ = deliveryRows.Close()
 			t.Fatalf("%s mock path did not reach %d turns; turns=%#v scan deliveries: %v", backend, want, turns, scanErr)
 		}

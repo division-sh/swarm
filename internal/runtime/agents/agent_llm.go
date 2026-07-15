@@ -642,18 +642,13 @@ func mergeTools(in []llm.ToolDefinition, extra []llm.ToolDefinition) []llm.ToolD
 	return out
 }
 
-func formatEventForAgent(cfg models.AgentConfig, evt events.Event, tools []llm.ToolDefinition) string {
+func formatEventForAgent(cfg models.AgentConfig, evt events.Event, _ []llm.ToolDefinition) string {
 	payload := strings.TrimSpace(string(evt.Payload()))
 	if payload == "" {
 		payload = "{}"
 	}
-	toolSummaryLines := llm.AgentVisibleToolSummaryLinesForActor(cfg, tools)
-	toolSummary := ""
-	for _, line := range toolSummaryLines {
-		toolSummary += "\n- " + line
-	}
 	return fmt.Sprintf(
-		"Agent: %s\nRole: %s\nMode: %s\nEvent:\n- id: %s\n- type: %s\n- source: %s\n- task_id: %s\n- entity_id: %s\n- payload: %s\n\nExecution contract (required):\n- Act via tools when needed.\n- Emit events by calling emit_* tools only.\n- Do not return JSON envelopes for event emission.%s",
+		"Agent: %s\nRole: %s\nMode: %s\nEvent:\n- id: %s\n- type: %s\n- source: %s\n- task_id: %s\n- entity_id: %s\n- payload: %s\n\nExecution contract (required):\n- Act via tools when needed.\n- Emit events by calling emit_* tools only.\n- Do not return JSON envelopes for event emission.",
 		cfg.ID,
 		cfg.Role,
 		cfg.FlowID,
@@ -663,7 +658,6 @@ func formatEventForAgent(cfg models.AgentConfig, evt events.Event, tools []llm.T
 		evt.TaskID(),
 		evt.EntityID(),
 		payload,
-		toolSummary,
 	)
 }
 

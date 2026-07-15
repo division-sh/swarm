@@ -216,12 +216,18 @@ func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base 
 		{`INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, []any{source.runID, base.Add(-3 * time.Minute)}},
 		{`INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source, runtime_descriptor) VALUES (?, ?, 'researcher', 'cheap', 1, 'authored', '{"type":"researcher","execution_mode":"live"}')`, []any{source.agentID, conversationForkSourceFlowInstance}},
 		{`INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at) VALUES (?, ?, ?, ?, 1, 'authored', 'active', ?, ?)`, []any{source.sessionID, source.runID, source.agentID, conversationForkSourceFlowInstance, base.Add(-3 * time.Minute), base.Add(-3 * time.Minute)}},
-		{`INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, parse_ok, execution_mode, created_at) VALUES (?, ?, ?, ?, ?, 1, 'authored', ?, 'task.ready', true, 'live', ?), (?, ?, ?, ?, ?, 1, 'authored', ?, 'task.done', true, 'live', ?)`, []any{source.turn1ID, source.runID, source.agentID, source.sessionID, conversationForkSourceFlowInstance, source.event1ID, source.turn1At, source.turn2ID, source.runID, source.agentID, source.sessionID, conversationForkSourceFlowInstance, source.event2ID, source.turn2At}},
 	}
 	for _, statement := range statements {
 		if _, err := s.DB.ExecContext(ctx, statement.query, statement.args...); err != nil {
 			t.Fatalf("seed SQLite conversation fork source: %v\nquery: %s", err, statement.query)
 		}
+	}
+	capability1 := seedManagedAgentTurnCapabilitySurface(t, s, source.runID, source.agentID, source.sessionID, source.turn1ID, "session", "global")
+	capability2 := seedManagedAgentTurnCapabilitySurface(t, s, source.runID, source.agentID, source.sessionID, source.turn2ID, "session", "global")
+	query := `INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, capability_surface_id, parse_ok, execution_mode, created_at) VALUES (?, ?, ?, ?, ?, 1, 'authored', ?, 'task.ready', ?, true, 'live', ?), (?, ?, ?, ?, ?, 1, 'authored', ?, 'task.done', ?, true, 'live', ?)`
+	args := []any{source.turn1ID, source.runID, source.agentID, source.sessionID, conversationForkSourceFlowInstance, source.event1ID, capability1, source.turn1At, source.turn2ID, source.runID, source.agentID, source.sessionID, conversationForkSourceFlowInstance, source.event2ID, capability2, source.turn2At}
+	if _, err := s.DB.ExecContext(ctx, query, args...); err != nil {
+		t.Fatalf("seed SQLite conversation fork source: %v\nquery: %s", err, query)
 	}
 	return source
 }

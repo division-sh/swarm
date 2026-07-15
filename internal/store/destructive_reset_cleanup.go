@@ -294,6 +294,14 @@ func destructiveResetCleanupSeverPreservedReferences(ctx context.Context, exec d
 		query string
 	}{
 		{
+			name: "managed_agent_capability_surfaces.run_id",
+			query: `
+				UPDATE managed_agent_capability_surfaces
+				SET run_id = NULL
+				WHERE run_id = ANY($1::uuid[])
+			`,
+		},
+		{
 			name: "agent_sessions.successor_session_id",
 			query: `
 				UPDATE agent_sessions preserved

@@ -24,6 +24,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimediaglog "github.com/division-sh/swarm/internal/runtime/diaglog"
@@ -51,6 +52,16 @@ type staticWorkspaceResolver struct {
 type discardCompletionSpendProjection struct{}
 
 func (discardCompletionSpendProjection) ProjectCommittedCompletionSpend(context.Context, runtimeeffects.CompletionSpendProjection) {
+}
+
+type conformanceToolExecutor struct{}
+
+func (conformanceToolExecutor) Execute(context.Context, string, any) (any, error) {
+	return nil, fmt.Errorf("conformance runtime declares no callable tools")
+}
+
+func (conformanceToolExecutor) ToolCapabilitiesForActor(runtimeactors.AgentConfig, []string, map[string]struct{}) toolcapabilities.Set {
+	return toolcapabilities.NewSet(nil)
 }
 
 func (s staticWorkspaceResolver) ResolveWorkspace(context.Context, runtimeactors.AgentConfig) (*runtimeworkspace.Target, error) {
@@ -100,7 +111,7 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 		t.Fatalf("seed run: %v", err)
 	}
 	sessionID := uuid.NewString()
-	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+	if err := pg.AppendAgentTurn(ctx, managedConformanceTurnRecord(t, runtimellm.AgentTurnRecord{
 		AgentID:   "agent-1",
 		Memory:    agentmemory.PlatformDefault(),
 		SessionID: sessionID,
@@ -116,7 +127,7 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 		ResponseRaw:    []byte(`{"result":"stale fallback text"}`),
 		ParseOK:        true,
 		Latency:        5 * time.Millisecond,
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("AppendAgentTurn: %v", err)
 	}
 
@@ -302,6 +313,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 
 	newTurnContext := func(evt events.Event) context.Context {
 		base := runtimeeffects.WithLifecycleToken(context.Background(), lifecycleToken)
+		base = managedConformanceExecutionContext(t, base, "reused-live-session")
 		base = agentmemory.WithExecution(base, agentmemory.Authored(true), agentmemory.Identity{RunID: runID, AgentID: "agent-1", FlowInstance: "support/inst-1"})
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
@@ -315,13 +327,12 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		})
 	}
 
-	session, err := runtime.StartSession(newTurnContext(event1), "agent-1", "system", nil)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	if _, err := runtime.ContinueSession(newTurnContext(event1), session, runtimellm.Message{Role: "user", Content: "first"}); err != nil {
+	conversation := runtimellm.NewConversation("agent-1", "", "system", nil, agentmemory.Authored(true), 10, runtime)
+	conversation.SetToolExecutor(conformanceToolExecutor{})
+	if _, err := conversation.Step(newTurnContext(event1), "first"); err != nil {
 		t.Fatalf("ContinueSession(first): %v", err)
 	}
+	session := conversation.Session
 	if err := pg.UpsertEventReceipt(newTurnContext(event1), event1.ID(), "agent-1", runtimemanager.ReceiptStatusProcessed, nil); err != nil {
 		t.Fatalf("UpsertEventReceipt(first): %v", err)
 	}
@@ -329,7 +340,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	if err := pg.MarkEventDeliveryInProgress(newTurnContext(event2), event2.ID(), "agent-1", ""); err != nil {
 		t.Fatalf("MarkEventDeliveryInProgress(second prelaunch): %v", err)
 	}
-	if _, err := runtime.ContinueSession(newTurnContext(event2), session, runtimellm.Message{Role: "user", Content: "second"}); err != nil {
+	if _, err := conversation.Step(newTurnContext(event2), "second"); err != nil {
 		t.Fatalf("ContinueSession(second): %v", err)
 	}
 
@@ -486,6 +497,7 @@ printf '{"result":"ok"}'
 
 	newTurnContext := func(evt events.Event) context.Context {
 		base := runtimeeffects.WithLifecycleToken(context.Background(), lifecycleToken)
+		base = managedConformanceExecutionContext(t, base, "cli-session-failure")
 		base = agentmemory.WithExecution(base, agentmemory.Authored(true), agentmemory.Identity{RunID: runID, AgentID: "agent-1", FlowInstance: "support/inst-1"})
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
@@ -503,10 +515,17 @@ printf '{"result":"ok"}'
 		t.Fatalf("StartSession: %v", err)
 	}
 	originalSessionID := session.ID
+	conversation := runtimellm.NewConversation("agent-1", "", "system", nil, agentmemory.Authored(true), 10, runtime)
+	conversation.Session = session
+	conversation.SetToolExecutor(conformanceToolExecutor{})
 	if err := pg.MarkEventDeliveryInProgress(newTurnContext(evt), evt.ID(), "agent-1", ""); err != nil {
 		t.Fatalf("MarkEventDeliveryInProgress(prelaunch): %v", err)
 	}
-	_, err = runtime.ContinueSession(newTurnContext(evt), session, runtimellm.Message{Role: "user", Content: "do not classify stderr"})
+	_, err = conversation.Step(newTurnContext(evt), "do not classify stderr")
+	if conversation.Session == nil {
+		t.Fatal("conversation did not retain the acquired session after provider failure")
+	}
+	session = conversation.Session
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_process_failed" {
 		t.Fatalf("ContinueSession failure = %v, want generic connector failure", err)
@@ -576,7 +595,7 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 	}
 
 	auditSessionID := uuid.NewString()
-	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+	if err := pg.AppendAgentTurn(ctx, managedConformanceTurnRecord(t, runtimellm.AgentTurnRecord{
 		SessionID: auditSessionID,
 		AgentID:   "agent-1",
 		RunID:     runID,
@@ -586,7 +605,7 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 			{Kind: "outcome", Text: "done"},
 		},
 		ParseOK: true,
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("AppendAgentTurn(stateless): %v", err)
 	}
 
@@ -1753,7 +1772,7 @@ func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProj
 		t.Fatalf("seed run: %v", err)
 	}
 	sessionID := uuid.NewString()
-	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+	if err := pg.AppendAgentTurn(ctx, managedConformanceTurnRecord(t, runtimellm.AgentTurnRecord{
 		AgentID:   "agent-1",
 		Memory:    agentmemory.PlatformDefault(),
 		RunID:     runID,
@@ -1775,7 +1794,7 @@ func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProj
 		},
 		ParseOK: true,
 		Latency: 5 * time.Millisecond,
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("AppendAgentTurn(task runtime_log block): %v", err)
 	}
 

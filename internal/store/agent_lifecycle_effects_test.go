@@ -66,12 +66,22 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	if err != nil || !replayed.Replayed || replayed.Generation != started.Generation {
 		t.Fatalf("lifecycle replay = %#v err=%v", replayed, err)
 	}
+	runID := managedNormalEffectStoreTestRunID(started.AgentID)
+	if sqlite {
+		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+			t.Fatalf("seed managed effect run: %v", err)
+		}
+	} else if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed managed effect run: %v", err)
+	}
 
 	controller := runtimeeffects.NewController(store)
 	activeCtx := runtimeeffects.WithController(runtimeeffects.WithLifecycleToken(ctx, runtimeeffects.LifecycleToken{
 		RuntimeEpoch: started.RuntimeEpoch, AgentID: started.AgentID, Generation: started.Generation,
 	}), controller)
 	activeCtx = runtimeeffects.WithLogicalOperationIdentity(activeCtx, "effect-authority-primary")
+	authority := runtimeeffects.NormalAgentAuthority(runtimeeffects.LifecycleToken{RuntimeEpoch: started.RuntimeEpoch, AgentID: started.AgentID, Generation: started.Generation}, "lifecycle-test-owner", now.Add(time.Minute))
+	activeCtx = managedNormalEffectStoreTestContext(t, activeCtx, authority)
 	handle, err := runtimeeffects.Begin(activeCtx, "authored_http_tool", []byte("request"), map[string]string{"test": "true"})
 	if err != nil {
 		t.Fatalf("authorize current generation effect: %v", err)
@@ -141,6 +151,8 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 		RuntimeEpoch: restarted.RuntimeEpoch, AgentID: restarted.AgentID, Generation: restarted.Generation,
 	}), controller)
 	restartedCtx = runtimeeffects.WithLogicalOperationIdentity(restartedCtx, "effect-authority-launched")
+	restartedAuthority := runtimeeffects.NormalAgentAuthority(runtimeeffects.LifecycleToken{RuntimeEpoch: restarted.RuntimeEpoch, AgentID: restarted.AgentID, Generation: restarted.Generation}, "lifecycle-test-restarted-owner", now.Add(time.Minute))
+	restartedCtx = managedNormalEffectStoreTestContext(t, restartedCtx, restartedAuthority)
 	if _, err := runtimeeffects.Begin(restartedCtx, "authored_http_tool", []byte("recover-launched"), nil); err == nil {
 		t.Fatal("successor generation redispatched the uncertain logical operation")
 	} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassOutcomeUncertain {
@@ -164,6 +176,8 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 		RuntimeEpoch: started.RuntimeEpoch, AgentID: started.AgentID, Generation: started.Generation - 1,
 	}), controller)
 	staleCtx = runtimeeffects.WithLogicalOperationIdentity(staleCtx, "effect-authority-stale")
+	staleAuthority := runtimeeffects.NormalAgentAuthority(runtimeeffects.LifecycleToken{RuntimeEpoch: started.RuntimeEpoch, AgentID: started.AgentID, Generation: started.Generation - 1}, "lifecycle-test-stale-owner", now.Add(time.Minute))
+	staleCtx = managedNormalEffectStoreTestContext(t, staleCtx, staleAuthority)
 	if current, err := runtimeeffects.ProjectionCurrent(staleCtx); err != nil || current {
 		t.Fatalf("stale generation projection authorization = %v, err=%v", current, err)
 	}

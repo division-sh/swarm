@@ -202,6 +202,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJS
 		return selectedRouteRecoveryAgent{id: cfg.ID}, nil
 	}, pg)
 
+	ctx = managedExecutionStoreTestContext(t, ctx)
 	if err := am.Recover(ctx); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
@@ -269,6 +270,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 		return selectedRouteRecoveryAgent{id: cfg.ID}, nil
 	}, pg)
 
+	ctx = managedExecutionStoreTestContext(t, ctx)
 	if err := am.Recover(ctx); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}

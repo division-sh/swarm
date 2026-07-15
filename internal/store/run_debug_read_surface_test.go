@@ -463,20 +463,20 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	`, deliveryID, runID, eventID, mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "trace_failure", nil)), sessionID, now.Add(1*time.Second), now.Add(500*time.Millisecond), replyContextID, projectedInstanceID); err != nil {
 		t.Fatalf("seed delivery: %v", err)
 	}
+	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, pg, runID, "agent-source", sessionID, turnID, "session", "entity:"+entityID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
-			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
+			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
+			emitted_events,
 			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, execution_mode, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'agent-source', $3::uuid, 'flow-a', TRUE, 'authored', $4::uuid,
-			$5::uuid, 'scan.requested', 'task-1', '[]'::jsonb, '[]'::jsonb,
-			'[]'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb,
-			'{}'::jsonb, '{}'::jsonb, true, 12, 1, NULL, 'live', $6
+			$5::uuid, 'scan.requested', 'task-1', $6::uuid, '[]'::jsonb,
+			'[]'::jsonb, '{}'::jsonb, '{}'::jsonb, true, 12, 1, NULL, 'live', $7
 		)
-	`, turnID, runID, sessionID, entityID, eventID, now.Add(2*time.Second)); err != nil {
+	`, turnID, runID, sessionID, entityID, eventID, capabilitySurfaceID, now.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed turn: %v", err)
 	}
 
@@ -571,20 +571,20 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 	`, deliveryID, runID, eventID, sessionID, base.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed late delivery: %v", err)
 	}
+	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, pg, runID, "agent-late", sessionID, turnID, "session", "entity:"+entityID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
-			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
+			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
+			emitted_events,
 			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, execution_mode, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'agent-late', $3::uuid, 'flow-a', TRUE, 'authored', $4::uuid,
-			$5::uuid, 'scan.requested', 'task-late', '[]'::jsonb, '[]'::jsonb,
-			'[]'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb,
-			'{}'::jsonb, '{}'::jsonb, true, 12, 0, NULL, 'live', $6
+			$5::uuid, 'scan.requested', 'task-late', $6::uuid, '[]'::jsonb,
+			'[]'::jsonb, '{}'::jsonb, '{}'::jsonb, true, 12, 0, NULL, 'live', $7
 		)
-	`, turnID, runID, sessionID, entityID, eventID, base.Add(3*time.Second)); err != nil {
+	`, turnID, runID, sessionID, entityID, eventID, capabilitySurfaceID, base.Add(3*time.Second)); err != nil {
 		t.Fatalf("seed late turn: %v", err)
 	}
 
@@ -651,20 +651,20 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 	`, deliveryID, runID, eventID, now.Add(500*time.Millisecond)); err != nil {
 		t.Fatalf("seed delivery: %v", err)
 	}
+	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, pg, runID, "agent-task", sessionID, turnID, "task", "entity:"+entityID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
-			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
+			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
+			emitted_events,
 			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, execution_mode, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'agent-task', $3::uuid, 'flow-a', FALSE, 'platform_default', $4::uuid,
-			$5::uuid, 'task.started', 'task-2', '[]'::jsonb, '[]'::jsonb,
-			'[]'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb,
-			'{}'::jsonb, '{}'::jsonb, true, 8, 0, NULL, 'live', $6
+			$5::uuid, 'task.started', 'task-2', $6::uuid, '[]'::jsonb,
+			'[]'::jsonb, '{}'::jsonb, '{}'::jsonb, true, 8, 0, NULL, 'live', $7
 		)
-	`, turnID, runID, sessionID, entityID, eventID, now.Add(3*time.Second)); err != nil {
+	`, turnID, runID, sessionID, entityID, eventID, capabilitySurfaceID, now.Add(3*time.Second)); err != nil {
 		t.Fatalf("seed turn: %v", err)
 	}
 

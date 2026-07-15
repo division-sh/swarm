@@ -164,6 +164,7 @@ func TestOpenAIResponsesRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
+	ctx = managedProviderTestContext(t, ctx, runtime, session, nil)
 	_, err = runtime.ContinueSession(ctx, session, Message{Role: "user", Content: "hello"})
 	if err == nil || !strings.Contains(err.Error(), "missing usage") {
 		t.Fatalf("ContinueSession error = %v, want missing usage", err)

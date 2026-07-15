@@ -10,18 +10,19 @@ import (
 )
 
 type cliStreamAccumulator struct {
-	raw               bytes.Buffer
-	message           Message
-	toolCalls         []ToolCall
-	observedToolCalls []ToolCall
-	streamedCalls     []cliRecordedToolCall
-	sessionID         string
-	resultText        string
-	pending           map[int]*cliPendingToolCall
-	completedToolIDs  map[string]struct{}
-	mcpServers        map[string]string
-	visibleTools      []string
-	mcpVisibleTools   []string
+	raw                  bytes.Buffer
+	message              Message
+	toolCalls            []ToolCall
+	observedToolCalls    []ToolCall
+	streamedCalls        []cliRecordedToolCall
+	sessionID            string
+	resultText           string
+	pending              map[int]*cliPendingToolCall
+	completedToolIDs     map[string]struct{}
+	mcpServers           map[string]string
+	visibleTools         []string
+	providerVisibleTools []string
+	mcpVisibleTools      []string
 }
 
 type cliPendingToolCall struct {
@@ -252,7 +253,7 @@ func parseVisibleToolNames(value any) []string {
 	for _, item := range list {
 		switch typed := item.(type) {
 		case string:
-			name := toolidentity.CanonicalName(typed)
+			name := strings.TrimSpace(typed)
 			if name != "" {
 				if _, ok := seen[name]; !ok {
 					seen[name] = struct{}{}
@@ -260,7 +261,7 @@ func parseVisibleToolNames(value any) []string {
 				}
 			}
 		case map[string]any:
-			name := toolidentity.CanonicalName(asString(typed["name"]))
+			name := strings.TrimSpace(asString(typed["name"]))
 			if name != "" {
 				if _, ok := seen[name]; !ok {
 					seen[name] = struct{}{}
@@ -311,6 +312,19 @@ func (a *cliStreamAccumulator) appendVisibleTool(name string) {
 	name = strings.TrimSpace(name)
 	if isCLIControlToolName(name) {
 		return
+	}
+	if !strings.HasPrefix(name, runtimeToolsMCPPrefix) {
+		found := false
+		for _, existing := range a.providerVisibleTools {
+			if existing == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			a.providerVisibleTools = append(a.providerVisibleTools, name)
+			sort.Strings(a.providerVisibleTools)
+		}
 	}
 	if canonical := toolidentity.CanonicalName(name); canonical != "" {
 		if isCLIControlToolName(canonical) {
@@ -373,14 +387,15 @@ func (a *cliStreamAccumulator) Response() *Response {
 		toolCalls = nil
 	}
 	return &Response{
-		Message:           message,
-		ToolCalls:         dedupeToolCalls(toolCalls),
-		ObservedToolCalls: observedToolCalls,
-		SessionID:         strings.TrimSpace(a.sessionID),
-		Raw:               bytes.TrimSpace(a.raw.Bytes()),
-		VisibleTools:      append([]string(nil), a.visibleTools...),
-		MCPServers:        a.mcpServers,
-		MCPVisibleTools:   append([]string(nil), a.mcpVisibleTools...),
+		Message:              message,
+		ToolCalls:            dedupeToolCalls(toolCalls),
+		ObservedToolCalls:    observedToolCalls,
+		SessionID:            strings.TrimSpace(a.sessionID),
+		Raw:                  bytes.TrimSpace(a.raw.Bytes()),
+		VisibleTools:         append([]string(nil), a.visibleTools...),
+		ProviderVisibleTools: append([]string(nil), a.providerVisibleTools...),
+		MCPServers:           a.mcpServers,
+		MCPVisibleTools:      append([]string(nil), a.mcpVisibleTools...),
 	}
 }
 

@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
 
@@ -28,6 +31,7 @@ func TestCompletionAuthorityPreservesExecutionMode(t *testing.T) {
 
 type effectStoreProbe struct {
 	authorizations []AuthorizeRequest
+	launches       int
 }
 
 type completionStoreProbe struct {
@@ -52,7 +56,8 @@ func (p *effectStoreProbe) AuthorizeExternalAttempt(_ context.Context, authority
 	return authorizedProbeAttempt(authority, req), nil
 }
 
-func (*effectStoreProbe) MarkExternalAttemptLaunched(context.Context, Attempt, time.Time) error {
+func (p *effectStoreProbe) MarkExternalAttemptLaunched(context.Context, Attempt, time.Time) error {
+	p.launches++
 	return nil
 }
 
@@ -123,6 +128,233 @@ func TestCompletionControllerRequiresSettlementProjectionOwner(t *testing.T) {
 	}
 }
 
+func TestBeginCompletionRejectsCapabilitySurfaceFromDifferentRun(t *testing.T) {
+	token := LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 3}
+	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "test-execution-authority", 1, "", "test-actors", "test-bundle", nil)
+	if err != nil {
+		t.Fatalf("build managed execution admission: %v", err)
+	}
+	target := UsageTarget{
+		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: token.AgentID,
+		SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "global",
+	}
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{
+		ActorID: target.AgentID, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "test-contract",
+		Authority: managedcapabilities.Authority{
+			Kind: managedcapabilities.AuthorityProviderTurn, ID: target.ID, ExecutionKind: managedcapabilities.ExecutionNormalAgent,
+			ExecutionAuthorityID: admission.ExecutionAuthorityID, RunID: uuid.NewString(), SessionID: target.SessionID, TurnOrdinal: 1,
+		},
+		CreatedAt: time.Unix(1, 0).UTC(),
+	})
+	if err != nil {
+		t.Fatalf("build managed capability surface: %v", err)
+	}
+	ctx := WithLifecycleToken(context.Background(), token)
+	ctx = WithController(ctx, NewCompletionController(&completionStoreProbe{}, completionProjectionProbe{}))
+	ctx = WithLogicalOperationIdentity(ctx, "event-123")
+	ctx = managedexecution.WithAdmission(ctx, admission)
+	ctx = WithUsageTarget(ctx, target)
+	ctx = managedcapabilities.WithContext(ctx, surface)
+
+	_, err = BeginCompletion(ctx, "anthropic_api", []byte("request"), nil)
+	if err == nil {
+		t.Fatal("provider completion accepted a capability surface from a different run")
+	}
+	failure, ok := runtimefailures.EnvelopeFromError(err)
+	if !ok || failure.Detail.Code != "managed_effect_turn_identity_mismatch" {
+		t.Fatalf("failure = %#v ok=%v, want managed_effect_turn_identity_mismatch", failure, ok)
+	}
+}
+
+func TestBeginNormalEffectRejectsCrossContextCapabilitySurfacesBeforeAuthorization(t *testing.T) {
+	token := LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 3}
+	tests := []struct {
+		name     string
+		mutate   func(*UsageTarget, *UsageTarget) string
+		noTarget bool
+		wantCode string
+	}{
+		{
+			name:     "missing turn target",
+			noTarget: true,
+			wantCode: "managed_effect_turn_identity_mismatch",
+		},
+		{
+			name: "different lifecycle actor",
+			mutate: func(authorityTarget, surfaceTarget *UsageTarget) string {
+				authorityTarget.AgentID = "agent-b"
+				surfaceTarget.AgentID = "agent-b"
+				return "agent-b"
+			},
+			wantCode: "managed_effect_execution_authority_mismatch",
+		},
+		{
+			name: "different turn",
+			mutate: func(_, surfaceTarget *UsageTarget) string {
+				surfaceTarget.ID = uuid.NewString()
+				return token.AgentID
+			},
+			wantCode: "managed_effect_turn_identity_mismatch",
+		},
+		{
+			name: "different session",
+			mutate: func(_, surfaceTarget *UsageTarget) string {
+				surfaceTarget.SessionID = uuid.NewString()
+				return token.AgentID
+			},
+			wantCode: "managed_effect_turn_identity_mismatch",
+		},
+		{
+			name: "different run",
+			mutate: func(_, surfaceTarget *UsageTarget) string {
+				surfaceTarget.RunID = uuid.NewString()
+				return token.AgentID
+			},
+			wantCode: "managed_effect_turn_identity_mismatch",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			probe := &effectStoreProbe{}
+			admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "test-execution-authority", 1, "", "test-actors", "test-bundle", nil)
+			if err != nil {
+				t.Fatalf("build managed execution admission: %v", err)
+			}
+			authorityTarget := UsageTarget{
+				Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: token.AgentID,
+				SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "global",
+			}
+			surfaceTarget := authorityTarget
+			surfaceActor := token.AgentID
+			if tc.mutate != nil {
+				surfaceActor = tc.mutate(&authorityTarget, &surfaceTarget)
+			}
+			surface := normalManagedEffectSurface(t, admission, surfaceTarget, surfaceActor)
+
+			ctx := WithLifecycleToken(context.Background(), token)
+			ctx = WithController(ctx, NewController(probe))
+			ctx = WithLogicalOperationIdentity(ctx, "hostile-normal-effect:"+tc.name)
+			ctx = managedexecution.WithAdmission(ctx, admission)
+			if !tc.noTarget {
+				ctx = WithUsageTarget(ctx, authorityTarget)
+			}
+			ctx = managedcapabilities.WithContext(ctx, surface)
+
+			dispatches := 0
+			handle, err := Begin(ctx, "authored_http_tool", []byte("request"), nil)
+			if err == nil {
+				if launchErr := handle.MarkLaunched(ctx); launchErr != nil {
+					t.Fatalf("hostile effect reached launch with error: %v", launchErr)
+				}
+				dispatches++
+			}
+			failure, ok := runtimefailures.EnvelopeFromError(err)
+			if !ok || failure.Detail.Code != tc.wantCode {
+				t.Fatalf("failure = %#v ok=%v, want %s", failure, ok, tc.wantCode)
+			}
+			if len(probe.authorizations) != 0 || probe.launches != 0 || dispatches != 0 {
+				t.Fatalf("hostile effect authorizations=%d launches=%d dispatches=%d, want zero", len(probe.authorizations), probe.launches, dispatches)
+			}
+		})
+	}
+}
+
+func TestBeginSelectedEffectRejectsMissingOrCrossActorTurnBeforeAuthorization(t *testing.T) {
+	executionID := uuid.NewString()
+	forkRunID := uuid.NewString()
+	authority := Authority{
+		Kind: AuthoritySelectedContractFork, ID: executionID,
+		SelectedFork: SelectedContractForkAuthority{
+			ExecutionID: executionID, ForkRunID: forkRunID, Generation: 1,
+			AdmissionFingerprint: "test-admission", ContainerPlanFingerprint: "test-container",
+			ActorCensusFingerprint: "test-actors", EffectiveConfigFingerprint: "test-config",
+		},
+		ExecutionOwner: "test-selected-owner", LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: 1,
+		ExecutionMode: ExecutionModeLive,
+	}
+	admission, err := managedexecution.New(
+		managedexecution.KindSelectedContractFork, executionID, 1, forkRunID,
+		"test-actors", "test-config", nil,
+	)
+	if err != nil {
+		t.Fatalf("build selected managed execution admission: %v", err)
+	}
+	target := UsageTarget{
+		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: forkRunID, AgentID: "agent-a",
+		SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "global",
+	}
+
+	for _, tc := range []struct {
+		name         string
+		withTarget   bool
+		surfaceActor string
+	}{
+		{name: "missing turn target", surfaceActor: target.AgentID},
+		{name: "different actor", withTarget: true, surfaceActor: "agent-b"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			probe := &effectStoreProbe{}
+			testAuthority := authority
+			if tc.withTarget {
+				testAuthority.Target = target
+			}
+			surface := selectedManagedEffectSurface(t, admission, target, tc.surfaceActor)
+			ctx := WithAuthority(context.Background(), testAuthority)
+			ctx = WithExecutionMode(ctx, ExecutionModeLive)
+			ctx = WithController(ctx, NewController(probe))
+			ctx = WithLogicalOperationIdentity(ctx, "hostile-selected-effect:"+tc.name)
+			ctx = managedexecution.WithAdmission(ctx, admission)
+			ctx = managedcapabilities.WithContext(ctx, surface)
+
+			dispatches := 0
+			handle, beginErr := Begin(ctx, "authored_http_tool", []byte("request"), nil)
+			if beginErr == nil {
+				if launchErr := handle.MarkLaunched(ctx); launchErr != nil {
+					t.Fatalf("hostile effect reached launch with error: %v", launchErr)
+				}
+				dispatches++
+			}
+			failure, ok := runtimefailures.EnvelopeFromError(beginErr)
+			if !ok || failure.Detail.Code != "managed_effect_turn_identity_mismatch" {
+				t.Fatalf("failure = %#v ok=%v, want managed_effect_turn_identity_mismatch", failure, ok)
+			}
+			if len(probe.authorizations) != 0 || probe.launches != 0 || dispatches != 0 {
+				t.Fatalf("hostile effect authorizations=%d launches=%d dispatches=%d, want zero", len(probe.authorizations), probe.launches, dispatches)
+			}
+		})
+	}
+}
+
+func TestCompletionSettlementRejectsTurnCoordinateMismatch(t *testing.T) {
+	token := LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 3}
+	authority := testAuthority(token)
+	authority.Target = UsageTarget{
+		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: token.AgentID,
+		SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "global", EntityID: uuid.NewString(),
+	}
+	inputTokens, outputTokens := int64(1), int64(1)
+	settlement := CompletionSettlement{
+		Settlement: Settlement{State: StateSettled},
+		Usage: CompletionUsage{
+			ResolvedModel: "test-model", Exactness: CompletionUsageExact, InputTokens: &inputTokens, OutputTokens: &outputTokens,
+		},
+		AgentTurn: &CompletionAgentTurn{
+			TurnID: authority.Target.ID, RunID: authority.Target.RunID, AgentID: "different-agent",
+			SessionID: authority.Target.SessionID, Memory: authority.Target.Memory, FlowInstance: authority.Target.FlowInstance,
+			EntityID: authority.Target.EntityID, CapabilitySurfaceID: uuid.NewString(), CapabilitySurface: []byte(`{}`),
+		},
+		Spend: CompletionSpend{
+			FlowInstance: "global", AgentID: token.AgentID, Model: "test-model", BackendProfile: "test",
+			Provider: "test", Transport: "api", ResolvedModel: "test-model", InvocationType: "task",
+		},
+	}
+	attempt := Attempt{AttemptID: uuid.NewString(), Authority: authority, Adapter: "anthropic_api"}
+	if err := settlement.Validate(attempt); err == nil {
+		t.Fatal("completion settlement accepted turn evidence for a different actor")
+	}
+}
+
 func TestBeginDerivesStableOperationAndAttemptIdentity(t *testing.T) {
 	probe := &effectStoreProbe{}
 	token := LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 3}
@@ -130,6 +362,7 @@ func TestBeginDerivesStableOperationAndAttemptIdentity(t *testing.T) {
 		WithController(WithLifecycleToken(context.Background(), token), NewController(probe)),
 		"event-123",
 	)
+	ctx = managedEffectTestContext(t, ctx, token.AgentID)
 	first, err := Begin(ctx, "authored_http_tool", []byte("request"), map[string]string{"tool": "lookup"})
 	if err != nil {
 		t.Fatalf("first begin: %v", err)
@@ -144,6 +377,54 @@ func TestBeginDerivesStableOperationAndAttemptIdentity(t *testing.T) {
 	if len(probe.authorizations) != 2 || probe.authorizations[0].RequestFingerprint != probe.authorizations[1].RequestFingerprint {
 		t.Fatalf("authorizations = %#v, want stable fingerprints", probe.authorizations)
 	}
+}
+
+func managedEffectTestContext(t testing.TB, ctx context.Context, agentID string) context.Context {
+	t.Helper()
+	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "test-execution-authority", 1, "", "test-actors", "test-bundle", nil)
+	if err != nil {
+		t.Fatalf("build managed execution test admission: %v", err)
+	}
+	target := UsageTarget{
+		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: agentID,
+		SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "global",
+	}
+	ctx = managedexecution.WithAdmission(ctx, admission)
+	ctx = WithUsageTarget(ctx, target)
+	return managedcapabilities.WithContext(ctx, normalManagedEffectSurface(t, admission, target, agentID))
+}
+
+func normalManagedEffectSurface(t testing.TB, admission managedexecution.Admission, target UsageTarget, actorID string) managedcapabilities.Surface {
+	t.Helper()
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{
+		ActorID: actorID, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "test-contract",
+		Authority: managedcapabilities.Authority{
+			Kind: managedcapabilities.AuthorityProviderTurn, ID: target.ID, ExecutionKind: managedcapabilities.ExecutionNormalAgent,
+			ExecutionAuthorityID: admission.ExecutionAuthorityID, RunID: target.RunID, SessionID: target.SessionID, TurnOrdinal: 1,
+		},
+		CreatedAt: time.Unix(1, 0).UTC(),
+	})
+	if err != nil {
+		t.Fatalf("build managed capability test surface: %v", err)
+	}
+	return surface
+}
+
+func selectedManagedEffectSurface(t testing.TB, admission managedexecution.Admission, target UsageTarget, actorID string) managedcapabilities.Surface {
+	t.Helper()
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{
+		ActorID: actorID, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "test-contract",
+		Authority: managedcapabilities.Authority{
+			Kind: managedcapabilities.AuthorityProviderTurn, ID: target.ID,
+			ExecutionKind:        managedcapabilities.ExecutionSelectedContractFork,
+			ExecutionAuthorityID: admission.ExecutionAuthorityID, RunID: target.RunID, SessionID: target.SessionID, TurnOrdinal: 1,
+		},
+		CreatedAt: time.Unix(1, 0).UTC(),
+	})
+	if err != nil {
+		t.Fatalf("build selected managed capability test surface: %v", err)
+	}
+	return surface
 }
 
 func TestCanonicalOperationIdentitySurvivesLifecycleGenerationChange(t *testing.T) {

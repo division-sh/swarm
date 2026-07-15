@@ -7,6 +7,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
@@ -52,6 +53,12 @@ func RuntimeMCPGatewayHooks(logger *RuntimeLogger, runtimeIngress *runtimeingres
 				return runtimemcp.TurnContext{}, false
 			}
 			return turnContexts.ResolveTurnContext(token)
+		},
+		ObserveCapabilityEvidence: func(token string, evidence ...managedcapabilities.DeliveryEvidence) (managedcapabilities.Surface, bool) {
+			if turnContexts == nil {
+				return managedcapabilities.Surface{}, false
+			}
+			return turnContexts.ObserveCapabilityEvidence(token, evidence...)
 		},
 		MarkEmitKeyUsed: func(token, key string) bool {
 			if turnContexts == nil {

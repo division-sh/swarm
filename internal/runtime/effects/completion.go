@@ -92,29 +92,27 @@ func (u CompletionUsage) Validate() error {
 }
 
 type CompletionAgentTurn struct {
-	TurnID           string
-	RunID            string
-	AgentID          string
-	SessionID        string
-	Memory           agentmemory.Plan
-	FlowInstance     string
-	EntityID         string
-	TriggerEventID   string
-	TriggerEventType string
-	TaskID           string
-	AvailableTools   json.RawMessage
-	ToolCalls        json.RawMessage
-	EmittedEvents    json.RawMessage
-	MCPServers       json.RawMessage
-	MCPToolsListed   json.RawMessage
-	MCPToolsVisible  json.RawMessage
-	RequestPayload   json.RawMessage
-	ResponsePayload  json.RawMessage
-	TurnBlocks       json.RawMessage
-	ParseOK          bool
-	LatencyMS        int
-	RetryCount       int
-	Failure          *runtimefailures.Envelope
+	TurnID              string
+	RunID               string
+	AgentID             string
+	SessionID           string
+	Memory              agentmemory.Plan
+	FlowInstance        string
+	EntityID            string
+	TriggerEventID      string
+	TriggerEventType    string
+	TaskID              string
+	CapabilitySurfaceID string
+	CapabilitySurface   json.RawMessage
+	ToolCalls           json.RawMessage
+	EmittedEvents       json.RawMessage
+	RequestPayload      json.RawMessage
+	ResponsePayload     json.RawMessage
+	TurnBlocks          json.RawMessage
+	ParseOK             bool
+	LatencyMS           int
+	RetryCount          int
+	Failure             *runtimefailures.Envelope
 }
 
 func (t CompletionAgentTurn) Validate() error {
@@ -130,6 +128,9 @@ func (t CompletionAgentTurn) Validate() error {
 	}
 	if memory.Enabled && strings.TrimSpace(t.FlowInstance) == "" {
 		return fmt.Errorf("memory-enabled completion agent turn requires flow instance identity")
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(t.CapabilitySurfaceID)); err != nil || len(t.CapabilitySurface) == 0 {
+		return fmt.Errorf("completion agent turn requires exact managed capability surface")
 	}
 	if _, err := uuid.Parse(strings.TrimSpace(t.SessionID)); err != nil {
 		return fmt.Errorf("completion agent turn session id is invalid: %w", err)
@@ -222,8 +223,36 @@ func (s CompletionSettlement) Validate(attempt Attempt) error {
 		if err := s.AgentTurn.Validate(); err != nil {
 			return err
 		}
-		if strings.TrimSpace(s.AgentTurn.TurnID) != strings.TrimSpace(attempt.Authority.Target.ID) {
-			return fmt.Errorf("completion target id does not match agent turn id")
+		target := attempt.Authority.Target
+		if !nonEmpty(target.AgentID, target.SessionID, target.RunID) {
+			return fmt.Errorf("agent-turn completion target requires exact run, actor, and session coordinates")
+		}
+		targetMemory, err := target.Memory.Normalize()
+		if err != nil {
+			return fmt.Errorf("completion target memory plan: %w", err)
+		}
+		turnMemory, err := s.AgentTurn.Memory.Normalize()
+		if err != nil {
+			return fmt.Errorf("completion agent turn memory plan: %w", err)
+		}
+		if targetMemory != turnMemory {
+			return fmt.Errorf("completion target memory does not match agent turn evidence")
+		}
+		for _, coordinate := range []struct {
+			name       string
+			target     string
+			turnRecord string
+		}{
+			{"turn_id", target.ID, s.AgentTurn.TurnID},
+			{"agent_id", target.AgentID, s.AgentTurn.AgentID},
+			{"session_id", target.SessionID, s.AgentTurn.SessionID},
+			{"run_id", target.RunID, s.AgentTurn.RunID},
+			{"flow_instance", target.FlowInstance, s.AgentTurn.FlowInstance},
+			{"entity_id", target.EntityID, s.AgentTurn.EntityID},
+		} {
+			if strings.TrimSpace(coordinate.turnRecord) != strings.TrimSpace(coordinate.target) {
+				return fmt.Errorf("completion target %s does not match agent turn evidence", coordinate.name)
+			}
 		}
 	case UsageTargetConversationForkCompletion:
 		if s.AgentTurn != nil {

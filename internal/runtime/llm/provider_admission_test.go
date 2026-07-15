@@ -262,6 +262,7 @@ func TestAnthropicProviderAdmissionNeverRedispatchesAmbiguousFailure(t *testing.
 	}
 	runtime := NewAnthropicAPIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
 	harness := effecttest.New()
+	harness.Token.AgentID = "agent-1"
 	runtime.completionController = runtimeeffects.NewCompletionController(harness, harness)
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
@@ -272,6 +273,7 @@ func TestAnthropicProviderAdmissionNeverRedispatchesAmbiguousFailure(t *testing.
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
+	ctx = managedProviderTestContext(t, ctx, runtime, session, nil)
 	if _, err := runtime.ContinueSession(ctx, session, Message{Role: "user", Content: "hello"}); err == nil {
 		t.Fatal("ContinueSession succeeded after ambiguous provider status")
 	}

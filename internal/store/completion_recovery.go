@@ -16,19 +16,21 @@ import (
 )
 
 type completionRecoveryAttempt struct {
-	OperationID       string
-	AttemptID         string
-	AuthorityKind     string
-	AuthorityID       string
-	AuthorityEvidence string
-	OperationMode     string
-	AttemptMode       string
-	Adapter           string
-	Transport         string
-	State             string
-	TargetKind        string
-	TargetID          string
-	TargetOrdinal     int
+	OperationID         string
+	AttemptID           string
+	AuthorityKind       string
+	AuthorityID         string
+	AuthorityEvidence   string
+	OperationMode       string
+	AttemptMode         string
+	Adapter             string
+	Transport           string
+	State               string
+	TargetKind          string
+	TargetID            string
+	TargetOrdinal       int
+	CapabilitySurfaceID string
+	CapabilitySurface   string
 }
 
 type completionRecoveryAuthorityEvidence struct {
@@ -52,9 +54,11 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, now ti
 	rows, err := tx.QueryContext(ctx, `
 		SELECT o.operation_id::text,a.attempt_id::text,o.authority_kind,o.authority_id,o.authority_evidence::text,
 		       o.execution_mode,a.execution_mode,
-		       a.adapter,a.transport,a.state,a.usage_target_kind,a.usage_target_id::text,COALESCE(a.target_ordinal,0)
+		       a.adapter,a.transport,a.state,a.usage_target_kind,a.usage_target_id::text,COALESCE(a.target_ordinal,0),
+		       COALESCE(a.capability_surface_id::text,''),COALESCE(s.surface::text,'')
 		FROM runtime_external_effect_operations o
 		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
+		LEFT JOIN managed_agent_capability_surfaces s ON s.surface_id=a.capability_surface_id
 		LEFT JOIN agents g ON o.authority_kind='normal_agent' AND g.agent_id=o.agent_id
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
@@ -83,9 +87,11 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, now time
 	rows, err := tx.QueryContext(ctx, `
 		SELECT o.operation_id,a.attempt_id,o.authority_kind,o.authority_id,o.authority_evidence,
 		       o.execution_mode,a.execution_mode,
-		       a.adapter,a.transport,a.state,a.usage_target_kind,a.usage_target_id,COALESCE(a.target_ordinal,0)
+		       a.adapter,a.transport,a.state,a.usage_target_kind,a.usage_target_id,COALESCE(a.target_ordinal,0),
+		       COALESCE(a.capability_surface_id,''),COALESCE(s.surface,'')
 		FROM runtime_external_effect_operations o
 		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
+		LEFT JOIN managed_agent_capability_surfaces s ON s.surface_id=a.capability_surface_id
 		LEFT JOIN agents g ON o.authority_kind='normal_agent' AND g.agent_id=o.agent_id
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
@@ -116,7 +122,8 @@ func scanCompletionRecoveryAttempts(rows *sql.Rows) ([]completionRecoveryAttempt
 		var attempt completionRecoveryAttempt
 		if err := rows.Scan(&attempt.OperationID, &attempt.AttemptID, &attempt.AuthorityKind, &attempt.AuthorityID,
 			&attempt.AuthorityEvidence, &attempt.OperationMode, &attempt.AttemptMode, &attempt.Adapter, &attempt.Transport, &attempt.State,
-			&attempt.TargetKind, &attempt.TargetID, &attempt.TargetOrdinal); err != nil {
+			&attempt.TargetKind, &attempt.TargetID, &attempt.TargetOrdinal,
+			&attempt.CapabilitySurfaceID, &attempt.CapabilitySurface); err != nil {
 			return nil, fmt.Errorf("scan completion attempt for recovery: %w", err)
 		}
 		attempts = append(attempts, attempt)
@@ -247,9 +254,14 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 		if _, err := uuid.Parse(strings.TrimSpace(target.SessionID)); err != nil || agentID == "" {
 			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery agent-turn identity for attempt %s is incomplete", recovered.AttemptID)
 		}
+		surface, err := decodeManagedCapabilitySurface([]byte(recovered.CapabilitySurface))
+		if err != nil || surface.ID != recovered.CapabilitySurfaceID || surface.Authority.ID != target.ID {
+			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery capability surface for attempt %s is invalid or mismatched: %w", recovered.AttemptID, err)
+		}
 		settlement.AgentTurn = &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: agentID, SessionID: target.SessionID,
-			Memory: target.Memory, FlowInstance: target.FlowInstance, EntityID: target.EntityID, Failure: failure,
+			Memory: target.Memory, FlowInstance: target.FlowInstance, EntityID: target.EntityID,
+			CapabilitySurfaceID: surface.ID, CapabilitySurface: json.RawMessage(recovered.CapabilitySurface), Failure: failure,
 		}
 	}
 	return attempt, settlement, nil

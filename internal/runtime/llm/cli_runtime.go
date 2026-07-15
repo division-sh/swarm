@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -164,8 +165,6 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 			return nil, err
 		}
 	}
-	actor, _ := runtimeactors.ActorFromContext(ctx)
-
 	s := &Session{
 		ID: ensurePlatformSessionID(func() string {
 			if lease != nil {
@@ -194,7 +193,7 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 			}
 			return ""
 		}(),
-		SystemPrompt: augmentCLISystemPrompt(systemPrompt, actor, tools),
+		SystemPrompt: strings.TrimSpace(systemPrompt),
 		Tools:        tools,
 		Messages:     append([]Message(nil), hydrated.Messages...),
 		TurnCount:    hydrated.TurnCount,
@@ -214,8 +213,10 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	}
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	entityID := actor.EffectiveEntityID()
-	disallowedBuiltinTools := claudeDisallowedBuiltinToolsArgForActor(actor, s.Tools)
-	allowedToolsArg := claudeAllowedToolsArgForActor(actor, s.Tools)
+	allowedToolsArg, disallowedBuiltinTools, err := claudeToolArgumentsForContext(ctx, actor, s.Tools)
+	if err != nil {
+		return nil, err
+	}
 
 	lease, resolved, err := acquireContinuedMemory(ctx, r.sessions, s, r.lockOwner)
 	if err != nil {
@@ -260,9 +261,16 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_provider_head_missing", "claude-cli-adapter", "continue_session", map[string]any{"session_id": s.ID})
 	}
 	transportFallback := promptTransportFallback{}
-	mcpConfig, _, mcpEnabled, err := r.buildMCPConfigArg(ctx, s)
+	ctx, completionTargetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, s, entityID)
 	if err != nil {
 		return nil, err
+	}
+	mcpConfig, mcpContextToken, mcpEnabled, err := r.buildMCPConfigArg(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+	if mcpContextToken != "" {
+		defer r.mcpTurns.UnregisterTurnContext(mcpContextToken)
 	}
 	requestFingerprintInput := jsonBytes(map[string]any{
 		"allowed_tools":           allowedToolsArg,
@@ -279,10 +287,6 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		"tools":                   s.Tools,
 		"turn_count":              s.TurnCount,
 	})
-	ctx, completionTargetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, s, entityID)
-	if err != nil {
-		return nil, err
-	}
 	attempt, err := runtimeeffects.BeginCompletion(ctx, claudeCLICompletionAdapter, requestFingerprintInput, nil)
 	if err != nil {
 		return nil, err
@@ -361,6 +365,11 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}(),
 	}
 	resp, fallback, err := r.runWithPreparedPrompt(ctx, args, target, prompt, monitorMeta, attempt)
+	if mcpContextToken != "" {
+		if listedSurface, ok := r.mcpTurns.ResolveManagedCapabilitySurface(mcpContextToken); ok {
+			ctx = managedcapabilities.WithContext(ctx, listedSurface)
+		}
+	}
 	transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
 	transportFallback.Used = transportFallback.Used || fallback.Used
 	latency := time.Since(start)
@@ -395,7 +404,22 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	if usageErr != nil {
 		usage = unavailableCompletionUsage(completionModel)
 	}
-	if err := validateCLIResponseToolCallsForTurn(actor, s.Tools, resp); err != nil {
+	if surface, ok := managedcapabilities.FromContext(ctx); ok {
+		observed, observeErr := observeCLIResponse(surface, resp)
+		if observeErr != nil {
+			return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "managed_capability_observation_invalid", "claude-cli-adapter", "observe_tool_surface", nil, observeErr)
+		}
+		resp.CapabilitySurface = &observed
+		ctx = managedcapabilities.WithContext(ctx, observed)
+		if validateErr := ValidateCLIProviderCapabilitySurface(observed, resp); validateErr != nil {
+			turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, false, latency, agentTurnFailure(validateErr, "claude_cli_capability_validation")), resp)
+			if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_capability_surface"}); settleErr != nil {
+				return nil, errors.Join(validateErr, settleErr)
+			}
+			return nil, validateErr
+		}
+	}
+	if err := validateCLIResponseToolCallsForTurn(ctx, actor, s.Tools, resp); err != nil {
 		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, true, latency, agentTurnFailure(err, "claude_cli_tool_validation")), resp)
 		if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_tool_calls", "provider_session_id": strings.TrimSpace(resp.SessionID)}); settleErr != nil {
 			return nil, errors.Join(err, settleErr)
@@ -478,12 +502,19 @@ func (r *ClaudeCLIRuntime) admitProviderDispatch(ctx context.Context) (func(), e
 	return release, nil
 }
 
-func validateCLIResponseToolCallsForTurn(actor runtimeactors.AgentConfig, tools []ToolDefinition, resp *Response) error {
+func validateCLIResponseToolCallsForTurn(ctx context.Context, actor runtimeactors.AgentConfig, tools []ToolDefinition, resp *Response) error {
 	if resp == nil || len(resp.ToolCalls) == 0 {
 		return nil
 	}
 	for _, call := range resp.ToolCalls {
-		if cliToolCallAllowedForTurn(actor, tools, resp, call.Name) {
+		if surface, ok := capabilitySurfaceForResponse(resp); ok {
+			capability, found := surface.Capability(call.Name)
+			if found && capability.Visible && capability.Callable {
+				continue
+			}
+		} else if managedAgentExecutionContext(ctx) {
+			return fmt.Errorf("managed CLI response is missing its exact capability surface")
+		} else if conversationForkSandboxToolCallAllowed(actor, tools, resp, call.Name) {
 			continue
 		}
 		return fmt.Errorf("tool %q was not provider-visible or locally allowed on this turn", strings.TrimSpace(call.Name))

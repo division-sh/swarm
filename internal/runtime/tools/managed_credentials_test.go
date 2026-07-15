@@ -370,9 +370,9 @@ func TestExecutorHTTPToolManagedCredentialServedAndMCPTransportsUseSameOwner(t *
 				return runtimemcp.TurnContext{}, false
 			}
 			return runtimemcp.TurnContext{
-				Actor:          actor,
-				Allowed:        map[string]struct{}{"send_provider": {}},
-				DifferentOwner: runtimeeffects.OwnerBuildTestInfrastructure,
+				Actor:              actor,
+				ForkSandboxAllowed: map[string]struct{}{"send_provider": {}},
+				DifferentOwner:     runtimeeffects.OwnerBuildTestInfrastructure,
 			}, true
 		},
 	})

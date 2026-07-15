@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -23,22 +25,40 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 type telegramPhraseBotLLMRuntime struct{}
 
-func (telegramPhraseBotLLMRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
+func (telegramPhraseBotLLMRuntime) ProviderContract() runtimellm.ProviderContract {
+	return runtimellm.AnthropicAPIProviderContract()
+}
+
+func (telegramPhraseBotLLMRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
+	execution, ok := agentmemory.FromContext(ctx)
+	memory := agentmemory.PlatformDefault()
+	if ok {
+		memory = execution.Plan
+	}
 	return &runtimellm.Session{
-		ID: agentID + "-session", AgentID: agentID, SystemPrompt: systemPrompt,
-		Tools: append([]runtimellm.ToolDefinition(nil), tools...),
+		ID: uuid.NewString(), AgentID: agentID, SystemPrompt: systemPrompt,
+		Tools: append([]runtimellm.ToolDefinition(nil), tools...), Memory: memory, MemoryIdentity: execution.Identity,
 	}, nil
 }
 
-func (telegramPhraseBotLLMRuntime) ContinueSession(_ context.Context, session *runtimellm.Session, message runtimellm.Message) (*runtimellm.Response, error) {
+func (telegramPhraseBotLLMRuntime) ContinueSession(ctx context.Context, session *runtimellm.Session, message runtimellm.Message) (*runtimellm.Response, error) {
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("phrase-bot requires managed capability surface")
+	}
+	observed, err := runtimellm.ObserveAPIRequestCapabilitySurface(surface, session.Tools)
+	if err != nil {
+		return nil, err
+	}
 	if message.Role == "tool" {
 		return &runtimellm.Response{
 			Message:   runtimellm.Message{Role: "assistant", Content: "Telegram reply sent."},
-			SessionID: session.ID,
+			SessionID: session.ID, CapabilitySurface: &observed,
 		}, nil
 	}
 	const payloadPrefix = "- payload: "
@@ -71,7 +91,7 @@ func (telegramPhraseBotLLMRuntime) ContinueSession(_ context.Context, session *r
 	}
 	return &runtimellm.Response{
 		Message:   runtimellm.Message{Role: "assistant", ToolCalls: []runtimellm.ToolCall{call}},
-		ToolCalls: []runtimellm.ToolCall{call}, SessionID: session.ID,
+		ToolCalls: []runtimellm.ToolCall{call}, SessionID: session.ID, CapabilitySurface: &observed,
 	}, nil
 }
 

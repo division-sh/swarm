@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -109,13 +110,18 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 				Budget:         tracker,
 			}, selected)
 
-			if _, err := manager.RecoverWithStartupReplayDiagnostics(ctx); err != nil {
+			admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "budget-recovery-test", 1, "", "budget-recovery-actors", "budget-recovery-bundle", nil)
+			if err != nil {
+				t.Fatalf("managedexecution.New: %v", err)
+			}
+			managedCtx := managedexecution.WithAdmission(ctx, admission)
+			if _, err := manager.RecoverWithStartupReplayDiagnostics(managedCtx); err != nil {
 				t.Fatalf("RecoverWithStartupReplayDiagnostics with process context: %v", err)
 			}
 			assertRecoveredBudgetState(t, tracker, entityA, entityB, terminalEntity)
 			assertBudgetRecoverySideEffects(t, ctx, db, 4, 4)
 
-			if _, err := manager.RecoverWithStartupReplayDiagnostics(ctx); err != nil {
+			if _, err := manager.RecoverWithStartupReplayDiagnostics(managedCtx); err != nil {
 				t.Fatalf("repeated RecoverWithStartupReplayDiagnostics with process context: %v", err)
 			}
 			assertRecoveredBudgetState(t, tracker, entityA, entityB, terminalEntity)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -61,9 +62,29 @@ func BuildMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnC
 	if turns == nil {
 		return MCPHTTPBinding{}, false, errors.New("mcp turn context store is required for MCP bridge")
 	}
-	allowedTools := cliTurnContextAllowedToolsForActor(actor, s.Tools)
-	if len(allowedTools) == 0 {
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		authority, sandbox := runtimeeffects.AuthorityFromContext(ctx)
+		if !sandbox || authority.Kind != runtimeeffects.AuthorityConversationForkChat {
+			return MCPHTTPBinding{}, false, errors.New("mcp bridge requires exact managed capability surface")
+		}
+		allowed := conversationForkSandboxTransportSurfaceForActor(actor, s.Tools).RuntimeToolNames
+		if len(allowed) == 0 {
+			return MCPHTTPBinding{}, false, nil
+		}
+		return buildConversationForkSandboxMCPHTTPBinding(ctx, cfg, turns, gateway, endpoint, allowed)
+	}
+	if surface.ActorID != strings.TrimSpace(actor.ID) {
+		return MCPHTTPBinding{}, false, errors.New("mcp bridge capability surface actor mismatch")
+	}
+	if len(surface.BindingNames(managedcapabilities.BindingMCPTool)) == 0 {
 		return MCPHTTPBinding{}, false, nil
+	}
+	if surface.Authority.Kind == managedcapabilities.AuthorityProviderTurn {
+		authority, ok := runtimeeffects.AuthorityFromContext(ctx)
+		if !ok || !runtimeeffects.ProviderTurnTargetMatchesCapabilitySurface(authority.Target, surface) {
+			return MCPHTTPBinding{}, false, errors.New("mcp bridge requires exact provider-turn usage target")
+		}
 	}
 	if err := gateway.Validate(); err != nil {
 		return MCPHTTPBinding{}, false, err
@@ -84,7 +105,7 @@ func BuildMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnC
 		return MCPHTTPBinding{}, false, errors.New("mcp bridge gateway endpoint is invalid")
 	}
 	headers := map[string]string{"Authorization": "Bearer " + gateway.AuthToken()}
-	contextToken := turns.RegisterTurnContextWithAllowedTools(ctx, mcpContextTokenTTLForConfig(ctx, cfg), allowedTools)
+	contextToken := turns.RegisterTurnContextWithCapabilitySurface(ctx, mcpContextTokenTTLForConfig(ctx, cfg), surface)
 	if strings.TrimSpace(contextToken) == "" {
 		return MCPHTTPBinding{}, false, errors.New("mcp turn context registration returned an empty token")
 	}
@@ -100,6 +121,30 @@ func BuildMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnC
 			contextToken:  contextToken,
 		},
 	}, true, nil
+}
+
+func buildConversationForkSandboxMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnContextStore, gateway toolgateway.Binding, endpoint MCPGatewayEndpoint, allowed []string) (MCPHTTPBinding, bool, error) {
+	if err := gateway.Validate(); err != nil {
+		return MCPHTTPBinding{}, false, err
+	}
+	if !gateway.IsRuntimeOwned() {
+		return MCPHTTPBinding{}, false, errors.New("forkchat MCP bridge requires a runtime-owned tool gateway binding")
+	}
+	serverURL := gateway.WorkspaceMCPURL()
+	if endpoint == MCPGatewayHostEndpoint {
+		serverURL = gateway.HostMCPURL()
+	}
+	if serverURL == "" {
+		return MCPHTTPBinding{}, false, errors.New("forkchat MCP bridge gateway endpoint is invalid")
+	}
+	token := turns.RegisterConversationForkSandboxTurnContext(ctx, mcpContextTokenTTLForConfig(ctx, cfg), allowed)
+	if strings.TrimSpace(token) == "" {
+		return MCPHTTPBinding{}, false, errors.New("forkchat MCP turn context registration returned an empty token")
+	}
+	headers := map[string]string{"Authorization": "Bearer " + gateway.AuthToken(), mcpContextTokenHeader: token}
+	return MCPHTTPBinding{URL: serverURL, Headers: headers, ContextToken: token, runtimeOwned: &runtimeOwnedMCPHTTPBinding{
+		url: serverURL, authorization: headers["Authorization"], contextToken: token,
+	}}, true, nil
 }
 
 func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (configJSON string, contextToken string, enabled bool, err error) {

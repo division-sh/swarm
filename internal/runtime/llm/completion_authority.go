@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -159,15 +161,40 @@ func prepareCompletionContext(ctx context.Context, controller *runtimeeffects.Co
 		target = runtimeeffects.UsageTarget{Kind: runtimeeffects.UsageTargetConversationForkCompletion, ID: authority.ForkChat.ForkTurnID, Ordinal: ordinal}
 	} else {
 		actor, _ := runtimeactors.ActorFromContext(ctx)
+		effectiveEntityID := strings.TrimSpace(actor.EffectiveEntityID())
+		effectiveFlowInstance := strings.TrimSpace(actor.CanonicalFlowPath())
+		if effectiveEntityID == "" {
+			if inbound, ok := runtimebus.InboundEventFromContext(ctx); ok {
+				effectiveEntityID = strings.TrimSpace(inbound.EntityID())
+			}
+		}
+		if effectiveFlowInstance == "" {
+			if inbound, ok := runtimebus.InboundEventFromContext(ctx); ok {
+				effectiveFlowInstance = strings.TrimSpace(inbound.FlowInstance())
+			}
+		}
+		if effectiveEntityID == "" {
+			effectiveEntityID = strings.TrimSpace(entityID)
+		}
+		turnID := uuid.NewString()
+		if capabilityAuthority, ok := providerTurnAuthorityFromContext(ctx); ok {
+			turnID = capabilityAuthority.ID
+		}
 		target = runtimeeffects.UsageTarget{
-			Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(),
+			Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID,
 			RunID: strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)), AgentID: strings.TrimSpace(session.AgentID),
 			SessionID: strings.TrimSpace(session.ID), Memory: session.Memory,
-			FlowInstance: strings.TrimSpace(actor.CanonicalFlowPath()), EntityID: strings.TrimSpace(actor.EffectiveEntityID()),
+			FlowInstance: effectiveFlowInstance, EntityID: effectiveEntityID,
 		}
 		if session.Memory.Enabled {
 			target.RunID = session.MemoryIdentity.RunID
 			target.FlowInstance = session.MemoryIdentity.FlowInstance
+		}
+		entityID = effectiveEntityID
+	}
+	if surface, ok := managedcapabilities.FromContext(ctx); ok {
+		if surface.Authority.Kind != managedcapabilities.AuthorityProviderTurn || surface.Authority.ID != target.ID {
+			return ctx, "", runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_turn_identity_mismatch", "llm-completion-authority", "prepare_completion", map[string]any{"surface_id": surface.ID, "surface_authority_id": surface.Authority.ID, "target_id": target.ID})
 		}
 	}
 	ctx = runtimeeffects.WithUsageTarget(ctx, target)
@@ -248,30 +275,34 @@ func completionAgentTurn(targetID string, turn AgentTurnRecord) *runtimeeffects.
 	if latency < 0 {
 		latency = 0
 	}
+	capabilitySurfaceID := ""
+	capabilitySurface := json.RawMessage(nil)
+	if turn.CapabilitySurface != nil {
+		capabilitySurfaceID = turn.CapabilitySurface.ID
+		capabilitySurface = completionMarshal(turn.CapabilitySurface, `{}`)
+	}
 	return &runtimeeffects.CompletionAgentTurn{
-		TurnID:           targetID,
-		RunID:            strings.TrimSpace(turn.RunID),
-		AgentID:          strings.TrimSpace(turn.AgentID),
-		SessionID:        strings.TrimSpace(turn.SessionID),
-		Memory:           turn.Memory,
-		FlowInstance:     strings.TrimSpace(turn.FlowInstance),
-		EntityID:         strings.TrimSpace(turn.EntityID),
-		TriggerEventID:   strings.TrimSpace(turn.TriggerEventID),
-		TriggerEventType: strings.TrimSpace(turn.TriggerEventType),
-		TaskID:           strings.TrimSpace(turn.TaskID),
-		AvailableTools:   completionMarshal(turn.AvailableTools, `[]`),
-		ToolCalls:        completionMarshal(turn.ToolCalls, `[]`),
-		EmittedEvents:    completionMarshal(turn.EmittedEvents, `[]`),
-		MCPServers:       completionMarshal(turn.MCPServers, `{}`),
-		MCPToolsListed:   completionMarshal(turn.MCPToolsListed, `[]`),
-		MCPToolsVisible:  completionMarshal(turn.MCPToolsVisible, `[]`),
-		RequestPayload:   completionRaw(turn.RequestPayload),
-		ResponsePayload:  completionRaw(turn.ResponseRaw),
-		TurnBlocks:       completionMarshal(turn.TurnBlocks, `[]`),
-		ParseOK:          turn.ParseOK,
-		LatencyMS:        latency,
-		RetryCount:       turn.RetryCount,
-		Failure:          turn.Failure,
+		TurnID:              targetID,
+		RunID:               strings.TrimSpace(turn.RunID),
+		AgentID:             strings.TrimSpace(turn.AgentID),
+		SessionID:           strings.TrimSpace(turn.SessionID),
+		Memory:              turn.Memory,
+		FlowInstance:        strings.TrimSpace(turn.FlowInstance),
+		EntityID:            strings.TrimSpace(turn.EntityID),
+		TriggerEventID:      strings.TrimSpace(turn.TriggerEventID),
+		TriggerEventType:    strings.TrimSpace(turn.TriggerEventType),
+		TaskID:              strings.TrimSpace(turn.TaskID),
+		CapabilitySurfaceID: capabilitySurfaceID,
+		CapabilitySurface:   capabilitySurface,
+		ToolCalls:           completionMarshal(turn.ToolCalls, `[]`),
+		EmittedEvents:       completionMarshal(turn.EmittedEvents, `[]`),
+		RequestPayload:      completionRaw(turn.RequestPayload),
+		ResponsePayload:     completionRaw(turn.ResponseRaw),
+		TurnBlocks:          completionMarshal(turn.TurnBlocks, `[]`),
+		ParseOK:             turn.ParseOK,
+		LatencyMS:           latency,
+		RetryCount:          turn.RetryCount,
+		Failure:             turn.Failure,
 	}
 }
 
@@ -426,12 +457,19 @@ func estimateCompletionCostUSD(model string, input, output int64) float64 {
 
 func completionTurnBase(ctx context.Context, session *Session, request, response []byte, parseOK bool, latency time.Duration, failure *runtimefailures.Envelope) AgentTurnRecord {
 	actor, _ := runtimeactors.ActorFromContext(ctx)
+	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	flowInstance := actor.CanonicalFlowPath()
+	if session.Memory.Enabled {
+		runID = session.MemoryIdentity.RunID
+		flowInstance = session.MemoryIdentity.FlowInstance
+	}
 	return AgentTurnRecord{
 		AgentID:        session.AgentID,
 		SessionID:      session.ID,
-		RunID:          strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
+		Memory:         session.Memory,
+		RunID:          runID,
 		EntityID:       actor.EffectiveEntityID(),
-		FlowInstance:   actor.CanonicalFlowPath(),
+		FlowInstance:   flowInstance,
 		RequestPayload: request,
 		ResponseRaw:    response,
 		ParseOK:        parseOK,
