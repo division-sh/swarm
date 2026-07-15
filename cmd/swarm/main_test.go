@@ -3985,7 +3985,7 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	}
 
 	body := fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"idempotency_key":"db-loaded-serve-fork"}}`,
+		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"confirm_source_freeze":true,"idempotency_key":"db-loaded-serve-fork"}}`,
 		sourceRunID,
 		sourceEventID,
 	)
@@ -4151,7 +4151,7 @@ func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) 
 
 	var fork apiv1.RunForkExecutionResult
 	requireServedJSONRPCResult(t, endpoint, "run.fork", map[string]any{
-		"source_run_id": initial.RunID, "fork_event_id": forkEventID, "idempotency_key": "join-fork-" + uuid.NewString(),
+		"source_run_id": initial.RunID, "fork_event_id": forkEventID, "confirm_source_freeze": true, "idempotency_key": "join-fork-" + uuid.NewString(),
 	}, &fork)
 	if fork.ForkRunID == "" || fork.SourceRunID != initial.RunID || fork.ExecutedEventCount != 1 {
 		t.Fatalf("join run.fork result = %#v", fork)
@@ -4319,6 +4319,7 @@ func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetI
 		"run", "fork", sourceRunID,
 		"--bundle-hash", targetProjection.BundleHash,
 		"--at-event", sourceEventID,
+		"--confirm-source-freeze",
 		"--idempotency-key", "db-loaded-cross-bundle-serve-fork",
 		"--json",
 	}, &stdout, &stderr, cliOpts)
@@ -11710,6 +11711,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON(t *testi
 		"--store", "postgres",
 		"--activate",
 		"--run", materialized.ForkRunID,
+		"--confirm-source-freeze",
 		"--json",
 	}, &buf)
 	if code != 0 {
@@ -11759,6 +11761,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateNonSelectedWithEmptySelectedAuthorit
 		"--store", "postgres",
 		"--activate",
 		"--run", materialized.ForkRunID,
+		"--confirm-source-freeze",
 		"--json",
 	}, &buf)
 	if code != 0 {
@@ -11807,6 +11810,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmiss
 		"--store", "postgres",
 		"--activate",
 		"--run", materialized.ForkRunID,
+		"--confirm-source-freeze",
 		"--json",
 	}, &activateOut)
 	if activateCode != 0 {

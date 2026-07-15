@@ -18,6 +18,13 @@ type DBTX interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
+type Dialect string
+
+const (
+	DialectPostgres Dialect = "postgres"
+	DialectSQLite   Dialect = "sqlite"
+)
+
 type Snapshot struct {
 	RunID       string
 	Status      string
@@ -123,8 +130,6 @@ func CanonicalTerminalStatus(raw string) (string, error) {
 		return "failed", nil
 	case "cancelled":
 		return "cancelled", nil
-	case "forked":
-		return "forked", nil
 	default:
 		return "", fmt.Errorf("unsupported terminal run status %q", raw)
 	}
@@ -169,6 +174,40 @@ func RequirePresent(ctx context.Context, db DBTX, runID string) error {
 	}
 	if err != nil {
 		return fmt.Errorf("require run row: %w", err)
+	}
+	return nil
+}
+
+// RequireActive locks an existing lifecycle row and refuses every status
+// except running or paused. It never creates or reopens a run.
+func RequireActive(ctx context.Context, db DBTX, runID string, dialect Dialect) error {
+	if db == nil {
+		return fmt.Errorf("require active run: database is required")
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("require active run: run_id is required")
+	}
+	var query string
+	switch dialect {
+	case DialectPostgres:
+		query = `SELECT COALESCE(status, '') FROM runs WHERE run_id = $1::uuid FOR UPDATE`
+	case DialectSQLite:
+		query = `SELECT COALESCE(status, '') FROM runs WHERE run_id = ?`
+	default:
+		return fmt.Errorf("require active run: unsupported dialect %q", dialect)
+	}
+	var status string
+	err := db.QueryRowContext(ctx, query, runID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return &RunNotFoundError{RunID: runID}
+	}
+	if err != nil {
+		return fmt.Errorf("require active run: %w", err)
+	}
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status != "running" && status != "paused" {
+		return &RunNotActiveError{RunID: runID, Status: status}
 	}
 	return nil
 }

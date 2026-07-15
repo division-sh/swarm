@@ -11,6 +11,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 func runPostgresAuthorActivityMutation(ctx context.Context, db *sql.DB, label string, fn func(context.Context, *sql.Tx) error) error {
@@ -99,6 +100,15 @@ func loadSystemNodeDeliveryStorySource(ctx context.Context, tx *sql.Tx, nodeID, 
 			return systemNodeDeliveryStorySource{}, fmt.Errorf("%w: node %s event %s", ErrSystemNodeDeliveryAuthorityMissing, nodeID, eventID)
 		}
 		return systemNodeDeliveryStorySource{}, err
+	}
+	if source.RunID != "" {
+		dialect := storerunlifecycle.DialectSQLite
+		if postgres {
+			dialect = storerunlifecycle.DialectPostgres
+		}
+		if err := storerunlifecycle.RequireActive(ctx, tx, source.RunID, dialect); err != nil {
+			return systemNodeDeliveryStorySource{}, fmt.Errorf("admit system node delivery mutation: %w", err)
+		}
 	}
 	return source, nil
 }

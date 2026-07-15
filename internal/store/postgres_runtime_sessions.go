@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -44,6 +45,9 @@ func (s *PostgresStore) acquirePostgresLiveSession(ctx context.Context, identity
 		return nil, runtimellm.ConversationRecord{}, fmt.Errorf("begin live session acquire: %w", err)
 	}
 	defer tx.Rollback()
+	if err := storerunlifecycle.RequireActive(ctx, tx, identity.RunID, storerunlifecycle.DialectPostgres); err != nil {
+		return nil, runtimellm.ConversationRecord{}, err
+	}
 	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.AgentID, "acquire_hydrate", false); err != nil {
 		return nil, runtimellm.ConversationRecord{}, err
 	}
@@ -134,6 +138,9 @@ func (s *PostgresStore) Release(ctx context.Context, lease *runtimesessions.Leas
 		return fmt.Errorf("begin live session release: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := storerunlifecycle.RequireActive(ctx, tx, identity.RunID, storerunlifecycle.DialectPostgres); err != nil {
+		return err
+	}
 	res, err := tx.ExecContext(ctx, `
 		UPDATE agent_sessions SET lease_holder=NULL, lease_expires_at=NULL, updated_at=now()
 		WHERE run_id=$1::uuid AND agent_id=$2 AND flow_instance=$3 AND session_id=$4::uuid AND lease_holder=$5 AND status='active'
@@ -164,6 +171,9 @@ func (s *PostgresStore) Rotate(ctx context.Context, identity agentmemory.Identit
 		return nil, err
 	}
 	defer tx.Rollback()
+	if err := storerunlifecycle.RequireActive(ctx, tx, identity.RunID, storerunlifecycle.DialectPostgres); err != nil {
+		return nil, err
+	}
 	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.AgentID, "rotate", false); err != nil {
 		return nil, err
 	}
@@ -238,6 +248,9 @@ func (s *PostgresStore) IncrementTurn(ctx context.Context, identity agentmemory.
 		return err
 	}
 	defer tx.Rollback()
+	if err := storerunlifecycle.RequireActive(ctx, tx, identity.RunID, storerunlifecycle.DialectPostgres); err != nil {
+		return err
+	}
 	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.AgentID, "increment_turn", false); err != nil {
 		return err
 	}
@@ -269,6 +282,9 @@ func (s *PostgresStore) AdoptSessionID(ctx context.Context, identity agentmemory
 		return err
 	}
 	defer tx.Rollback()
+	if err := storerunlifecycle.RequireActive(ctx, tx, identity.RunID, storerunlifecycle.DialectPostgres); err != nil {
+		return err
+	}
 	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.AgentID, "adopt_provider_session", false); err != nil {
 		return err
 	}

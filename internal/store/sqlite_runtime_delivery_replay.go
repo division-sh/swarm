@@ -16,6 +16,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -59,6 +60,9 @@ func (s *SQLiteRuntimeStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sq
 		return s.runRuntimeMutation(ctx, "sqlite pipeline receipt", func(txctx context.Context, tx *sql.Tx) error {
 			return s.UpsertPipelineReceiptTx(txctx, tx, eventID, status, failure)
 		})
+	}
+	if err := requireActiveRunForPipelineReceipt(ctx, tx, eventID, storerunlifecycle.DialectSQLite); err != nil {
+		return err
 	}
 	status = strings.TrimSpace(strings.ToLower(status))
 	if status == "" {
@@ -149,15 +153,18 @@ func (s *SQLiteRuntimeStore) InsertEventDeliveryRoutesTx(ctx context.Context, tx
 	if eventID == "" || len(deliveryRoutes) == 0 {
 		return nil
 	}
-	var runID sql.NullString
-	if err := chooseRowQueryer(s.DB, tx).QueryRowContext(ctx, `SELECT run_id FROM events WHERE event_id = ?`, eventID).Scan(&runID); err != nil {
-		return fmt.Errorf("load event run for sqlite delivery routes: %w", err)
-	}
 	ownedTx := tx == nil
 	if ownedTx {
 		return s.runRuntimeMutation(ctx, "sqlite event delivery routes", func(txctx context.Context, tx *sql.Tx) error {
 			return s.InsertEventDeliveryRoutesTx(txctx, tx, eventID, deliveryRoutes)
 		})
+	}
+	if err := requireActiveRunForEvent(ctx, tx, eventID, storerunlifecycle.DialectSQLite); err != nil {
+		return err
+	}
+	var runID sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT run_id FROM events WHERE event_id = ?`, eventID).Scan(&runID); err != nil {
+		return fmt.Errorf("load event run for sqlite delivery routes: %w", err)
 	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
@@ -293,6 +300,9 @@ func (s *SQLiteRuntimeStore) UpsertCommittedReplayScopeTx(ctx context.Context, t
 		return s.runRuntimeMutation(ctx, "sqlite committed replay scope", func(txctx context.Context, tx *sql.Tx) error {
 			return s.UpsertCommittedReplayScopeTx(txctx, tx, eventID, scope)
 		})
+	}
+	if err := requireActiveRunForEvent(ctx, tx, eventID, storerunlifecycle.DialectSQLite); err != nil {
+		return err
 	}
 	reasonCode, err := committedReplayScopeReasonCode(scope)
 	if err != nil {
@@ -481,11 +491,13 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.
 			COALESCE(e.target_route, '{}'),
 			COALESCE(e.target_set, '[]')
 		FROM events e
+		LEFT JOIN runs run ON run.run_id = e.run_id
 		LEFT JOIN event_receipts r
 			ON r.event_id = e.event_id
 			AND r.subscriber_type = 'platform'
 			AND r.subscriber_id = 'pipeline'
 		WHERE r.event_id IS NULL
+		  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
 		  AND `+where+`
 		  AND NOT EXISTS (
 			SELECT 1 FROM decision_card_route_obligations o
@@ -580,7 +592,9 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsWithPendingDeliveriesForRun(ctx con
 			COALESCE(e.target_route, '{}'),
 			COALESCE(e.target_set, '[]')
 		FROM events e
+		JOIN runs run ON run.run_id = e.run_id
 		WHERE e.run_id = ?
+		  AND run.status IN ('running', 'paused')
 		  AND e.created_at >= ?
 		  AND EXISTS (
 			SELECT 1
@@ -668,11 +682,13 @@ func (s *SQLiteRuntimeStore) ClaimPipelineReplay(ctx context.Context, eventID st
 		SELECT EXISTS (
 			SELECT 1
 			FROM events e
+			LEFT JOIN runs run ON run.run_id = e.run_id
 			LEFT JOIN event_receipts r
 				ON r.event_id = e.event_id
 				AND r.subscriber_type = 'platform'
 				AND r.subscriber_id = 'pipeline'
 			WHERE e.event_id = ?
+			  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
 			  AND r.event_id IS NULL
 		)
 	`, eventID).Scan(&pending); err != nil {
@@ -684,18 +700,26 @@ func (s *SQLiteRuntimeStore) ClaimPipelineReplay(ctx context.Context, eventID st
 	return s.claimPipelineEvent(eventID)
 }
 
-func (s *SQLiteRuntimeStore) ClaimPipelinePublication(_ context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+func (s *SQLiteRuntimeStore) ClaimPipelinePublication(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return nil, false, fmt.Errorf("event_id is required")
 	}
+	// Publication ownership serializes same-ID attempts. Canonical append must
+	// classify exact/conflicting duplicates before applying run-status admission.
 	return s.claimPipelineEvent(eventID)
 }
 
-func (s *SQLiteRuntimeStore) ClaimPipelineSettlement(_ context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+func (s *SQLiteRuntimeStore) ClaimPipelineSettlement(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return nil, false, fmt.Errorf("event_id is required")
+	}
+	if err := requireEventRunNotForked(ctx, s.DB, eventID, storerunlifecycle.DialectSQLite, true); err != nil {
+		if errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+			return nil, false, nil
+		}
+		return nil, false, err
 	}
 	return s.claimPipelineEvent(eventID)
 }
@@ -746,6 +770,11 @@ func (s *SQLiteRuntimeStore) MarkEventDeliveryInProgress(ctx context.Context, ev
 		}
 		if activeRunQuiescenceDeliveryTerminal(delivery.status, delivery.reasonCode) {
 			return nil
+		}
+		if strings.TrimSpace(delivery.runID) != "" {
+			if err := storerunlifecycle.RequireActive(txctx, tx, delivery.runID, storerunlifecycle.DialectSQLite); err != nil {
+				return err
+			}
 		}
 		res, err := tx.ExecContext(txctx, `
 			UPDATE event_deliveries
@@ -803,6 +832,11 @@ func (s *SQLiteRuntimeStore) UpsertEventReceipt(ctx context.Context, eventID, ag
 		}
 		if activeRunQuiescenceDeliveryTerminal(delivery.status, delivery.reasonCode) {
 			return nil
+		}
+		if strings.TrimSpace(delivery.runID) != "" {
+			if err := storerunlifecycle.RequireActive(txctx, tx, delivery.runID, storerunlifecycle.DialectSQLite); err != nil {
+				return err
+			}
 		}
 		state, err := buildAgentReceiptWriteState(delivery.retryCount, status, failure)
 		if err != nil {
@@ -1221,11 +1255,13 @@ func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.C
 			CASE WHEN r.event_id IS NULL THEN 0 ELSE 1 END
 		FROM event_deliveries d
 		INNER JOIN events e ON e.event_id = d.event_id
+		LEFT JOIN runs run ON run.run_id = e.run_id
 		LEFT JOIN event_receipts r
 			ON r.event_id = d.event_id
 			AND r.subscriber_type = 'agent'
 			AND r.subscriber_id = d.subscriber_id
 		WHERE d.subscriber_type = 'agent'
+		  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
 		  AND d.subscriber_id IN (`+strings.Join(placeholders, ",")+`)
 		  `+sinceClause+`
 		ORDER BY d.subscriber_id ASC, e.created_at ASC, e.event_id ASC

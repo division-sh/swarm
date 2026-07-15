@@ -22,6 +22,7 @@ func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRo
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ensurePipelineTestRun(t, store, runID)
 	ctx = withWorkflowCreateEntityInitialValues(ctx, map[string]any{
 		"region": "west",
 		"tier":   float64(1),
@@ -54,7 +55,9 @@ func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRo
 func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
-	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ensurePipelineTestRun(t, store, runID)
 	storageRef := "review/inst-1"
 
 	if err := store.Create(ctx, WorkflowInstance{
@@ -103,6 +106,9 @@ func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	runner := &recordingRuntimeMutationRunner{db: db}
 	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ensurePipelineTestRun(t, store, runID)
 	storageRef := "root/terminated"
 	terminatedAt := time.Now().UTC().Truncate(time.Millisecond)
 	if _, err := db.Exec(`
@@ -112,7 +118,7 @@ func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *
 		t.Fatalf("seed flow instance: %v", err)
 	}
 
-	if err := store.MarkTerminated(context.Background(), storageRef, terminatedAt); err != nil {
+	if err := store.MarkTerminated(ctx, storageRef, terminatedAt); err != nil {
 		t.Fatalf("MarkTerminated: %v", err)
 	}
 	if got := atomic.LoadInt32(&runner.calls); got != 1 {
@@ -155,7 +161,9 @@ func TestSQLiteWorkflowInstanceStore_RunPipelineMutationUsesRuntimeMutationRunne
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	runner := &recordingRuntimeMutationRunner{db: db}
 	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
-	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ensurePipelineTestRun(t, store, runID)
 	var postCommitActions int32
 
 	err := store.RunPipelineMutation(ctx, func(txctx context.Context) error {
@@ -189,7 +197,9 @@ func TestSQLiteWorkflowInstanceStore_MutateERollsBackCallbackFailure(t *testing.
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	runner := &recordingRuntimeMutationRunner{db: db}
 	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
-	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ensurePipelineTestRun(t, store, runID)
 	instance := WorkflowInstance{InstanceID: "root/item", StorageRef: "root/item", WorkflowName: "root", WorkflowVersion: "1.0.0", CurrentState: "queued", Metadata: map[string]any{}}
 	if err := store.Upsert(ctx, instance); err != nil {
 		t.Fatalf("seed: %v", err)

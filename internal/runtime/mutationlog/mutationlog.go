@@ -76,16 +76,10 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 	if err != nil {
 		return ErrInvalidMutationLogWriter(err.Error())
 	}
-	opts := storerunlifecycle.EnsureActiveOptions{}
-	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
-		opts.HasBundleHashCol = true
-		opts.HasBundleSourceCol = true
-		opts.HasBundleFingerprintCol = true
-		opts.BundleHash = fact.BundleHash
-		opts.BundleSource = fact.BundleSource
-		opts.BundleFingerprint = fact.BundleFingerprint
+	if err := storerunlifecycle.RequireActive(ctx, tx, runID, storerunlifecycle.DialectPostgres); err != nil {
+		return err
 	}
-	if err := storerunlifecycle.EnsureActive(ctx, db, runID, "", "", opts); err != nil {
+	if err := requireBundleSourceAvailable(ctx, tx); err != nil {
 		return err
 	}
 
@@ -131,6 +125,39 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 		return nil
 	}
 	return runtimeauthoractivity.Record(ctx, draft)
+}
+
+func requireBundleSourceAvailable(ctx context.Context, db DBTX) error {
+	fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		return nil
+	}
+	bundleSource, err := storerunlifecycle.CanonicalBundleSource(fact.BundleSource)
+	if err != nil {
+		return err
+	}
+	bundleHash := strings.TrimSpace(fact.BundleHash)
+	if bundleSource == storerunlifecycle.BundleSourceLegacy && bundleHash != "" {
+		return fmt.Errorf("mutation log bundle source: legacy bundle_source cannot carry canonical bundle_hash")
+	}
+	if bundleSource != storerunlifecycle.BundleSourceLegacy && bundleHash == "" {
+		return fmt.Errorf("mutation log bundle source: bundle_hash is required for bundle_source=%s", bundleSource)
+	}
+	if bundleSource != storerunlifecycle.BundleSourcePersisted {
+		return nil
+	}
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)`, bundleHash).Scan(&exists); err != nil {
+		return fmt.Errorf("validate mutation log persisted bundle source: %w", err)
+	}
+	if !exists {
+		return &storerunlifecycle.PersistedBundleUnavailableError{
+			BundleHash:   bundleHash,
+			BundleSource: bundleSource,
+			Cause:        "persisted_missing_bundle_row",
+		}
+	}
+	return nil
 }
 
 func AuthorActivityDraft(runID, mutationID string, rec Record, occurredAt time.Time) (runtimeauthoractivity.Draft, bool, error) {

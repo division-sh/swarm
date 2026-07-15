@@ -4247,7 +4247,8 @@ engine:
           stored instance identity, including deterministic entity and parent facts, plus the cloned activation config. Its
           derived route MUST exactly equal the persisted route before installation. Recovery MUST NOT read `entity_state`,
           synthesize or choose a run, fall back to current-state loading, or re-render route subscribers from route identity
-          alone. Missing, inactive, terminated, malformed, or identity-mismatched projections fail startup closed.
+          alone. Installation restores only the in-memory route table and MUST NOT rewrite the already-persisted route.
+          Missing, inactive, terminated, malformed, or identity-mismatched projections fail startup closed.
       auto_emit: Flow schemas may declare auto_emit_on_create. When the platform creates an instance, it automatically emits
         the declared event after the instance is fully started. Duplicate create failures MUST NOT auto-emit. This bootstraps
         the flow without requiring an external trigger.
@@ -11852,15 +11853,16 @@ platform_tables:
             event_id       UUID PRIMARY KEY,
             card_id        UUID NOT NULL REFERENCES decision_cards(card_id) ON DELETE CASCADE,
             run_id         UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-            status         TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'quarantined')),
+            status         TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'quarantined', 'superseded')),
             attempt_count  INTEGER NOT NULL DEFAULT 0,
             next_attempt_at TIMESTAMPTZ NOT NULL,
             last_failure   JSONB,
             completed_at   TIMESTAMPTZ,
             quarantined_at TIMESTAMPTZ,
+            superseded_at  TIMESTAMPTZ,
             created_at     TIMESTAMPTZ NOT NULL,
             updated_at     TIMESTAMPTZ NOT NULL,
-            CHECK ((status = 'pending' AND completed_at IS NULL AND quarantined_at IS NULL) OR (status = 'completed' AND completed_at IS NOT NULL AND quarantined_at IS NULL) OR (status = 'quarantined' AND completed_at IS NULL AND quarantined_at IS NOT NULL)),
+            CHECK ((status = 'pending' AND completed_at IS NULL AND quarantined_at IS NULL AND superseded_at IS NULL) OR (status = 'completed' AND completed_at IS NOT NULL AND quarantined_at IS NULL AND superseded_at IS NULL) OR (status = 'quarantined' AND completed_at IS NULL AND quarantined_at IS NOT NULL AND superseded_at IS NULL) OR (status = 'superseded' AND completed_at IS NULL AND quarantined_at IS NULL AND superseded_at IS NOT NULL)),
             INDEX idx_decision_route_due (status, attempt_count, next_attempt_at, created_at)
         );
     api_idempotency:
@@ -12125,10 +12127,10 @@ platform_tables:
         \    bundle_hash        TEXT CHECK (bundle_hash IS NULL OR bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),\n\
         \    bundle_source      TEXT NOT NULL DEFAULT 'legacy' CHECK (bundle_source IN ('persisted', 'ephemeral', 'deleted', 'legacy')),\n\
         \    bundle_fingerprint TEXT,\n    trigger_event_id  UUID,\n    trigger_event_type TEXT,\n    forked_from_run_id UUID REFERENCES runs(run_id),\n\
-        \    forked_from_event_id UUID,\n    entity_count      INTEGER NOT NULL DEFAULT 0,\n    event_count       INTEGER\
+        \    forked_from_event_id UUID,\n    continued_as_run_id UUID REFERENCES runs(run_id),\n    entity_count      INTEGER NOT NULL DEFAULT 0,\n    event_count       INTEGER\
         \ NOT NULL DEFAULT 0,\n    failure           JSONB,\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n\
-        \    ended_at          TIMESTAMPTZ,\n    INDEX idx_runs_status (status, started_at),\n    INDEX idx_runs_fork\
-        \ (forked_from_run_id) WHERE forked_from_run_id IS NOT NULL,\n    INDEX idx_runs_bundle_hash (bundle_hash) WHERE bundle_hash IS NOT NULL,\n\
+        \    ended_at          TIMESTAMPTZ,\n    CHECK (continued_as_run_id IS NULL OR continued_as_run_id <> run_id),\n    CHECK ((status = 'forked') = (continued_as_run_id IS NOT NULL)),\n    INDEX idx_runs_status (status, started_at),\n    INDEX idx_runs_fork\
+        \ (forked_from_run_id) WHERE forked_from_run_id IS NOT NULL,\n    UNIQUE INDEX idx_runs_continued_as (continued_as_run_id) WHERE continued_as_run_id IS NOT NULL,\n    INDEX idx_runs_bundle_hash (bundle_hash) WHERE bundle_hash IS NOT NULL,\n\
         \    INDEX idx_runs_bundle_source_status (bundle_source, status, started_at),\n    INDEX idx_runs_bundle_delete_planning\
         \ (bundle_hash, status) WHERE bundle_hash IS NOT NULL\n);"
       lifecycle:
@@ -12137,8 +12139,9 @@ platform_tables:
         completed: All pipelines reached terminal states or idle. No in-flight events.
         failed: Unrecoverable error. Run cannot continue.
         cancelled: Admin-terminated. In-flight events drained but no new processing.
-        forked: 'A new run was forked from this one. Original run is frozen at the fork point.
-          The forked run continues execution independently.'
+        forked: 'A new run was forked from this one. Original run is frozen at the fork point,
+          admits no further execution or continuation mutation, and exposes continued_as_run_id as
+          its single forward lineage pointer. The forked run continues execution independently.'
       terminal_evidence:
         canonical_owner: internal/store/runlifecycle plus internal/runtime/failures
         store_enforcement:
@@ -12438,8 +12441,9 @@ run_model:
         \ ON e.source_event_id = t.event_id\n) SELECT * FROM tree ORDER BY depth, created_at;"
       entity_in_run: 'SELECT * FROM events WHERE run_id = :run_id AND entity_id = :entity_id ORDER BY created_at'
     fork_lineage: 'Forked runs link to their parent via runs.forked_from_run_id and runs.forked_from_event_id.
-      This provides cross-run lineage: which run was this forked from, and at which event. The event
-      tree within the forked run starts fresh (new event_ids, new source_event_id chains) — it does not
+      A source frozen by a freeze-style fork links forward through the source-owned runs.continued_as_run_id;
+      only the atomic source-freeze owner may write that pointer. This provides bidirectional cross-run lineage.
+      The event tree within the forked run starts fresh (new event_ids, new source_event_id chains) — it does not
       extend the parent run''s event tree.'
   lifecycle:
     creation: 'A run is created when: (1) system.started fires (cold start), (2) an external event arrives with
@@ -12495,7 +12499,7 @@ run_model:
       unfinished work; in-progress delivery, session, turn, audit, non-agent, route, retry/idempotency, and other
       unsupported historical facts remain permanently fail-closed unless a later issue names a concrete consumer and
       proves a new owner.'
-    command: 'public CLI: `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]`, consuming /v1/rpc run.fork'
+    command: 'public CLI: `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--confirm-source-freeze] [--idempotency-key <key>]`, consuming /v1/rpc run.fork'
     dry_run_command: 'retired in v1 CLI; historical `swarm fork --dry-run` is not a supported operator command'
     materialize_only_command: 'retired in v1 CLI; historical `swarm fork --materialize-only` is not a supported operator command'
     activation_command: 'retired in v1 CLI; historical `swarm fork --activate` is not a supported operator command'
@@ -12530,7 +12534,9 @@ run_model:
       supported activation slice for forks whose state was produced by materialize-only admission. Activation
       requires a fork run with status=paused, fork lineage, fork-local entity_state rows, and a revalidated
       execution_ready=true planner result at the original selected event revision. Activation atomically transitions the
-      fork run to status=running and the source run to status=forked. It may create fork-local event and delivery
+      fork run to status=running and the source run to status=forked through store.run_fork.source_freeze. A running or
+      paused source requires explicit confirm_source_freeze=true; a completed or otherwise terminal source refuses before
+      confirmation or mutation. It may create fork-local event and delivery
       rows only after runtime.run_fork.historical_replay_execution consumes a concrete
       runtime.run_fork.historical_replay_execution_admission that marks event_deliveries as executable fork work for
       source pending unstarted agent deliveries that the canonical replay_resume_admission taxonomy marks
@@ -12545,6 +12551,28 @@ run_model:
       Activation does not copy source event IDs, replay delivered/completed
       or receipt-only facts, reconstruct timer, route, session, turn, or contract rows, or recompute recipients from
       current subscriptions.'
+    source_freeze:
+      owner: store.run_fork.source_freeze
+      contract: >
+        This is the only writer of source status=forked. In one caller-owned transaction it locks an existing running or
+        paused source, verifies explicit source-freeze confirmation and absence of live execution authority, writes
+        ended_at plus the unique source-owned continued_as_run_id forward pointer, supersedes source decision cards,
+        drafts, held human-task/proposed-effect continuations, and route obligations with append-only change evidence,
+        activates the paused child, and records both lifecycle author activities. Ordinary activation and selected-contract
+        unadvanced activation consume this owner. Generic terminal mutation rejects forked. Rollback leaves every coupled
+        source, child, decision, pointer, and activity fact unchanged.
+      preserved_lineage: >
+        Freeze preserves source events, deliveries, receipts, dead letters, timers, sessions, turns, audits, reply contexts,
+        state history, decision/effect/directive evidence, and fork facts as immutable history. It does not dead-letter,
+        settle, delete, migrate, copy, reopen, or reinterpret those rows as source execution. Only an actual live
+        lease, claim, reservation, or in-progress authority blocks the freeze; historical rows do not.
+      execution_admission: >
+        Every independently mutable run-scoped claimant uses internal/store/runlifecycle.RequireActive in its existing
+        transaction. RequireActive locks an existing running or paused row and never creates or reopens a run. Executable
+        selectors join the same status policy; read-only history remains visible. Runless/global work and standalone
+        conversation-fork chat are different concepts and do not infer a run association. Fork-specific selected execution,
+        binding, and recovery writers admit the active child; source columns remain lineage only. The selected
+        source-advanced divergence path remains source-preserving and never writes continued_as_run_id.
     planning_owner: 'Fork planning/admission is owned by the canonical store-backed fork planner. CLI,
       Builder, dashboard, and other operator surfaces MUST consume that owner and MUST NOT reimplement
       fork planning with direct SQL joins.'
@@ -14024,13 +14052,14 @@ multi_bundle_persistence:
       - swarm event publish <event-name> --bundle-hash <bundle_hash>
       - swarm run start --bundle-hash <bundle_hash>
     run_fork:
-      command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
+      command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--confirm-source-freeze] [--idempotency-key <key>]
       public_status: implemented_public_command
       api_owner: /v1/rpc run.fork
       rules:
         - '`swarm run fork` is the public command for run.fork (CLI v2.2). The former top-level `swarm fork` spelling is retired fail-closed per cli_specification.retired_namespaces.topology_v2_2_retired_spellings.'
         - The bundle selector flag is --bundle-hash, not draft --bundle.
         - --at-event selects the fork event only and never means ambient current-run or current-event.
+        - A running or paused source requires --confirm-source-freeze; a TTY may obtain the same explicit confirmation interactively, while a non-TTY invocation fails before the mutation unless the flag is present.
         - The CLI must not call internal runtime/store/fork harnesses directly.
         - Historical harness flags --dry-run, --materialize-only, --activate, and --contracts remain rejected unless a later source-authority PR promotes them.
   explicit_splits:
@@ -21884,7 +21913,7 @@ cli_specification:
       - unpromoted bundle.get alias, bundle new, bundle build --watch, archive register packaging, auto-build in test/register,
         release-pipeline/per-module Python snapshot production, and generated bindings remain absent/unknown until later CLI gates
     run_fork:
-      command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
+      command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--confirm-source-freeze] [--idempotency-key <key>]
       group: run_operate
       tier: should_have
       implementation_status: implemented_public_cli_consumer
@@ -21894,6 +21923,9 @@ cli_specification:
       behavior: >
         Public run-fork CLI. `swarm run fork` is the public command (CLI v2.2); top-level `swarm fork` is a retired spelling that fails closed. The bundle selector flag is
         `--bundle-hash`; draft `--bundle` is superseded by #1001. `--at-event` is an explicit fork-event selector only.
+        A currently running or paused source requires `--confirm-source-freeze`; an interactive TTY may obtain the same
+        explicit confirmation after warning that the source is permanently frozen and continues as the fork. Non-TTY
+        callers must pass the flag. Terminal sources fail closed without a confirmation ceremony.
         The CLI validates source_run_id and fork_event_id as currently UUID-shaped runtime IDs before calling the
         handler, calls /v1/rpc run.fork exactly once, and renders only server-owned fork results.
       implemented_dependencies:
@@ -22477,7 +22509,7 @@ cli_specification:
         group: run_operate
         inherits_contract: cli_specification.command_catalog.trace
       run_fork:
-        command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
+        command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--confirm-source-freeze] [--idempotency-key <key>]
         group: run_operate
         inherits_contract: cli_specification.command_catalog.run_fork
         supersession_scope: >
@@ -23624,6 +23656,9 @@ api_specification:
           forked_from_run_id:
             $ref: '#/components/schemas/OpaqueId'
             description: Present only if status indicates a fork.
+          continued_as_run_id:
+            $ref: '#/components/schemas/OpaqueId'
+            description: Present on a source frozen by a freeze-style fork; identifies the one run that continues its state.
           failure:
             $ref: '#/components/schemas/FailureEnvelope'
             description: Required exactly when status is failed; forbidden for every other status.
@@ -27479,6 +27514,12 @@ api_specification:
         description: "Optional target/source bundle selector. Equal or omitted values use same-bundle selected_contracts semantics. A differing value selects an already loaded/boot-pinned RuntimeContextManager BundleContext under #976; valid but unavailable targets fail with BUNDLE_UNAVAILABLE and corrupt target catalog bytes fail with BUNDLE_DATA_INTEGRITY_ERROR."
         schema:
           $ref: '#/components/schemas/BundleHash'
+      - name: confirm_source_freeze
+        required: false
+        description: Must be true when the selected operation freezes a running or paused source. The mutation rechecks source activity and this acknowledgment in the source-freeze transaction. Terminal sources refuse without requiring confirmation.
+        schema:
+          type: boolean
+          default: false
       - name: idempotency_key
         required: false
         schema:

@@ -981,8 +981,8 @@ func (am *AgentManager) restoreFlowInstanceRoutes(ctx context.Context) error {
 	if am == nil || am.bus == nil {
 		return nil
 	}
-	installer, ok := am.bus.(flowInstanceRouteInstaller)
-	if !ok || installer == nil {
+	restorer, ok := am.bus.(persistedFlowInstanceRouteRestorer)
+	if !ok || restorer == nil {
 		return nil
 	}
 	routeStore, ok := am.bus.Store().(runtimebus.FlowInstanceRoutePersistence)
@@ -998,7 +998,7 @@ func (am *AgentManager) restoreFlowInstanceRoutes(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := installer.AddFlowInstanceRoute(req); err != nil {
+		if err := restorer.RestorePersistedFlowInstanceRoute(req); err != nil {
 			return fmt.Errorf("restore flow instance route %s/%s: %w", route.ScopeKey, route.InstanceID, err)
 		}
 	}

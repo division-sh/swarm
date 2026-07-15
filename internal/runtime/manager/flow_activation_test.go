@@ -222,12 +222,16 @@ func (b *flowActivationTestBus) LogRuntime(_ context.Context, entry runtimepipel
 }
 
 func (b *flowActivationTestBus) AddFlowInstanceRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
+	return b.AddFlowInstanceRouteContext(context.Background(), req)
+}
+
+func (b *flowActivationTestBus) AddFlowInstanceRouteContext(ctx context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) error {
 	req = req.Normalized()
 	identity := req.Identity
 	b.addedPaths = append(b.addedPaths, identity.InstancePath)
 	b.addedRouteRequests = append(b.addedRouteRequests, req)
 	if b.routeStore != nil {
-		return b.routeStore.UpsertFlowInstanceRoute(context.Background(), runtimebus.FlowInstanceRouteRecord{
+		return b.routeStore.UpsertFlowInstanceRoute(ctx, runtimebus.FlowInstanceRouteRecord{
 			Identity:       identity,
 			EventPattern:   identity.InstancePath + "/task.started",
 			SubscriberType: "agent",
@@ -239,14 +243,22 @@ func (b *flowActivationTestBus) AddFlowInstanceRoute(req runtimebus.FlowInstance
 }
 
 func (b *flowActivationTestBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) error {
+	return b.RemoveFlowInstanceRouteContext(context.Background(), identity)
+}
+
+func (b *flowActivationTestBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity runtimeflowidentity.Route) error {
 	b.removedPairs = append(b.removedPairs, identity.ScopeKey+"/"+identity.InstanceID)
 	if b.removeErr != nil {
 		return b.removeErr
 	}
 	if b.routeStore != nil {
-		return b.routeStore.DeleteFlowInstanceRoute(context.Background(), identity)
+		return b.routeStore.DeleteFlowInstanceRoute(ctx, identity)
 	}
 	return nil
+}
+
+func flowActivationRunContext() context.Context {
+	return runtimecorrelation.WithRunID(context.Background(), "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 }
 
 type flowActivationStubAgent struct{ id string }
@@ -1194,7 +1206,7 @@ func TestDeactivateFlowInstanceRemovesAgentsAndRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if err := am.DeactivateFlowInstance(context.Background(), "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
+	if err := am.DeactivateFlowInstance(flowActivationRunContext(), "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance: %v", err)
 	}
 	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
@@ -1223,7 +1235,7 @@ func TestDeactivateFlowInstanceQueuesTerminalSideEffectsUntilPostCommitWhenAvail
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	postCommit := make([]func(), 0, 1)
-	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommit)
+	ctx := runtimepipeline.WithPipelinePostCommitActions(flowActivationRunContext(), &postCommit)
 	if err := am.DeactivateFlowInstance(ctx, "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance: %v", err)
 	}
@@ -1282,7 +1294,7 @@ func TestDeactivateFlowInstanceLogsPostCommitAgentFailureWithoutRouteRemoval(t *
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	postCommit := make([]func(), 0, 1)
-	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommit)
+	ctx := runtimepipeline.WithPipelinePostCommitActions(flowActivationRunContext(), &postCommit)
 	if err := am.DeactivateFlowInstance(ctx, "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance returned pre-commit error: %v", err)
 	}
@@ -1317,7 +1329,7 @@ func TestDeactivateFlowInstanceLogsPostCommitRouteFailureAfterAgentTeardown(t *t
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	postCommit := make([]func(), 0, 1)
-	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommit)
+	ctx := runtimepipeline.WithPipelinePostCommitActions(flowActivationRunContext(), &postCommit)
 	if err := am.DeactivateFlowInstance(ctx, "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance returned pre-commit error: %v", err)
 	}
@@ -1354,7 +1366,7 @@ func TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate(t *tes
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if err := am.DeactivateFlowInstance(context.Background(), "grandchild", "inst-1", "child/grandchild/inst-1", "ent-1"); err != nil {
+	if err := am.DeactivateFlowInstance(flowActivationRunContext(), "grandchild", "inst-1", "child/grandchild/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance: %v", err)
 	}
 	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "child/grandchild/inst-1" {

@@ -78,10 +78,11 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:  sourceRunID,
-		At:           sourceEventID,
-		Store:        pg,
-		SourceLoader: loader,
+		SourceRunID:         sourceRunID,
+		At:                  sourceEventID,
+		ConfirmSourceFreeze: true,
+		Store:               pg,
+		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 			contractsRoot,
@@ -322,10 +323,11 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:  sourceRunID,
-		At:           sourceEventID,
-		Store:        pg,
-		SourceLoader: loader,
+		SourceRunID:         sourceRunID,
+		At:                  sourceEventID,
+		ConfirmSourceFreeze: true,
+		Store:               pg,
+		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 			contractsRoot,
@@ -493,11 +495,12 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:  sourceRunID,
-		At:           sourceEventID,
-		BundleHash:   projection.BundleHash,
-		BundleSource: storerunlifecycle.BundleSourcePersisted,
-		Store:        pg,
+		SourceRunID:         sourceRunID,
+		At:                  sourceEventID,
+		BundleHash:          projection.BundleHash,
+		BundleSource:        storerunlifecycle.BundleSourcePersisted,
+		ConfirmSourceFreeze: true,
+		Store:               pg,
 		SourceLoader: BundleCatalogSelectedContractSourceLoader{
 			RepoRoot: repoRoot,
 			Store:    pg,
@@ -558,10 +561,11 @@ func TestExecuteSelectedContractRunForkFailsClosedBeforeMaterializationForAgentR
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:  sourceRunID,
-		At:           sourceEventID,
-		Store:        pg,
-		SourceLoader: loader,
+		SourceRunID:         sourceRunID,
+		At:                  sourceEventID,
+		ConfirmSourceFreeze: true,
+		Store:               pg,
+		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 			contractsRoot,
@@ -609,10 +613,11 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 
 	agent := &selectedContractForkTestAgent{}
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:  sourceRunID,
-		At:           sourceEventID,
-		Store:        pg,
-		SourceLoader: loader,
+		SourceRunID:         sourceRunID,
+		At:                  sourceEventID,
+		ConfirmSourceFreeze: true,
+		Store:               pg,
+		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 			contractsRoot,
@@ -810,10 +815,11 @@ func TestExecuteSelectedContractRunForkProviderCompletionRecordsDurableAuthority
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:  sourceRunID,
-		At:           sourceEventID,
-		Store:        pg,
-		SourceLoader: loader,
+		SourceRunID:         sourceRunID,
+		At:                  sourceEventID,
+		ConfirmSourceFreeze: true,
+		Store:               pg,
+		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 			contractsRoot,
@@ -1240,10 +1246,11 @@ func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:  sourceRunID,
-		At:           sourceEventID,
-		Store:        pg,
-		SourceLoader: loader,
+		SourceRunID:         sourceRunID,
+		At:                  sourceEventID,
+		ConfirmSourceFreeze: true,
+		Store:               pg,
+		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 			contractsRoot,
@@ -1348,9 +1355,10 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 	materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded.Source, selection, sourceRunID, sourceEventID)
 
 	result, err := ActivateSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
-		ForkRunID:    materialized.ForkRunID,
-		Store:        pg,
-		SourceLoader: loader,
+		ForkRunID:           materialized.ForkRunID,
+		ConfirmSourceFreeze: true,
+		Store:               pg,
+		SourceLoader:        loader,
 	})
 	if err != nil {
 		t.Fatalf("ActivateSelectedContractRunFork: %v", err)
@@ -1550,10 +1558,11 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:  sourceRunID,
-		At:           sourceEventID,
-		Store:        pg,
-		SourceLoader: loader,
+		SourceRunID:         sourceRunID,
+		At:                  sourceEventID,
+		ConfirmSourceFreeze: true,
+		Store:               pg,
+		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 			contractsRoot,
@@ -1682,10 +1691,11 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:  sourceRunID,
-		At:           forkPointEventID,
-		Store:        pg,
-		SourceLoader: loader,
+		SourceRunID:         sourceRunID,
+		At:                  forkPointEventID,
+		ConfirmSourceFreeze: true,
+		Store:               pg,
+		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 			contractsRoot,
@@ -1813,10 +1823,11 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 	)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:  sourceRunID,
-		At:           sourceEventID,
-		Store:        pg,
-		SourceLoader: loader,
+		SourceRunID:         sourceRunID,
+		At:                  sourceEventID,
+		ConfirmSourceFreeze: true,
+		Store:               pg,
+		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 			contractsRoot,
@@ -1899,10 +1910,11 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:  sourceRunID,
-		At:           sourceEventID,
-		Store:        pg,
-		SourceLoader: loader,
+		SourceRunID:         sourceRunID,
+		At:                  sourceEventID,
+		ConfirmSourceFreeze: true,
+		Store:               pg,
+		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 			contractsRoot,
@@ -1996,10 +2008,11 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeMarkerWriteSke
 	}
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:  sourceRunID,
-		At:           sourceEventID,
-		Store:        pg,
-		SourceLoader: loader,
+		SourceRunID:         sourceRunID,
+		At:                  sourceEventID,
+		ConfirmSourceFreeze: true,
+		Store:               pg,
+		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 			contractsRoot,
@@ -2038,10 +2051,11 @@ func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterializ
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:  sourceRunID,
-		At:           sourceEventID,
-		Store:        pg,
-		SourceLoader: loader,
+		SourceRunID:         sourceRunID,
+		At:                  sourceEventID,
+		ConfirmSourceFreeze: true,
+		Store:               pg,
+		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 			contractsRoot,
@@ -2102,10 +2116,11 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:  sourceRunID,
-		At:           sourceEventID,
-		Store:        pg,
-		SourceLoader: loader,
+		SourceRunID:         sourceRunID,
+		At:                  sourceEventID,
+		ConfirmSourceFreeze: true,
+		Store:               pg,
+		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 			contractsRoot,
@@ -2180,10 +2195,11 @@ func TestExecuteSelectedContractRunForkBranchesWhenSourceAdvancedAfterForkPoint(
 	)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:  sourceRunID,
-		At:           sourceEventID,
-		Store:        pg,
-		SourceLoader: loader,
+		SourceRunID:         sourceRunID,
+		At:                  sourceEventID,
+		ConfirmSourceFreeze: true,
+		Store:               pg,
+		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 			contractsRoot,

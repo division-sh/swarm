@@ -13,6 +13,7 @@ import (
 	"time"
 
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -109,8 +110,22 @@ func (s *PostgresStore) RecordRunForkSelectedContractRouteRecovery(ctx context.C
 	if err != nil {
 		return RunForkSelectedContractRouteRecovery{}, err
 	}
-	if err := insertRunForkSelectedContractRouteRecovery(ctx, s.DB, record); err != nil {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("begin selected-contract route recovery: %w", err)
+	}
+	defer tx.Rollback()
+	if err := storerunlifecycle.RequireActive(ctx, tx, record.SourceRunID, storerunlifecycle.DialectPostgres); err != nil {
+		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("admit selected-contract route recovery source: %w", err)
+	}
+	if err := storerunlifecycle.RequireActive(ctx, tx, record.ForkRunID, storerunlifecycle.DialectPostgres); err != nil {
+		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("admit selected-contract route recovery fork: %w", err)
+	}
+	if err := insertRunForkSelectedContractRouteRecovery(ctx, tx, record); err != nil {
 		return RunForkSelectedContractRouteRecovery{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("commit selected-contract route recovery: %w", err)
 	}
 	return record, nil
 }

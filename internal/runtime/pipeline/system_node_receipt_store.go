@@ -33,14 +33,17 @@ func (s *WorkflowInstanceStore) SystemNodeDeliveryAuthorized(ctx context.Context
 		err := dbQueryRowContext(ctx, s.db, `
 			SELECT EXISTS (
 				SELECT 1
-				FROM event_deliveries
-				WHERE event_id = ?
-				  AND subscriber_type = 'node'
-					  AND subscriber_id = ?
+				FROM event_deliveries d
+				JOIN events e ON e.event_id = d.event_id
+				LEFT JOIN runs run ON run.run_id = e.run_id
+				WHERE d.event_id = ?
+				  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
+				  AND d.subscriber_type = 'node'
+					  AND d.subscriber_id = ?
 					  AND COALESCE(delivery_target_route, '{}') = '{}'
 					  AND (
-						status IN ('pending', 'in_progress')
-						OR (status = 'failed' AND COALESCE(retry_count, 0) < ?)
+						d.status IN ('pending', 'in_progress')
+						OR (d.status = 'failed' AND COALESCE(d.retry_count, 0) < ?)
 					  )
 				)
 			`, eventID, nodeID, retryLimit).Scan(&ok)
@@ -50,14 +53,17 @@ func (s *WorkflowInstanceStore) SystemNodeDeliveryAuthorized(ctx context.Context
 	err := dbQueryRowContext(ctx, s.db, `
 		SELECT EXISTS (
 			SELECT 1
-			FROM event_deliveries
-			WHERE event_id = $1::uuid
-			  AND subscriber_type = 'node'
-				  AND subscriber_id = $2
+			FROM event_deliveries d
+			JOIN events e ON e.event_id = d.event_id
+			LEFT JOIN runs run ON run.run_id = e.run_id
+			WHERE d.event_id = $1::uuid
+			  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
+			  AND d.subscriber_type = 'node'
+				  AND d.subscriber_id = $2
 				  AND COALESCE(delivery_target_route, '{}'::jsonb) = '{}'::jsonb
 				  AND (
-					status IN ('pending', 'in_progress')
-					OR (status = 'failed' AND COALESCE(retry_count, 0) < $3)
+					d.status IN ('pending', 'in_progress')
+					OR (d.status = 'failed' AND COALESCE(d.retry_count, 0) < $3)
 				  )
 			)
 		`, eventID, nodeID, retryLimit).Scan(&ok)
@@ -84,14 +90,17 @@ func (s *WorkflowInstanceStore) SystemNodeDeliveryAuthorizedForTarget(ctx contex
 		err := dbQueryRowContext(ctx, s.db, `
 			SELECT EXISTS (
 				SELECT 1
-				FROM event_deliveries
-				WHERE event_id = ?
-				  AND subscriber_type = 'node'
-				  AND subscriber_id = ?
+				FROM event_deliveries d
+				JOIN events e ON e.event_id = d.event_id
+				LEFT JOIN runs run ON run.run_id = e.run_id
+				WHERE d.event_id = ?
+				  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
+				  AND d.subscriber_type = 'node'
+				  AND d.subscriber_id = ?
 				  AND COALESCE(delivery_target_route, '{}') = ?
 				  AND (
-					status IN ('pending', 'in_progress')
-					OR (status = 'failed' AND COALESCE(retry_count, 0) < ?)
+					d.status IN ('pending', 'in_progress')
+					OR (d.status = 'failed' AND COALESCE(d.retry_count, 0) < ?)
 				  )
 				)
 			`, eventID, nodeID, targetJSON, retryLimit).Scan(&ok)
@@ -101,14 +110,17 @@ func (s *WorkflowInstanceStore) SystemNodeDeliveryAuthorizedForTarget(ctx contex
 	err := dbQueryRowContext(ctx, s.db, `
 		SELECT EXISTS (
 			SELECT 1
-			FROM event_deliveries
-			WHERE event_id = $1::uuid
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = $2
+			FROM event_deliveries d
+			JOIN events e ON e.event_id = d.event_id
+			LEFT JOIN runs run ON run.run_id = e.run_id
+			WHERE d.event_id = $1::uuid
+			  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
+			  AND d.subscriber_type = 'node'
+			  AND d.subscriber_id = $2
 			  AND COALESCE(delivery_target_route, '{}'::jsonb) = $3::jsonb
 			  AND (
-				status IN ('pending', 'in_progress')
-				OR (status = 'failed' AND COALESCE(retry_count, 0) < $4)
+				d.status IN ('pending', 'in_progress')
+				OR (d.status = 'failed' AND COALESCE(d.retry_count, 0) < $4)
 			  )
 			)
 		`, eventID, nodeID, targetJSON, retryLimit).Scan(&ok)

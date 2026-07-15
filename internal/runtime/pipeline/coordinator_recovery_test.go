@@ -3,6 +3,7 @@ package pipeline_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/store"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -323,6 +325,7 @@ func TestRecoveryManager_ReplaysHistoricalForkDeliveryEventReplayRows(t *testing
 	}
 	activated, err := pg.ActivateRunFork(ctx, store.RunForkActivateRequest{
 		ForkRunID:                         materialized.ForkRunID,
+		ConfirmSourceFreeze:               true,
 		HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{},
 	})
 	if err != nil {
@@ -352,8 +355,21 @@ func TestRecoveryManager_ReplaysHistoricalForkDeliveryEventReplayRows(t *testing
 	if scope != runtimereplayclaim.CommittedReplayScopeDirect {
 		t.Fatalf("fork replay scope = %q, want direct", scope)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, sourceEventID, "processed", nil); err != nil {
-		t.Fatalf("mark source pipeline receipt: %v", err)
+	if err := pg.UpsertPipelineReceipt(ctx, sourceEventID, "processed", nil); !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+		t.Fatalf("mark frozen source pipeline receipt error = %v, want run not active", err)
+	}
+	var sourcePipelineReceipts int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, sourceEventID).Scan(&sourcePipelineReceipts); err != nil {
+		t.Fatalf("count frozen source pipeline receipts: %v", err)
+	}
+	if sourcePipelineReceipts != 0 {
+		t.Fatalf("frozen source pipeline receipts = %d, want 0", sourcePipelineReceipts)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_receipts (

@@ -80,11 +80,16 @@ func acquireLiveTestSession(t *testing.T, ctx context.Context, db *sql.DB, agent
 
 func seedSpecMemoryRun(t *testing.T, ctx context.Context, db execer) {
 	t.Helper()
+	seedManagerRun(t, ctx, db, specEntityStateRunID)
+}
+
+func seedManagerRun(t *testing.T, ctx context.Context, db execer, runID string) {
+	t.Helper()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status)
 		VALUES ($1::uuid, 'running')
 		ON CONFLICT (run_id) DO NOTHING
-	`, specEntityStateRunID); err != nil {
+	`, runID); err != nil {
 		t.Fatalf("seed agent memory run: %v", err)
 	}
 }
@@ -2656,6 +2661,50 @@ func TestSchedules_UpsertLoadCancelAndMarkFired(t *testing.T) {
 	}
 }
 
+func TestSchedules_RunScopedWritesUsePipelineTransaction(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	runID := uuid.NewString()
+	ctx, cancel := context.WithTimeout(runtimecorrelation.WithRunID(context.Background(), runID), 3*time.Second)
+	defer cancel()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', now())`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin pipeline transaction: %v", err)
+	}
+	defer tx.Rollback()
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	schedule := runtimepipeline.Schedule{
+		RunID: runID, AgentID: "scheduler", EventType: "timer.pipeline", TaskID: "pipeline-timer",
+		Mode: "once", At: time.Now().UTC().Add(time.Hour), Payload: []byte(`{}`),
+	}
+	if err := pg.UpsertSchedule(txctx, schedule); err != nil {
+		t.Fatalf("UpsertSchedule in pipeline transaction: %v", err)
+	}
+	if err := pg.CancelScheduleExact(txctx, schedule); err != nil {
+		t.Fatalf("CancelScheduleExact in pipeline transaction: %v", err)
+	}
+	var status string
+	if err := tx.QueryRowContext(txctx, `SELECT status FROM timers WHERE run_id = $1::uuid AND timer_name = $2`, runID, schedule.TaskID).Scan(&status); err != nil {
+		t.Fatalf("load transaction-local timer: %v", err)
+	}
+	if status != "cancelled" {
+		t.Fatalf("transaction-local timer status = %q, want cancelled", status)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("rollback pipeline transaction: %v", err)
+	}
+	var rows int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM timers WHERE run_id = $1::uuid`, runID).Scan(&rows); err != nil {
+		t.Fatalf("count rolled-back timers: %v", err)
+	}
+	if rows != 0 {
+		t.Fatalf("rolled-back timer rows = %d, want 0", rows)
+	}
+}
+
 func TestSchedules_ExactIdentityUsesTaskID(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -3910,6 +3959,7 @@ func TestManagerStore_LiveConversationPersistenceRequiresCanonicalLiveSession(t 
 	ctx := runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
+	seedSpecMemoryRun(t, ctx, db)
 	identity := specMemoryIdentity("a1", "global")
 
 	err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
@@ -4221,6 +4271,7 @@ func TestManagerStore_AppendStatelessAgentTurnPersistsTurnBlocks(t *testing.T) {
 
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
+	seedManagerRun(t, ctx, db, runID)
 
 	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1", RunID: runID, FlowInstance: "global",
 		Memory: agentmemory.PlatformDefault(), SessionID: sessionID,
@@ -4255,6 +4306,7 @@ func TestManagerStore_AppendStatelessAgentTurnCanonicalizesTurnBlocksThroughSing
 
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
+	seedManagerRun(t, ctx, db, runID)
 
 	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1", RunID: runID, FlowInstance: "global",
 		Memory:           agentmemory.PlatformDefault(),
@@ -4398,6 +4450,7 @@ func TestManagerStore_AppendAgentTurnRollsBackStatelessAuditAndTurnWhenTurnInser
 
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
+	seedManagerRun(t, ctx, db, runID)
 	err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1",
 		RunID:          runID,
 		FlowInstance:   "global",
@@ -4437,6 +4490,7 @@ func TestManagerStore_StatelessTurnPersistsAuditEvidenceWithoutLiveMemory(t *tes
 
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
+	seedManagerRun(t, ctx, db, runID)
 	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1",
 		RunID:          runID,
 		FlowInstance:   "global",
@@ -4572,6 +4626,7 @@ func TestManagerStore_AppendStatelessTurnCreatesCanonicalAuditRow(t *testing.T) 
 
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
+	seedManagerRun(t, ctx, db, runID)
 	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1", RunID: runID, FlowInstance: "global",
 		Memory: agentmemory.PlatformDefault(), SessionID: sessionID,
 		RequestPayload: []byte(`{"kind":"stateless"}`), ResponseRaw: []byte(`{"ok":true}`),
@@ -4607,6 +4662,7 @@ func TestManagerStore_AppendStatelessTurnPersistsEntityAsAuditMetadata(t *testin
 	sessionID := uuid.NewString()
 	entityID := uuid.NewString()
 	runID := uuid.NewString()
+	seedManagerRun(t, ctx, db, runID)
 	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1",
 		SessionID:      sessionID,
 		RunID:          runID,
@@ -4676,6 +4732,7 @@ func TestManagerStore_AppendStatelessTurnPersistsFlowInstanceAuditIdentity(t *te
 	sessionID := uuid.NewString()
 	flowInstance := "review/inst-1"
 	runID := uuid.NewString()
+	seedManagerRun(t, ctx, db, runID)
 	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1",
 		SessionID:      sessionID,
 		RunID:          runID,

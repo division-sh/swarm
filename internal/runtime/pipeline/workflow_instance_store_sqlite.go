@@ -112,6 +112,17 @@ func (s *WorkflowInstanceStore) listSQLite(ctx context.Context) ([]WorkflowInsta
 }
 
 func (s *WorkflowInstanceStore) selectActiveByFieldsSQLite(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var active bool
+	if err := dbQueryRowContext(ctx, s.db, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = ? AND status IN ('running', 'paused'))`, runID).Scan(&active); err != nil {
+		return nil, err
+	}
+	if !active {
+		return nil, nil
+	}
 	scopeKey = strings.Trim(strings.TrimSpace(scopeKey), "/")
 	if scopeKey == "" {
 		return nil, nil
@@ -188,7 +199,10 @@ func (s *WorkflowInstanceStore) mutateSQLite(ctx context.Context, instanceID str
 }
 
 func (s *WorkflowInstanceStore) mutateSQLiteE(ctx context.Context, instanceID string, fn func(*WorkflowInstance) error) error {
-	return s.runInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if _, err := s.requireActiveWorkflowRun(txctx, tx); err != nil {
+			return err
+		}
 		instance, ok, err := s.loadSQLite(txctx, instanceID)
 		if err != nil {
 			return err
@@ -235,6 +249,9 @@ func (s *WorkflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 		return err
 	}
 	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if _, err := s.requireActiveWorkflowRun(txctx, tx); err != nil {
+			return err
+		}
 		if createOnly {
 			allowRebind := standingGenerationRebindAllowed(txctx)
 			exists, err := workflowInstanceSQLiteCreateTargetExists(txctx, tx, runID, rowID, storageRef)
@@ -277,12 +294,6 @@ func (s *WorkflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 		}
 		mode := workflowInstanceMode(storageRef)
 		now := time.Now().UTC()
-		if _, err := tx.ExecContext(txctx, `
-			INSERT OR IGNORE INTO runs (run_id, status, started_at)
-			VALUES (?, 'running', ?)
-		`, runID, now); err != nil {
-			return err
-		}
 		if createOnly {
 			flowInstanceInsert := `
 				INSERT INTO flow_instances (

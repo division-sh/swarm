@@ -315,6 +315,22 @@ func seedBundleDeleteRun(t *testing.T, ctx context.Context, pg *PostgresStore, r
 
 func seedBundleDeleteRunWithSource(t *testing.T, ctx context.Context, pg *PostgresStore, runID, status, bundleHash, bundleSource string) {
 	t.Helper()
+	if status == "forked" {
+		continuedAsRunID := uuid.NewString()
+		if _, err := pg.DB.ExecContext(ctx, `
+			INSERT INTO runs (run_id, status, started_at, ended_at)
+			VALUES ($1::uuid, 'completed', now(), now())
+		`, continuedAsRunID); err != nil {
+			t.Fatalf("seed bundle delete continuation run %s: %v", continuedAsRunID, err)
+		}
+		if _, err := pg.DB.ExecContext(ctx, `
+			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at, ended_at, continued_as_run_id)
+			VALUES ($1::uuid, $2, $3, $4, $5, now(), now(), $6::uuid)
+		`, runID, status, bundleHash, bundleSource, testBootBundleFingerprint, continuedAsRunID); err != nil {
+			t.Fatalf("seed bundle delete run %s: %v", runID, err)
+		}
+		return
+	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
 		VALUES ($1::uuid, $2, $3, $4, $5, now())

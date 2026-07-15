@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -32,18 +33,30 @@ var _ decisioncard.Store = (*SQLiteRuntimeStore)(nil)
 
 func (s *PostgresStore) CreateDecisionCard(ctx context.Context, card decisioncard.Card) error {
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		if err := requireActiveDecisionRun(ctx, tx, card.RunID, true); err != nil {
+			return err
+		}
 		return insertDecisionCard(ctx, tx, card, true)
 	}
 	return runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
+		if err := requireActiveDecisionRun(txctx, tx, card.RunID, true); err != nil {
+			return err
+		}
 		return insertDecisionCard(txctx, tx, card, true)
 	})
 }
 
 func (s *SQLiteRuntimeStore) CreateDecisionCard(ctx context.Context, card decisioncard.Card) error {
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		if err := requireActiveDecisionRun(ctx, tx, card.RunID, false); err != nil {
+			return err
+		}
 		return insertDecisionCard(ctx, tx, card, false)
 	}
 	return s.runDecisionCardMutation(ctx, "sqlite create decision card", func(txctx context.Context, tx *sql.Tx) error {
+		if err := requireActiveDecisionRun(txctx, tx, card.RunID, false); err != nil {
+			return err
+		}
 		return insertDecisionCard(txctx, tx, card, false)
 	})
 }
@@ -152,6 +165,56 @@ func loadDecisionCard(ctx context.Context, db decisionCardSQL, id string, postgr
 		}
 	}
 	return scanDecisionCard(db.QueryRowContext(ctx, query, strings.TrimSpace(id)))
+}
+
+func requireActiveDecisionRun(ctx context.Context, db decisionCardSQL, runID string, postgres bool) error {
+	dialect := storerunlifecycle.DialectSQLite
+	if postgres {
+		dialect = storerunlifecycle.DialectPostgres
+	}
+	return storerunlifecycle.RequireActive(ctx, db, runID, dialect)
+}
+
+func requireActiveDecisionCardRun(ctx context.Context, db decisionCardSQL, cardID string, postgres bool) error {
+	query := `SELECT run_id FROM decision_cards WHERE card_id = ?`
+	if postgres {
+		query = `SELECT run_id::text FROM decision_cards WHERE card_id = $1`
+	}
+	var runID string
+	if err := db.QueryRowContext(ctx, query, strings.TrimSpace(cardID)).Scan(&runID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return decisioncard.ErrNotFound
+		}
+		return err
+	}
+	if err := requireActiveDecisionRun(ctx, db, runID, postgres); err != nil {
+		if errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+			return decisioncard.ErrAlreadyTerminal
+		}
+		return err
+	}
+	return nil
+}
+
+func requireActiveDecisionDraftRun(ctx context.Context, db decisionCardSQL, draftID string, postgres bool) error {
+	query := `SELECT run_id FROM decision_card_input_drafts WHERE input_draft_id = ?`
+	if postgres {
+		query = `SELECT run_id::text FROM decision_card_input_drafts WHERE input_draft_id = $1`
+	}
+	var runID string
+	if err := db.QueryRowContext(ctx, query, strings.TrimSpace(draftID)).Scan(&runID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return decisioncard.ErrDraftNotFound
+		}
+		return err
+	}
+	if err := requireActiveDecisionRun(ctx, db, runID, postgres); err != nil {
+		if errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+			return decisioncard.ErrDraftNotAuthority
+		}
+		return err
+	}
+	return nil
 }
 
 func scanDecisionCard(row *sql.Row) (decisioncard.Card, error) {
@@ -395,6 +458,9 @@ func decideDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.Decide
 	if now.IsZero() {
 		now = decisioncard.CanonicalTimestamp(time.Now())
 	}
+	if err := requireActiveDecisionCardRun(ctx, tx, req.CardID, postgres); err != nil {
+		return decisioncard.DecisionOutcome{}, err
+	}
 	card, err := loadDecisionCard(ctx, tx, req.CardID, postgres, true)
 	if err != nil {
 		return decisioncard.DecisionOutcome{}, err
@@ -541,6 +607,9 @@ func deferDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.DeferRe
 	if !until.After(now) {
 		return decisioncard.DecisionOutcome{}, decisioncard.ErrInvalidDeferUntil
 	}
+	if err := requireActiveDecisionCardRun(ctx, tx, req.CardID, postgres); err != nil {
+		return decisioncard.DecisionOutcome{}, err
+	}
 	card, err := loadDecisionCard(ctx, tx, req.CardID, postgres, true)
 	if err != nil {
 		return decisioncard.DecisionOutcome{}, err
@@ -599,6 +668,9 @@ func beginDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.Be
 	}
 	if req.TTL <= 0 {
 		req.TTL = 15 * time.Minute
+	}
+	if err := requireActiveDecisionCardRun(ctx, tx, req.CardID, postgres); err != nil {
+		return decisioncard.InputDraft{}, err
 	}
 	card, err := loadDecisionCard(ctx, tx, req.CardID, postgres, true)
 	if err != nil {
@@ -674,6 +746,9 @@ func cancelDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.C
 	now := decisioncard.CanonicalTimestamp(req.Now)
 	if now.IsZero() {
 		now = decisioncard.CanonicalTimestamp(time.Now())
+	}
+	if err := requireActiveDecisionDraftRun(ctx, tx, req.InputDraftID, postgres); err != nil {
+		return decisioncard.InputDraft{}, err
 	}
 	draft, err := loadDecisionCardDraft(ctx, tx, req.InputDraftID, postgres)
 	if err != nil {
@@ -784,6 +859,7 @@ func transitionDecisionCardDrafts(ctx context.Context, tx *sql.Tx, filter draftT
 			placeholder = "$" + strconv.Itoa(len(args))
 		}
 		clauses = append(clauses, "expires_at <= "+placeholder)
+		clauses = append(clauses, "EXISTS (SELECT 1 FROM runs run WHERE run.run_id = decision_card_input_drafts.run_id AND run.status IN ('running', 'paused'))")
 	}
 	query := `SELECT input_draft_id, run_id, card_id, expires_at FROM decision_card_input_drafts WHERE ` + strings.Join(clauses, " AND ") + ` ORDER BY input_draft_id`
 	if postgres {
@@ -856,6 +932,9 @@ func supersedeDecisionCardsForStage(ctx context.Context, tx *sql.Tx, runID, enti
 	if now.IsZero() {
 		now = decisioncard.CanonicalTimestamp(time.Now())
 	}
+	if err := requireActiveDecisionRun(ctx, tx, runID, postgres); err != nil {
+		return err
+	}
 	card, err := loadDecisionCardByActivation(ctx, tx, runID, entityID, activationID, postgres)
 	if errors.Is(err, decisioncard.ErrNotFound) {
 		return nil
@@ -880,7 +959,7 @@ func supersedeDecisionCardsForStage(ctx context.Context, tx *sql.Tx, runID, enti
 	return err
 }
 
-func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason string, now time.Time, postgres bool) error {
+func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
 	if err := runtimeauthoractivity.Require(ctx); err != nil {
 		return err
 	}
@@ -896,12 +975,18 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason
 	if now.IsZero() {
 		now = decisioncard.CanonicalTimestamp(time.Now())
 	}
-	if err := supersedeRunGateActivations(ctx, tx, runID, reason, now, postgres); err != nil {
+	if err := supersedeRunGateActivations(ctx, tx, runID, reason, now, includeCommitted, postgres); err != nil {
 		return err
 	}
-	query := `SELECT card_id FROM decision_cards WHERE run_id = ? AND status = 'pending' ORDER BY card_id`
+	cardFilter := `c.status = 'pending'`
+	updateFilter := `status = 'pending'`
+	if includeCommitted {
+		cardFilter = `(c.status = 'pending' OR EXISTS (SELECT 1 FROM decision_card_route_obligations o WHERE o.card_id = c.card_id AND o.status = 'pending'))`
+		updateFilter = `(status = 'pending' OR EXISTS (SELECT 1 FROM decision_card_route_obligations o WHERE o.card_id = decision_cards.card_id AND o.status = 'pending'))`
+	}
+	query := `SELECT c.card_id FROM decision_cards c WHERE c.run_id = ? AND ` + cardFilter + ` ORDER BY c.card_id`
 	if postgres {
-		query = `SELECT card_id FROM decision_cards WHERE run_id = $1 AND status = 'pending' ORDER BY card_id FOR UPDATE`
+		query = `SELECT c.card_id FROM decision_cards c WHERE c.run_id = $1 AND ` + cardFilter + ` ORDER BY c.card_id FOR UPDATE OF c`
 	}
 	rows, err := tx.QueryContext(ctx, query, runID)
 	if err != nil {
@@ -928,23 +1013,34 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason
 			return err
 		}
 		if card.Anchor.Kind() == decisioncard.AnchorKindHumanTask {
-			if err := supersedeHumanTaskContinuation(ctx, tx, card.CardID, now, postgres); err != nil {
+			if err := supersedeHumanTaskContinuation(ctx, tx, card.CardID, now, includeCommitted, postgres); err != nil {
 				return err
 			}
 		}
 		if card.Anchor.Kind() == decisioncard.AnchorKindProposedEffect {
-			if err := supersedeProposedEffectContinuation(ctx, tx, card.CardID, reason, now, postgres); err != nil {
+			if err := supersedeProposedEffectContinuation(ctx, tx, card.CardID, reason, now, includeCommitted, postgres); err != nil {
 				return err
 			}
 		}
-		update := `UPDATE decision_cards SET status = ?, superseded_reason = ?, updated_at = ? WHERE card_id = ? AND status = 'pending'`
+		update := `UPDATE decision_cards SET status = ?, superseded_reason = ?, updated_at = ? WHERE card_id = ? AND ` + updateFilter
 		if postgres {
-			update = `UPDATE decision_cards SET status = $1, superseded_reason = $2, updated_at = $3 WHERE card_id = $4 AND status = 'pending'`
+			update = `UPDATE decision_cards SET status = $1, superseded_reason = $2, updated_at = $3 WHERE card_id = $4 AND ` + updateFilter
 		}
 		if _, err := tx.ExecContext(ctx, update, decisioncard.StatusSuperseded, reason, now, cardID); err != nil {
 			return err
 		}
 		if _, err := appendDecisionCardChangeDTO(ctx, tx, runID, cardID, decisioncard.ChangeSuperseded, map[string]any{"reason": reason}, now, postgres); err != nil {
+			return err
+		}
+	}
+	if includeCommitted {
+		obligationUpdate := `UPDATE decision_card_route_obligations SET status = 'superseded', superseded_at = ?, updated_at = ? WHERE run_id = ? AND status = 'pending'`
+		if postgres {
+			obligationUpdate = `UPDATE decision_card_route_obligations SET status = 'superseded', superseded_at = $1, updated_at = $1 WHERE run_id = $2::uuid AND status = 'pending'`
+			if _, err := tx.ExecContext(ctx, obligationUpdate, now, runID); err != nil {
+				return err
+			}
+		} else if _, err := tx.ExecContext(ctx, obligationUpdate, now, now, runID); err != nil {
 			return err
 		}
 	}
@@ -972,7 +1068,7 @@ func (s *SQLiteRuntimeStore) ExpireDecisionCardInputDrafts(ctx context.Context, 
 	return count, err
 }
 
-func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, runID, reason string, now time.Time, postgres bool) error {
+func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
 	query := `SELECT entity_id, accumulator FROM entity_state WHERE run_id = ? ORDER BY entity_id`
 	if postgres {
 		query = `SELECT entity_id::text, accumulator FROM entity_state WHERE run_id = $1::uuid ORDER BY entity_id FOR UPDATE`
@@ -1010,11 +1106,11 @@ func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, runID, reason 
 		}
 		changed := false
 		for _, activation := range activations {
-			if activation.Status == gateruntime.StatusDecisionCommitted {
+			if activation.Status == gateruntime.StatusDecisionCommitted && !includeCommitted {
 				rows.Close()
 				return fmt.Errorf("run %s cannot terminate while decision card %s has a committed verdict awaiting its frozen route", runID, activation.CardID)
 			}
-			if activation.Supersede(reason, now) {
+			if (includeCommitted && activation.Freeze(reason, now)) || (!includeCommitted && activation.Supersede(reason, now)) {
 				if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
 					rows.Close()
 					return err

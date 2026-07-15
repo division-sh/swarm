@@ -626,7 +626,7 @@ func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *tes
 		t.Fatalf("loaded selected binding = %#v", loaded)
 	}
 
-	activated, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	activated, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID, ConfirmSourceFreeze: true})
 	if err != nil {
 		t.Fatalf("ActivateRunFork: %v", err)
 	}
@@ -889,7 +889,7 @@ func TestRunForkActivation_ActivatesMaterializedForkAndFreezesSource(t *testing.
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
-	activated, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	activated, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID, ConfirmSourceFreeze: true})
 	if err != nil {
 		t.Fatalf("ActivateRunFork: %v", err)
 	}
@@ -996,6 +996,7 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	admitter := &fakeRunForkHistoricalReplayExecutionAdmitter{}
 	activated, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{
 		ForkRunID:                         materialized.ForkRunID,
+		ConfirmSourceFreeze:               true,
 		HistoricalReplayExecutionAdmitter: admitter,
 	})
 	if err != nil {
@@ -1116,8 +1117,8 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	if scope != runtimereplayclaim.CommittedReplayScopeDirect {
 		t.Fatalf("fork replay scope = %q, want direct", scope)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err != nil {
-		t.Fatalf("mark source event pipeline receipt: %v", err)
+	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err == nil || !strings.Contains(err.Error(), "run is not active") {
+		t.Fatalf("post-freeze source pipeline receipt error = %v, want inactive-run refusal", err)
 	}
 	eb, err := runtimebus.NewEventBus(pg)
 	if err != nil {
@@ -1391,7 +1392,7 @@ func TestRunForkActivation_IgnoresExcludedSourceSessionColumnChanges(t *testing.
 		t.Fatalf("source revision after excluded session update = %d, want %d", afterExcluded, selectedRevision)
 	}
 
-	activation, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	activation, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID, ConfirmSourceFreeze: true})
 	if err != nil {
 		t.Fatalf("ActivateRunFork after excluded session update: %v", err)
 	}
@@ -1452,7 +1453,7 @@ func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MaterializeRunFork clean: %v", err)
 	}
-	if _, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: cleanMaterialized.ForkRunID}); err != nil {
+	if _, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: cleanMaterialized.ForkRunID, ConfirmSourceFreeze: true}); err != nil {
 		t.Fatalf("ActivateRunFork clean: %v", err)
 	}
 	_, err = pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: cleanMaterialized.ForkRunID})

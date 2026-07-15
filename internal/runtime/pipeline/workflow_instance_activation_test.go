@@ -81,6 +81,7 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 	runID := uuid.NewString()
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
+	ensurePipelineTestRun(t, store, runID)
 	schedules := &recordingSchedulePersistence{}
 	source := semanticview.Wrap(stageTimerTemplateLifecycleBundle())
 	pc := &PipelineCoordinator{

@@ -25,6 +25,7 @@ type RunHeader struct {
 	StartedAt        time.Time                 `json:"started_at"`
 	EndedAt          *time.Time                `json:"ended_at,omitempty"`
 	ForkedFromRunID  string                    `json:"forked_from_run_id,omitempty"`
+	ContinuedAsRunID string                    `json:"continued_as_run_id,omitempty"`
 	Failure          *runtimefailures.Envelope `json:"failure,omitempty"`
 	ControlReason    string                    `json:"control_reason,omitempty"`
 }
@@ -81,7 +82,7 @@ func (s *PostgresStore) requireRunHeaderCapabilities(ctx context.Context) error 
 		return err
 	}
 	required := map[string][]string{
-		"runs":              {"run_id", "status", "bundle_hash", "trigger_event_id", "trigger_event_type", "forked_from_run_id", "entity_count", "event_count", "failure", "started_at", "ended_at"},
+		"runs":              {"run_id", "status", "bundle_hash", "trigger_event_id", "trigger_event_type", "forked_from_run_id", "continued_as_run_id", "entity_count", "event_count", "failure", "started_at", "ended_at"},
 		"run_control_state": {"run_id", "reason"},
 		"events":            {"run_id", "event_id", "event_name", "created_at"},
 		"entity_state":      {"run_id", "entity_id"},
@@ -203,6 +204,7 @@ SELECT
 	r.started_at,
 	r.ended_at,
 	COALESCE(r.forked_from_run_id::text, ''),
+	COALESCE(r.continued_as_run_id::text, ''),
 	r.failure,
 	COALESCE(rc.reason, '')
 FROM runs r
@@ -245,6 +247,7 @@ func scanRunHeader(row runHeaderScanner) (RunHeader, error) {
 		&header.StartedAt,
 		&endedAt,
 		&header.ForkedFromRunID,
+		&header.ContinuedAsRunID,
 		&failureRaw,
 		&header.ControlReason,
 	); err != nil {
@@ -254,6 +257,7 @@ func scanRunHeader(row runHeaderScanner) (RunHeader, error) {
 	header.TriggerEventType = strings.TrimSpace(header.TriggerEventType)
 	header.TriggerEventID = strings.TrimSpace(header.TriggerEventID)
 	header.ForkedFromRunID = strings.TrimSpace(header.ForkedFromRunID)
+	header.ContinuedAsRunID = strings.TrimSpace(header.ContinuedAsRunID)
 	header.ControlReason = strings.TrimSpace(header.ControlReason)
 	failure, err := decodeStoredFailure(failureRaw)
 	if err != nil {

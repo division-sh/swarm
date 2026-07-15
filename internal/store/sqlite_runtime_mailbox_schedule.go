@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -243,6 +245,11 @@ func (s *SQLiteRuntimeStore) UpsertSchedule(ctx context.Context, sc runtimepipel
 		timerName = strings.TrimSpace(sc.EventType)
 	}
 	if err := s.runRuntimeMutation(ctx, "sqlite schedule upsert", func(txctx context.Context, tx *sql.Tx) error {
+		if strings.TrimSpace(sc.RunID) != "" {
+			if err := storerunlifecycle.RequireActive(txctx, tx, sc.RunID, storerunlifecycle.DialectSQLite); err != nil {
+				return err
+			}
+		}
 		if err := s.CancelScheduleExact(txctx, sc); err != nil {
 			return err
 		}
@@ -262,11 +269,20 @@ func (s *SQLiteRuntimeStore) UpsertSchedule(ctx context.Context, sc runtimepipel
 }
 
 func (s *SQLiteRuntimeStore) CancelScheduleExact(ctx context.Context, sc runtimepipeline.Schedule) error {
+	return s.cancelSQLiteScheduleExact(ctx, sc, true)
+}
+
+func (s *SQLiteRuntimeStore) cancelSQLiteScheduleExact(ctx context.Context, sc runtimepipeline.Schedule, requireActive bool) error {
 	sc = scheduleWithContextRunID(ctx, sc)
 	sc.NormalizeRunID()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
 	if err := s.runRuntimeMutation(ctx, "sqlite schedule cancel", func(txctx context.Context, tx *sql.Tx) error {
+		if requireActive && strings.TrimSpace(sc.RunID) != "" {
+			if err := storerunlifecycle.RequireActive(txctx, tx, sc.RunID, storerunlifecycle.DialectSQLite); err != nil {
+				return err
+			}
+		}
 		_, err := tx.ExecContext(txctx, `
 			UPDATE timers
 			SET status = 'cancelled'
@@ -286,17 +302,19 @@ func (s *SQLiteRuntimeStore) CancelScheduleExact(ctx context.Context, sc runtime
 }
 
 func (s *SQLiteRuntimeStore) CancelScheduleExactTerminal(ctx context.Context, sc runtimepipeline.Schedule) error {
-	return s.CancelScheduleExact(ctx, sc)
+	return s.cancelSQLiteScheduleExact(ctx, sc, true)
 }
 
 func (s *SQLiteRuntimeStore) LoadActiveSchedules(ctx context.Context) ([]runtimepipeline.Schedule, error) {
 	exec := sqliteScheduleDBExecutor(ctx, s.DB)
 	rows, err := exec.QueryContext(ctx, `
-		SELECT COALESCE(run_id, ''), COALESCE(owner_agent, ''), fire_event, COALESCE(recurrence_cron, ''),
-		       fire_at, COALESCE(entity_id, ''), COALESCE(flow_instance, ''), COALESCE(fire_payload, '{}'), COALESCE(reply_context_id, '')
-		FROM timers
-		WHERE status = 'active'
-		ORDER BY fire_at ASC
+		SELECT COALESCE(t.run_id, ''), COALESCE(t.owner_agent, ''), t.fire_event, COALESCE(t.recurrence_cron, ''),
+		       t.fire_at, COALESCE(t.entity_id, ''), COALESCE(t.flow_instance, ''), COALESCE(t.fire_payload, '{}'), COALESCE(t.reply_context_id, '')
+		FROM timers t
+		LEFT JOIN runs run ON run.run_id = t.run_id
+		WHERE t.status = 'active'
+		  AND (t.run_id IS NULL OR run.status IN ('running', 'paused'))
+		ORDER BY t.fire_at ASC
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("load sqlite active schedules: %w", err)
@@ -337,6 +355,11 @@ func (s *SQLiteRuntimeStore) MarkScheduleFiredExact(ctx context.Context, sc runt
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
 	if err := s.runRuntimeMutation(ctx, "sqlite schedule fired", func(txctx context.Context, tx *sql.Tx) error {
+		if strings.TrimSpace(sc.RunID) != "" {
+			if err := storerunlifecycle.RequireActive(txctx, tx, sc.RunID, storerunlifecycle.DialectSQLite); err != nil {
+				return err
+			}
+		}
 		_, err := tx.ExecContext(txctx, `
 			UPDATE timers
 			SET status = 'fired', fired_at = ?
@@ -366,17 +389,27 @@ func (s *SQLiteRuntimeStore) ClaimSchedule(ctx context.Context, sc runtimepipeli
 	sc.NormalizeFlowInstance()
 	var active bool
 	exec := sqliteScheduleDBExecutor(ctx, s.DB)
+	if strings.TrimSpace(sc.RunID) != "" {
+		if err := storerunlifecycle.RequireActive(ctx, exec, sc.RunID, storerunlifecycle.DialectSQLite); err != nil {
+			if errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+				return false, nil
+			}
+			return false, err
+		}
+	}
 	err := exec.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1
-			FROM timers
-			WHERE COALESCE(run_id, '') = COALESCE(?, '')
-			  AND owner_agent = ?
-			  AND fire_event = ?
-			  AND COALESCE(entity_id, '') = COALESCE(?, '')
-			  AND COALESCE(flow_instance, '') = COALESCE(?, '')
-			  AND COALESCE(json_extract(fire_payload, '$.__schedule_task_id'), '') = ?
-			  AND status = 'active'
+			FROM timers t
+			LEFT JOIN runs run ON run.run_id = t.run_id
+			WHERE COALESCE(t.run_id, '') = COALESCE(?, '')
+			  AND t.owner_agent = ?
+			  AND t.fire_event = ?
+			  AND COALESCE(t.entity_id, '') = COALESCE(?, '')
+			  AND COALESCE(t.flow_instance, '') = COALESCE(?, '')
+			  AND COALESCE(json_extract(t.fire_payload, '$.__schedule_task_id'), '') = ?
+			  AND t.status = 'active'
+			  AND (t.run_id IS NULL OR run.status IN ('running', 'paused'))
 		)
 	`, sqliteNullUUID(sc.RunID), sc.AgentID, sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID)).Scan(&active)
 	if err != nil {

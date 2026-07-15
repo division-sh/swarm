@@ -47,7 +47,9 @@ func TestArmWorkflowJoinPersistsActivationAndScheduleAtomically(t *testing.T) {
 				timerScheduleStore: schedules,
 			}
 			entityID := FlowInstanceEntityID("orders/order-1")
-			ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+			runID := uuid.NewString()
+			ensurePipelineTestRun(t, store, runID)
+			ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 			if err := store.Upsert(ctx, WorkflowInstance{
 				InstanceID: "order-1", StorageRef: "orders/order-1", WorkflowName: "orders", WorkflowVersion: "1.0.0",
 				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": tc.members},
@@ -215,7 +217,9 @@ func TestWorkflowJoinArmRejectsCatalogInvalidNamedResultExpression(t *testing.T)
 		workflowStore: store,
 	}
 	entityID := FlowInstanceEntityID("orders/order-typed")
-	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	runID := uuid.NewString()
+	ensurePipelineTestRun(t, store, runID)
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	if err := store.Upsert(ctx, WorkflowInstance{
 		InstanceID: "order-typed", StorageRef: "orders/order-typed", WorkflowName: "orders", WorkflowVersion: "1.0.0",
 		CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{}},
@@ -304,9 +308,8 @@ type workflowJoinStoreCase struct {
 func workflowJoinStoreCases() []workflowJoinStoreCase {
 	return []workflowJoinStoreCase{
 		{name: "sqlite", open: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			db := newSQLiteWorkflowInstanceStoreTestDB(t)
-			ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
-			return newSQLiteWorkflowInstanceStoreForTest(t, db), runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
+			store, ctx := newSQLiteWorkflowJoinStore(t)
+			return store, runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 		}},
 		{name: "postgres", open: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
 			_, db, cleanup := testutil.StartPostgres(t)
@@ -321,14 +324,22 @@ func workflowJoinStoreCases() []workflowJoinStoreCase {
 	}
 }
 
+func newSQLiteWorkflowJoinStore(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+	t.Helper()
+	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
+	runID := uuid.NewString()
+	ensurePipelineTestRun(t, store, runID)
+	return store, runtimecorrelation.WithRunID(context.Background(), runID)
+}
+
 func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.T) {
 	tests := []struct {
 		name  string
 		store func(*testing.T) (*WorkflowInstanceStore, context.Context)
 	}{
 		{name: "sqlite", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			db := newSQLiteWorkflowInstanceStoreTestDB(t)
-			return newSQLiteWorkflowInstanceStoreForTest(t, db), runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+			return newSQLiteWorkflowJoinStore(t)
 		}},
 		{name: "postgres", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
 			_, db, cleanup := testutil.StartPostgres(t)
@@ -425,8 +436,7 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 		store func(*testing.T) (*WorkflowInstanceStore, context.Context)
 	}{
 		{name: "sqlite", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			db := newSQLiteWorkflowInstanceStoreTestDB(t)
-			return newSQLiteWorkflowInstanceStoreForTest(t, db), runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+			return newSQLiteWorkflowJoinStore(t)
 		}},
 		{name: "postgres", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
 			_, db, cleanup := testutil.StartPostgres(t)
@@ -509,8 +519,7 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 		store func(*testing.T) (*WorkflowInstanceStore, context.Context)
 	}{
 		{name: "sqlite", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			db := newSQLiteWorkflowInstanceStoreTestDB(t)
-			return newSQLiteWorkflowInstanceStoreForTest(t, db), runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+			return newSQLiteWorkflowJoinStore(t)
 		}},
 		{name: "postgres", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
 			_, db, cleanup := testutil.StartPostgres(t)
@@ -600,8 +609,7 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 		store func(*testing.T) (*WorkflowInstanceStore, context.Context)
 	}{
 		{name: "sqlite", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			db := newSQLiteWorkflowInstanceStoreTestDB(t)
-			return newSQLiteWorkflowInstanceStoreForTest(t, db), runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+			return newSQLiteWorkflowJoinStore(t)
 		}},
 		{name: "postgres", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
 			_, db, cleanup := testutil.StartPostgres(t)
@@ -688,8 +696,7 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 		store func(*testing.T) (*WorkflowInstanceStore, context.Context)
 	}{
 		{name: "sqlite", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
-			db := newSQLiteWorkflowInstanceStoreTestDB(t)
-			return newSQLiteWorkflowInstanceStoreForTest(t, db), runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+			return newSQLiteWorkflowJoinStore(t)
 		}},
 		{name: "postgres", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
 			_, db, cleanup := testutil.StartPostgres(t)

@@ -72,11 +72,12 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	cfg := testRuntimeConfig()
 	cfg.LLM.Backend = "anthropic"
 	result, err := runtimerunforkexecution.ExecuteSelectedContractRunFork(h.ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
-		SourceRunID:       sourceRunID,
-		At:                forkAt,
-		Store:             h.pg,
-		SourceLoader:      loader,
-		ContractSelection: selection,
+		SourceRunID:         sourceRunID,
+		At:                  forkAt,
+		ConfirmSourceFreeze: true,
+		Store:               h.pg,
+		SourceLoader:        loader,
+		ContractSelection:   selection,
 		AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
 			Config:            cfg,
 			EntityStore:       h.pg,

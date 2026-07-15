@@ -118,14 +118,22 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 	}
 	defer db.Close()
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
 	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	entityID := uuid.NewString()
 	recordedAt := time.Now().UTC().Truncate(time.Second)
 
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(status, '') FROM runs WHERE run_id = $1::uuid FOR UPDATE")).
+		WithArgs(runID).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("running"))
+	mock.ExpectQuery("SELECT EXISTS \\(SELECT 1 FROM entity_state").
+		WithArgs(runID, entityID).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO spend_ledger")).
 		WithArgs("live", entityID, "flow/1", "agent-1", "claude-sonnet", "regular", "anthropic", "anthropic", "api", "claude-sonnet", 10, 4, 1.25, "anthropic", "exact", recordedAt).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 	if err := pg.RecordSpend(ctx, budgetspend.SpendRecord{
 		ExecutionMode:   "live",
 		EntityID:        entityID,
@@ -158,7 +166,7 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 		t.Fatalf("flow = %q, want flow/1", flow)
 	}
 
-	mock.ExpectQuery("SELECT run_id::text, entity_id::text").
+	mock.ExpectQuery("SELECT es.run_id::text, es.entity_id::text").
 		WithArgs(sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"run_id", "entity_id"}).AddRow(runID, entityID))
 	targets, err := pg.ListBudgetProjectionTargets(ctx, []string{"done"})

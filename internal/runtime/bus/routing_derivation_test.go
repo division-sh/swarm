@@ -70,6 +70,7 @@ type routePersistenceTestStore struct {
 	deleteErr        error
 	rollbackCalls    []string
 	deleteCalls      []runtimeflowidentity.Route
+	upsertCalls      int
 	upsertAfterWrite bool
 }
 
@@ -86,6 +87,7 @@ func (*routePersistenceTestStore) ListEventDeliveryRecipients(context.Context, s
 }
 
 func (s *routePersistenceTestStore) UpsertFlowInstanceRoute(_ context.Context, route runtimebus.FlowInstanceRouteRecord) error {
+	s.upsertCalls++
 	if s.routes == nil {
 		s.routes = map[string]runtimebus.FlowInstanceRouteRecord{}
 	}
@@ -98,6 +100,31 @@ func (s *routePersistenceTestStore) UpsertFlowInstanceRoute(_ context.Context, r
 		return s.upsertErr
 	}
 	return nil
+}
+
+func TestEventBusRestorePersistedFlowInstanceRouteDoesNotRewritePersistence(t *testing.T) {
+	store := &routePersistenceTestStore{}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	req := runtimebus.FlowInstanceRouteMaterializationRequest{
+		Template: runtimecontracts.SystemNodeContract{
+			ID:           "reviewer-{instance_id}",
+			Produces:     []string{"task.started"},
+			SubscribesTo: []string{"task.started"},
+		},
+		Identity: runtimeflowidentity.DeriveRoute("review", "inst-1"),
+	}
+	if err := eb.RestorePersistedFlowInstanceRoute(req); err != nil {
+		t.Fatalf("RestorePersistedFlowInstanceRoute: %v", err)
+	}
+	if store.upsertCalls != 0 || len(store.routes) != 0 {
+		t.Fatalf("route recovery rewrote persistence: calls=%d routes=%#v", store.upsertCalls, store.routes)
+	}
+	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 1 || got[0].ID != "reviewer-inst-1" {
+		t.Fatalf("restored route subscribers = %#v, want reviewer-inst-1", got)
+	}
 }
 
 func (s *routePersistenceTestStore) RollbackFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.Route) error {

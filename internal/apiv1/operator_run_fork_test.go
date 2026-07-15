@@ -35,7 +35,7 @@ func TestOperatorRunForkHandlersUseAvailabilityAndSelectedExecutor(t *testing.T)
 	handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: availability}}, executor)
 
 	resp := rpcCall(t, handler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"idempotency_key":"idem-fork"}}`,
+		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"confirm_source_freeze":true,"idempotency_key":"idem-fork"}}`,
 		runForkTestSourceRunID,
 		runForkTestEventID,
 	))
@@ -52,12 +52,12 @@ func TestOperatorRunForkHandlersUseAvailabilityAndSelectedExecutor(t *testing.T)
 	if executor.calls != 1 {
 		t.Fatalf("executor calls = %d, want 1", executor.calls)
 	}
-	if executor.last.SourceRunID != runForkTestSourceRunID || executor.last.ForkEventID != runForkTestEventID || executor.last.BundleHash != runForkTestBundleHash {
+	if executor.last.SourceRunID != runForkTestSourceRunID || executor.last.ForkEventID != runForkTestEventID || executor.last.BundleHash != runForkTestBundleHash || !executor.last.ConfirmSourceFreeze {
 		t.Fatalf("executor request = %#v", executor.last)
 	}
 
 	replay := rpcCall(t, handler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork-replay","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"idempotency_key":"idem-fork"}}`,
+		`{"jsonrpc":"2.0","id":"fork-replay","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"confirm_source_freeze":true,"idempotency_key":"idem-fork"}}`,
 		runForkTestSourceRunID,
 		runForkTestEventID,
 	))
@@ -66,6 +66,29 @@ func TestOperatorRunForkHandlersUseAvailabilityAndSelectedExecutor(t *testing.T)
 	}
 	if executor.calls != 1 {
 		t.Fatalf("executor calls after replay = %d, want 1", executor.calls)
+	}
+}
+
+func TestOperatorRunForkHandlersRequireActiveSourceFreezeConfirmation(t *testing.T) {
+	executor := &recordingRunForkExecutor{}
+	handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
+		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+	}}, executor)
+
+	resp := rpcCall(t, handler, fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q}}`,
+		runForkTestSourceRunID,
+		runForkTestEventID,
+	))
+	if resp.Error == nil || resp.Error.Code != codeInvalidParams {
+		t.Fatalf("run.fork confirmation error = %#v, want invalid params", resp.Error)
+	}
+	details := asMap(t, asMap(t, resp.Error.Data)["details"])
+	if details["field"] != "confirm_source_freeze" {
+		t.Fatalf("run.fork confirmation details = %#v", details)
+	}
+	if executor.calls != 0 {
+		t.Fatalf("executor calls = %d, want 0", executor.calls)
 	}
 }
 
@@ -92,7 +115,7 @@ func TestOperatorRunForkHandlersFailClosedOnBundleAvailability(t *testing.T) {
 			name:         "different bundle hash",
 			availability: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
 			params: fmt.Sprintf(
-				`{"source_run_id":%q,"fork_event_id":%q,"bundle_hash":"bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}`,
+				`{"source_run_id":%q,"fork_event_id":%q,"bundle_hash":"bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","confirm_source_freeze":true}`,
 				runForkTestSourceRunID,
 				runForkTestEventID,
 			),
@@ -131,7 +154,7 @@ func TestOperatorRunForkHandlersMapSourceAndEventErrors(t *testing.T) {
 		executor := &recordingRunForkExecutor{err: errors.New("fork point event " + runForkTestEventID + " not found in source run " + runForkTestSourceRunID)}
 		handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash)}}, executor)
 		resp := rpcCall(t, handler, fmt.Sprintf(
-			`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"idempotency_key":"event-missing"}}`,
+			`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"confirm_source_freeze":true,"idempotency_key":"event-missing"}}`,
 			runForkTestSourceRunID,
 			runForkTestEventID,
 		))
@@ -148,7 +171,7 @@ func TestOperatorRunForkHandlersMapSourceAndEventErrors(t *testing.T) {
 		executor := &recordingRunForkExecutor{err: errors.New("no source-run event exists for fork source run " + runForkTestSourceRunID)}
 		handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash)}}, executor)
 		resp := rpcCall(t, handler, fmt.Sprintf(
-			`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"idempotency_key":"default-event-missing"}}`,
+			`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"confirm_source_freeze":true,"idempotency_key":"default-event-missing"}}`,
 			runForkTestSourceRunID,
 		))
 		if resp.Error == nil || resp.Error.Code != codeInvalidParams {
@@ -164,7 +187,7 @@ func TestOperatorRunForkHandlersMapSourceAndEventErrors(t *testing.T) {
 		executor := &recordingRunForkExecutor{err: errors.New(runbundle.CodeBundleDataIntegrityError + ": corrupt persisted bundle catalog bytes")}
 		handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash)}}, executor)
 		resp := rpcCall(t, handler, fmt.Sprintf(
-			`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"idempotency_key":"integrity-error"}}`,
+			`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"confirm_source_freeze":true,"idempotency_key":"integrity-error"}}`,
 			runForkTestSourceRunID,
 			runForkTestEventID,
 		))
@@ -177,7 +200,7 @@ func TestOperatorRunForkHandlersMapSourceAndEventErrors(t *testing.T) {
 		executor := &recordingRunForkExecutor{err: errors.New(runbundle.CodeBundleDataIntegrityError + ": selected_contracts source hash mismatch: request bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc source " + runForkTestBundleHash)}
 		handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash)}}, executor)
 		resp := rpcCall(t, handler, fmt.Sprintf(
-			`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"idempotency_key":"hash-mismatch"}}`,
+			`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"confirm_source_freeze":true,"idempotency_key":"hash-mismatch"}}`,
 			runForkTestSourceRunID,
 			runForkTestEventID,
 		))

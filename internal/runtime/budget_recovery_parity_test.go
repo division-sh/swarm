@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -65,13 +66,20 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 			seedBudgetRecoveryEntity(t, ctx, db, postgres, runB, entityB, "active", now.Add(time.Second))
 			seedBudgetRecoveryEntity(t, ctx, db, postgres, runB, terminalEntity, "done", now.Add(2*time.Second))
 
-			for _, rec := range []budgetspend.SpendRecord{
-				budgetRecoverySpend(entityA, "flow/a", 9.5, now),
-				budgetRecoverySpend(entityB, "flow/b", 9.5, now),
-				budgetRecoverySpend(terminalEntity, "flow/done", 9.5, now),
-				budgetRecoverySpend("", "global", 9.5, now),
+			for _, seed := range []struct {
+				runID  string
+				record budgetspend.SpendRecord
+			}{
+				{runID: runA, record: budgetRecoverySpend(entityA, "flow/a", 9.5, now)},
+				{runID: runB, record: budgetRecoverySpend(entityB, "flow/b", 9.5, now)},
+				{runID: runB, record: budgetRecoverySpend(terminalEntity, "flow/done", 9.5, now)},
+				{record: budgetRecoverySpend("", "global", 9.5, now)},
 			} {
-				if err := selected.RecordSpend(ctx, rec); err != nil {
+				spendCtx := ctx
+				if seed.runID != "" {
+					spendCtx = runtimecorrelation.WithRunID(spendCtx, seed.runID)
+				}
+				if err := selected.RecordSpend(spendCtx, seed.record); err != nil {
 					t.Fatalf("seed retained spend: %v", err)
 				}
 			}

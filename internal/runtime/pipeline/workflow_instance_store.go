@@ -22,6 +22,7 @@ import (
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -295,6 +296,21 @@ func (s *WorkflowInstanceStore) SelectActiveByFields(ctx context.Context, scopeK
 	return s.selectActiveByFieldsSpec(ctx, scopeKey, selectors, excludedStates)
 }
 
+func (s *WorkflowInstanceStore) requireActiveWorkflowRun(ctx context.Context, tx *sql.Tx) (string, error) {
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return "", err
+	}
+	dialect := storerunlifecycle.DialectPostgres
+	if s.isSQLite() {
+		dialect = storerunlifecycle.DialectSQLite
+	}
+	if err := storerunlifecycle.RequireActive(ctx, tx, runID, dialect); err != nil {
+		return "", err
+	}
+	return runID, nil
+}
+
 func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowInstance) error {
 	if s == nil || s.db == nil {
 		return nil
@@ -404,6 +420,9 @@ func (s *WorkflowInstanceStore) MutateE(ctx context.Context, instanceID string, 
 		return s.mutateSQLiteE(ctx, instanceID, fn)
 	}
 	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if _, err := s.requireActiveWorkflowRun(txctx, tx); err != nil {
+			return err
+		}
 		if err := lockWorkflowInstanceMutation(txctx, tx, instanceID); err != nil {
 			return err
 		}
@@ -427,6 +446,9 @@ func (s *WorkflowInstanceStore) MarkTerminated(ctx context.Context, storageRef s
 	}
 	if s.decisionCards != nil {
 		return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			if _, err := s.requireActiveWorkflowRun(txctx, tx); err != nil {
+				return err
+			}
 			if err := s.MutateE(txctx, storageRef, func(instance *WorkflowInstance) error {
 				return s.supersedeWorkflowInstanceGates(txctx, instance, "flow_terminated", terminatedAt)
 			}); err != nil {
@@ -440,6 +462,9 @@ func (s *WorkflowInstanceStore) MarkTerminated(ctx context.Context, storageRef s
 	}
 	if s.isSQLite() {
 		return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			if _, err := s.requireActiveWorkflowRun(txctx, tx); err != nil {
+				return err
+			}
 			return s.markTerminatedSQLiteTx(txctx, tx, storageRef, terminatedAt)
 		})
 	}
@@ -451,6 +476,9 @@ func (s *WorkflowInstanceStore) MarkTerminated(ctx context.Context, storageRef s
 		terminatedAt = time.Now().UTC()
 	}
 	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if _, err := s.requireActiveWorkflowRun(txctx, tx); err != nil {
+			return err
+		}
 		result, err := tx.ExecContext(txctx, `
 			UPDATE flow_instances
 			SET status = 'terminated',
@@ -745,6 +773,12 @@ func (s *WorkflowInstanceStore) selectActiveByFieldsSpec(ctx context.Context, sc
 	var where strings.Builder
 	where.WriteString(`
 		WHERE es.run_id = $1::uuid
+		  AND EXISTS (
+			SELECT 1
+			FROM runs run
+			WHERE run.run_id = es.run_id
+			  AND run.status IN ('running', 'paused')
+		  )
 		  AND (es.flow_instance = $2 OR es.flow_instance LIKE $3)
 		  AND COALESCE(fi.status, 'active') NOT IN ('terminated', 'inactive')
 		  AND fi.terminated_at IS NULL
@@ -933,13 +967,13 @@ func workflowInstanceFieldSelectorPath(field string) []string {
 }
 
 func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRef string, instance WorkflowInstance) error {
-	runID, err := runtimecurrentstate.RequireRunID(ctx)
-	if err != nil {
-		return err
-	}
 	tx, ok := sqlTxFromContext(ctx)
 	if !ok || tx == nil || !runtimeauthoractivity.InMutation(ctx, tx) {
 		return fmt.Errorf("workflow instance upsert requires the pipeline story transaction owner")
+	}
+	runID, err := s.requireActiveWorkflowRun(ctx, tx)
+	if err != nil {
+		return err
 	}
 	previous, err := loadTrackedEntityStateProjection(ctx, tx, runID, rowID)
 	if err != nil {
@@ -1079,13 +1113,13 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 }
 
 func (s *WorkflowInstanceStore) createSpec(ctx context.Context, rowID, storageRef string, instance WorkflowInstance) error {
-	runID, err := runtimecurrentstate.RequireRunID(ctx)
-	if err != nil {
-		return err
-	}
 	tx, ok := sqlTxFromContext(ctx)
 	if !ok || tx == nil || !runtimeauthoractivity.InMutation(ctx, tx) {
 		return fmt.Errorf("workflow instance create requires the pipeline story transaction owner")
+	}
+	runID, err := s.requireActiveWorkflowRun(ctx, tx)
+	if err != nil {
+		return err
 	}
 	if err := lockWorkflowInstanceMutation(ctx, tx, storageRef); err != nil {
 		return err

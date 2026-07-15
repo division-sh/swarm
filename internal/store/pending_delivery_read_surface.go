@@ -282,11 +282,13 @@ func (s *PostgresStore) listPendingAgentDeliveryRecordsSpec(ctx context.Context,
 			CASE WHEN r.event_id IS NULL THEN FALSE ELSE TRUE END
 		FROM event_deliveries d
 		INNER JOIN events e ON e.event_id = d.event_id
+		LEFT JOIN runs run ON run.run_id = e.run_id
 		LEFT JOIN event_receipts r
 			ON r.event_id = d.event_id
 			AND r.subscriber_type = 'agent'
 			AND r.subscriber_id = d.subscriber_id
 		WHERE d.subscriber_type = 'agent'
+		  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
 		  AND d.subscriber_id = ANY($1)
 		  AND ($2::timestamptz IS NULL OR e.created_at >= $2::timestamptz)
 		  AND `+canonicalPendingDeliveryPredicateSQL("d", "r")+`

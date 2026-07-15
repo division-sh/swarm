@@ -3,10 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 func (s *PostgresStore) ClaimSchedule(ctx context.Context, sc runtimepipeline.Schedule) (bool, error) {
@@ -30,7 +32,30 @@ func (s *PostgresStore) ClaimSchedule(ctx context.Context, sc runtimepipeline.Sc
 	defer s.scheduleClaimMu.Unlock()
 
 	if _, ok := s.scheduleClaimKeys[key]; ok {
-		return true, nil
+		if strings.TrimSpace(sc.RunID) == "" {
+			return true, nil
+		}
+		conn := s.scheduleClaimConn
+		if conn == nil {
+			delete(s.scheduleClaimKeys, key)
+		} else if err := storerunlifecycle.RequireActive(ctx, conn, sc.RunID, storerunlifecycle.DialectPostgres); err != nil {
+			if !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+				return false, err
+			}
+			if _, unlockErr := conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key); unlockErr != nil {
+				_ = s.closeScheduleClaimConnLocked()
+				return false, fmt.Errorf("release terminal-run schedule ownership: %w", unlockErr)
+			}
+			delete(s.scheduleClaimKeys, key)
+			if len(s.scheduleClaimKeys) == 0 {
+				if closeErr := s.closeScheduleClaimConnLocked(); closeErr != nil {
+					return false, closeErr
+				}
+			}
+			return false, nil
+		} else {
+			return true, nil
+		}
 	}
 	conn, err := s.ensureScheduleClaimConnLocked(ctx)
 	if err != nil {
@@ -42,6 +67,15 @@ func (s *PostgresStore) ClaimSchedule(ctx context.Context, sc runtimepipeline.Sc
 	}
 	if !acquired {
 		return false, nil
+	}
+	if strings.TrimSpace(sc.RunID) != "" {
+		if err := storerunlifecycle.RequireActive(ctx, conn, sc.RunID, storerunlifecycle.DialectPostgres); err != nil {
+			_, _ = conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key)
+			if errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+				return false, nil
+			}
+			return false, err
+		}
 	}
 	active, err := scheduleActiveOnConn(ctx, conn, sc)
 	if err != nil {
@@ -98,7 +132,7 @@ func (s *PostgresStore) ReleaseSchedule(ctx context.Context, sc runtimepipeline.
 }
 
 func (s *PostgresStore) CancelScheduleExactTerminal(ctx context.Context, sc runtimepipeline.Schedule) error {
-	return s.applyScheduleTerminalTransition(ctx, sc, s.CancelScheduleExact, true)
+	return s.applyScheduleTerminalTransition(ctx, sc, s.cancelScheduleExactSpec, true)
 }
 
 func (s *PostgresStore) CompleteScheduleFireExact(ctx context.Context, sc runtimepipeline.Schedule) error {
@@ -170,16 +204,18 @@ func scheduleActiveOnConn(ctx context.Context, conn *sql.Conn, sc runtimepipelin
 	err := conn.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT EXISTS (
 			SELECT 1
-			FROM timers
-			WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
-			  AND owner_agent = $2
-			  AND fire_event = $3
-			  AND entity_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
-			  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
-			  AND %s = $6
-			  AND status = 'active'
+			FROM timers t
+			LEFT JOIN runs run ON run.run_id = t.run_id
+			WHERE t.run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
+			  AND t.owner_agent = $2
+			  AND t.fire_event = $3
+			  AND t.entity_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
+			  AND t.flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
+			  AND COALESCE(t.fire_payload->>'__schedule_task_id', '') = $6
+			  AND t.status = 'active'
+			  AND (t.run_id IS NULL OR run.status IN ('running', 'paused'))
 		)
-	`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID)).Scan(&active)
+	`), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID)).Scan(&active)
 	if err != nil {
 		return false, fmt.Errorf("check active schedule ownership target: %w", err)
 	}

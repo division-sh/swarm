@@ -713,7 +713,6 @@ func TestTerminalDecisionCardSupersessionStateChangeOnlyProducerParity(t *testin
 	}{
 		{name: "mark_failed", invoke: markDecisionCardRunTerminalStatus("failed"), retry: markDecisionCardRunTerminalStatus("failed")},
 		{name: "mark_cancelled", invoke: markDecisionCardRunTerminalStatus("cancelled"), retry: markDecisionCardRunTerminalStatus("cancelled")},
-		{name: "mark_forked", invoke: markDecisionCardRunTerminalStatus("forked"), retry: markDecisionCardRunTerminalStatus("forked")},
 		{name: "run_stop", invoke: stopDecisionCardRun, retry: func(ctx context.Context, cards decisioncard.Store, runID string, now time.Time) error {
 			err := stopDecisionCardRun(ctx, cards, runID, now)
 			if !errors.Is(err, runtimeruncontrol.ErrAlreadyTerminal) {

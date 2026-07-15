@@ -1305,6 +1305,7 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialized.ForkRunID,
+		ConfirmSourceFreeze:   true,
 		AllowedSourceEventIDs: []string{eventID},
 	})
 	if err != nil {
@@ -1403,6 +1404,7 @@ func TestSelectedContractActivation_IgnoresExcludedSourceSessionColumnChanges(t 
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialized.ForkRunID,
+		ConfirmSourceFreeze:   true,
 		AllowedSourceEventIDs: []string{eventID},
 	})
 	if err != nil {
@@ -1778,6 +1780,7 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialized.ForkRunID,
+		ConfirmSourceFreeze:   true,
 		AllowedSourceEventIDs: []string{eventID},
 	})
 	if err != nil {
@@ -1835,6 +1838,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEv
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialized.ForkRunID,
+		ConfirmSourceFreeze:   true,
 		AllowedSourceEventIDs: []string{eventID},
 	})
 	if err != nil {
@@ -1885,6 +1889,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialized.ForkRunID,
+		ConfirmSourceFreeze:   true,
 		AllowedSourceEventIDs: []string{eventID},
 	})
 	if err != nil {

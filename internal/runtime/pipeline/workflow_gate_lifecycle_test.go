@@ -108,7 +108,7 @@ func TestHumanTaskDecisionRoutesDirectlyToRequesterInOneMutationOnBothStores(t *
 			t.Run(tc.name+"/"+scopeCase.name, func(t *testing.T) {
 				workflowStore, ctx := tc.open(t)
 				runID := runtimeRunID(ctx)
-				ensureGateLifecycleRun(t, workflowStore, runID)
+				ensurePipelineTestRun(t, workflowStore, runID)
 				now := time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC)
 				decisionEventID := uuid.NewString()
 				anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
@@ -205,7 +205,7 @@ func TestHumanTaskDeferredAndExpiredOutcomesUseRequesterRouteOnBothStores(t *tes
 			t.Run(tc.name+"/"+lifecycle.name, func(t *testing.T) {
 				workflowStore, ctx := tc.open(t)
 				runID := runtimeRunID(ctx)
-				ensureGateLifecycleRun(t, workflowStore, runID)
+				ensurePipelineTestRun(t, workflowStore, runID)
 				now := time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC)
 				lifecycleEventID := uuid.NewString()
 				anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
@@ -386,7 +386,7 @@ func TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBo
 		t.Run(tc.name, func(t *testing.T) {
 			workflowStore, ctx := tc.open(t)
 			runID := runtimeRunID(ctx)
-			ensureGateLifecycleRun(t, workflowStore, runID)
+			ensurePipelineTestRun(t, workflowStore, runID)
 			now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()
 			if err := workflowStore.Upsert(ctx, WorkflowInstance{
@@ -482,7 +482,7 @@ func TestWorkflowGateCommittedDecisionWinsOrdinaryAndTimerExitRacesOnBothStores(
 			t.Run(tc.name+"/"+sourceEvent, func(t *testing.T) {
 				workflowStore, ctx := tc.open(t)
 				runID := runtimeRunID(ctx)
-				ensureGateLifecycleRun(t, workflowStore, runID)
+				ensurePipelineTestRun(t, workflowStore, runID)
 				now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 				entityID := uuid.NewString()
 				if err := workflowStore.Upsert(ctx, WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: entityID, WorkflowName: "gate-test", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: map[string]any{"entity_id": entityID, "run_id": runID}}); err != nil {
@@ -520,7 +520,7 @@ func TestWorkflowGateDecisionWaitsForItsRecordedBundlePinOnBothStores(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			workflowStore, ctx := tc.open(t)
 			runID := runtimeRunID(ctx)
-			ensureGateLifecycleRun(t, workflowStore, runID)
+			ensurePipelineTestRun(t, workflowStore, runID)
 			now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()
 			if err := workflowStore.Upsert(ctx, WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: entityID, WorkflowName: "gate-test", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: map[string]any{"entity_id": entityID, "run_id": runID}}); err != nil {
@@ -562,7 +562,7 @@ func TestInitialStageLifecycleArmsStandingGateOnBothStores(t *testing.T) {
 			workflowStore, ctx := tc.open(t)
 			ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 			runID := runtimeRunID(ctx)
-			ensureGateLifecycleRun(t, workflowStore, runID)
+			ensurePipelineTestRun(t, workflowStore, runID)
 			entityID := uuid.NewString()
 			if err := workflowStore.Upsert(ctx, WorkflowInstance{InstanceID: "standing-readable-id", StorageRef: entityID, WorkflowName: "gate-test", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "activation": "standing"}}); err != nil {
 				t.Fatal(err)
@@ -587,7 +587,7 @@ func TestWorkflowGateTerminationUsesCanonicalPersistedEntityIdentityOnBothStores
 		t.Run(tc.name, func(t *testing.T) {
 			workflowStore, ctx := tc.open(t)
 			runID := runtimeRunID(ctx)
-			ensureGateLifecycleRun(t, workflowStore, runID)
+			ensurePipelineTestRun(t, workflowStore, runID)
 			entityID := uuid.NewString()
 			if err := workflowStore.Upsert(ctx, WorkflowInstance{InstanceID: "display-instance-id", StorageRef: entityID, WorkflowName: "gate-test", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "run_id": runID}}); err != nil {
 				t.Fatal(err)
@@ -617,7 +617,7 @@ func TestWorkflowGateOrdinaryExitSupersessionCarriesCardFlowIdentityOnBothStores
 		t.Run(tc.name, func(t *testing.T) {
 			workflowStore, ctx := tc.open(t)
 			runID := runtimeRunID(ctx)
-			ensureGateLifecycleRun(t, workflowStore, runID)
+			ensurePipelineTestRun(t, workflowStore, runID)
 			entityID := uuid.NewString()
 			if err := workflowStore.Upsert(ctx, WorkflowInstance{InstanceID: "child/review-1", StorageRef: entityID, WorkflowName: "gate-test", WorkflowVersion: "1", CurrentState: "drafting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "run_id": runID}}); err != nil {
 				t.Fatal(err)
@@ -650,7 +650,7 @@ func TestWorkflowGateOrdinaryExitSupersessionCarriesCardFlowIdentityOnBothStores
 	}
 }
 
-func ensureGateLifecycleRun(t *testing.T, store *WorkflowInstanceStore, runID string) {
+func ensurePipelineTestRun(t *testing.T, store *WorkflowInstanceStore, runID string) {
 	t.Helper()
 	query := `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running') ON CONFLICT (run_id) DO NOTHING`
 	if store.isSQLite() {

@@ -58,6 +58,7 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, now ti
 		LEFT JOIN agents g ON o.authority_kind='normal_agent' AND g.agent_id=o.agent_id
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
+		  AND `+postgresExternalEffectActiveOwnerPredicate+`
 		  AND (
 		    a.lease_expires_at <= $1 OR
 		    (o.authority_kind='normal_agent' AND (
@@ -88,6 +89,7 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, now time
 		LEFT JOIN agents g ON o.authority_kind='normal_agent' AND g.agent_id=o.agent_id
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
+		  AND `+sqliteExternalEffectActiveOwnerPredicate+`
 		  AND (
 		    a.lease_expires_at <= ? OR
 		    (o.authority_kind='normal_agent' AND (

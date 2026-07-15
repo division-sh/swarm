@@ -46,6 +46,104 @@ type execQueryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
+func requireActiveRunForEvent(ctx context.Context, db storerunlifecycle.DBTX, eventID string, dialect storerunlifecycle.Dialect) error {
+	return requireActiveRunForEventMode(ctx, db, eventID, dialect, false)
+}
+
+func requireActiveRunForEventMode(ctx context.Context, db storerunlifecycle.DBTX, eventID string, dialect storerunlifecycle.Dialect, allowMissing bool) error {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return fmt.Errorf("event_id is required")
+	}
+	var query string
+	switch dialect {
+	case storerunlifecycle.DialectPostgres:
+		query = `SELECT COALESCE(run_id::text, '') FROM events WHERE event_id = $1::uuid`
+	case storerunlifecycle.DialectSQLite:
+		query = `SELECT COALESCE(CAST(run_id AS TEXT), '') FROM events WHERE event_id = ?`
+	default:
+		return fmt.Errorf("require active event run: unsupported dialect %q", dialect)
+	}
+	var runID string
+	if err := db.QueryRowContext(ctx, query, eventID).Scan(&runID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			if allowMissing {
+				return nil
+			}
+			return fmt.Errorf("require active event run: event %s not found", eventID)
+		}
+		return fmt.Errorf("require active event run: %w", err)
+	}
+	if strings.TrimSpace(runID) == "" {
+		return nil
+	}
+	return storerunlifecycle.RequireActive(ctx, db, runID, dialect)
+}
+
+func requireEventRunNotForked(ctx context.Context, db storerunlifecycle.DBTX, eventID string, dialect storerunlifecycle.Dialect, allowMissing bool) error {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return fmt.Errorf("event_id is required")
+	}
+	var eventQuery, runQuery string
+	switch dialect {
+	case storerunlifecycle.DialectPostgres:
+		eventQuery = `SELECT COALESCE(run_id::text, '') FROM events WHERE event_id = $1::uuid`
+		runQuery = `SELECT COALESCE(status, '') FROM runs WHERE run_id = $1::uuid FOR UPDATE`
+	case storerunlifecycle.DialectSQLite:
+		eventQuery = `SELECT COALESCE(CAST(run_id AS TEXT), '') FROM events WHERE event_id = ?`
+		runQuery = `SELECT COALESCE(status, '') FROM runs WHERE run_id = ?`
+	default:
+		return fmt.Errorf("require non-forked event run: unsupported dialect %q", dialect)
+	}
+	var runID string
+	if err := db.QueryRowContext(ctx, eventQuery, eventID).Scan(&runID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) && allowMissing {
+			return nil
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("require non-forked event run: event %s not found", eventID)
+		}
+		return fmt.Errorf("require non-forked event run: %w", err)
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil
+	}
+	var status string
+	if err := db.QueryRowContext(ctx, runQuery, runID).Scan(&status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return &storerunlifecycle.RunNotFoundError{RunID: runID}
+		}
+		return fmt.Errorf("require non-forked event run: %w", err)
+	}
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status == RunForkSourceFrozenStatus {
+		return &storerunlifecycle.RunNotActiveError{RunID: runID, Status: status}
+	}
+	return nil
+}
+
+func requireActiveRunForPipelineReceipt(ctx context.Context, db storerunlifecycle.DBTX, eventID string, dialect storerunlifecycle.Dialect) error {
+	var query string
+	switch dialect {
+	case storerunlifecycle.DialectPostgres:
+		query = `SELECT EXISTS (SELECT 1 FROM event_deliveries WHERE event_id = $1::uuid AND status = 'dead_letter' AND reason_code IN ($2, $3))`
+	case storerunlifecycle.DialectSQLite:
+		query = `SELECT EXISTS (SELECT 1 FROM event_deliveries WHERE event_id = ? AND status = 'dead_letter' AND reason_code IN (?, ?))`
+	default:
+		return fmt.Errorf("require active pipeline receipt run: unsupported dialect %q", dialect)
+	}
+	var quiesced bool
+	if err := db.QueryRowContext(ctx, query, strings.TrimSpace(eventID), destructivereset.QuiescenceReasonCode, runtimerunquiescence.ServeAbandonReasonCode).Scan(&quiesced); err != nil {
+		return fmt.Errorf("inspect pipeline receipt quiescence: %w", err)
+	}
+	if quiesced {
+		return nil
+	}
+	return requireActiveRunForEvent(ctx, db, eventID, dialect)
+}
+
 func eventReadQueryerFromContext(ctx context.Context, db *sql.DB) eventReadQueryer {
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		return tx
@@ -355,6 +453,9 @@ func (s *PostgresStore) InsertEventDeliveriesTx(ctx context.Context, tx *sql.Tx,
 			return s.InsertEventDeliveriesTx(txctx, tx, eventID, agentIDs)
 		})
 	}
+	if err := requireActiveRunForEvent(ctx, tx, eventID, storerunlifecycle.DialectPostgres); err != nil {
+		return err
+	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
@@ -388,6 +489,9 @@ func (s *PostgresStore) UpsertCommittedReplayScopeTx(
 		return s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 			return s.UpsertCommittedReplayScopeTx(txctx, tx, eventID, scope)
 		})
+	}
+	if err := requireActiveRunForEvent(ctx, tx, eventID, storerunlifecycle.DialectPostgres); err != nil {
+		return err
 	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
@@ -446,6 +550,11 @@ func (s *PostgresStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx,
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
+	}
+	if caps.Events.LogRunID {
+		if err := requireActiveRunForPipelineReceipt(ctx, tx, eventID, storerunlifecycle.DialectPostgres); err != nil {
+			return err
+		}
 	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
@@ -560,19 +669,38 @@ func (s *PostgresStore) ClaimPipelineReplay(ctx context.Context, eventID string)
 	if err != nil || !claimed {
 		return nil, claimed, err
 	}
-	var pending bool
-	err = lease.conn.QueryRowContext(ctx, `
+	pendingQuery := `
 		SELECT EXISTS (
 			SELECT 1
 			FROM events e
+			LEFT JOIN runs run ON run.run_id = e.run_id
 			LEFT JOIN event_receipts r
 				ON r.event_id = e.event_id
 				AND r.subscriber_type = 'platform'
 				AND r.subscriber_id = 'pipeline'
 			WHERE e.event_id = $1::uuid
+			  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
 			  AND r.event_id IS NULL
 		)
-	`, eventID).Scan(&pending)
+	`
+	if !caps.Events.LogRunID {
+		// The recovery capability probe must still claim the old row so it can
+		// quarantine it with the canonical missing-run-identity failure.
+		pendingQuery = `
+			SELECT EXISTS (
+				SELECT 1
+				FROM events e
+				LEFT JOIN event_receipts r
+					ON r.event_id = e.event_id
+					AND r.subscriber_type = 'platform'
+					AND r.subscriber_id = 'pipeline'
+				WHERE e.event_id = $1::uuid
+				  AND r.event_id IS NULL
+			)
+		`
+	}
+	var pending bool
+	err = lease.conn.QueryRowContext(ctx, pendingQuery, eventID).Scan(&pending)
 	if err != nil {
 		_ = lease.Release(ctx)
 		return nil, false, fmt.Errorf("claim pipeline replay: %w", err)
@@ -589,6 +717,8 @@ func (s *PostgresStore) ClaimPipelinePublication(ctx context.Context, eventID st
 	if eventID == "" {
 		return nil, false, fmt.Errorf("event_id is required")
 	}
+	// Publication ownership serializes same-ID attempts. Canonical append must
+	// classify exact/conflicting duplicates before applying run-status admission.
 	return acquireAdvisoryLockLease(ctx, s.DB, replayClaimLockKey(eventID))
 }
 
@@ -597,7 +727,19 @@ func (s *PostgresStore) ClaimPipelineSettlement(ctx context.Context, eventID str
 	if eventID == "" {
 		return nil, false, fmt.Errorf("event_id is required")
 	}
-	return acquireAdvisoryLockLease(ctx, s.DB, replayClaimLockKey(eventID))
+	lease, claimed, err := acquireAdvisoryLockLease(ctx, s.DB, replayClaimLockKey(eventID))
+	if err != nil || !claimed {
+		return nil, claimed, err
+	}
+	admissionErr := requireEventRunNotForked(ctx, lease.conn, eventID, storerunlifecycle.DialectPostgres, true)
+	if admissionErr != nil {
+		_ = lease.Release(ctx)
+		if errors.Is(admissionErr, storerunlifecycle.ErrRunNotActive) {
+			return nil, false, nil
+		}
+		return nil, false, admissionErr
+	}
+	return lease, true, nil
 }
 
 func (s *PostgresStore) EventExists(ctx context.Context, eventID string) (bool, error) {
@@ -1121,6 +1263,9 @@ func (s *PostgresStore) InsertEventDeliveryRoutesTx(ctx context.Context, tx *sql
 			return s.InsertEventDeliveryRoutesTx(txctx, tx, eventID, deliveryRoutes)
 		})
 	}
+	if err := requireActiveRunForEvent(ctx, tx, eventID, storerunlifecycle.DialectPostgres); err != nil {
+		return err
+	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
@@ -1437,8 +1582,12 @@ func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.T
 
 func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context, caps StoreSchemaCapabilities, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
 	runIDExpr := `COALESCE(e.run_id::text, '')`
+	runJoin := `LEFT JOIN runs run ON run.run_id = e.run_id`
+	runAdmission := `AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))`
 	if !caps.Events.LogRunID {
 		runIDExpr = `''`
+		runJoin = ``
+		runAdmission = ``
 	}
 	routeSelect := ` '{}'::jsonb, '{}'::jsonb, '[]'::jsonb`
 	if caps.Events.LogRouteIdentity {
@@ -1455,11 +1604,13 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 			e.payload, e.created_at, COALESCE(e.source_event_id::text, ''), e.execution_mode,
 			%s
 		FROM events e
+		%s
 		LEFT JOIN event_receipts r
 			ON r.event_id = e.event_id
 			AND r.subscriber_type = 'platform'
 			AND r.subscriber_id = 'pipeline'
 		WHERE r.event_id IS NULL
+		  %s
 		  AND e.created_at >= $1
 		  AND NOT EXISTS (
 			SELECT 1 FROM decision_card_route_obligations o
@@ -1468,7 +1619,7 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 		  AND %s
 		ORDER BY e.created_at ASC
 		LIMIT $%d
-	`, runIDExpr, routeSelect, postgresDiagnosticDirectReplayExclusionSQL("e", 2), limitPlaceholder), args...)
+	`, runIDExpr, routeSelect, runJoin, runAdmission, postgresDiagnosticDirectReplayExclusionSQL("e", 2), limitPlaceholder), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list events missing pipeline receipt: %w", err)
 	}
@@ -1545,12 +1696,14 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 			e.payload, e.created_at, COALESCE(e.source_event_id::text, ''), e.execution_mode,
 			%s
 		FROM events e
+		JOIN runs run ON run.run_id = e.run_id
 		LEFT JOIN event_receipts r
 			ON r.event_id = e.event_id
 			AND r.subscriber_type = 'platform'
 			AND r.subscriber_id = 'pipeline'
 		WHERE r.event_id IS NULL
 		  AND e.run_id = $1::uuid
+		  AND run.status IN ('running', 'paused')
 		  AND e.created_at >= $2
 		  AND NOT EXISTS (
 			SELECT 1 FROM decision_card_route_obligations o
@@ -1634,7 +1787,9 @@ func (s *PostgresStore) listEventsWithPendingDeliveriesForRunSpec(ctx context.Co
 			e.payload, e.created_at, COALESCE(e.source_event_id::text, ''), e.execution_mode,
 			%s
 		FROM events e
+		JOIN runs run ON run.run_id = e.run_id
 		WHERE e.run_id = $1::uuid
+		  AND run.status IN ('running', 'paused')
 		  AND e.created_at >= $2
 		  AND EXISTS (
 			SELECT 1
@@ -1825,7 +1980,7 @@ func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status strin
 		if err != nil {
 			return err
 		}
-		return supersedeDecisionCardsForRun(txctx, tx, runID, "run_"+status, endedAt, true)
+		return supersedeDecisionCardsForRun(txctx, tx, runID, "run_"+status, endedAt, false, true)
 	})
 	if err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err

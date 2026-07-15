@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -61,7 +62,10 @@ func (s *WorkflowInstanceStore) StartActivityAttempt(ctx context.Context, rec Ac
 	if err != nil {
 		return ActivityAttemptRecord{}, false, fmt.Errorf("marshal activity loop generation: %w", err)
 	}
-	err = s.runInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+	err = s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if err := requireActiveActivityRun(txctx, tx, rec.RunID, s.isSQLite()); err != nil {
+			return err
+		}
 		query := `
 			INSERT INTO activity_attempts (
 				request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
@@ -119,7 +123,10 @@ func (s *WorkflowInstanceStore) ClaimActivityAttemptForLoopGeneration(ctx contex
 	}
 	var out ActivityAttemptRecord
 	var inserted bool
-	err := s.runInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+	err := s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if err := requireActiveActivityRun(txctx, tx, rec.RunID, s.isSQLite()); err != nil {
+			return err
+		}
 		instance, ok, err := s.Load(txctx, rec.EntityID)
 		if err != nil {
 			return err
@@ -176,7 +183,10 @@ func (s *WorkflowInstanceStore) CompleteActivityAttempt(ctx context.Context, rec
 		return ActivityAttemptRecord{}, err
 	}
 	var out ActivityAttemptRecord
-	err := s.runInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+	err := s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if err := requireActiveActivityRun(txctx, tx, rec.RunID, s.isSQLite()); err != nil {
+			return err
+		}
 		rawPayload, err := json.Marshal(rec.ResultPayload)
 		if err != nil {
 			return fmt.Errorf("marshal activity attempt result payload: %w", err)
@@ -238,6 +248,14 @@ func (s *WorkflowInstanceStore) CompleteActivityAttempt(ctx context.Context, rec
 	return out, nil
 }
 
+func requireActiveActivityRun(ctx context.Context, tx *sql.Tx, runID string, sqlite bool) error {
+	dialect := storerunlifecycle.DialectPostgres
+	if sqlite {
+		dialect = storerunlifecycle.DialectSQLite
+	}
+	return storerunlifecycle.RequireActive(ctx, tx, runID, dialect)
+}
+
 func (s *WorkflowInstanceStore) MarkActivityAttemptUncertain(ctx context.Context, rec ActivityAttemptRecord) (ActivityAttemptRecord, error) {
 	rec = rec.normalized()
 	rec.Status = ActivityAttemptStatusUncertain
@@ -245,7 +263,10 @@ func (s *WorkflowInstanceStore) MarkActivityAttemptUncertain(ctx context.Context
 		return ActivityAttemptRecord{}, err
 	}
 	var out ActivityAttemptRecord
-	err := s.runInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+	err := s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if err := requireActiveActivityRun(txctx, tx, rec.RunID, s.isSQLite()); err != nil {
+			return err
+		}
 		rawPayload, err := json.Marshal(rec.ResultPayload)
 		if err != nil {
 			return fmt.Errorf("marshal activity attempt uncertain payload: %w", err)

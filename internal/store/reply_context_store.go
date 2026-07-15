@@ -12,6 +12,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 type replyContextSQL interface {
@@ -47,6 +48,9 @@ func createPostgresReplyContext(ctx context.Context, db replyContextSQL, record 
 	record = record.Normalized()
 	if err := record.Validate(); err != nil {
 		return err
+	}
+	if err := storerunlifecycle.RequireActive(ctx, db, record.RunID, storerunlifecycle.DialectPostgres); err != nil {
+		return fmt.Errorf("create reply context: %w", err)
 	}
 	origin, err := json.Marshal(record.Origin)
 	if err != nil {
@@ -99,6 +103,9 @@ func createSQLiteReplyContextTx(ctx context.Context, db replyContextSQL, record 
 	record = record.Normalized()
 	if err := record.Validate(); err != nil {
 		return err
+	}
+	if err := storerunlifecycle.RequireActive(ctx, db, record.RunID, storerunlifecycle.DialectSQLite); err != nil {
+		return fmt.Errorf("create sqlite reply context: %w", err)
 	}
 	origin, err := json.Marshal(record.Origin)
 	if err != nil {
@@ -229,6 +236,13 @@ func claimLoadedReplyContextTx(ctx context.Context, db replyContextSQL, record r
 	replyEventID = strings.TrimSpace(replyEventID)
 	if replyEventID == "" {
 		return runtimereplycontext.Record{}, "", fmt.Errorf("reply event id is required")
+	}
+	dialect := storerunlifecycle.DialectSQLite
+	if postgres {
+		dialect = storerunlifecycle.DialectPostgres
+	}
+	if err := storerunlifecycle.RequireActive(ctx, db, record.RunID, dialect); err != nil {
+		return runtimereplycontext.Record{}, "", fmt.Errorf("claim reply context: %w", err)
 	}
 	if record.State == runtimereplycontext.StateTerminal {
 		if record.AcceptedReplyEventID == replyEventID {

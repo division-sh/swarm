@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
+	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -26,7 +28,28 @@ func (s *PostgresStore) RecordSpend(ctx context.Context, rec budgetspend.SpendRe
 	if err := validateBudgetSpendEntity(rec.EntityID); err != nil {
 		return err
 	}
-	_, err := s.DB.ExecContext(ctx, `
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if rec.EntityID != "" {
+		runID, err := runtimecurrentstate.RequireRunID(ctx)
+		if err != nil {
+			return err
+		}
+		if err := storerunlifecycle.RequireActive(ctx, tx, runID, storerunlifecycle.DialectPostgres); err != nil {
+			return err
+		}
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid)`, runID, rec.EntityID).Scan(&exists); err != nil {
+			return fmt.Errorf("resolve postgres spend entity: %w", err)
+		}
+		if !exists {
+			return fmt.Errorf("budget spend entity does not belong to canonical run")
+		}
+	}
+	_, err = tx.ExecContext(ctx, `
 			INSERT INTO spend_ledger (
 				execution_mode, entity_id, flow_instance, agent_id, model, model_alias, backend_profile, provider, transport, resolved_model,
 				input_tokens, output_tokens, cost_usd, invocation_type, usage_accounting, created_at
@@ -37,7 +60,7 @@ func (s *PostgresStore) RecordSpend(ctx context.Context, rec budgetspend.SpendRe
 	if err != nil {
 		return fmt.Errorf("record postgres spend: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *PostgresStore) ResolveFlowInstance(ctx context.Context, runID string, entityID string) (string, error) {
@@ -65,10 +88,12 @@ func (s *PostgresStore) ListBudgetProjectionTargets(ctx context.Context, termina
 		return nil, fmt.Errorf("postgres budget spend store is required")
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT run_id::text, entity_id::text
-		FROM entity_state
-		WHERE NOT (current_state = ANY($1::text[]))
-		ORDER BY run_id::text ASC, created_at ASC, entity_id::text ASC
+		SELECT es.run_id::text, es.entity_id::text
+		FROM entity_state es
+		JOIN runs run ON run.run_id = es.run_id
+		WHERE run.status IN ('running', 'paused')
+		  AND NOT (es.current_state = ANY($1::text[]))
+		ORDER BY es.run_id::text ASC, es.created_at ASC, es.entity_id::text ASC
 	`, pq.Array(normalizeBudgetTerminalStates(terminalStates)))
 	if err != nil {
 		return nil, fmt.Errorf("list postgres budget projection targets: %w", err)
@@ -132,6 +157,22 @@ func (s *SQLiteRuntimeStore) RecordSpend(ctx context.Context, rec budgetspend.Sp
 		return err
 	}
 	if err := s.runRuntimeMutation(ctx, "sqlite budget spend record", func(txctx context.Context, tx *sql.Tx) error {
+		if rec.EntityID != "" {
+			runID, err := runtimecurrentstate.RequireRunID(txctx)
+			if err != nil {
+				return err
+			}
+			if err := storerunlifecycle.RequireActive(txctx, tx, runID, storerunlifecycle.DialectSQLite); err != nil {
+				return err
+			}
+			var exists bool
+			if err := tx.QueryRowContext(txctx, `SELECT EXISTS (SELECT 1 FROM entity_state WHERE run_id = ? AND entity_id = ?)`, runID, rec.EntityID).Scan(&exists); err != nil {
+				return fmt.Errorf("resolve sqlite spend entity: %w", err)
+			}
+			if !exists {
+				return fmt.Errorf("budget spend entity does not belong to canonical run")
+			}
+		}
 		_, err := tx.ExecContext(txctx, `
 			INSERT INTO spend_ledger (
 				execution_mode, entity_id, flow_instance, agent_id, model, model_alias, backend_profile, provider, transport, resolved_model,
@@ -171,8 +212,10 @@ func (s *SQLiteRuntimeStore) ListBudgetProjectionTargets(ctx context.Context, te
 	}
 	args := make([]any, 0, len(terminalStates))
 	query := `
-		SELECT run_id, entity_id
-		FROM entity_state
+		SELECT es.run_id, es.entity_id
+		FROM entity_state es
+		JOIN runs run ON run.run_id = es.run_id
+		WHERE run.status IN ('running', 'paused')
 	`
 	states := normalizeBudgetTerminalStates(terminalStates)
 	if len(states) > 0 {
@@ -181,9 +224,9 @@ func (s *SQLiteRuntimeStore) ListBudgetProjectionTargets(ctx context.Context, te
 			placeholders = append(placeholders, "?")
 			args = append(args, state)
 		}
-		query += " WHERE current_state NOT IN (" + strings.Join(placeholders, ", ") + ")"
+		query += " AND es.current_state NOT IN (" + strings.Join(placeholders, ", ") + ")"
 	}
-	query += " ORDER BY run_id ASC, created_at ASC, entity_id ASC"
+	query += " ORDER BY es.run_id ASC, es.created_at ASC, es.entity_id ASC"
 	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list sqlite budget projection targets: %w", err)

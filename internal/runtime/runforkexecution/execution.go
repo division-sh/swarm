@@ -18,14 +18,15 @@ import (
 )
 
 type SelectedContractExecutionRequest struct {
-	SourceRunID       string
-	At                string
-	BundleHash        string
-	BundleSource      string
-	Store             *store.PostgresStore
-	SourceLoader      SelectedContractSourceLoader
-	ContractSelection store.RunForkContractSelection
-	AgentRuntime      SelectedContractAgentRuntimeOptions
+	SourceRunID         string
+	At                  string
+	BundleHash          string
+	BundleSource        string
+	ConfirmSourceFreeze bool
+	Store               *store.PostgresStore
+	SourceLoader        SelectedContractSourceLoader
+	ContractSelection   store.RunForkContractSelection
+	AgentRuntime        SelectedContractAgentRuntimeOptions
 }
 
 type SelectedContractExecutionForkEvent struct {
@@ -209,6 +210,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	}
 	activation, err := req.Store.ActivateRunForkForSelectedContractExecution(ctx, store.RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialization.ForkRunID,
+		ConfirmSourceFreeze:   req.ConfirmSourceFreeze,
 		AllowedSourceEventIDs: sourceEventIDs,
 		FrontierAdmission:     frontier,
 		RouteTopology:         routeTopology,

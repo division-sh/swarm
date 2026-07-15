@@ -17,6 +17,15 @@ import (
 
 const runForkIdempotencyTTL = 24 * time.Hour
 
+func activeRunStatus(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "running", "paused":
+		return true
+	default:
+		return false
+	}
+}
+
 type RunForkAvailabilityStore interface {
 	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
 }
@@ -26,10 +35,11 @@ type RunForkExecutor interface {
 }
 
 type RunForkExecutionRequest struct {
-	SourceRunID       string
-	ForkEventID       string
-	BundleHash        string
-	ContractSelection store.RunForkContractSelection
+	SourceRunID         string
+	ForkEventID         string
+	BundleHash          string
+	ConfirmSourceFreeze bool
+	ContractSelection   store.RunForkContractSelection
 }
 
 type RunForkExecutionResult struct {
@@ -60,13 +70,14 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 		selection = e.ContractSelection
 	}
 	result, err := e.ExecuteSelectedContractRunFork(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
-		SourceRunID:       strings.TrimSpace(req.SourceRunID),
-		At:                strings.TrimSpace(req.ForkEventID),
-		BundleHash:        strings.TrimSpace(req.BundleHash),
-		BundleSource:      storerunlifecycle.BundleSourcePersisted,
-		SourceLoader:      e.SourceLoader,
-		ContractSelection: selection,
-		AgentRuntime:      e.AgentRuntime,
+		SourceRunID:         strings.TrimSpace(req.SourceRunID),
+		At:                  strings.TrimSpace(req.ForkEventID),
+		BundleHash:          strings.TrimSpace(req.BundleHash),
+		BundleSource:        storerunlifecycle.BundleSourcePersisted,
+		ConfirmSourceFreeze: req.ConfirmSourceFreeze,
+		SourceLoader:        e.SourceLoader,
+		ContractSelection:   selection,
+		AgentRuntime:        e.AgentRuntime,
 	})
 	if err != nil {
 		return RunForkExecutionResult{}, err
@@ -116,6 +127,12 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 	if !availability.Available() {
 		return nil, NewApplicationError(BundleUnavailableCode, false, runForkAvailabilityDetails(availability))
 	}
+	if activeRunStatus(availability.Status) && !params.ConfirmSourceFreeze {
+		return nil, NewInvalidParamsError(map[string]any{
+			"field":  "confirm_source_freeze",
+			"reason": "must be true when forking a running or paused source because the source is permanently frozen",
+		})
+	}
 	sourceBundleHash := strings.TrimSpace(availability.BundleHash)
 	targetBundleHash := strings.TrimSpace(params.BundleHash)
 	if targetBundleHash == "" {
@@ -163,10 +180,11 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 		Now:            now,
 	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
 		result, err := selectedOpts.RunFork.ExecuteRunFork(ctx, RunForkExecutionRequest{
-			SourceRunID:       params.SourceRunID,
-			ForkEventID:       params.ForkEventID,
-			BundleHash:        params.BundleHash,
-			ContractSelection: contractSelection,
+			SourceRunID:         params.SourceRunID,
+			ForkEventID:         params.ForkEventID,
+			BundleHash:          params.BundleHash,
+			ConfirmSourceFreeze: params.ConfirmSourceFreeze,
+			ContractSelection:   contractSelection,
 		})
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, runForkError(params.SourceRunID, params.ForkEventID, err)
@@ -194,10 +212,11 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 }
 
 type runForkParams struct {
-	SourceRunID    string
-	ForkEventID    string
-	BundleHash     string
-	IdempotencyKey string
+	SourceRunID         string
+	ForkEventID         string
+	BundleHash          string
+	ConfirmSourceFreeze bool
+	IdempotencyKey      string
 }
 
 func runForkParamsFromRequest(params map[string]any) (runForkParams, error) {
@@ -216,15 +235,20 @@ func runForkParamsFromRequest(params map[string]any) (runForkParams, error) {
 	if bundleHash != "" && !bundleHashPattern.MatchString(bundleHash) {
 		return runForkParams{}, NewInvalidParamsError(map[string]any{"field": "bundle_hash", "reason": "must be bundle-v1:sha256:<64 lowercase hex>"})
 	}
+	confirmSourceFreeze, err := optionalBoolParam(params, "confirm_source_freeze", false)
+	if err != nil {
+		return runForkParams{}, err
+	}
 	idempotencyKey, _, err := optionalStringParam(params, "idempotency_key")
 	if err != nil {
 		return runForkParams{}, err
 	}
 	return runForkParams{
-		SourceRunID:    sourceRunID,
-		ForkEventID:    forkEventID,
-		BundleHash:     bundleHash,
-		IdempotencyKey: idempotencyKey,
+		SourceRunID:         sourceRunID,
+		ForkEventID:         forkEventID,
+		BundleHash:          bundleHash,
+		ConfirmSourceFreeze: confirmSourceFreeze,
+		IdempotencyKey:      idempotencyKey,
 	}, nil
 }
 
@@ -288,6 +312,18 @@ func runForkError(sourceRunID, forkEventID string, err error) error {
 	}
 	msg := err.Error()
 	switch {
+	case errors.Is(err, store.ErrRunForkSourceFreezeConfirmationRequired):
+		return NewInvalidParamsError(map[string]any{
+			"field":  "confirm_source_freeze",
+			"reason": "must be true when the selected fork freezes a running or paused source",
+		})
+	case errors.Is(err, storerunlifecycle.ErrRunNotActive):
+		details := map[string]any{"run_id": strings.TrimSpace(sourceRunID)}
+		var inactive *storerunlifecycle.RunNotActiveError
+		if errors.As(err, &inactive) {
+			details["current_status"] = strings.TrimSpace(inactive.Status)
+		}
+		return NewApplicationError(RunAlreadyTerminalCode, false, details)
 	case strings.Contains(msg, UnsupportedBundleHashForkCode):
 		return NewApplicationError(UnsupportedBundleHashForkCode, false, map[string]any{
 			"run_id":             strings.TrimSpace(sourceRunID),
