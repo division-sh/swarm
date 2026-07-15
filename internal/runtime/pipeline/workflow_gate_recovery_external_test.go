@@ -582,7 +582,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
 					EntityID: entityID, NodeID: "support", FlowInstance: "root", HandlerEventKey: "support.reply_drafted",
 					SourceEventID: sourceEventID, SourceRunID: runID, SourceTaskID: "task-1",
-					ReplyContextID: "reply-context-route-proof", State: decisioncard.ProposedEffectPending,
+					ExecutionMode: executionmode.Live, ReplyContextID: "reply-context-route-proof", State: decisioncard.ProposedEffectPending,
 					CreatedAt: now, UpdatedAt: now,
 				}.Canonical()
 				effect, err := continuation.EffectValue()

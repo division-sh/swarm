@@ -803,11 +803,15 @@ contract_formats:
             explicit run, source, envelope, and timestamp facts at construction.
         child:
           rule: Child/runtime emits inherit lineage from the supplied parent or
-            explicit EventLineage at construction. Lineage inheritance MUST NOT
-            be patched by later carrier mutation.
+            explicit EventLineage at construction. EventLineage is the canonical
+            carrier for run_id, parent_event_id, task_id, and causal execution_mode;
+            missing or invalid execution_mode fails admission instead of defaulting
+            to live. Lineage inheritance MUST NOT be patched by later carrier mutation.
         replay:
           rule: Replay/fork events use replay lineage constructors so replay
-            source and run ownership are explicit before persistence or dispatch.
+            source, run ownership, and the persisted source execution_mode are
+            explicit before persistence or dispatch. Replay never defaults a
+            missing causal mode to live.
             Selected-contract fork-local replay is the bounded exception where
             the durable parent/source authority is
             run_fork_selected_contract_executions rather than
@@ -24287,6 +24291,7 @@ api_specification:
         required:
         - event_id
         - event_name
+        - execution_mode
         - created_at
         - source
         - payload
@@ -24297,6 +24302,8 @@ api_specification:
             $ref: '#/components/schemas/OpaqueId'
           event_name:
             type: string
+          execution_mode:
+            $ref: '#/components/schemas/ExecutionMode'
           entity_id:
             $ref: '#/components/schemas/OpaqueId'
           run_id:

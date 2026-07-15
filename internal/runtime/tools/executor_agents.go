@@ -13,6 +13,7 @@ import (
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -92,6 +93,10 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 	if len(wirePayload) == 0 || string(wirePayload) == "null" {
 		wirePayload = []byte("{}")
 	}
+	executionMode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("agent_message requires typed causal execution mode")
+	}
 	evt := events.NewChildEventWithLineage(
 		uuid.NewString(),
 		events.EventType(in.EventType),
@@ -100,7 +105,8 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 		wirePayload,
 		0,
 		events.EventLineage{
-			RunID: runtimecorrelation.RunIDFromContext(ctx),
+			RunID:         runtimecorrelation.RunIDFromContext(ctx),
+			ExecutionMode: executionMode,
 		},
 		events.EventEnvelope{EntityID: targetEntity},
 		time.Now(),

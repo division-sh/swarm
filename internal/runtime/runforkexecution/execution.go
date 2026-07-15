@@ -307,7 +307,8 @@ func selectedContractForkEvent(forkRunID, forkEventID string, sourceEvent store.
 		payload,
 		0,
 		events.EventLineage{
-			RunID: strings.TrimSpace(forkRunID),
+			RunID:         strings.TrimSpace(forkRunID),
+			ExecutionMode: sourceEvent.ExecutionMode,
 		},
 		envelope,
 		time.Now().UTC(),

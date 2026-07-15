@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -63,6 +64,19 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	eventType = e.resolveAgentScopedEmitEventType(actor, eventType)
 
 	inbound, _ := runtimebus.InboundEventFromContext(ctx)
+	executionMode := actor.ExecutionMode
+	if !executionMode.Valid() {
+		err := fmt.Errorf("emit tool requires typed execution mode for agent %s", strings.TrimSpace(actor.ID))
+		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, nil, events.EmptyEvent(), "execution_mode_missing", "execution_mode", "resolve_execution_mode", err)
+		return nil, err
+	}
+	if activeMode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok && activeMode != executionMode {
+		err := fmt.Errorf("emit tool execution mode %q conflicts with agent %s mode %q", activeMode, strings.TrimSpace(actor.ID), executionMode)
+		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, nil, events.EmptyEvent(), "execution_mode_conflict", "execution_mode", "resolve_execution_mode", err)
+		return nil, err
+	}
+	emitLineage := events.LineageFromEvent(inbound)
+	emitLineage.ExecutionMode = executionMode
 	payloadMap = e.enrichEmitPayloadContext(actor, inbound, schemaEventType, payloadMap)
 	if err := rejectEmitEnvelopeFields(payloadMap); err != nil {
 		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, diagnosticPayloadMap(payloadMap), events.EmptyEvent(), "payload_shape_failed", "payload_shape", "envelope_field", err)
@@ -104,20 +118,17 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		envelope = events.EnvelopeForSourceRoute(envelope, sourceRoute)
 	}
 	taskID := asString(payloadMap["task_id"])
-	emitted := events.NewChildEvent(
+	emitted := events.NewChildEventWithLineage(
 		uuid.NewString(),
 		events.EventType(eventType),
 		actor.ID,
 		taskID,
 		mustJSON(payloadMap),
 		0,
-		inbound,
+		emitLineage,
 		envelope,
 		time.Now(),
 	)
-	if mode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
-		emitted = emitted.WithExecutionMode(mode)
-	}
 	if runtimepinrouting.PinDeclaredOutput(e.workflowSource, flowID, eventType) {
 		usePublishAuthority := false
 		if planner, ok := e.bus.(publishRecipientPlanner); ok && planner != nil {
@@ -181,20 +192,17 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "pin_target_resolution_failed", "publish", "pin_target_resolution", wrapped)
 				return nil, wrapped
 			}
-			emitted = events.NewChildEvent(
+			emitted = events.NewChildEventWithLineage(
 				emitted.ID(),
 				emitted.Type(),
 				emitted.SourceAgent(),
 				emitted.TaskID(),
 				emitted.Payload(),
 				emitted.ChainDepth(),
-				inbound,
+				emitLineage,
 				resolution.Envelope,
 				emitted.CreatedAt(),
 			)
-			if mode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
-				emitted = emitted.WithExecutionMode(mode)
-			}
 		}
 	}
 	if err := e.bus.Publish(ctx, emitted); err != nil {

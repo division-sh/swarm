@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/sealedpackage"
 )
@@ -183,7 +184,7 @@ func assertSealedFlowPackageRuntimeDelivery(t *testing.T, source semanticview.So
 		"",
 		json.RawMessage(`{"work_id":"work-1"}`),
 		1,
-		events.EventLineage{RunID: "run-sealed-package", ParentEventID: "evt-sealed-parent", TaskID: "producer-node"},
+		events.EventLineage{RunID: "run-sealed-package", ParentEventID: "evt-sealed-parent", TaskID: "producer-node", ExecutionMode: executionmode.Live},
 		events.EventEnvelope{},
 		time.Now().UTC(),
 	)
@@ -212,7 +213,7 @@ func assertSealedFlowPackageRuntimeDelivery(t *testing.T, source semanticview.So
 		"",
 		json.RawMessage(`{"flow_instance":"consumer"}`),
 		1,
-		events.EventLineage{RunID: "run-sealed-package", ParentEventID: "evt-sealed-parent", TaskID: "producer-node"},
+		events.EventLineage{RunID: "run-sealed-package", ParentEventID: "evt-sealed-parent", TaskID: "producer-node", ExecutionMode: executionmode.Live},
 		events.EventEnvelope{},
 		time.Now().UTC(),
 	)

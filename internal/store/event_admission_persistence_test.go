@@ -28,7 +28,7 @@ func TestPostgresEventAdmissionRejectsMalformedChildDirectAppend(t *testing.T) {
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	err := pg.AppendEvent(ctx, eventtest.MalformedChildWithoutLineage(
+	err := pg.AppendEvent(ctx, eventtest.MalformedChildWithoutRunLineage(
 		events.EventType("task.completed"),
 		"agent-1",
 		json.RawMessage(`{"ok":true}`),
@@ -740,7 +740,7 @@ func TestSQLiteEventAdmissionRejectsMalformedChildDirectAppend(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := context.Background()
 
-	err := sqliteStore.AppendEvent(ctx, eventtest.MalformedChildWithoutLineage(
+	err := sqliteStore.AppendEvent(ctx, eventtest.MalformedChildWithoutRunLineage(
 		events.EventType("task.completed"),
 		"agent-1",
 		json.RawMessage(`{"ok":true}`),

@@ -244,7 +244,7 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 		RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
 		EntityID: entityID, NodeID: "activity-runtime", FlowInstance: "root", HandlerEventKey: "support.reply_drafted",
 		SourceEventID: sourceEventID, SourceRunID: runID, SourceTaskID: "task-1",
-		State: decisioncard.ProposedEffectPending, CreatedAt: now, UpdatedAt: now,
+		ExecutionMode: "live", State: decisioncard.ProposedEffectPending, CreatedAt: now, UpdatedAt: now,
 	}.Canonical()
 	effect, err := continuation.EffectValue()
 	if err != nil {

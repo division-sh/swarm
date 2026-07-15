@@ -11,6 +11,7 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/google/uuid"
@@ -43,12 +44,13 @@ type RunForkSelectedContractExecutionActivateRequest struct {
 }
 
 type RunForkSelectedContractSourceEvent struct {
-	SourceEventID string          `json:"source_event_id"`
-	EventName     string          `json:"event_name"`
-	EntityID      string          `json:"entity_id,omitempty"`
-	FlowInstance  string          `json:"flow_instance,omitempty"`
-	Scope         string          `json:"scope,omitempty"`
-	Payload       json.RawMessage `json:"payload,omitempty"`
+	SourceEventID string             `json:"source_event_id"`
+	EventName     string             `json:"event_name"`
+	ExecutionMode executionmode.Mode `json:"execution_mode"`
+	EntityID      string             `json:"entity_id,omitempty"`
+	FlowInstance  string             `json:"flow_instance,omitempty"`
+	Scope         string             `json:"scope,omitempty"`
+	Payload       json.RawMessage    `json:"payload,omitempty"`
 }
 
 type RunForkSelectedContractExecutionLineage struct {
@@ -738,6 +740,7 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Cont
 			COALESCE(entity_id::text, ''),
 			COALESCE(flow_instance, ''),
 			COALESCE(scope, ''),
+			execution_mode,
 			COALESCE(payload, '{}'::jsonb)
 		FROM events
 		WHERE run_id = $1::uuid
@@ -750,7 +753,7 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Cont
 	out := make([]RunForkSelectedContractSourceEvent, 0, len(ids))
 	for rows.Next() {
 		var event RunForkSelectedContractSourceEvent
-		if err := rows.Scan(&event.SourceEventID, &event.EventName, &event.EntityID, &event.FlowInstance, &event.Scope, &event.Payload); err != nil {
+		if err := rows.Scan(&event.SourceEventID, &event.EventName, &event.EntityID, &event.FlowInstance, &event.Scope, &event.ExecutionMode, &event.Payload); err != nil {
 			return nil, fmt.Errorf("scan selected-contract source event: %w", err)
 		}
 		if !json.Valid(event.Payload) {

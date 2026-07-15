@@ -96,6 +96,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	autoEmitLineage := events.EventLineage{
 		RunID:         runtimecorrelation.RunIDFromContext(ctx),
 		ParentEventID: strings.TrimSpace(req.TriggerEvent.ID()),
+		ExecutionMode: req.TriggerEvent.ExecutionMode(),
 	}
 	autoEmitEvent, autoEmitName, err := buildAutoEmitOnCreateEvent(req.ContractBundle, schema, templateID, flowPath, flowEntityID, autoEmitLineage, req.Config)
 	if err != nil {

@@ -462,15 +462,16 @@ func webSocketRuntimeProbeObservability(base time.Time) *fakeObservabilityReadSt
 	return &fakeObservabilityReadStore{
 		events: map[string]store.OperatorEventFull{
 			"evt-1": {
-				EventID:     "evt-1",
-				EventName:   "scan.requested",
-				RunID:       "run-1",
-				EntityID:    "entity-1",
-				CreatedAt:   base.Add(time.Second),
-				Source:      "runtime",
-				Payload:     map[string]any{"ok": true},
-				Deliveries:  []store.OperatorEventDelivery{},
-				DeadLetters: []store.OperatorDeadLetterRecord{},
+				EventID:       "evt-1",
+				EventName:     "scan.requested",
+				ExecutionMode: "live",
+				RunID:         "run-1",
+				EntityID:      "entity-1",
+				CreatedAt:     base.Add(time.Second),
+				Source:        "runtime",
+				Payload:       map[string]any{"ok": true},
+				Deliveries:    []store.OperatorEventDelivery{},
+				DeadLetters:   []store.OperatorDeadLetterRecord{},
 			},
 		},
 		traceRows: map[string][]store.RunDebugTraceRow{

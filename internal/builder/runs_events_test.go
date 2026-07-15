@@ -18,13 +18,14 @@ func TestProjectCanonicalRunDebugReplay_UsesCanonicalEventOwnerPayload(t *testin
 		StartedAt: now,
 	}
 	events := []store.OperatorEventFull{{
-		EventID:   "evt-1",
-		EventName: "workflow.started",
-		RunID:     "run-123",
-		EntityID:  "entity-1",
-		CreatedAt: now,
-		Source:    "builder",
-		Payload:   map[string]any{"topic": "sample"},
+		EventID:       "evt-1",
+		EventName:     "workflow.started",
+		ExecutionMode: "live",
+		RunID:         "run-123",
+		EntityID:      "entity-1",
+		CreatedAt:     now,
+		Source:        "builder",
+		Payload:       map[string]any{"topic": "sample"},
 	}}
 
 	replay, _ := projectCanonicalRunDebugReplay(snapshot, events, nil)
@@ -56,12 +57,13 @@ func TestProjectCanonicalRunDebugReplay_UsesCanonicalEventOwnerPayload(t *testin
 func TestProjectCanonicalRunDebugReplay_DoesNotPromotePayloadEntityToInstanceID(t *testing.T) {
 	now := time.Unix(1700001200, 0).UTC()
 	events := []store.OperatorEventFull{{
-		EventID:   "evt-payload-only",
-		EventName: "workflow.payload_only",
-		RunID:     "run-123",
-		CreatedAt: now,
-		Source:    "builder",
-		Payload:   map[string]any{"entity_id": "payload-entity", "topic": "sample"},
+		EventID:       "evt-payload-only",
+		EventName:     "workflow.payload_only",
+		ExecutionMode: "live",
+		RunID:         "run-123",
+		CreatedAt:     now,
+		Source:        "builder",
+		Payload:       map[string]any{"entity_id": "payload-entity", "topic": "sample"},
 	}}
 
 	replay, _ := projectCanonicalRunDebugReplay(runtimebus.RunLifecycleSnapshot{}, events, nil)

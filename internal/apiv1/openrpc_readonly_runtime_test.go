@@ -545,14 +545,15 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 			},
 			events: map[string]store.OperatorEventFull{
 				eventID: {
-					EventID:     eventID,
-					EventName:   "scan.requested",
-					RunID:       runID,
-					CreatedAt:   now,
-					Source:      "runtime",
-					Payload:     map[string]any{"ok": true},
-					Deliveries:  []store.OperatorEventDelivery{},
-					DeadLetters: []store.OperatorDeadLetterRecord{},
+					EventID:       eventID,
+					EventName:     "scan.requested",
+					ExecutionMode: "live",
+					RunID:         runID,
+					CreatedAt:     now,
+					Source:        "runtime",
+					Payload:       map[string]any{"ok": true},
+					Deliveries:    []store.OperatorEventDelivery{},
+					DeadLetters:   []store.OperatorDeadLetterRecord{},
 				},
 			},
 			logs: []store.OperatorRuntimeLogEntry{{

@@ -3049,3 +3049,15 @@ func selectedExecutionResultHasBlocker(result SelectedContractExecutionResult, c
 	}
 	return false
 }
+
+func TestSelectedContractForkEventPreservesSourceExecutionMode(t *testing.T) {
+	evt := selectedContractForkEvent("fork-run", "fork-event", store.RunForkSelectedContractSourceEvent{
+		SourceEventID: "source-event",
+		EventName:     "task.started",
+		ExecutionMode: runtimeeffects.ExecutionModeMock,
+		Payload:       json.RawMessage(`{"ok":true}`),
+	}, "selected-contract")
+	if evt.ExecutionMode() != runtimeeffects.ExecutionModeMock {
+		t.Fatalf("fork event execution mode = %q, want mock", evt.ExecutionMode())
+	}
+}

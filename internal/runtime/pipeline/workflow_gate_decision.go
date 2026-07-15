@@ -160,6 +160,7 @@ func activityIntentFromProposedEffect(continuation decisioncard.ProposedEffectCo
 		SourceRunID: continuation.SourceRunID, SourceTaskID: continuation.SourceTaskID,
 		ParentEventID: continuation.ParentEventID, ChainDepth: continuation.ChainDepth,
 		Attempt: continuation.Attempt, Generation: continuation.Generation, LoopStage: continuation.LoopStage,
+		ExecutionMode: continuation.ExecutionMode,
 	}
 	if continuation.ReplyContextID != "" {
 		intent.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: continuation.ReplyContextID}}

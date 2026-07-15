@@ -12,6 +12,8 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -366,7 +368,7 @@ func TestHandleEmitTool_RejectsMutableActorCriteriaGrant(t *testing.T) {
 	}
 }
 
-func TestHandleEmitTool_PreservesInboundChildFlowOwnerWithinActorScope(t *testing.T) {
+func TestHandleEmitTool_PreservesInboundChildFlowOwnerAndExecutionMode(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"research.completed": {
@@ -400,7 +402,7 @@ func TestHandleEmitTool_PreservesInboundChildFlowOwnerWithinActorScope(t *testin
 	bus := &publishBusCapture{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
-		ExecutionMode: "live",
+		ExecutionMode: "mock",
 		ID:            "business-research-agent",
 		Role:          "business_research",
 		FlowID:        "validation",
@@ -418,7 +420,7 @@ func TestHandleEmitTool_PreservesInboundChildFlowOwnerWithinActorScope(t *testin
 		"",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), "validation/inst-1"),
 		time.Time{},
-	)
+	).WithExecutionMode(executionmode.Mock)
 	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound)
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_research_completed", map[string]any{
@@ -432,6 +434,16 @@ func TestHandleEmitTool_PreservesInboundChildFlowOwnerWithinActorScope(t *testin
 	}
 	if got, want := bus.event.FlowInstance(), "validation/inst-1"; got != want {
 		t.Fatalf("published event flow_instance = %q, want %q", got, want)
+	}
+	if got := bus.event.ExecutionMode(); got != executionmode.Mock {
+		t.Fatalf("published event execution mode = %q, want mock", got)
+	}
+	conflictCtx := runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
+	if _, err := exec.handleEmitTool(conflictCtx, actor, "emit_research_completed", map[string]any{"summary": "must not publish"}); err == nil || !strings.Contains(err.Error(), "conflicts with agent") {
+		t.Fatalf("conflicting execution mode error = %v", err)
+	}
+	if bus.count != 1 {
+		t.Fatalf("publish count after execution mode conflict = %d, want 1", bus.count)
 	}
 }
 

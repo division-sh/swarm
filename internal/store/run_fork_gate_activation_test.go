@@ -294,7 +294,8 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				var inner error
 				prepared, inner = prepareRunForkSelectedContractSourceEvent(txctx, tx, forkRunID, RunForkSelectedContractSourceEvent{
 					SourceEventID: continuation.RequestEventID, EventName: runForkActivityRequestEvent,
-					EntityID: continuation.EntityID, FlowInstance: "root", Payload: payload,
+					ExecutionMode: continuation.ExecutionMode,
+					EntityID:      continuation.EntityID, FlowInstance: "root", Payload: payload,
 				})
 				return inner
 			})

@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
 type deliveryContextTimerApplier struct {
@@ -43,7 +44,7 @@ func TestExecutorPersistPropagatesDeliveryContextToEveryContinuationIntent(t *te
 		result: ExecutionResult{
 			EmitIntents:     []EmitIntent{{}},
 			TimerIntents:    []TimerIntent{{TimerID: "provider-timeout"}},
-			ActivityIntents: []ActivityIntent{{ActivityID: "provider-call"}},
+			ActivityIntents: []ActivityIntent{{ActivityID: "provider-call", ExecutionMode: executionmode.Live}},
 		},
 	}
 	if err := exec.persist(ctx, frame); err != nil {

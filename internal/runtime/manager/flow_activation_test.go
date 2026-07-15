@@ -20,6 +20,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -604,7 +605,7 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	const triggerEventID = "33333333-3333-3333-3333-333333333333"
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID)
+	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID).WithExecutionMode(executionmode.Mock)
 
 	err := am.ActivateFlowInstance(ctx, req)
 	if err != nil {
@@ -628,6 +629,9 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	}
 	if got := strings.TrimSpace(autoEmit.ParentEventID()); got != triggerEventID {
 		t.Fatalf("published parent_event_id = %q, want trigger event %q", got, triggerEventID)
+	}
+	if got := autoEmit.ExecutionMode(); got != executionmode.Mock {
+		t.Fatalf("published execution mode = %q, want mock", got)
 	}
 	if got, _ := autoEmit.ContextMap("")["source_event_id"].(string); got != triggerEventID {
 		t.Fatalf("event context source_event_id = %q, want trigger event %q", got, triggerEventID)

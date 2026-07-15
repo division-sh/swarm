@@ -336,11 +336,11 @@ func (s *SQLiteRuntimeStore) LoadOperatorEvent(ctx context.Context, eventID stri
 	var event OperatorEventFull
 	var payloadRaw, createdRaw any
 	err := s.DB.QueryRowContext(ctx, `
-		SELECT event_id, event_name, COALESCE(entity_id, ''), COALESCE(run_id, ''), COALESCE(source_event_id, ''),
+		SELECT event_id, event_name, COALESCE(entity_id, ''), COALESCE(run_id, ''), COALESCE(source_event_id, ''), execution_mode,
 		       created_at, COALESCE(produced_by, ''), payload
 		FROM events
 		WHERE event_id = ?
-	`, eventID).Scan(&event.EventID, &event.EventName, &event.EntityID, &event.RunID, &event.SourceEventID, &createdRaw, &event.Source, &payloadRaw)
+	`, eventID).Scan(&event.EventID, &event.EventName, &event.EntityID, &event.RunID, &event.SourceEventID, &event.ExecutionMode, &createdRaw, &event.Source, &payloadRaw)
 	if err == sql.ErrNoRows {
 		return OperatorEventFull{}, ErrEventNotFound
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
 )
@@ -52,6 +53,7 @@ type ProposedEffectContinuation struct {
 	Attempt           int
 	Generation        attemptgeneration.Generation
 	LoopStage         string
+	ExecutionMode     executionmode.Mode
 	ReplyContextID    string
 	State             string
 	Verdict           string
@@ -97,6 +99,7 @@ func (c ProposedEffectContinuation) Canonical() ProposedEffectContinuation {
 	c.ParentEventID = strings.TrimSpace(c.ParentEventID)
 	c.Generation = c.Generation.Normalize()
 	c.LoopStage = strings.TrimSpace(c.LoopStage)
+	c.ExecutionMode = executionmode.Mode(strings.TrimSpace(string(c.ExecutionMode)))
 	c.ReplyContextID = strings.TrimSpace(c.ReplyContextID)
 	c.State = strings.TrimSpace(c.State)
 	c.Verdict = strings.TrimSpace(c.Verdict)
@@ -143,6 +146,7 @@ func (c ProposedEffectContinuation) EffectValue() (semanticvalue.Value, error) {
 		"attempt":            c.Attempt,
 		"loop_generation":    c.Generation,
 		"loop_stage":         c.LoopStage,
+		"execution_mode":     c.ExecutionMode,
 		"reply_context_id":   c.ReplyContextID,
 	})
 	if err != nil {
@@ -171,6 +175,9 @@ func (c ProposedEffectContinuation) Validate(card Card) error {
 	}
 	if c.Input.Kind() != semanticvalue.KindObject {
 		return fmt.Errorf("proposed-effect input must be a semantic object")
+	}
+	if !c.ExecutionMode.Valid() || c.ExecutionMode != card.ExecutionMode {
+		return fmt.Errorf("proposed-effect continuation execution mode does not match its card")
 	}
 	for name, value := range map[string]string{
 		"request_event_id": c.RequestEventID, "activity_id": c.ActivityID, "tool": c.Tool,

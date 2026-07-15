@@ -26,7 +26,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
@@ -78,6 +80,65 @@ func TestPipelineActivityIntentWriterPersistsDurableActivityRequestEvent(t *test
 	url, ok := input.Lookup("url")
 	if got, isText := url.String(); !ok || !isText || got != "https://example.com/source" {
 		t.Fatalf("request input url = %q (string=%v)", got, isText)
+	}
+}
+
+func TestActivityRequestAndResultPreserveMockExecutionMode(t *testing.T) {
+	intent := testActivityIntent("https://example.com/source")
+	intent.ExecutionMode = executionmode.Mock
+	request, err := activityRequestEmitIntent(intent)
+	if err != nil {
+		t.Fatalf("activityRequestEmitIntent: %v", err)
+	}
+	if request.Event.ExecutionMode() != executionmode.Mock {
+		t.Fatalf("request execution mode = %q, want mock", request.Event.ExecutionMode())
+	}
+	recovered, err := activityIntentFromRequestEvent(request.Event)
+	if err != nil {
+		t.Fatalf("activityIntentFromRequestEvent: %v", err)
+	}
+	if recovered.ExecutionMode != executionmode.Mock {
+		t.Fatalf("recovered intent execution mode = %q, want mock", recovered.ExecutionMode)
+	}
+
+	var emitted []events.Event
+	ctx := context.WithValue(context.Background(), pipelineEmitCollectorKey{}, &emitted)
+	if err := (pipelineActivityDispatcher{}).publishActivityResult(ctx, recovered, recovered.SuccessEvent, map[string]any{"ok": true}); err != nil {
+		t.Fatalf("publishActivityResult: %v", err)
+	}
+	if len(emitted) != 1 || emitted[0].ExecutionMode() != executionmode.Mock {
+		t.Fatalf("result events = %#v, want one mock event", emitted)
+	}
+
+	missingMode := eventtest.ChildWithLineage(
+		request.Event.ID(),
+		request.Event.Type(),
+		request.Event.SourceAgent(),
+		request.Event.TaskID(),
+		request.Event.Payload(),
+		request.Event.ChainDepth(),
+		events.EventLineage{RunID: request.Event.RunID(), ParentEventID: request.Event.ParentEventID()},
+		request.Event.Envelope(),
+		request.Event.CreatedAt(),
+	)
+	if _, err := activityIntentFromRequestEvent(missingMode); err == nil || !strings.Contains(err.Error(), "invalid execution mode") {
+		t.Fatalf("activityIntentFromRequestEvent missing mode error = %v", err)
+	}
+}
+
+func TestActivityExecutionContextRejectsCausalModeConflict(t *testing.T) {
+	intent := testActivityIntent("https://example.com/source")
+	intent.ExecutionMode = executionmode.Mock
+	ctx := runtimeeffects.WithExecutionMode(context.Background(), executionmode.Live)
+	if _, err := activityExecutionContext(ctx, intent); err == nil || !strings.Contains(err.Error(), "conflicts with dispatch context") {
+		t.Fatalf("activityExecutionContext error = %v, want mode conflict", err)
+	}
+	ctx, err := activityExecutionContext(context.Background(), intent)
+	if err != nil {
+		t.Fatalf("activityExecutionContext mock recovery: %v", err)
+	}
+	if got, ok := runtimeeffects.ExecutionModeFromContext(ctx); !ok || got != executionmode.Mock {
+		t.Fatalf("activity execution context mode = %q (present=%v), want mock", got, ok)
 	}
 }
 
@@ -1278,6 +1339,7 @@ func testActivityIntent(inputURL string) runtimeengine.ActivityIntent {
 		SourceTaskID:  "task-1",
 		ChainDepth:    4,
 		Attempt:       1,
+		ExecutionMode: executionmode.Live,
 	}.Normalized()
 }
 

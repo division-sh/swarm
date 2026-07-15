@@ -358,6 +358,7 @@ func ensureEventReplayAudit(
 		events.EventLineage{
 			RunID:         original.RunID,
 			ParentEventID: original.EventID,
+			ExecutionMode: original.ExecutionMode,
 		},
 		events.EventEnvelope{EntityID: original.EntityID},
 		now,
@@ -435,6 +436,9 @@ func deliveriesForSubscribers(eventID string, index map[string]store.OperatorEve
 }
 
 func replayEventFromOriginal(original store.OperatorEventFull, replayEventID string, now time.Time) (events.Event, error) {
+	if !original.ExecutionMode.Valid() {
+		return events.EmptyEvent(), fmt.Errorf("event %s carries invalid execution mode %q", original.EventID, original.ExecutionMode)
+	}
 	payload, err := json.Marshal(original.Payload)
 	if err != nil {
 		return events.EmptyEvent(), err
@@ -453,6 +457,7 @@ func replayEventFromOriginal(original store.OperatorEventFull, replayEventID str
 		events.EventLineage{
 			RunID:         original.RunID,
 			ParentEventID: original.EventID,
+			ExecutionMode: original.ExecutionMode,
 		},
 		events.EventEnvelope{EntityID: original.EntityID},
 		now,

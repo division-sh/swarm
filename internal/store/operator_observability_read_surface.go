@@ -13,6 +13,7 @@ import (
 	"time"
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -46,6 +47,7 @@ type OperatorEventListResult struct {
 type OperatorEventFull struct {
 	EventID       string                     `json:"event_id"`
 	EventName     string                     `json:"event_name"`
+	ExecutionMode executionmode.Mode         `json:"execution_mode"`
 	EntityID      string                     `json:"entity_id,omitempty"`
 	RunID         string                     `json:"run_id,omitempty"`
 	SourceEventID string                     `json:"source_event_id,omitempty"`
@@ -406,6 +408,7 @@ func (r *OperatorObservabilityReadSurface) LoadOperatorEvent(ctx context.Context
 			COALESCE(e.entity_id::text, ''),
 			COALESCE(e.run_id::text, ''),
 			COALESCE(e.source_event_id::text, ''),
+			e.execution_mode,
 			e.created_at,
 			COALESCE(e.produced_by, ''),
 			COALESCE(e.produced_by_type, ''),
@@ -419,7 +422,7 @@ func (r *OperatorObservabilityReadSurface) LoadOperatorEvent(ctx context.Context
 		producedByType string
 		payloadRaw     []byte
 	)
-	if err := row.Scan(&event.EventID, &event.EventName, &event.EntityID, &event.RunID, &event.SourceEventID, &event.CreatedAt, &producedBy, &producedByType, &payloadRaw); err == sql.ErrNoRows {
+	if err := row.Scan(&event.EventID, &event.EventName, &event.EntityID, &event.RunID, &event.SourceEventID, &event.ExecutionMode, &event.CreatedAt, &producedBy, &producedByType, &payloadRaw); err == sql.ErrNoRows {
 		return OperatorEventFull{}, ErrEventNotFound
 	} else if err != nil {
 		return OperatorEventFull{}, fmt.Errorf("load operator event: %w", err)

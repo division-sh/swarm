@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/platformcontext"
@@ -358,6 +359,7 @@ type ActivityIntent struct {
 	Attempt          int
 	Generation       attemptgeneration.Generation
 	LoopStage        string
+	ExecutionMode    executionmode.Mode
 }
 
 func (i ActivityIntent) Normalized() ActivityIntent {
@@ -378,6 +380,7 @@ func (i ActivityIntent) Normalized() ActivityIntent {
 	i.FlowInstance = strings.Trim(strings.TrimSpace(i.FlowInstance), "/")
 	i.Generation = i.Generation.Normalize()
 	i.LoopStage = strings.TrimSpace(i.LoopStage)
+	i.ExecutionMode = executionmode.Mode(strings.TrimSpace(string(i.ExecutionMode)))
 	if i.Attempt <= 0 {
 		i.Attempt = 1
 	}
