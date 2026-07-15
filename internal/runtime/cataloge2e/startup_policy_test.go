@@ -70,12 +70,12 @@ func TestTier8RuntimeBootMatchesAuthoritativeStartupTruthForWarningFixtures(t *t
 			}
 			source := semanticview.Wrap(bundle)
 
-			report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+			report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 			if got := len(report.Warnings()) > 0; got != tc.wantBootWarnings {
 				t.Fatalf("boot warnings present = %v, want %v", got, tc.wantBootWarnings)
 			}
 
-			_, validationErr := runtime.ValidateWorkflowContractSurface(context.Background(), source, runtime.DefaultWorkflowContractValidationOptions(nil))
+			_, validationErr := runtime.ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, runtime.DefaultWorkflowContractValidationOptions(nil))
 			if got := validationErr != nil; got != tc.wantValidationErr {
 				t.Fatalf("ValidateWorkflowContractSurface error = %v, want error=%v", validationErr, tc.wantValidationErr)
 			}

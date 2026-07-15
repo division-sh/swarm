@@ -15,7 +15,7 @@ func TestWorkflowInstanceStore_RequiresRunContext(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := NewWorkflowInstanceStore(db)
 
-	err := store.Upsert(context.Background(), WorkflowInstance{
+	err := store.Upsert(testAuthorActivityContext(context.Background()), WorkflowInstance{
 		InstanceID:      uuid.NewString(),
 		StorageRef:      uuid.NewString(),
 		WorkflowName:    "run-scope",
@@ -34,12 +34,12 @@ func TestWorkflowInstanceStore_RunScopedCurrentStateRowsDoNotBleed(t *testing.T)
 	runB := uuid.NewString()
 	entityID := uuid.NewString()
 	for _, runID := range []string{runA, runB} {
-		if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 			t.Fatalf("seed run %s: %v", runID, err)
 		}
 	}
-	ctxA := runtimecorrelation.WithRunID(context.Background(), runA)
-	ctxB := runtimecorrelation.WithRunID(context.Background(), runB)
+	ctxA := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runA)
+	ctxB := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runB)
 	for _, tc := range []struct {
 		ctx   context.Context
 		state string
@@ -78,12 +78,12 @@ func TestWorkflowInstanceStore_RunScopedTimerRowsDoNotBleed(t *testing.T) {
 	entityID := uuid.NewString()
 	now := time.Now().UTC().Round(time.Microsecond)
 	for _, runID := range []string{runA, runB} {
-		if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 			t.Fatalf("seed run %s: %v", runID, err)
 		}
 	}
-	ctxA := runtimecorrelation.WithRunID(context.Background(), runA)
-	ctxB := runtimecorrelation.WithRunID(context.Background(), runB)
+	ctxA := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runA)
+	ctxB := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runB)
 
 	if err := store.Upsert(ctxA, WorkflowInstance{
 		InstanceID:      entityID,
@@ -133,7 +133,7 @@ func TestWorkflowInstanceStore_RunScopedTimerRowsDoNotBleed(t *testing.T) {
 	}
 
 	var timerRows int
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COUNT(*)
 		FROM timers
 		WHERE entity_id = $1::uuid

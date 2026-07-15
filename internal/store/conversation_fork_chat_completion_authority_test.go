@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,6 +61,50 @@ func TestForkChatCompletionGroupLifecycle(t *testing.T) {
 	}
 }
 
+func TestConversationForkChatSourceBundleOwnershipParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			fixture := newForkChatCompletionAuthorityFixture(t, backend == "sqlite")
+			prepared := prepareForkChatCompletionGroup(t, fixture, "bundle-owner-key", "bundle owner")
+			if prepared.SourceBundleHash != fixture.source.bundleHash {
+				t.Fatalf("prepared source bundle = %q, want %q", prepared.SourceBundleHash, fixture.source.bundleHash)
+			}
+			var persisted string
+			query := `SELECT bundle_hash FROM conversation_fork_turns WHERE fork_turn_id=?`
+			if !fixture.sqlite {
+				query = `SELECT bundle_hash FROM conversation_fork_turns WHERE fork_turn_id=$1::uuid`
+			}
+			if err := fixture.db.QueryRowContext(testAuthorActivityContext(), query, prepared.ForkTurnID).Scan(&persisted); err != nil {
+				t.Fatalf("load forkchat source bundle: %v", err)
+			}
+			if persisted != fixture.source.bundleHash {
+				t.Fatalf("persisted forkchat source bundle = %q, want %q", persisted, fixture.source.bundleHash)
+			}
+
+			wrong := forkChatCompletionAuthority(prepared, 1)
+			wrong.ForkChat.BundleHash = "bundle-v1:sha256:" + strings.Repeat("b", 64)
+			wrongCtx := forkChatCompletionContext(fixture, wrong, "wrong-bundle")
+			if _, err := runtimeeffects.BeginCompletion(wrongCtx, "anthropic_api", []byte(prepared.RequestHash), nil); err == nil {
+				t.Fatal("forkchat authority accepted a bundle other than its durable source bundle")
+			}
+			requireForkChatGroupState(t, fixture, prepared.ForkTurnID, "prepared", false)
+
+			_, handle := beginForkChatCompletionAttempt(t, fixture, prepared, 1, "source-bundle")
+			operationQuery := `SELECT bundle_hash FROM runtime_external_effect_operations WHERE operation_id=?`
+			if !fixture.sqlite {
+				operationQuery = `SELECT bundle_hash FROM runtime_external_effect_operations WHERE operation_id=$1::uuid`
+			}
+			if err := fixture.db.QueryRowContext(testAuthorActivityContext(), operationQuery, handle.Attempt().OperationID).Scan(&persisted); err != nil {
+				t.Fatalf("load external operation source bundle: %v", err)
+			}
+			if persisted != fixture.source.bundleHash {
+				t.Fatalf("external operation source bundle = %q, want %q", persisted, fixture.source.bundleHash)
+			}
+		})
+	}
+}
+
 func proveForkChatCompletionGroupCapRejection(t *testing.T, fixture forkChatCompletionAuthorityFixture) {
 	prepared := prepareForkChatCompletionGroup(t, fixture, "cap-key", "cap rejection")
 	seedForkChatRetainedSpend(t, fixture, 1)
@@ -84,7 +129,7 @@ func proveForkChatCompletionGroupCapRejection(t *testing.T, fixture forkChatComp
 func proveForkChatCompletionGroupPreparedOrphanRecovery(t *testing.T, fixture forkChatCompletionAuthorityFixture) {
 	prepared := prepareForkChatCompletionGroup(t, fixture, "orphan-key", "prepared orphan")
 	expireForkChatGroupLease(t, fixture, prepared.ForkTurnID)
-	if _, err := fixture.store.ReconcileExternalEffectAttempts(context.Background(), fixture.now.Add(10*time.Minute)); err != nil {
+	if _, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), fixture.now.Add(10*time.Minute)); err != nil {
 		t.Fatalf("recover prepared forkchat group: %v", err)
 	}
 	requireForkChatGroupState(t, fixture, prepared.ForkTurnID, "abandoned", true)
@@ -137,7 +182,7 @@ func proveForkChatCompletionGroupFinalizationFailure(t *testing.T, fixture forkC
 	}
 	requireForkChatGroupState(t, fixture, prepared.ForkTurnID, "executing", false)
 	expireForkChatGroupLease(t, fixture, prepared.ForkTurnID)
-	if _, err := fixture.store.ReconcileExternalEffectAttempts(context.Background(), fixture.now.Add(10*time.Minute)); err != nil {
+	if _, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), fixture.now.Add(10*time.Minute)); err != nil {
 		t.Fatalf("recover finalization-failed forkchat group: %v", err)
 	}
 	requireForkChatGroupState(t, fixture, prepared.ForkTurnID, "outcome_uncertain", true)
@@ -148,7 +193,7 @@ func proveForkChatCompletionGroupFinalizationFailure(t *testing.T, fixture forkC
 func proveForkChatCompletionGroupSameKeyLiveReplay(t *testing.T, fixture forkChatCompletionAuthorityFixture) {
 	prepared := prepareForkChatCompletionGroup(t, fixture, "live-key", "live replay")
 	requireForkChatReplayState(t, fixture, prepared, "live replay", "prepared")
-	if err := fixture.store.HeartbeatOperatorConversationForkChat(context.Background(), prepared, fixture.now.Add(30*time.Second)); err != nil {
+	if err := fixture.store.HeartbeatOperatorConversationForkChat(testAuthorActivityContext(), prepared, fixture.now.Add(30*time.Second)); err != nil {
 		t.Fatalf("heartbeat prepared forkchat group: %v", err)
 	}
 	_, handle := beginForkChatCompletionAttempt(t, fixture, prepared, 1, "live")
@@ -179,7 +224,7 @@ func proveForkChatCompletionGroupSucceededReplay(t *testing.T, fixture forkChatC
 
 func proveForkChatCompletionGroupConflictingRequestReuse(t *testing.T, fixture forkChatCompletionAuthorityFixture) {
 	prepared := prepareForkChatCompletionGroup(t, fixture, "conflict-key", "original request")
-	_, err := fixture.store.PrepareOperatorConversationForkChat(context.Background(), ConversationForkChatPrepareRequest{
+	_, err := fixture.store.PrepareOperatorConversationForkChat(testAuthorActivityContext(), ConversationForkChatPrepareRequest{
 		ForkID: fixture.fork.ForkID, Message: "changed request", Method: "conversation.fork_chat",
 		ActorTokenID: prepared.ActorTokenID, RequestHash: runtimeeffects.Fingerprint([]byte("changed request")),
 		IdempotencyKey: prepared.IdempotencyKey, Now: fixture.now.Add(2 * time.Second),
@@ -215,7 +260,7 @@ func newForkChatCompletionAuthorityFixture(t *testing.T, sqlite bool) forkChatCo
 		store, db = s, pgDB
 		source = seedConversationForkSource(t, db, now)
 	}
-	fork, err := store.CreateOperatorConversationFork(context.Background(), ConversationForkCreateRequest{
+	fork, err := store.CreateOperatorConversationFork(testAuthorActivityContext(), ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID, ForkPoint: ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
 		CreatedBy: "actor-token", Now: now,
 	})
@@ -227,7 +272,7 @@ func newForkChatCompletionAuthorityFixture(t *testing.T, sqlite bool) forkChatCo
 
 func prepareForkChatCompletionGroup(t *testing.T, fixture forkChatCompletionAuthorityFixture, key, message string) ConversationForkChatPrepared {
 	t.Helper()
-	prepared, err := fixture.store.PrepareOperatorConversationForkChat(context.Background(), ConversationForkChatPrepareRequest{
+	prepared, err := fixture.store.PrepareOperatorConversationForkChat(testAuthorActivityContext(), ConversationForkChatPrepareRequest{
 		ForkID: fixture.fork.ForkID, Message: message, Method: "conversation.fork_chat", ActorTokenID: "actor-token",
 		RequestHash: runtimeeffects.Fingerprint([]byte(message)), IdempotencyKey: key, Now: fixture.now.Add(time.Second),
 	})
@@ -243,7 +288,7 @@ func forkChatCompletionAuthority(prepared ConversationForkChatPrepared, ordinal 
 		ExecutionOwner: prepared.ExecutionOwner, LeaseExpiresAt: prepared.LeaseExpiresAt, FenceGeneration: prepared.FenceGeneration,
 		ExecutionMode: prepared.Snapshot.SourceAgent.ExecutionMode,
 		ForkChat: runtimeeffects.ConversationForkChatAuthority{
-			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, ActorTokenID: prepared.ActorTokenID,
+			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, BundleHash: prepared.SourceBundleHash, ActorTokenID: prepared.ActorTokenID,
 			RequestOccurrenceID: prepared.RequestOccurrenceID, RequestHash: prepared.RequestHash,
 		},
 		Target: runtimeeffects.UsageTarget{Kind: runtimeeffects.UsageTargetConversationForkCompletion, ID: prepared.ForkTurnID, Ordinal: ordinal},
@@ -251,7 +296,7 @@ func forkChatCompletionAuthority(prepared ConversationForkChatPrepared, ordinal 
 }
 
 func forkChatCompletionContext(fixture forkChatCompletionAuthorityFixture, authority runtimeeffects.Authority, suffix string) context.Context {
-	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(context.Background(), authority), runtimeeffects.NewController(fixture.store))
+	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), authority), runtimeeffects.NewController(fixture.store))
 	return runtimeeffects.WithLogicalOperationIdentity(ctx, "forkchat:"+authority.ForkChat.RequestOccurrenceID+":"+suffix)
 }
 
@@ -335,7 +380,7 @@ func successfulForkChatRecord(prepared ConversationForkChatPrepared, message str
 
 func requireForkChatReplayState(t *testing.T, fixture forkChatCompletionAuthorityFixture, prepared ConversationForkChatPrepared, message, wantState string) {
 	t.Helper()
-	_, err := fixture.store.PrepareOperatorConversationForkChat(context.Background(), ConversationForkChatPrepareRequest{
+	_, err := fixture.store.PrepareOperatorConversationForkChat(testAuthorActivityContext(), ConversationForkChatPrepareRequest{
 		ForkID: prepared.Fork.ForkID, Message: message, Method: "conversation.fork_chat", ActorTokenID: prepared.ActorTokenID,
 		RequestHash: prepared.RequestHash, IdempotencyKey: prepared.IdempotencyKey, Now: fixture.now.Add(20 * time.Second),
 	})

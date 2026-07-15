@@ -42,7 +42,7 @@ func TestResolveDatabasePasswordRejectsImplicitEnvFallbacks(t *testing.T) {
 		},
 	}
 
-	_, err := resolver.Resolve(context.Background(), config.DatabaseConfig{})
+	_, err := resolver.Resolve(testAuthorActivityContext(), config.DatabaseConfig{})
 	if err == nil || !strings.Contains(err.Error(), "postgres store requires exactly one database password source") {
 		t.Fatalf("Resolve error = %v, want fail-closed missing source guidance", err)
 	}
@@ -61,7 +61,7 @@ func TestResolveDatabasePasswordReadsOnlyDeclaredEnv(t *testing.T) {
 		},
 	}
 
-	got, err := resolver.Resolve(context.Background(), config.DatabaseConfig{PasswordEnv: "DB_PASSWORD"})
+	got, err := resolver.Resolve(testAuthorActivityContext(), config.DatabaseConfig{PasswordEnv: "DB_PASSWORD"})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestResolveDatabasePasswordAllowsExplicitLegacyEnvName(t *testing.T) {
 		},
 	}
 
-	got, err := resolver.Resolve(context.Background(), config.DatabaseConfig{PasswordEnv: "PGPASSWORD"})
+	got, err := resolver.Resolve(testAuthorActivityContext(), config.DatabaseConfig{PasswordEnv: "PGPASSWORD"})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestResolveDatabasePasswordSecretKeyIgnoresAmbientEnv(t *testing.T) {
 		},
 	}
 
-	got, err := resolver.Resolve(context.Background(), config.DatabaseConfig{PasswordSecretKey: "postgres_password"})
+	got, err := resolver.Resolve(testAuthorActivityContext(), config.DatabaseConfig{PasswordSecretKey: "postgres_password"})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestResolveDatabasePasswordReadsPasswordFile(t *testing.T) {
 		},
 	}
 
-	got, err := resolver.Resolve(context.Background(), config.DatabaseConfig{PasswordFile: "/run/secrets/db-password"})
+	got, err := resolver.Resolve(testAuthorActivityContext(), config.DatabaseConfig{PasswordFile: "/run/secrets/db-password"})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}

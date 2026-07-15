@@ -40,7 +40,7 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 			entityID     = "7a000000-0000-0000-0000-000000000002"
 			flowInstance = "slack-connector-managed-credential-pg"
 		)
-		ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		pg := &store.PostgresStore{DB: db}
 		workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 		seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "slack-managed-credential-observer")
@@ -66,7 +66,7 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 			entityID     = "7b000000-0000-0000-0000-000000000002"
 			flowInstance = "slack-connector-managed-credential-sqlite"
 		)
-		ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 		workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 		seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "slack-managed-credential-observer")
@@ -465,7 +465,7 @@ func (m slackManagedConnectorModule) ActionRegistry() runtimepipeline.ActionRegi
 func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackManagedConnectorBackend, source semanticview.Source, managedStore runtimemanagedcredentials.Store) (*runtimebus.EventBus, *runtimepipeline.PipelineCoordinator) {
 	t.Helper()
 	var pc *runtimepipeline.PipelineCoordinator
-	bus, err := runtimebus.NewEventBusWithOptions(backend.eventStore, runtimebus.EventBusOptions{
+	bus, err := newScopedTestEventBus(t, backend.eventStore, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
@@ -473,7 +473,7 @@ func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackMana
 			}
 			return []runtimebus.EventInterceptor{pc}
 		},
-	})
+	}, "inbound.github.issue_comment", "inbound.github.issues", "inbound.telegram", "inbound.telegram.text_message")
 	if err != nil {
 		t.Fatalf("%s NewEventBusWithOptions: %v", backend.name, err)
 	}

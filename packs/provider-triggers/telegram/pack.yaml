@@ -2,7 +2,7 @@ id: provider.telegram
 version: 0.1.0
 platform_version: '>=0.7.0 <0.8.0'
 type: trigger
-manifest_hash: sha256:bd52afaa81475c451b41de343c8c70b6f5f397cfaec6423f0cab8cae410eeeec
+manifest_hash: sha256:6ec104c594930137dd47460556f560968b1d639813b5128ddf1fc673f66e350c
 provenance:
     source: platform
 capabilities:

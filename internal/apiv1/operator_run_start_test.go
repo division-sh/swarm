@@ -45,7 +45,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestOperatorRunStartHandlersUseActiveEphemeralBundleScopeForCreateNewWork(t
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestOperatorRunStartHandlersAcceptCanonicalBundleHashForCreateNewWork(t *te
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestOperatorRunStartRejectsFlowScopedEventName(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(flowScopedEventPublishTestBundle())
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -230,7 +230,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -262,7 +262,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -283,7 +283,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -304,7 +304,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -325,7 +325,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -364,7 +364,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		}
 		bundle.Nodes["scan-orchestrator"] = bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"]
 		source := semanticview.Wrap(bundle)
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -396,7 +396,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 			ContractBundle:   source,
 			BundleSourceFact: runStartTestBundleSourceFact(),
 			PayloadValidator: func(_ context.Context, eventType string, payload []byte) error {
@@ -426,7 +426,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -457,7 +457,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -577,7 +577,7 @@ func TestOperatorRunStartHandlersLeaveSplitControlMethodsUnavailable(t *testing.
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}

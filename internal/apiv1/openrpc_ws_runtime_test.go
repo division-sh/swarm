@@ -540,7 +540,7 @@ func callTransportProbeHTTP(t *testing.T, handler *Handler, methodName string, p
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/rpc", bytes.NewReader(raw))
 	req.Header.Set("Authorization", "Bearer "+testToken)
-	handler.ServeHTTP(rec, req)
+	handler.ServeHTTP(rec, testAuthorActivityRequest(req))
 
 	if rec.Code != http.StatusOK {
 		return rec.Code, rpcResponse{}, rec.Body.String()

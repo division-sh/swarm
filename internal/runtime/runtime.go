@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
@@ -84,6 +85,7 @@ type RuntimeOptions struct {
 	ToolGatewayBinding               toolgateway.Binding
 	BundleFingerprint                string
 	BundleSourceFact                 runtimecorrelation.BundleSourceFact
+	RuntimeInstanceID                string
 	WorkflowModule                   runtimepipeline.WorkflowModule
 	LLMRuntime                       llm.Runtime
 	Credentials                      runtimecredentials.Store
@@ -179,23 +181,25 @@ type BootProgressEvent struct {
 }
 
 type Runtime struct {
-	lifecycleMu             sync.Mutex
-	startCtx                context.Context
-	cancelStart             context.CancelFunc
-	ownershipLease          runtimestartupownership.Lease
-	ownershipLeaseBorrowed  bool
-	pendingOwnershipLease   runtimestartupownership.Lease
-	pendingOwnershipOwned   bool
-	ownershipHandoffPending bool
-	replacementQuiesced     bool
-	ownerID                 string
-	bootID                  string
-	startupAdmission        managedexecution.Admission
-	pendingOwnershipHandoff runtimestartupownership.Handoff
-	shutdownGate            shutdownAdmission
-	backgroundActive        atomic.Int64
-	payloadValidator        runtimebus.PayloadValidator
-	authorActivityEvents    []string
+	lifecycleMu               sync.Mutex
+	startCtx                  context.Context
+	cancelStart               context.CancelFunc
+	ownershipLease            runtimestartupownership.Lease
+	ownershipLeaseBorrowed    bool
+	pendingOwnershipLease     runtimestartupownership.Lease
+	pendingOwnershipOwned     bool
+	ownershipHandoffPending   bool
+	replacementQuiesced       bool
+	ownerID                   string
+	bootID                    string
+	startupAdmission          managedexecution.Admission
+	pendingOwnershipHandoff   runtimestartupownership.Handoff
+	shutdownGate              shutdownAdmission
+	backgroundActive          atomic.Int64
+	payloadValidator          runtimebus.PayloadValidator
+	authorActivityDescriptors []runtimeauthoractivity.EventDescriptor
+	authorActivityScope       runtimeauthoractivity.Scope
+	authorActivityLeases      []*runtimeauthoractivity.EventCatalogLease
 
 	Config             *config.Config
 	Stores             Stores
@@ -707,29 +711,139 @@ func bindRuntimeStorePayloadValidator(stores Stores, payloadValidator runtimebus
 	}
 }
 
-func bindRuntimeStoreAuthorActivityCatalog(stores Stores, names []string) {
-	type binder interface{ SetAuthorActivityEventCatalog([]string) }
-	if target, ok := stores.EventStore.(binder); ok && target != nil {
-		target.SetAuthorActivityEventCatalog(names)
+// AuthorActivityEventDescriptors projects one semantic source into the exact
+// descriptors consumed by every runtime that can persist authored events.
+func AuthorActivityEventDescriptors(source semanticview.Source) ([]runtimeauthoractivity.EventDescriptor, error) {
+	if source == nil {
+		return nil, nil
 	}
-	if target, ok := stores.InboundStore.(binder); ok && target != nil {
-		target.SetAuthorActivityEventCatalog(names)
+	resolved := source.ResolvedEventCatalog()
+	authored := source.AuthoredResolvedEventCatalog()
+	byName := make(map[string]runtimeauthoractivity.EventDescriptor, len(resolved)+len(authored))
+	add := func(name string, entry runtimecontracts.EventCatalogEntry, disposition runtimeauthoractivity.StoryDisposition) error {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return nil
+		}
+		summaryField := strings.TrimSpace(entry.AuthorSummaryField)
+		if summaryField != "" {
+			field, ok := entry.Payload.Properties[summaryField]
+			if !ok {
+				return fmt.Errorf("authored event %q author_summary_field %q is not declared in payload", name, summaryField)
+			}
+			fieldType := strings.TrimSpace(field.Type)
+			if fieldType != "text" && fieldType != "string" {
+				return fmt.Errorf("authored event %q author_summary_field %q must be text", name, summaryField)
+			}
+		}
+		descriptor := runtimeauthoractivity.EventDescriptor{EventType: name, Disposition: disposition, AuthorSummaryField: summaryField}
+		if previous, ok := byName[name]; ok && previous != descriptor {
+			return fmt.Errorf("author activity event descriptor %q resolves to conflicting declarations", name)
+		}
+		byName[name] = descriptor
+		return nil
+	}
+	for name, entry := range resolved {
+		disposition := runtimeauthoractivity.StoryDifferent
+		if _, ok := authored[name]; ok {
+			disposition = runtimeauthoractivity.StoryAuthored
+		}
+		if err := add(name, entry, disposition); err != nil {
+			return nil, err
+		}
+	}
+	census := semanticview.BuildAuthoredEventEndpointCensus(source)
+	endpoints := append(census.Producers(), census.Consumers()...)
+	endpoints = append(endpoints, census.InputPins()...)
+	endpoints = append(endpoints, census.OutputPins()...)
+	for _, endpoint := range endpoints {
+		proof := endpoint.Event
+		if !proof.HasSchema {
+			continue
+		}
+		disposition := runtimeauthoractivity.StoryDifferent
+		if _, ok := authored[strings.TrimSpace(proof.CatalogKey)]; ok {
+			disposition = runtimeauthoractivity.StoryAuthored
+		}
+		if err := add(proof.EventKey(), proof.Entry, disposition); err != nil {
+			return nil, err
+		}
+	}
+	descriptors := make([]runtimeauthoractivity.EventDescriptor, 0, len(byName))
+	for _, descriptor := range byName {
+		descriptors = append(descriptors, descriptor)
+	}
+	sort.Slice(descriptors, func(i, j int) bool { return descriptors[i].EventType < descriptors[j].EventType })
+	return descriptors, nil
+}
+
+type authorActivityCatalogRegistrar interface {
+	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
+}
+
+func (rt *Runtime) PrepareAuthorActivityCatalog() error {
+	if rt == nil {
+		return fmt.Errorf("runtime is required")
+	}
+	rt.lifecycleMu.Lock()
+	defer rt.lifecycleMu.Unlock()
+	if len(rt.authorActivityLeases) > 0 {
+		return nil
+	}
+	if rt.Stores.EventStore == nil && rt.Stores.InboundStore == nil {
+		return nil
+	}
+	targets := []any{rt.Stores.EventStore, rt.Stores.InboundStore}
+	registrars := make([]authorActivityCatalogRegistrar, 0, len(targets))
+	for _, target := range targets {
+		if registrar, ok := target.(authorActivityCatalogRegistrar); ok && registrar != nil {
+			registrars = append(registrars, registrar)
+		}
+	}
+	if len(registrars) == 0 {
+		if rt.Stores.SQLDB != nil {
+			return fmt.Errorf("selected store does not implement the author activity event catalog registry")
+		}
+		return nil
+	}
+	if rt.authorActivityScope.Kind != runtimeauthoractivity.ScopeBundle || strings.TrimSpace(rt.authorActivityScope.RuntimeInstanceID) == "" || strings.TrimSpace(rt.authorActivityScope.BundleHash) == "" {
+		return fmt.Errorf("runtime author activity catalog requires runtime_instance_id and bundle_hash")
+	}
+	leases := make([]*runtimeauthoractivity.EventCatalogLease, 0, len(registrars))
+	for _, registrar := range registrars {
+		lease, err := registrar.RegisterAuthorActivityEventCatalog(rt.authorActivityScope, rt.authorActivityDescriptors)
+		if err != nil {
+			for _, acquired := range leases {
+				acquired.Release()
+			}
+			return err
+		}
+		leases = append(leases, lease)
+	}
+	rt.authorActivityLeases = leases
+	return nil
+}
+
+func (rt *Runtime) releaseAuthorActivityCatalog() {
+	if rt == nil {
+		return
+	}
+	rt.lifecycleMu.Lock()
+	leases := rt.authorActivityLeases
+	rt.authorActivityLeases = nil
+	rt.lifecycleMu.Unlock()
+	for _, lease := range leases {
+		lease.Release()
 	}
 }
 
-func authoredEventNames(source semanticview.Source) []string {
-	if source == nil {
-		return nil
+func (rt *Runtime) authorActivityContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	catalog := source.AuthoredResolvedEventCatalog()
-	names := make([]string, 0, len(catalog))
-	for name := range catalog {
-		if name = strings.TrimSpace(name); name != "" {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	return names
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, rt.Options.RuntimeInstanceID)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, rt.Options.BundleSourceFact)
+	return runtimeauthoractivity.WithScope(ctx, rt.authorActivityScope)
 }
 
 func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
@@ -747,20 +861,25 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		}
 	}
 	mcpTurns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
+	descriptors, err := AuthorActivityEventDescriptors(source)
+	if err != nil {
+		return nil, err
+	}
 	rt := &Runtime{
-		ownerID:              newRuntimeOwnerID(),
-		bootID:               uuid.NewString(),
-		Config:               cfg,
-		Stores:               stores,
-		Options:              opts,
-		Workspace:            opts.WorkspaceLifecycle,
-		MCPTurns:             mcpTurns,
-		Authority:            boot.Authority,
-		EmitRegistry:         boot.EmitRegistry,
-		authorActivityEvents: authoredEventNames(source),
-		PromptResolver:       boot.PromptResolver,
-		Credentials:          boot.Credentials,
-		ManagedCredentials:   boot.ManagedCredentials,
+		ownerID:                   newRuntimeOwnerID(),
+		bootID:                    uuid.NewString(),
+		Config:                    cfg,
+		Stores:                    stores,
+		Options:                   opts,
+		Workspace:                 opts.WorkspaceLifecycle,
+		MCPTurns:                  mcpTurns,
+		Authority:                 boot.Authority,
+		EmitRegistry:              boot.EmitRegistry,
+		authorActivityDescriptors: descriptors,
+		authorActivityScope:       runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, boot.BundleSourceFact.BundleHash),
+		PromptResolver:            boot.PromptResolver,
+		Credentials:               boot.Credentials,
+		ManagedCredentials:        boot.ManagedCredentials,
 	}
 
 	if stores.RuntimeLogStore != nil {
@@ -769,7 +888,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	payloadValidator := boot.payloadValidator(rt.Logger)
 	rt.payloadValidator = payloadValidator
 	var managerRef *runtimemanager.AgentManager
-	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, source, boot.TrimmedBundleFingerprint, boot.BundleSourceFact, func() []runtimebus.EventInterceptor {
+	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, source, boot.TrimmedBundleFingerprint, boot.BundleSourceFact, opts.RuntimeInstanceID, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}
@@ -1001,6 +1120,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		return nil, fmt.Errorf("selected runtime store does not implement agent lifecycle persistence")
 	}
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, runtimemanager.AgentManagerOptions{
+		BaseContext:            rt.authorActivityContext(context.Background()),
 		LifecycleStore:         lifecycleStore,
 		Workspaces:             rt.Workspace,
 		Sessions:               stores.SessionRegistry,
@@ -1134,6 +1254,10 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if _, err := uuid.Parse(strings.TrimSpace(rt.bootID)); err != nil {
 		rt.bootID = uuid.NewString()
 	}
+	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
+		return err
+	}
+	ctx = rt.authorActivityContext(ctx)
 	bootStartedAt := rt.Options.BootStartedAt
 	if bootStartedAt.IsZero() {
 		bootStartedAt = time.Now().UTC()
@@ -1159,6 +1283,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			rt.emitBootProgress(5, "startup_ownership_lease", "FAILED", err.Error())
 			cancelStart()
 			rt.lifecycleMu.Unlock()
+			rt.releaseAuthorActivityCatalog()
 			return err
 		}
 		rt.emitBootProgress(5, "startup_ownership_lease", "ok", "owner="+rt.ownerID)
@@ -1201,7 +1326,6 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.cleanupStartFailure()
 	}()
 	bindRuntimeStorePayloadValidator(rt.Stores, rt.payloadValidator)
-	bindRuntimeStoreAuthorActivityCatalog(rt.Stores, rt.authorActivityEvents)
 	if rt.RuntimeIngress != nil {
 		if err := rt.RuntimeIngress.SyncState(ctx); err != nil {
 			return fmt.Errorf("sync runtime ingress state: %w", err)
@@ -1665,6 +1789,7 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) 
 		rt.lifecycleMu.Lock()
 		rt.replacementQuiesced = true
 		rt.lifecycleMu.Unlock()
+		rt.releaseAuthorActivityCatalog()
 	}
 	return shutdownErr
 }

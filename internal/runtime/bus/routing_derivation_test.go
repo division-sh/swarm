@@ -17,7 +17,7 @@ import (
 )
 
 func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
-	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
 }
 
 func TestEventBusFlowInstanceTemplateDerivesSubscriptionsFromHandlerKeys(t *testing.T) {
-	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -144,7 +144,7 @@ func (s *routePersistenceTestStore) DeleteFlowInstanceRoute(_ context.Context, i
 
 func TestEventBusFlowInstanceRouteIdentityOwnerRejectsMismatchedExplicitPath(t *testing.T) {
 	store := &routePersistenceTestStore{}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -216,7 +216,7 @@ func (s *routePersistenceTestStore) ListFlowInstanceRoutes(context.Context) ([]r
 
 func TestEventBusFlowInstanceRoutesPersistAcrossAddAndRemove(t *testing.T) {
 	store := &routePersistenceTestStore{}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestEventBusAddFlowInstanceRouteRollsBackPersistedRouteOnActiveInstallFailu
 		upsertAfterWrite: true,
 		deleteErr:        context.Canceled,
 	}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestEventBusAddFlowInstanceRouteRollsBackPersistedRouteOnActiveInstallFailu
 func TestEventBusFlowInstanceRoutePersistsAndDeliversRenderedActivationConfigSubscriber(t *testing.T) {
 	store := &routePersistenceTestStore{}
 	bundle := routeMaterializationConfigVarBundle()
-	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),
 	})
 	if err != nil {
@@ -314,7 +314,7 @@ func TestEventBusFlowInstanceRoutePersistsAndDeliversRenderedActivationConfigSub
 }
 
 func TestEventBusRemoveNestedFlowInstanceDropsDerivedRoutes(t *testing.T) {
-	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

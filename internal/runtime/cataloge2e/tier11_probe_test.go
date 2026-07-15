@@ -39,7 +39,7 @@ func TestTier11Probe(t *testing.T) {
 					return
 				}
 				source := semanticview.Wrap(bundle)
-				report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+				report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 				t.Logf("boot warnings=%#v", report.Warnings())
 				t.Logf("boot errors=%#v", report.Errors())
 				return
@@ -92,7 +92,7 @@ func TestTier11Probe(t *testing.T) {
 				}
 			}
 			var eventsDump []string
-			eventRows, err := h.db.QueryContext(context.Background(), `
+			eventRows, err := h.db.QueryContext(testAuthorActivityContext(context.Background()), `
 				SELECT event_name, COALESCE(NULLIF(payload->>'entity_id',''), COALESCE(entity_id::text,'')), COALESCE(flow_instance,'')
 				FROM events
 				ORDER BY created_at ASC, event_id ASC
@@ -108,7 +108,7 @@ func TestTier11Probe(t *testing.T) {
 			}
 			t.Logf("events=%v", eventsDump)
 			var runtimeLogs []string
-			logRows, err := h.db.QueryContext(context.Background(), `
+			logRows, err := h.db.QueryContext(testAuthorActivityContext(context.Background()), `
 				SELECT COALESCE(payload->'details'->>'component',''),
 				       COALESCE(payload->'details'->>'action',''),
 				       COALESCE(payload->'details'->>'error',''),
@@ -128,7 +128,7 @@ func TestTier11Probe(t *testing.T) {
 			}
 			t.Logf("runtime_logs=%v", runtimeLogs)
 			var receipts []string
-			receiptRows, err := h.db.QueryContext(context.Background(), `
+			receiptRows, err := h.db.QueryContext(testAuthorActivityContext(context.Background()), `
 				SELECT subscriber_type, subscriber_id, outcome, COALESCE(flow_instance,''), COALESCE(entity_id::text,'')
 				FROM event_receipts
 				ORDER BY processed_at ASC NULLS LAST, receipt_id ASC
@@ -144,7 +144,7 @@ func TestTier11Probe(t *testing.T) {
 			}
 			t.Logf("receipts=%v", receipts)
 			var deliveries []string
-			deliveryRows, err := h.db.QueryContext(context.Background(), `
+			deliveryRows, err := h.db.QueryContext(testAuthorActivityContext(context.Background()), `
 				SELECT event_id::text, recipient_agent_id
 				FROM event_deliveries
 				ORDER BY created_at ASC, delivery_id ASC

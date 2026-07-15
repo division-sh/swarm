@@ -77,6 +77,18 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 	}
 }
 
+func TestServeLifecyclePresenterStylesOnlyWaitingToken(t *testing.T) {
+	var out bytes.Buffer
+	presenter := newServeLifecyclePresenter(serveOptions{Dev: true, Output: &out})
+	presenter.waiting = func(value string) string { return "\x1b[33m" + value + "\x1b[0m" }
+	if err := presenter.writeFeedReady(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := out.String(), "ready — \x1b[33mwaiting\x1b[0m for events\n"; got != want {
+		t.Fatalf("feed-ready palette = %q, want %q", got, want)
+	}
+}
+
 func TestServeLifecyclePresenterVerbosePreservesExactlyCanonicalBootSequence(t *testing.T) {
 	var out bytes.Buffer
 	presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Verbose: true, Output: &out})
@@ -211,6 +223,27 @@ func TestServeLifecyclePresenterPreReadyRuntimeFailureSuppressesCommit(t *testin
 	}
 	if text := stderr.String(); !strings.Contains(text, "serve failed · api server · accept failed before readiness") || strings.Contains(text, "must-not-render") {
 		t.Fatalf("pre-ready runtime failure output is not one startup disposition:\n%s", text)
+	}
+}
+
+func TestServeLifecyclePresenterPublishesAdmissionBeforeVisibleReadiness(t *testing.T) {
+	var out bytes.Buffer
+	presenter := newServeLifecyclePresenter(serveOptions{Verbose: true, Output: &out})
+	presenter.boot(runtime.BootProgressTotalSteps, "ready", "ok", "")
+	published := false
+	if !presenter.commitReady(serveLifecycleReadyFacts{ProjectName: "project"}, func() {
+		published = true
+		if out.Len() != 0 {
+			t.Fatalf("visible readiness preceded public admission: %q", out.String())
+		}
+	}) {
+		t.Fatal("readiness commit was rejected")
+	}
+	if !published {
+		t.Fatal("public readiness was not published")
+	}
+	if !strings.Contains(out.String(), "[22/22]") {
+		t.Fatalf("visible readiness was not rendered after admission: %q", out.String())
 	}
 }
 

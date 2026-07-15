@@ -658,7 +658,7 @@ func TestInboundGateway_PausedRuntimeUsesIngressOwnerAndAcceptsQueueableWebhook(
 	}
 	controller := runtimeingress.NewController(nil, bus, runtimeingress.Options{})
 	bus.SetRuntimeIngressDispatchGate(controller)
-	if _, err := controller.Pause(context.Background(), runtimeingress.TransitionRequest{
+	if _, err := controller.Pause(testAuthorActivityContext(context.Background()), runtimeingress.TransitionRequest{
 		Reason:       "test_pause",
 		ControlledBy: "test",
 	}); err != nil {
@@ -689,7 +689,7 @@ func TestInboundGateway_GitHubPausedRuntimeUsesIngressOwnerAndAcceptsQueueableWe
 	}
 	controller := runtimeingress.NewController(nil, bus, runtimeingress.Options{})
 	bus.SetRuntimeIngressDispatchGate(controller)
-	if _, err := controller.Pause(context.Background(), runtimeingress.TransitionRequest{
+	if _, err := controller.Pause(testAuthorActivityContext(context.Background()), runtimeingress.TransitionRequest{
 		Reason:       "test_pause",
 		ControlledBy: "test",
 	}); err != nil {
@@ -1311,7 +1311,7 @@ func TestInboundGateway_SlackEventCallbackAcknowledgesBeforePostCommitDispatchCo
 	}
 
 	releaseDispatch()
-	waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	waitCtx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 5*time.Second)
 	defer cancel()
 	if err := bus.WaitForQuiescence(waitCtx); err != nil {
 		t.Fatalf("WaitForQuiescence after dispatch release: %v", err)
@@ -1460,7 +1460,7 @@ func TestInboundGateway_StripeManifestOwnsSignatureReplayIDTypeAndAck(t *testing
 	}
 
 	releaseDispatch()
-	waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	waitCtx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 5*time.Second)
 	defer cancel()
 	if err := bus.WaitForQuiescence(waitCtx); err != nil {
 		t.Fatalf("WaitForQuiescence after dispatch release: %v", err)
@@ -2408,7 +2408,7 @@ func TestInboundGateway_TelegramManifestOwnsTokenDeliveryIDLiteralEventAndAck(t 
 	}
 
 	releaseDispatch()
-	waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	waitCtx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 5*time.Second)
 	defer cancel()
 	if err := bus.WaitForQuiescence(waitCtx); err != nil {
 		t.Fatalf("WaitForQuiescence after dispatch release: %v", err)

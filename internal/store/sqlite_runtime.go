@@ -35,8 +35,8 @@ type SQLiteRuntimeStore struct {
 	*SQLiteSchemaStore
 
 	eventPayloadValidator   EventPayloadValidator
-	authorActivityCatalogMu sync.RWMutex
-	authorActivityCatalog   map[string]struct{}
+	authorActivityCatalogMu sync.Mutex
+	authorActivityCatalog   *runtimeauthoractivity.EventCatalogRegistry
 	startupMu               sync.Mutex
 	mutationMu              sync.Mutex
 	sessionMu               sync.Mutex
@@ -672,6 +672,10 @@ func (s *SQLiteRuntimeStore) sqliteRunControlTransition(ctx context.Context, req
 		if err != nil {
 			return err
 		}
+		occurrenceScope, err := runtimeauthoractivity.BundleScopeForSource(txctx, state.BundleHash)
+		if err != nil {
+			return fmt.Errorf("sqlite run control source scope: %w", err)
+		}
 		switch action {
 		case "pause":
 			state, err = sqlitePauseRunControl(txctx, tx, state, req)
@@ -697,7 +701,7 @@ func (s *SQLiteRuntimeStore) sqliteRunControlTransition(ctx context.Context, req
 			return runtimeauthoractivity.Record(txctx, runtimeauthoractivity.Draft{
 				Kind: runtimeauthoractivity.KindRunLifecycle, Transition: transition,
 				SourceOwner: "runs", SourceIdentity: transitionID, DedupKey: "run-transition:" + transitionID,
-				OccurredAt: req.Now.UTC(), RunID: runID,
+				OccurredAt: req.Now.UTC(), RunID: runID, Scope: occurrenceScope,
 				Projection: runtimeauthoractivity.Projection{
 					SubjectType: "run", SubjectID: runID, ControlReason: req.Reason, Source: req.ControlledBy,
 				},
@@ -934,6 +938,10 @@ func sqliteEnsureRunRow(ctx context.Context, tx *sql.Tx, runID, triggerEventID, 
 	if bundleSource == "" {
 		bundleSource = storerunlifecycle.BundleSourceLegacy
 	}
+	occurrenceScope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
+	if err != nil {
+		return fmt.Errorf("ensure sqlite run row: %w", err)
+	}
 	result, err := tx.ExecContext(ctx, `
 		INSERT OR IGNORE INTO runs (
 			run_id, status, bundle_hash, bundle_source, bundle_fingerprint,
@@ -952,7 +960,7 @@ func sqliteEnsureRunRow(ctx context.Context, tx *sql.Tx, runID, triggerEventID, 
 		return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
 			Kind: runtimeauthoractivity.KindRunLifecycle, Transition: "started",
 			SourceOwner: "runs", SourceIdentity: runID, DedupKey: "run-created:" + runID,
-			OccurredAt: now.UTC(), RunID: runID,
+			OccurredAt: now.UTC(), RunID: runID, Scope: occurrenceScope,
 			Projection: runtimeauthoractivity.Projection{SubjectType: "run", SubjectID: runID, TriggerEventType: strings.TrimSpace(triggerEventType)},
 		})
 	}

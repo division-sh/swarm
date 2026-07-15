@@ -62,7 +62,11 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 		if err != nil {
 			return err
 		}
-		appendOutcome, err := appendEventMutationOutcome(ctx, mutation, intent.Event)
+		intentCtx, err = o.bus.withAuthorActivityEventDescriptor(intentCtx, intent.Event)
+		if err != nil {
+			return err
+		}
+		appendOutcome, err := appendEventMutationOutcome(intentCtx, mutation, intent.Event)
 		if err != nil {
 			return fmt.Errorf("persist event: %w", err)
 		}

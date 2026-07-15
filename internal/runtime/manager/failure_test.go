@@ -83,7 +83,7 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 			err := tt.newFailure()
 			expected := runtimeengine.NormalizeFailure(err, "agent-manager", "process_event.on_event").Failure
 			evt := eventtest.RootIngress("evt-"+tt.name, events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
-			result := am.processEventDetailed(context.Background(), failureReturningAgent{id: "agent-a", err: err}, evt)
+			result := am.processEventDetailed(testAuthorActivityContext(context.Background()), failureReturningAgent{id: "agent-a", err: err}, evt)
 
 			if result.err == nil {
 				t.Fatal("processEventDetailed error = nil")
@@ -112,13 +112,13 @@ func TestProcessEventOutcomeUncertainTerminalReceiptSuppressesReplay(t *testing.
 	err := runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "claude_cli_attempt_outcome_unconfirmed", "claude-cli-adapter", "wait", nil)
 	agent := &countingFailureAgent{failureReturningAgent: failureReturningAgent{id: "agent-a", err: err}}
 	evt := eventtest.RootIngress("evt-uncertain", events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
-	first := am.processEventDetailed(context.Background(), agent, evt)
+	first := am.processEventDetailed(testAuthorActivityContext(context.Background()), agent, evt)
 	if first.err == nil || agent.calls != 1 || store.lastStatus != ReceiptStatusTerminal || store.lastFailure == nil {
 		t.Fatalf("first result err=%v calls=%d status=%s failure=%#v", first.err, agent.calls, store.lastStatus, store.lastFailure)
 	}
 	store.receipt = EventReceipt{EventID: evt.ID(), AgentID: agent.ID(), Status: ReceiptStatusDeadLetter, RetryCount: 0, Failure: runtimefailures.CloneEnvelope(store.lastFailure)}
 	store.found = true
-	second := am.processEventDetailed(context.Background(), agent, evt)
+	second := am.processEventDetailed(testAuthorActivityContext(context.Background()), agent, evt)
 	if second.err != nil || agent.calls != 1 || second.record.ReasonCode != startupManagerReplayReasonReceiptDeadLettered {
 		t.Fatalf("replay result err=%v calls=%d record=%#v", second.err, agent.calls, second.record)
 	}
@@ -130,7 +130,7 @@ func TestQuarantineCarriesTriggeringPanicFailureWithoutReclassification(t *testi
 	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassInternalFailure, "agent_event_panic", "agent-manager", "process_event", map[string]any{"agent_id": "agent-a"}), "agent-manager", "process_event")
 	for i := 0; i < poisonEventEntityThreshold; i++ {
 		evt := eventtest.RootIngress("evt-quarantine", events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{EntityID: "entity-" + string(rune('a'+i))}, time.Time{})
-		am.quarantinePoisonEvent(context.Background(), "agent-a", evt, poisonPanicQuarantineAt, failure)
+		am.quarantinePoisonEvent(testAuthorActivityContext(context.Background()), "agent-a", evt, poisonPanicQuarantineAt, failure)
 	}
 	if len(bus.published) != 1 || bus.published[0].Type() != events.EventType("platform.event_quarantined") {
 		t.Fatalf("published = %#v, want one quarantine event", bus.published)

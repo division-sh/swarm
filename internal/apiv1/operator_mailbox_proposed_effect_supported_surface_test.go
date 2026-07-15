@@ -105,7 +105,7 @@ func TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores(t *t
 			insertProposedEffectAPIRun(t, db, tc.name, runID)
 			cards := persistence.(decisioncard.Store)
 			card, continuation := proposedEffectAPICard(t, runID, entityID, fact, source.WorkflowVersion())
-			if err := cards.(decisioncard.ProposedEffectStore).CreateProposedEffectCard(context.Background(), card, continuation); err != nil {
+			if err := cards.(decisioncard.ProposedEffectStore).CreateProposedEffectCard(testAuthorActivityContextForSource(context.Background(), fact), card, continuation); err != nil {
 				t.Fatal(err)
 			}
 
@@ -160,7 +160,7 @@ func newProposedEffectMailboxHandler(
 ) (*Handler, *runtimebus.EventBus) {
 	t.Helper()
 	var coordinator *runtimepipeline.PipelineCoordinator
-	bus, err := runtimebus.NewEventBusWithOptions(persistence.(runtimebus.EventStore), runtimebus.EventBusOptions{
+	bus, err := newScopedAPITestEventBus(t, persistence.(runtimebus.EventStore), runtimebus.EventBusOptions{
 		ContractBundle:    source,
 		BundleFingerprint: fact.BundleFingerprint,
 		BundleSourceFact:  fact,

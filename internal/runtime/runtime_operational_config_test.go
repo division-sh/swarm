@@ -170,7 +170,7 @@ func TestNewRuntimeRejectsInvalidArtifactRootEnv(t *testing.T) {
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
 
-	_, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	_, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		SQLDB:         db,
 		PipelineStore: runtimepipeline.NewWorkflowInstanceStore(db),
 		EventStore:    &minimalRuntimeEventStore{},
@@ -195,7 +195,7 @@ func TestRuntimeStart_FailsWhenRecoveryDisabledAndActiveSchedulesExist(t *testin
 			TaskID:    "recover-me",
 		}},
 	}
-	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{ScheduleStore: store}, Options: RuntimeOptions{
+	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{ScheduleStore: store}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
@@ -204,7 +204,7 @@ func TestRuntimeStart_FailsWhenRecoveryDisabledAndActiveSchedulesExist(t *testin
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	err = rt.Start(context.Background())
+	err = rt.Start(testAuthorActivityContext(context.Background()))
 	if err == nil || !strings.Contains(err.Error(), "runtime.recovery_on_startup=false") || !strings.Contains(err.Error(), "active schedules") {
 		t.Fatalf("Start error = %v, want explicit active schedule denial", err)
 	}
@@ -226,7 +226,7 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T
 			Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "persisted-agent"},
 		}},
 	}
-	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore:   eventStore,
 		ManagerStore: managerStore,
 	}, Options: RuntimeOptions{
@@ -238,7 +238,7 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	if err := rt.Start(context.Background()); err != nil {
+	if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if got := eventStore.directiveReconcileCalls.Load(); got != 1 {
@@ -251,7 +251,7 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T
 
 func TestRuntimeStart_AllowsRecoveryDisabledWhenNoRecoverableWorkExists(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
-	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		ScheduleStore: &recordingRuntimeScheduleStore{},
 		EventStore:    &recoveryGuardEventStore{},
 		ManagerStore:  &recoveryGuardManagerStore{},
@@ -264,7 +264,7 @@ func TestRuntimeStart_AllowsRecoveryDisabledWhenNoRecoverableWorkExists(t *testi
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	if err := rt.Start(context.Background()); err != nil {
+	if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if err := rt.Shutdown(); err != nil {
@@ -274,7 +274,7 @@ func TestRuntimeStart_AllowsRecoveryDisabledWhenNoRecoverableWorkExists(t *testi
 
 func TestRuntimeStart_AllowsRecoveryDisabledWithNonReplayEventStore(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
-	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore:    &minimalRuntimeEventStore{},
 		ScheduleStore: &recordingRuntimeScheduleStore{},
 		ManagerStore:  &recoveryGuardManagerStore{},
@@ -287,7 +287,7 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithNonReplayEventStore(t *testing.T
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	if err := rt.Start(context.Background()); err != nil {
+	if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if err := rt.Shutdown(); err != nil {
@@ -318,7 +318,7 @@ func TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads(t 
 		},
 	}
 	eventStore := &recoveryGuardEventStore{}
-	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: cfg, Stores: Stores{
+	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Stores: Stores{
 		EventStore:    eventStore,
 		ManagerStore:  managerStore,
 		ScheduleStore: scheduleStore,
@@ -332,7 +332,7 @@ func TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads(t 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	if err := rt.Start(context.Background()); err != nil {
+	if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if got := scheduleStore.loadCalls.Load(); got != 0 {
@@ -352,7 +352,7 @@ func TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads(t 
 func TestRuntimeStart_FailsClosedWhenRequiredDirectiveReconciliationFails(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	eventStore := &recoveryGuardEventStore{directiveReconcileErr: errors.New("injected directive reconciliation failure")}
-	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore: eventStore,
 	}, Options: RuntimeOptions{
 		SelfCheck:      false,
@@ -362,7 +362,7 @@ func TestRuntimeStart_FailsClosedWhenRequiredDirectiveReconciliationFails(t *tes
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	err = rt.Start(context.Background())
+	err = rt.Start(testAuthorActivityContext(context.Background()))
 	if err == nil || !strings.Contains(err.Error(), "required directive operation reconciliation failed") || !strings.Contains(err.Error(), "injected directive reconciliation failure") {
 		t.Fatalf("Start error = %v, want required reconciliation failure", err)
 	}
@@ -376,7 +376,7 @@ func TestRuntimeStart_ReconcilesEverySelectedRuntimeContext(t *testing.T) {
 	stores := []*recoveryGuardEventStore{{}, {}}
 	runtimes := make([]*Runtime, 0, len(stores))
 	for _, eventStore := range stores {
-		rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+		rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 			EventStore: eventStore,
 		}, Options: RuntimeOptions{
 			SelfCheck:      false,
@@ -386,7 +386,7 @@ func TestRuntimeStart_ReconcilesEverySelectedRuntimeContext(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewRuntime: %v", err)
 		}
-		if err := rt.Start(context.Background()); err != nil {
+		if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 		runtimes = append(runtimes, rt)
@@ -405,7 +405,7 @@ func TestRuntimeStart_ReconcilesEverySelectedRuntimeContext(t *testing.T) {
 
 func TestNewRuntime_FailsClosedOnMalformedExtensionConfig(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
-	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: &config.Config{
+	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{RecoveryOnStartup: false},
 		LLM:     config.LLMConfig{Backend: "anthropic"},
 		Extensions: map[string]any{

@@ -30,7 +30,7 @@ func TestRuntimeStart_AgentFreeCLITestDoesNotRequireClaudeStartupEnv(t *testing.
 		t.Fatalf("agent-free fixture has %d semantic agents", got)
 	}
 
-	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
+	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
@@ -41,7 +41,7 @@ func TestRuntimeStart_AgentFreeCLITestDoesNotRequireClaudeStartupEnv(t *testing.
 	}
 	t.Cleanup(func() { _ = rt.Shutdown() })
 
-	if err := rt.Start(context.Background()); err != nil {
+	if err := rt.Start(testAuthorActivityContext(context.Background())); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 }
@@ -50,7 +50,7 @@ func TestNewRuntimeRejectsRetiredLLMRuntimeMode(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.RuntimeMode = "cli_test"
 
-	_, err := NewRuntime(context.Background(), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
+	_, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: loadAgentFreeRuntimeWorkflowModule(t),
 		LLMRuntime:     noopLLMRuntime{},
@@ -67,7 +67,7 @@ func TestNewRuntime_AgentPresentRequiresSelectedBackendCredential(t *testing.T) 
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	module := semanticOnlyWorkflowRuntime{source: loadPackageBackedRuntimeAgentMemorySource(t)}
 
-	_, err := NewRuntime(context.Background(), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
+	_, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 	}})
@@ -91,7 +91,7 @@ func TestNewRuntime_AgentPresentCLITestStillRequiresClaudeStartupEnv(t *testing.
 		t.Fatal("agent-present fixture unexpectedly has zero semantic agents")
 	}
 
-	_, err := NewRuntime(context.Background(), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
+	_, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
@@ -111,7 +111,7 @@ func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupBinding(t *test
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
-	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
+	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: loadAgentFreeRuntimeWorkflowModule(t),
 		LLMRuntime:     noopLLMRuntime{},
@@ -130,7 +130,7 @@ func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupBinding(t *test
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 
-	err = rt.Start(context.Background())
+	err = rt.Start(testAuthorActivityContext(context.Background()))
 	if err == nil || !strings.Contains(err.Error(), "claude runtime startup validation failed") || !strings.Contains(err.Error(), "tool gateway binding workspace endpoint") {
 		t.Fatalf("Start error = %v, want startup validation failure for missing workspace gateway binding", err)
 	}
@@ -140,7 +140,7 @@ func TestNewRuntimeToolGatewayRequiresBindingToken(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 
-	_, err := NewRuntime(context.Background(), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
+	_, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
 		SelfCheck:          false,
 		WorkflowModule:     loadAgentFreeRuntimeWorkflowModule(t),
 		LLMRuntime:         noopLLMRuntime{},

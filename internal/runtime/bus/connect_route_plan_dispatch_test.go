@@ -263,7 +263,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscr
 		To:   "consumer.deploy_completed",
 	})
 	store := newTargetRouteMemoryStore()
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscr
 func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T) {
 	source := connectRoutePlanRootProducerStaticSource()
 	store := newTargetRouteMemoryStore()
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T
 func TestEventBusPublish_RootConnectRoutePlanDoesNotCaptureChildScopedSameNameEvent(t *testing.T) {
 	source := connectRoutePlanRootProducerStaticSource()
 	store := newTargetRouteMemoryStore()
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -449,7 +449,7 @@ func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanPrecedesLegacyDescrip
 		To:   "consumer.deploy_completed",
 	})
 	store := &connectRoutePlanFailingAgentDescriptorStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -546,7 +546,7 @@ func TestEventBusPublishInMutation_ConnectRoutePlanPersistsSharedRoutePlan(t *te
 		To:   "consumer.deploy_completed",
 	})
 	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -581,7 +581,7 @@ func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 		To:   "consumer.deploy_completed",
 	})
 	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -625,7 +625,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTargetSetFanout(t *testing.T) {
 			{InstanceID: "gamma", EntityID: "team-b", FlowInstance: "worker/gamma"},
 		},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -668,7 +668,7 @@ func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		flowInstances:          []ActiveFlowInstanceDescriptor{{InstanceID: "alpha", EntityID: "team-a", FlowInstance: "worker/alpha"}},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -739,7 +739,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTarget(t *t
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -781,7 +781,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -841,7 +841,7 @@ func TestEventBusPublish_ConnectRoutePlanCreatesTemplateInstanceOnMissingCreate(
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:            source,
 		TemplateInstanceActivator: store.Activate,
 	})
@@ -940,7 +940,7 @@ func TestCommittedReplayReusesPersistedSyntheticCarryWithoutReminting(t *testing
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:            source,
 		TemplateInstanceActivator: store.Activate,
 	})
@@ -1038,7 +1038,7 @@ func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanCreateResolutionAdmit
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:            source,
 		TemplateInstanceActivator: store.Activate,
 	})
@@ -1075,7 +1075,7 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *t
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:            source,
 		TemplateInstanceActivator: store.Activate,
 	})
@@ -1134,7 +1134,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 			}},
 		},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:            source,
 		TemplateInstanceActivator: store.Activate,
 	})
@@ -1247,7 +1247,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 					flowInstances:          tc.flowInstances,
 				},
 			}
-			eb, err := NewEventBusWithOptions(store, EventBusOptions{
+			eb, err := newScopedTestEventBus(store, EventBusOptions{
 				ContractBundle:            source,
 				TemplateInstanceActivator: store.Activate,
 			})
@@ -1322,7 +1322,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 			}},
 		},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:            source,
 		TemplateInstanceActivator: store.Activate,
 	})
@@ -1442,7 +1442,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionDoesNotReuseUnr
 		},
 		failAfterDescriptorWithoutRoute: errors.New("route installation failed"),
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:            source,
 		TemplateInstanceActivator: store.Activate,
 	})
@@ -1486,7 +1486,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionFailsClosedForA
 			},
 		},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:            source,
 		TemplateInstanceActivator: store.Activate,
 	})
@@ -1535,7 +1535,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameK
 		},
 	}
 	store := &connectRoutePlanConcurrentLifecycleStore{connectRoutePlanLifecycleStore: base}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:            source,
 		TemplateInstanceActivator: store.Activate,
 	})
@@ -1597,7 +1597,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCreateRefreshesDescriptorsForL
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:            source,
 		TemplateInstanceActivator: store.Activate,
 	})
@@ -1636,7 +1636,7 @@ func TestEventBusPublish_ConnectRoutePlanCreateRejectSameEventRetryIsNoOpAndExpl
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:            source,
 		TemplateInstanceActivator: store.Activate,
 	})
@@ -1682,7 +1682,7 @@ func TestEventBusPublish_ConnectRoutePlanDefaultedPoliciesMatchCreateReject(t *t
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:            source,
 		TemplateInstanceActivator: store.Activate,
 	})
@@ -1724,7 +1724,7 @@ func TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:            source,
 		TemplateInstanceActivator: store.Activate,
 	})
@@ -1772,7 +1772,7 @@ func TestEventBusPublish_ConnectRoutePlanRejectsCreateConflict(t *testing.T) {
 			}},
 		},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:            source,
 		TemplateInstanceActivator: store.Activate,
 	})
@@ -1807,7 +1807,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleUnavailableBlocksLowerPreceden
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 	}
 	materializerCalled := false
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source,
 		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]events.DeliveryRoute, error) {
 			materializerCalled = true
@@ -1859,7 +1859,7 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -1924,7 +1924,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarge
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -1988,7 +1988,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKe
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -2083,7 +2083,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 				targetRouteMemoryStore: newTargetRouteMemoryStore(),
 				flowInstances:          tc.flowInstances,
 			}
-			eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -2149,7 +2149,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTargetSet(t
 			{InstanceID: "other", EntityID: "ent-3", FlowInstance: "consumer/other", AddressFields: map[string]string{"entity.vertical_id": "v-2"}},
 		},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -2253,7 +2253,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForBusinessFieldDescriptorGa
 				targetRouteMemoryStore: newTargetRouteMemoryStore(),
 				flowInstances:          tc.flowInstances,
 			}
-			eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: tc.source})
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: tc.source})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -2290,7 +2290,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForUnsupportedBusinessFieldT
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -2356,7 +2356,7 @@ func TestEventBusPublish_ConnectRoutePlanWithOnlySourceAndRawSubscribersFailsClo
 		To:   "consumer.deploy_completed",
 	}}))
 	store := newTargetRouteMemoryStore()
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -2434,7 +2434,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForInvalidLoweredPlan(t *tes
 		From: "producer.deploy_done",
 		To:   "consumer.missing_input",
 	}}))
-	eb, err := NewEventBusWithOptions(newTargetRouteMemoryStore(), EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(newTargetRouteMemoryStore(), EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -2487,7 +2487,7 @@ func TestEventBusPublish_ConnectRoutePlanFailureSkipsRecipientPlanMaterializer(t
 		To:   "consumer.missing_input",
 	}}))
 	materializerCalled := false
-	eb, err := NewEventBusWithOptions(newTargetRouteMemoryStore(), EventBusOptions{
+	eb, err := newScopedTestEventBus(newTargetRouteMemoryStore(), EventBusOptions{
 		ContractBundle: source,
 		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]events.DeliveryRoute, error) {
 			materializerCalled = true
@@ -2534,7 +2534,7 @@ func TestEventBusPublish_ConnectRoutePlanFailureSkipsRecipientPlanMaterializer(t
 }
 
 func TestEventBusPlan_UnmatchedCanonicalRouteUsesLowerPrecedenceFallback(t *testing.T) {
-	eb, err := NewEventBus(InMemoryEventStore{})
+	eb, err := newScopedTestEventBus(InMemoryEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

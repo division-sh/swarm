@@ -91,20 +91,22 @@ func proveLifecycleConcurrentPartialReconfigure(t *testing.T, store lifecycleOcc
 			}
 		}
 		return lifecycleOccurrenceAgent{id: cfg.ID}, nil
-	}, runtimemanager.AgentManagerOptions{LifecycleStore: store, Sessions: store}, store)
-	cfg := runtimeactors.AgentConfig{ExecutionMode: "live", ID: "concurrent-partial-reconfigure-agent",
-		Role:     "worker",
-		Type:     "sonnet",
-		Model:    "regular",
-		FlowID:   "global",
-		Memory:   agentmemory.Authored(true),
-		FlowPath: "support/serialized",
-		Tools:    []string{"tool-a"},
+	}, runtimemanager.AgentManagerOptions{BaseContext: testAuthorActivityContext(), LifecycleStore: store, Sessions: store}, store)
+	cfg := runtimeactors.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "concurrent-partial-reconfigure-agent",
+		Role:          "worker",
+		Type:          "sonnet",
+		Model:         "regular",
+		FlowID:        "global",
+		Memory:        agentmemory.Authored(true),
+		FlowPath:      "support/serialized",
+		Tools:         []string{"tool-a"},
 	}
 	if err := manager.SpawnAgent(cfg); err != nil {
 		t.Fatalf("spawn agent: %v", err)
 	}
-	agents, err := store.LoadAgents(context.Background())
+	agents, err := store.LoadAgents(testAuthorActivityContext())
 	if err != nil || len(agents) != 1 {
 		t.Fatalf("load spawned agent: agents=%#v err=%v", agents, err)
 	}
@@ -147,7 +149,7 @@ func proveLifecycleConcurrentPartialReconfigure(t *testing.T, store lifecycleOcc
 		t.Fatal("disjoint partial patch was built before the prior reconfigure committed and projected")
 	}
 
-	agents, err = store.LoadAgents(context.Background())
+	agents, err = store.LoadAgents(testAuthorActivityContext())
 	if err != nil || len(agents) != 1 {
 		t.Fatalf("load reconfigured agent: agents=%#v err=%v", agents, err)
 	}
@@ -168,7 +170,7 @@ func seedLifecycleRun(t *testing.T, db *sql.DB, sqlite bool, runID string) {
 	if !sqlite {
 		query = `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`
 	}
-	if _, err := db.ExecContext(context.Background(), query, runID); err != nil {
+	if _, err := db.ExecContext(testAuthorActivityContext(), query, runID); err != nil {
 		t.Fatalf("seed lifecycle run: %v", err)
 	}
 }
@@ -182,7 +184,7 @@ func seedLifecycleSessionForPartialReconfigure(t *testing.T, db *sql.DB, sqlite 
 		query = `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, conversation, runtime_state, status, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, $4, TRUE, 'authored', '[]'::jsonb, '{}'::jsonb, 'active', $5, $5)`
 		args = []any{sessionID, runID, agentID, flowInstance, now}
 	}
-	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
+	if _, err := db.ExecContext(testAuthorActivityContext(), query, args...); err != nil {
 		t.Fatalf("seed lifecycle session: %v", err)
 	}
 }
@@ -194,7 +196,7 @@ func assertLifecyclePartialReconfigureSession(t *testing.T, db *sql.DB, sqlite b
 		query = `SELECT status, COALESCE(successor_session_id::text, '') FROM agent_sessions WHERE session_id = $1::uuid`
 	}
 	var status, successor string
-	if err := db.QueryRowContext(context.Background(), query, sessionID).Scan(&status, &successor); err != nil {
+	if err := db.QueryRowContext(testAuthorActivityContext(), query, sessionID).Scan(&status, &successor); err != nil {
 		t.Fatalf("load predecessor session: %v", err)
 	}
 	if status != "terminated" || successor != "" {
@@ -208,7 +210,7 @@ func assertLifecyclePartialReconfigureOutcomes(t *testing.T, db *sql.DB, sqlite 
 	if !sqlite {
 		query = `SELECT result::text FROM agent_lifecycle_operations WHERE agent_id = $1 AND operation_kind = 'reconfigure' ORDER BY expected_generation`
 	}
-	rows, err := db.QueryContext(context.Background(), query, agentID)
+	rows, err := db.QueryContext(testAuthorActivityContext(), query, agentID)
 	if err != nil {
 		t.Fatalf("query reconfigure outcomes: %v", err)
 	}
@@ -244,19 +246,21 @@ func proveLifecycleReconfigureOccurrenceIdentity(t *testing.T, store lifecycleOc
 	t.Helper()
 	manager := runtimemanager.NewAgentManagerWithOptions(nil, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return lifecycleOccurrenceAgent{id: cfg.ID}, nil
-	}, runtimemanager.AgentManagerOptions{LifecycleStore: store, Sessions: store}, store)
-	cfg := runtimeactors.AgentConfig{ExecutionMode: "live", ID: "reconfigure-occurrence-agent",
-		Role:     "worker",
-		Type:     "sonnet",
-		Model:    "regular",
-		FlowID:   "global",
-		Memory:   agentmemory.Authored(true),
-		FlowPath: "support/occurrence",
+	}, runtimemanager.AgentManagerOptions{BaseContext: testAuthorActivityContext(), LifecycleStore: store, Sessions: store}, store)
+	cfg := runtimeactors.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "reconfigure-occurrence-agent",
+		Role:          "worker",
+		Type:          "sonnet",
+		Model:         "regular",
+		FlowID:        "global",
+		Memory:        agentmemory.Authored(true),
+		FlowPath:      "support/occurrence",
 	}
 	if err := manager.SpawnAgent(cfg); err != nil {
 		t.Fatalf("spawn agent: %v", err)
 	}
-	agents, err := store.LoadAgents(context.Background())
+	agents, err := store.LoadAgents(testAuthorActivityContext())
 	if err != nil || len(agents) != 1 {
 		t.Fatalf("load spawned agent: agents=%#v err=%v", agents, err)
 	}
@@ -265,7 +269,7 @@ func proveLifecycleReconfigureOccurrenceIdentity(t *testing.T, store lifecycleOc
 		if err := manager.ReconfigureAgent(cfg.ID, runtimeactors.AgentConfig{ExecutionMode: "live", Tools: []string{tool}}); err != nil {
 			t.Fatalf("reconfigure occurrence %d (%s): %v", i+1, tool, err)
 		}
-		agents, err = store.LoadAgents(context.Background())
+		agents, err = store.LoadAgents(testAuthorActivityContext())
 		if err != nil || len(agents) != 1 {
 			t.Fatalf("load occurrence %d: agents=%#v err=%v", i+1, agents, err)
 		}
@@ -279,7 +283,7 @@ func proveLifecycleReconfigureOccurrenceIdentity(t *testing.T, store lifecycleOc
 		t.Fatalf("same-current reconfigure: %v", err)
 	}
 	assertLifecycleReconfigureOperationCount(t, db, sqlite, cfg.ID, 4)
-	agents, err = store.LoadAgents(context.Background())
+	agents, err = store.LoadAgents(testAuthorActivityContext())
 	if err != nil || len(agents) != 1 {
 		t.Fatalf("load same-current agent: agents=%#v err=%v", agents, err)
 	}
@@ -295,7 +299,7 @@ func assertLifecycleReconfigureOperationCount(t *testing.T, db *sql.DB, sqlite b
 		query = `SELECT COUNT(*), COUNT(DISTINCT operation_id) FROM agent_lifecycle_operations WHERE agent_id = $1 AND operation_kind = 'reconfigure'`
 	}
 	var count, distinct int
-	if err := db.QueryRowContext(context.Background(), query, agentID).Scan(&count, &distinct); err != nil {
+	if err := db.QueryRowContext(testAuthorActivityContext(), query, agentID).Scan(&count, &distinct); err != nil {
 		t.Fatalf("count reconfigure operations: %v", err)
 	}
 	if count != want || distinct != want {
@@ -305,7 +309,7 @@ func assertLifecycleReconfigureOperationCount(t *testing.T, db *sql.DB, sqlite b
 
 func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordinateStore, db *sql.DB, sqlite bool) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
 	agentID := "subordinate-transaction-agent"
 	rec := runtimemanager.PersistedAgent{

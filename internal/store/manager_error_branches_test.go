@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -16,9 +15,9 @@ import (
 
 func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := newTestPostgresStore(t, db)
 	const runID = "44444444-4444-4444-4444-444444444444"
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 
 	// UpsertAgent: missing id.
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{Config: runtimeactors.AgentConfig{ExecutionMode: "live"}}); err == nil {

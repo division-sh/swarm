@@ -12,7 +12,7 @@ import (
 func TestPostgresStoreResolveAgentDirectiveRunTarget(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	pg := &PostgresStore{DB: db}
 	createDirectiveRunTargetTables(t, ctx, pg)
 

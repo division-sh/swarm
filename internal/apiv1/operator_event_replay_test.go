@@ -23,7 +23,7 @@ import (
 )
 
 func TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	bus := eventReplayTestBus(t, pg)
@@ -150,7 +150,7 @@ func TestReplayEventFromOriginalUsesCanonicalEventEntityOnly(t *testing.T) {
 }
 
 func TestOperatorEventReplayStoresIdempotencyBeforeAuditPublishReadiness(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	inner := eventReplayTestBus(t, pg)
@@ -192,7 +192,7 @@ func TestOperatorEventReplayStoresIdempotencyBeforeAuditPublishReadiness(t *test
 }
 
 func TestOperatorEventReplayStoresIdempotencyBeforeDirectPublishFanoutError(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	bus := eventReplayTestBus(t, pg)
@@ -243,7 +243,7 @@ func TestOperatorEventReplayStoresIdempotencyBeforeDirectPublishFanoutError(t *t
 
 func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 	t.Run("subset targets only requested original subscriber", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := testAuthorActivityContext(context.Background())
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		bus := eventReplayTestBus(t, pg)
@@ -283,11 +283,12 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 	})
 
 	t.Run("zero original agent delivery history", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := testAuthorActivityContext(context.Background())
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
+		bus := eventReplayTestBus(t, pg)
 		original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", nil, eventReplayStatusDelivered)
-		handler := eventReplayTestHandler(t, pg, eventReplayTestBus(t, pg))
+		handler := eventReplayTestHandler(t, pg, bus)
 		resp := rpcCall(t, handler, eventReplayBody(original.EventID, nil, "idem-empty"))
 		if resp.Error == nil {
 			t.Fatal("zero-history event.replay error = nil")
@@ -298,9 +299,10 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 	})
 
 	t.Run("pending node-only delivery is not replay eligible and does not mutate", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := testAuthorActivityContext(context.Background())
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
+		bus := eventReplayTestBus(t, pg)
 		eventID := uuid.NewString()
 		runID := uuid.NewString()
 		if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(
@@ -324,7 +326,7 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 		`, runID, eventID); err != nil {
 			t.Fatalf("seed node-only delivery: %v", err)
 		}
-		handler := eventReplayTestHandler(t, pg, eventReplayTestBus(t, pg))
+		handler := eventReplayTestHandler(t, pg, bus)
 		resp := rpcCall(t, handler, eventReplayBody(eventID, nil, "idem-node-only-pending"))
 		if resp.Error == nil {
 			t.Fatal("node-only event.replay error = nil")
@@ -354,7 +356,7 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 	})
 
 	t.Run("requested subscriber was not original", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := testAuthorActivityContext(context.Background())
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		bus := eventReplayTestBus(t, pg)
@@ -376,7 +378,7 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 	})
 
 	t.Run("original subscriber no longer deliverable", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := testAuthorActivityContext(context.Background())
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		bus := eventReplayTestBus(t, pg)
@@ -397,7 +399,7 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 
 	for _, status := range []string{eventReplayStatusPending, eventReplayStatusInProgress} {
 		t.Run("nonterminal original delivery is not eligible "+status, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext(context.Background())
 			_, db, _ := testutil.StartPostgres(t)
 			pg := &store.PostgresStore{DB: db}
 			bus := eventReplayTestBus(t, pg)
@@ -437,7 +439,7 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 }
 
 func TestOperatorAgentReplayProjectsSingletonEventReplayOwner(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	bus := eventReplayTestBus(t, pg)
@@ -502,7 +504,7 @@ func TestOperatorAgentReplayProjectsSingletonEventReplayOwner(t *testing.T) {
 
 func TestOperatorAgentReplayFailClosedCases(t *testing.T) {
 	t.Run("requested agent was not original subscriber", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := testAuthorActivityContext(context.Background())
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		bus := eventReplayTestBus(t, pg)
@@ -525,7 +527,7 @@ func TestOperatorAgentReplayFailClosedCases(t *testing.T) {
 	})
 
 	t.Run("original agent no longer deliverable", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := testAuthorActivityContext(context.Background())
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		bus := eventReplayTestBus(t, pg)
@@ -546,7 +548,7 @@ func TestOperatorAgentReplayFailClosedCases(t *testing.T) {
 	})
 
 	t.Run("nonterminal original delivery is not eligible", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := testAuthorActivityContext(context.Background())
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		bus := eventReplayTestBus(t, pg)
@@ -575,10 +577,10 @@ func TestOperatorEventReplayQueuesWhenDispatchGated(t *testing.T) {
 		{name: "run dispatch blocked", opts: runtimebus.EventBusOptions{RunDispatchGate: blockedRunDispatchGate{}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext(context.Background())
 			_, db, _ := testutil.StartPostgres(t)
 			pg := &store.PostgresStore{DB: db}
-			bus, err := runtimebus.NewEventBusWithOptions(pg, tc.opts)
+			bus, err := newScopedAPITestEventBus(t, pg, tc.opts)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -619,7 +621,7 @@ func (blockedRunDispatchGate) QueueableRunDispatchBlocked(context.Context, strin
 
 func eventReplayTestBus(t *testing.T, pg *store.PostgresStore) *runtimebus.EventBus {
 	t.Helper()
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(runStartTestBundle("scan.requested")),
 	})
 	if err != nil {

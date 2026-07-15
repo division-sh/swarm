@@ -161,6 +161,7 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 		}
 		out.Runs = append(out.Runs, runtimerunquiescence.QuiescedRun{
 			RunID:          run.RunID,
+			BundleHash:     run.BundleHash,
 			PreviousStatus: run.Status,
 			Status:         nextStatus,
 			ReasonCode:     out.ReasonCode,
@@ -201,7 +202,9 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 		if err := supersedeDecisionCardsForRun(ctx, tx, run.RunID, "run_quiesced", now, false, true); err != nil {
 			return runtimerunquiescence.Result{}, err
 		}
-		if _, err := storerunlifecycle.MarkTerminal(ctx, tx, run.RunID, "cancelled", nil, now, runLifecycleOptions(caps)); err != nil {
+		opts := runLifecycleOptions(caps)
+		opts.BundleHash = run.BundleHash
+		if _, err := storerunlifecycle.MarkTerminal(ctx, tx, run.RunID, "cancelled", nil, now, opts); err != nil {
 			return runtimerunquiescence.Result{}, fmt.Errorf("mark active run quiescence run terminal: %w", err)
 		}
 		if err := upsertActiveRunQuiescenceRunControlTx(ctx, tx, run.RunID, out.ReasonCode, out.ControlledBy, now); err != nil {
@@ -326,6 +329,7 @@ func (s *SQLiteRuntimeStore) ApplyActiveRunQuiescence(ctx context.Context, req r
 			}
 			attemptOut.Runs = append(attemptOut.Runs, runtimerunquiescence.QuiescedRun{
 				RunID:          run.RunID,
+				BundleHash:     run.BundleHash,
 				PreviousStatus: run.Status,
 				Status:         nextStatus,
 				ReasonCode:     attemptOut.ReasonCode,
@@ -417,7 +421,7 @@ func activeRunQuiescenceRunStatusActive(status string) bool {
 
 func lockAllActiveQuiescenceRunsTx(ctx context.Context, tx *sql.Tx) ([]runtimerunquiescence.QuiescedRun, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT run_id::text, COALESCE(status, '')
+		SELECT run_id::text, COALESCE(bundle_hash, ''), COALESCE(status, '')
 		FROM runs
 		WHERE lower(COALESCE(status, '')) IN ('running', 'paused')
 		  AND NOT EXISTS (
@@ -434,7 +438,7 @@ func lockAllActiveQuiescenceRunsTx(ctx context.Context, tx *sql.Tx) ([]runtimeru
 
 func lockActiveRunQuiescenceRunsTx(ctx context.Context, tx *sql.Tx, runIDs []string) ([]runtimerunquiescence.QuiescedRun, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT run_id::text, COALESCE(status, '')
+		SELECT run_id::text, COALESCE(bundle_hash, ''), COALESCE(status, '')
 		FROM runs
 		WHERE run_id = ANY($1::uuid[])
 		  AND lower(COALESCE(status, '')) IN ('running', 'paused')
@@ -452,10 +456,11 @@ func scanActiveRunQuiescenceRuns(rows *sql.Rows) ([]runtimerunquiescence.Quiesce
 	var out []runtimerunquiescence.QuiescedRun
 	for rows.Next() {
 		var run runtimerunquiescence.QuiescedRun
-		if err := rows.Scan(&run.RunID, &run.PreviousStatus); err != nil {
+		if err := rows.Scan(&run.RunID, &run.BundleHash, &run.PreviousStatus); err != nil {
 			return nil, fmt.Errorf("scan active quiescence run: %w", err)
 		}
 		run.RunID = strings.TrimSpace(run.RunID)
+		run.BundleHash = strings.TrimSpace(run.BundleHash)
 		run.PreviousStatus = strings.TrimSpace(run.PreviousStatus)
 		run.Status = run.PreviousStatus
 		out = append(out, run)
@@ -512,7 +517,7 @@ func lockActiveRunQuiescenceDeliveriesTx(ctx context.Context, tx *sql.Tx, runIDs
 
 func sqliteLockAllActiveQuiescenceRunsTx(ctx context.Context, tx *sql.Tx) ([]runtimerunquiescence.QuiescedRun, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT run_id, COALESCE(status, '')
+		SELECT run_id, COALESCE(bundle_hash, ''), COALESCE(status, '')
 		FROM runs
 		WHERE lower(COALESCE(status, '')) IN ('running', 'paused')
 		  AND NOT EXISTS (
@@ -535,7 +540,7 @@ func sqliteLockActiveQuiescenceRunsTx(ctx context.Context, tx *sql.Tx, runIDs []
 		args = append(args, runID)
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT run_id, COALESCE(status, '')
+		SELECT run_id, COALESCE(bundle_hash, ''), COALESCE(status, '')
 		FROM runs
 		WHERE run_id IN (`+sqlitePlaceholders(len(runIDs))+`)
 		  AND lower(COALESCE(status, '')) IN ('running', 'paused')

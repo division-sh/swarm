@@ -97,7 +97,7 @@ func TestInsertRequiresExistingActiveRunAndPreservesBundleSourceFact(t *testing.
 	}
 	seedMutationLogBundleRow(t, db, sourceFact.BundleHash)
 	seedMutationLogActiveRun(t, db, runID, &sourceFact)
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityRuntimeContext(context.Background()), runID)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
 
 	if err := insertMutationLogRecord(t, ctx, db, Record{
@@ -137,7 +137,7 @@ func TestInsertRejectsDeletedPersistedBundleSourceFact(t *testing.T) {
 	if _, err := db.ExecContext(context.Background(), `DELETE FROM bundles WHERE bundle_hash = $1`, sourceFact.BundleHash); err != nil {
 		t.Fatalf("delete bundle row: %v", err)
 	}
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityRuntimeContext(context.Background()), runID)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
 
 	err := insertMutationLogRecord(t, ctx, db, Record{
@@ -207,7 +207,7 @@ func insertMutationLogRecord(t *testing.T, ctx context.Context, db *sql.DB, reco
 
 func seedMutationLogBundleRow(t *testing.T, db *sql.DB, bundleHash string) {
 	t.Helper()
-	if _, err := db.ExecContext(context.Background(), `
+	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `
 		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
 		VALUES ($1, 'name: test', '{}'::jsonb)
 	`, bundleHash); err != nil {
@@ -234,7 +234,7 @@ func seedMutationLogActiveRun(t *testing.T, db *sql.DB, runID string, sourceFact
 func countMutationLogRunRows(t *testing.T, db *sql.DB, runID string) int {
 	t.Helper()
 	var count int
-	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM runs WHERE run_id = $1::uuid`, runID).Scan(&count); err != nil {
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `SELECT COUNT(*) FROM runs WHERE run_id = $1::uuid`, runID).Scan(&count); err != nil {
 		t.Fatalf("count run rows for %s: %v", runID, err)
 	}
 	return count
@@ -243,7 +243,7 @@ func countMutationLogRunRows(t *testing.T, db *sql.DB, runID string) int {
 func countMutationRowsForRun(t *testing.T, db *sql.DB, runID string) int {
 	t.Helper()
 	var count int
-	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid`, runID).Scan(&count); err != nil {
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid`, runID).Scan(&count); err != nil {
 		t.Fatalf("count entity_mutations rows for %s: %v", runID, err)
 	}
 	return count

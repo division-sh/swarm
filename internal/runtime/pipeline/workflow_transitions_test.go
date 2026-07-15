@@ -33,7 +33,7 @@ func TestRecordPipelineTransition_PersistsViaCanonicalCapabilityOwner(t *testing
 	mock.ExpectCommit()
 
 	pg := &store.PostgresStore{DB: db}
-	err = runtimepipeline.RecordPipelineTransition(context.Background(), db, pg.CanonicalEventReceiptsCapability, runtimepipeline.PipelineTransitionInput{
+	err = runtimepipeline.RecordPipelineTransition(testAuthorActivityContext(context.Background()), db, pg.CanonicalEventReceiptsCapability, runtimepipeline.PipelineTransitionInput{
 		EventID:    eventID,
 		EventType:  "review.requested",
 		Handler:    "node-a",
@@ -57,7 +57,7 @@ func TestRecordPipelineTransition_FailsClosedOnMixedSchemaCapability(t *testing.
 	mock.ExpectQuery("FROM information_schema.columns").WillReturnRows(mixedTransitionSchemaRows())
 	mock.ExpectQuery("FROM pg_index").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	pg := &store.PostgresStore{DB: db}
-	err = runtimepipeline.RecordPipelineTransition(context.Background(), db, pg.CanonicalEventReceiptsCapability, runtimepipeline.PipelineTransitionInput{
+	err = runtimepipeline.RecordPipelineTransition(testAuthorActivityContext(context.Background()), db, pg.CanonicalEventReceiptsCapability, runtimepipeline.PipelineTransitionInput{
 		EventID:    uuid.NewString(),
 		EventType:  "review.requested",
 		Handler:    "node-a",

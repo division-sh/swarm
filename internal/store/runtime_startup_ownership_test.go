@@ -141,13 +141,13 @@ func TestPostgresStore_AcquireRuntimeStartupOwnership_DeniesCompetingOwner(t *te
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 
-	lease1, err := pg.AcquireRuntimeStartupOwnership(context.Background(), testStartupAcquireRequest("runtime-1"))
+	lease1, err := pg.AcquireRuntimeStartupOwnership(testAuthorActivityContext(), testStartupAcquireRequest("runtime-1"))
 	if err != nil {
 		t.Fatalf("AcquireRuntimeStartupOwnership(runtime-1): %v", err)
 	}
-	t.Cleanup(func() { _ = lease1.Release(context.Background()) })
+	t.Cleanup(func() { _ = lease1.Release(testAuthorActivityContext()) })
 
-	lease2, err := pg.AcquireRuntimeStartupOwnership(context.Background(), testStartupAcquireRequest("runtime-2"))
+	lease2, err := pg.AcquireRuntimeStartupOwnership(testAuthorActivityContext(), testStartupAcquireRequest("runtime-2"))
 	if lease2 != nil {
 		t.Fatalf("AcquireRuntimeStartupOwnership(runtime-2) lease = %#v, want nil", lease2)
 	}
@@ -160,19 +160,19 @@ func TestPostgresStore_AcquireRuntimeStartupOwnership_ReleaseAllowsSuccessor(t *
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 
-	lease1, err := pg.AcquireRuntimeStartupOwnership(context.Background(), testStartupAcquireRequest("runtime-1"))
+	lease1, err := pg.AcquireRuntimeStartupOwnership(testAuthorActivityContext(), testStartupAcquireRequest("runtime-1"))
 	if err != nil {
 		t.Fatalf("AcquireRuntimeStartupOwnership(runtime-1): %v", err)
 	}
-	if err := lease1.Release(context.Background()); err != nil {
+	if err := lease1.Release(testAuthorActivityContext()); err != nil {
 		t.Fatalf("Release(runtime-1): %v", err)
 	}
 
-	lease2, err := pg.AcquireRuntimeStartupOwnership(context.Background(), testStartupAcquireRequest("runtime-2"))
+	lease2, err := pg.AcquireRuntimeStartupOwnership(testAuthorActivityContext(), testStartupAcquireRequest("runtime-2"))
 	if err != nil {
 		t.Fatalf("AcquireRuntimeStartupOwnership(runtime-2): %v", err)
 	}
-	if err := lease2.Release(context.Background()); err != nil {
+	if err := lease2.Release(testAuthorActivityContext()); err != nil {
 		t.Fatalf("Release(runtime-2): %v", err)
 	}
 }

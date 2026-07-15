@@ -94,7 +94,7 @@ func ensureFlowInstanceRouteTables(t *testing.T, ctx context.Context, db *sql.DB
 }
 
 func TestPostgresStoreFlowInstanceRoutes(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ensureFlowInstanceRouteTables(t, ctx, db)
@@ -144,7 +144,7 @@ func TestPostgresStoreFlowInstanceRoutes(t *testing.T) {
 }
 
 func TestPostgresStoreUpsertFlowInstanceRouteUsesPipelineTransaction(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ensureFlowInstanceRouteTables(t, ctx, db)
@@ -254,7 +254,7 @@ func TestSQLiteRuntimeStoreUpsertFlowInstanceRouteUsesPipelineTransaction(t *tes
 }
 
 func TestPostgresStoreDeleteFlowInstanceRouteUsesPipelineTransaction(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ensureFlowInstanceRouteTables(t, ctx, db)
@@ -313,7 +313,7 @@ func TestPostgresStoreDeleteFlowInstanceRouteUsesPipelineTransaction(t *testing.
 }
 
 func TestPostgresStoreRollbackFlowInstanceRouteUsesPipelineTransaction(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ensureFlowInstanceRouteTables(t, ctx, db)
@@ -372,7 +372,7 @@ func TestPostgresStoreRollbackFlowInstanceRouteUsesPipelineTransaction(t *testin
 }
 
 func TestPostgresStoreFlowInstanceRoutes_NestedTemplateScope(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ensureFlowInstanceRouteTables(t, ctx, db)
@@ -422,7 +422,7 @@ func TestPostgresStoreFlowInstanceRoutes_NestedTemplateScope(t *testing.T) {
 }
 
 func TestPostgresStoreFlowInstanceRoutes_CanonicalizesInstancePathOnlyIdentity(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ensureFlowInstanceRouteTables(t, ctx, db)
@@ -476,7 +476,7 @@ func TestPostgresStoreFlowInstanceRoutes_CanonicalizesInstancePathOnlyIdentity(t
 }
 
 func TestPostgresStoreFlowInstanceRouteDeletionRequiresCanonicalTermination(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ensureFlowInstanceRouteTables(t, ctx, db)
@@ -530,7 +530,7 @@ func TestPostgresStoreFlowInstanceRouteDeletionRequiresCanonicalTermination(t *t
 }
 
 func TestPostgresStoreListFlowInstanceRoutesFiltersTerminatedInstances(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ensureFlowInstanceRouteTables(t, ctx, db)
@@ -576,7 +576,7 @@ func TestPostgresStoreListFlowInstanceRoutesFiltersTerminatedInstances(t *testin
 
 func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(t *testing.T) {
 	const runID = "11111111-1111-4111-8111-111111111111"
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ensureFlowInstanceRouteTables(t, ctx, db)
@@ -634,7 +634,7 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 }
 
 func TestPostgresStoreListActiveFlowInstanceDescriptorsOmitsAddressFieldsWithoutRunScope(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ensureFlowInstanceRouteTables(t, ctx, db)
@@ -671,7 +671,7 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsOmitsAddressFieldsWithout
 }
 
 func TestPostgresStoreListActiveFlowInstanceDescriptorsReadsPipelineTransaction(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ensureFlowInstanceRouteTables(t, ctx, db)

@@ -37,7 +37,7 @@ func TestNewEventBusWithOptions_DoesNotUseAmbientWorkflowSemanticSource(t *testi
 		},
 	}
 
-	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{})
+	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}

@@ -74,11 +74,11 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 			} else {
 				insert += "$2, $3, " + tc.json + ", $5, " + tc.now + ")"
 			}
-			if _, err := db.ExecContext(context.Background(), insert, instancePath, "review", "template", string(configRaw), "active"); err != nil {
+			if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), insert, instancePath, "review", "template", string(configRaw), "active"); err != nil {
 				t.Fatalf("seed active flow instance: %v", err)
 			}
 
-			projection, err := store.LoadRouteRecoveryProjection(context.Background(), route)
+			projection, err := store.LoadRouteRecoveryProjection(testAuthorActivityContext(context.Background()), route)
 			if err != nil {
 				t.Fatalf("LoadRouteRecoveryProjection without run context: %v", err)
 			}
@@ -95,7 +95,7 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 				t.Fatalf("projection config vertical_id = %q, want vertical-1", got)
 			}
 			projection.Config["vertical_id"] = "mutated"
-			again, err := store.LoadRouteRecoveryProjection(context.Background(), route)
+			again, err := store.LoadRouteRecoveryProjection(testAuthorActivityContext(context.Background()), route)
 			if err != nil {
 				t.Fatalf("reload route recovery projection: %v", err)
 			}
@@ -105,7 +105,7 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 
 			t.Run("route identity mismatch", func(t *testing.T) {
 				mismatched := runtimeflowidentity.StoredRoute("wrong-scope", instanceID, instancePath)
-				_, err := store.LoadRouteRecoveryProjection(context.Background(), mismatched)
+				_, err := store.LoadRouteRecoveryProjection(testAuthorActivityContext(context.Background()), mismatched)
 				if err == nil || !strings.Contains(err.Error(), "identity mismatch") {
 					t.Fatalf("mismatched route error = %v, want identity mismatch", err)
 				}
@@ -115,38 +115,38 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 			updateConfig := "UPDATE flow_instances SET config = "
 			if tc.name == "sqlite" {
 				updateConfig += "? WHERE instance_id = ?"
-				_, err = db.ExecContext(context.Background(), updateConfig, badConfig, instancePath)
+				_, err = db.ExecContext(testAuthorActivityContext(context.Background()), updateConfig, badConfig, instancePath)
 			} else {
 				updateConfig += "$1::jsonb WHERE instance_id = $2"
-				_, err = db.ExecContext(context.Background(), updateConfig, badConfig, instancePath)
+				_, err = db.ExecContext(testAuthorActivityContext(context.Background()), updateConfig, badConfig, instancePath)
 			}
 			if err != nil {
 				t.Fatalf("write malformed config: %v", err)
 			}
-			if _, err := store.LoadRouteRecoveryProjection(context.Background(), route); err == nil || !strings.Contains(err.Error(), "flow_path must be a string") {
+			if _, err := store.LoadRouteRecoveryProjection(testAuthorActivityContext(context.Background()), route); err == nil || !strings.Contains(err.Error(), "flow_path must be a string") {
 				t.Fatalf("malformed config error = %v, want flow_path teaching failure", err)
 			}
 
 			statusUpdate := "UPDATE flow_instances SET status = "
 			if tc.name == "sqlite" {
 				statusUpdate += "? WHERE instance_id = ?"
-				_, err = db.ExecContext(context.Background(), statusUpdate, "terminated", instancePath)
+				_, err = db.ExecContext(testAuthorActivityContext(context.Background()), statusUpdate, "terminated", instancePath)
 			} else {
 				statusUpdate += "$1 WHERE instance_id = $2"
-				_, err = db.ExecContext(context.Background(), statusUpdate, "terminated", instancePath)
+				_, err = db.ExecContext(testAuthorActivityContext(context.Background()), statusUpdate, "terminated", instancePath)
 			}
 			if err != nil {
 				t.Fatalf("mark flow instance inactive: %v", err)
 			}
-			if _, err := store.LoadRouteRecoveryProjection(context.Background(), route); err == nil || !strings.Contains(err.Error(), "active flow instance not found") {
+			if _, err := store.LoadRouteRecoveryProjection(testAuthorActivityContext(context.Background()), route); err == nil || !strings.Contains(err.Error(), "active flow instance not found") {
 				t.Fatalf("inactive row error = %v, want active-row failure", err)
 			}
 
 			deleteQuery := "DELETE FROM flow_instances WHERE instance_id = " + tc.bind
-			if _, err := db.ExecContext(context.Background(), deleteQuery, instancePath); err != nil {
+			if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), deleteQuery, instancePath); err != nil {
 				t.Fatalf("delete flow instance: %v", err)
 			}
-			if _, err := store.LoadRouteRecoveryProjection(context.Background(), route); err == nil || !strings.Contains(err.Error(), "active flow instance not found") {
+			if _, err := store.LoadRouteRecoveryProjection(testAuthorActivityContext(context.Background()), route); err == nil || !strings.Contains(err.Error(), "active flow instance not found") {
 				t.Fatalf("missing row error = %v, want active-row failure", err)
 			}
 		})
@@ -158,13 +158,13 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjectionRejectsTerminatedTimest
 	store := NewSQLiteWorkflowInstanceStore(db)
 	route := runtimeflowidentity.StoredRoute("review", "inst-1", "review/inst-1")
 	config := `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"review/inst-1","flow_path":"review/inst-1"}`
-	if _, err := db.ExecContext(context.Background(), `
+	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, terminated_at, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 	`, route.InstancePath, "review", "template", config, "active", time.Now().UTC()); err != nil {
 		t.Fatalf("seed terminated flow instance: %v", err)
 	}
-	if _, err := store.LoadRouteRecoveryProjection(context.Background(), route); err == nil || !strings.Contains(err.Error(), "active flow instance not found") {
+	if _, err := store.LoadRouteRecoveryProjection(testAuthorActivityContext(context.Background()), route); err == nil || !strings.Contains(err.Error(), "active flow instance not found") {
 		t.Fatalf("terminated row error = %v, want active-row failure", err)
 	}
 }

@@ -168,6 +168,7 @@ func (s *SQLiteRuntimeStore) sqliteLoadRunLifecycleSnapshot(ctx context.Context,
 		SELECT
 			run_id,
 			LOWER(COALESCE(status, '')),
+			COALESCE(bundle_hash, ''),
 			COALESCE(event_count, 0),
 			COALESCE((SELECT COUNT(DISTINCT es.entity_id) FROM entity_state es WHERE es.run_id = runs.run_id), 0),
 			failure,
@@ -178,6 +179,7 @@ func (s *SQLiteRuntimeStore) sqliteLoadRunLifecycleSnapshot(ctx context.Context,
 	`, runID).Scan(
 		&snap.RunID,
 		&snap.Status,
+		&snap.BundleHash,
 		&snap.EventCount,
 		&snap.EntityCount,
 		&failureRaw,
@@ -202,6 +204,7 @@ func (s *SQLiteRuntimeStore) sqliteLoadRunLifecycleSnapshot(ctx context.Context,
 	}
 	snap.RunID = strings.TrimSpace(snap.RunID)
 	snap.Status = strings.TrimSpace(strings.ToLower(snap.Status))
+	snap.BundleHash = strings.TrimSpace(snap.BundleHash)
 	if failureRaw.Valid && strings.TrimSpace(failureRaw.String) != "" {
 		failure, err := runtimefailures.UnmarshalEnvelope([]byte(failureRaw.String))
 		if err != nil {
@@ -233,6 +236,10 @@ func (s *SQLiteRuntimeStore) sqliteMarkRunTerminalTx(ctx context.Context, tx *sq
 	}
 	if err := storerunlifecycle.ValidateStatusFailure(status, failure); err != nil {
 		return storerunlifecycle.Snapshot{}, err
+	}
+	occurrenceScope, err := sqliteRunBundleScope(ctx, tx, runID)
+	if err != nil {
+		return storerunlifecycle.Snapshot{}, fmt.Errorf("mark sqlite run terminal: %w", err)
 	}
 	var failureJSON any
 	if failure != nil {
@@ -298,12 +305,23 @@ func (s *SQLiteRuntimeStore) sqliteMarkRunTerminalTx(ctx context.Context, tx *sq
 	if err := runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindRunLifecycle, Transition: status,
 		SourceOwner: "runs", SourceIdentity: runID + ":" + status, DedupKey: "run-terminal:" + runID + ":" + status,
-		OccurredAt: occurredAt, RunID: runID, Failure: failure,
+		OccurredAt: occurredAt, RunID: runID, Scope: occurrenceScope, Failure: failure,
 		Projection: runtimeauthoractivity.Projection{SubjectType: "run", SubjectID: runID},
 	}); err != nil {
 		return storerunlifecycle.Snapshot{}, err
 	}
 	return snapshot, nil
+}
+
+func sqliteRunBundleScope(ctx context.Context, q execQueryer, runID string) (runtimeauthoractivity.Scope, error) {
+	var bundleHash string
+	if err := q.QueryRowContext(ctx, `SELECT COALESCE(bundle_hash, '') FROM runs WHERE run_id = ?`, runID).Scan(&bundleHash); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return runtimeauthoractivity.Scope{}, fmt.Errorf("run %s not found", runID)
+		}
+		return runtimeauthoractivity.Scope{}, fmt.Errorf("load source-owned run bundle_hash: %w", err)
+	}
+	return runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
 }
 
 func sameSQLiteRunFailure(left, right *runtimefailures.Envelope) bool {

@@ -40,7 +40,7 @@ func TestGitHubAppIssueWorkflowConnectorPackRoundTripThroughActivityJournal(t *t
 			entityID     = "9c000000-0000-0000-0000-000000000002"
 			flowInstance = "github-app-issue-workflow-pg"
 		)
-		ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		pg := &store.PostgresStore{DB: db}
 		workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 		seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "github", "github-webhook-secret", "github-app-issue-workflow-observer")
@@ -66,7 +66,7 @@ func TestGitHubAppIssueWorkflowConnectorPackRoundTripThroughActivityJournal(t *t
 			entityID     = "9d000000-0000-0000-0000-000000000002"
 			flowInstance = "github-app-issue-workflow-sqlite"
 		)
-		ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 		workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 		seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "github", "github-webhook-secret", "github-app-issue-workflow-observer")

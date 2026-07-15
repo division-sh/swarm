@@ -12,14 +12,15 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -30,9 +31,9 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	fieldOnlyAt := at.Add(30 * time.Second)
 	afterAt := at.Add(time.Minute)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_fingerprint, started_at)
-		VALUES ($1::uuid, 'running', 'bundle-source-fingerprint', $2)
-	`, sourceRunID, at.Add(-time.Minute)); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'running', $2, $3, $4)
+	`, sourceRunID, authorActivityTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -170,8 +171,8 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	if forkStatus != "paused" || forkedFromRun != sourceRunID || forkedFromEvent != secondEventID {
 		t.Fatalf("fork run = status:%s from:%s event:%s", forkStatus, forkedFromRun, forkedFromEvent)
 	}
-	if forkBundleHash != "" || forkBundleSource != "legacy" || forkBundleFingerprint != "bundle-source-fingerprint" {
-		t.Fatalf("fork bundle identity = hash:%q source:%q fingerprint:%q, want legacy with compatibility fingerprint", forkBundleHash, forkBundleSource, forkBundleFingerprint)
+	if forkBundleHash != authorActivityTestBundleHash || forkBundleSource != storerunlifecycle.BundleSourceEphemeral || forkBundleFingerprint != "" {
+		t.Fatalf("fork bundle identity = hash:%q source:%q fingerprint:%q, want inherited canonical identity", forkBundleHash, forkBundleSource, forkBundleFingerprint)
 	}
 	var sourceStatus string
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {
@@ -286,8 +287,8 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 
 func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlowAbsent(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -296,9 +297,9 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 	at := time.Unix(1700000505, 0).UTC()
 	afterAt := at.Add(time.Minute)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
-	`, sourceRunID, at.Add(-time.Minute)); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'running', $2, $3, $4)
+	`, sourceRunID, authorActivityTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -402,8 +403,8 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 
 func TestRunForkPlanner_FailsClosedWithoutSourceAtTEntitySnapshotMetadata(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -411,9 +412,9 @@ func TestRunForkPlanner_FailsClosedWithoutSourceAtTEntitySnapshotMetadata(t *tes
 	at := time.Unix(1700000507, 0).UTC()
 	afterAt := at.Add(time.Minute)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
-	`, sourceRunID, at.Add(-time.Minute)); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'running', $2, $3, $4)
+	`, sourceRunID, authorActivityTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -473,8 +474,8 @@ func TestRunForkPlanner_FailsClosedWithoutSourceAtTEntitySnapshotMetadata(t *tes
 
 func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeHasNoSourceMetadataAuthority(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -520,8 +521,8 @@ func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeHasNoSourceMetadataAuthori
 
 func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeConflictsWithSourceMetadata(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -581,8 +582,8 @@ func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeConflictsWithSourceMetadat
 
 func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -650,8 +651,8 @@ func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *tes
 
 func TestRunForkSelectedContractBinding_MaterializesDurableBundleHashBinding(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -703,8 +704,8 @@ func TestRunForkSelectedContractBinding_MaterializesDurableBundleHashBinding(t *
 
 func TestRunForkSelectedContractBinding_FailsClosedOnMissingDuplicateAndInvalidSelection(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 
 	if _, err := pg.RequireRunForkSelectedContractBinding(ctx, uuid.NewString()); err == nil || !strings.Contains(err.Error(), "selected contract binding") {
 		t.Fatalf("RequireRunForkSelectedContractBinding error = %v, want missing binding failure", err)
@@ -760,8 +761,8 @@ func TestRunForkSelectedContractBinding_FailsClosedOnMissingDuplicateAndInvalidS
 
 func TestRunForkMaterializer_FailsClosedOnRepeatAndUnsupportedBlockers(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -769,9 +770,9 @@ func TestRunForkMaterializer_FailsClosedOnRepeatAndUnsupportedBlockers(t *testin
 	clearEventID := uuid.NewString()
 	at := time.Unix(1700000600, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
-	`, sourceRunID, at.Add(-time.Minute)); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'running', $2, $3, $4)
+	`, sourceRunID, authorActivityTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -875,8 +876,8 @@ func TestRunForkMaterializer_FailsClosedOnRepeatAndUnsupportedBlockers(t *testin
 
 func TestRunForkActivation_ActivatesMaterializedForkAndFreezesSource(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -946,8 +947,8 @@ func TestRunForkActivation_ActivatesMaterializedForkAndFreezesSource(t *testing.
 
 func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1269,8 +1270,8 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
-			pg := &PostgresStore{DB: db}
-			ctx := context.Background()
+			pg := newTestPostgresStore(t, db)
+			ctx := testAuthorActivityContext()
 
 			sourceRunID := uuid.NewString()
 			entityID := uuid.NewString()
@@ -1368,8 +1369,8 @@ func TestRunForkDeliveryEventReplayValidationRejectsUnsafeCurrentEvidence(t *tes
 
 func TestRunForkActivation_IgnoresExcludedSourceSessionColumnChanges(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -1403,8 +1404,8 @@ func TestRunForkActivation_IgnoresExcludedSourceSessionColumnChanges(t *testing.
 
 func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1464,8 +1465,8 @@ func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 
 func TestRunForkActivation_FailsClosedForDeliveryAdvancementAndMissingLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1506,8 +1507,8 @@ func TestRunForkActivation_FailsClosedForDeliveryAdvancementAndMissingLineage(t 
 
 func TestRunForkActivation_FailsClosedForForkReplayStateWithTaxonomy(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1596,8 +1597,8 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
-			pg := &PostgresStore{DB: db}
-			ctx := context.Background()
+			pg := newTestPostgresStore(t, db)
+			ctx := testAuthorActivityContext()
 
 			sourceRunID := uuid.NewString()
 			entityID := uuid.NewString()
@@ -1709,7 +1710,7 @@ func runForkHistoricalReplayWorkForDelivery(req RunForkHistoricalReplayExecution
 
 func assertRunForkActivationReplayMutationAbsent(t *testing.T, db *sql.DB, sourceRunID, forkRunID string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	var sourceStatus, forkStatus string
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {
 		t.Fatalf("load source status after blocked activation: %v", err)
@@ -1755,11 +1756,11 @@ func (n *sqlNullTime) Scan(value any) error {
 
 func seedActivationReadySourceRun(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
-	`, sourceRunID, at.Add(-time.Minute)); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'running', $2, $3, $4)
+	`, sourceRunID, authorActivityTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `

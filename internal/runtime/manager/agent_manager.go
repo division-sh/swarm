@@ -10,8 +10,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -47,6 +49,7 @@ type AgentManager struct {
 	selectedContractRouteRecoveries map[string]SelectedContractRouteRecoveryTruth
 	directiveHeartbeat              directiveHeartbeatConfig
 	lifecycle                       *agentLifecycleCoordinator
+	baseContext                     context.Context
 
 	runMu              sync.Mutex
 	authBreakerTripped bool
@@ -110,6 +113,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		}
 	}
 	lifecycle := newAgentLifecycleCoordinator(opts.LifecycleStore, opts.Sessions)
+	lifecycle.baseContext = opts.BaseContext
 	lifecycle.bindRoutes(bus)
 	return &AgentManager{
 		bus:                             bus,
@@ -134,6 +138,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		requireModelResolution:          opts.RequireModelResolution,
 		inFlight:                        make(map[string]struct{}),
 		lifecycle:                       lifecycle,
+		baseContext:                     opts.BaseContext,
 		poisonPanicCounts:               make(map[string]int),
 		poisonEventEntities:             make(map[string]map[string]struct{}),
 		poisonEventEmitted:              make(map[string]bool),
@@ -150,7 +155,49 @@ func (am *AgentManager) runtimeContext() context.Context {
 	if ctx != nil && ctx.Err() == nil {
 		return ctx
 	}
+	if am.baseContext != nil {
+		return am.baseContext
+	}
 	return context.Background()
+}
+
+func (am *AgentManager) bindRuntimeOperationContext(ctx context.Context) (context.Context, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	base := am.runtimeContext()
+	ownerScope, ownerOK := runtimeauthoractivity.ScopeFromContext(base)
+	currentScope, currentOK := runtimeauthoractivity.ScopeFromContext(ctx)
+	if !ownerOK {
+		return ctx, nil
+	}
+	if currentOK {
+		switch currentScope.Kind {
+		case runtimeauthoractivity.ScopeBundle:
+			if currentScope != ownerScope {
+				return nil, fmt.Errorf("manager runtime scope conflicts with selected operation scope")
+			}
+		case runtimeauthoractivity.ScopeRuntime:
+			if currentScope.RuntimeInstanceID != ownerScope.RuntimeInstanceID {
+				return nil, fmt.Errorf("manager runtime instance conflicts with selected operation scope")
+			}
+		default:
+			return nil, fmt.Errorf("manager operation cannot bind bundle semantics over %q scope", currentScope.Kind)
+		}
+	}
+	ctx = runtimeauthoractivity.WithScope(ctx, ownerScope)
+	if runtimeID, ok := runtimecorrelation.RuntimeInstanceIDFromContext(base); ok {
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
+	} else if ownerScope.RuntimeInstanceID != "" {
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, ownerScope.RuntimeInstanceID)
+	}
+	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(base); ok {
+		if current, currentOK := runtimecorrelation.BundleSourceFactFromContext(ctx); currentOK && current.BundleHash != "" && current.BundleHash != fact.BundleHash {
+			return nil, fmt.Errorf("manager bundle source fact conflicts with selected operation scope")
+		}
+		ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	}
+	return ctx, nil
 }
 
 func (am *AgentManager) runtimePlatformControlEventContext(ctx context.Context) context.Context {

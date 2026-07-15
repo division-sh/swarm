@@ -12,9 +12,11 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -270,14 +272,14 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := &store.PostgresStore{DB: db}
-	bus, err := runtimebus.NewEventBus(pg)
+	bus, err := newScopedAPITestEventBus(t, pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	agent := &directiveIntegrationAgent{id: "agent-1"}
-	manager := runtimemanager.NewAgentManager(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
-	}, pg)
+	}, runtimemanager.AgentManagerOptions{BaseContext: testAuthorActivityContext(context.Background())}, pg)
 	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular"}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
@@ -316,22 +318,25 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	}
 }
 
-func TestOperatorAgentSendDirectiveUsesLegacyRunBundleSourceUntilSourceStampingOwnerLands(t *testing.T) {
+func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeBundleSource(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := &store.PostgresStore{DB: db}
 	bootFingerprint := "sha256:4444444444444444444444444444444444444444444444444444444444444444"
-	existingFingerprint := "sha256:5555555555555555555555555555555555555555555555555555555555555555"
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+	bootFact := runtimecorrelation.BundleSourceFact{
+		BundleHash: "bundle-v1:" + bootFingerprint, BundleSource: storerunlifecycle.BundleSourceEphemeral, BundleFingerprint: bootFingerprint,
+	}
+	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 		BundleFingerprint: bootFingerprint,
+		BundleSourceFact:  bootFact,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	agent := &directiveIntegrationAgent{id: "agent-1"}
-	manager := runtimemanager.NewAgentManager(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
-	}, pg)
+	}, runtimemanager.AgentManagerOptions{BaseContext: testAuthorActivityContextForSource(context.Background(), bootFact)}, pg)
 	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular"}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
@@ -351,20 +356,20 @@ func TestOperatorAgentSendDirectiveUsesLegacyRunBundleSourceUntilSourceStampingO
 	if newRunID == "" {
 		t.Fatalf("new-run directive result = %#v", first.Result)
 	}
-	assertRunBundleIdentity(t, db, newRunID, "", "legacy", bootFingerprint)
+	assertRunBundleIdentity(t, db, newRunID, bootFact.BundleHash, storerunlifecycle.BundleSourceEphemeral, bootFingerprint)
 
 	existingRunID := "00000000-0000-0000-0000-000000000755"
 	if _, err := db.Exec(`
-		INSERT INTO runs (run_id, status, bundle_fingerprint)
-		VALUES ($1::uuid, 'running', $2)
-	`, existingRunID, existingFingerprint); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
+		VALUES ($1::uuid, 'running', $2, $3, $4)
+	`, existingRunID, bootFact.BundleHash, storerunlifecycle.BundleSourceEphemeral, bootFingerprint); err != nil {
 		t.Fatalf("seed existing run: %v", err)
 	}
 	explicit := rpcCall(t, handler, agentDirectiveBodyWithRun("agent-1", existingRunID, "existing run", "idem-directive-bundle-existing"))
 	if explicit.Error != nil {
 		t.Fatalf("existing-run directive error = %#v", explicit.Error)
 	}
-	assertRunBundleIdentity(t, db, existingRunID, "", "legacy", existingFingerprint)
+	assertRunBundleIdentity(t, db, existingRunID, bootFact.BundleHash, storerunlifecycle.BundleSourceEphemeral, bootFingerprint)
 }
 
 func TestOperatorAgentControlHandlersRestrictAgentNotRunningToSendDirective(t *testing.T) {

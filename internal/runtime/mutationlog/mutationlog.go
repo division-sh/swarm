@@ -117,7 +117,7 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 	if field != "current_state" {
 		return nil
 	}
-	draft, admitted, err := AuthorActivityDraft(runID, mutationID, rec, occurredAt)
+	draft, admitted, err := AuthorActivityDraft(ctx, runID, mutationID, rec, occurredAt)
 	if err != nil {
 		return err
 	}
@@ -160,7 +160,7 @@ func requireBundleSourceAvailable(ctx context.Context, db DBTX) error {
 	return nil
 }
 
-func AuthorActivityDraft(runID, mutationID string, rec Record, occurredAt time.Time) (runtimeauthoractivity.Draft, bool, error) {
+func AuthorActivityDraft(ctx context.Context, runID, mutationID string, rec Record, occurredAt time.Time) (runtimeauthoractivity.Draft, bool, error) {
 	if strings.TrimSpace(rec.Field) != "current_state" {
 		return runtimeauthoractivity.Draft{}, false, nil
 	}
@@ -178,7 +178,7 @@ func AuthorActivityDraft(runID, mutationID string, rec Record, occurredAt time.T
 	if oldState == "" {
 		transition = "created"
 	}
-	return runtimeauthoractivity.Draft{
+	draft := runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindEntityLifecycle, Transition: transition,
 		SourceOwner: "entity_mutations", SourceIdentity: mutationID, DedupKey: "entity-mutation:" + mutationID,
 		OccurredAt: occurredAt.UTC(), RunID: runID, EntityID: entityID,
@@ -186,7 +186,12 @@ func AuthorActivityDraft(runID, mutationID string, rec Record, occurredAt time.T
 			SubjectType: "entity", SubjectID: entityID, OldState: oldState, NewState: newState,
 			WriterType: writerType, WriterID: writerID,
 		},
-	}, true, nil
+	}
+	if subject, ok := runtimeauthoractivity.InboundProjectionFromContext(ctx); ok {
+		draft.Projection.AuthorSubjectType = subject.SubjectType
+		draft.Projection.AuthorSubjectID = subject.SubjectID
+	}
+	return draft, true, nil
 }
 
 func authorActivityStateString(value any) string {

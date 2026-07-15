@@ -3,8 +3,10 @@ package apiv1
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/runbundle"
@@ -66,7 +68,8 @@ func resolveEventPublicationBundleScope(
 			params.BundleHash = currentFact.BundleHash
 			params.BundleSource = currentFact.BundleSource
 			params.BundleFingerprint = currentFact.BundleFingerprint
-			return runtimecorrelation.WithBundleSourceFact(ctx, currentFact), opts, params, nil
+			ctx, err = eventPublicationSourceContext(ctx, currentFact)
+			return ctx, opts, params, err
 		}
 	}
 	if resolvedHash == "" {
@@ -121,7 +124,19 @@ func resolveEventPublicationBundleScope(
 	params.BundleHash = resolvedHash
 	params.BundleSource = currentFact.BundleSource
 	params.BundleFingerprint = currentFact.BundleFingerprint
-	return runtimecorrelation.WithBundleSourceFact(ctx, currentFact), opts, params, nil
+	ctx, err = eventPublicationSourceContext(ctx, currentFact)
+	return ctx, opts, params, err
+}
+
+func eventPublicationSourceContext(ctx context.Context, fact runtimecorrelation.BundleSourceFact) (context.Context, error) {
+	fact = fact.Normalized()
+	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, fact.BundleHash)
+	if err != nil {
+		return ctx, fmt.Errorf("resolve event publication author activity scope: %w", err)
+	}
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, scope.RuntimeInstanceID)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	return runtimeauthoractivity.WithScope(ctx, scope), nil
 }
 
 func eventPublicationRuntimeSourceFact(ctx context.Context, publisher EventPublisher) (runtimecorrelation.BundleSourceFact, bool) {

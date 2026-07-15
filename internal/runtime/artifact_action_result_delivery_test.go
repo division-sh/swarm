@@ -53,7 +53,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 			t.Cleanup(cleanup)
 			ctx := seedRuntimeTestRun(t, db)
 			pg := &store.PostgresStore{DB: db}
-			bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+			bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -110,14 +110,16 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 				0,
 				templateInstanceDeliveryRunID,
 				"",
-				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID), "repo-scaffold/inst-1"),
+				events.EnvelopeForSourceRoute(
+					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID), "repo-scaffold/inst-1"),
+					events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold/inst-1", EntityID: artifactActionResultEntityID},
+				),
 				time.Now().UTC(),
 			)
 
 			if err := bus.Publish(ctx, requestEvent); err != nil {
 				t.Fatalf("Publish request event: %v", err)
 			}
-
 			resultEventID := waitRuntimeEventID(t, ctx, db, `
 				SELECT event_id::text
 				FROM events
@@ -212,7 +214,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			t.Cleanup(cleanup)
 			ctx := seedRuntimeTestRun(t, db)
 			pg := &store.PostgresStore{DB: db}
-			bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+			bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -266,7 +268,10 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 				0,
 				templateInstanceDeliveryRunID,
 				"",
-				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID), tc.requestFlowPath),
+				events.EnvelopeForSourceRoute(
+					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID), tc.requestFlowPath),
+					events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: tc.requestFlowPath, EntityID: artifactActionResultEntityID},
+				),
 				time.Now().UTC(),
 			)
 

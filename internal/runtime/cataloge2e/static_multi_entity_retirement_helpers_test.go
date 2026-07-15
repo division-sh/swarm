@@ -18,7 +18,7 @@ func assertCatalogStaticMultiEntityRetirement(t testing.TB, fixtureRoot string) 
 	if err != nil {
 		t.Fatalf("load workflow contract bundle %s: %v", fixtureRoot, err)
 	}
-	report := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{})
+	report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), runtimebootverify.Options{})
 	if !findingsContain(report.Errors(), "flow_boundary_create_entity_validation", staticMultiEntityRetirementDiagnostic) &&
 		!findingsContain(report.Errors(), "select_entity_validation", staticMultiEntityRetirementDiagnostic) {
 		t.Fatalf("expected retired static multi-entity validation error, got %#v", report.Errors())

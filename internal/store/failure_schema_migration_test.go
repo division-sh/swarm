@@ -17,7 +17,7 @@ import (
 
 func TestPostgresCanonicalFailureMigrationNormalizesEveryDurableCarrier(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	createPostgresLegacyFailureTables(t, ctx, db)
 	ids := seedPostgresLegacyFailures(t, ctx, db)
 
@@ -44,7 +44,7 @@ func TestPostgresCanonicalFailureMigrationNormalizesEveryDurableCarrier(t *testi
 
 func TestPostgresCanonicalFailureMigrationRejectsUnknownRowsAtomically(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	createPostgresLegacyFailureTables(t, ctx, db)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (delivery_id, event_id, subscriber_type, subscriber_id, status, reason_code, last_error)
@@ -68,7 +68,7 @@ func TestSQLiteCanonicalFailureMigrationNormalizesEveryDurableCarrier(t *testing
 		t.Fatalf("open sqlite: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	createSQLiteLegacyFailureTables(t, ctx, db)
 	ids := seedSQLiteLegacyFailures(t, ctx, db)
 
@@ -91,7 +91,7 @@ func TestSQLiteCanonicalFailureMigrationPreservesReplyContextAddedByNewerMaster(
 		t.Fatalf("open sqlite: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	createSQLiteLegacyFailureTables(t, ctx, db)
 	mustExecTest(t, ctx, db, `
 		CREATE TABLE reply_contexts (reply_context_id TEXT PRIMARY KEY);
@@ -119,7 +119,7 @@ func TestSQLiteCanonicalFailureMigrationRejectsUnknownRowsAtomically(t *testing.
 		t.Fatalf("open sqlite: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	createSQLiteLegacyFailureTables(t, ctx, db)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (delivery_id, event_id, subscriber_type, subscriber_id, status, reason_code, last_error)
@@ -140,7 +140,7 @@ func TestSQLiteCanonicalFailureMigrationRejectsUnknownRowsAtomically(t *testing.
 
 func TestPostgresRunTerminalEvidenceMigrationSplitsFailureFromCancellationReason(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	mustExecTest(t, ctx, db, `
 		DROP TABLE IF EXISTS run_control_state CASCADE;
 		DROP TABLE IF EXISTS runs CASCADE;
@@ -183,7 +183,7 @@ func TestPostgresRunTerminalEvidenceMigrationSplitsFailureFromCancellationReason
 
 func TestPostgresRunTerminalEvidenceMigrationRejectsAmbiguousFailedProseAtomically(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	mustExecTest(t, ctx, db, `DROP TABLE IF EXISTS runs CASCADE; CREATE TABLE runs (run_id UUID PRIMARY KEY, status TEXT NOT NULL, error_summary TEXT, ended_at TIMESTAMPTZ)`)
 	runID := uuid.NewString()
 	mustExecTest(t, ctx, db, `INSERT INTO runs (run_id, status, error_summary, ended_at) VALUES ($1::uuid, 'failed', 'opaque prose', now())`, runID)
@@ -202,7 +202,7 @@ func TestSQLiteRunTerminalEvidenceMigrationSplitsFailureFromCancellationReason(t
 		t.Fatalf("open sqlite: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	mustExecTest(t, ctx, db, `
 		CREATE TABLE runs (run_id TEXT PRIMARY KEY, status TEXT NOT NULL, error_summary TEXT, ended_at TIMESTAMP);
 		CREATE TABLE run_control_state (run_id TEXT PRIMARY KEY, control_status TEXT NOT NULL, reason TEXT, controlled_by TEXT NOT NULL, updated_at TIMESTAMP NOT NULL)
@@ -239,7 +239,7 @@ func TestSQLiteRunTerminalEvidenceMigrationRejectsAmbiguousFailedProseAtomically
 		t.Fatalf("open sqlite: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	mustExecTest(t, ctx, db, `CREATE TABLE runs (run_id TEXT PRIMARY KEY, status TEXT NOT NULL, error_summary TEXT, ended_at TIMESTAMP)`)
 	runID := uuid.NewString()
 	mustExecTest(t, ctx, db, `INSERT INTO runs (run_id, status, error_summary, ended_at) VALUES (?, 'failed', 'opaque prose', ?)`, runID, time.Now().UTC())
@@ -255,7 +255,7 @@ func TestSQLiteRunTerminalEvidenceMigrationRejectsAmbiguousFailedProseAtomically
 
 func TestPostgresCanonicalFailureMigrationReplacesEmptyAgentTurnError(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	mustExecTest(t, ctx, db, `DROP TABLE IF EXISTS agent_turns CASCADE`)
 	mustExecTest(t, ctx, db, `CREATE TABLE agent_turns (turn_id UUID PRIMARY KEY, error TEXT)`)
 	mustExecTest(t, ctx, db, `INSERT INTO agent_turns (turn_id, error) VALUES ($1::uuid, '')`, uuid.NewString())
@@ -270,7 +270,7 @@ func TestPostgresCanonicalFailureMigrationReplacesEmptyAgentTurnError(t *testing
 
 func TestPostgresCanonicalFailureMigrationRejectsAmbiguousAgentTurnErrorAtomically(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	mustExecTest(t, ctx, db, `DROP TABLE IF EXISTS agent_turns CASCADE`)
 	mustExecTest(t, ctx, db, `CREATE TABLE agent_turns (turn_id UUID PRIMARY KEY, error TEXT)`)
 	mustExecTest(t, ctx, db, `INSERT INTO agent_turns (turn_id, error) VALUES ($1::uuid, 'opaque provider failure')`, uuid.NewString())
@@ -286,7 +286,7 @@ func TestPostgresCanonicalFailureMigrationRejectsAmbiguousAgentTurnErrorAtomical
 
 func TestSQLiteCanonicalFailureMigrationReplacesEmptyAgentTurnError(t *testing.T) {
 	db := openSQLiteFailureMigrationTestDB(t, "agent-turn-empty.db")
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	mustExecTest(t, ctx, db, `
 		CREATE TABLE agent_turns (turn_id TEXT PRIMARY KEY, error TEXT);
 		INSERT INTO agent_turns (turn_id, error) VALUES ('turn-1', '')
@@ -303,7 +303,7 @@ func TestSQLiteCanonicalFailureMigrationReplacesEmptyAgentTurnError(t *testing.T
 
 func TestSQLiteCanonicalFailureMigrationRejectsAmbiguousAgentTurnErrorAtomically(t *testing.T) {
 	db := openSQLiteFailureMigrationTestDB(t, "agent-turn-ambiguous.db")
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	mustExecTest(t, ctx, db, `
 		CREATE TABLE agent_turns (turn_id TEXT PRIMARY KEY, error TEXT);
 		INSERT INTO agent_turns (turn_id, error) VALUES ('turn-1', 'opaque provider failure')
@@ -321,7 +321,7 @@ func TestSQLiteCanonicalFailureMigrationRejectsAmbiguousAgentTurnErrorAtomically
 
 func TestPostgresCanonicalFailureMigrationNormalizesFailureBearingEvents(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	mustExecTest(t, ctx, db, `DROP TABLE IF EXISTS events CASCADE`)
 	mustExecTest(t, ctx, db, `CREATE TABLE events (event_id UUID PRIMARY KEY, event_name TEXT NOT NULL, payload JSONB NOT NULL)`)
 	fixtures := seedPostgresLegacyFailureEvents(t, ctx, db)
@@ -336,7 +336,7 @@ func TestPostgresCanonicalFailureMigrationNormalizesFailureBearingEvents(t *test
 
 func TestSQLiteCanonicalFailureMigrationNormalizesFailureBearingEvents(t *testing.T) {
 	db := openSQLiteFailureMigrationTestDB(t, "failure-events.db")
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	mustExecTest(t, ctx, db, `CREATE TABLE events (event_id TEXT PRIMARY KEY, event_name TEXT NOT NULL, payload TEXT NOT NULL)`)
 	fixtures := seedSQLiteLegacyFailureEvents(t, ctx, db)
 
@@ -350,7 +350,7 @@ func TestSQLiteCanonicalFailureMigrationNormalizesFailureBearingEvents(t *testin
 
 func TestPostgresCanonicalFailureMigrationRejectsUnknownFailureEventAtomically(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	mustExecTest(t, ctx, db, `DROP TABLE IF EXISTS events CASCADE`)
 	mustExecTest(t, ctx, db, `CREATE TABLE events (event_id UUID PRIMARY KEY, event_name TEXT NOT NULL, payload JSONB NOT NULL)`)
 	id := uuid.NewString()
@@ -368,7 +368,7 @@ func TestPostgresCanonicalFailureMigrationRejectsUnknownFailureEventAtomically(t
 
 func TestSQLiteCanonicalFailureMigrationRejectsUnknownFailureEventAtomically(t *testing.T) {
 	db := openSQLiteFailureMigrationTestDB(t, "failure-events-unknown.db")
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	mustExecTest(t, ctx, db, `CREATE TABLE events (event_id TEXT PRIMARY KEY, event_name TEXT NOT NULL, payload TEXT NOT NULL)`)
 	id := uuid.NewString()
 	mustExecTest(t, ctx, db, `INSERT INTO events (event_id, event_name, payload) VALUES (?, 'platform.auth_required', '{"reason":"unknown"}')`, id)
@@ -606,7 +606,7 @@ func seedSQLiteLegacyFailures(t testing.TB, ctx context.Context, db *sql.DB) leg
 
 func TestPostgresDirectiveOperationFailureMigrationMapsOnlyClosedRecoveryCodes(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	createPostgresLegacyDirectiveOperationTable(t, ctx, db)
 	leaseID, notAdmittedID := uuid.NewString(), uuid.NewString()
 	mustExecTest(t, ctx, db, `INSERT INTO agent_directive_operations (operation_id, state, error_code, error_message) VALUES ($1::uuid, 'indeterminate', 'execution_lease_expired', 'directive execution lease expired before a durable outcome')`, leaseID)
@@ -635,7 +635,7 @@ func TestSQLiteDirectiveOperationFailureMigrationMapsOnlyClosedRecoveryCodes(t *
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	createSQLiteLegacyDirectiveOperationTable(t, ctx, db)
 	leaseID, notAdmittedID := uuid.NewString(), uuid.NewString()
 	insertSQLiteLegacyDirectiveOperation(t, ctx, db, leaseID, "indeterminate", "execution_lease_expired", "directive execution lease expired before a durable outcome", "")
@@ -664,7 +664,7 @@ func TestPostgresDirectiveOperationFailureMigrationRejectsAmbiguousRowsAtomicall
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			createPostgresLegacyDirectiveOperationTable(t, ctx, db)
 			id := uuid.NewString()
 			mustExecTest(t, ctx, db, `INSERT INTO agent_directive_operations (operation_id, state, error_code, error_message, error_details) VALUES ($1::uuid, $2, $3, $4, $5::jsonb)`, id, test.state, test.code, test.message, nullableMigrationTestValue(test.details))
@@ -687,7 +687,7 @@ func TestSQLiteDirectiveOperationFailureMigrationRejectsAmbiguousRowsAtomically(
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = db.Close() })
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			createSQLiteLegacyDirectiveOperationTable(t, ctx, db)
 			id := uuid.NewString()
 			insertSQLiteLegacyDirectiveOperation(t, ctx, db, id, test.state, test.code, test.message, test.details)

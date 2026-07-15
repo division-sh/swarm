@@ -46,7 +46,7 @@ func (s *normalRunCompletionTestStore) ConvergeNormalRunCompletion(_ context.Con
 
 func TestEventBusMarkPipelineReceiptConvergesNormalRunCompletion(t *testing.T) {
 	store := &normalRunCompletionTestStore{}
-	eb, err := NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestEventBusMarkPipelineReceiptConvergesNormalRunCompletion(t *testing.T) {
 
 func TestEventBusStandalonePlatformConvergenceAlsoProbesNormalRunCompletion(t *testing.T) {
 	store := &normalRunCompletionTestStore{}
-	eb, err := NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestEventBusStandalonePlatformConvergenceAlsoProbesNormalRunCompletion(t *t
 
 func TestEventBusNormalRunCompletionUsesRootTerminalStatesNotChildAggregate(t *testing.T) {
 	store := &normalRunCompletionTestStore{}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 			Package: runtimecontracts.ProjectPackageDocument{Name: "root-workflow"},
 			RootSchema: &runtimecontracts.FlowSchemaDocument{

@@ -91,6 +91,15 @@ func Record(ctx context.Context, draft Draft) error {
 	if draft.OccurrenceID == "" {
 		draft.OccurrenceID = uuid.NewString()
 	}
+	scope, err := scopeForDraft(ctx, draft.Kind, draft.Transition, draft.Scope)
+	if err != nil {
+		return err
+	}
+	draft.Scope = scope
+	draft.AuthorSafeSummary, err = NormalizeAuthorSafeSummary(draft.AuthorSafeSummary)
+	if err != nil {
+		return fmt.Errorf("normalize author activity summary: %w", err)
+	}
 	if err := ValidateDraft(draft); err != nil {
 		return err
 	}
@@ -119,6 +128,25 @@ func PersistedOccurredAt(ctx context.Context, dedupKey string) (time.Time, bool,
 		return time.Time{}, false, nil
 	}
 	return occurrence.OccurredAt.UTC(), true, nil
+}
+
+// PersistedAuthorSafeSummary returns only the already-admitted story summary
+// for an exact source occurrence. Downstream producers may copy this fact, but
+// must never reopen the source payload to reconstruct it.
+func PersistedAuthorSafeSummary(ctx context.Context, dedupKey string) (string, bool, error) {
+	state, ok := stateFromContext(ctx)
+	if !ok || state == nil || state.tx == nil || state.finalizing {
+		return "", false, fmt.Errorf("author activity mutation context is required")
+	}
+	dedupKey = strings.TrimSpace(dedupKey)
+	if dedupKey == "" {
+		return "", false, fmt.Errorf("author activity dedup key is required")
+	}
+	occurrence, found, err := state.loadByDedup(ctx, dedupKey)
+	if err != nil || !found {
+		return "", found, err
+	}
+	return occurrence.AuthorSafeSummary, true, nil
 }
 
 func Finalize(ctx context.Context) error {
@@ -248,14 +276,17 @@ func (s *mutationState) insert(ctx context.Context, sequence int64, draft Draft)
 		}
 		failure = string(failureRaw)
 	}
-	args := []any{draft.OccurrenceID, sequence, string(draft.Kind), draft.Version, draft.Transition, draft.SourceOwner, draft.SourceIdentity, draft.DedupKey, nullable(draft.RunID), nullable(draft.EntityID), nullable(draft.AgentID), nullable(draft.FlowID), string(projection), failure, draft.OccurredAt.UTC()}
-	query := `INSERT INTO author_activity_occurrences (occurrence_id, sequence, kind, version, transition, source_owner, source_identity, dedup_key, run_id, entity_id, agent_id, flow_id, projection, failure, occurred_at) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, NULLIF($10, '')::uuid, NULLIF($11, ''), NULLIF($12, ''), $13::jsonb, NULLIF($14, '')::jsonb, $15)`
+	args := []any{draft.OccurrenceID, sequence, string(draft.Kind), draft.Version, draft.Transition, draft.SourceOwner, draft.SourceIdentity, draft.DedupKey, nullable(draft.RunID), nullable(draft.EntityID), nullable(draft.AgentID), nullable(draft.FlowID), string(draft.Scope.Kind), nullable(draft.Scope.RuntimeInstanceID), nullable(draft.Scope.BundleHash), nullable(draft.AuthorSafeSummary), string(projection), failure, draft.OccurredAt.UTC()}
+	query := `INSERT INTO author_activity_occurrences (occurrence_id, sequence, kind, version, transition, source_owner, source_identity, dedup_key, run_id, entity_id, agent_id, flow_id, scope_kind, runtime_instance_id, bundle_hash, author_safe_summary, projection, failure, occurred_at) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, NULLIF($10, '')::uuid, NULLIF($11, ''), NULLIF($12, ''), $13, NULLIF($14, '')::uuid, NULLIF($15, ''), NULLIF($16, ''), $17::jsonb, NULLIF($18, '')::jsonb, $19)`
 	if s.dialect == DialectSQLite {
-		query = `INSERT INTO author_activity_occurrences (occurrence_id, sequence, kind, version, transition, source_owner, source_identity, dedup_key, run_id, entity_id, agent_id, flow_id, projection, failure, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		query = `INSERT INTO author_activity_occurrences (occurrence_id, sequence, kind, version, transition, source_owner, source_identity, dedup_key, run_id, entity_id, agent_id, flow_id, scope_kind, runtime_instance_id, bundle_hash, author_safe_summary, projection, failure, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		args[8] = nullableSQLite(draft.RunID)
 		args[9] = nullableSQLite(draft.EntityID)
 		args[10] = nullableSQLite(draft.AgentID)
 		args[11] = nullableSQLite(draft.FlowID)
+		args[13] = nullableSQLite(draft.Scope.RuntimeInstanceID)
+		args[14] = nullableSQLite(draft.Scope.BundleHash)
+		args[15] = nullableSQLite(draft.AuthorSafeSummary)
 	}
 	if _, err := s.tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("insert author activity %s/%s: %w", draft.Kind, draft.Transition, err)
@@ -268,7 +299,8 @@ func occurrenceMatchesDraft(occurrence Occurrence, draft Draft) bool {
 		Kind: occurrence.Kind, Version: occurrence.Version, Transition: occurrence.Transition,
 		SourceOwner: occurrence.SourceOwner, SourceIdentity: occurrence.SourceIdentity, DedupKey: occurrence.DedupKey,
 		OccurredAt: occurrence.OccurredAt, RunID: occurrence.RunID, EntityID: occurrence.EntityID,
-		AgentID: occurrence.AgentID, FlowID: occurrence.FlowID, Projection: occurrence.Projection,
+		AgentID: occurrence.AgentID, FlowID: occurrence.FlowID, Scope: occurrence.Scope,
+		AuthorSafeSummary: occurrence.AuthorSafeSummary, Projection: occurrence.Projection,
 		Failure: occurrence.Failure,
 	}
 	return draftsEqual(existing, draft)
@@ -284,7 +316,7 @@ func nullableSQLite(value string) any {
 	return value
 }
 
-const occurrenceSelect = `SELECT CAST(occurrence_id AS TEXT), sequence, kind, version, transition, source_owner, source_identity, dedup_key, COALESCE(CAST(run_id AS TEXT), ''), COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(agent_id, ''), COALESCE(flow_id, ''), projection, failure, occurred_at FROM author_activity_occurrences`
+const occurrenceSelect = `SELECT CAST(occurrence_id AS TEXT), sequence, kind, version, transition, source_owner, source_identity, dedup_key, COALESCE(CAST(run_id AS TEXT), ''), COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(agent_id, ''), COALESCE(flow_id, ''), scope_kind, COALESCE(CAST(runtime_instance_id AS TEXT), ''), COALESCE(bundle_hash, ''), COALESCE(author_safe_summary, ''), projection, failure, occurred_at FROM author_activity_occurrences`
 
 type rowScanner interface{ Scan(...any) error }
 
@@ -293,7 +325,7 @@ func scanOccurrence(row rowScanner) (Occurrence, error) {
 	var projectionRaw []byte
 	var failureRaw []byte
 	var occurredAtRaw any
-	err := row.Scan(&occurrence.OccurrenceID, &occurrence.Sequence, &occurrence.Kind, &occurrence.Version, &occurrence.Transition, &occurrence.SourceOwner, &occurrence.SourceIdentity, &occurrence.DedupKey, &occurrence.RunID, &occurrence.EntityID, &occurrence.AgentID, &occurrence.FlowID, &projectionRaw, &failureRaw, &occurredAtRaw)
+	err := row.Scan(&occurrence.OccurrenceID, &occurrence.Sequence, &occurrence.Kind, &occurrence.Version, &occurrence.Transition, &occurrence.SourceOwner, &occurrence.SourceIdentity, &occurrence.DedupKey, &occurrence.RunID, &occurrence.EntityID, &occurrence.AgentID, &occurrence.FlowID, &occurrence.Scope.Kind, &occurrence.Scope.RuntimeInstanceID, &occurrence.Scope.BundleHash, &occurrence.AuthorSafeSummary, &projectionRaw, &failureRaw, &occurredAtRaw)
 	if err != nil {
 		return Occurrence{}, err
 	}
@@ -315,7 +347,7 @@ func scanOccurrence(row rowScanner) (Occurrence, error) {
 		return Occurrence{}, fmt.Errorf("decode author activity occurred_at: %w", err)
 	}
 	occurrence.OccurredAt = occurredAt
-	if err := ValidateDraft(Draft{Kind: occurrence.Kind, Version: occurrence.Version, Transition: occurrence.Transition, SourceOwner: occurrence.SourceOwner, SourceIdentity: occurrence.SourceIdentity, DedupKey: occurrence.DedupKey, OccurredAt: occurrence.OccurredAt, Projection: occurrence.Projection, Failure: occurrence.Failure}); err != nil {
+	if err := ValidateDraft(Draft{Kind: occurrence.Kind, Version: occurrence.Version, Transition: occurrence.Transition, SourceOwner: occurrence.SourceOwner, SourceIdentity: occurrence.SourceIdentity, DedupKey: occurrence.DedupKey, OccurredAt: occurrence.OccurredAt, Scope: occurrence.Scope, AuthorSafeSummary: occurrence.AuthorSafeSummary, Projection: occurrence.Projection, Failure: occurrence.Failure}); err != nil {
 		return Occurrence{}, fmt.Errorf("invalid persisted author activity %s: %w", occurrence.OccurrenceID, err)
 	}
 	return occurrence, nil

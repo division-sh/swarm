@@ -138,6 +138,7 @@ type agentReceiptWriteState struct {
 
 type lockedAgentDelivery struct {
 	deliveryID      string
+	eventID         string
 	runID           string
 	eventType       string
 	retryCount      int
@@ -299,6 +300,7 @@ func (s *PostgresStore) lockAgentDeliveryTx(
 	case err != nil:
 		return lockedAgentDelivery{}, fmt.Errorf("lock event delivery row: %w", err)
 	default:
+		delivery.eventID = strings.TrimSpace(eventID)
 		delivery.found = true
 		return delivery, nil
 	}
@@ -485,11 +487,19 @@ func recordAgentDeliveryAuthorActivity(ctx context.Context, delivery lockedAgent
 	}
 	retry := state.retryCount
 	identity := delivery.deliveryID + ":" + transition + fmt.Sprintf(":%d", retry)
+	summary := ""
+	if transition == "delivered" {
+		persisted, _, err := runtimeauthoractivity.PersistedAuthorSafeSummary(ctx, "emit:"+strings.TrimSpace(delivery.eventID))
+		if err != nil {
+			return fmt.Errorf("read delivered event author summary: %w", err)
+		}
+		summary = persisted
+	}
 	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindDeliveryLifecycle, Transition: transition,
 		SourceOwner: "event_deliveries", SourceIdentity: identity, DedupKey: "delivery:" + identity,
 		OccurredAt: occurredAt.UTC(), RunID: delivery.runID, EntityID: delivery.entityID, FlowID: delivery.flowInstance,
-		AgentID: agentID, Failure: state.failure,
+		AgentID: agentID, Failure: state.failure, AuthorSafeSummary: summary,
 		Projection: runtimeauthoractivity.Projection{
 			SubjectType: "agent", SubjectID: agentID, EventType: delivery.eventType,
 			SubscriberType: "agent", SubscriberID: agentID, RetryCount: &retry, ReasonCode: state.reasonCode,

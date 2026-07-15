@@ -16,6 +16,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -30,7 +32,7 @@ import (
 func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntimeContainer(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := runForkTestContext()
 
 	var connectorCalls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -45,7 +47,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			name:               "read-only reexecutes exactly once",
 			effectClass:        runtimecontracts.ActivityEffectClassReadOnly,
 			forkPolicy:         runtimecontracts.ActivityForkReexecuteRead,
-			resultEventType:    "activity.succeeded",
+			resultEventType:    "flow_a.connector.succeeded",
 			wantConnectorCalls: 1,
 		},
 		{
@@ -53,7 +55,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			effectClass:           runtimecontracts.ActivityEffectClassNonIdempotentWrite,
 			forkPolicy:            runtimecontracts.ActivityForkReuseRecordedResult,
 			sourceAttemptStatus:   "succeeded",
-			resultEventType:       "activity.succeeded",
+			resultEventType:       "flow_a.connector.succeeded",
 			wantForkAttemptStatus: "succeeded",
 		},
 		{
@@ -61,7 +63,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			effectClass:           runtimecontracts.ActivityEffectClassNonIdempotentWrite,
 			forkPolicy:            runtimecontracts.ActivityForkReuseRecordedResult,
 			sourceAttemptStatus:   "failed",
-			resultEventType:       "activity.failed",
+			resultEventType:       "flow_a.connector.failed",
 			failureClass:          string(runtimefailures.ClassDependencyUnavailable),
 			failureCode:           "provider_unavailable",
 			wantForkAttemptStatus: "failed",
@@ -71,7 +73,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			effectClass:           runtimecontracts.ActivityEffectClassNonIdempotentWrite,
 			forkPolicy:            runtimecontracts.ActivityForkReuseRecordedResult,
 			sourceAttemptStatus:   "uncertain",
-			resultEventType:       "activity.failed",
+			resultEventType:       "flow_a.connector.failed",
 			failureClass:          string(runtimefailures.ClassOutcomeUncertain),
 			failureCode:           "activity_provider_outcome_uncertain",
 			wantForkAttemptStatus: "uncertain",
@@ -85,14 +87,14 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			entityID := uuid.NewString()
 			initiatingEventID := uuid.NewString()
 			at := time.Now().UTC().Truncate(time.Microsecond)
-			activation, err := loopruntime.New(sourceRunID, entityID, "flow-a", "revision", "revision_id", uuid.NewString(), "review", 3, at.Add(-time.Minute))
+			activation, err := loopruntime.New(sourceRunID, entityID, "flow_a", "revision", "revision_id", uuid.NewString(), "review", 3, at.Add(-time.Minute))
 			if err != nil {
 				t.Fatalf("create source loop activation: %v", err)
 			}
 			sourceGeneration := activation.Generation()
 			sourceFact := activityidentity.Fact{
 				RunID: sourceRunID, SourceEventID: initiatingEventID, EntityID: entityID,
-				FlowID: "flow-a", NodeID: "test-node", HandlerEventKey: "review.requested",
+				FlowID: "flow_a", NodeID: "test-node", HandlerEventKey: "review.requested",
 				ActivityID: "connector", Tool: "provider.connector", Attempt: 1,
 				RevisionID: sourceGeneration.RevisionID,
 			}
@@ -101,9 +103,9 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			seedSelectedContractActivityLoop(t, db, sourceRunID, entityID, sourceRequestEventID, activation, at)
 			seedSelectedContractActivityRequest(t, db, sourceRunID, sourceRequestEventID, selectedContractActivityRequestPayload{
 				ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"},
-				EffectClass: string(tt.effectClass), SuccessEvent: "activity.succeeded", FailureEvent: "activity.failed",
+				EffectClass: string(tt.effectClass), SuccessEvent: "flow_a.connector.succeeded", FailureEvent: "flow_a.connector.failed",
 				RetryMaxAttempts: 1, ForkPolicy: string(tt.forkPolicy), EntityID: entityID,
-				NodeID: "test-node", FlowID: "flow-a", HandlerEventKey: "review.requested",
+				NodeID: "test-node", FlowID: "flow_a", HandlerEventKey: "review.requested",
 				SourceEventID: initiatingEventID, SourceRunID: sourceRunID, Attempt: 1,
 				Generation: sourceGeneration, LoopStage: "review",
 			})
@@ -113,6 +115,13 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			}
 
 			source := selectedContractActivitySource(server.URL, tt.effectClass)
+			descriptors, err := runtimepkg.AuthorActivityEventDescriptors(source)
+			if err != nil {
+				t.Fatalf("project activity event descriptors: %v", err)
+			}
+			if !selectedContractActivityDescriptorExists(descriptors, tt.resultEventType) {
+				t.Fatalf("selected activity source has no descriptor for %s: %#v", tt.resultEventType, descriptors)
+			}
 			selection := store.RunForkContractSelection{
 				Mode: "selected_contracts", ContractsRoot: "/tmp/selected-contract-activity-proof",
 				WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
@@ -138,7 +147,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			}
 			forkFact := activityidentity.Fact{
 				RunID: result.Materialization.ForkRunID, SourceEventID: forkRequest.SourceEventID,
-				ParentEventID: forkRequest.ParentEventID, EntityID: entityID, FlowID: "flow-a",
+				ParentEventID: forkRequest.ParentEventID, EntityID: entityID, FlowID: "flow_a",
 				NodeID: "test-node", HandlerEventKey: "review.requested", ActivityID: "connector",
 				Tool: "provider.connector", Attempt: 1, RevisionID: forkRequest.Generation.RevisionID,
 			}
@@ -178,6 +187,15 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 	}
 }
 
+func selectedContractActivityDescriptorExists(descriptors []runtimeauthoractivity.EventDescriptor, eventType string) bool {
+	for _, descriptor := range descriptors {
+		if descriptor.EventType == eventType {
+			return true
+		}
+	}
+	return false
+}
+
 type selectedContractActivityForkCase struct {
 	name                  string
 	effectClass           runtimecontracts.ActivityEffectClass
@@ -215,25 +233,36 @@ type selectedContractActivityRequestPayload struct {
 }
 
 func selectedContractActivitySource(serverURL string, effectClass runtimecontracts.ActivityEffectClass) semanticview.Source {
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Activity: runtimecontracts.ActivitySpec{ID: "connector", Tool: "provider.connector"},
+	}
 	node := runtimecontracts.SystemNodeContract{
 		ID: "test-node", ExecutionType: runtimecontracts.SystemNodeExecutionType,
-		SubscribesTo: []string{"platform.activity_requested"},
+		SubscribesTo:  []string{"platform.activity_requested"},
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"review.requested": handler},
 	}
 	flow := runtimecontracts.FlowContractView{
-		Paths:  runtimecontracts.FlowContractPaths{ID: "flow-a", PackageKey: "activity-fork-proof", Dir: "flows/flow-a"},
-		Schema: runtimecontracts.FlowSchemaDocument{Name: "flow-a", InitialState: "pending", States: []string{"pending"}},
-		Nodes:  map[string]runtimecontracts.SystemNodeContract{"test-node": node}, Path: "flow-a",
+		Paths:  runtimecontracts.FlowContractPaths{ID: "flow_a", PackageKey: "activity-fork-proof", Dir: "flows/flow_a"},
+		Schema: runtimecontracts.FlowSchemaDocument{Name: "flow_a", InitialState: "pending", States: []string{"pending"}},
+		Nodes:  map[string]runtimecontracts.SystemNodeContract{"test-node": node}, Path: "flow_a",
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "activity-fork-proof", Version: "v1", InitialStage: "pending",
-			FlowInitial: map[string]string{"flow-a": "pending"}, FlowStates: map[string][]string{"flow-a": {"pending"}},
+			FlowInitial: map[string]string{"flow_a": "pending"}, FlowStates: map[string][]string{"flow_a": {"pending"}},
 			EventOwners: map[string][]string{"platform.activity_requested": {"test-node"}},
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"test-node": {"review.requested": handler},
+			},
 			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
-				"test-node": {ID: "test-node", ExecutionType: runtimecontracts.SystemNodeExecutionType, RuntimeSubscriptions: []string{"platform.activity_requested"}},
+				"test-node": {
+					ID: "test-node", ExecutionType: runtimecontracts.SystemNodeExecutionType,
+					RuntimeSubscriptions: []string{"platform.activity_requested"},
+					Produces:             []string{"flow_a.connector.succeeded", "flow_a.connector.failed"},
+				},
 			},
 		},
-		FlowTree: runtimecontracts.FlowTree{Root: &flow, ByPath: map[string]*runtimecontracts.FlowContractView{"flow-a": &flow}, ByID: map[string]*runtimecontracts.FlowContractView{"flow-a": &flow}},
+		FlowTree: runtimecontracts.FlowTree{Root: &flow, ByPath: map[string]*runtimecontracts.FlowContractView{"flow_a": &flow}, ByID: map[string]*runtimecontracts.FlowContractView{"flow_a": &flow}},
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"provider.connector": {
 				HandlerType: "http", EffectClass: string(effectClass),
@@ -252,7 +281,7 @@ func selectedContractActivityLoadedSource(source semanticview.Source, selection 
 		Policies: map[string]runtimepipeline.WorkflowEventPolicy{"platform.activity_requested": {Consume: true, RequireEntity: true}},
 	}}
 	return LoadedSelectedContractSource{
-		Selection: selection, Source: source,
+		Selection: selection, Source: source, BundleHash: runForkTestBundleHash, BundleSource: "ephemeral",
 		Module: selectedContractWorkflowModule{
 			source: source, workflow: workflow, nodes: nodes,
 			guardRegistry: runtimepipeline.NewContractGuardRegistry(source), actionRegistry: runtimepipeline.NewContractActionRegistry(source),
@@ -375,7 +404,7 @@ func loadSelectedContractActivityResult(t *testing.T, db *sql.DB, runID, eventID
 	var gotType string
 	var raw []byte
 	if err := db.QueryRowContext(context.Background(), `SELECT event_name, payload FROM events WHERE run_id = $1::uuid AND event_id = $2::uuid`, runID, eventID).Scan(&gotType, &raw); err != nil {
-		t.Fatalf("load fork activity result: %v", err)
+		t.Fatalf("load fork activity result %s/%s: %v", eventID, eventType, err)
 	}
 	if gotType != eventType {
 		t.Fatalf("fork result event type = %s, want %s", gotType, eventType)

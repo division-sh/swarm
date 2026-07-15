@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/store"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 type SelectedContractExecutionRequest struct {
@@ -70,11 +71,31 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if loadedSource.Module == nil {
 		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract execution requires executable selected workflow module")
 	}
-	materializationBundleHash := firstNonEmpty(req.BundleHash, loadedSource.BundleHash)
-	materializationBundleSource := strings.TrimSpace(req.BundleSource)
-	if materializationBundleSource == "" && materializationBundleHash != "" {
-		materializationBundleSource = storerunlifecycle.BundleSourcePersisted
+	materializationBundleHash := strings.TrimSpace(loadedSource.BundleHash)
+	materializationBundleSource := strings.TrimSpace(loadedSource.BundleSource)
+	if materializationBundleHash == "" || materializationBundleSource == "" {
+		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract source loader returned incomplete bundle identity")
 	}
+	if requested := strings.TrimSpace(req.BundleHash); requested != "" && requested != materializationBundleHash {
+		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract bundle_hash mismatch: request %s loaded %s", requested, materializationBundleHash)
+	}
+	if requested := strings.TrimSpace(req.BundleSource); requested != "" && requested != materializationBundleSource {
+		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract bundle_source mismatch: request %s loaded %s", requested, materializationBundleSource)
+	}
+	selectedScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, materializationBundleHash)
+	if err != nil {
+		return SelectedContractExecutionResult{}, fmt.Errorf("resolve selected-contract author activity scope: %w", err)
+	}
+	ctx = runtimeauthoractivity.WithScope(ctx, selectedScope)
+	descriptors, err := runtimepkg.AuthorActivityEventDescriptors(loadedSource.Source)
+	if err != nil {
+		return SelectedContractExecutionResult{}, fmt.Errorf("project selected-contract author activity descriptors: %w", err)
+	}
+	descriptorLease, err := req.Store.RegisterAuthorActivityEventCatalog(selectedScope, descriptors)
+	if err != nil {
+		return SelectedContractExecutionResult{}, fmt.Errorf("register selected-contract author activity descriptors: %w", err)
+	}
+	defer descriptorLease.Release()
 	plan, err := req.Store.PlanRunFork(ctx, store.RunForkPlanRequest{
 		SourceRunID: strings.TrimSpace(req.SourceRunID),
 		At:          strings.TrimSpace(req.At),

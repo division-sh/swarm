@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/testutil"
@@ -10,7 +9,7 @@ import (
 
 func TestEntityStateSchema_AllowsSameEntityIDInDifferentRuns(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	runA := uuid.NewString()
 	runB := uuid.NewString()
 	entityID := uuid.NewString()

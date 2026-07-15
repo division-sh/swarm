@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"testing"
 
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -37,7 +36,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_CoversEveryCurrentStateLa
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -106,7 +105,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalLiveLifecycl
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -159,7 +158,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalTerminalLife
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {

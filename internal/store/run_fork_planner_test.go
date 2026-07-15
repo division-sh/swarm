@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -15,7 +14,7 @@ import (
 func TestRunForkPlanner_ResolvesCommitOrderedEventRevisionsAndRejectsTimestampSelectors(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	firstEventID := "00000000-0000-0000-0000-000000000001"
@@ -79,7 +78,7 @@ func TestRunForkPlanner_ResolvesCommitOrderedEventRevisionsAndRejectsTimestampSe
 func TestRunForkPlanner_FailsClosedForOpenReplyContextAtForkPoint(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	requestEventID := uuid.NewString()
 	at := time.Unix(1700000050, 0).UTC()
@@ -126,7 +125,7 @@ func TestRunForkPlanner_FailsClosedForOpenReplyContextAtForkPoint(t *testing.T) 
 func TestRunForkPlanner_ReconstructsEntityStateAtForkPointFromMutations(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -207,7 +206,7 @@ func TestRunForkPlanner_ReconstructsEntityStateAtForkPointFromMutations(t *testi
 func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -326,7 +325,7 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 func TestRunForkPlanner_PendingUnstartedDeliveryIsDeliveryEventReplayReady(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -382,7 +381,7 @@ func TestRunForkPlanner_PendingUnstartedDeliveryIsDeliveryEventReplayReady(t *te
 func TestRunForkPlanner_NodePendingDeliveryRemainsBlocked(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -474,7 +473,7 @@ func TestRunForkPlanner_NonAgentDeliveryStatesRemainNamedBlockers(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
 			pg := &PostgresStore{DB: db}
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 
 			runID := uuid.NewString()
 			eventID := uuid.NewString()
@@ -539,7 +538,7 @@ func TestRunForkPlanner_NonAgentDeliveryStatesRemainNamedBlockers(t *testing.T) 
 func TestRunForkPlanner_ReplayScopeMarkerRemainsCommittedReplayBlocker(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -588,7 +587,7 @@ func TestRunForkPlanner_ReplayScopeMarkerRemainsCommittedReplayBlocker(t *testin
 
 func TestRunForkPlanner_SystemDeliveryRowsAreNotCanonicalEventDeliveries(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -624,7 +623,7 @@ func TestRunForkPlanner_SystemDeliveryRowsAreNotCanonicalEventDeliveries(t *test
 func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentRouteRows(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -744,7 +743,7 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -812,7 +811,7 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -896,7 +895,7 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 func TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -968,7 +967,7 @@ func TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork(t *test
 func TestRunForkPlanner_SuppressesPostForkTerminalMetadata(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -1034,7 +1033,7 @@ func TestRunForkPlanner_SuppressesPostForkTerminalMetadata(t *testing.T) {
 func TestRunForkPlanner_AccountsForReceiptOnlyPlatformAndNodeProcessing(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -1122,7 +1121,7 @@ func TestRunForkPlanner_AccountsForReceiptOnlyPlatformAndNodeProcessing(t *testi
 func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -1192,7 +1191,7 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 func TestRunForkPlanner_ActiveConversationAuditRemainsPolicyBlocker(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -1240,7 +1239,7 @@ func TestRunForkPlanner_ActiveConversationAuditRemainsPolicyBlocker(t *testing.T
 func TestRunForkPlanner_TerminatedSessionBeforeForkIsLineageOnly(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -1294,7 +1293,7 @@ func TestRunForkPlanner_TerminatedSessionBeforeForkIsLineageOnly(t *testing.T) {
 func TestRunForkPlanner_TerminatedAuditStillBlocksWithoutAtForkTerminationProof(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -1342,7 +1341,7 @@ func TestRunForkPlanner_TerminatedAuditStillBlocksWithoutAtForkTerminationProof(
 func TestRunForkPlanner_FailsClosedWhenMutationLogUnavailable(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	if _, err := db.ExecContext(ctx, `DROP TABLE entity_mutations`); err != nil {
 		t.Fatalf("drop entity_mutations: %v", err)
 	}
@@ -1361,7 +1360,7 @@ func TestRunForkPlanner_FailsClosedWhenMutationLogUnavailable(t *testing.T) {
 func TestRunForkPlanner_FailsClosedWhenDeadLettersUnavailable(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	if _, err := db.ExecContext(ctx, `DROP TABLE dead_letters`); err != nil {
 		t.Fatalf("drop dead_letters: %v", err)
 	}

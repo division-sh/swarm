@@ -142,7 +142,7 @@ func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 
 func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	entityID := uuid.NewString()
 	evt := eventtest.RootIngress(
 		uuid.NewString(),
@@ -270,7 +270,7 @@ func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *test
 		"source.evt",
 		"src", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	runner.ProcessEventForTest(context.Background(), evt)
+	runner.ProcessEventForTest(testAuthorActivityContext(context.Background()), evt)
 
 	if attempts != 1 {
 		t.Fatalf("attempts = %d, want 1", attempts)
@@ -300,7 +300,7 @@ func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *test
 
 func TestSystemNodeRunner_FailsClosedWithoutCanonicalEventReceiptsCapability(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	entityID := uuid.NewString()
 	evt := eventtest.RootIngress(
 		uuid.NewString(),
@@ -343,7 +343,7 @@ func TestSystemNodeRunner_FailsClosedWithoutCanonicalEventReceiptsCapability(t *
 
 func TestSystemNodeRunner_UsesCanonicalEventReceiptsCapabilityForIdempotency(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	entityID := uuid.NewString()
 	evt := eventtest.RootIngress(
 		uuid.NewString(),
@@ -393,7 +393,7 @@ func TestSystemNodeRunner_UsesCanonicalEventReceiptsCapabilityForIdempotency(t *
 
 func TestSystemNodeRunner_SkipsWithoutPersistedNodeDeliveryAuthority(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	entityID := uuid.NewString()
 	evt := eventtest.RootIngress(
 		uuid.NewString(),
@@ -444,7 +444,7 @@ func TestSystemNodeRunner_SkipsWithoutPersistedNodeDeliveryAuthority(t *testing.
 }
 
 func TestSystemNodeRunner_UsesTypedReceiptOwnerWithoutRawDB(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	receipts := &typedSystemNodeReceiptStore{deliveryAuthorized: true}
 	attempts := 0
 	runner := newSystemNodeRunnerWithReceiptStoreAndRetryBase("node-a", deadLetterTestBus{}, nil, receipts, func() []events.EventType {
@@ -509,7 +509,7 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 		time.Now().UTC(),
 	)
 
-	if _, err := db.ExecContext(context.Background(), `
+	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `
 		INSERT INTO events (execution_mode, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES ('live', $1::uuid, $2, NULLIF($3,'')::uuid, 'runtime', 'entity', $4::jsonb, 'analysis-agent', 'agent', now())
 	`, evt.ID(), string(evt.Type()), evt.EntityID(), string(evt.Payload())); err != nil {
@@ -518,7 +518,7 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 	seedPipelineNodeDeliveryAuthority(t, db, evt, "node-a")
 	postCommit := make([]func(), 0, 1)
 	override := &PipelineReceiptOverride{}
-	ctx := WithPipelinePostCommitActions(context.Background(), &postCommit)
+	ctx := WithPipelinePostCommitActions(testAuthorActivityContext(context.Background()), &postCommit)
 	ctx = WithPipelineReceiptOverride(ctx, override)
 
 	passthrough, _, err := pc.Intercept(ctx, evt)
@@ -538,7 +538,7 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 		failureClass string
 		handlerNode  string
 	)
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT failure->>'class', COALESCE(handler_node, '')
 		FROM dead_letters
 		WHERE original_event_id = $1::uuid
@@ -553,7 +553,7 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 		deliveryReason string
 		receiptOutcome string
 	)
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COALESCE(status, ''), COALESCE(reason_code, '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
@@ -565,7 +565,7 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 	if deliveryStatus != "dead_letter" || deliveryReason != "handler_terminal_failure" {
 		t.Fatalf("workflow node delivery = %s/%s, want dead_letter/handler_terminal_failure", deliveryStatus, deliveryReason)
 	}
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COALESCE(outcome, '')
 		FROM event_receipts
 		WHERE event_id = $1::uuid

@@ -26,7 +26,7 @@ import (
 func TestPostgresEventAdmissionRejectsMalformedChildDirectAppend(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	err := pg.AppendEvent(ctx, eventtest.MalformedChildWithoutRunLineage(
 		events.EventType("task.completed"),
@@ -724,7 +724,7 @@ func terminalEventAdmissionEvent(eventID, runID, payload string, createdAt time.
 func TestPostgresEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritativeFacts(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	err := pg.AppendEvent(ctx, eventtest.MalformedProjectionWithoutAuthoritativeFacts(
 		events.EventType("task.completed"),
@@ -765,7 +765,7 @@ func TestPostgresEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritative
 
 func TestSQLiteEventAdmissionRejectsMalformedChildDirectAppend(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	err := sqliteStore.AppendEvent(ctx, eventtest.MalformedChildWithoutRunLineage(
 		events.EventType("task.completed"),
@@ -790,7 +790,7 @@ func TestSQLiteEventAdmissionRejectsMalformedChildDirectAppend(t *testing.T) {
 
 func TestSQLiteEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritativeFacts(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	err := sqliteStore.AppendEvent(ctx, eventtest.MalformedProjectionWithoutAuthoritativeFacts(
 		events.EventType("task.completed"),
@@ -1047,7 +1047,7 @@ func assertRunScopedRuntimeLogRequiresExistingRun(
 func TestPostgresRuntimeLogWriterUsesAdmissionFactsAndRemainsNonRouted(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	logger := runtimepkg.NewRuntimeLogger(pg)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
@@ -1074,7 +1074,7 @@ func TestPostgresRuntimeLogWriterUsesAdmissionFactsAndRemainsNonRouted(t *testin
 
 func TestSQLiteRuntimeLogDiagnosticDirectUsesAdmissionFacts(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	logger := runtimepkg.NewRuntimeLogger(sqliteStore)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{

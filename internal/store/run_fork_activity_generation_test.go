@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -17,7 +16,7 @@ import (
 
 func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	pg := &PostgresStore{DB: db}
 	sourceRunID, entityID := uuid.NewString(), uuid.NewString()
 	sourceEventID := uuid.NewString()
@@ -135,7 +134,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 
 func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	pg := &PostgresStore{DB: db}
 	sourceRunID, entityID, sourceEventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	activation, err := loopruntime.New(sourceRunID, entityID, "flow-a", "revision", "revision_id", uuid.NewString(), "review", 3, time.Now().UTC())
@@ -213,7 +212,7 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 
 func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	pg := &PostgresStore{DB: db}
 	sourceRunID, entityID, sourceEventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	activation, err := loopruntime.New(sourceRunID, entityID, "flow-a", "revision", "revision_id", uuid.NewString(), "review", 3, time.Now().UTC())

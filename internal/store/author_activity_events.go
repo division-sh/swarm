@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -13,58 +14,48 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
-type authorActivityCatalogBinder interface {
-	SetAuthorActivityEventCatalog([]string)
+func (s *PostgresStore) RegisterAuthorActivityEventCatalog(scope runtimeauthoractivity.Scope, descriptors []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {
+	return ensureAuthorActivityCatalog(&s.authorActivityCatalogMu, &s.authorActivityCatalog).Register(scope, descriptors)
 }
 
-func (s *PostgresStore) SetAuthorActivityEventCatalog(names []string) {
-	if s == nil {
-		return
+func (s *SQLiteRuntimeStore) RegisterAuthorActivityEventCatalog(scope runtimeauthoractivity.Scope, descriptors []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {
+	return ensureAuthorActivityCatalog(&s.authorActivityCatalogMu, &s.authorActivityCatalog).Register(scope, descriptors)
+}
+
+func ensureAuthorActivityCatalog(mu *sync.Mutex, registry **runtimeauthoractivity.EventCatalogRegistry) *runtimeauthoractivity.EventCatalogRegistry {
+	mu.Lock()
+	defer mu.Unlock()
+	if *registry == nil {
+		*registry = runtimeauthoractivity.NewEventCatalogRegistry()
 	}
-	s.authorActivityCatalogMu.Lock()
-	defer s.authorActivityCatalogMu.Unlock()
-	s.authorActivityCatalog = normalizedEventNameSet(names)
+	return *registry
 }
 
-func (s *SQLiteRuntimeStore) SetAuthorActivityEventCatalog(names []string) {
-	if s == nil {
-		return
-	}
-	s.authorActivityCatalogMu.Lock()
-	defer s.authorActivityCatalogMu.Unlock()
-	s.authorActivityCatalog = normalizedEventNameSet(names)
+func (s *PostgresStore) authorActivityEventDescriptor(scope runtimeauthoractivity.Scope, name string) (runtimeauthoractivity.EventDescriptor, bool) {
+	return ensureAuthorActivityCatalog(&s.authorActivityCatalogMu, &s.authorActivityCatalog).Resolve(scope, name)
 }
 
-func normalizedEventNameSet(names []string) map[string]struct{} {
-	out := make(map[string]struct{}, len(names))
-	for _, name := range names {
-		name = strings.TrimSpace(name)
-		if name != "" {
-			out[name] = struct{}{}
-		}
-	}
-	return out
+func (s *SQLiteRuntimeStore) authorActivityEventDescriptor(scope runtimeauthoractivity.Scope, name string) (runtimeauthoractivity.EventDescriptor, bool) {
+	return ensureAuthorActivityCatalog(&s.authorActivityCatalogMu, &s.authorActivityCatalog).Resolve(scope, name)
 }
 
-func (s *PostgresStore) authoredAuthorActivityEvent(name string) bool {
-	s.authorActivityCatalogMu.RLock()
-	defer s.authorActivityCatalogMu.RUnlock()
-	_, ok := s.authorActivityCatalog[strings.TrimSpace(name)]
-	return ok
+func (s *PostgresStore) authorActivityEventCatalogRegistered(scope runtimeauthoractivity.Scope) bool {
+	return ensureAuthorActivityCatalog(&s.authorActivityCatalogMu, &s.authorActivityCatalog).HasScope(scope)
 }
 
-func (s *SQLiteRuntimeStore) authoredAuthorActivityEvent(name string) bool {
-	s.authorActivityCatalogMu.RLock()
-	defer s.authorActivityCatalogMu.RUnlock()
-	_, ok := s.authorActivityCatalog[strings.TrimSpace(name)]
-	return ok
+func (s *SQLiteRuntimeStore) authorActivityEventCatalogRegistered(scope runtimeauthoractivity.Scope) bool {
+	return ensureAuthorActivityCatalog(&s.authorActivityCatalogMu, &s.authorActivityCatalog).HasScope(scope)
 }
 
-type authoredEventClassifier interface {
-	authoredAuthorActivityEvent(string) bool
+type authoredEventDescriptorResolver interface {
+	authorActivityEventDescriptor(runtimeauthoractivity.Scope, string) (runtimeauthoractivity.EventDescriptor, bool)
 }
 
-func recordPersistedEventAuthorActivity(ctx context.Context, classifier authoredEventClassifier, evt events.Event, producedBy, producedByType string) error {
+type authoredEventCatalogLeaseResolver interface {
+	authorActivityEventCatalogRegistered(runtimeauthoractivity.Scope) bool
+}
+
+func recordPersistedEventAuthorActivity(ctx context.Context, resolver authoredEventDescriptorResolver, evt events.Event, producedBy, producedByType string) error {
 	name := strings.TrimSpace(string(evt.Type()))
 	if name == "platform.inbound_recorded" || platformEventHandledElsewhere(name) || platformEventDifferentConcept(name) {
 		return nil
@@ -72,25 +63,85 @@ func recordPersistedEventAuthorActivity(ctx context.Context, classifier authored
 	if platformEventRegistered(name) {
 		return recordPlatformSignalAuthorActivity(ctx, evt)
 	}
-	if classifier == nil || !classifier.authoredAuthorActivityEvent(name) {
+	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
+	if !ok || scope.Kind != runtimeauthoractivity.ScopeBundle {
+		return fmt.Errorf("persist event %q author activity requires exact bundle scope", name)
+	}
+	if resolver == nil {
+		return fmt.Errorf("persist event %q author activity descriptor registry is required", name)
+	}
+	descriptor, registered := resolver.authorActivityEventDescriptor(scope, name)
+	resolved, hasResolved, err := runtimeauthoractivity.ResolvedEventDescriptorFromContext(ctx, scope, name)
+	if err != nil {
+		return fmt.Errorf("persist event %q author activity descriptor: %w", name, err)
+	}
+	if registered && hasResolved && descriptor != resolved {
+		return fmt.Errorf("persist event %q author activity descriptor conflicts with registered bundle descriptor", name)
+	}
+	if !registered && hasResolved {
+		leaseResolver, ok := resolver.(authoredEventCatalogLeaseResolver)
+		if !ok || !leaseResolver.authorActivityEventCatalogRegistered(scope) {
+			return fmt.Errorf("persist event %q author activity descriptor has no live registry lease for runtime %q bundle %q", name, scope.RuntimeInstanceID, scope.BundleHash)
+		}
+		descriptor = resolved
+		registered = true
+	}
+	if !registered {
+		return fmt.Errorf("persist event %q has no author activity descriptor for runtime %q bundle %q", name, scope.RuntimeInstanceID, scope.BundleHash)
+	}
+	if descriptor.Disposition == runtimeauthoractivity.StoryDifferent {
 		return nil
+	}
+	summary, err := authoredEventSummary(evt.Payload(), descriptor.AuthorSummaryField)
+	if err != nil {
+		return fmt.Errorf("persist event %q author summary: %w", name, err)
 	}
 	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindEventEmitted, Transition: "emitted",
 		SourceOwner: "events", SourceIdentity: evt.ID(), DedupKey: "emit:" + evt.ID(),
 		OccurredAt: evt.CreatedAt(), RunID: evt.RunID(), EntityID: evt.EntityID(), FlowID: evt.FlowInstance(),
+		AuthorSafeSummary: summary,
 		Projection: runtimeauthoractivity.Projection{
 			EventType: name, ProducerType: strings.TrimSpace(producedByType), ProducerID: strings.TrimSpace(producedBy),
 		},
 	})
 }
 
+func authoredEventSummary(payload []byte, field string) (string, error) {
+	field = strings.TrimSpace(field)
+	if field == "" {
+		return "", nil
+	}
+	var object map[string]any
+	decoder := json.NewDecoder(strings.NewReader(string(payload)))
+	decoder.UseNumber()
+	if err := decoder.Decode(&object); err != nil {
+		return "", fmt.Errorf("decode declared summary field %q: %w", field, err)
+	}
+	value, ok := object[field]
+	if !ok || value == nil {
+		return "", nil
+	}
+	switch typed := value.(type) {
+	case string:
+		return runtimeauthoractivity.NormalizeAuthorSafeSummary(typed)
+	case json.Number:
+		return runtimeauthoractivity.NormalizeAuthorSafeSummary(typed.String())
+	case bool:
+		return runtimeauthoractivity.NormalizeAuthorSafeSummary(strconv.FormatBool(typed))
+	default:
+		return "", fmt.Errorf("declared summary field %q must be scalar", field)
+	}
+}
+
 func recordInboundAuthorActivity(ctx context.Context, evt events.Event, provider string) error {
+	projection, _ := runtimeauthoractivity.InboundProjectionFromContext(ctx)
 	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindInboundReceived, Transition: "received",
 		SourceOwner: "events", SourceIdentity: evt.ID(), DedupKey: "inbound:" + evt.ID(),
 		OccurredAt: evt.CreatedAt(), RunID: evt.RunID(), EntityID: evt.EntityID(), FlowID: evt.FlowInstance(),
-		Projection: runtimeauthoractivity.Projection{SubjectType: "entity", SubjectID: evt.EntityID(), Provider: strings.TrimSpace(provider)},
+		AuthorSafeSummary: projection.Summary,
+		Projection:        runtimeauthoractivity.Projection{SubjectType: "entity", SubjectID: evt.EntityID(), Provider: strings.TrimSpace(provider), AuthorSubjectType: projection.SubjectType, AuthorSubjectID: projection.SubjectID},
 	})
 }
 
@@ -127,6 +178,7 @@ var platformEventDisposition = map[string]string{
 	"human_task.rejected":               platformDispositionHandled,
 	"platform.runtime_log":              platformDispositionDifferent,
 	"platform.boot":                     platformDispositionDifferent,
+	"event.replayed":                    platformDispositionDifferent,
 }
 
 func platformEventRegistered(name string) bool {

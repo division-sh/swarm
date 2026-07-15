@@ -24,7 +24,7 @@ func (s *activeFlowInstanceDescriptorStore) ListActiveFlowInstanceDescriptors(co
 
 func TestEventBusPinRoutingDescriptorsIncludeActiveDynamicFlowInstances(t *testing.T) {
 	const flowInstance = "component-scaffold/aaaaaaaa-1111-4111-8111-aaaaaaaa1111"
-	eb, err := runtimebus.NewEventBus(&activeFlowInstanceDescriptorStore{
+	eb, err := newScopedTestEventBus(&activeFlowInstanceDescriptorStore{
 		agents: []runtimebus.ActiveAgentDescriptor{{
 			AgentID:      "service-owner",
 			EntityID:     "service-ent",

@@ -774,7 +774,7 @@ func deliveryPlannerRoutesContain(routes []events.DeliveryRoute, want events.Del
 }
 
 func TestResolveInternalRecipientsForRoutedNodePlanning_DoesNotSelectParentConcreteRouteForNestedSemanticScope(t *testing.T) {
-	eb, err := NewEventBus(InMemoryEventStore{})
+	eb, err := newScopedTestEventBus(InMemoryEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

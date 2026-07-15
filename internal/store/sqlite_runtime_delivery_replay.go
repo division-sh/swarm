@@ -1382,6 +1382,7 @@ func (s *SQLiteRuntimeStore) sqliteLockAgentDeliveryTx(ctx context.Context, tx *
 	case err != nil:
 		return lockedAgentDelivery{}, fmt.Errorf("lock sqlite event delivery row: %w", err)
 	default:
+		delivery.eventID = strings.TrimSpace(eventID)
 		if startedAt, valid, parseErr := sqliteTimeValue(startedAtRaw); parseErr != nil {
 			return lockedAgentDelivery{}, fmt.Errorf("parse sqlite event delivery started_at: %w", parseErr)
 		} else if valid {

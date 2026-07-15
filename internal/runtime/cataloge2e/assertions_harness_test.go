@@ -16,7 +16,7 @@ import (
 )
 
 func catalogRuntimeContext() context.Context {
-	return runtimecorrelation.WithRunID(context.Background(), catalogRuntimeRunID)
+	return runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), catalogRuntimeRunID)
 }
 
 func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catalogExpectedDocument) {
@@ -354,7 +354,7 @@ func workflowStateDebugRows(db *sql.DB) (string, error) {
 	if db == nil {
 		return "", nil
 	}
-	rows, err := db.QueryContext(context.Background(), `
+	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), `
 		SELECT entity_id::text, COALESCE(flow_instance, ''), current_state
 		FROM entity_state
 		ORDER BY created_at ASC
@@ -387,7 +387,7 @@ func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs
 	}
 	relevantEventIDs := catalogCausalEventIDs(t, db, since, publishedIDs)
 	relevantEntityIDs := catalogCausalEntityIDs(t, db, since, publishedIDs, entityID)
-	rows, err := db.QueryContext(context.Background(), `
+	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), `
 		SELECT event_id::text, event_name, COALESCE(NULLIF(payload->>'entity_id', ''), COALESCE(entity_id::text, ''))
 		FROM events
 		WHERE created_at >= $1
@@ -458,7 +458,7 @@ func catalogEventsSince(t testing.TB, db *sql.DB, since time.Time) []catalogStor
 	if db == nil {
 		return nil
 	}
-	rows, err := db.QueryContext(context.Background(), `
+	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), `
 		SELECT
 			event_id::text,
 			event_name,
@@ -684,7 +684,7 @@ func shouldIgnoreCatalogE2EEvent(eventName string) bool {
 func assertDeadLetter(t testing.TB, db *sql.DB, since time.Time, entityID string, want bool) {
 	t.Helper()
 	var count int
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COUNT(*)
 		FROM (
 			SELECT 1
@@ -715,7 +715,7 @@ func assertAgentReceived(t testing.TB, db *sql.DB, since time.Time, want map[str
 		if agentID == "" {
 			continue
 		}
-		rows, err := db.QueryContext(context.Background(), `
+		rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), `
 			SELECT e.event_name
 			FROM event_deliveries d
 			JOIN events e ON e.event_id = d.event_id
@@ -755,7 +755,7 @@ func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want m
 	instanceID := strings.TrimSpace(asString(want["instance_id"]))
 	if templateID == "" || instanceID == "" {
 		var count int
-		if err := db.QueryRowContext(context.Background(), `
+		if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 			SELECT COUNT(*)
 			FROM flow_instances
 			WHERE created_at >= $1
@@ -769,7 +769,7 @@ func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want m
 	}
 	instancePath := strings.Trim(strings.TrimSpace(templateID+"/"+instanceID), "/")
 	var instanceCount int
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COUNT(*)
 		FROM flow_instances
 		WHERE instance_id = $1
@@ -782,7 +782,7 @@ func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want m
 	}
 	if config, ok := want["config"].(map[string]any); ok && len(config) > 0 {
 		var raw []byte
-		err := db.QueryRowContext(context.Background(), `
+		err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 			SELECT config
 			FROM flow_instances
 			WHERE instance_id = $1
@@ -823,7 +823,7 @@ func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want m
 	}
 	if autoEmitted := strings.TrimSpace(asString(want["auto_emitted"])); autoEmitted != "" {
 		var count int
-		if err := db.QueryRowContext(context.Background(), `
+		if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 			SELECT COUNT(*)
 			FROM events
 			WHERE event_name = $1
@@ -839,7 +839,7 @@ func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want m
 func assertFlowInstanceCount(t testing.TB, db *sql.DB, since time.Time, want int) {
 	t.Helper()
 	var count int
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COUNT(*)
 		FROM flow_instances
 		WHERE created_at >= $1
@@ -871,7 +871,7 @@ func (h *runtimeHarness) assertTriggerReceipt(step catalogTriggerStep) {
 	for _, eventID := range eventIDs {
 		var subscriberID, outcome, sideEffects string
 		var rawFailure []byte
-		err := h.db.QueryRowContext(context.Background(), `
+		err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 			SELECT subscriber_id, outcome, COALESCE(side_effects::text, ''), COALESCE(failure, 'null'::jsonb)
 			FROM event_receipts
 			WHERE event_id = $1::uuid
@@ -931,7 +931,7 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 	eventIDs := h.publishedEventIDs(entityID)
 	for _, eventID := range eventIDs {
 		var outcome string
-		err := h.db.QueryRowContext(context.Background(), `
+		err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 			SELECT outcome
 			FROM event_receipts
 			WHERE event_id = $1::uuid
@@ -981,7 +981,7 @@ func catalogRecognizesHandlerOutcome(raw string) bool {
 func assertEntityDeadLetterOutcome(t testing.TB, db *sql.DB, since time.Time, entityID string) bool {
 	t.Helper()
 	var count int
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COUNT(*)
 		FROM (
 			SELECT 1
@@ -1009,7 +1009,7 @@ func assertChainDepthExceeded(t testing.TB, db *sql.DB, since time.Time, entityI
 		return
 	}
 	var count int
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COUNT(*)
 		FROM (
 			SELECT 1

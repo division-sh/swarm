@@ -44,11 +44,11 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 		agentID           = "github-webhook-subscriber"
 		providerEventName = "inbound.github.push"
 	)
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := &store.PostgresStore{DB: db}
 	seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := runtimebus.NewEventBus(pg)
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -147,11 +147,11 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 		agentID           = "slack-webhook-subscriber"
 		providerEventName = "inbound.slack.message"
 	)
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := &store.PostgresStore{DB: db}
 	seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := runtimebus.NewEventBus(pg)
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -250,11 +250,11 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 		agentID           = "stripe-webhook-subscriber"
 		providerEventName = "inbound.stripe"
 	)
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := &store.PostgresStore{DB: db}
 	seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := runtimebus.NewEventBus(pg)
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -352,11 +352,11 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 		agentID           = "stripe-sqlite-webhook-subscriber"
 		providerEventName = "inbound.stripe"
 	)
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := runtimebus.NewEventBus(sqliteStore)
+	bus, err := newScopedTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -415,11 +415,11 @@ func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *test
 		agentID           = "twilio-webhook-subscriber"
 		providerEventName = "inbound.twilio"
 	)
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := &store.PostgresStore{DB: db}
 	seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := runtimebus.NewEventBus(pg)
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -479,11 +479,11 @@ func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testin
 		agentID           = "twilio-sqlite-webhook-subscriber"
 		providerEventName = "inbound.twilio"
 	)
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := runtimebus.NewEventBus(sqliteStore)
+	bus, err := newScopedTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -546,11 +546,11 @@ func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *tes
 		agentID           = "shopify-webhook-subscriber"
 		providerEventName = "inbound.shopify"
 	)
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := &store.PostgresStore{DB: db}
 	seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := runtimebus.NewEventBus(pg)
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -606,11 +606,11 @@ func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testi
 		agentID           = "shopify-sqlite-webhook-subscriber"
 		providerEventName = "inbound.shopify"
 	)
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := runtimebus.NewEventBus(sqliteStore)
+	bus, err := newScopedTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -669,11 +669,11 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 		agentID           = "telegram-webhook-subscriber"
 		providerEventName = "inbound.telegram"
 	)
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := &store.PostgresStore{DB: db}
 	seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := runtimebus.NewEventBus(pg)
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName, "inbound.telegram.text_message")
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -730,11 +730,11 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 		agentID           = "telegram-sqlite-webhook-subscriber"
 		providerEventName = "inbound.telegram"
 	)
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := runtimebus.NewEventBus(sqliteStore)
+	bus, err := newScopedTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName, "inbound.telegram.text_message")
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -827,11 +827,11 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 
-			ctx := runtimecorrelation.WithRunID(context.Background(), tc.runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), tc.runID)
 			pg := &store.PostgresStore{DB: db}
 			seedPostgresInboundGatewayRuntime(t, ctx, db, pg, tc.runID, tc.entityID, tc.flowInstance, "customer-a", tc.provider, tc.webhookSecret, tc.agentID)
 
-			bus, err := runtimebus.NewEventBus(pg)
+			bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, tc.providerEventName)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -919,11 +919,11 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := runtimecorrelation.WithRunID(context.Background(), tc.runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), tc.runID)
 			sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 			seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, tc.runID, tc.entityID, tc.flowInstance, "customer-a", tc.provider, tc.webhookSecret, tc.agentID)
 
-			bus, err := runtimebus.NewEventBus(sqliteStore)
+			bus, err := newScopedTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, tc.providerEventName)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -1328,7 +1328,7 @@ func requireNoInboundBusEvent(t testing.TB, ch <-chan events.Event, context stri
 
 func waitForInboundBusQuiescence(t testing.TB, bus *runtimebus.EventBus) {
 	t.Helper()
-	waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	waitCtx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 5*time.Second)
 	defer cancel()
 	if err := bus.WaitForQuiescence(waitCtx); err != nil {
 		t.Fatalf("WaitForQuiescence: %v", err)

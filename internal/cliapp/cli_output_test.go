@@ -574,7 +574,6 @@ func TestCLIOutputModeExceptionRowsFailClosedBeforeSideEffects(t *testing.T) {
 		{name: "completion", args: []string{"completion", "bash", "--json"}, wantStderr: "unknown flag"},
 		{name: "completion no-color", args: []string{"completion", "bash", "--no-color"}, wantStderr: "unknown flag"},
 		{name: "serve", args: []string{"serve", "--json"}, wantStderr: "unknown flag"},
-		{name: "serve no-color", args: []string{"serve", "--no-color"}, wantStderr: "unknown flag"},
 		{name: "serve log-level", args: []string{"serve", "--log-level", "debug"}, wantStderr: "unknown flag"},
 		{name: "retired investigate", args: []string{"investigate", "runs", "--json"}, wantStderr: "retired in CLI v2"},
 		{name: "retired investigate no-color", args: []string{"investigate", "runs", "--no-color"}, wantStderr: "retired in CLI v2"},

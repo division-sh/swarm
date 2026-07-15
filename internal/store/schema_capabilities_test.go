@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -92,7 +91,7 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 	expectEventReceiptsTypedIdentityKey(mock, true)
 
 	pg := &PostgresStore{DB: db}
-	caps, err := pg.BindSchemaCapabilities(context.Background())
+	caps, err := pg.BindSchemaCapabilities(testAuthorActivityContext())
 	if err != nil {
 		t.Fatalf("BindSchemaCapabilities: %v", err)
 	}
@@ -172,7 +171,7 @@ func TestPostgresStore_BindSchemaCapabilities_DetectsLegacyShapes(t *testing.T) 
 	mock.ExpectQuery("FROM information_schema.columns").WillReturnRows(rows)
 
 	pg := &PostgresStore{DB: db}
-	caps, err := pg.BindSchemaCapabilities(context.Background())
+	caps, err := pg.BindSchemaCapabilities(testAuthorActivityContext())
 	if err != nil {
 		t.Fatalf("BindSchemaCapabilities: %v", err)
 	}
@@ -224,7 +223,7 @@ func TestPostgresStore_BindSchemaCapabilities_FailsClosedOnPartialCanonicalShape
 	mock.ExpectQuery("FROM information_schema.columns").WillReturnRows(rows)
 
 	pg := &PostgresStore{DB: db}
-	caps, err := pg.BindSchemaCapabilities(context.Background())
+	caps, err := pg.BindSchemaCapabilities(testAuthorActivityContext())
 	if err != nil {
 		t.Fatalf("BindSchemaCapabilities: %v", err)
 	}
@@ -297,14 +296,14 @@ func TestPostgresStore_CanonicalCapabilityReaders(t *testing.T) {
 	expectEventReceiptsTypedIdentityKey(mock, true)
 
 	pg := &PostgresStore{DB: db}
-	logEnabled, logRunID, err := pg.CanonicalRuntimeLogCapability(context.Background())
+	logEnabled, logRunID, err := pg.CanonicalRuntimeLogCapability(testAuthorActivityContext())
 	if err != nil {
 		t.Fatalf("CanonicalRuntimeLogCapability: %v", err)
 	}
 	if !logEnabled || !logRunID {
 		t.Fatalf("runtime log capability = enabled:%v run_id:%v, want true/true", logEnabled, logRunID)
 	}
-	receiptsEnabled, err := pg.CanonicalEventReceiptsCapability(context.Background())
+	receiptsEnabled, err := pg.CanonicalEventReceiptsCapability(testAuthorActivityContext())
 	if err != nil {
 		t.Fatalf("CanonicalEventReceiptsCapability: %v", err)
 	}
@@ -350,7 +349,7 @@ func TestPostgresStore_CanonicalEventReceiptsCapability_FailsClosedWithoutCanoni
 	expectEventReceiptsTypedIdentityKey(mock, true)
 
 	pg := &PostgresStore{DB: db}
-	receiptsEnabled, err := pg.CanonicalEventReceiptsCapability(context.Background())
+	receiptsEnabled, err := pg.CanonicalEventReceiptsCapability(testAuthorActivityContext())
 	if err != nil {
 		t.Fatalf("CanonicalEventReceiptsCapability: %v", err)
 	}
@@ -401,14 +400,14 @@ func TestPostgresStore_CanonicalEventReceiptsCapability_FailsClosedWithoutTypedI
 	expectEventReceiptsTypedIdentityKey(mock, false)
 
 	pg := &PostgresStore{DB: db}
-	caps, err := pg.BindSchemaCapabilities(context.Background())
+	caps, err := pg.BindSchemaCapabilities(testAuthorActivityContext())
 	if err != nil {
 		t.Fatalf("BindSchemaCapabilities: %v", err)
 	}
 	if caps.Events.Receipts != SchemaFlavorUnsupported || caps.Events.ReceiptTypedIdentity {
 		t.Fatalf("event_receipts caps = %+v, want unsupported without typed identity key", caps.Events)
 	}
-	receiptsEnabled, err := pg.CanonicalEventReceiptsCapability(context.Background())
+	receiptsEnabled, err := pg.CanonicalEventReceiptsCapability(testAuthorActivityContext())
 	if err != nil {
 		t.Fatalf("CanonicalEventReceiptsCapability: %v", err)
 	}

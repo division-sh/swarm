@@ -21,7 +21,7 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	now := time.Date(2026, 5, 27, 9, 30, 0, 0, time.UTC)
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source)

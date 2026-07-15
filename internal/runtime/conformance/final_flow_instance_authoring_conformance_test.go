@@ -13,7 +13,7 @@ import (
 
 func TestFinalFlowInstanceAuthoringFixture_CoversSealedContractOwners(t *testing.T) {
 	source := finalflowinstanceauthoring.LoadSource(t, finalflowinstanceauthoring.Options{})
-	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+	report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {
 		t.Fatalf("final sealed fixture hard invalidities = %#v, want none", got)
 	}
@@ -170,7 +170,7 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 			if err != nil {
 				t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 			}
-			report := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{})
+			report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), runtimebootverify.Options{})
 			if !finalFixtureFindingContains(report.Errors(), tc.checkID, tc.wantMessage) {
 				t.Fatalf("expected bootverify error %s containing %q, got %#v", tc.checkID, tc.wantMessage, report.Errors())
 			}

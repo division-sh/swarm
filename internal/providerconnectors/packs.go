@@ -515,6 +515,72 @@ func (s connectorPackSource) ToolEntryForAgent(agentID, toolID string) (runtimec
 	return tool, ok
 }
 
+func (s connectorPackSource) ResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry {
+	out := cloneConnectorEventCatalog(s.Source.ResolvedEventCatalog())
+	for eventType, entry := range s.generatedActivityEventEntries() {
+		out[eventType] = entry
+	}
+	return out
+}
+
+func (s connectorPackSource) ResolveFlowEventCatalogEntry(flowID, eventType string) (runtimecontracts.EventCatalogEntry, string, bool) {
+	if entry, resolved, ok := s.Source.ResolveFlowEventCatalogEntry(flowID, eventType); ok {
+		return entry, resolved, true
+	}
+	eventType = strings.TrimSpace(eventType)
+	entry, ok := s.generatedActivityEventEntries()[eventType]
+	return entry, eventType, ok
+}
+
+func (s connectorPackSource) EventEntries() map[string]runtimecontracts.EventCatalogEntry {
+	out := cloneConnectorEventCatalog(s.Source.EventEntries())
+	for eventType, entry := range s.generatedActivityEventEntries() {
+		out[eventType] = entry
+	}
+	return out
+}
+
+func (s connectorPackSource) EventEntry(eventType string) (runtimecontracts.EventCatalogEntry, bool) {
+	if entry, ok := s.Source.EventEntry(eventType); ok {
+		return entry, true
+	}
+	entry, ok := s.generatedActivityEventEntries()[strings.TrimSpace(eventType)]
+	return entry, ok
+}
+
+func (s connectorPackSource) generatedActivityEventEntries() map[string]runtimecontracts.EventCatalogEntry {
+	out := map[string]runtimecontracts.EventCatalogEntry{}
+	tools := s.ToolEntries()
+	for nodeID := range s.NodeEntries() {
+		flowID := ""
+		if owner, ok := s.NodeContractSource(nodeID); ok {
+			flowID = strings.TrimSpace(owner.FlowID)
+		}
+		for _, site := range runtimecontracts.ActivitySitesForNode(flowID, nodeID, s.NodeEventHandlers(nodeID)) {
+			tool, ok := tools[strings.TrimSpace(site.Spec.Tool)]
+			if !ok {
+				continue
+			}
+			events := runtimecontracts.ActivityResultEventsForSite(site)
+			out[events.SuccessEvent] = runtimecontracts.ActivityResultEventCatalogEntry(site, tool, runtimecontracts.ActivityResultStatusSucceeded)
+			out[events.FailureEvent] = runtimecontracts.ActivityResultEventCatalogEntry(site, tool, runtimecontracts.ActivityResultStatusFailed)
+			if site.Spec.Approval != nil {
+				out[events.RevisionRequested] = runtimecontracts.ActivityApprovalEventCatalogEntry(site, true)
+				out[events.Rejected] = runtimecontracts.ActivityApprovalEventCatalogEntry(site, false)
+			}
+		}
+	}
+	return out
+}
+
+func cloneConnectorEventCatalog(in map[string]runtimecontracts.EventCatalogEntry) map[string]runtimecontracts.EventCatalogEntry {
+	out := make(map[string]runtimecontracts.EventCatalogEntry, len(in))
+	for eventType, entry := range in {
+		out[eventType] = entry
+	}
+	return out
+}
+
 func existingToolSources(source semanticview.Source) map[string][]string {
 	out := map[string][]string{}
 	for _, scope := range source.ProjectScopes() {

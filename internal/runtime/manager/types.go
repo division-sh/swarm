@@ -203,6 +203,7 @@ type BudgetGuard interface {
 type StrategicContext = json.RawMessage
 
 type AgentManagerOptions struct {
+	BaseContext                    context.Context
 	LifecycleStore                 AgentLifecyclePersistence
 	Workspaces                     workspace.Lifecycle
 	Sessions                       sessions.Registry

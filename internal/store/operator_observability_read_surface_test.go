@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -13,7 +12,7 @@ import (
 )
 
 func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 
@@ -134,7 +133,7 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 }
 
 func TestOperatorObservabilityEventOwnerDoesNotPromotePayloadEntityIdentity(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 
@@ -202,7 +201,7 @@ func TestOperatorObservabilityEventOwnerDoesNotPromotePayloadEntityIdentity(t *t
 }
 
 func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 
@@ -335,7 +334,7 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 }
 
 func TestPostgresRuntimeLogSourceFilterMatchesProjectionFallback(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 
@@ -477,7 +476,7 @@ func assertRuntimeLogIDsAndSources(t *testing.T, logs []OperatorRuntimeLogEntry,
 }
 
 func TestOperatorRuntimeLogsFilterBySessionAndTimeWindow(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 
@@ -532,7 +531,7 @@ func TestOperatorRuntimeLogsFilterBySessionAndTimeWindow(t *testing.T) {
 }
 
 func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 
@@ -613,7 +612,7 @@ func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 }
 
 func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 
@@ -696,7 +695,7 @@ func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 }
 
 func TestRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 
@@ -733,7 +732,7 @@ func TestRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 }
 
 func TestRunDebugTracePageTypedFilters(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 

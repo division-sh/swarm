@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"testing"
@@ -21,7 +20,7 @@ type sqliteNormalRunCompletionFixture struct {
 
 func seedSQLiteNormalRunCompletionFixture(t *testing.T, store *SQLiteRuntimeStore, state string) sqliteNormalRunCompletionFixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	now := time.Now().UTC()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -58,7 +57,7 @@ func assertSQLiteRunCompletionStatus(t *testing.T, db *sql.DB, runID, want strin
 		status string
 		ended  any
 	)
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(), `
 		SELECT COALESCE(status, ''), ended_at
 		FROM runs
 		WHERE run_id = ?
@@ -76,7 +75,7 @@ func assertSQLiteRunCompletionStatus(t *testing.T, db *sql.DB, runID, want strin
 }
 
 func TestSQLiteRuntimeStoreConvergeNormalRunCompletionMarksCompletedAndIgnoresRuntimeLogs(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	fixture := seedSQLiteNormalRunCompletionFixture(t, store, "done")
 	if err := store.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
@@ -114,7 +113,7 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionMarksCompletedAndIgnoresRu
 }
 
 func TestSQLiteRuntimeStoreMarkRunTerminalPreservesFailureAndRejectsConflict(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, time.Now().UTC()); err != nil {
@@ -141,7 +140,7 @@ func TestSQLiteRuntimeStoreMarkRunTerminalPreservesFailureAndRejectsConflict(t *
 }
 
 func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	now := time.Now().UTC()
 	runID := uuid.NewString()
@@ -189,7 +188,7 @@ func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 }
 
 func TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryActive(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	fixture := seedSQLiteNormalRunCompletionFixture(t, store, "done")
 	if _, err := store.DB.ExecContext(ctx, `

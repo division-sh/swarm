@@ -86,7 +86,7 @@ func TestPrepareInboundDeliveryBatchRejectsInvalidProviderOutputAuthorizationBef
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &InMemoryEventStore{}
-			bus, err := NewEventBusWithOptions(store, EventBusOptions{
+			bus, err := newScopedTestEventBus(store, EventBusOptions{
 				ProviderOutputVerifier: inboundBatchAuthorizationVerifier{expected: expected},
 			})
 			if err != nil {
@@ -112,7 +112,7 @@ func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthori
 		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "generation-current",
 	}
 	store := &InMemoryEventStore{}
-	bus, err := NewEventBusWithOptions(store, EventBusOptions{
+	bus, err := newScopedTestEventBus(store, EventBusOptions{
 		ProviderOutputVerifier: inboundBatchAuthorizationVerifier{expected: expected},
 	})
 	if err != nil {

@@ -22,7 +22,7 @@ func TestCoordinatorHandlerExecutionEngineUsesRuntimeEnginePath(t *testing.T) {
 	if engine == nil {
 		t.Fatal("expected engine")
 	}
-	outcome, err := engine.ExecuteHandlerSteps(context.Background(), runtimecontracts.SystemNodeEventHandler{
+	outcome, err := engine.ExecuteHandlerSteps(testAuthorActivityContext(context.Background()), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}), "custom.trigger")
 	if err != nil {

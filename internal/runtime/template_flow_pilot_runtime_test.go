@@ -24,7 +24,7 @@ import (
 func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersistedDeliveryRoute(t *testing.T) {
 	bundle := templateflowpilot.LoadBundle(t, templateflowpilot.Options{})
 	source := semanticview.Wrap(bundle)
-	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+	report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {
 		t.Fatalf("template-flow pilot hard invalidities = %#v, want none", got)
 	}
@@ -35,7 +35,7 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	pg := &store.PostgresStore{DB: db}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	var manager *runtimemanager.AgentManager
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		TemplateInstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 			if manager == nil {
@@ -54,13 +54,13 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	evt := eventtest.RootIngress(
 		"99999999-9999-4999-8999-999999999952",
 		events.EventType("producer/account.ready"),
-		"",
+		"producer",
 		"",
 		json.RawMessage(`{"account_id":"acct-1","score":"91","decision":"approved"}`),
 		0,
 		templateInstanceDeliveryRunID,
 		"",
-		events.EventEnvelope{},
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "producer"}),
 		time.Now().UTC(),
 	)
 	preflight, err := bus.CheckPublishRecipientPlan(ctx, evt)
@@ -146,7 +146,7 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &templateFlowPilotMemoryStore{flowInstances: tc.flowInstances}
-			bus, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
+			bus, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
 				ContractBundle: source,
 				TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 					t.Fatal("fail-closed route must not activate a template instance")
@@ -161,16 +161,16 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 			evt := eventtest.RootIngress(
 				"99999999-9999-4999-8999-999999999953",
 				events.EventType("producer/account.ready"),
-				"",
+				"producer",
 				"",
 				tc.payload,
 				0,
 				templateInstanceDeliveryRunID,
 				"",
-				events.EventEnvelope{},
+				events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "producer"}),
 				time.Now().UTC(),
 			)
-			plan, err := bus.CheckPublishRecipientPlan(context.Background(), evt)
+			plan, err := bus.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), evt)
 			if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan: %v", err)
 			}
@@ -182,7 +182,7 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 				t.Fatalf("fail-closed route exposed executable plan: recipients=%#v persisted=%#v routed=%#v subscriptions=%#v routes=%#v",
 					plan.Recipients, plan.PersistedRecipients, plan.RoutedRecipients, plan.SubscriptionRecipients, plan.DeliveryRoutes)
 			}
-			if err := bus.Publish(context.Background(), evt); err != nil {
+			if err := bus.Publish(testAuthorActivityContext(context.Background()), evt); err != nil {
 				t.Fatalf("Publish: %v", err)
 			}
 			if routes := store.deliveryRoutes[evt.ID()]; len(routes) != 0 {

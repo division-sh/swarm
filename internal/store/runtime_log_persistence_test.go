@@ -19,7 +19,7 @@ import (
 )
 
 func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
@@ -81,7 +81,7 @@ func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.
 }
 
 func TestSQLiteRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
@@ -126,10 +126,10 @@ func TestSQLiteRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t *
 }
 
 func TestPostgresRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	pg := &PostgresStore{DB: db}
+	pg := newTestPostgresStore(t, db)
 	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
 		t.Fatalf("BindSchemaCapabilities: %v", err)
 	}
@@ -197,7 +197,7 @@ func computeModuleReplayEvidenceTestEnvelope() computemodule.ReplayEnvelope {
 }
 
 func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
@@ -301,10 +301,11 @@ func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
 }
 
 func TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage(t *testing.T) {
-	ctx := context.Background()
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	pg := &PostgresStore{DB: db}
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContextForBundle("bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111")
+	registerTestAuthorActivityCatalogForContext(t, pg, ctx)
 	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
 		t.Fatalf("BindSchemaCapabilities: %v", err)
 	}
@@ -369,10 +370,10 @@ func TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage(t *testing.T)
 }
 
 func TestPostgresRuntimeLogPersistenceReusesAmbientEventTransaction(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	pg := &PostgresStore{DB: db}
+	pg := newTestPostgresStore(t, db)
 	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
 		t.Fatalf("BindSchemaCapabilities: %v", err)
 	}

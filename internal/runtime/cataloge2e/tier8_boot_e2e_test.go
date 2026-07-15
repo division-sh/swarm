@@ -142,7 +142,7 @@ func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 			if loadErr != nil {
 				t.Fatalf("load workflow contract bundle %s: %v", fixtureRoot, loadErr)
 			}
-			report := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{})
+			report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), runtimebootverify.Options{})
 
 			switch strings.ToLower(strings.TrimSpace(expected.Expected.BootResult)) {
 			case "", "success":
@@ -224,11 +224,13 @@ func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBund
 	if err != nil {
 		return nil, err
 	}
-	return runtime.NewRuntime(context.Background(), runtime.RuntimeDeps{Config: testRuntimeConfig(), Stores: runtime.Stores{}, Options: runtime.RuntimeOptions{
+	return runtime.NewRuntime(testAuthorActivityContext(context.Background()), runtime.RuntimeDeps{Config: testRuntimeConfig(), Stores: runtime.Stores{}, Options: runtime.RuntimeOptions{
 		SelfCheck:           false,
 		WorkflowModule:      module,
 		LLMRuntime:          runtimellm.NoopRuntime{},
 		ProviderCredentials: tier8ProviderCredentialStore(t, "ANTHROPIC_API_KEY", "test-key"),
+		RuntimeInstanceID:   authorActivityTestRuntimeInstanceID,
+		BundleSourceFact:    authorActivityTestBundleSourceFact,
 	}})
 
 }
@@ -239,7 +241,7 @@ func tier8ProviderCredentialStore(t testing.TB, key, value string) runtimecreden
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	if err := store.Set(context.Background(), key, value); err != nil {
+	if err := store.Set(testAuthorActivityContext(context.Background()), key, value); err != nil {
 		t.Fatalf("Set provider credential: %v", err)
 	}
 	return store
@@ -249,7 +251,7 @@ func assertTier8RuntimeBootMatchesAuthoritativeStartupTruth(t testing.TB, bundle
 	t.Helper()
 	strictCatalogFixtureStartupPolicy().apply(t)
 	source := semanticview.Wrap(bundle)
-	_, validationErr := runtime.ValidateWorkflowContractSurface(context.Background(), source, runtime.DefaultWorkflowContractValidationOptions(nil))
+	_, validationErr := runtime.ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, runtime.DefaultWorkflowContractValidationOptions(nil))
 	if validationErr != nil {
 		if _, err := newTier8Runtime(t, bundle); err == nil {
 			t.Fatal("expected NewRuntime to fail when authoritative startup validation fails")
@@ -273,7 +275,7 @@ func startRuntimeForBootTest(t testing.TB, rt *runtime.Runtime) {
 }
 
 func startRuntimeAndReturnError(rt *runtime.Runtime) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 2*time.Second)
 	defer cancel()
 	if err := rt.Start(ctx); err != nil {
 		return err

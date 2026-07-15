@@ -54,7 +54,7 @@ func testProviderCredentialStore(t *testing.T, key, value string) runtimecredent
 		t.Fatalf("NewFileStore: %v", err)
 	}
 	if strings.TrimSpace(value) != "" {
-		if err := store.Set(context.Background(), key, value); err != nil {
+		if err := store.Set(testAuthorActivityContext(context.Background()), key, value); err != nil {
 			t.Fatalf("Set provider credential: %v", err)
 		}
 	}
@@ -106,7 +106,7 @@ func TestValidateClaudeStartupConfig_RequiresWorkspaceAndGateway(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 
-	err := validateClaudeStartupConfig(context.Background(), cfg, RuntimeOptions{
+	err := validateClaudeStartupConfig(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{
 		ToolGatewayBinding:  testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", "gateway-token"),
 		ProviderCredentials: testProviderCredentialStore(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token"),
 	}, claudeStartupAgentSource())
@@ -124,7 +124,7 @@ func TestValidateClaudeStartupConfig_SkipsClaudeEnvForAgentFreeSource(t *testing
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
-	if err := validateClaudeStartupConfig(context.Background(), cfg, RuntimeOptions{}, claudeStartupAgentFreeSource()); err != nil {
+	if err := validateClaudeStartupConfig(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{}, claudeStartupAgentFreeSource()); err != nil {
 		t.Fatalf("validateClaudeStartupConfig: %v", err)
 	}
 }
@@ -146,13 +146,13 @@ func TestValidateClaudeStartupConfigForActiveAgents_RequiresFullCLIBindingForRec
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
 	opts.ToolGatewayBinding = testToolGatewayBinding("http://127.0.0.1:8081", "", "gateway-token")
-	err := validateClaudeStartupConfigForActiveAgents(context.Background(), cfg, opts, claudeStartupAgentFreeSource(), manager)
+	err := validateClaudeStartupConfigForActiveAgents(testAuthorActivityContext(context.Background()), cfg, opts, claudeStartupAgentFreeSource(), manager)
 	if err == nil || !strings.Contains(err.Error(), "tool gateway binding workspace endpoint") {
 		t.Fatalf("expected workspace gateway binding error, got %v", err)
 	}
 
 	opts.ToolGatewayBinding = testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", "gateway-token")
-	err = validateClaudeStartupConfigForActiveAgents(context.Background(), cfg, opts, claudeStartupAgentFreeSource(), manager)
+	err = validateClaudeStartupConfigForActiveAgents(testAuthorActivityContext(context.Background()), cfg, opts, claudeStartupAgentFreeSource(), manager)
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassAuthenticationNeeded || failure.Failure.Detail.Code != "provider_credential_missing" {
 		t.Fatalf("expected oauth token error, got %v", err)
@@ -167,7 +167,7 @@ func TestValidateClaudeManagedAgentWorkspaces_RequiresResolvedContainerTargets(t
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 
-	err := validateClaudeManagedAgentWorkspaces(context.Background(), cfg, claudeStartupAgentSource("campaign-coordinator"), claudeStartupWorkspaceStub{}, manager)
+	err := validateClaudeManagedAgentWorkspaces(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource("campaign-coordinator"), claudeStartupWorkspaceStub{}, manager)
 	if err == nil || !strings.Contains(err.Error(), "does not support Claude CLI execution") {
 		t.Fatalf("expected workspace target error, got %v", err)
 	}
@@ -181,7 +181,7 @@ func TestValidateClaudeManagedAgentWorkspaces_PropagatesResolverErrors(t *testin
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 
-	err := validateClaudeManagedAgentWorkspaces(context.Background(), cfg, claudeStartupAgentSource("campaign-coordinator"), claudeStartupWorkspaceStub{err: errors.New("docker unavailable")}, manager)
+	err := validateClaudeManagedAgentWorkspaces(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource("campaign-coordinator"), claudeStartupWorkspaceStub{err: errors.New("docker unavailable")}, manager)
 	if err == nil || !strings.Contains(err.Error(), "docker unavailable") {
 		t.Fatalf("expected resolver error, got %v", err)
 	}
@@ -195,7 +195,7 @@ func TestValidateClaudeManagedAgentWorkspaces_AcceptsContainerTargets(t *testing
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 
-	err := validateClaudeManagedAgentWorkspaces(context.Background(), cfg, claudeStartupAgentSource("campaign-coordinator"), claudeStartupWorkspaceStub{
+	err := validateClaudeManagedAgentWorkspaces(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource("campaign-coordinator"), claudeStartupWorkspaceStub{
 		target: &workspace.Target{Container: "swarm-agent-campaign-coordinator", Workdir: "/workspace"},
 	}, manager)
 	if err != nil {
@@ -207,7 +207,7 @@ func TestValidateClaudeManagedAgentWorkspaces_SkipsWorkspaceForAgentFreeSource(t
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 
-	if err := validateClaudeManagedAgentWorkspaces(context.Background(), cfg, claudeStartupAgentFreeSource(), nil, nil); err != nil {
+	if err := validateClaudeManagedAgentWorkspaces(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentFreeSource(), nil, nil); err != nil {
 		t.Fatalf("validateClaudeManagedAgentWorkspaces: %v", err)
 	}
 }
@@ -220,7 +220,7 @@ func TestValidateClaudeManagedAgentWorkspaces_RequiresWorkspaceForRecoveredManag
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 
-	err := validateClaudeManagedAgentWorkspaces(context.Background(), cfg, claudeStartupAgentFreeSource(), nil, manager)
+	err := validateClaudeManagedAgentWorkspaces(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentFreeSource(), nil, manager)
 	if err == nil || !strings.Contains(err.Error(), "workspace lifecycle") {
 		t.Fatalf("expected workspace lifecycle error, got %v", err)
 	}
@@ -401,7 +401,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_SkipsGatewayBindingForAgentFreeS
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
-	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentFreeSource(), toolgateway.Binding{}, nil, nil, nil, nil); err != nil {
+	if err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentFreeSource(), toolgateway.Binding{}, nil, nil, nil, nil); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
 	}
 }
@@ -426,7 +426,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_RequiresGatewayBindingForAgentSo
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
-	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource("campaign-coordinator"), toolgateway.Binding{}, nil, turns, exec, manager)
+	err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource("campaign-coordinator"), toolgateway.Binding{}, nil, turns, exec, manager)
 	if err == nil || !strings.Contains(err.Error(), "tool gateway binding is invalid") {
 		t.Fatalf("expected gateway binding error, got %v", err)
 	}
@@ -452,7 +452,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_RequiresGatewayBindingForRecover
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
-	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentFreeSource(), toolgateway.Binding{}, nil, turns, exec, manager)
+	err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentFreeSource(), toolgateway.Binding{}, nil, turns, exec, manager)
 	if err == nil || !strings.Contains(err.Error(), "tool gateway binding is invalid") {
 		t.Fatalf("expected gateway binding error, got %v", err)
 	}
@@ -477,7 +477,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_UsesRealFilteredTransport(t *tes
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 	probe := &startupVisibleSurfaceProbeStub{}
 
-	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager); err != nil {
+	if err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
 	}
 	if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {
@@ -506,7 +506,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_RequiresCLIStartupProbeForMCPOnl
 	}
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 
-	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, nil, turns, exec, manager)
+	err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), binding, nil, turns, exec, manager)
 	if err == nil || !strings.Contains(err.Error(), "claude cli startup probe is required") {
 		t.Fatalf("expected required CLI startup probe error, got %v", err)
 	}
@@ -534,7 +534,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedWhenMCPOnlyCLIStartup
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 	probe := &startupVisibleSurfaceProbeStub{err: errors.New("claude: command not found")}
 
-	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
+	err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
 	if err == nil || !strings.Contains(err.Error(), "claude cli startup probe failed") || !strings.Contains(err.Error(), "claude: command not found") {
 		t.Fatalf("expected CLI startup probe failure, got %v", err)
 	}
@@ -581,7 +581,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_SeparatesStaticInventoryFromNoCu
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 	probe := &startupVisibleSurfaceProbeStub{}
 
-	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager); err != nil {
+	if err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
 	}
 	if !slices.Equal(probe.calls, []string{"analysis-agent"}) {
@@ -623,7 +623,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_AllowsEmptyConcreteSurfaceWhenSt
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 	probe := &startupVisibleSurfaceProbeStub{}
 
-	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager); err != nil {
+	if err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
 	}
 	if !slices.Equal(probe.calls, []string{"validation-agent"}) {
@@ -656,7 +656,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_AcceptsExplicitValidationOnlyPro
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 	probe := &startupVisibleSurfaceProbeStub{}
 
-	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager); err != nil {
+	if err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
 	}
 	if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {
@@ -686,7 +686,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnConfiguredGatewayTo
 	binding.Token = "wrong-token"
 	probe := &startupVisibleSurfaceProbeStub{}
 
-	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
+	err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
 	if err == nil || !strings.Contains(err.Error(), "not runtime-owned") {
 		t.Fatalf("expected construction provenance error, got %v", err)
 	}
@@ -719,7 +719,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_AcceptsFullyDeniedToolPlan(t *te
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 	probe := &startupVisibleSurfaceProbeStub{}
 
-	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
+	err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
 	if err != nil {
 		t.Fatalf("fully denied tool plan: %v", err)
 	}
@@ -765,7 +765,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_UsesLiveVisibleSurfaceForNativeB
 		},
 	}
 
-	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager); err != nil {
+	if err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
 	}
 	if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {
@@ -808,7 +808,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_ComparesProviderNativeSurfaceOnl
 		},
 	}
 
-	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager); err != nil {
+	if err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
 	}
 	if !slices.Equal(probe.calls, []string{"trend-research-agent"}) {
@@ -851,7 +851,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnUnexpectedProviderN
 		},
 	}
 
-	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
+	err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
 	if err == nil || !strings.Contains(err.Error(), "unexpected visible tool surface") {
 		t.Fatalf("expected provider-native visible-surface mismatch, got %v", err)
 	}
@@ -894,7 +894,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedWhenNativeBuiltinVisi
 		},
 	}
 
-	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
+	err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
 	if err == nil || !strings.Contains(err.Error(), "unexpected visible tool surface") {
 		t.Fatalf("expected visible tool surface mismatch, got %v", err)
 	}
@@ -938,7 +938,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_UsesVisibilityOnlyWhenNoExplicit
 			turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 			probe := &startupVisibleSurfaceProbeStub{}
 
-			if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager); err != nil {
+			if err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager); err != nil {
 				t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
 			}
 			if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {
@@ -978,7 +978,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_DoesNotCallSchemaOnlyEmptyObject
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 	probe := &startupVisibleSurfaceProbeStub{}
 
-	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager); err != nil {
+	if err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
 	}
 	if !slices.Equal(probe.calls, []string{"lifecycle-coordinator"}) {
@@ -1014,7 +1014,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_UsesVisibilityOnlyWhenVisibleToo
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 	probe := &startupVisibleSurfaceProbeStub{}
 
-	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager); err != nil {
+	if err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
 	}
 	if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {
@@ -1049,7 +1049,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedWhenExplicitProbeSafe
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 	probe := &startupVisibleSurfaceProbeStub{}
 
-	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
+	err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
 	if err == nil || !strings.Contains(err.Error(), "call_empty_object") {
 		t.Fatalf("expected explicit probe-safe schema mismatch error, got %v", err)
 	}
@@ -1078,7 +1078,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnUnexpectedCallableP
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 	probe := &startupVisibleSurfaceProbeStub{}
 
-	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
+	err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassInternalFailure || failure.Failure.Detail.Code != "unclassified_runtime_error" {
 		t.Fatalf("expected unexpected callable probe error, got %v", err)
@@ -1105,7 +1105,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnGenericPhraseNonVal
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 	probe := &startupVisibleSurfaceProbeStub{}
 
-	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
+	err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassInternalFailure || failure.Failure.Detail.Code != "unclassified_runtime_error" {
 		t.Fatalf("expected generic phrase non-validation probe error, got %v", err)

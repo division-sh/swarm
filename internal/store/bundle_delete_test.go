@@ -29,7 +29,7 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
 	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source) VALUES ('agent-a', 'bundle-delete', 'operator', 'regular', TRUE, 'authored')`); err != nil {
 		t.Fatalf("seed agent: %v", err)
@@ -128,7 +128,7 @@ func TestPostgresStore_BundleDeleteFinalMutationFailsBeforeDeletingWithActiveRun
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
 	seedBundleDeleteRun(t, ctx, pg, runID, "running", bundleDeleteTestHash)
@@ -154,7 +154,7 @@ func TestPostgresStore_BundleDeleteFinalMutationMarksOnlyNonActivePersistedRunsD
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
 
 	persisted := map[string]string{
@@ -202,7 +202,7 @@ func TestPostgresStore_BundleDeleteFinalMutationSerializesConcurrentRunCreation(
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
 
 	runCreationTx, err := pg.DB.BeginTx(ctx, nil)
@@ -264,7 +264,7 @@ func TestPostgresStore_BundleDeleteFinalMutationBlocksPostDeletePersistedSourceR
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
 	final, err := pg.ApplyBundleDeleteFinalMutation(ctx, bundledelete.FinalMutationRequest{
 		OperationName: bundledelete.DefaultOperationName,

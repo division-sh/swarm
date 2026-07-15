@@ -16,7 +16,7 @@ import (
 )
 
 func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEvents(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -100,9 +100,9 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 }
 
 func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEvents(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := newTestPostgresStore(t, db)
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	now := time.Now().Add(-time.Minute).UTC()

@@ -130,7 +130,7 @@ func TestSweepUndispatchedUsesPersistedDeliveryRecipients(t *testing.T) {
 		deliveries: map[string][]string{"evt-1": {"agent-a"}},
 		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-1": runtimereplayclaim.CommittedReplayScopeSubscribed},
 	}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestSweepUndispatched_UsesAuthoritativeEmptyFanOutWithoutSubscribedFallback
 		deliveries: map[string][]string{},
 		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-2": runtimereplayclaim.CommittedReplayScopeDirect},
 	}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestSweepUndispatched_ReplaysSubscribedInternalOnlyUsingReplayScope(t *test
 		deliveries: map[string][]string{},
 		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-internal-only": runtimereplayclaim.CommittedReplayScopeSubscribed},
 	}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestSweepUndispatched_ReplaysSubscribedMixedRecipientsUsingReplayScope(t *t
 		deliveries: map[string][]string{"evt-mixed": {"agent-a"}},
 		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-mixed": runtimereplayclaim.CommittedReplayScopeSubscribed},
 	}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestSweepUndispatched_DirectScopeDoesNotBroadenToCurrentInternalSubscribers
 			"evt-direct-mixed": runtimereplayclaim.CommittedReplayScopeDirect,
 		},
 	}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestSweepUndispatched_DirectEmptyManifestDoesNotBroadenToCurrentInternalSub
 			"evt-direct-empty": runtimereplayclaim.CommittedReplayScopeDirect,
 		},
 	}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
 		deliveries: map[string][]string{"evt-good": {"agent-good"}},
 		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-good": runtimereplayclaim.CommittedReplayScopeSubscribed},
 	}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -435,7 +435,7 @@ func TestSweepUndispatched_TerminallyMarksMissingCommittedReplayScopeAndContinue
 		},
 	}
 	logger := &recordingLoggerHook{}
-	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{Logger: logger})
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{Logger: logger})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -498,7 +498,7 @@ func TestSweepUndispatched_ClaimsReplayOwnershipBeforeDispatch(t *testing.T) {
 		releaseGate: make(chan struct{}),
 		releasing:   make(chan struct{}, 1),
 	}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -540,7 +540,7 @@ func TestSweepUndispatched_FailsClosedWithoutReplayClaimOwner(t *testing.T) {
 		},
 		deliveries: map[string][]string{"evt-claim-missing": {"agent-a"}},
 	}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -555,7 +555,7 @@ func TestSweepUndispatched_FailsClosedWithoutReplayClaimOwner(t *testing.T) {
 }
 
 func TestSweepUndispatched_NoopsWithoutPersistedReplayStore(t *testing.T) {
-	eb, err := runtimebus.NewEventBus(nil)
+	eb, err := newScopedTestEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

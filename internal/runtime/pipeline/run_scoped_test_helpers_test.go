@@ -19,7 +19,7 @@ func testPipelineRunContext(t *testing.T, db *sql.DB) context.Context {
 	if db == nil {
 		t.Fatal("test pipeline run context requires db")
 	}
-	ctx := runtimecorrelation.WithRunID(context.Background(), testPipelineRunID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), testPipelineRunID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status)
 		VALUES ($1::uuid, 'running')
@@ -31,7 +31,7 @@ func testPipelineRunContext(t *testing.T, db *sql.DB) context.Context {
 }
 
 func testPipelineRunContextNoSeed() context.Context {
-	return runtimecorrelation.WithRunID(context.Background(), testPipelineRunID)
+	return runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), testPipelineRunID)
 }
 
 func testWorkflowStoreRunContext(t *testing.T, store *WorkflowInstanceStore) context.Context {
@@ -79,7 +79,7 @@ func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Even
 	if _, err := uuid.Parse(runID); err != nil {
 		t.Fatalf("seed pipeline node delivery authority run id = %q: %v", runID, err)
 	}
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status)
 		VALUES ($1::uuid, 'running')

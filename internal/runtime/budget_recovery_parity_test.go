@@ -57,7 +57,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 	for _, tc := range backends {
 		t.Run(tc.name, func(t *testing.T) {
 			selected, db, postgres := tc.start(t)
-			ctx := context.Background()
+			ctx := testAuthorActivityContext(context.Background())
 			now := time.Now().UTC().Truncate(time.Second)
 			runA, runB := uuid.NewString(), uuid.NewString()
 			entityA, entityB, terminalEntity := uuid.NewString(), uuid.NewString(), uuid.NewString()
@@ -105,6 +105,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 				},
 			}}, selected, nil, source)
 			manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+				BaseContext:    ctx,
 				LifecycleStore: selected,
 				SemanticSource: source,
 				Budget:         tracker,

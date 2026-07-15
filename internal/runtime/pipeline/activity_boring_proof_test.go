@@ -72,7 +72,7 @@ func TestActivityBoringProofHandAuthoredFlowDispatchesOutsideTransactionAndReuse
 				return nil
 			}
 
-			ctx := runtimecorrelation.WithRunID(context.Background(), sourceEvent.RunID())
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), sourceEvent.RunID())
 			handled, err := fixture.pc.handleEventResult(ctx, sourceEvent)
 			if err != nil {
 				t.Fatalf("hand-authored source handleEventResult: %v", err)
@@ -118,7 +118,7 @@ func TestActivityBoringProofHandAuthoredFlowCrashAfterRequestBeforeResultComplet
 
 	fixture := newActivityBoringFullFlowFixture(t, activityBoringStorePostgres, server.URL, false)
 	seedActivityBoringSourceFlow(t, fixture, activityBoringStorePostgres, sourceEvent)
-	ctx := runtimecorrelation.WithRunID(context.Background(), sourceEvent.RunID())
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), sourceEvent.RunID())
 	handled, err := fixture.pc.handleEventResult(ctx, sourceEvent)
 	if err != nil {
 		t.Fatalf("source handleEventResult before crash: %v", err)
@@ -181,7 +181,7 @@ func TestActivityBoringProofHandAuthoredReadOnlyForkReexecuteUsesForkLocalIdenti
 
 			for _, evt := range []events.Event{sourceEvent, forkEvent} {
 				seedActivityBoringSourceFlow(t, fixture, tc.kind, evt)
-				ctx := runtimecorrelation.WithRunID(context.Background(), evt.RunID())
+				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), evt.RunID())
 				handled, err := fixture.pc.handleEventResult(ctx, evt)
 				if err != nil {
 					t.Fatalf("hand-authored fork source handleEventResult(%s): %v", evt.RunID(), err)
@@ -212,7 +212,7 @@ func TestActivityBoringProofDuplicateRequestReusesRecordedReadResult(t *testing.
 
 			fixture := newActivityBoringFixture(t, tc.kind, server.URL)
 			intent := newActivityBoringIntent("https://example.com/source", testPipelineRunID)
-			ctx := runtimecorrelation.WithRunID(context.Background(), intent.SourceRunID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), intent.SourceRunID)
 			request, err := activityRequestEmitIntent(intent)
 			if err != nil {
 				t.Fatalf("activityRequestEmitIntent: %v", err)
@@ -255,7 +255,7 @@ func TestActivityBoringProofCrashAfterIntentBeforeResultCompletesOncePostgres(t 
 
 	fixture := newActivityBoringFixture(t, activityBoringStorePostgres, server.URL)
 	intent := newActivityBoringIntent("https://example.com/source", testPipelineRunID)
-	ctx := runtimecorrelation.WithRunID(context.Background(), intent.SourceRunID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), intent.SourceRunID)
 	writer := pipelineActivityIntentWriter{coordinator: fixture.pc}
 	if err := writer.WriteActivityIntents(ctx, []runtimeengine.ActivityIntent{intent}); err != nil {
 		t.Fatalf("WriteActivityIntents: %v", err)
@@ -322,7 +322,7 @@ func TestActivityBoringProofReadOnlyForkReexecuteUsesForkLocalRequestIdentity(t 
 				if err != nil {
 					t.Fatalf("activityRequestEmitIntent: %v", err)
 				}
-				ctx := runtimecorrelation.WithRunID(context.Background(), intent.SourceRunID)
+				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), intent.SourceRunID)
 				handled, err := fixture.pc.handleEventResult(ctx, request.Event)
 				if err != nil {
 					t.Fatalf("handleEventResult(%s): %v", intent.SourceRunID, err)
@@ -359,7 +359,7 @@ func TestActivityBoringProofRetryIsBoundedAndTraced(t *testing.T) {
 			intent := newActivityBoringIntent("https://example.com/source", testPipelineRunID)
 			intent.RetryMaxAttempts = 3
 			intent.RetryBackoff = "none"
-			ctx := runtimecorrelation.WithRunID(context.Background(), intent.SourceRunID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), intent.SourceRunID)
 			request, err := activityRequestEmitIntent(intent)
 			if err != nil {
 				t.Fatalf("activityRequestEmitIntent: %v", err)
@@ -398,7 +398,7 @@ func TestActivityBoringProofRuntimeLogFailureDoesNotBlockReadOnlyActivity(t *tes
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
 	}
-	handled, err := pc.handleEventResult(runtimecorrelation.WithRunID(context.Background(), intent.SourceRunID), request.Event)
+	handled, err := pc.handleEventResult(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), intent.SourceRunID), request.Event)
 	if err != nil {
 		t.Fatalf("handleEventResult with failing runtime log: %v", err)
 	}
@@ -891,7 +891,7 @@ func seedActivityBoringSourceFlow(t *testing.T, fixture activityBoringFixture, k
 	if fixture.pc == nil || fixture.db == nil {
 		t.Fatal("activity boring source flow fixture requires coordinator and db")
 	}
-	ctx := runtimecorrelation.WithRunID(context.Background(), evt.RunID())
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), evt.RunID())
 	if err := appendActivityBoringEvent(ctx, fixture.db, kind, evt); err != nil {
 		t.Fatalf("seed activity boring source event: %v", err)
 	}

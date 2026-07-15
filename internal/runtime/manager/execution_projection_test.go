@@ -171,7 +171,7 @@ func TestExecutionProjectionReconfigureSerializesRestartSelection(t *testing.T) 
 	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	runCtx, cancelRun := context.WithCancel(context.Background())
+	runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
 	defer cancelRun()
 	am.Run(managedExecutionTestContext(t, runCtx))
 
@@ -182,7 +182,7 @@ func TestExecutionProjectionReconfigureSerializesRestartSelection(t *testing.T) 
 	<-factory.secondStarted
 	restartDone := make(chan error, 1)
 	go func() {
-		_, err := am.Restart(context.Background(), runtimeagentcontrol.RestartRequest{AgentID: agentID})
+		_, err := am.Restart(testAuthorActivityContext(context.Background()), runtimeagentcontrol.RestartRequest{AgentID: agentID})
 		restartDone <- err
 	}()
 	close(releaseBuild)
@@ -239,7 +239,7 @@ func TestExecutionProjectionReconfigureSerializesBothRunModes(t *testing.T) {
 				reconfigureDone <- am.ReconfigureAgent(agentID, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}})
 			}()
 			<-factory.secondStarted
-			runCtx, cancelRun := context.WithCancel(context.Background())
+			runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
 			defer cancelRun()
 			runDone := make(chan struct{})
 			go func() { tc.run(am, managedExecutionTestContext(t, runCtx)); close(runDone) }()
@@ -287,7 +287,7 @@ func TestExecutionProjectionDirectiveLeaseFencesReplacement(t *testing.T) {
 	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	runCtx, cancelRun := context.WithCancel(context.Background())
+	runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
 	defer cancelRun()
 	am.Run(managedExecutionTestContext(t, runCtx))
 	predecessor, ok := am.lifecycle.token(agentID)
@@ -296,7 +296,7 @@ func TestExecutionProjectionDirectiveLeaseFencesReplacement(t *testing.T) {
 	}
 	directiveDone := make(chan error, 1)
 	go func() {
-		_, err := am.SendDirective(context.Background(), runtimeagentcontrol.SendDirectiveRequest{
+		_, err := am.SendDirective(testAuthorActivityContext(context.Background()), runtimeagentcontrol.SendDirectiveRequest{
 			AgentID: agentID, Directive: "hold generation", ActorTokenID: "operator-token",
 			IdempotencyKey: "projection-directive", RequestHash: "projection-directive-hash",
 		})
@@ -339,7 +339,7 @@ func TestExecutionProjectionRunCancellationRemovesExactRoute(t *testing.T) {
 	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	runCtx, cancelRun := context.WithCancel(context.Background())
+	runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
 	am.Run(managedExecutionTestContext(t, runCtx))
 	route, ok := bus.current(agentID)
 	if !ok {
@@ -378,7 +378,7 @@ func TestExecutionProjectionTeardownRemovesExactRoute(t *testing.T) {
 	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	runCtx, cancelRun := context.WithCancel(context.Background())
+	runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
 	defer cancelRun()
 	am.Run(managedExecutionTestContext(t, runCtx))
 	route, ok := bus.current(agentID)
@@ -416,7 +416,7 @@ func TestExecutionProjectionNaturalLoopExitRemovesExactRoute(t *testing.T) {
 	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	runCtx, cancelRun := context.WithCancel(context.Background())
+	runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
 	defer cancelRun()
 	am.Run(managedExecutionTestContext(t, runCtx))
 	route, ok := bus.current(agentID)
@@ -474,7 +474,7 @@ func TestExecutionProjectionBacklogLeaseFencesReplacement(t *testing.T) {
 		}, nil
 	}
 	am := NewAgentManager(bus, factory, store)
-	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{Config: models.AgentConfig{ExecutionMode: "live", ID: agentID}}, false); err != nil {
+	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: models.AgentConfig{ExecutionMode: "live", ID: agentID}}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 	predecessor, ok := am.lifecycle.executionSnapshot(agentID)
@@ -482,7 +482,7 @@ func TestExecutionProjectionBacklogLeaseFencesReplacement(t *testing.T) {
 		t.Fatal("predecessor execution is absent")
 	}
 	replayDone := make(chan error, 1)
-	go func() { replayDone <- am.ReplayAgentBacklog(context.Background(), agentID) }()
+	go func() { replayDone <- am.ReplayAgentBacklog(testAuthorActivityContext(context.Background()), agentID) }()
 	if got := <-eventStarted; got != predecessor.Token {
 		t.Fatalf("backlog token = %+v, want exact predecessor %+v", got, predecessor.Token)
 	}
@@ -518,13 +518,13 @@ func TestExecutionProjectionRecoveryStartsPersistedRunningCell(t *testing.T) {
 		Config: models.AgentConfig{ExecutionMode: "live", ID: agentID}, LifecycleEpoch: runtimebus.CurrentRuntimeEpoch(),
 		LifecycleGeneration: 4, LifecyclePhase: AgentLifecycleRunning, LifecycleRunMode: AgentRunModeStandard,
 	}
-	if err := am.spawnAgentInternal(context.Background(), rec, false); err != nil {
+	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), rec, false); err != nil {
 		t.Fatalf("hydrate persisted running agent: %v", err)
 	}
 	if _, live := bus.current(agentID); live {
 		t.Fatal("hydration installed a route before runtime start")
 	}
-	runCtx, cancelRun := context.WithCancel(context.Background())
+	runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
 	defer cancelRun()
 	am.Run(managedExecutionTestContext(t, runCtx))
 	route, live := bus.current(agentID)
@@ -550,7 +550,7 @@ func TestExecutionProjectionSpawnDuringRunActivatesRegisteredProjection(t *testi
 	handled := make(chan int, 1)
 	factory := &projectionTestFactory{handled: handled}
 	am := NewAgentManager(bus, factory.Build)
-	runCtx, cancelRun := context.WithCancel(context.Background())
+	runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
 	defer cancelRun()
 	am.Run(managedExecutionTestContext(t, runCtx))
 	const agentID = "projection-flow-activation"

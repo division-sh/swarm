@@ -186,14 +186,14 @@ func seedOperatorConversationProjectionFixture(t *testing.T, backend operatorCon
 
 func operatorConversationProjectionExec(t *testing.T, db *sql.DB, query string, args ...any) {
 	t.Helper()
-	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
+	if _, err := db.ExecContext(testAuthorActivityContext(), query, args...); err != nil {
 		t.Fatalf("seed operator conversation projection: %v\nquery: %s", err, query)
 	}
 }
 
 func proveOperatorConversationProjectionBackend(t *testing.T, backend operatorConversationProjectionTestBackend, fixture operatorConversationProjectionFixture) operatorConversationProjectionParityResult {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	first, err := backend.store.ListOperatorConversationTurns(ctx, OperatorConversationTurnListOptions{SessionID: fixture.sessionID, Limit: 2})
 	if err != nil {
 		t.Fatalf("list first turn page: %v", err)

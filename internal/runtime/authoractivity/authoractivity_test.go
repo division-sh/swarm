@@ -235,6 +235,7 @@ func TestRenderModesKeepHumanProseSeparateFromTypedNDJSON(t *testing.T) {
 		OccurrenceID: uuid.NewString(), Sequence: 1, Kind: KindDeliveryLifecycle, Version: Version,
 		Transition: "failed", SourceOwner: "event_deliveries", SourceIdentity: "delivery-a", DedupKey: "delivery-a:failed",
 		OccurredAt: now, RunID: "11111111-1111-1111-1111-111111111111",
+		Scope:      BundleScope("22222222-2222-2222-2222-222222222222", "bundle-v1:sha256:"+strings.Repeat("a", 64)),
 		Projection: Projection{SubjectType: "agent", SubjectID: "normalizer", EventType: "message.normalized"}, Failure: failure,
 	}}
 	var plain bytes.Buffer
@@ -247,7 +248,7 @@ func TestRenderModesKeepHumanProseSeparateFromTypedNDJSON(t *testing.T) {
 			t.Fatalf("plain output leaked %q: %s", forbidden, plainText)
 		}
 	}
-	if !strings.Contains(plainText, "agent[normalizer]  failed, retrying") || !strings.Contains(plainText, "swarm logs --run 11111111-1111-1111-1111-111111111111 --level error") {
+	if !strings.Contains(plainText, "normalizer ✗ failed — internal error") || !strings.Contains(plainText, "swarm logs --run 11111111-1111-1111-1111-111111111111 --level error") {
 		t.Fatalf("plain output = %q", plainText)
 	}
 
@@ -270,6 +271,7 @@ func TestAgentLifecycleFailureWithoutEnvelopeStillRendersDiagnosticRoute(t *test
 		OccurrenceID: uuid.NewString(), Sequence: 1, Kind: KindAgentLifecycle, Version: Version,
 		Transition: "failed", SourceOwner: "agent_lifecycle_transition_facts", SourceIdentity: "transition-a",
 		DedupKey: "agent-transition:transition-a", OccurredAt: now, RunID: "11111111-1111-1111-1111-111111111111",
+		Scope:   BundleScope("22222222-2222-2222-2222-222222222222", "bundle-v1:sha256:"+strings.Repeat("a", 64)),
 		AgentID: "normalizer", Projection: Projection{SubjectType: "agent", SubjectID: "normalizer", NextPhase: "failed"},
 	}
 	var plain bytes.Buffer
@@ -277,7 +279,7 @@ func TestAgentLifecycleFailureWithoutEnvelopeStillRendersDiagnosticRoute(t *test
 		t.Fatal(err)
 	}
 	text := plain.String()
-	if !strings.Contains(text, "agent[normalizer]  failed") || !strings.Contains(text, "swarm logs --run 11111111-1111-1111-1111-111111111111 --level error") {
+	if !strings.Contains(text, "normalizer ✗ failed") || !strings.Contains(text, "swarm logs --run 11111111-1111-1111-1111-111111111111 --level error") {
 		t.Fatalf("agent failure output = %q", text)
 	}
 }
@@ -294,9 +296,10 @@ func openAuthorActivitySQLite(t *testing.T) *sql.DB {
 		`CREATE TABLE author_activity_order (singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1), last_sequence BIGINT NOT NULL CHECK (last_sequence >= 0))`,
 		`CREATE TABLE author_activity_occurrences (
 			occurrence_id TEXT PRIMARY KEY, sequence BIGINT NOT NULL UNIQUE CHECK (sequence > 0), kind TEXT NOT NULL,
-			version INTEGER NOT NULL CHECK (version = 1), transition TEXT NOT NULL, source_owner TEXT NOT NULL,
+			version INTEGER NOT NULL CHECK (version = 2), transition TEXT NOT NULL, source_owner TEXT NOT NULL,
 			source_identity TEXT NOT NULL, dedup_key TEXT NOT NULL UNIQUE, run_id TEXT, entity_id TEXT, agent_id TEXT,
-			flow_id TEXT, projection TEXT NOT NULL DEFAULT '{}', failure TEXT, occurred_at TIMESTAMP NOT NULL
+			flow_id TEXT, scope_kind TEXT NOT NULL, runtime_instance_id TEXT, bundle_hash TEXT, author_safe_summary TEXT,
+			projection TEXT NOT NULL DEFAULT '{}', failure TEXT, occurred_at TIMESTAMP NOT NULL
 		)`,
 	} {
 		if _, err := db.Exec(ddl); err != nil {
@@ -360,7 +363,18 @@ func testDraft(kind Kind, transition string, at time.Time) Draft {
 	return Draft{
 		OccurrenceID: uuid.NewString(), Kind: kind, Version: Version, Transition: transition,
 		SourceOwner: contract.SourceOwner, SourceIdentity: identity, DedupKey: identity, OccurredAt: at,
-		Projection: projection,
+		Scope: testScopeForContract(contract, transition), Projection: projection,
+	}
+}
+
+func testScopeForContract(contract kindContract, transition string) Scope {
+	switch contract.ScopeByTransition[transition] {
+	case ScopeRuntime:
+		return RuntimeScope("22222222-2222-2222-2222-222222222222")
+	case ScopeGlobal:
+		return Scope{Kind: ScopeGlobal}
+	default:
+		return BundleScope("22222222-2222-2222-2222-222222222222", "bundle-v1:sha256:"+strings.Repeat("a", 64))
 	}
 }
 

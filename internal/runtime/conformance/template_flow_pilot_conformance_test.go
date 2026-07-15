@@ -26,7 +26,7 @@ import (
 
 func TestTemplateFlowPilotConformance_CoversInstanceCenteredAuthoringOwners(t *testing.T) {
 	source := templateflowpilot.LoadSource(t, templateflowpilot.Options{})
-	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+	report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {
 		t.Fatalf("template-flow pilot hard invalidities = %#v, want none", got)
 	}
@@ -116,7 +116,7 @@ func TestTemplateFlowPilotConformance_FailClosedMatrix(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			source := templateflowpilot.LoadSource(t, tc.opts)
-			report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+			report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 			if !templateFlowPilotConformanceFindingContains(report.HardInvalidities(), tc.checkID, tc.wantMessage) {
 				t.Fatalf("expected hard invalidity %s containing %q, got %#v", tc.checkID, tc.wantMessage, report.HardInvalidities())
 			}
@@ -126,7 +126,7 @@ func TestTemplateFlowPilotConformance_FailClosedMatrix(t *testing.T) {
 
 func TestTemplateSelectExistingConformance_CoversResolutionSelectOwner(t *testing.T) {
 	source := templateselectexisting.LoadSource(t)
-	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+	report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {
 		t.Fatalf("template-select-existing hard invalidities = %#v, want none", got)
 	}
@@ -178,7 +178,7 @@ func TestTemplateSelectExistingConformance_CoversResolutionSelectOwner(t *testin
 
 func TestTemplateSelectOrCreateConformance_CoversResolutionSelectOrCreateOwner(t *testing.T) {
 	source := templateselectorcreate.LoadSource(t)
-	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+	report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {
 		t.Fatalf("template-select-or-create hard invalidities = %#v, want none", got)
 	}
@@ -229,7 +229,7 @@ func TestTemplateSelectOrCreateConformance_CoversResolutionSelectOrCreateOwner(t
 func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("examples/routing/notify-all-children"))
 	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
-	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+	report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {
 		t.Fatalf("notify-all-children hard invalidities = %#v, want none", got)
 	}
@@ -288,7 +288,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		}),
 		time.Now().UTC(),
 	)
-	result, err := exec.Execute(context.Background(), runtimeengine.ExecutionRequest{
+	result, err := exec.Execute(testAuthorActivityContext(context.Background()), runtimeengine.ExecutionRequest{
 		EntityID: "portfolio",
 		NodeID:   "portfolio-coordinator",
 		FlowID:   "portfolio",
@@ -313,7 +313,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 			{InstanceID: "acct-b", EntityID: "ent-b", FlowInstance: "account/acct-b", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-b"}},
 		},
 	}
-	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
+	eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 			t.Fatal("existing account route descriptors should satisfy fan-out delivery")
@@ -362,7 +362,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		if !ok {
 			t.Fatalf("unexpected account_id in fan_out payload: %#v", payload)
 		}
-		preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+		preflight, err := eb.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), evt)
 		if err != nil {
 			t.Fatalf("CheckPublishRecipientPlan(%s): %v", accountID, err)
 		}
@@ -370,7 +370,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 			!fanOutPinRouteDeliveryRoutesContain(preflight.DeliveryRoutes, expected) {
 			t.Fatalf("preflight for %s = failure:%q routes:%#v, want only %#v", accountID, preflight.TargetFailure, preflight.DeliveryRoutes, expected)
 		}
-		if err := eb.Publish(context.Background(), evt); err != nil {
+		if err := eb.Publish(testAuthorActivityContext(context.Background()), evt); err != nil {
 			t.Fatalf("Publish fan_out event for %s: %v", accountID, err)
 		}
 		if routes := store.deliveryRoutes[evt.ID()]; len(routes) != 1 ||
@@ -406,7 +406,7 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &fanOutPinRouteMemoryStore{flowInstances: tc.flowInstances}
-			eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
+			eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
 				ContractBundle: source,
 				TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 					t.Fatal("fail-closed fan-out route should not activate an account instance")
@@ -432,7 +432,7 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 				}),
 				time.Now().UTC(),
 			)
-			preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+			preflight, err := eb.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), evt)
 			if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan: %v", err)
 			}
@@ -479,7 +479,7 @@ func (fanOutPinRouteTxRunner) Run(ctx context.Context, fn func(runtimeengine.Tx)
 
 func (t fanOutPinRouteTx) Context() context.Context {
 	if t.ctx == nil {
-		return context.Background()
+		return testAuthorActivityContext(context.Background())
 	}
 	return t.ctx
 }

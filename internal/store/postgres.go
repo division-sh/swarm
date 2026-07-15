@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	_ "github.com/lib/pq"
 )
 
@@ -21,8 +22,8 @@ type PostgresStore struct {
 	schemaCapsBound bool
 
 	eventPayloadValidator   EventPayloadValidator
-	authorActivityCatalogMu sync.RWMutex
-	authorActivityCatalog   map[string]struct{}
+	authorActivityCatalogMu sync.Mutex
+	authorActivityCatalog   *runtimeauthoractivity.EventCatalogRegistry
 	sessionLockTTL          time.Duration
 
 	scheduleClaimMu   sync.Mutex

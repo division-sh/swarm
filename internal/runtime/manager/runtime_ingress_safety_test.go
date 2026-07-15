@@ -23,8 +23,8 @@ func TestAuthBreakerConsumesRuntimeIngressSafetyPauseOwner(t *testing.T) {
 		},
 	})
 
-	am.maybeTripAuthCircuitBreaker(context.Background(), "agent-1", "evt-1", testAuthFailure())
-	am.maybeTripAuthCircuitBreaker(context.Background(), "agent-1", "evt-2", testAuthFailure())
+	am.maybeTripAuthCircuitBreaker(testAuthorActivityContext(context.Background()), "agent-1", "evt-1", testAuthFailure())
+	am.maybeTripAuthCircuitBreaker(testAuthorActivityContext(context.Background()), "agent-1", "evt-2", testAuthFailure())
 
 	if pauseCalls != 1 {
 		t.Fatalf("runtime ingress safety pause calls = %d, want 1", pauseCalls)

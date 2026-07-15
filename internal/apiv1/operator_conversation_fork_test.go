@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -531,6 +532,8 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 	forkID := uuid.NewString()
 	forkTurnID := uuid.NewString()
 	requestOccurrenceID := uuid.NewString()
+	runtimeInstanceID := uuid.NewString()
+	bundleHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
 	prepared := store.ConversationForkChatPrepared{
 		Fork: store.OperatorConversationForkSession{
 			ForkID:        forkID,
@@ -556,7 +559,7 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 			StubbedTools: []string{"save_entity_field", "emit_event", "run.start", "run.stop"},
 		},
 		AvailableTools: []string{"fork_snapshot_read_entities", "save_entity_field", "emit_event", "run_start", "run_stop"},
-		ForkTurnID:     forkTurnID, RequestOccurrenceID: requestOccurrenceID, RequestHash: "request-hash",
+		ForkTurnID:     forkTurnID, SourceBundleHash: bundleHash, RequestOccurrenceID: requestOccurrenceID, RequestHash: "request-hash",
 		ActorTokenID: "actor-token", ExecutionOwner: "forkchat-test-owner", LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: 1,
 	}
 	rt := &forkChatScriptedRuntime{
@@ -573,7 +576,8 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 			{Message: runtimellm.Message{Role: "assistant", Content: "snapshot says Before; writes were stubbed"}},
 		},
 	}
-	execution, err := NewLLMForkChatExecutor(rt).ExecuteForkChat(context.Background(), prepared, "inspect and try sandbox writes")
+	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.RuntimeScope(runtimeInstanceID))
+	execution, err := NewLLMForkChatExecutor(rt).ExecuteForkChat(ctx, prepared, "inspect and try sandbox writes")
 	if err != nil {
 		t.Fatalf("ExecuteForkChat: %v", err)
 	}
@@ -582,6 +586,9 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 	}
 	if rt.actorModel != llmselection.ModelAliasRegular || rt.authority.Kind != runtimeeffects.AuthorityConversationForkChat || rt.authority.ID != forkTurnID {
 		t.Fatalf("forkchat runtime authority = model:%q authority:%#v", rt.actorModel, rt.authority)
+	}
+	if rt.authority.ForkChat.BundleHash != bundleHash || rt.scope != runtimeauthoractivity.BundleScope(runtimeInstanceID, bundleHash) {
+		t.Fatalf("forkchat source scope = authority:%#v context:%#v", rt.authority.ForkChat, rt.scope)
 	}
 	if !strings.Contains(rt.systemPrompt, "isolated forensic sandbox") || !strings.Contains(rt.systemPrompt, store.ConversationForkChatSnapshotOwner) {
 		t.Fatalf("system prompt = %q, want forkchat sandbox/snapshot context", rt.systemPrompt)
@@ -627,6 +634,7 @@ type forkChatScriptedRuntime struct {
 	messages     []runtimellm.Message
 	actorModel   string
 	authority    runtimeeffects.Authority
+	scope        runtimeauthoractivity.Scope
 }
 
 func (r *forkChatScriptedRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
@@ -636,6 +644,7 @@ func (r *forkChatScriptedRuntime) StartSession(ctx context.Context, agentID, sys
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	r.actorModel = actor.Model
 	r.authority, _ = runtimeeffects.CompletionAuthorityFromContext(ctx)
+	r.scope, _ = runtimeauthoractivity.ScopeFromContext(ctx)
 	return &runtimellm.Session{ID: "forkchat-runtime-session", AgentID: agentID}, nil
 }
 

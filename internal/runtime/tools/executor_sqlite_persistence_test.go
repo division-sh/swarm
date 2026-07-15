@@ -340,7 +340,7 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 	now := time.Now().UTC().Truncate(time.Microsecond).Add(789 * time.Nanosecond)
 	switch typed := persistence.(type) {
 	case *store.PostgresStore:
-		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, now); err != nil {
+		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at) VALUES ($1::uuid, 'running', $2, $3, $4, $5)`, runID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint, now); err != nil {
 			t.Fatalf("seed postgres reply tool run: %v", err)
 		}
 		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `
@@ -350,7 +350,7 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 			t.Fatalf("seed postgres reply tool event: %v", err)
 		}
 	case *store.SQLiteRuntimeStore:
-		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, now); err != nil {
+		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at) VALUES (?, 'running', ?, ?, ?, ?)`, runID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint, now); err != nil {
 			t.Fatalf("seed sqlite reply tool run: %v", err)
 		}
 		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `
@@ -440,10 +440,10 @@ func newSQLiteRuntimeToolStoreForTest(t *testing.T) *store.SQLiteRuntimeStore {
 func ensureSQLiteEntityToolTestRun(t *testing.T, sqliteStore *store.SQLiteRuntimeStore) {
 	t.Helper()
 	if _, err := sqliteStore.DB.ExecContext(unmanagedToolTestContext(), `
-		INSERT INTO runs (run_id, status, bundle_source, started_at)
-		VALUES (?, 'running', 'legacy', ?)
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
+		VALUES (?, 'running', ?, ?, ?, ?)
 		ON CONFLICT(run_id) DO NOTHING
-	`, entityToolTestRunID, time.Now().UTC()); err != nil {
+	`, entityToolTestRunID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint, time.Now().UTC()); err != nil {
 		t.Fatalf("seed sqlite entity tool test run: %v", err)
 	}
 }

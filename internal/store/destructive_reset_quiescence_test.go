@@ -21,7 +21,7 @@ func TestPostgresStore_ApplyDestructiveResetQuiescence_TerminalizesRunsAndDelive
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	now := time.Date(2026, 5, 15, 2, 40, 0, 0, time.UTC)
 	runID := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
@@ -182,7 +182,7 @@ func TestPostgresStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecoverableW
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	now := time.Date(2026, 5, 18, 2, 10, 0, 0, time.UTC)
 	runID := uuid.NewString()
 	terminalRunID := uuid.NewString()
@@ -279,7 +279,7 @@ func TestPostgresStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecoverableW
 
 func TestSQLiteRuntimeStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecoverableWork(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	now := time.Date(2026, 5, 18, 2, 10, 0, 0, time.UTC)
 	runID := uuid.NewString()
 	pausedRunID := uuid.NewString()
@@ -390,7 +390,7 @@ func TestPostgresStore_ApplyDestructiveResetQuiescence_DryRunDoesNotMutate(t *te
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	now := time.Date(2026, 5, 15, 2, 45, 0, 0, time.UTC)
 	runID := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {

@@ -67,7 +67,7 @@ func TestPrimaryEntityConformance(t *testing.T) {
 				t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 			}
 			source := semanticview.Wrap(bundle)
-			report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+			report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 			if tc.wantBootError != "" {
 				if !primaryEntityConformanceReportContains(report.Errors(), "primary_entity_validation", tc.wantBootError) {
 					t.Fatalf("bootverify errors = %#v, want primary_entity_validation containing %q", report.Errors(), tc.wantBootError)

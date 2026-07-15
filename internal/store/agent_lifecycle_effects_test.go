@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"testing"
@@ -31,7 +30,7 @@ func TestLifecycleAndExternalEffectAuthorityPostgres(t *testing.T) {
 
 func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffectStore, db *sql.DB, sqlite bool) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	now := time.Date(2026, 7, 10, 18, 0, 0, 0, time.UTC)
 	rec := runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{

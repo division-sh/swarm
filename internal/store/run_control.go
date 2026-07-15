@@ -82,6 +82,10 @@ func (s *PostgresStore) runControlTransition(ctx context.Context, req runtimerun
 		if err != nil {
 			return err
 		}
+		occurrenceScope, err := runtimeauthoractivity.BundleScopeForSource(txctx, state.BundleHash)
+		if err != nil {
+			return fmt.Errorf("run control source scope: %w", err)
+		}
 		switch action {
 		case "stop":
 			if err := rejectPostgresStandingRunStopTx(txctx, tx, runID); err != nil {
@@ -107,7 +111,7 @@ func (s *PostgresStore) runControlTransition(ctx context.Context, req runtimerun
 			return runtimeauthoractivity.Record(txctx, runtimeauthoractivity.Draft{
 				Kind: runtimeauthoractivity.KindRunLifecycle, Transition: transition,
 				SourceOwner: "runs", SourceIdentity: transitionID, DedupKey: "run-transition:" + transitionID,
-				OccurredAt: req.Now.UTC(), RunID: runID,
+				OccurredAt: req.Now.UTC(), RunID: runID, Scope: occurrenceScope,
 				Projection: runtimeauthoractivity.Projection{
 					SubjectType: "run", SubjectID: runID, ControlReason: req.Reason, Source: req.ControlledBy,
 				},
@@ -126,6 +130,7 @@ func lockRunControlState(ctx context.Context, tx *sql.Tx, runID string) (runtime
 		SELECT
 			r.run_id::text,
 			COALESCE(r.status, ''),
+			COALESCE(r.bundle_hash, ''),
 			COALESCE(rc.control_status, ''),
 			COALESCE(rc.reason, ''),
 			COALESCE(rc.controlled_by, ''),
@@ -134,7 +139,7 @@ func lockRunControlState(ctx context.Context, tx *sql.Tx, runID string) (runtime
 		LEFT JOIN run_control_state rc ON rc.run_id = r.run_id
 		WHERE r.run_id = $1::uuid
 		FOR UPDATE OF r
-	`, runID).Scan(&state.RunID, &state.Status, &controlStatus, &reason, &controlledBy, &updatedAt)
+	`, runID).Scan(&state.RunID, &state.Status, &state.BundleHash, &controlStatus, &reason, &controlledBy, &updatedAt)
 	if err == sql.ErrNoRows {
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrRunNotFound, RunID: runID}
 	}
@@ -143,6 +148,7 @@ func lockRunControlState(ctx context.Context, tx *sql.Tx, runID string) (runtime
 	}
 	state.RunID = strings.TrimSpace(state.RunID)
 	state.Status = strings.TrimSpace(state.Status)
+	state.BundleHash = strings.TrimSpace(state.BundleHash)
 	state.ControlStatus = strings.TrimSpace(controlStatus.String)
 	state.Reason = strings.TrimSpace(reason.String)
 	state.ControlledBy = strings.TrimSpace(controlledBy.String)

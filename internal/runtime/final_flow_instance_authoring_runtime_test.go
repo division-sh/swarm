@@ -24,7 +24,7 @@ import (
 func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTemplateInstance(t *testing.T) {
 	bundle := finalflowinstanceauthoring.LoadBundle(t, finalflowinstanceauthoring.Options{})
 	source := semanticview.Wrap(bundle)
-	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+	report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {
 		t.Fatalf("final flow-instance authoring hard invalidities = %#v, want none", got)
 	}
@@ -36,7 +36,7 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	var manager *runtimemanager.AgentManager
 	var pc *runtimepipeline.PipelineCoordinator
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
@@ -70,13 +70,13 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 	evt := eventtest.RootIngress(
 		"99999999-9999-4999-8999-999999999955",
 		events.EventType(finalflowinstanceauthoring.ProducerFlowID+"/"+finalflowinstanceauthoring.ProducerOutput),
-		"",
+		finalflowinstanceauthoring.ProducerFlowID,
 		"",
 		json.RawMessage(`{"account_id":"acct-42","score":"91","decision":"approved"}`),
 		0,
 		templateInstanceDeliveryRunID,
 		"",
-		events.EventEnvelope{},
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: finalflowinstanceauthoring.ProducerFlowID}),
 		time.Now().UTC(),
 	)
 	preflight, err := bus.CheckPublishRecipientPlan(ctx, evt)

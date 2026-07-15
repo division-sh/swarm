@@ -14,7 +14,7 @@ import (
 )
 
 func TestSQLiteRuntimeStoreBudgetSpendPersistence(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	activeEntity := uuid.NewString()
@@ -119,7 +119,7 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 	defer db.Close()
 	pg := &PostgresStore{DB: db}
 	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	entityID := uuid.NewString()
 	recordedAt := time.Now().UTC().Truncate(time.Second)
 

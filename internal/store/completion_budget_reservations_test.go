@@ -143,7 +143,7 @@ func proveCompletionBudgetAdmissionRace(t *testing.T, fixture completionBudgetRa
 		go func() {
 			defer wg.Done()
 			<-start
-			ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(context.Background(), candidate.authority), runtimeeffects.NewController(candidate.store))
+			ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), candidate.authority), runtimeeffects.NewController(candidate.store))
 			if candidate.authority.Target.Kind == runtimeeffects.UsageTargetAgentTurn {
 				ctx = withManagedCompletionTestSurface(t, ctx, candidate.authority, "openai_responses")
 			}
@@ -213,11 +213,11 @@ func completionBudgetRaceAuthority(t *testing.T, fixture completionBudgetRaceFix
 		return authority
 	case runtimeeffects.AuthoritySelectedContractFork:
 		selected := newSelectedCompletionFixture(t, fixture.primary, fixture.db, fixture.sqlite)
-		issued, err := fixture.primary.IssueRunForkSelectedContractRuntimeExecution(context.Background(), selected.request)
+		issued, err := fixture.primary.IssueRunForkSelectedContractRuntimeExecution(testAuthorActivityContext(), selected.request)
 		if err != nil {
 			t.Fatalf("issue budget-race selected authority: %v", err)
 		}
-		authority, err := fixture.primary.ClaimRunForkSelectedContractRuntimeExecution(context.Background(), issued, "budget-selected", time.Minute)
+		authority, err := fixture.primary.ClaimRunForkSelectedContractRuntimeExecution(testAuthorActivityContext(), issued, "budget-selected", time.Minute)
 		if err != nil {
 			t.Fatalf("claim budget-race selected authority: %v", err)
 		}
@@ -231,13 +231,13 @@ func completionBudgetRaceAuthority(t *testing.T, fixture completionBudgetRaceFix
 		} else {
 			source = seedConversationForkSource(t, fixture.db, now)
 		}
-		fork, err := fixture.primary.CreateOperatorConversationFork(context.Background(), ConversationForkCreateRequest{
+		fork, err := fixture.primary.CreateOperatorConversationFork(testAuthorActivityContext(), ConversationForkCreateRequest{
 			SourceSessionID: source.sessionID, ForkPoint: ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID}, CreatedBy: "budget-actor", Now: now,
 		})
 		if err != nil {
 			t.Fatalf("create budget-race forkchat fork: %v", err)
 		}
-		prepared, err := fixture.primary.PrepareOperatorConversationForkChat(context.Background(), ConversationForkChatPrepareRequest{
+		prepared, err := fixture.primary.PrepareOperatorConversationForkChat(testAuthorActivityContext(), ConversationForkChatPrepareRequest{
 			ForkID: fork.ForkID, Message: "budget race", Method: "conversation.fork_chat", ActorTokenID: "budget-actor",
 			RequestHash: runtimeeffects.Fingerprint([]byte("budget race")), Now: now.Add(time.Second),
 		})
@@ -294,7 +294,7 @@ func proveCompletionBudgetSettlementAccounting(t *testing.T, sqlite bool, exactn
 	}
 	authority := fixture.authority
 	authority.BudgetScopes = append([]runtimeeffects.BudgetAdmissionScope(nil), scopes...)
-	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(context.Background(), authority), runtimeeffects.NewController(fixture.store))
+	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), authority), runtimeeffects.NewController(fixture.store))
 	ctx = withManagedCompletionTestSurface(t, ctx, authority, "openai_compatible")
 	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "budget-accounting:"+string(exactness)+":"+string(state))
 	handle, err := runtimeeffects.BeginCompletion(ctx, "openai_compatible", []byte("budget accounting"), nil)

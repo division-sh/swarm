@@ -49,7 +49,7 @@ func TestRuntimeContextManagerRegistersAndLooksUpPinnedContexts(t *testing.T) {
 	if !ok || primary.BundleHash != runtimeContextTestHashA {
 		t.Fatalf("Primary = %#v/%v, want %s", primary, ok, runtimeContextTestHashA)
 	}
-	contextDef, availabilityResult, loaded, err := manager.LookupRun(context.Background(), "run-b")
+	contextDef, availabilityResult, loaded, err := manager.LookupRun(testAuthorActivityContext(context.Background()), "run-b")
 	if err != nil {
 		t.Fatalf("LookupRun: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestRuntimeContextManagerDeactivatesPinnedContextFailClosed(t *testing.T) {
 	if !ok || primary.BundleHash != runtimeContextTestHashA {
 		t.Fatalf("Primary after deactivation = %#v/%v, want %s", primary, ok, runtimeContextTestHashA)
 	}
-	runLookup, availabilityResult, err := manager.LookupRunStatus(context.Background(), "run-b")
+	runLookup, availabilityResult, err := manager.LookupRunStatus(testAuthorActivityContext(context.Background()), "run-b")
 	if err != nil {
 		t.Fatalf("LookupRunStatus: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestRuntimeContextManagerResolvedRequestCannotAdmitAfterDeactivation(t *tes
 
 func TestRuntimeContextManagerDeactivationBoundsStuckAdmissionByConfiguredGrace(t *testing.T) {
 	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
-	admissionCtx, release, admitted := contextDef.Runtime.shutdownGate.BeginContext(context.Background())
+	admissionCtx, release, admitted := contextDef.Runtime.shutdownGate.BeginContext(testAuthorActivityContext(context.Background()))
 	if !admitted {
 		t.Fatal("runtime admission unexpectedly closed")
 	}

@@ -19,7 +19,7 @@ import (
 func TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	s := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now)
 
@@ -145,7 +145,7 @@ func activeConversationForkTestClock() time.Time {
 func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	s := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now)
 
@@ -190,7 +190,7 @@ func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testi
 func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	s := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now)
 	entityID := uuid.NewString()
@@ -412,7 +412,7 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	s := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now)
 	fork, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
@@ -492,7 +492,7 @@ func settleForkChatCompletionForTest(t *testing.T, ctx context.Context, s forkCh
 		ExecutionOwner: prepared.ExecutionOwner, LeaseExpiresAt: prepared.LeaseExpiresAt, FenceGeneration: prepared.FenceGeneration,
 		ExecutionMode: prepared.Snapshot.SourceAgent.ExecutionMode,
 		ForkChat: runtimeeffects.ConversationForkChatAuthority{
-			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, ActorTokenID: prepared.ActorTokenID,
+			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, BundleHash: prepared.SourceBundleHash, ActorTokenID: prepared.ActorTokenID,
 			RequestOccurrenceID: prepared.RequestOccurrenceID, RequestHash: prepared.RequestHash,
 		},
 		Target: runtimeeffects.UsageTarget{Kind: runtimeeffects.UsageTargetConversationForkCompletion, ID: prepared.ForkTurnID, Ordinal: ordinal},
@@ -559,15 +559,16 @@ func conversationForkToolCallMap(t *testing.T, raw json.RawMessage) map[string]a
 }
 
 type conversationForkSourceFixture struct {
-	runID     string
-	agentID   string
-	sessionID string
-	turn1ID   string
-	turn2ID   string
-	event1ID  string
-	event2ID  string
-	turn1At   time.Time
-	turn2At   time.Time
+	runID      string
+	bundleHash string
+	agentID    string
+	sessionID  string
+	turn1ID    string
+	turn2ID    string
+	event1ID   string
+	event2ID   string
+	turn1At    time.Time
+	turn2At    time.Time
 }
 
 const conversationForkSourceFlowInstance = "review"
@@ -575,18 +576,19 @@ const conversationForkSourceFlowInstance = "review"
 func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conversationForkSourceFixture {
 	t.Helper()
 	source := conversationForkSourceFixture{
-		runID:     uuid.NewString(),
-		agentID:   "agent-fork-source",
-		sessionID: uuid.NewString(),
-		turn1ID:   uuid.NewString(),
-		turn2ID:   uuid.NewString(),
-		event1ID:  uuid.NewString(),
-		event2ID:  uuid.NewString(),
-		turn1At:   base.Add(-2 * time.Minute),
-		turn2At:   base.Add(-1 * time.Minute),
+		runID:      uuid.NewString(),
+		bundleHash: authorActivityTestBundleHash,
+		agentID:    "agent-fork-source",
+		sessionID:  uuid.NewString(),
+		turn1ID:    uuid.NewString(),
+		turn2ID:    uuid.NewString(),
+		event1ID:   uuid.NewString(),
+		event2ID:   uuid.NewString(),
+		turn1At:    base.Add(-2 * time.Minute),
+		turn2At:    base.Add(-1 * time.Minute),
 	}
-	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, source.runID, base.Add(-3*time.Minute)); err != nil {
+	ctx := testAuthorActivityContext()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, started_at) VALUES ($1::uuid, 'running', $2, $3)`, source.runID, source.bundleHash, base.Add(-3*time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `

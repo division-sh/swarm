@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -15,7 +14,7 @@ import (
 )
 
 func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	spec := loadPlatformSpecForSQLiteSchemaTest(t)
 	platformPlans, err := GeneratePlatformTableDDLs(spec)
 	if err != nil {
@@ -119,7 +118,7 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 }
 
 func TestSQLiteSchemaStoreMigratesLegacyAgentLLMBackendProfiles(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	spec := loadPlatformSpecForSQLiteSchemaTest(t)
 	platformPlans, err := GeneratePlatformTableDDLs(spec)
 	if err != nil {
@@ -293,7 +292,7 @@ func TestSQLiteSchemaStoreMigratesLegacyAgentLLMBackendProfiles(t *testing.T) {
 }
 
 func TestSQLiteSchemaStoreAddsMailboxDeferredUntilAndNormalizesLegacyDeferredRows(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	spec := loadPlatformSpecForSQLiteSchemaTest(t)
 	platformPlans, err := GeneratePlatformTableDDLs(spec)
 	if err != nil {
@@ -376,7 +375,7 @@ func TestSQLiteSchemaStoreAddsMailboxDeferredUntilAndNormalizesLegacyDeferredRow
 }
 
 func TestSQLiteSchemaStoreEnsureAgentModelAliasesMigratesLegacyModelTier(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sqliteStore, err := NewSQLiteSchemaStore(filepath.Join(t.TempDir(), "runtime.db"))
 	if err != nil {
 		t.Fatalf("NewSQLiteSchemaStore: %v", err)
@@ -441,7 +440,7 @@ func TestSQLiteSchemaStoreEnsureAgentModelAliasesMigratesLegacyModelTier(t *test
 }
 
 func TestSQLiteSchemaStoreEnsureAgentModelAliasesRejectsUnmappableLegacyModelTier(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sqliteStore, err := NewSQLiteSchemaStore(filepath.Join(t.TempDir(), "runtime.db"))
 	if err != nil {
 		t.Fatalf("NewSQLiteSchemaStore: %v", err)
@@ -532,7 +531,7 @@ func TestSQLiteStatementsForPlanAcceptsCompositeForeignKeyDeleteCascade(t *testi
 }
 
 func TestSQLiteSchemaStoreRendersExplicitUUIDDefaults(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	sqliteStore, err := NewSQLiteSchemaStore(filepath.Join(t.TempDir(), "uuid-defaults.db"))
 	if err != nil {
 		t.Fatalf("NewSQLiteSchemaStore: %v", err)

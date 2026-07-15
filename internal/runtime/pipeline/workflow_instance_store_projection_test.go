@@ -448,7 +448,7 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 			if tc.mutateKey == "entity" {
 				mutateID = workflowInstanceRowID(storageRef)
 			}
-			if _, err := db.ExecContext(context.Background(), tc.mutateSQL, mutateID, tc.mutateArg); err != nil {
+			if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), tc.mutateSQL, mutateID, tc.mutateArg); err != nil {
 				t.Fatalf("mutate malformed persisted shape: %v", err)
 			}
 

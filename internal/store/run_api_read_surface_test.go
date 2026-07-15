@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
@@ -14,7 +13,7 @@ import (
 func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	now := time.Unix(1700000000, 0).UTC()
 	newer := uuid.NewString()
@@ -132,7 +131,7 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 func TestRunAPIReadSurface_LoadRunHeaderNotFound(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	_, err := pg.LoadRunHeader(context.Background(), uuid.NewString())
+	_, err := pg.LoadRunHeader(testAuthorActivityContext(), uuid.NewString())
 	if !errors.Is(err, ErrRunNotFound) {
 		t.Fatalf("LoadRunHeader error = %v, want ErrRunNotFound", err)
 	}

@@ -207,7 +207,7 @@ func TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors(t *te
 		},
 	}
 	guardSawMaterializedRoute := false
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		RecipientPlanMaterializer: func(ctx context.Context, evt events.Event, plan PublishRecipientPlan) ([]events.DeliveryRoute, error) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -271,7 +271,7 @@ func TestEventBusPublish_TargetedNodeConsumeSuppressesLiveRecipientDelivery(t *t
 		RouteSource: "subscription",
 	}}
 	interceptor := &targetRouteConsumingInterceptor{}
-	eb, err := NewEventBusWithOptions(newTargetRouteMemoryStore(), EventBusOptions{
+	eb, err := newScopedTestEventBus(newTargetRouteMemoryStore(), EventBusOptions{
 		RouteTable: rt,
 		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]events.DeliveryRoute, error) {
 			return []events.DeliveryRoute{targetRoute}, nil
@@ -326,7 +326,7 @@ func TestEventBusRecipientPlanMaterializerNormalizesRoutePlanDirectly(t *testing
 			FlowInstance: "review/inst-1",
 		},
 	}
-	eb, err := NewEventBusWithOptions(InMemoryEventStore{}, EventBusOptions{
+	eb, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{
 		RecipientPlanMaterializer: func(ctx context.Context, evt events.Event, plan PublishRecipientPlan) ([]events.DeliveryRoute, error) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -371,7 +371,7 @@ func TestEventBusRecipientPlanMaterializerNormalizesRoutePlanDirectly(t *testing
 
 func TestEventBusAgentDispatchIgnoresSameIDNodeRouteTargets(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	eb, err := NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -397,7 +397,7 @@ func TestEventBusAgentDispatchIgnoresSameIDNodeRouteTargets(t *testing.T) {
 }
 
 func TestEventBusWorkflowRuntimeCarrierPrefersConcreteNodeRouteOverPlaceholder(t *testing.T) {
-	eb, err := NewEventBus(newTargetRouteMemoryStore())
+	eb, err := newScopedTestEventBus(newTargetRouteMemoryStore())
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -519,7 +519,7 @@ func nodeOnlyDeliveryPlan(evt events.Event, nodeID string) RoutePlan {
 
 func TestEventBusPublish_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	eb, err := NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -540,7 +540,7 @@ func TestEventBusPublish_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 
 func TestEventBusCommittedPublishDispatch_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	eb, err := NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -556,7 +556,7 @@ func TestEventBusCommittedPublishDispatch_NodeOnlyRouteDoesNotRequireAgentChanne
 
 func TestEngineDispatcher_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	eb, err := NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -583,7 +583,7 @@ func TestSweepUndispatched_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T)
 	store.routes[evt.ID()] = []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "workflow-node"}}
 	store.scopes[evt.ID()] = replayclaim.CommittedReplayScopeSubscribed
 	store.missing = []events.PersistedReplayEvent{{Event: evt}}
-	eb, err := NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -603,7 +603,7 @@ func TestSweepUndispatched_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T)
 
 func TestEventBusPublish_MixedNodeAgentRouteStillRequiresAgentChannel(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	eb, err := NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -624,7 +624,7 @@ func TestEventBusPublish_MixedNodeAgentRouteStillRequiresAgentChannel(t *testing
 
 func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	eb, err := NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -702,7 +702,7 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 
 func TestEventBusPublish_TargetSetSameSemanticNodePersistsPerTargetRoutes(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	eb, err := NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -767,7 +767,7 @@ func TestEventBusPublish_TargetSetSameSemanticNodePersistsPerTargetRoutes(t *tes
 
 func TestEventBusPublish_TargetedRouteTableNodePersistsSemanticNodeRoute(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	eb, err := NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -816,7 +816,7 @@ func TestEventBusPublish_TargetedRouteTableNodePersistsSemanticNodeRoute(t *test
 func TestEventBusPublish_TargetedTemplateInstanceRouteTableNodePersistsSemanticNodeRoute(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(routedNodeTemplateBundle())
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -872,7 +872,7 @@ func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanti
 	if err != nil {
 		t.Fatalf("load fixture bundle: %v", err)
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -948,7 +948,7 @@ func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanti
 func TestEventBusPublish_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(routedNodeTemplateBundle())
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -1020,7 +1020,7 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 func TestEventBusPublish_SemanticScopeFlowInstanceResolvesConcreteRoute(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(routedNodeTemplateBundle())
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -1085,7 +1085,7 @@ func TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBefor
 					EntityID:     "ent-repo",
 				},
 			}
-			eb, err := NewEventBusWithOptions(store, EventBusOptions{
+			eb, err := newScopedTestEventBus(store, EventBusOptions{
 				ContractBundle: semanticview.Wrap(routedCallbackTemplateBundle()),
 				Interceptors: []EventInterceptor{materializedRoutePersistedBeforeInterceptor{
 					t:       t,
@@ -1150,7 +1150,7 @@ func TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBefor
 
 func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializesNodeRoute(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: semanticview.Wrap(routedNodeStaticValidationBundle()),
 	})
 	if err != nil {
@@ -1206,7 +1206,7 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 
 func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializesSystemNodeRouteWithoutLiveSubscription(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: semanticview.Wrap(routedNodeStaticValidationBundle()),
 	})
 	if err != nil {
@@ -1257,7 +1257,7 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 
 func TestEventBusPublish_NoTargetScopedRoutedNodePersistsSemanticRouteBeforeInternalCarrier(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: semanticview.Wrap(routedNodeStaticChildBundle()),
 	})
 	if err != nil {
@@ -1363,7 +1363,7 @@ func TestEventBusPublish_WildcardStaticServiceNodePersistsRouteBeforeInternalCar
 			EntityID:     "ent-component",
 		},
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		RouteTable: rt,
 		Interceptors: []EventInterceptor{materializedRoutePersistedBeforeInterceptor{
 			t:       t,
@@ -1453,7 +1453,7 @@ func TestEventBusPublish_RootInputFlowNodePersistsRouteBeforeDispatch(t *testing
 		SubscriberType: "node",
 		SubscriberID:   "entity-writer",
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: semanticview.Wrap(routedRootInputFlowNodeBundle()),
 		Interceptors: []EventInterceptor{materializedRoutePersistedBeforeInterceptor{
 			t:       t,
@@ -1516,7 +1516,7 @@ func TestEventBusPublish_RootInputFlowNodePersistsRouteBeforeInterceptorWithoutI
 		SubscriberType: "node",
 		SubscriberID:   "entity-writer",
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: semanticview.Wrap(routedRootInputFlowNodeBundle()),
 		Interceptors: []EventInterceptor{materializedRoutePersistedBeforeInterceptor{
 			t:       t,
@@ -1591,7 +1591,7 @@ func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(
 		t.Fatalf("resolved subscribers = %#v, want canonical same-flow item-handler subscription", resolved)
 	}
 
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source,
 		Interceptors: []EventInterceptor{materializedRoutePersistedBeforeInterceptor{
 			t:       t,
@@ -1653,7 +1653,7 @@ func TestEventBusPublish_CanonicalParentConnectPersistsSingularStaticRoute(t *te
 	if err != nil {
 		t.Fatalf("load canonical parent connect: %v", err)
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -1684,7 +1684,7 @@ func TestEventBusPublish_CanonicalParentConnectPersistsSingularStaticRoute(t *te
 func TestEventBusPublish_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, routedRootNodeFixtureFiles()))
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -1748,7 +1748,7 @@ func TestEventBusPublish_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 func TestEventBusPublish_NoTargetRootRoutedNodePersistsSemanticRouteWithoutInternalSubscription(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, routedRootNodeFixtureFiles()))
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -1825,7 +1825,7 @@ func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *te
 		SubscriberType: "agent",
 		SubscriberID:   "workflow-runtime",
 	}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: semanticview.Wrap(routedTopLevelProjectNodeBundle()),
 		Interceptors: []EventInterceptor{materializedRoutePersistedBeforeInterceptor{
 			t:       t,
@@ -1876,7 +1876,7 @@ func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *te
 }
 
 func TestEventBusPublish_NodeRouteFailsClosedWithoutRouteSetPersistence(t *testing.T) {
-	eb, err := NewEventBusWithOptions(InMemoryEventStore{}, EventBusOptions{
+	eb, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{
 		ContractBundle: semanticview.Wrap(routedTopLevelProjectNodeBundle()),
 	})
 	if err != nil {

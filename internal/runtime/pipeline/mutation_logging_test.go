@@ -50,7 +50,7 @@ func TestUpdateEntityState_LogsMutationRowForStateTransition(t *testing.T) {
 		writerType string
 		step       string
 	)
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT
 			COALESCE(field, ''),
 			COALESCE(old_value::text, ''),
@@ -263,10 +263,10 @@ func TestMutationLogTrackedStateFailsOnMalformedCanonicalMutationField(t *testin
 	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 
 	var runID string
-	if err := db.QueryRowContext(context.Background(), `SELECT run_id::text FROM runs ORDER BY started_at DESC LIMIT 1`).Scan(&runID); err != nil {
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `SELECT run_id::text FROM runs ORDER BY started_at DESC LIMIT 1`).Scan(&runID); err != nil {
 		t.Fatalf("load run_id: %v", err)
 	}
-	if _, err := db.ExecContext(context.Background(), `
+	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, writer_type, writer_id, handler_step
 		) VALUES (
@@ -355,7 +355,7 @@ func seedMutationLoggingInstance(t *testing.T, store *WorkflowInstanceStore, ent
 
 func dropEntityMutationsTable(t *testing.T, db *sql.DB) {
 	t.Helper()
-	if _, err := db.ExecContext(context.Background(), `DROP TABLE entity_mutations`); err != nil {
+	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `DROP TABLE entity_mutations`); err != nil {
 		t.Fatalf("drop entity_mutations: %v", err)
 	}
 }
@@ -363,7 +363,7 @@ func dropEntityMutationsTable(t *testing.T, db *sql.DB) {
 func assertCurrentState(t *testing.T, db *sql.DB, entityID, want string) {
 	t.Helper()
 	var currentState string
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COALESCE(current_state, '')
 		FROM entity_state
 		WHERE entity_id = $1::uuid
@@ -378,7 +378,7 @@ func assertCurrentState(t *testing.T, db *sql.DB, entityID, want string) {
 func assertEntityGates(t *testing.T, db *sql.DB, entityID string, want map[string]any) {
 	t.Helper()
 	var gatesRaw []byte
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COALESCE(gates, '{}'::jsonb)
 		FROM entity_state
 		WHERE entity_id = $1::uuid
@@ -394,7 +394,7 @@ func assertEntityGates(t *testing.T, db *sql.DB, entityID string, want map[strin
 func assertAccumulatorBucketMissing(t *testing.T, db *sql.DB, entityID, bucket string) {
 	t.Helper()
 	var accRaw []byte
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COALESCE(accumulator, '{}'::jsonb)
 		FROM entity_state
 		WHERE entity_id = $1::uuid
@@ -409,7 +409,7 @@ func assertAccumulatorBucketMissing(t *testing.T, db *sql.DB, entityID, bucket s
 
 func mutationFieldsForEntity(t *testing.T, db *sql.DB, entityID string) []string {
 	t.Helper()
-	rows, err := db.QueryContext(context.Background(), `
+	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), `
 		SELECT field
 		FROM entity_mutations
 		WHERE entity_id = $1::uuid
@@ -441,7 +441,7 @@ func trackedMutationStateMatchesEntityState(t *testing.T, db *sql.DB, entityID s
 		gatesRaw     []byte
 		accRaw       []byte
 	)
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT
 			COALESCE(current_state, ''),
 			COALESCE(fields, '{}'::jsonb),
@@ -460,7 +460,7 @@ func trackedMutationStateMatchesEntityState(t *testing.T, db *sql.DB, entityID s
 		Accumulator:  decodeJSONMap(t, accRaw),
 	}
 	records := make([]runtimemutationlog.ProjectionMutation, 0, 8)
-	rows, err := db.QueryContext(context.Background(), `
+	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), `
 		SELECT field, old_value, new_value
 		FROM entity_mutations
 		WHERE entity_id = $1::uuid

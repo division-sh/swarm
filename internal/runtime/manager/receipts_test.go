@@ -128,7 +128,7 @@ func TestWriteReceiptConvergesNormalRunCompletionAfterReceiptPersists(t *testing
 	}
 	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{}, store)
 
-	am.writeReceipt(context.Background(), "event-1", "agent-1", ReceiptStatusProcessed, nil)
+	am.writeReceipt(testAuthorActivityContext(context.Background()), "event-1", "agent-1", ReceiptStatusProcessed, nil)
 
 	if store.upsertCalls != 1 {
 		t.Fatalf("receipt upsert calls = %d, want 1", store.upsertCalls)
@@ -151,7 +151,7 @@ func TestWriteReceiptConvergesNormalRunCompletionAfterReceiptRetryPersists(t *te
 	}
 	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{}, store)
 
-	am.writeReceipt(context.Background(), "event-1", "agent-1", ReceiptStatusProcessed, nil)
+	am.writeReceipt(testAuthorActivityContext(context.Background()), "event-1", "agent-1", ReceiptStatusProcessed, nil)
 
 	if store.upsertCalls != 2 {
 		t.Fatalf("receipt upsert calls = %d, want 2", store.upsertCalls)
@@ -202,7 +202,7 @@ func (a panicStubAgent) OnEvent(context.Context, events.Event) ([]events.Event, 
 
 func registerReceiptTestAgent(t *testing.T, am *AgentManager, cfg runtimeactors.AgentConfig) {
 	t.Helper()
-	if err := am.lifecycle.registerExecution(context.Background(), PersistedAgent{Config: cfg, Status: "active", HiredBy: "test"}, false, panicStubAgent{id: cfg.ID}); err != nil {
+	if err := am.lifecycle.registerExecution(testAuthorActivityContext(context.Background()), PersistedAgent{Config: cfg, Status: "active", HiredBy: "test"}, false, panicStubAgent{id: cfg.ID}); err != nil {
 		t.Fatalf("register receipt test agent: %v", err)
 	}
 }
@@ -232,7 +232,7 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 	inbound := eventtest.RootIngress("evt-1",
 		events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
 
-	ctx := runtimecorrelation.WithInboundEvent(context.Background(), inbound)
+	ctx := runtimecorrelation.WithInboundEvent(testAuthorActivityContext(context.Background()), inbound)
 	ctx = runtimecorrelation.WithRunID(ctx, inbound.RunID())
 	am.maybeTripAuthCircuitBreaker(ctx, "agent-a", inbound.ID(), testAuthFailure())
 
@@ -288,7 +288,7 @@ func TestMaybeTripAuthCircuitBreaker_PreservesCanceledEventLineage(t *testing.T)
 	inbound := eventtest.RootIngress("evt-canceled",
 		events.EventType("work.requested"), "", "", nil, 0, "run-canceled", "", events.EventEnvelope{}, time.Time{})
 
-	ctx := runtimecorrelation.WithInboundEvent(context.Background(), inbound)
+	ctx := runtimecorrelation.WithInboundEvent(testAuthorActivityContext(context.Background()), inbound)
 	ctx = runtimecorrelation.WithRunID(ctx, inbound.RunID())
 	ctx, cancel := context.WithCancel(ctx)
 	cancel()
@@ -401,7 +401,7 @@ func TestMaybeEscalateDeadLetter_PublishesTypedFlowInstanceEnvelope(t *testing.T
 	})
 
 	for i := 0; i < deadLetterEscalationThreshold; i++ {
-		am.maybeEscalateDeadLetter(context.Background(), "evt-1", "agent-a")
+		am.maybeEscalateDeadLetter(testAuthorActivityContext(context.Background()), "evt-1", "agent-a")
 	}
 
 	if len(bus.published) != 1 {
@@ -436,7 +436,7 @@ func TestHandleAgentLoopPanic_PublishesTypedFlowInstanceEnvelope(t *testing.T) {
 		FlowPath:      "review/inst-1",
 	})
 
-	am.handleAgentLoopPanic(context.Background(), panicStubAgent{id: "agent-a"}, 5, "scan.requested", "boom", "stack")
+	am.handleAgentLoopPanic(testAuthorActivityContext(context.Background()), panicStubAgent{id: "agent-a"}, 5, "scan.requested", "boom", "stack")
 
 	if len(bus.published) != 2 {
 		t.Fatalf("published events = %d, want 2", len(bus.published))
@@ -490,7 +490,7 @@ func TestProcessEvent_PropagatesInboundParentWithoutTraceSeeding(t *testing.T) {
 		events.EventType("discovery/market_research.scan_assigned"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 	evt = evt.WithDeliveryContext(events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:agent-delivery"}})
 
-	if err := am.processEvent(context.Background(), agent, evt); err != nil {
+	if err := am.processEvent(testAuthorActivityContext(context.Background()), agent, evt); err != nil {
 		t.Fatalf("processEvent: %v", err)
 	}
 	if agent.parent != "evt-123" {
@@ -529,7 +529,7 @@ func TestProcessEvent_LogsLaunchingDeliveryLifecycleTransition(t *testing.T) {
 	evt := eventtest.RootIngress("evt-1", events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 	agent := traceRecordingAgent{parent: ""}
 
-	if err := am.processEvent(context.Background(), &agent, evt); err != nil {
+	if err := am.processEvent(testAuthorActivityContext(context.Background()), &agent, evt); err != nil {
 		t.Fatalf("processEvent: %v", err)
 	}
 	if len(store.markCalls) != 1 {
@@ -554,7 +554,7 @@ func TestProcessEvent_SkipsLateOutputAndReceiptAfterDestructiveResetQuiescence(t
 	am := NewAgentManager(bus, nil, store)
 	agent := &outputRecordingAgent{}
 
-	result := am.processEventDetailed(context.Background(), agent, eventtest.RootIngress(uuid.NewString(), events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	result := am.processEventDetailed(testAuthorActivityContext(context.Background()), agent, eventtest.RootIngress(uuid.NewString(), events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if result.err != nil {
 		t.Fatalf("processEventDetailed error = %v", result.err)
 	}
@@ -607,7 +607,7 @@ func TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions(t *te
 			store.found = true
 			am := NewAgentManager(bus, nil, store)
 
-			am.writeReceipt(context.Background(), "evt-1", "agent-a", ReceiptStatusError, testFailure("handler_failed"))
+			am.writeReceipt(testAuthorActivityContext(context.Background()), "evt-1", "agent-a", ReceiptStatusError, testFailure("handler_failed"))
 
 			if len(bus.runtimeLogs) != 1 {
 				t.Fatalf("runtime logs = %d, want 1", len(bus.runtimeLogs))
@@ -647,7 +647,7 @@ func TestWriteReceipt_RetryAfterContextCancellationStillLogsLifecycleTransition(
 	store.upsertErrs = []error{context.Canceled, nil}
 	am := NewAgentManager(bus, nil, store)
 
-	am.writeReceipt(context.Background(), "evt-1", "agent-a", ReceiptStatusError, testFailure("handler_failed"))
+	am.writeReceipt(testAuthorActivityContext(context.Background()), "evt-1", "agent-a", ReceiptStatusError, testFailure("handler_failed"))
 
 	if store.upsertCalls != 2 {
 		t.Fatalf("upsert calls = %d, want 2", store.upsertCalls)

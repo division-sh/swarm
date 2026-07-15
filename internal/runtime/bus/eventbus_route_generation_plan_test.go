@@ -36,7 +36,7 @@ func TestEventBusSubscribedPublishDoesNotCrossAgentRouteGenerations(t *testing.T
 		t.Run(test.name, func(t *testing.T) {
 			store := newTargetRouteMemoryStore()
 			barrier := routeGenerationPlanBarrier{started: make(chan struct{}, 1), release: make(chan struct{})}
-			eb, err := NewEventBusWithOptions(store, EventBusOptions{Interceptors: []EventInterceptor{barrier}})
+			eb, err := newScopedTestEventBus(store, EventBusOptions{Interceptors: []EventInterceptor{barrier}})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -79,7 +79,7 @@ func TestEventBusSubscribedPublishDoesNotCrossAgentRouteGenerations(t *testing.T
 func TestEventBusPublishInMutationDoesNotCrossAgentRouteGenerations(t *testing.T) {
 	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
 	barrier := routeGenerationPlanBarrier{started: make(chan struct{}, 1), release: make(chan struct{})}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{Interceptors: []EventInterceptor{barrier}})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{Interceptors: []EventInterceptor{barrier}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestEventBusPublishInMutationDoesNotCrossAgentRouteGenerations(t *testing.T
 func TestEventBusPublishAcknowledgedDoesNotCrossAgentRouteGenerations(t *testing.T) {
 	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
 	barrier := routeGenerationPlanBarrier{started: make(chan struct{}, 1), release: make(chan struct{})}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{Interceptors: []EventInterceptor{barrier}})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{Interceptors: []EventInterceptor{barrier}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestEventBusPublishAcknowledgedDoesNotCrossAgentRouteGenerations(t *testing
 }
 
 func TestEventBusIdentityRoutePlanResolvesCurrentAgentGenerationAtDispatch(t *testing.T) {
-	eb, err := NewEventBus(nil)
+	eb, err := newScopedTestEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestEventBusIdentityRoutePlanResolvesCurrentAgentGenerationAtDispatch(t *te
 }
 
 func TestEventBusIdentityRouteAuthorityDominatesDuplicateExactSubscription(t *testing.T) {
-	eb, err := NewEventBus(nil)
+	eb, err := newScopedTestEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

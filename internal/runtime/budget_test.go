@@ -92,7 +92,7 @@ func (s *budgetSpendStoreCapture) SumSpendUSD(_ context.Context, query budgetspe
 func TestBudgetTracker_RecordSpendNormalizesThroughBudgetSpendOwner(t *testing.T) {
 	store := &budgetSpendStoreCapture{}
 	tracker := &BudgetTracker{store: store}
-	if err := tracker.RecordSpend(context.Background(), SpendRecord{
+	if err := tracker.RecordSpend(testAuthorActivityContext(context.Background()), SpendRecord{
 		ExecutionMode:   "live",
 		FlowInstance:    " flow/1 ",
 		AgentID:         " agent-1 ",
@@ -134,7 +134,7 @@ func TestBudgetTrackerProjectsCommittedCompletionIntoThresholdEventAndEmergencyS
 		"budget": map[string]any{"system_monthly_cap": 1},
 	}}, mailbox, nil, source)
 
-	tracker.ProjectCommittedCompletionSpend(context.Background(), runtimeeffects.CompletionSpendProjection{AttemptID: "attempt-1"})
+	tracker.ProjectCommittedCompletionSpend(testAuthorActivityContext(context.Background()), runtimeeffects.CompletionSpendProjection{AttemptID: "attempt-1"})
 	events := eventStore.appendedEvents()
 	if len(events) != 1 || string(events[0].Type()) != "platform.budget_threshold_crossed" {
 		t.Fatalf("events = %#v, want one platform.budget_threshold_crossed", events)
@@ -190,7 +190,7 @@ func TestBudgetTrackerProjectsRecoveryScopesBeforeAllRunTargetsWithoutRunContext
 		},
 	}}, nil, nil, source)
 
-	if err := tracker.ProjectRecoveryBudgetState(context.Background()); err != nil {
+	if err := tracker.ProjectRecoveryBudgetState(testAuthorActivityContext(context.Background())); err != nil {
 		t.Fatalf("ProjectRecoveryBudgetState: %v", err)
 	}
 	wantCalls := []string{
@@ -210,7 +210,7 @@ func TestBudgetTrackerProjectsRecoveryScopesBeforeAllRunTargetsWithoutRunContext
 		t.Fatalf("threshold events = %d, want system, global, and two entity transitions", got)
 	}
 
-	if err := tracker.ProjectRecoveryBudgetState(context.Background()); err != nil {
+	if err := tracker.ProjectRecoveryBudgetState(testAuthorActivityContext(context.Background())); err != nil {
 		t.Fatalf("second ProjectRecoveryBudgetState: %v", err)
 	}
 	if got := len(eventStore.appendedEvents()); got != 4 {
@@ -221,7 +221,7 @@ func TestBudgetTrackerProjectsRecoveryScopesBeforeAllRunTargetsWithoutRunContext
 func TestNewRuntimeConstructsBudgetTrackerFromBackendNeutralStore(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	store := &budgetSpendStoreCapture{}
-	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore:       &minimalRuntimeEventStore{},
 		BudgetSpendStore: store,
 	}, Options: RuntimeOptions{

@@ -132,11 +132,11 @@ func persistCommittedReplayScope(t *testing.T, ctx context.Context, pg *store.Po
 
 func seedHistoricalReplayRecoverySourceRun(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
-	`, sourceRunID, at.Add(-time.Minute)); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
+		VALUES ($1::uuid, 'running', $2, $3, $4, $5)
+	`, sourceRunID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -174,11 +174,11 @@ func seedHistoricalReplayRecoverySourceRun(t *testing.T, db *sql.DB, sourceRunID
 }
 
 func TestRecoveryManager_ReplaysPersistedCorrelationEnvelope(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pg := &store.PostgresStore{DB: db}
+	pg := newRecoveryTestPostgresStore(t, db)
 	bus, err := runtimebus.NewEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -281,11 +281,11 @@ func TestRecoveryManager_ReplaysPersistedCorrelationEnvelope(t *testing.T) {
 }
 
 func TestRecoveryManager_ReplaysHistoricalForkDeliveryEventReplayRows(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pg := &store.PostgresStore{DB: db}
+	pg := newRecoveryTestPostgresStore(t, db)
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -456,11 +456,11 @@ func TestRecoveryManager_ReplaysHistoricalForkDeliveryEventReplayRows(t *testing
 }
 
 func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pg := &store.PostgresStore{DB: db}
+	pg := newRecoveryTestPostgresStore(t, db)
 	bus, err := runtimebus.NewEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -546,7 +546,7 @@ func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing
 }
 
 func TestRecoveryManager_QuarantinesMissingRunIDSchemaCapability(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -554,7 +554,7 @@ func TestRecoveryManager_QuarantinesMissingRunIDSchemaCapability(t *testing.T) {
 		t.Fatalf("drop events.run_id: %v", err)
 	}
 
-	pg := &store.PostgresStore{DB: db}
+	pg := newRecoveryTestPostgresStore(t, db)
 	bus, err := runtimebus.NewEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -596,12 +596,12 @@ func TestRecoveryManager_QuarantinesMissingRunIDSchemaCapability(t *testing.T) {
 }
 
 func TestRecoveryManager_ClaimsReplayOwnershipUnderOverlap(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pg1 := &store.PostgresStore{DB: db}
-	pg2 := &store.PostgresStore{DB: db}
+	pg1 := newRecoveryTestPostgresStore(t, db)
+	pg2 := newRecoveryTestPostgresStore(t, db)
 
 	runID := uuid.NewString()
 	parentID := uuid.NewString()
@@ -678,11 +678,11 @@ func TestRecoveryManager_ClaimsReplayOwnershipUnderOverlap(t *testing.T) {
 }
 
 func TestRecoveryManager_ExplicitlySkipsReplayWithoutPersistedRecipients(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pg := &store.PostgresStore{DB: db}
+	pg := newRecoveryTestPostgresStore(t, db)
 	bus, err := runtimebus.NewEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -738,11 +738,11 @@ func TestRecoveryManager_ExplicitlySkipsReplayWithoutPersistedRecipients(t *test
 }
 
 func TestRecoveryManager_DoesNotEmitAftermathLogForRuntimeLogReplayCandidate(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pg := &store.PostgresStore{DB: db}
+	pg := newRecoveryTestPostgresStore(t, db)
 	bus, err := runtimebus.NewEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -783,11 +783,11 @@ func TestRecoveryManager_DoesNotEmitAftermathLogForRuntimeLogReplayCandidate(t *
 }
 
 func TestRecoveryManager_UsesPersistedDeliveryRecipientsInsteadOfCurrentSubscriptions(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pg := &store.PostgresStore{DB: db}
+	pg := newRecoveryTestPostgresStore(t, db)
 	bus, err := runtimebus.NewEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -877,11 +877,11 @@ func TestRecoveryManager_UsesPersistedDeliveryRecipientsInsteadOfCurrentSubscrip
 }
 
 func TestRecoveryManager_ReplaysSubscribedInternalOnlyUsingCommittedReplayScope(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pg := &store.PostgresStore{DB: db}
+	pg := newRecoveryTestPostgresStore(t, db)
 	bus, err := runtimebus.NewEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -928,11 +928,11 @@ func TestRecoveryManager_ReplaysSubscribedInternalOnlyUsingCommittedReplayScope(
 }
 
 func TestRecoveryManager_DirectEmptyManifestDoesNotBroadenToCurrentInternalSubscribers(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pg := &store.PostgresStore{DB: db}
+	pg := newRecoveryTestPostgresStore(t, db)
 	bus, err := runtimebus.NewEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -986,7 +986,7 @@ func TestRecoveryManager_FailsClosedWithoutReplayClaimOwner(t *testing.T) {
 	}
 	rm := runtimepipeline.NewRecoveryManagerWith(store, &recoveryCapturePublisher{})
 
-	err := rm.Recover(context.Background())
+	err := rm.Recover(testAuthorActivityContext(context.Background()))
 	if err == nil {
 		t.Fatal("expected Recover to fail without replay claim owner")
 	}
@@ -999,7 +999,7 @@ func TestRecoveryManager_NoopsWithoutPersistedReplayStore(t *testing.T) {
 	capture := &recoveryCapturePublisher{}
 	rm := runtimepipeline.NewRecoveryManagerWith(runtimebus.InMemoryEventStore{}, capture)
 
-	if err := rm.Recover(context.Background()); err != nil {
+	if err := rm.Recover(testAuthorActivityContext(context.Background())); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	if len(capture.published) != 0 || len(capture.direct) != 0 {

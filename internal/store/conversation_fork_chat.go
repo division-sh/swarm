@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -54,6 +55,7 @@ type ConversationForkChatPrepared struct {
 	SandboxPolicy       ConversationForkSandboxPolicy
 	AvailableTools      []string
 	ForkTurnID          string
+	SourceBundleHash    string
 	TurnIndex           int
 	RequestOccurrenceID string
 	RequestHash         string
@@ -187,12 +189,16 @@ func (s conversationForkStore) prepareOperatorConversationForkChat(ctx context.C
 		if err != nil {
 			return err
 		}
+		sourceBundleHash, err := loadConversationForkChatBundleHash(txctx, s, tx, fork.SourceRunID)
+		if err != nil {
+			return err
+		}
 		snapshot, err := ensureConversationForkSnapshot(txctx, s, tx, fork, now)
 		if err != nil {
 			return err
 		}
 		policy := defaultConversationForkSandboxPolicy()
-		forkTurnID, turnIndex, occurrenceID, executionOwner, leaseExpiresAt, err := preallocateConversationForkTurn(txctx, s, tx, forkID, method, actorTokenID, idempotencyKey, requestHash, message, now)
+		forkTurnID, turnIndex, occurrenceID, executionOwner, leaseExpiresAt, err := preallocateConversationForkTurn(txctx, s, tx, forkID, sourceBundleHash, method, actorTokenID, idempotencyKey, requestHash, message, now)
 		if err != nil {
 			return err
 		}
@@ -201,7 +207,7 @@ func (s conversationForkStore) prepareOperatorConversationForkChat(ctx context.C
 			Snapshot:       snapshot,
 			SandboxPolicy:  policy,
 			AvailableTools: conversationForkSandboxAvailableTools(policy),
-			ForkTurnID:     forkTurnID, TurnIndex: turnIndex, RequestOccurrenceID: occurrenceID,
+			ForkTurnID:     forkTurnID, SourceBundleHash: sourceBundleHash, TurnIndex: turnIndex, RequestOccurrenceID: occurrenceID,
 			RequestHash: requestHash, IdempotencyKey: idempotencyKey, ActorTokenID: actorTokenID,
 			ExecutionOwner: executionOwner, LeaseExpiresAt: leaseExpiresAt, FenceGeneration: 1,
 		}
@@ -290,7 +296,7 @@ func (s *SQLiteRuntimeStore) HeartbeatOperatorConversationForkChat(ctx context.C
 
 func (s conversationForkStore) heartbeatOperatorConversationForkChat(ctx context.Context, prepared ConversationForkChatPrepared, now time.Time) error {
 	if prepared.ForkTurnID == "" || prepared.Fork.ForkID == "" || prepared.ActorTokenID == "" || prepared.RequestOccurrenceID == "" ||
-		prepared.RequestHash == "" || prepared.ExecutionOwner == "" || prepared.FenceGeneration == 0 {
+		prepared.RequestHash == "" || prepared.SourceBundleHash == "" || prepared.ExecutionOwner == "" || prepared.FenceGeneration == 0 {
 		return fmt.Errorf("conversation fork chat heartbeat requires exact prepared authority")
 	}
 	now = now.UTC()
@@ -303,9 +309,9 @@ func (s conversationForkStore) heartbeatOperatorConversationForkChat(ctx context
 			UPDATE conversation_fork_turns
 			SET lease_expires_at=CASE WHEN lease_expires_at>? THEN lease_expires_at ELSE ? END,updated_at=?
 			WHERE fork_turn_id=? AND fork_id=? AND actor_token_id=? AND request_occurrence_id=? AND request_hash=?
-			  AND state IN ('prepared','executing') AND execution_owner=? AND fence_generation=? AND `+s.currentLeaseSQL()+`
+			  AND bundle_hash=? AND state IN ('prepared','executing') AND execution_owner=? AND fence_generation=? AND `+s.currentLeaseSQL()+`
 		`, expires, expires, now, prepared.ForkTurnID, prepared.Fork.ForkID, prepared.ActorTokenID, prepared.RequestOccurrenceID,
-			prepared.RequestHash, prepared.ExecutionOwner, prepared.FenceGeneration)
+			prepared.RequestHash, prepared.SourceBundleHash, prepared.ExecutionOwner, prepared.FenceGeneration)
 		if err := requireExactlyOneMutation(res, err, "heartbeat conversation fork chat"); err != nil {
 			return err
 		}
@@ -315,7 +321,7 @@ func (s conversationForkStore) heartbeatOperatorConversationForkChat(ctx context
 
 func (s conversationForkStore) failOperatorConversationForkChat(ctx context.Context, req ConversationForkChatFailureRequest) error {
 	prepared := req.Prepared
-	if prepared.ForkTurnID == "" || prepared.Fork.ForkID == "" || prepared.RequestOccurrenceID == "" || prepared.RequestHash == "" || prepared.FenceGeneration == 0 || req.Cause == nil {
+	if prepared.ForkTurnID == "" || prepared.Fork.ForkID == "" || prepared.SourceBundleHash == "" || prepared.RequestOccurrenceID == "" || prepared.RequestHash == "" || prepared.FenceGeneration == 0 || req.Cause == nil {
 		return fmt.Errorf("conversation fork chat failure requires exact prepared authority and cause")
 	}
 	now := req.Now.UTC()
@@ -336,9 +342,9 @@ func (s conversationForkStore) failOperatorConversationForkChat(ctx context.Cont
 			UPDATE conversation_fork_turns
 			SET state=?,lease_expires_at=NULL,failure=?,updated_at=?,terminal_at=?
 			WHERE fork_turn_id=? AND fork_id=? AND actor_token_id=? AND request_occurrence_id=? AND request_hash=?
-			  AND fence_generation=? AND (state='prepared' OR (state='executing' AND execution_owner=?))
+			  AND bundle_hash=? AND fence_generation=? AND (state='prepared' OR (state='executing' AND execution_owner=?))
 		`, state, string(failureJSON), now, now, prepared.ForkTurnID, prepared.Fork.ForkID, prepared.ActorTokenID,
-			prepared.RequestOccurrenceID, prepared.RequestHash, prepared.FenceGeneration, prepared.ExecutionOwner)
+			prepared.RequestOccurrenceID, prepared.RequestHash, prepared.SourceBundleHash, prepared.FenceGeneration, prepared.ExecutionOwner)
 		if err != nil {
 			return fmt.Errorf("terminalize failed conversation fork turn: %w", err)
 		}
@@ -366,7 +372,7 @@ func (s conversationForkStore) recordOperatorConversationForkChat(ctx context.Co
 	execution := req.Execution
 	prepared := req.Prepared
 	if prepared.ForkTurnID == "" || prepared.Fork.ForkID != forkID || prepared.RequestHash == "" || prepared.RequestOccurrenceID == "" ||
-		prepared.ActorTokenID != actorTokenID || prepared.ExecutionOwner == "" || prepared.FenceGeneration == 0 ||
+		prepared.ActorTokenID != actorTokenID || prepared.SourceBundleHash == "" || prepared.ExecutionOwner == "" || prepared.FenceGeneration == 0 ||
 		execution.ExecutionOwner != prepared.ExecutionOwner || execution.FenceGeneration != prepared.FenceGeneration {
 		return ConversationForkChatResult{}, fmt.Errorf("conversation fork chat terminalization requires exact prepared authority")
 	}
@@ -444,7 +450,7 @@ func completeConversationForkTurn(
 		ExecutionOwner: prepared.ExecutionOwner, LeaseExpiresAt: prepared.LeaseExpiresAt, FenceGeneration: prepared.FenceGeneration,
 		ExecutionMode: prepared.Snapshot.SourceAgent.ExecutionMode,
 		ForkChat: runtimeeffects.ConversationForkChatAuthority{
-			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, ActorTokenID: prepared.ActorTokenID,
+			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, BundleHash: prepared.SourceBundleHash, ActorTokenID: prepared.ActorTokenID,
 			RequestOccurrenceID: prepared.RequestOccurrenceID, RequestHash: prepared.RequestHash,
 		},
 	}
@@ -507,6 +513,9 @@ func requireConversationForkChatCapabilities(caps StoreSchemaCapabilities, catal
 	if caps.Conversations.ForkTurns != SchemaFlavorCanonical {
 		return fmt.Errorf("store: conversation_fork_turns schema is unavailable")
 	}
+	if !caps.Events.RunBundleHash || !catalog.hasColumns("runs", "run_id", "bundle_hash") {
+		return fmt.Errorf("store: conversation fork chat requires canonical runs.bundle_hash")
+	}
 	if caps.EntityState != SchemaFlavorCanonical || !caps.EntityRunID {
 		return fmt.Errorf("store: conversation fork chat requires canonical run-scoped entity_state")
 	}
@@ -537,6 +546,25 @@ func loadActiveConversationForkForChat(ctx context.Context, owner conversationFo
 		return OperatorConversationForkSession{}, &EntityReadParamError{Field: "fork_id", Reason: "must reference an active fork"}
 	}
 	return item, nil
+}
+
+func loadConversationForkChatBundleHash(ctx context.Context, owner conversationForkStore, tx *sql.Tx, sourceRunID string) (string, error) {
+	sourceRunID = strings.TrimSpace(sourceRunID)
+	if sourceRunID == "" {
+		return "", fmt.Errorf("conversation fork chat requires source-owned run bundle identity")
+	}
+	var bundleHash string
+	if err := owner.queryRow(ctx, tx, `SELECT COALESCE(bundle_hash, '') FROM runs WHERE run_id=?`, sourceRunID).Scan(&bundleHash); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("conversation fork chat source run %q is unavailable", sourceRunID)
+		}
+		return "", fmt.Errorf("load conversation fork chat source bundle: %w", err)
+	}
+	bundleHash = strings.TrimSpace(bundleHash)
+	if err := runtimecontracts.ValidateBundleHash(bundleHash); err != nil {
+		return "", fmt.Errorf("conversation fork chat source run has invalid bundle identity: %w", err)
+	}
+	return bundleHash, nil
 }
 
 func ensureConversationForkSnapshot(ctx context.Context, owner conversationForkStore, tx *sql.Tx, fork OperatorConversationForkSession, now time.Time) (ConversationForkSnapshot, error) {
@@ -785,7 +813,7 @@ func preallocateConversationForkTurn(
 	ctx context.Context,
 	owner conversationForkStore,
 	tx *sql.Tx,
-	forkID, method, actorTokenID, idempotencyKey, requestHash, message string,
+	forkID, bundleHash, method, actorTokenID, idempotencyKey, requestHash, message string,
 	now time.Time,
 ) (string, int, string, string, time.Time, error) {
 	if idempotencyKey != "" {
@@ -806,10 +834,10 @@ func preallocateConversationForkTurn(
 	leaseExpiresAt := now.Add(conversationForkChatExecutionLease).UTC()
 	if _, err := owner.exec(ctx, tx, `
 		INSERT INTO conversation_fork_turns (
-			fork_turn_id,fork_id,turn_index,actor_token_id,request_occurrence_id,request_hash,idempotency_key,
+			fork_turn_id,fork_id,bundle_hash,turn_index,actor_token_id,request_occurrence_id,request_hash,idempotency_key,
 			message,state,execution_owner,lease_expires_at,fence_generation,tool_calls,evidence,created_at,updated_at
-		) VALUES (?,?,?,?,?,?,NULLIF(?,''),?,'prepared',?,?,1,'[]','{}',?,?)
-	`, forkTurnID, forkID, nextIndex, actorTokenID, occurrenceID, requestHash, idempotencyKey, message, executionOwner, leaseExpiresAt, now, now); err != nil {
+		) VALUES (?,?,?,?,?,?,?,NULLIF(?,''),?,'prepared',?,?,1,'[]','{}',?,?)
+	`, forkTurnID, forkID, bundleHash, nextIndex, actorTokenID, occurrenceID, requestHash, idempotencyKey, message, executionOwner, leaseExpiresAt, now, now); err != nil {
 		return "", 0, "", "", time.Time{}, fmt.Errorf("preallocate conversation fork turn: %w", err)
 	}
 	return forkTurnID, nextIndex, occurrenceID, executionOwner, leaseExpiresAt, nil

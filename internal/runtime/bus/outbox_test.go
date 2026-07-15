@@ -293,7 +293,7 @@ func (r *recordingDeliveryRouteInterceptor) seen(route events.DeliveryRoute) boo
 }
 
 func TestEngineDispatcherCollectsEmitIntentsWithChainDepth(t *testing.T) {
-	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestEngineDispatcherQueuesWhenPipelineSQLTxActive(t *testing.T) {
 			{AgentID: "agent-a", EntityID: "ent-1"},
 		},
 	}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t 
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
-	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -484,7 +484,7 @@ func TestEngineDispatcherFailsClosedWithSQLTxAndNoPostCommitQueue(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
-	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -539,7 +539,7 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 			{AgentID: "reviewer", EntityID: entityID},
 		},
 	}
-	eb, err := runtimebus.NewEventBus(recordingStore)
+	eb, err := newScopedTestEventBus(recordingStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -883,7 +883,7 @@ func TestEngineOutboxSkipsEmptyNoopIntentBeforeAdmission(t *testing.T) {
 		t.Fatalf("Begin: %v", err)
 	}
 	recordingStore := &directRecipientTransactionalStore{}
-	eb, err := runtimebus.NewEventBus(recordingStore)
+	eb, err := newScopedTestEventBus(recordingStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -906,7 +906,7 @@ func TestEngineOutboxSkipsEmptyNoopIntentBeforeAdmission(t *testing.T) {
 }
 
 func TestEngineDispatcherSkipsEmptyNoopIntentBeforeAdmission(t *testing.T) {
-	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -941,7 +941,7 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 		},
 	}
 	guardSawMaterializedRoute := false
-	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
 		RecipientPlanMaterializer: func(ctx context.Context, evt events.Event, plan runtimebus.PublishRecipientPlan) ([]events.DeliveryRoute, error) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -1008,7 +1008,7 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 			{AgentID: "reviewer-ent-2", EntityID: "ent-2"},
 		},
 	}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1080,7 +1080,7 @@ func TestEngineOutbox_TargetFailureDeadLetterErrorFailsClosed(t *testing.T) {
 	}
 	deadLetterErr := errors.New("dead letter recorder unavailable")
 	store := &directRecipientTransactionalStore{deadLetterErr: deadLetterErr}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1131,7 +1131,7 @@ func TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedMan
 			{AgentID: "agent-a"},
 		},
 	}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1201,7 +1201,7 @@ func TestEngineOutboxAndDispatcher_RoutesPendingInternalDeliveriesToRouteInterce
 	}
 	store := &directRecipientTransactionalStore{}
 	interceptor := &recordingDeliveryRouteInterceptor{}
-	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
 		Interceptors: []runtimebus.EventInterceptor{interceptor},
 	})
 	if err != nil {
@@ -1248,7 +1248,7 @@ func TestEngineOutboxAndDispatcher_RoutesPendingInternalDeliveriesToRouteInterce
 
 func TestEngineDispatcherRunsInterceptorsForPersistedEmitIntents(t *testing.T) {
 	store := &recordingEventStore{}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1278,7 +1278,7 @@ func TestEngineDispatcherRunsInterceptorsForPersistedEmitIntents(t *testing.T) {
 }
 
 func TestEngineDispatcher_FailsClosedWithoutAuthoritativeRecipientManifestOnInMemoryBus(t *testing.T) {
-	eb, err := runtimebus.NewEventBus(nil)
+	eb, err := newScopedTestEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1308,7 +1308,7 @@ func TestEngineDispatcher_FailsClosedWithoutAuthoritativeRecipientManifestOnInMe
 }
 
 func TestEngineDispatcher_DirectIntentUsesExplicitRecipientsWhenManifestWasNotPersisted(t *testing.T) {
-	eb, err := runtimebus.NewEventBus(nil)
+	eb, err := newScopedTestEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1360,7 +1360,7 @@ func TestEngineDispatcher_TransactionalDirectIntentHonorsEmptyPersistedManifest(
 			{AgentID: "reviewer-ent-2", EntityID: "ent-2"},
 		},
 	}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1426,7 +1426,7 @@ func TestPublishDirectInMutationRejectsFilteredExplicitRecipient(t *testing.T) {
 			AgentID: "requester-agent", EntityID: "requester-entity", FlowInstance: "provider/instance-a",
 		}},
 	}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

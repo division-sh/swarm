@@ -219,7 +219,7 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunRequestedHashMismatch(t 
 func TestOperatorRuntimeContextManagerRoutesEventReplayByOriginalRunBundle(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := fixture.handler(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, fixture.pg, "agent-a")
 	chPrimary := fixture.busA.Subscribe("agent-a")
 	defer fixture.busA.Unsubscribe("agent-a")
@@ -281,8 +281,8 @@ func TestOperatorRuntimeContextManagerRoutesAgentDirectiveByStoredBundle(t *test
 	fixture := newOperatorRuntimeContextFixture(t)
 	baseAgent := &directiveIntegrationAgent{id: "agent-1"}
 	selectedAgent := &directiveIntegrationAgent{id: "agent-1"}
-	baseManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busA, baseAgent)
-	selectedManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busB, selectedAgent)
+	baseManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busA, baseAgent, runtimeContextTestSourceFact(runStartTestBundleHash))
+	selectedManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busB, selectedAgent, runtimeContextTestSourceFact(runtimeContextTestBundleHashB))
 	manager := runtimeContextManagerWithRuntimes(t, fixture,
 		&swruntime.Runtime{Bus: fixture.busA, Manager: baseManager},
 		&swruntime.Runtime{Bus: fixture.busB, Manager: selectedManager},
@@ -559,7 +559,7 @@ func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixtur
 	t.Helper()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	seedOperatorBundleDeleteBundle(t, ctx, db, runStartTestBundleHash)
 	seedOperatorBundleDeleteBundle(t, ctx, db, runtimeContextTestBundleHashB)
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
@@ -574,14 +574,14 @@ func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixtur
 			BundleSourceFact: runtimeContextTestSourceFact(runStartTestBundleHash),
 			BundleIdentity:   runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
 			Source:           sourceA,
-			Runtime:          &swruntime.Runtime{Bus: busA},
+			Runtime:          runtimeContextTestRuntime(&swruntime.Runtime{Bus: busA}, runStartTestBundleHash),
 		},
 		swruntime.BundleContext{
 			BundleHash:       runtimeContextTestBundleHashB,
 			BundleSourceFact: runtimeContextTestSourceFact(runtimeContextTestBundleHashB),
 			BundleIdentity:   runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
 			Source:           sourceB,
-			Runtime:          &swruntime.Runtime{Bus: busB},
+			Runtime:          runtimeContextTestRuntime(&swruntime.Runtime{Bus: busB}, runtimeContextTestBundleHashB),
 		},
 	)
 	if err != nil {
@@ -638,6 +638,8 @@ func seedRuntimeContextRunBundle(t *testing.T, db *sql.DB, runID, bundleHash, bu
 
 func runtimeContextManagerWithRuntimes(t *testing.T, fixture operatorRuntimeContextFixture, runtimeA, runtimeB *swruntime.Runtime) *swruntime.RuntimeContextManager {
 	t.Helper()
+	runtimeA = runtimeContextTestRuntime(runtimeA, runStartTestBundleHash)
+	runtimeB = runtimeContextTestRuntime(runtimeB, runtimeContextTestBundleHashB)
 	manager, err := swruntime.NewRuntimeContextManager(fixture.pg,
 		swruntime.BundleContext{
 			BundleHash:       runStartTestBundleHash,
@@ -660,15 +662,24 @@ func runtimeContextManagerWithRuntimes(t *testing.T, fixture operatorRuntimeCont
 	return manager
 }
 
-func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *runtimebus.EventBus, agent *directiveIntegrationAgent) *runtimemanager.AgentManager {
+func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *runtimebus.EventBus, agent *directiveIntegrationAgent, fact runtimecorrelation.BundleSourceFact) *runtimemanager.AgentManager {
 	t.Helper()
-	manager := runtimemanager.NewAgentManager(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
-	}, pg)
+	}, runtimemanager.AgentManagerOptions{BaseContext: testAuthorActivityContextForSource(context.Background(), fact)}, pg)
 	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular"}); err != nil {
 		t.Fatalf("SpawnAgent(%s): %v", agent.id, err)
 	}
 	return manager
+}
+
+func runtimeContextTestRuntime(rt *swruntime.Runtime, bundleHash string) *swruntime.Runtime {
+	if rt == nil {
+		return nil
+	}
+	rt.Options.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
+	rt.Options.BundleSourceFact = runtimeContextTestSourceFact(bundleHash)
+	return rt
 }
 
 func eventPublishExistingRunBody(runID, bundleHash, idempotencyKey string) string {
@@ -733,7 +744,7 @@ func (s *recordingRuntimeContextRunControlStore) totalCalls() int {
 
 func newRuntimeContextTestBus(t *testing.T, pg *store.PostgresStore, source semanticview.Source, bundleHash string) *runtimebus.EventBus {
 	t.Helper()
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle:   source,
 		BundleSourceFact: runtimeContextTestSourceFact(bundleHash),
 	})

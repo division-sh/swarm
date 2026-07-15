@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -25,7 +24,7 @@ func TestListPendingAgentDeliveryDetailsFailsClosedOnNonCanonicalCapabilities(t 
 	}
 	pg.schemaCapsBound = true
 
-	page, err := pg.ListPendingAgentDeliveryDetails(context.Background(), PendingAgentDeliveryListOptions{AgentID: "agent-1"})
+	page, err := pg.ListPendingAgentDeliveryDetails(testAuthorActivityContext(), PendingAgentDeliveryListOptions{AgentID: "agent-1"})
 	if err == nil || !strings.Contains(err.Error(), "event_receipts schema is unsupported") {
 		t.Fatalf("ListPendingAgentDeliveryDetails err=%v page=%+v, want event_receipts capability failure", err, page)
 	}

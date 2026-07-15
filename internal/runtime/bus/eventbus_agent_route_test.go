@@ -11,7 +11,7 @@ import (
 )
 
 func TestEventBusAgentRouteReplacementIsExactFreshAndTokenFenced(t *testing.T) {
-	eb, err := NewEventBus(nil)
+	eb, err := newScopedTestEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

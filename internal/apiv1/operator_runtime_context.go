@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	swruntime "github.com/division-sh/swarm/internal/runtime"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/store"
@@ -101,7 +102,13 @@ func runtimeBundleContextByHash(ctx context.Context, opts OperatorReadOptions, b
 	if fact.BundleHash == "" {
 		fact.BundleHash = bundleHash
 	}
-	return runtimecorrelation.WithBundleSourceFact(ctx, fact), selected, contextDef, nil
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	if contextDef.Runtime != nil {
+		runtimeInstanceID := contextDef.Runtime.Options.RuntimeInstanceID
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
+		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash))
+	}
+	return ctx, selected, contextDef, nil
 }
 
 func runtimeBundleContextByRun(ctx context.Context, opts OperatorReadOptions, runID string) (context.Context, OperatorReadOptions, runbundle.Availability, error) {
@@ -134,7 +141,13 @@ func runtimeBundleContextByRun(ctx context.Context, opts OperatorReadOptions, ru
 	if fact.BundleHash == "" {
 		fact.BundleHash = availability.BundleHash
 	}
-	return runtimecorrelation.WithBundleSourceFact(ctx, fact), selected, availability, nil
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	if contextDef.Runtime != nil {
+		runtimeInstanceID := contextDef.Runtime.Options.RuntimeInstanceID
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
+		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash))
+	}
+	return ctx, selected, availability, nil
 }
 
 func runtimeContextRequiredError(method, reason string) error {

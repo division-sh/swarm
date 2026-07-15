@@ -16,7 +16,7 @@ import (
 )
 
 func TestActivityAttemptJournalSQLiteAndPostgres(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	cases := []struct {
 		name  string
 		store func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool)
@@ -108,7 +108,7 @@ func TestActivityAttemptJournalSQLiteAndPostgres(t *testing.T) {
 }
 
 func TestActivityAttemptJournalPreservesReplyContextAcrossRestart(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	cases := []struct {
 		name  string
 		store func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool)

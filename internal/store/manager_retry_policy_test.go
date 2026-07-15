@@ -26,7 +26,7 @@ func TestUpsertEventReceipt_DeadLettersAfterOneRetry_V2(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.retry_upsert")
 	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
@@ -64,7 +64,7 @@ func TestUpsertEventReceipt_PreservesRetryableVsTerminalDeliveryStatus_V2(t *tes
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.retry_delivery_status")
 	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
@@ -130,7 +130,7 @@ func TestUpsertEventReceipt_PreservesRetryableVsTerminalDeliveryStatus_V2(t *tes
 func TestUpsertEventReceipt_ImmediateTerminalPreservesOriginalFailure_V2(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.immediate_terminal_delivery")
 	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
@@ -153,7 +153,7 @@ func TestUpsertEventReceipt_ImmediateTerminalPreservesOriginalFailure_V2(t *test
 func TestUpsertEventReceipt_DirectDeadLetterIsNotRetryExhaustion_V2(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.direct_dead_letter_delivery")
 	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
@@ -177,7 +177,7 @@ func TestUpsertEventReceipt_AlignsRetryOwnershipOnCanonicalDelivery_V2(t *testin
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.retry_alignment.delivery_backed")
 	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
@@ -248,7 +248,7 @@ func TestUpsertEventReceipt_FailsClosedOnLegacyReceiptOnlyRetryHistory_V2(t *tes
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.retry_legacy_receipt_only")
 	insertLegacyAgentReceiptState(t, ctx, pg, evt.ID(), agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", time.Now().Add(-2*time.Minute))
@@ -297,7 +297,7 @@ func TestUpsertEventReceipt_ConcurrentErrorRetriesAdvanceAtomically_V2(t *testin
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.concurrent_retry_upsert")
 	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
@@ -372,7 +372,7 @@ func TestUpsertEventReceipt_ConcurrentTerminalReceiptsConvergeStandaloneRuntimeR
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentA := seedEntityAndAgent(t, ctx, pg)
 	agentB := "agent-" + uuid.NewString()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
@@ -487,7 +487,7 @@ func TestUpsertEventReceipt_RollsBackReceiptWhenDeliverySyncFails_V2(t *testing.
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.receipt_delivery_atomicity")
 	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
@@ -570,7 +570,7 @@ func TestListPendingEventsForAgent_RetryBackoff_V2(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.pending_direct")
 	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
@@ -625,7 +625,7 @@ func TestListPendingSubscribedEvents_RetryBackoff_V2(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.pending_subscribed")
 	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
@@ -681,7 +681,7 @@ func TestPendingAgentEvents_IgnoreLegacyReceiptOnlyRetryOwner_V2(t *testing.T) {
 			pg, cleanup := newTestPostgresStore(t)
 			defer cleanup()
 
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 			evt := seedEvent(t, ctx, pg, entityID, "test.pending_legacy_retry_owner."+tt.name)
 			insertLegacyAgentReceiptState(t, ctx, pg, evt.ID(), agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", time.Now().Add(-2*time.Minute))
@@ -724,7 +724,7 @@ func TestListPendingAgentDeliveryFacts_IgnoresLegacyReceiptOnlyRetryOwner_V2(t *
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.pending_facts.legacy_receipt_only")
 	insertLegacyAgentReceiptState(t, ctx, pg, evt.ID(), agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", time.Now().Add(-2*time.Minute))
@@ -757,7 +757,7 @@ func TestListPendingAgentDeliveryFacts_AlignsWithCanonicalPendingStates_V2(t *te
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 
 	pendingEvt := seedEvent(t, ctx, pg, entityID, "test.pending_facts.pending")
@@ -808,7 +808,7 @@ func TestListPendingAgentDeliveryDetails_PagesCanonicalQueueTruth_V2(t *testing.
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 
 	pendingEvt := seedEvent(t, ctx, pg, entityID, "test.pending_details.pending")
@@ -929,7 +929,7 @@ func TestListPendingAgentDeliveryFacts_UsesFullPendingHorizon_V2(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.pending_facts.full_horizon")
 	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
@@ -968,7 +968,7 @@ func TestListPendingEventsForAgent_InProgressWithoutReceipt_RemainsPending(t *te
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.pending_in_progress")
 	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
@@ -991,7 +991,7 @@ func TestMarkEventDeliveryInProgress_AllowsRetryableFailedDeliveryClaim_V2(t *te
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.retry_claim.failed")
 	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
@@ -1024,7 +1024,7 @@ func TestListPendingSubscribedEvents_UsesCanonicalMatcherParity(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 
 	deep := seedEvent(t, ctx, pg, entityID, "operating/child/grandchild/opco.launched")
@@ -1125,10 +1125,11 @@ func newTestPostgresStore(t *testing.T) (*store.PostgresStore, func()) {
 	if err != nil {
 		t.Fatalf("new postgres store: %v", err)
 	}
-	if err := pg.Ping(context.Background()); err != nil {
+	if err := pg.Ping(testAuthorActivityContext()); err != nil {
 		_ = pg.DB.Close()
 		t.Fatalf("ping app db: %v", err)
 	}
+	registerExternalTestAuthorActivityCatalog(t, pg)
 	return pg, func() {
 		_ = pg.DB.Close()
 		cleanup()

@@ -304,7 +304,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 
 			bundle := proposedEffectProofBundle(server.URL)
 			source := semanticview.Wrap(bundle)
-			bus, err := runtimebus.NewEventBusWithOptions(selected.events, runtimebus.EventBusOptions{ContractBundle: source})
+			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source}, "support.reply_drafted")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -333,7 +333,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 
 			runID, entityID := uuid.NewString(), uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(context.Background(), runID))
+			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 			if err := selected.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
 				Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "root", "instance_id": entityID},
@@ -559,7 +559,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 		for _, verdict := range []string{"approve", "revise", "reject"} {
 			t.Run(storeCase.name+"/"+verdict, func(t *testing.T) {
 				selected := storeCase.open(t)
-				ctx := context.Background()
+				ctx := testAuthorActivityContext(context.Background())
 				runID, entityID := uuid.NewString(), uuid.NewString()
 				insertGateRecoveryRun(t, selected, runID)
 				now := time.Date(2026, 7, 14, 22, 0, 0, 0, time.UTC)
@@ -705,7 +705,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			bundle.Semantics.NodeHandlers["support"]["support.reply_drafted"] = handler
 
 			source := semanticview.Wrap(bundle)
-			bus, err := runtimebus.NewEventBusWithOptions(selected.events, runtimebus.EventBusOptions{ContractBundle: source})
+			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source}, "support.reply_drafted")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -727,7 +727,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 
 			runID, entityID := uuid.NewString(), uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(context.Background(), runID))
+			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 			if err := selected.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
 				Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "root", "instance_id": entityID},
@@ -811,7 +811,7 @@ func TestDecisionRouteObligationFairnessAdmitsNewWorkBehindFullDeferredPageOnBot
 	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
 		t.Run(tc.name, func(t *testing.T) {
 			selected := tc.open(t)
-			ctx := context.Background()
+			ctx := testAuthorActivityContext(context.Background())
 			runID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
 			deferred := map[string]struct{}{}
@@ -822,7 +822,7 @@ func TestDecisionRouteObligationFairnessAdmitsNewWorkBehindFullDeferredPageOnBot
 				setGateRecoveryRouteAttempt(t, selected, eventID, 1)
 			}
 			newEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC())
-			bus, err := runtimebus.NewEventBusWithOptions(selected.events, runtimebus.EventBusOptions{Interceptors: []runtimebus.EventInterceptor{gateRecoveryFairnessInterceptor{deferred: deferred}}})
+			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{Interceptors: []runtimebus.EventInterceptor{gateRecoveryFairnessInterceptor{deferred: deferred}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -848,19 +848,19 @@ func TestDecisionRouteObligationQuarantinesPoisonAndContinuesOnBothStores(t *tes
 			insertGateRecoveryRun(t, selected, runID)
 			poisonEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC().Add(-time.Minute))
 			validEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC())
-			bus, err := runtimebus.NewEventBusWithOptions(selected.events, runtimebus.EventBusOptions{
+			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				Interceptors: []runtimebus.EventInterceptor{gateRecoveryPoisonInterceptor{poisonEventID: poisonEventID}},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got, err := bus.SweepUndispatched(context.Background(), time.Hour, 10); err != nil || got != 1 {
+			if got, err := bus.SweepUndispatched(testAuthorActivityContext(context.Background()), time.Hour, 10); err != nil || got != 1 {
 				t.Fatalf("poison route sweep recovered = %d, %v; want 1, nil", got, err)
 			}
 			assertGateRecoveryObligationStatus(t, selected, poisonEventID, "quarantined")
 			assertGateRecoveryErrorReceipt(t, selected, poisonEventID, "event_interceptor_failed")
 			assertGateRecoveryProcessedReceipt(t, selected, validEventID)
-			if got, err := bus.SweepUndispatched(context.Background(), time.Hour, 10); err != nil || got != 0 {
+			if got, err := bus.SweepUndispatched(testAuthorActivityContext(context.Background()), time.Hour, 10); err != nil || got != 0 {
 				t.Fatalf("second poison route sweep recovered = %d, %v; want 0, nil", got, err)
 			}
 		})
@@ -878,20 +878,20 @@ func TestDecisionRouteStartupRecoveryQuarantinesPoisonAndContinuesOnBothStores(t
 			insertGateRecoveryRun(t, selected, runID)
 			poisonEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC().Add(-time.Minute))
 			validEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC())
-			bus, err := runtimebus.NewEventBusWithOptions(selected.events, runtimebus.EventBusOptions{
+			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				Interceptors: []runtimebus.EventInterceptor{gateRecoveryPoisonInterceptor{poisonEventID: poisonEventID}},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			recovery := runtimepipeline.NewRecoveryManagerWith(selected.events, bus)
-			if err := recovery.Recover(context.Background()); err != nil {
+			if err := recovery.Recover(testAuthorActivityContext(context.Background())); err != nil {
 				t.Fatalf("startup poison route recovery: %v", err)
 			}
 			assertGateRecoveryObligationStatus(t, selected, poisonEventID, "quarantined")
 			assertGateRecoveryErrorReceipt(t, selected, poisonEventID, "event_interceptor_failed")
 			assertGateRecoveryProcessedReceipt(t, selected, validEventID)
-			if err := recovery.Recover(context.Background()); err != nil {
+			if err := recovery.Recover(testAuthorActivityContext(context.Background())); err != nil {
 				t.Fatalf("second startup poison route recovery: %v", err)
 			}
 		})
@@ -928,7 +928,7 @@ func TestDecisionRouteSettlementFailureDefersAndDoesNotStarveOnBothStores(t *tes
 
 func testDecisionRouteSettlementFailureFairness(t *testing.T, selected gateRecoveryStoreCase, form, recovery string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
 	insertGateRecoveryRun(t, selected, runID)
 	failing := seedGateRecoveryForegroundRoute(t, selected, runID, time.Now().UTC().Add(-2*time.Minute))
@@ -946,7 +946,7 @@ func testDecisionRouteSettlementFailureFairness(t *testing.T, selected gateRecov
 		convergenceCalls = &wrapped.calls
 	}
 	bundle := gateRecoveryContractBundle()
-	bus, err := runtimebus.NewEventBusWithOptions(failingStore, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	bus, err := newScopedTestEventBus(t, failingStore, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1020,12 +1020,12 @@ func testDecisionRouteSettlementFailureFairness(t *testing.T, selected gateRecov
 
 func testDecisionRouteSettlementRetry(t *testing.T, selected gateRecoveryStoreCase, recovery string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	runID, entityID := uuid.NewString(), uuid.NewString()
 	insertGateRecoveryRun(t, selected, runID)
 	ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 	bundle := gateRecoveryTerminalContractBundle()
-	setupBus, err := runtimebus.NewEventBusWithOptions(selected.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	setupBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1071,7 +1071,7 @@ func testDecisionRouteSettlementRetry(t *testing.T, selected gateRecoveryStoreCa
 	} else {
 		failingStore = &failOnceSQLiteNormalRunConvergence{SQLiteRuntimeStore: selected.events.(*store.SQLiteRuntimeStore)}
 	}
-	bus, err := runtimebus.NewEventBusWithOptions(failingStore, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	bus, err := newScopedTestEventBus(t, failingStore, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1121,8 +1121,10 @@ func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForm
 				runID := uuid.NewString()
 				insertGateRecoveryRun(t, selected, runID)
 				fixture := seedGateRecoveryForegroundRoute(t, selected, runID, time.Now().UTC())
-				bus, err := runtimebus.NewEventBusWithOptions(selected.events, runtimebus.EventBusOptions{
-					Interceptors: []runtimebus.EventInterceptor{gateRecoveryPoisonInterceptor{poisonEventID: fixture.event.ID()}},
+				bundle := gateRecoveryContractBundle()
+				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
+					ContractBundle: semanticview.Wrap(bundle),
+					Interceptors:   []runtimebus.EventInterceptor{gateRecoveryPoisonInterceptor{poisonEventID: fixture.event.ID()}},
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -1130,14 +1132,14 @@ func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForm
 
 				switch form {
 				case "synchronous":
-					if err := bus.Publish(context.Background(), fixture.event); err == nil {
+					if err := bus.Publish(testAuthorActivityContext(context.Background()), fixture.event); err == nil {
 						t.Fatal("synchronous poison route publish succeeded, want interceptor failure")
 					}
 				case "acknowledged":
-					if err := bus.PublishAcknowledged(context.Background(), fixture.event); err != nil {
+					if err := bus.PublishAcknowledged(testAuthorActivityContext(context.Background()), fixture.event); err != nil {
 						t.Fatalf("acknowledged poison route publish: %v", err)
 					}
-					waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					waitCtx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 5*time.Second)
 					defer cancel()
 					if err := bus.WaitForQuiescence(waitCtx); err != nil {
 						t.Fatalf("wait for acknowledged poison route: %v", err)
@@ -1147,7 +1149,7 @@ func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForm
 					if !ok {
 						t.Fatalf("event store %T lacks mutation runner", selected.events)
 					}
-					if err := runner.RunEventMutation(context.Background(), func(mutation runtimebus.EventMutation) error {
+					if err := runner.RunEventMutation(testAuthorActivityContext(context.Background()), func(mutation runtimebus.EventMutation) error {
 						return bus.PublishInMutation(mutation.Context(), fixture.event)
 					}); err != nil {
 						t.Fatalf("mutation-bound poison route publish: %v", err)
@@ -1156,8 +1158,8 @@ func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForm
 
 				assertGateRecoveryObligationStatus(t, selected, fixture.event.ID(), "quarantined")
 				assertGateRecoveryErrorReceipt(t, selected, fixture.event.ID(), "event_interceptor_failed")
-				assertGateRecoveryActivation(t, selected.workflowStore, runtimecorrelation.WithRunID(context.Background(), runID), fixture.entityID, "awaiting_review", gateruntime.StatusDecisionCommitted)
-				card, err := selected.cards.GetDecisionCard(context.Background(), fixture.cardID)
+				assertGateRecoveryActivation(t, selected.workflowStore, runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID), fixture.entityID, "awaiting_review", gateruntime.StatusDecisionCommitted)
+				card, err := selected.cards.GetDecisionCard(testAuthorActivityContext(context.Background()), fixture.cardID)
 				if err != nil {
 					t.Fatalf("read quarantined decision card: %v", err)
 				}
@@ -1166,12 +1168,12 @@ func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForm
 				}
 
 				validEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC())
-				if _, err := bus.SweepUndispatched(context.Background(), time.Hour, 10); err != nil {
+				if _, err := bus.SweepUndispatched(testAuthorActivityContext(context.Background()), time.Hour, 10); err != nil {
 					t.Fatalf("sweep unrelated route behind quarantined foreground failure: %v", err)
 				}
 				assertGateRecoveryProcessedReceipt(t, selected, validEventID)
 				assertGateRecoveryObligationStatus(t, selected, validEventID, "completed")
-				if got, err := bus.SweepUndispatched(context.Background(), time.Hour, 10); err != nil || got != 0 {
+				if got, err := bus.SweepUndispatched(testAuthorActivityContext(context.Background()), time.Hour, 10); err != nil || got != 0 {
 					t.Fatalf("second foreground quarantine sweep recovered = %d, %v; want 0, nil", got, err)
 				}
 			})
@@ -1187,10 +1189,10 @@ type gateRecoveryForegroundFixture struct {
 
 func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, runID string, at time.Time) gateRecoveryForegroundFixture {
 	t.Helper()
-	ctx := withLiveGateExecution(runtimecorrelation.WithRunID(context.Background(), runID))
+	ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 	entityID := uuid.NewString()
 	bundle := gateRecoveryContractBundle()
-	setupBus, err := runtimebus.NewEventBusWithOptions(tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	setupBus, err := newScopedTestEventBus(t, tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1266,18 +1268,18 @@ func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, run
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tc.cards.CreateDecisionCard(context.Background(), card); err != nil {
+	if err := tc.cards.CreateDecisionCard(testAuthorActivityContext(context.Background()), card); err != nil {
 		t.Fatal(err)
 	}
 	eventID := uuid.NewString()
-	if _, err := tc.cards.DecideDecisionCard(context.Background(), decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: eventID, Now: at}); err != nil {
+	if _, err := tc.cards.DecideDecisionCard(testAuthorActivityContext(context.Background()), decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: eventID, Now: at}); err != nil {
 		t.Fatal(err)
 	}
 	payload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
 	stageAnchor := recoveryStageAnchor(t, card)
 	evt := eventtest.RuntimeControl(eventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, stageAnchor.EntityID), stageAnchor.FlowInstance), at)
-	if err := tc.events.AppendEvent(context.Background(), evt); err != nil {
+	if err := tc.events.AppendEvent(testAuthorActivityContext(context.Background()), evt); err != nil {
 		t.Fatal(err)
 	}
 	scopeWriter, ok := tc.events.(interface {
@@ -1286,7 +1288,7 @@ func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, run
 	if !ok {
 		t.Fatalf("event store %T lacks replay scope writer", tc.events)
 	}
-	if err := scopeWriter.UpsertCommittedReplayScope(context.Background(), eventID, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+	if err := scopeWriter.UpsertCommittedReplayScope(testAuthorActivityContext(context.Background()), eventID, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 		t.Fatal(err)
 	}
 	return eventID
@@ -1294,7 +1296,7 @@ func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, run
 
 func persistGateRecoveryRouteEvent(t *testing.T, tc gateRecoveryStoreCase, evt events.Event) {
 	t.Helper()
-	if err := tc.events.AppendEvent(context.Background(), evt); err != nil {
+	if err := tc.events.AppendEvent(testAuthorActivityContext(context.Background()), evt); err != nil {
 		t.Fatal(err)
 	}
 	scopeWriter, ok := tc.events.(interface {
@@ -1303,7 +1305,7 @@ func persistGateRecoveryRouteEvent(t *testing.T, tc gateRecoveryStoreCase, evt e
 	if !ok {
 		t.Fatalf("event store %T lacks replay scope writer", tc.events)
 	}
-	if err := scopeWriter.UpsertCommittedReplayScope(context.Background(), evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+	if err := scopeWriter.UpsertCommittedReplayScope(testAuthorActivityContext(context.Background()), evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -1315,7 +1317,7 @@ func setGateRecoveryRouteAttempt(t *testing.T, tc gateRecoveryStoreCase, eventID
 	if tc.postgres {
 		query = `UPDATE decision_card_route_obligations SET attempt_count = $1, next_attempt_at = $2 WHERE event_id = $3::uuid`
 	}
-	if _, err := tc.db.ExecContext(context.Background(), query, args...); err != nil {
+	if _, err := tc.db.ExecContext(testAuthorActivityContext(context.Background()), query, args...); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -1327,7 +1329,7 @@ func assertGateRecoveryObligationAttempt(t *testing.T, tc gateRecoveryStoreCase,
 		query = `SELECT attempt_count FROM decision_card_route_obligations WHERE event_id = $1::uuid`
 	}
 	var got int
-	if err := tc.db.QueryRowContext(context.Background(), query, eventID).Scan(&got); err != nil {
+	if err := tc.db.QueryRowContext(testAuthorActivityContext(context.Background()), query, eventID).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
 	if got != want {
@@ -1344,12 +1346,12 @@ func firstGateRecoveryEventID(ids map[string]struct{}) string {
 
 func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreCase) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	runID, entityID := uuid.NewString(), uuid.NewString()
 	insertGateRecoveryRun(t, tc, runID)
 	ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 	bundle := gateRecoveryTerminalContractBundle()
-	bus, err := runtimebus.NewEventBusWithOptions(tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	bus, err := newScopedTestEventBus(t, tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1420,14 +1422,14 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 
 func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCase) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	insertGateRecoveryRun(t, tc, runID)
 	ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 
 	bundle := gateRecoveryContractBundle()
-	bus, err := runtimebus.NewEventBusWithOptions(tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	bus, err := newScopedTestEventBus(t, tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1539,7 +1541,7 @@ func makeGateRecoveryRouteDue(t *testing.T, tc gateRecoveryStoreCase, eventID st
 	if tc.postgres {
 		query = `UPDATE decision_card_route_obligations SET next_attempt_at = $1 WHERE event_id = $2::uuid`
 	}
-	if _, err := tc.db.ExecContext(context.Background(), query, due.UTC(), eventID); err != nil {
+	if _, err := tc.db.ExecContext(testAuthorActivityContext(context.Background()), query, due.UTC(), eventID); err != nil {
 		t.Fatalf("make decision route obligation due: %v", err)
 	}
 }
@@ -1642,10 +1644,10 @@ func assertProposedEffectProofCounts(t *testing.T, selected gateRecoveryStoreCas
 		attemptQuery = `SELECT COUNT(*) FROM activity_attempts WHERE run_id = $1::uuid`
 	}
 	var gotRequests, gotAttempts int
-	if err := selected.db.QueryRowContext(context.Background(), requestQuery, runID).Scan(&gotRequests); err != nil {
+	if err := selected.db.QueryRowContext(testAuthorActivityContext(context.Background()), requestQuery, runID).Scan(&gotRequests); err != nil {
 		t.Fatal(err)
 	}
-	if err := selected.db.QueryRowContext(context.Background(), attemptQuery, runID).Scan(&gotAttempts); err != nil {
+	if err := selected.db.QueryRowContext(testAuthorActivityContext(context.Background()), attemptQuery, runID).Scan(&gotAttempts); err != nil {
 		t.Fatal(err)
 	}
 	if gotRequests != requests || gotAttempts != attempts {
@@ -1660,7 +1662,7 @@ func assertProposedEffectOutcomeCount(t *testing.T, selected gateRecoveryStoreCa
 		query = `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name = $2`
 	}
 	var got int
-	if err := selected.db.QueryRowContext(context.Background(), query, runID, eventType).Scan(&got); err != nil {
+	if err := selected.db.QueryRowContext(testAuthorActivityContext(context.Background()), query, runID, eventType).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
 	if got != want {
@@ -1670,7 +1672,7 @@ func assertProposedEffectOutcomeCount(t *testing.T, selected gateRecoveryStoreCa
 
 func seedProposedEffectProofDelivery(t *testing.T, selected gateRecoveryStoreCase, evt events.Event, nodeID string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	if err := selected.events.AppendEvent(ctx, evt); err != nil {
 		t.Fatal(err)
 	}
@@ -1694,7 +1696,7 @@ func loadProposedEffectProofRequest(t *testing.T, selected gateRecoveryStoreCase
 	var eventID, eventType, parentID, entityID, flowInstance string
 	var payload []byte
 	var depth int
-	if err := selected.db.QueryRowContext(context.Background(), query, runID).Scan(&eventID, &eventType, &payload, &depth, &parentID, &entityID, &flowInstance); err != nil {
+	if err := selected.db.QueryRowContext(testAuthorActivityContext(context.Background()), query, runID).Scan(&eventID, &eventType, &payload, &depth, &parentID, &entityID, &flowInstance); err != nil {
 		t.Fatal(err)
 	}
 	envelope := events.EnvelopeForEntityID(events.EventEnvelope{}, entityID)
@@ -1739,7 +1741,7 @@ func insertGateRecoveryRun(t *testing.T, tc gateRecoveryStoreCase, runID string)
 	if tc.postgres {
 		query = `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`
 	}
-	if _, err := tc.db.ExecContext(context.Background(), query, runID); err != nil {
+	if _, err := tc.db.ExecContext(testAuthorActivityContext(context.Background()), query, runID); err != nil {
 		t.Fatalf("insert run: %v", err)
 	}
 }
@@ -1767,7 +1769,7 @@ func gateRecoveryPipelineReceiptCount(t *testing.T, tc gateRecoveryStoreCase, ev
 		query = `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
 	}
 	var count int
-	if err := tc.db.QueryRowContext(context.Background(), query, eventID).Scan(&count); err != nil {
+	if err := tc.db.QueryRowContext(testAuthorActivityContext(context.Background()), query, eventID).Scan(&count); err != nil {
 		t.Fatalf("count pipeline receipts: %v", err)
 	}
 	return count
@@ -1780,7 +1782,7 @@ func assertGateRecoveryProcessedReceipt(t *testing.T, tc gateRecoveryStoreCase, 
 		query = `SELECT outcome, COALESCE(reason_code, '') FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
 	}
 	var outcome, reason string
-	if err := tc.db.QueryRowContext(context.Background(), query, eventID).Scan(&outcome, &reason); err != nil {
+	if err := tc.db.QueryRowContext(testAuthorActivityContext(context.Background()), query, eventID).Scan(&outcome, &reason); err != nil {
 		t.Fatalf("load final pipeline receipt: %v", err)
 	}
 	if outcome != "success" || reason != "pipeline_persisted" {
@@ -1795,7 +1797,7 @@ func assertGateRecoveryObligationStatus(t *testing.T, tc gateRecoveryStoreCase, 
 		query = `SELECT status FROM decision_card_route_obligations WHERE event_id = $1::uuid`
 	}
 	var got string
-	if err := tc.db.QueryRowContext(context.Background(), query, eventID).Scan(&got); err != nil || got != want {
+	if err := tc.db.QueryRowContext(testAuthorActivityContext(context.Background()), query, eventID).Scan(&got); err != nil || got != want {
 		t.Fatalf("decision route obligation status = %q, %v; want %q", got, err, want)
 	}
 }
@@ -1807,7 +1809,7 @@ func assertGateRecoveryErrorReceipt(t *testing.T, tc gateRecoveryStoreCase, even
 		query = `SELECT outcome, COALESCE(reason_code, '') FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
 	}
 	var outcome, reason string
-	if err := tc.db.QueryRowContext(context.Background(), query, eventID).Scan(&outcome, &reason); err != nil {
+	if err := tc.db.QueryRowContext(testAuthorActivityContext(context.Background()), query, eventID).Scan(&outcome, &reason); err != nil {
 		t.Fatalf("load quarantined pipeline receipt: %v", err)
 	}
 	if outcome != "dead_letter" || reason != wantReason {
@@ -1822,7 +1824,7 @@ func gateRecoveryOutcomeEventID(t *testing.T, tc gateRecoveryStoreCase, parentEv
 		query = `SELECT event_id::text FROM events WHERE event_name = 'launch.approved' AND source_event_id = $1::uuid`
 	}
 	var eventID string
-	if err := tc.db.QueryRowContext(context.Background(), query, parentEventID).Scan(&eventID); err != nil {
+	if err := tc.db.QueryRowContext(testAuthorActivityContext(context.Background()), query, parentEventID).Scan(&eventID); err != nil {
 		t.Fatalf("load authored outcome event: %v", err)
 	}
 	return eventID
@@ -1835,7 +1837,7 @@ func gateRecoveryOutcomeEventCount(t *testing.T, tc gateRecoveryStoreCase, paren
 		query = `SELECT COUNT(*) FROM events WHERE event_name = 'launch.approved' AND source_event_id = $1::uuid`
 	}
 	var count int
-	if err := tc.db.QueryRowContext(context.Background(), query, parentEventID).Scan(&count); err != nil {
+	if err := tc.db.QueryRowContext(testAuthorActivityContext(context.Background()), query, parentEventID).Scan(&count); err != nil {
 		t.Fatalf("count authored outcome events: %v", err)
 	}
 	return count
@@ -1849,7 +1851,7 @@ func gateRecoveryDeliveryCount(t *testing.T, tc gateRecoveryStoreCase, eventID, 
 		query = `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_id = $2`
 	}
 	var count int
-	if err := tc.db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+	if err := tc.db.QueryRowContext(testAuthorActivityContext(context.Background()), query, args...).Scan(&count); err != nil {
 		t.Fatalf("count authored outcome deliveries: %v", err)
 	}
 	return count

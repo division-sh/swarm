@@ -84,6 +84,7 @@ type SelectedContractForkAuthority struct {
 type ConversationForkChatAuthority struct {
 	ForkTurnID          string
 	ForkID              string
+	BundleHash          string
 	ActorTokenID        string
 	RequestOccurrenceID string
 	RequestHash         string
@@ -145,7 +146,7 @@ func (a Authority) Valid() bool {
 			nonEmpty(a.SelectedFork.AdmissionFingerprint, a.SelectedFork.ContainerPlanFingerprint, a.SelectedFork.ActorCensusFingerprint, a.SelectedFork.EffectiveConfigFingerprint)
 	case AuthorityConversationForkChat:
 		return validUUIDs(a.ForkChat.ForkTurnID, a.ForkChat.ForkID, a.ForkChat.RequestOccurrenceID) &&
-			a.ID == strings.TrimSpace(a.ForkChat.ForkTurnID) && nonEmpty(a.ForkChat.ActorTokenID, a.ForkChat.RequestHash)
+			a.ID == strings.TrimSpace(a.ForkChat.ForkTurnID) && nonEmpty(a.ForkChat.BundleHash, a.ForkChat.ActorTokenID, a.ForkChat.RequestHash)
 	case AuthorityStartupProbe:
 		return validUUIDs(a.StartupProbe.ProbeID, a.StartupProbe.StartupAuthorityID) &&
 			a.ID == strings.TrimSpace(a.StartupProbe.ProbeID) && a.StartupProbe.StartupStateVersion > 0 &&
@@ -209,6 +210,7 @@ func (a Authority) Evidence() map[string]any {
 	case AuthorityConversationForkChat:
 		evidence["fork_turn_id"] = a.ForkChat.ForkTurnID
 		evidence["fork_id"] = a.ForkChat.ForkID
+		evidence["bundle_hash"] = a.ForkChat.BundleHash
 		evidence["actor_token_id"] = a.ForkChat.ActorTokenID
 		evidence["request_occurrence_id"] = a.ForkChat.RequestOccurrenceID
 		evidence["request_hash"] = a.ForkChat.RequestHash

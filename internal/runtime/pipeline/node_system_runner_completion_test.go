@@ -32,7 +32,7 @@ func (b *systemNodeCompletionBus) ConvergeNormalRunCompletionForEvent(_ context.
 
 func TestSystemNodeRunner_MarkProcessedSettlesNodeDeliveryAndTriggersNormalRunCompletion(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -122,7 +122,7 @@ func TestSystemNodeRunner_MarkProcessedSettlesNodeDeliveryAndTriggersNormalRunCo
 
 func TestSystemNodeRunner_TargetSetSameNodeSettlesEachTargetDelivery(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -184,7 +184,7 @@ func TestSystemNodeRunner_TargetSetSameNodeSettlesEachTargetDelivery(t *testing.
 
 func TestSystemNodeRunner_TargetSetSameNodeFailureKeepsSiblingPending(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -235,7 +235,7 @@ func TestSystemNodeRunner_TargetSetSameNodeFailureKeepsSiblingPending(t *testing
 
 func TestSystemNodeRunner_TargetSetSameNodeDeadLetterKeepsSiblingExecutable(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -281,7 +281,7 @@ func TestSystemNodeRunner_TargetSetSameNodeDeadLetterKeepsSiblingExecutable(t *t
 func TestSQLiteSystemNodeTargetSetSameNodeTransitionsAreTargetScoped(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -347,7 +347,7 @@ func TestSQLiteSystemNodeTargetSetSameNodeTransitionsAreTargetScoped(t *testing.
 
 func TestSystemNodeRunnerLifecycleProbeEmitsHandlerBoundaries(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -447,7 +447,7 @@ func TestSystemNodeRunnerLifecycleProbeEmitsHandlerBoundaries(t *testing.T) {
 
 func TestSystemNodeRunner_RetryableFailureWritesFailedBeforeRetry(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -519,7 +519,7 @@ func TestSystemNodeRunner_RetryableFailureWritesFailedBeforeRetry(t *testing.T) 
 
 func TestSystemNodeRunner_RetryableFailureExhaustsConfiguredRetryLimit(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -578,7 +578,7 @@ func TestSystemNodeRunner_RetryableFailureExhaustsConfiguredRetryLimit(t *testin
 
 func TestSystemNodeRunner_PipelineNamedNodeDoesNotMaskPlatformReceipt(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -641,7 +641,7 @@ func TestSystemNodeRunner_PipelineNamedNodeDoesNotMaskPlatformReceipt(t *testing
 
 func TestSystemNodeProcessedSettlementFailsWithoutNodeDeliveryAuthority(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -691,7 +691,7 @@ func TestSystemNodeProcessedSettlementFailsWithTerminalNodeDeliveryAuthority(t *
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
-			ctx := context.Background()
+			ctx := testAuthorActivityContext(context.Background())
 			runID := uuid.NewString()
 			eventID := uuid.NewString()
 			entityID := uuid.NewString()
@@ -756,7 +756,7 @@ func seedSystemNodeCompletionRun(t *testing.T, db *sql.DB, runID, eventID, entit
 		nodeID = nodeIDs[0]
 	}
 	seedSystemNodeCompletionEventWithoutDelivery(t, db, runID, eventID, entityID)
-	if _, err := db.ExecContext(context.Background(), `
+	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
 		) VALUES (
@@ -769,7 +769,7 @@ func seedSystemNodeCompletionRun(t *testing.T, db *sql.DB, runID, eventID, entit
 
 func seedSQLiteSystemNodeCompletionEventWithoutDelivery(t *testing.T, db *sql.DB, runID, eventID, entityID string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	now := time.Now().UTC()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, started_at)
@@ -792,7 +792,7 @@ func seedSQLiteSystemNodeCompletionEventWithoutDelivery(t *testing.T, db *sql.DB
 
 func seedSystemNodeCompletionTargetDelivery(t *testing.T, db *sql.DB, runID, eventID, nodeID string, target events.RouteIdentity) {
 	t.Helper()
-	if _, err := db.ExecContext(context.Background(), `
+	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, delivery_target_route, status, reason_code, created_at
 		) VALUES (
@@ -805,7 +805,7 @@ func seedSystemNodeCompletionTargetDelivery(t *testing.T, db *sql.DB, runID, eve
 
 func seedSQLiteSystemNodeCompletionTargetDelivery(t *testing.T, db *sql.DB, runID, eventID, nodeID string, target events.RouteIdentity) {
 	t.Helper()
-	if _, err := db.ExecContext(context.Background(), `
+	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `
 		INSERT INTO event_deliveries (
 			delivery_id, run_id, event_id, subscriber_type, subscriber_id, delivery_target_route, status, retry_count, reason_code, created_at
 		) VALUES (
@@ -825,7 +825,7 @@ func loadSystemNodeCompletionTargetDelivery(t *testing.T, db *sql.DB, eventID, n
 	t.Helper()
 	var delivery systemNodeCompletionTargetDelivery
 	var failureRaw []byte
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(retry_count, 0), failure
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
@@ -848,7 +848,7 @@ func loadSQLiteSystemNodeCompletionTargetDelivery(t *testing.T, db *sql.DB, even
 	t.Helper()
 	var delivery systemNodeCompletionTargetDelivery
 	var failureRaw []byte
-	if err := db.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(retry_count, 0), failure
 		FROM event_deliveries
 		WHERE event_id = ?
@@ -876,7 +876,7 @@ func decodeTestPipelineFailure(t testing.TB, raw []byte) *runtimefailures.Envelo
 
 func seedSystemNodeCompletionEventWithoutDelivery(t *testing.T, db *sql.DB, runID, eventID, entityID string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, started_at)
 		VALUES ($1::uuid, 'running', now())

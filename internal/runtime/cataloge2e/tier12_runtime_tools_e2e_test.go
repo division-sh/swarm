@@ -46,7 +46,7 @@ func TestTier12RuntimeTools_FlowDataAccessFixture(t *testing.T) {
 		t.Fatalf("flow_data_access exposed native file tools: %#v", names)
 	}
 
-	out, err := h.rt.ToolExecutor.Execute(models.WithActor(context.Background(), cfg), "read_flow_data", map[string]any{
+	out, err := h.rt.ToolExecutor.Execute(models.WithActor(testAuthorActivityContext(context.Background()), cfg), "read_flow_data", map[string]any{
 		"filename": "exclusions.yaml",
 	})
 	if err != nil {
@@ -64,14 +64,14 @@ func TestTier12RuntimeTools_FlowDataAccessFixture(t *testing.T) {
 		t.Fatalf("content_type = %q, want yaml", got)
 	}
 
-	if _, err := h.rt.ToolExecutor.Execute(models.WithActor(context.Background(), cfg), "read_flow_data", map[string]any{
+	if _, err := h.rt.ToolExecutor.Execute(models.WithActor(testAuthorActivityContext(context.Background()), cfg), "read_flow_data", map[string]any{
 		"filename": "undeclared.yaml",
 	}); err == nil {
 		t.Fatal("undeclared read unexpectedly succeeded")
 	} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassSchemaInvalid || failure.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("undeclared read failure = %#v, want fail-closed schema rejection", failure)
 	}
-	if _, err := h.rt.ToolExecutor.Execute(models.WithActor(context.Background(), cfg), "read_flow_data", map[string]any{
+	if _, err := h.rt.ToolExecutor.Execute(models.WithActor(testAuthorActivityContext(context.Background()), cfg), "read_flow_data", map[string]any{
 		"filename": "../support/data/exclusions.yaml",
 	}); err == nil {
 		t.Fatal("traversal read succeeded, want fail-closed error")
@@ -84,7 +84,7 @@ func TestTier12RuntimeTools_FlowDataAccessFixture(t *testing.T) {
 	if defs := h.rt.ToolExecutor.ToolDefinitionsForActor(other); containsTier12String(toolNamesForTier12RuntimeTools(defs), "read_flow_data") {
 		t.Fatalf("undeclared actor saw read_flow_data definitions: %#v", toolNamesForTier12RuntimeTools(defs))
 	}
-	if _, err := h.rt.ToolExecutor.Execute(models.WithActor(context.Background(), other), "read_flow_data", map[string]any{
+	if _, err := h.rt.ToolExecutor.Execute(models.WithActor(testAuthorActivityContext(context.Background()), other), "read_flow_data", map[string]any{
 		"filename": "exclusions.yaml",
 	}); err == nil {
 		t.Fatal("undeclared actor read flow data, want fail-closed error")

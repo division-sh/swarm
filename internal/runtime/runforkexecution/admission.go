@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/runbundle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 type SelectedContractBindingReader interface {
@@ -40,6 +41,7 @@ type LoadedSelectedContractSource struct {
 	Source                 semanticview.Source
 	Module                 runtimepipeline.WorkflowModule
 	BundleHash             string
+	BundleSource           string
 	MockConnectorResponses *providerconnectors.MockResponsePlan
 	Cleanup                func() error
 }
@@ -113,6 +115,10 @@ func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx contex
 	if err := runtimecontracts.ValidateBundlePlatformVersionCompatibility(bundle); err != nil {
 		return LoadedSelectedContractSource{}, fmt.Errorf("selected-contract source admission failed: %w", err)
 	}
+	bundleHash, err := runtimecontracts.BundleHash(bundle)
+	if err != nil {
+		return LoadedSelectedContractSource{}, fmt.Errorf("hash selected-contract source: %w", err)
+	}
 	source, mockConnectorResponses, err := compileSelectedContractSource(semanticview.Wrap(bundle))
 	if err != nil {
 		return LoadedSelectedContractSource{}, err
@@ -137,6 +143,8 @@ func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx contex
 	return LoadedSelectedContractSource{
 		Selection:              selection,
 		Source:                 source,
+		BundleHash:             bundleHash,
+		BundleSource:           storerunlifecycle.BundleSourceEphemeral,
 		MockConnectorResponses: mockConnectorResponses,
 		Module: selectedContractWorkflowModule{
 			source:         source,
@@ -243,6 +251,7 @@ func (l BundleCatalogSelectedContractSourceLoader) LoadRunForkSelectedContractSo
 		Selection:              selection,
 		Source:                 source,
 		BundleHash:             bundleHash,
+		BundleSource:           storerunlifecycle.BundleSourcePersisted,
 		MockConnectorResponses: mockConnectorResponses,
 		Module: selectedContractWorkflowModule{
 			source:         source,

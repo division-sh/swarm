@@ -240,6 +240,7 @@ type externalEffectStorySource struct {
 	AgentID       string
 	ExecutionMode string
 	Ordinal       int
+	BundleHash    string
 }
 
 func externalEffectStorySourceFromAttempt(attempt runtimeeffects.Attempt) externalEffectStorySource {
@@ -254,7 +255,7 @@ func externalEffectStorySourceFromAttempt(attempt runtimeeffects.Attempt) extern
 func loadExternalEffectStorySource(ctx context.Context, tx *sql.Tx, attemptID string, postgres bool) (externalEffectStorySource, error) {
 	query := `
 		SELECT CAST(a.attempt_id AS TEXT), o.effect_kind, o.effect_class, a.adapter, a.transport,
-		       o.authority_kind, o.authority_id, COALESCE(o.agent_id, ''), o.execution_mode, a.attempt_ordinal
+		       o.authority_kind, o.authority_id, COALESCE(o.agent_id, ''), o.execution_mode, a.attempt_ordinal, o.bundle_hash
 		FROM runtime_external_effect_attempts a
 		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
 		WHERE a.attempt_id = ?
@@ -262,7 +263,7 @@ func loadExternalEffectStorySource(ctx context.Context, tx *sql.Tx, attemptID st
 	if postgres {
 		query = `
 			SELECT a.attempt_id::text, o.effect_kind, o.effect_class, a.adapter, a.transport,
-			       o.authority_kind, o.authority_id, COALESCE(o.agent_id, ''), o.execution_mode, a.attempt_ordinal
+			       o.authority_kind, o.authority_id, COALESCE(o.agent_id, ''), o.execution_mode, a.attempt_ordinal, o.bundle_hash
 			FROM runtime_external_effect_attempts a
 			JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
 			WHERE a.attempt_id = $1::uuid
@@ -271,7 +272,7 @@ func loadExternalEffectStorySource(ctx context.Context, tx *sql.Tx, attemptID st
 	var source externalEffectStorySource
 	if err := tx.QueryRowContext(ctx, query, strings.TrimSpace(attemptID)).Scan(
 		&source.AttemptID, &source.Kind, &source.Class, &source.Adapter, &source.Transport,
-		&source.AuthorityKind, &source.AuthorityID, &source.AgentID, &source.ExecutionMode, &source.Ordinal,
+		&source.AuthorityKind, &source.AuthorityID, &source.AgentID, &source.ExecutionMode, &source.Ordinal, &source.BundleHash,
 	); err != nil {
 		return externalEffectStorySource{}, fmt.Errorf("load external effect author activity source: %w", err)
 	}
@@ -326,10 +327,19 @@ func recordExternalEffectStory(ctx context.Context, source externalEffectStorySo
 	transition := string(state)
 	attempt := source.Ordinal
 	identity := source.AttemptID + ":" + transition
+	var scope runtimeauthoractivity.Scope
+	if strings.TrimSpace(source.BundleHash) != "" {
+		current, ok := runtimeauthoractivity.ScopeFromContext(ctx)
+		if !ok || strings.TrimSpace(current.RuntimeInstanceID) == "" {
+			return fmt.Errorf("external effect author activity requires current runtime scope")
+		}
+		scope = runtimeauthoractivity.BundleScope(current.RuntimeInstanceID, source.BundleHash)
+	}
 	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindEffectLifecycle, Transition: transition,
 		SourceOwner: "runtime_external_effect_attempts", SourceIdentity: identity, DedupKey: "effect:" + identity,
 		OccurredAt: occurredAt.UTC(), AgentID: source.AgentID,
+		Scope: scope,
 		Projection: runtimeauthoractivity.Projection{
 			EffectClass: source.Class, Attempt: &attempt, Adapter: source.Adapter, Transport: source.Transport,
 			AuthorityKind: source.AuthorityKind, AuthorityID: source.AuthorityID, ExecutionMode: source.ExecutionMode,
@@ -653,6 +663,10 @@ func supersededExternalAttempt(token runtimeeffects.LifecycleToken, currentEpoch
 }
 
 func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
+	bundleHash, err := requiredExternalEffectBundleHash(ctx, authority)
+	if err != nil {
+		return runtimeeffects.Attempt{}, err
+	}
 	lineage, _ := json.Marshal(req.Lineage)
 	authorityEvidence, _ := json.Marshal(authority.Evidence())
 	capabilitySurfaceID, capabilityPlan, err := persistManagedCapabilitySurfacePostgres(ctx, tx, req.CapabilitySurface)
@@ -661,12 +675,12 @@ func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority ru
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runtime_external_effect_operations (
-			operation_id, effect_kind, effect_class, execution_mode, authority_kind, authority_id,
+			operation_id, effect_kind, effect_class, execution_mode, bundle_hash, authority_kind, authority_id,
 			agent_id, runtime_epoch, generation, selected_execution_id, fork_turn_id, startup_authority_id,
 			capability_plan_fingerprint, authority_evidence, lineage, request_fingerprint, state, created_at, updated_at
-		) VALUES ($1::uuid, $2, $3, $4, $5, $6, NULLIF($7,''), NULLIF($8,0), $9,
-		          NULLIF($10,'')::uuid, NULLIF($11,'')::uuid, NULLIF($12,'')::uuid, NULLIF($13,''), $14::jsonb, $15::jsonb, $16, 'authorized', $17, $17)
-	`, req.OperationID, string(req.Kind), string(req.Class), authority.ExecutionMode, string(authority.Kind), authority.ID,
+		) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, NULLIF($8,''), NULLIF($9,0), $10,
+		          NULLIF($11,'')::uuid, NULLIF($12,'')::uuid, NULLIF($13,'')::uuid, NULLIF($14,''), $15::jsonb, $16::jsonb, $17, 'authorized', $18, $18)
+	`, req.OperationID, string(req.Kind), string(req.Class), authority.ExecutionMode, bundleHash, string(authority.Kind), authority.ID,
 		authority.Normal.AgentID, authority.RuntimeEpoch(), authority.Generation(), authority.SelectedFork.ExecutionID, authority.ForkChat.ForkTurnID,
 		authority.StartupProbe.StartupAuthorityID, capabilityPlan, string(authorityEvidence), string(lineage), req.RequestFingerprint, req.Now.UTC()); err != nil {
 		return runtimeeffects.Attempt{}, fmt.Errorf("insert external effect operation: %w", err)
@@ -687,6 +701,10 @@ func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority ru
 }
 
 func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
+	bundleHash, err := requiredExternalEffectBundleHash(ctx, authority)
+	if err != nil {
+		return runtimeeffects.Attempt{}, err
+	}
 	lineage, _ := json.Marshal(req.Lineage)
 	authorityEvidence, _ := json.Marshal(authority.Evidence())
 	capabilitySurfaceID, capabilityPlan, err := persistManagedCapabilitySurfaceSQLite(ctx, tx, req.CapabilitySurface)
@@ -695,11 +713,11 @@ func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority ru
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runtime_external_effect_operations (
-			operation_id, effect_kind, effect_class, execution_mode, authority_kind, authority_id,
+			operation_id, effect_kind, effect_class, execution_mode, bundle_hash, authority_kind, authority_id,
 			agent_id, runtime_epoch, generation, selected_execution_id, fork_turn_id, startup_authority_id,
 			capability_plan_fingerprint, authority_evidence, lineage, request_fingerprint, state, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?,''), NULLIF(?,0), ?, NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), ?, ?, ?, 'authorized', ?, ?)
-	`, req.OperationID, string(req.Kind), string(req.Class), authority.ExecutionMode, string(authority.Kind), authority.ID,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?,''), NULLIF(?,0), ?, NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), ?, ?, ?, 'authorized', ?, ?)
+	`, req.OperationID, string(req.Kind), string(req.Class), authority.ExecutionMode, bundleHash, string(authority.Kind), authority.ID,
 		authority.Normal.AgentID, authority.RuntimeEpoch(), authority.Generation(), authority.SelectedFork.ExecutionID, authority.ForkChat.ForkTurnID,
 		authority.StartupProbe.StartupAuthorityID, capabilityPlan, string(authorityEvidence), string(lineage), req.RequestFingerprint, req.Now.UTC(), req.Now.UTC()); err != nil {
 		return runtimeeffects.Attempt{}, fmt.Errorf("insert sqlite external effect operation: %w", err)
@@ -716,6 +734,18 @@ func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority ru
 		return runtimeeffects.Attempt{}, fmt.Errorf("insert sqlite external effect attempt: %w", err)
 	}
 	return externalAuthorizedAttempt(authority, req, req.AttemptID, 1), nil
+}
+
+func requiredExternalEffectBundleHash(ctx context.Context, authority runtimeeffects.Authority) (string, error) {
+	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
+	if !ok || scope.Kind != runtimeauthoractivity.ScopeBundle || strings.TrimSpace(scope.BundleHash) == "" {
+		return "", fmt.Errorf("external effect operation requires exact author activity bundle scope")
+	}
+	bundleHash := strings.TrimSpace(scope.BundleHash)
+	if authority.Kind == runtimeeffects.AuthorityConversationForkChat && bundleHash != strings.TrimSpace(authority.ForkChat.BundleHash) {
+		return "", fmt.Errorf("external effect operation bundle scope conflicts with forkchat source bundle")
+	}
+	return bundleHash, nil
 }
 
 func externalAuthorizedAttempt(authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, attemptID string, ordinal int) runtimeeffects.Attempt {

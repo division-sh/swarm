@@ -20,13 +20,13 @@ import (
 )
 
 func TestSQLiteObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	fixture := newSQLiteObservabilitySurfaceFixture(t, ctx)
 	assertObservabilityOwnerBacksSupportedAPISurfaces(t, fixture)
 }
 
 func TestPostgresObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	fixture := newPostgresObservabilitySurfaceFixture(t, ctx)
 	assertObservabilityOwnerBacksSupportedAPISurfaces(t, fixture)
 }
@@ -281,6 +281,11 @@ type observabilityFixtureStore interface {
 
 func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store observabilityFixtureStore) observabilitySurfaceFixture {
 	t.Helper()
+	registrar, ok := store.(authorActivityTestCatalogRegistrar)
+	if !ok {
+		t.Fatal("observability fixture store does not implement the author activity catalog registry")
+	}
+	registerScopedAPITestCatalog(t, registrar, nil)
 
 	now := time.Now().UTC().Add(-2 * time.Minute)
 	runID := uuid.NewString()

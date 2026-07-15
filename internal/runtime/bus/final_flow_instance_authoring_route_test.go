@@ -50,7 +50,7 @@ func (s *finalFlowInstanceAuthoringLifecycleStore) Activate(ctx context.Context,
 func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsReplayableTemplateTarget(t *testing.T) {
 	source := finalflowinstanceauthoring.LoadSource(t, finalflowinstanceauthoring.Options{})
 	store := &finalFlowInstanceAuthoringLifecycleStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:            source,
 		TemplateInstanceActivator: store.Activate,
 	})
@@ -188,7 +188,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 				targetRouteMemoryStore: newTargetRouteMemoryStore(),
 				flowInstances:          tc.flowInstances,
 			}
-			eb, err := NewEventBusWithOptions(store, EventBusOptions{
+			eb, err := newScopedTestEventBus(store, EventBusOptions{
 				ContractBundle: source,
 				TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 					t.Fatal("fail-closed route must not activate a template instance")

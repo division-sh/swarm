@@ -16,8 +16,8 @@ import (
 func TestPostgresStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	store := &PostgresStore{DB: db}
-	ctx := context.Background()
+	store := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 	if _, err := store.BindSchemaCapabilities(ctx); err != nil {
 		t.Fatalf("BindSchemaCapabilities: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestPostgresStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner(t *t
 
 func TestSQLiteRuntimeStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()

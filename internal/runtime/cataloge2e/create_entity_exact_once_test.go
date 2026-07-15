@@ -13,7 +13,7 @@ import (
 func TestCatalogRejectsStaticCreateEntityHandlerFixture(t *testing.T) {
 	fixtureRoot := writeCreateEntityExactOnceFixture(t)
 	bundle := loadFixtureBundle(t, fixtureRoot)
-	report := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{})
+	report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), runtimebootverify.Options{})
 
 	if !catalogCreateEntityFindingContains(report.Errors(), "flow_boundary_create_entity_validation", "static multi-row entity ownership is retired") {
 		t.Fatalf("expected retired static create_entity validation error, got %#v", report.Errors())
@@ -40,7 +40,7 @@ func catalogCreateEntityFindingContains(findings []runtimebootverify.Finding, ch
 func assertCatalogMutationCount(t *testing.T, h *runtimeHarness, eventID, field, writerID, handlerStep string, want int) {
 	t.Helper()
 	var got int
-	if err := h.db.QueryRowContext(context.Background(), `
+	if err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COUNT(*)
 		FROM entity_mutations
 		WHERE caused_by_event = $1::uuid
@@ -58,7 +58,7 @@ func assertCatalogMutationCount(t *testing.T, h *runtimeHarness, eventID, field,
 func assertCatalogReceiptCount(t *testing.T, h *runtimeHarness, eventID, nodeID string, want int) {
 	t.Helper()
 	var got int
-	if err := h.db.QueryRowContext(context.Background(), `
+	if err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COUNT(*)
 		FROM event_receipts
 		WHERE event_id = $1::uuid
@@ -75,7 +75,7 @@ func assertCatalogReceiptCount(t *testing.T, h *runtimeHarness, eventID, nodeID 
 func assertCatalogDeliveryStatusCount(t *testing.T, h *runtimeHarness, eventID, nodeID, status string, want int) {
 	t.Helper()
 	var got int
-	if err := h.db.QueryRowContext(context.Background(), `
+	if err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COUNT(*)
 		FROM event_deliveries
 		WHERE event_id = $1::uuid

@@ -45,7 +45,7 @@ func TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext(t 
 			if !ok {
 				t.Fatalf("%s store lacks reply continuation surface", tc.name)
 			}
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
 			requestEventID := uuid.NewString()
 			if err := seed(ctx, runID, requestEventID); err != nil {
@@ -161,7 +161,7 @@ func TestReplyContextStore_BackendParityAtomicClaimAndDeliveryReadback(t *testin
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, seed := tc.setup(t)
-			ctx := context.Background()
+			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
 			requestEventID := uuid.NewString()
 			collisionEventID := uuid.NewString()

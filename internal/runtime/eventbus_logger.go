@@ -18,7 +18,7 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
-func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, source semanticview.Source, bundleFingerprint string, bundleSourceFact runtimecorrelation.BundleSourceFact, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator, templateInstanceActivator runtimepipeline.FlowInstanceActivator, providerOutputVerifier runtimebus.ProviderOutputAuthorizationVerifier, testLifecycleProbe runtimelifecycleprobe.Observer) (*runtimebus.EventBus, error) {
+func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, source semanticview.Source, bundleFingerprint string, bundleSourceFact runtimecorrelation.BundleSourceFact, runtimeInstanceID string, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator, templateInstanceActivator runtimepipeline.FlowInstanceActivator, providerOutputVerifier runtimebus.ProviderOutputAuthorizationVerifier, testLifecycleProbe runtimelifecycleprobe.Observer) (*runtimebus.EventBus, error) {
 	var hook runtimebus.LoggerHook
 	if logger != nil {
 		hook = runtimeLoggerHook{logger: logger}
@@ -31,6 +31,7 @@ func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, sour
 		PayloadValidator:          payloadValidator,
 		BundleFingerprint:         bundleFingerprint,
 		BundleSourceFact:          bundleSourceFact,
+		RuntimeInstanceID:         strings.TrimSpace(runtimeInstanceID),
 		TestLifecycleProbe:        testLifecycleProbe,
 		ProviderOutputVerifier:    providerOutputVerifier,
 	})

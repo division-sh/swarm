@@ -1,7 +1,6 @@
 package runbundle
 
 import (
-	"context"
 	"database/sql"
 	"testing"
 
@@ -16,7 +15,7 @@ const (
 
 func TestLoadAvailabilityClassifiesBundleSourceStates(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 
 	persistedPresent := seedRunBundleAvailability(t, db, "running", testBundleHash, storerunlifecycle.BundleSourcePersisted, "")
 	persistedMissing := seedRunBundleAvailability(t, db, "running", "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222", storerunlifecycle.BundleSourcePersisted, "")
@@ -68,7 +67,7 @@ func TestLoadAvailabilityClassifiesBundleSourceStates(t *testing.T) {
 
 func TestLoadAvailabilityClassifiesPersistedMissingHashAsDataIntegrity(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	runID := seedRunBundleAvailability(t, db, "running", "", storerunlifecycle.BundleSourcePersisted, "")
 
 	availability, err := LoadAvailability(ctx, db, runID)
@@ -82,7 +81,7 @@ func TestLoadAvailabilityClassifiesPersistedMissingHashAsDataIntegrity(t *testin
 
 func TestLoadAvailabilityReadsSourceBeforeBundleRows(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	runID := seedRunBundleAvailability(t, db, "running", "", storerunlifecycle.BundleSourceLegacy, testBundleHash)
 	if _, err := db.ExecContext(ctx, `DROP TABLE bundles`); err != nil {
 		t.Fatalf("drop bundles table: %v", err)
@@ -99,7 +98,7 @@ func TestLoadAvailabilityReadsSourceBeforeBundleRows(t *testing.T) {
 
 func TestListActiveConflictsUsesAvailabilityOwner(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	persistedPresent := seedRunBundleAvailability(t, db, "running", testBundleHash, storerunlifecycle.BundleSourcePersisted, "")
 	legacy := seedRunBundleAvailability(t, db, "paused", "", storerunlifecycle.BundleSourceLegacy, "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	completedLegacy := seedRunBundleAvailability(t, db, "completed", "", storerunlifecycle.BundleSourceLegacy, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")

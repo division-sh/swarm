@@ -394,6 +394,8 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 	cmd.Flags().BoolVar(&opts.NoRequireBundleMatch, "no-require-bundle-match", opts.NoRequireBundleMatch, "Allow startup even when active runs have unavailable bundle source state")
 	cmd.Flags().BoolVar(&opts.AbandonActiveRuns, "abandon-active-runs", opts.AbandonActiveRuns, "Cancel active runs and quiesce recoverable work before startup recovery")
 	cmd.Flags().BoolVarP(&opts.Verbose, "verbose", "v", opts.Verbose, "Render the canonical serve boot sequence after startup succeeds or fails")
+	cmd.Flags().BoolVar(&opts.NoFeed, "no-feed", opts.NoFeed, "Disable the development author story feed after readiness")
+	cmd.Flags().BoolVar(&opts.NoColor, "no-color", opts.NoColor, "Disable ANSI color in human-readable serve output")
 	return cmd
 }
 

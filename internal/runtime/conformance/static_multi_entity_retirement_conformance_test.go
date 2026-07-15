@@ -53,7 +53,7 @@ func TestStaticMultiEntityRetirementConformance(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			source := loadCanonicalRoutingSource(t, canonicalrouting.CopyStaticMultiEntityRetirement(t, tc.handler))
-			report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+			report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 			if tc.checkID != "" {
 				if !staticMultiEntityRetirementFindingContains(report.Errors(), tc.checkID, tc.wantMessage) {
 					t.Fatalf("bootverify errors = %#v, want %s containing %q", report.Errors(), tc.checkID, tc.wantMessage)
@@ -103,7 +103,7 @@ func TestRootDefaultStaticMultiEntityRetirementConformance(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			source := loadCanonicalRoutingSource(t, canonicalrouting.CopyRootDefaultStaticInput(t, tc.handler, tc.entityID))
-			report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+			report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 			if tc.checkID != "" {
 				if !staticMultiEntityRetirementFindingContains(report.Errors(), tc.checkID, tc.wantMessage) {
 					t.Fatalf("bootverify errors = %#v, want %s containing root/default-static implicit materialization retirement", report.Errors(), tc.checkID)

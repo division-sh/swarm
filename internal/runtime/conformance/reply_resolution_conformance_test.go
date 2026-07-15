@@ -35,7 +35,7 @@ import (
 
 func TestReplyResolutionConformance_BootAndLoweringExposePairedLoop(t *testing.T) {
 	source := templatereply.LoadSource(t, templatereply.Options{})
-	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+	report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {
 		t.Fatalf("template reply hard invalidities = %#v, want none", got)
 	}
@@ -68,14 +68,14 @@ func TestReplyResolutionConformance_BootAndLoweringExposePairedLoop(t *testing.T
 }
 
 func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	source := templatereply.LoadSource(t, templatereply.Options{DefaultEventIDCorrelation: true})
 	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {
 		t.Fatalf("default-correlation hard invalidities = %#v", got)
 	}
 	store := newReplyConformanceStore()
-	eb, err := bus.NewEventBusWithOptions(store, bus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestReplyResolutionConformance_VerifierFailsClosedForInvalidPairedTopology(
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := templatereply.LoadSource(t, tc.opts)
-			report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+			report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 			found := false
 			for _, finding := range report.HardInvalidities() {
 				if strings.Contains(finding.Message, tc.want) {
@@ -131,10 +131,10 @@ func TestReplyResolutionConformance_VerifierFailsClosedForInvalidPairedTopology(
 }
 
 func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPersistedContext(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	source := templatereply.LoadSource(t, templatereply.Options{ExplicitCorrelation: true})
 	store := newReplyConformanceStore()
-	eb, err := bus.NewEventBusWithOptions(store, bus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestReplyResolutionConformance_DurableRestartRoutesOverlappingRequestsOnBot
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext(context.Background())
 			source := templatereply.LoadSource(t, templatereply.Options{ExplicitCorrelation: true})
 			backend := tc.setup(t)
 			runID := uuid.NewString()
@@ -381,7 +381,7 @@ func TestReplyResolutionConformance_DurableExplicitCorrelationFailsClosedOnBothB
 		},
 	} {
 		t.Run(backendCase.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext(context.Background())
 			source := templatereply.LoadSource(t, templatereply.Options{OptionalReplyCorrelation: true})
 			backend := backendCase.setup(t)
 			runID := uuid.NewString()
@@ -476,7 +476,7 @@ func TestReplyResolutionConformance_TypedHumanTaskPreservesReplyAuthorityAcrossR
 		},
 	} {
 		t.Run(backendCase.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext(context.Background())
 			requestKey := "human-task-request"
 			source := templatereply.LoadSource(t, templatereply.Options{
 				ProviderContinuation: templatereply.ContinuationHuman,
@@ -774,7 +774,7 @@ func newDurableReplyConformanceBus(t *testing.T, ctx context.Context, backend du
 	if source == nil {
 		t.Fatal("reply conformance semantic source is required")
 	}
-	eb, err := bus.NewEventBusWithOptions(backend, bus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(t, backend, bus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -946,7 +946,7 @@ func assertReplyContextState(t *testing.T, ctx context.Context, backend durableR
 
 func waitReplyConformanceBus(t *testing.T, eb *bus.EventBus) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 5*time.Second)
 	defer cancel()
 	if err := eb.WaitForQuiescence(ctx); err != nil {
 		t.Fatalf("wait for reply conformance bus: %v", err)
@@ -978,7 +978,7 @@ func replyConformanceEventForRun(eventType, id, runID, flowID, flowInstance stri
 	return eventtest.RootIngress(
 		id,
 		events.EventType(eventType),
-		"",
+		flowID,
 		"",
 		raw,
 		0,
