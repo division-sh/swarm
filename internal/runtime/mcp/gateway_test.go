@@ -453,15 +453,24 @@ func putTestTurnContext(t testing.TB, registry *TurnContextRegistry, token strin
 
 func testCapabilitySurface(t testing.TB, actor models.AgentConfig, names ...string) *managedcapabilities.Surface {
 	t.Helper()
-	planned := make([]managedcapabilities.PlannedTool, 0, len(names))
+	definitions := make([]llm.ToolDefinition, 0, len(names))
 	for _, name := range names {
-		canonical := toolidentity.CanonicalName(name)
+		definitions = append(definitions, llm.ToolDefinition{Name: toolidentity.CanonicalName(name)})
+	}
+	return testCapabilitySurfaceForDefinitions(t, actor, definitions...)
+}
+
+func testCapabilitySurfaceForDefinitions(t testing.TB, actor models.AgentConfig, definitions ...llm.ToolDefinition) *managedcapabilities.Surface {
+	t.Helper()
+	planned := make([]managedcapabilities.PlannedTool, 0, len(definitions))
+	for _, definition := range definitions {
+		canonical := toolidentity.CanonicalName(definition.Name)
 		kind := toolcapabilities.KindStandard
 		if toolidentity.IsEmitToolName(canonical) {
 			kind = toolcapabilities.KindEmit
 		}
 		planned = append(planned, managedcapabilities.PlannedTool{
-			Name: canonical, DefinitionHash: "test-definition-" + canonical,
+			Name: canonical, DefinitionHash: llm.ToolDefinitionIdentity(llmToolDefinitionForMCP(mcpToolDefinition(canonical, definition))),
 			Capability: toolcapabilities.Capability{Name: canonical, Kind: kind, Visible: true, Callable: true},
 			Bindings:   []managedcapabilities.DeliveryBinding{{Kind: managedcapabilities.BindingMCPTool, ExactName: toolidentity.RuntimeToolsMCPPrefix + canonical, RequiredEvidenceKind: "mcp_listed"}},
 		})
@@ -485,6 +494,32 @@ func testCapabilitySurface(t testing.TB, actor models.AgentConfig, names ...stri
 		t.Fatalf("observe test capability surface: %v", err)
 	}
 	return &surface
+}
+
+func managedCLIGatewayHooks(registry *TurnContextRegistry) GatewayHooks {
+	return GatewayHooks{
+		ResolveTurnContext:        registry.ResolveTurnContext,
+		ObserveCapabilityEvidence: registry.ObserveCapabilityEvidence,
+		ObserveCapabilityMismatch: registry.ObserveCapabilityMismatch,
+		ObserveMCPProviderCall:    registry.ObserveMCPProviderCall,
+		WithActor:                 models.WithActor,
+	}
+}
+
+func callMCPGateway(t *testing.T, gateway *Gateway, contextToken string, request RPCRequest) RPCResponse {
+	t.Helper()
+	body, err := json.Marshal(request)
+	if err != nil {
+		t.Fatalf("marshal MCP request: %v", err)
+	}
+	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body)), contextToken)
+	authorizeGatewayRequest(req)
+	rec := httptest.NewRecorder()
+	gateway.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("gateway status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	return mustRPCResponse(t, rec)
 }
 
 func TestGatewayHandleMCP_ProviderCallCoordinateSeparatesSiblingsAndFencesReplay(t *testing.T) {
@@ -582,13 +617,22 @@ func TestGatewayHandleMCP_ProviderCallCoordinateSeparatesSiblingsAndFencesReplay
 	}
 }
 
-func TestGatewayHandleMCP_ManagedClaudeProviderTurnsPreserveExactUsageTarget(t *testing.T) {
+func TestGatewayHandleMCP_ManagedClaudeCLIChronologyNormalAndSelectedFork(t *testing.T) {
 	for _, executionKind := range []managedcapabilities.ExecutionKind{
 		managedcapabilities.ExecutionNormalAgent,
 		managedcapabilities.ExecutionSelectedContractFork,
 	} {
 		t.Run(string(executionKind), func(t *testing.T) {
 			ctx, surface, harness := managedClaudeProviderTurnTestContext(t, executionKind)
+			if names := surface.BindingNames(managedcapabilities.BindingMCPTool); !slices.Equal(names, []string{"mcp__runtime-tools__write_file"}) {
+				t.Fatalf("managed CLI MCP catalog bindings = %#v", names)
+			}
+			if names := surface.BindingNames(managedcapabilities.BindingMCPProvider); !slices.Equal(names, []string{"mcp__runtime-tools__write_file"}) {
+				t.Fatalf("managed CLI MCP provider bindings = %#v", names)
+			}
+			if len(surface.Tools) != 1 || len(surface.Tools[0].Evidence) != 0 {
+				t.Fatalf("managed CLI registration pre-confirmed evidence: %#v", surface.Tools)
+			}
 			registry := NewTurnContextRegistry(models.ActorFromContext)
 			authority, ok := runtimeeffects.AuthorityFromContext(ctx)
 			if !ok {
@@ -625,8 +669,10 @@ func TestGatewayHandleMCP_ManagedClaudeProviderTurnsPreserveExactUsageTarget(t *
 				t.Fatalf("registered turn context lost exact provider target: %#v", turn)
 			}
 
+			executorCalls := 0
 			dispatches := 0
 			gateway := NewGateway(testToolExecutor(func(callCtx context.Context, name string, input any) (any, error) {
+				executorCalls++
 				request, err := json.Marshal(map[string]any{"name": name, "arguments": input})
 				if err != nil {
 					return nil, err
@@ -643,36 +689,161 @@ func TestGatewayHandleMCP_ManagedClaudeProviderTurnsPreserveExactUsageTarget(t *
 					return nil, err
 				}
 				return map[string]any{"ok": true}, nil
-			}), testGatewayToken, GatewayHooks{ResolveTurnContext: registry.ResolveTurnContext, WithActor: models.WithActor})
-			body, err := json.Marshal(RPCRequest{
+			}), testGatewayToken, managedCLIGatewayHooks(registry))
+
+			listed := callMCPGateway(t, gateway, token, RPCRequest{JSONRPC: "2.0", Method: "tools/list", ID: "list-1", Params: map[string]any{}})
+			if listed.Error != nil {
+				t.Fatalf("managed Claude tools/list error = %#v", listed.Error)
+			}
+			listedTurn, ok := registry.ResolveTurnContext(token)
+			if !ok || listedTurn.CapabilitySurface == nil {
+				t.Fatal("managed Claude tools/list did not preserve the turn surface")
+			}
+			if names := listedTurn.CapabilitySurface.EffectiveNames(); len(names) != 0 {
+				t.Fatalf("tools/list pre-confirmed provider visibility: effective names = %#v", names)
+			}
+			listedEvidence := listedTurn.CapabilitySurface.Tools[0].Evidence
+			if len(listedEvidence) != 1 || listedEvidence[0].BindingKind != managedcapabilities.BindingMCPTool || listedEvidence[0].Kind != "mcp_listed" {
+				t.Fatalf("tools/list evidence = %#v, want only exact MCP catalog confirmation", listedEvidence)
+			}
+
+			call := RPCRequest{
 				JSONRPC: "2.0", Method: "tools/call", ID: float64(1),
 				Params: map[string]any{
 					"name": "write_file", "arguments": map[string]any{"path": "/workspace/result.txt", "content": "ok"},
 					"_meta": map[string]any{claudeCodeToolUseIDMetaKey: "toolu-exact-provider-turn"},
 				},
-			})
-			if err != nil {
-				t.Fatal(err)
 			}
-			req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body)), token)
-			authorizeGatewayRequest(req)
-			rec := httptest.NewRecorder()
-			gateway.Handler().ServeHTTP(rec, req)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("gateway status = %d body=%s", rec.Code, rec.Body.String())
-			}
-			resp := mustRPCResponse(t, rec)
+			resp := callMCPGateway(t, gateway, token, call)
 			if resp.Error != nil {
 				t.Fatalf("managed Claude tools/call error = %#v", resp.Error)
 			}
 			if result, ok := resp.Result.(map[string]any); ok && result["isError"] == true {
 				t.Fatalf("managed Claude tools/call result = %#v", result)
 			}
-			if dispatches != 1 || len(harness.Attempts) != 1 {
-				t.Fatalf("managed Claude dispatches=%d persisted attempts=%d, want 1/1", dispatches, len(harness.Attempts))
+			if executorCalls != 1 || dispatches != 1 || len(harness.Attempts) != 1 {
+				t.Fatalf("managed Claude executor=%d dispatches=%d persisted attempts=%d, want 1/1/1", executorCalls, dispatches, len(harness.Attempts))
 			}
 			if state, ok := harness.StateForAdapter("authored_http_tool"); !ok || state != runtimeeffects.StateSettled {
 				t.Fatalf("managed Claude effect state=%q present=%t, want settled", state, ok)
+			}
+			settledTurn, ok := registry.ResolveTurnContext(token)
+			if !ok || settledTurn.CapabilitySurface == nil || !slices.Equal(settledTurn.CapabilitySurface.EffectiveNames(), []string{"write_file"}) {
+				t.Fatalf("provider call did not settle exact MCP visibility: %#v", settledTurn.CapabilitySurface)
+			}
+			settledEvidence := settledTurn.CapabilitySurface.Tools[0].Evidence
+			providerConfirmed := false
+			for _, evidence := range settledEvidence {
+				providerConfirmed = providerConfirmed || (evidence.BindingKind == managedcapabilities.BindingMCPProvider && evidence.Kind == "mcp_visible")
+			}
+			if len(settledEvidence) != 2 || !providerConfirmed {
+				t.Fatalf("provider-call evidence = %#v, want exact MCP provider confirmation", settledEvidence)
+			}
+
+			call.ID = "replacement-transport-id"
+			replay := callMCPGateway(t, gateway, token, call)
+			if replayResult, ok := replay.Result.(map[string]any); !ok || replayResult["isError"] != true {
+				t.Fatalf("replayed provider occurrence = %#v, want fail-closed tool error", replay)
+			}
+			if executorCalls != 1 || dispatches != 1 || len(harness.Attempts) != 1 {
+				t.Fatalf("replay reached execution: executor=%d dispatches=%d attempts=%d", executorCalls, dispatches, len(harness.Attempts))
+			}
+			replayedTurn, ok := registry.ResolveTurnContext(token)
+			if !ok || replayedTurn.CapabilitySurface == nil || !replayedTurn.CapabilitySurface.HasMismatch() || len(replayedTurn.CapabilitySurface.EffectiveNames()) != 0 {
+				t.Fatalf("replay did not fail the canonical turn surface closed: %#v", replayedTurn.CapabilitySurface)
+			}
+		})
+	}
+}
+
+func TestGatewayHandleMCP_ManagedClaudeCLIRejectsHostileCallsBeforeExecutor(t *testing.T) {
+	for _, hostile := range []struct {
+		name          string
+		toolName      string
+		providerID    string
+		mutateContext func(*TurnContext)
+	}{
+		{name: "unplanned tool", toolName: "read_file", providerID: "toolu-unplanned"},
+		{name: "wrong authority", toolName: "write_file", providerID: "toolu-wrong-authority", mutateContext: func(turn *TurnContext) {
+			turn.EffectAuthority.Target.RunID = uuid.NewString()
+		}},
+		{name: "missing call coordinate", toolName: "write_file"},
+	} {
+		t.Run(hostile.name, func(t *testing.T) {
+			ctx, surface, harness := managedClaudeProviderTurnTestContext(t, managedcapabilities.ExecutionNormalAgent)
+			registry := NewTurnContextRegistry(models.ActorFromContext)
+			token := registry.RegisterTurnContextWithCapabilitySurface(ctx, time.Minute, surface)
+			if token == "" {
+				t.Fatal("register production-shaped managed CLI turn")
+			}
+			executorCalls := 0
+			gateway := NewGateway(testToolExecutor(func(context.Context, string, any) (any, error) {
+				executorCalls++
+				return map[string]any{"ok": true}, nil
+			}), testGatewayToken, managedCLIGatewayHooks(registry))
+			if resp := callMCPGateway(t, gateway, token, RPCRequest{JSONRPC: "2.0", Method: "tools/list", ID: "list-hostile", Params: map[string]any{}}); resp.Error != nil {
+				t.Fatalf("hostile setup tools/list error = %#v", resp.Error)
+			}
+			if hostile.mutateContext != nil {
+				turn, ok := registry.ResolveTurnContext(token)
+				if !ok {
+					t.Fatal("resolve hostile turn")
+				}
+				hostile.mutateContext(&turn)
+				registry.PutTurnContextForTest(token, turn)
+			}
+			params := map[string]any{"name": hostile.toolName, "arguments": map[string]any{}}
+			if hostile.providerID != "" {
+				params["_meta"] = map[string]any{claudeCodeToolUseIDMetaKey: hostile.providerID}
+			}
+			resp := callMCPGateway(t, gateway, token, RPCRequest{JSONRPC: "2.0", Method: "tools/call", ID: "hostile-call", Params: params})
+			if result, ok := resp.Result.(map[string]any); resp.Error == nil && (!ok || result["isError"] != true) {
+				t.Fatalf("hostile call was not rejected: %#v", resp)
+			}
+			if executorCalls != 0 || len(harness.Attempts) != 0 {
+				t.Fatalf("hostile call reached execution: executor=%d attempts=%d", executorCalls, len(harness.Attempts))
+			}
+			turn, ok := registry.ResolveTurnContext(token)
+			if !ok || turn.CapabilitySurface == nil || !turn.CapabilitySurface.HasMismatch() || len(turn.CapabilitySurface.EffectiveNames()) != 0 {
+				t.Fatalf("hostile call did not fail the canonical turn surface closed: %#v", turn.CapabilitySurface)
+			}
+		})
+	}
+}
+
+func TestGatewayHandleMCP_ToolsListRejectsSameNameDefinitionIdentityDrift(t *testing.T) {
+	for _, changedDefinition := range []llm.ToolDefinition{
+		{Name: "write_file", Description: "changed description"},
+		{Name: "write_file", Schema: map[string]any{"type": "object", "required": []any{"path"}}},
+	} {
+		name := "description"
+		if changedDefinition.Schema != nil {
+			name = "schema"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx, surface, _ := managedClaudeProviderTurnTestContext(t, managedcapabilities.ExecutionNormalAgent)
+			registry := NewTurnContextRegistry(models.ActorFromContext)
+			token := registry.RegisterTurnContextWithCapabilitySurface(ctx, time.Minute, surface)
+			if token == "" {
+				t.Fatal("register production-shaped managed CLI turn")
+			}
+			executorCalls := 0
+			gateway := NewGateway(actorScopedToolExecutorStub{
+				actorDefs: []llm.ToolDefinition{changedDefinition}, callCount: &executorCalls,
+			}, testGatewayToken, managedCLIGatewayHooks(registry))
+			resp := callMCPGateway(t, gateway, token, RPCRequest{JSONRPC: "2.0", Method: "tools/list", ID: "list-drift", Params: map[string]any{}})
+			if resp.Error == nil {
+				t.Fatalf("same-name changed %s definition was accepted: %#v", name, resp)
+			}
+			turn, ok := registry.ResolveTurnContext(token)
+			if !ok || turn.CapabilitySurface == nil || !turn.CapabilitySurface.HasMismatch() {
+				t.Fatalf("definition drift was not settled on canonical surface: %#v", turn.CapabilitySurface)
+			}
+			if len(turn.CapabilitySurface.Mismatches) != 1 || turn.CapabilitySurface.Mismatches[0].Kind != "mcp_definition_identity_mismatch" {
+				t.Fatalf("definition drift mismatch = %#v", turn.CapabilitySurface.Mismatches)
+			}
+			if executorCalls != 0 {
+				t.Fatalf("definition drift reached executor %d times", executorCalls)
 			}
 		})
 	}
@@ -898,7 +1069,7 @@ func TestGatewayMCPToolsForRequest_UsesHydratedActorRoleForEmitTools(t *testing.
 
 	putTestTurnContext(t, registry, "ctx-hydrated-role", TurnContext{
 		Actor:             models.AgentConfig{ID: "campaign-coordinator"},
-		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"}, "emit_scan_requested"),
+		CapabilitySurface: testCapabilitySurfaceForDefinitions(t, models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"}, llm.ToolDefinition{Name: "emit_scan_requested", Description: "Emit scan.requested", Schema: map[string]any{"type": "object"}}),
 		CreatedAt:         time.Now().UTC(),
 		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
@@ -941,7 +1112,7 @@ func TestGatewayMCPToolsForRequest_KeepsEmitToolsForDirectMCPContext(t *testing.
 
 	putTestTurnContext(t, registry, "ctx-1", TurnContext{
 		Actor:             models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"},
-		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"}, "emit_scan_requested"),
+		CapabilitySurface: testCapabilitySurfaceForDefinitions(t, models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"}, llm.ToolDefinition{Name: "emit_scan_requested", Description: "Emit scan.requested", Schema: map[string]any{"type": "object"}}),
 		CreatedAt:         time.Now().UTC(),
 		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
@@ -978,7 +1149,7 @@ func TestGatewayMCPToolsForRequest_PrefersActorScopedToolDefinitions(t *testing.
 
 	putTestTurnContext(t, registry, "ctx-actor-scoped", TurnContext{
 		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
-		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities"),
+		CapabilitySurface: testCapabilitySurfaceForDefinitions(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, llm.ToolDefinition{Name: "query_entities", Description: "actor scoped", Usage: "Use CEL equality with ==."}),
 		CreatedAt:         time.Now().UTC(),
 		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
@@ -1000,7 +1171,7 @@ func TestGatewayMCPToolsForRequest_ExposesFlowDataOnlyFromActorScopedCatalog(t *
 	registry := newTestTurnContextRegistry()
 	putTestTurnContext(t, registry, "ctx-flow-data", TurnContext{
 		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
-		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "read_flow_data"),
+		CapabilitySurface: testCapabilitySurfaceForDefinitions(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, llm.ToolDefinition{Name: "read_flow_data", Description: "actor declared flow data", GeneratedSchema: true}),
 		CreatedAt:         time.Now().UTC(),
 		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
@@ -1103,7 +1274,7 @@ func TestGatewayMCPToolsForRoleScopedActor_RetiresLegacyEntitySurface(t *testing
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator"}
 	putTestTurnContext(t, registry, "ctx-role-scoped-generated", TurnContext{
 		Actor:             actor,
-		CapabilitySurface: testCapabilitySurface(t, actor, "read_validation_case", "save_validation_case_business_brief"),
+		CapabilitySurface: testCapabilitySurfaceForDefinitions(t, actor, generatedDefs...),
 		CreatedAt:         time.Now().UTC(),
 		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
@@ -1305,7 +1476,7 @@ func TestGatewayMCPToolsForRequest_IgnoresCallerAllowlist(t *testing.T) {
 
 	putTestTurnContext(t, registry, "ctx-ignore-allowlist", TurnContext{
 		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
-		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities", "read_file"),
+		CapabilitySurface: testCapabilitySurfaceForDefinitions(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, llm.ToolDefinition{Name: "query_entities", Description: "actor scoped"}, llm.ToolDefinition{Name: "read_file", Description: "reader"}),
 		CreatedAt:         time.Now().UTC(),
 		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
@@ -1337,7 +1508,7 @@ func TestGatewayMCPToolsForRequest_DoesNotTrustUnknownCallerAllowlist(t *testing
 
 	putTestTurnContext(t, registry, "ctx-unknown-allowlist", TurnContext{
 		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
-		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities"),
+		CapabilitySurface: testCapabilitySurfaceForDefinitions(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, llm.ToolDefinition{Name: "query_entities", Description: "actor scoped"}),
 		CreatedAt:         time.Now().UTC(),
 		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
@@ -1403,7 +1574,7 @@ func TestGatewayHandleMCP_ToolsListUsesResolvedTurnContext(t *testing.T) {
 
 	putTestTurnContext(t, registry, "ctx-list", TurnContext{
 		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
-		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities"),
+		CapabilitySurface: testCapabilitySurfaceForDefinitions(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, llm.ToolDefinition{Name: "query_entities", Description: "actor scoped"}),
 		CreatedAt:         time.Now().UTC(),
 		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})

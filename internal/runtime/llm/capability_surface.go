@@ -148,7 +148,7 @@ func managedCapabilityPlan(ctx context.Context, runtime Runtime, runtimeMode str
 		}
 		planned = append(planned, managedcapabilities.PlannedTool{
 			Name:           name,
-			DefinitionHash: toolDefinitionIdentity(def),
+			DefinitionHash: ToolDefinitionIdentity(def),
 			Capability:     capability,
 			Bindings:       managedCapabilityBindings(contract, actor, name),
 		})
@@ -342,7 +342,7 @@ func ObserveAPIRequestCapabilitySurface(surface managedcapabilities.Surface, del
 			mismatches = append(mismatches, managedcapabilities.DeliveryMismatch{BindingKind: managedcapabilities.BindingAPIDefinition, ExactName: name, Kind: "duplicate_api_definition"})
 			continue
 		}
-		actual[name] = toolDefinitionIdentity(def)
+		actual[name] = ToolDefinitionIdentity(def)
 	}
 	for name := range actual {
 		if _, ok := planned[name]; !ok {
@@ -395,7 +395,7 @@ func ObserveMockRuntimeCapabilitySurface(surface managedcapabilities.Surface, de
 			mismatches = append(mismatches, managedcapabilities.DeliveryMismatch{BindingKind: managedcapabilities.BindingLocalRuntime, ExactName: name, Kind: "duplicate_local_runtime_definition"})
 			continue
 		}
-		actual[name] = toolDefinitionIdentity(def)
+		actual[name] = ToolDefinitionIdentity(def)
 	}
 	for name := range actual {
 		if _, ok := planned[name]; !ok {
@@ -521,7 +521,8 @@ func observeAllBindings(surface managedcapabilities.Surface, kind managedcapabil
 	return surface.Observe(evidence...)
 }
 
-func toolDefinitionIdentity(def ToolDefinition) string {
+// ToolDefinitionIdentity is the canonical identity of a definition delivered to a provider transport.
+func ToolDefinitionIdentity(def ToolDefinition) string {
 	schema := def.Schema
 	if schema == nil {
 		schema = map[string]any{"type": "object", "properties": map[string]any{}}

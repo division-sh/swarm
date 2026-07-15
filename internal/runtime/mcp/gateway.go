@@ -34,6 +34,8 @@ type GatewayHooks struct {
 	WithEmittedEventsRecorder      func(context.Context, *runtimebus.EmittedEventsRecorder) context.Context
 	ResolveTurnContext             func(string) (TurnContext, bool)
 	ObserveCapabilityEvidence      func(string, ...managedcapabilities.DeliveryEvidence) (managedcapabilities.Surface, bool)
+	ObserveCapabilityMismatch      func(string, ...managedcapabilities.DeliveryMismatch) (managedcapabilities.Surface, bool)
+	ObserveMCPProviderCall         func(string, string, string) (managedcapabilities.Surface, error)
 	MarkEmitKeyUsed                func(string, string) bool
 	EmitToolsForActor              func(models.AgentConfig) []llm.ToolDefinition
 	EmitTools                      func(string) []llm.ToolDefinition
@@ -256,14 +258,48 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			g.writeToolCallErrorResult(w, req.ID, err)
 			return
 		}
-		logicalSegment, err := mcpToolCallLogicalIdentitySegment(ctx, req)
+		occurrence, err := mcpToolCallOccurrenceCoordinate(ctx, req)
 		if err != nil {
+			if surface, managed := managedcapabilities.FromContext(ctx); managed && surface.Authority.Kind == managedcapabilities.AuthorityProviderTurn && len(surface.BindingNames(managedcapabilities.BindingMCPProvider)) > 0 {
+				mismatch := managedcapabilities.DeliveryMismatch{
+					BindingKind: managedcapabilities.BindingMCPProvider,
+					ExactName:   toolidentity.RuntimeToolsMCPPrefix + toolidentity.CanonicalName(toolName),
+					Kind:        "missing_mcp_provider_call_coordinate",
+					Detail:      "managed provider tools/call omitted its provider-owned occurrence coordinate",
+				}
+				if g.hooks.ObserveCapabilityMismatch == nil {
+					err = g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.call.identity", err, map[string]any{"reason": "mismatch_owner_missing"})
+					g.writeToolCallErrorResult(w, req.ID, err)
+					return
+				}
+				if _, ok := g.hooks.ObserveCapabilityMismatch(ContextTokenFromRequest(r), mismatch); !ok {
+					err = g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.call.identity", err, map[string]any{"reason": "mismatch_settlement_failed"})
+					g.writeToolCallErrorResult(w, req.ID, err)
+					return
+				}
+			}
 			err = g.newGatewayError(ErrCodeInvalidRequest, "mcp.tools.call.identity", err, nil)
 			g.writeToolCallErrorResult(w, req.ID, err)
 			return
 		}
+		logicalSegment := mcpToolCallLogicalIdentitySegmentForOccurrence(occurrence)
 		if logicalSegment != "" {
 			ctx = runtimeeffects.WithLogicalOperationIdentitySegment(ctx, logicalSegment)
+		}
+		if surface, managed := managedcapabilities.FromContext(ctx); managed && surface.Authority.Kind == managedcapabilities.AuthorityProviderTurn && len(surface.BindingNames(managedcapabilities.BindingMCPProvider)) > 0 {
+			if g.hooks.ObserveMCPProviderCall == nil {
+				err = g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.call.provider_visibility", nil, map[string]any{"reason": "evidence_owner_missing"})
+				g.writeToolCallErrorResult(w, req.ID, err)
+				return
+			}
+			observed, observeErr := g.hooks.ObserveMCPProviderCall(ContextTokenFromRequest(r), toolName, occurrence)
+			if observeErr != nil {
+				err = g.newGatewayError(ErrCodeToolNotAllowed, "mcp.tools.call.provider_visibility", observeErr, map[string]any{"tool": toolName, "surface_id": surface.ID})
+				g.writeToolCallErrorResult(w, req.ID, err)
+				return
+			}
+			ctx = managedcapabilities.WithContext(ctx, observed)
+			ctx = toolcapabilities.WithContext(ctx, observed.CapabilitySet())
 		}
 		r = r.WithContext(ctx)
 		if !toolAllowedInContext(ctx, toolName) {
@@ -575,7 +611,15 @@ func (g *Gateway) mcpToolsForRequest(r *http.Request) ([]ToolDef, error) {
 		}
 		return g.mcpToolsForActorInContext(ctx, turn.Actor, turn.ForkSandboxAllowed, true), nil
 	}
-	tools, evidence, err := g.mcpToolsForCapabilitySurface(ctx, turn)
+	tools, evidence, mismatches, err := g.mcpToolsForCapabilitySurface(ctx, turn)
+	if len(mismatches) > 0 {
+		if g.hooks.ObserveCapabilityMismatch == nil {
+			return nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_mismatch", nil, map[string]any{"reason": "mismatch_owner_missing"})
+		}
+		if _, ok := g.hooks.ObserveCapabilityMismatch(ContextTokenFromRequest(r), mismatches...); !ok {
+			return nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_mismatch", nil, map[string]any{"reason": "mismatch_settlement_failed"})
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -590,16 +634,17 @@ func (g *Gateway) mcpToolsForRequest(r *http.Request) ([]ToolDef, error) {
 	return tools, nil
 }
 
-func (g *Gateway) mcpToolsForCapabilitySurface(ctx context.Context, turn TurnContext) ([]ToolDef, []managedcapabilities.DeliveryEvidence, error) {
+func (g *Gateway) mcpToolsForCapabilitySurface(ctx context.Context, turn TurnContext) ([]ToolDef, []managedcapabilities.DeliveryEvidence, []managedcapabilities.DeliveryMismatch, error) {
 	if turn.CapabilitySurface == nil {
-		return nil, nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", nil, map[string]any{"reason": "surface_missing"})
+		return nil, nil, nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", nil, map[string]any{"reason": "surface_missing"})
 	}
 	if err := turn.CapabilitySurface.Validate(); err != nil || turn.CapabilitySurface.ActorID != strings.TrimSpace(turn.Actor.ID) {
-		return nil, nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", err, map[string]any{"reason": "surface_invalid_or_mismatched"})
+		return nil, nil, nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", err, map[string]any{"reason": "surface_invalid_or_mismatched"})
 	}
 	catalog := g.toolCatalogInContext(ctx, turn.Actor, true)
 	var names []string
 	var evidence []managedcapabilities.DeliveryEvidence
+	delivered := make(map[string]ToolDef, len(turn.CapabilitySurface.Tools))
 	for _, tool := range turn.CapabilitySurface.Tools {
 		if !tool.Capability.Visible || !tool.Capability.Callable {
 			continue
@@ -608,9 +653,17 @@ func (g *Gateway) mcpToolsForCapabilitySurface(ctx context.Context, turn TurnCon
 			if binding.Kind != managedcapabilities.BindingMCPTool {
 				continue
 			}
-			if _, ok := catalog[tool.Name]; !ok {
-				return nil, nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", nil, map[string]any{"reason": "planned_definition_missing", "tool": tool.Name})
+			definition, ok := catalog[tool.Name]
+			if !ok {
+				mismatch := managedcapabilities.DeliveryMismatch{BindingKind: binding.Kind, ExactName: binding.ExactName, Kind: "missing_mcp_definition", Detail: "planned definition is absent from the live MCP catalog"}
+				return nil, nil, []managedcapabilities.DeliveryMismatch{mismatch}, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", nil, map[string]any{"reason": "planned_definition_missing", "tool": tool.Name})
 			}
+			deliveredDefinition := mcpToolDefinition(tool.Name, definition)
+			if actual := llm.ToolDefinitionIdentity(llmToolDefinitionForMCP(deliveredDefinition)); actual != tool.DefinitionHash {
+				mismatch := managedcapabilities.DeliveryMismatch{BindingKind: binding.Kind, ExactName: binding.ExactName, Kind: "mcp_definition_identity_mismatch", Detail: "live MCP description or schema differs from the planned definition"}
+				return nil, nil, []managedcapabilities.DeliveryMismatch{mismatch}, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", nil, map[string]any{"reason": "definition_identity_mismatch", "tool": tool.Name})
+			}
+			delivered[tool.Name] = deliveredDefinition
 			names = append(names, tool.Name)
 			if !tool.EffectiveVisible || !tool.EffectiveCallable {
 				evidence = append(evidence, managedcapabilities.DeliveryEvidence{BindingKind: binding.Kind, ExactName: binding.ExactName, Kind: "mcp_listed", Status: managedcapabilities.EvidenceConfirmed, Detail: "exact turn-context tools/list response"})
@@ -620,18 +673,24 @@ func (g *Gateway) mcpToolsForCapabilitySurface(ctx context.Context, turn TurnCon
 	sort.Strings(names)
 	out := make([]ToolDef, 0, len(names))
 	for _, name := range names {
-		def := catalog[name]
-		description := strings.TrimSpace(llm.DeliveredToolDescription(def))
-		if description == "" {
-			description = "Runtime tool"
-		}
-		schema := def.Schema
-		if schema == nil {
-			schema = map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": true}
-		}
-		out = append(out, ToolDef{Name: name, Description: description, InputSchema: schema})
+		out = append(out, delivered[name])
 	}
-	return out, evidence, nil
+	return out, evidence, nil, nil
+}
+
+func mcpToolDefinition(name string, definition llm.ToolDefinition) ToolDef {
+	description := strings.TrimSpace(llm.DeliveredToolDescription(definition))
+	schema := definition.Schema
+	if schema == nil {
+		schema = map[string]any{"type": "object", "properties": map[string]any{}}
+	}
+	return ToolDef{Name: name, Description: description, InputSchema: schema}
+}
+
+func llmToolDefinitionForMCP(definition ToolDef) llm.ToolDefinition {
+	return llm.ToolDefinition{
+		Name: definition.Name, Description: definition.Description, Schema: definition.InputSchema,
+	}
 }
 
 func (g *Gateway) MCPToolsForActor(actor models.AgentConfig) []ToolDef {
@@ -869,6 +928,14 @@ func (g *Gateway) baseContextForResolvedTurn(ctx context.Context, turn TurnConte
 }
 
 func mcpToolCallLogicalIdentitySegment(ctx context.Context, req RPCRequest) (string, error) {
+	occurrence, err := mcpToolCallOccurrenceCoordinate(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	return mcpToolCallLogicalIdentitySegmentForOccurrence(occurrence), nil
+}
+
+func mcpToolCallOccurrenceCoordinate(ctx context.Context, req RPCRequest) (string, error) {
 	_, lifecycleManaged := runtimeeffects.LifecycleTokenFromContext(ctx)
 	authority, authorityManaged := runtimeeffects.AuthorityFromContext(ctx)
 	if !lifecycleManaged && (!authorityManaged || (authority.Kind != runtimeeffects.AuthorityNormalAgent && authority.Kind != runtimeeffects.AuthoritySelectedContractFork && authority.Kind != runtimeeffects.AuthorityStartupProbe)) {
@@ -883,7 +950,15 @@ func mcpToolCallLogicalIdentitySegment(ctx context.Context, req RPCRequest) (str
 	if !ok || toolUseID == "" {
 		return "", fmt.Errorf("managed MCP tools/call requires non-empty params._meta.%s", claudeCodeToolUseIDMetaKey)
 	}
-	return "mcp_tool_call:" + runtimeeffects.Fingerprint([]byte(claudeCodeToolUseIDMetaKey+"\x00"+toolUseID)), nil
+	return toolUseID, nil
+}
+
+func mcpToolCallLogicalIdentitySegmentForOccurrence(occurrence string) string {
+	occurrence = strings.TrimSpace(occurrence)
+	if occurrence == "" {
+		return ""
+	}
+	return "mcp_tool_call:" + runtimeeffects.Fingerprint([]byte(claudeCodeToolUseIDMetaKey+"\x00"+occurrence))
 }
 
 func (g *Gateway) contextForResolvedTurn(ctx context.Context, turn TurnContext) context.Context {

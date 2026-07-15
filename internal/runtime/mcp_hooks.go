@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -59,6 +60,18 @@ func RuntimeMCPGatewayHooks(logger *RuntimeLogger, runtimeIngress *runtimeingres
 				return managedcapabilities.Surface{}, false
 			}
 			return turnContexts.ObserveCapabilityEvidence(token, evidence...)
+		},
+		ObserveCapabilityMismatch: func(token string, mismatches ...managedcapabilities.DeliveryMismatch) (managedcapabilities.Surface, bool) {
+			if turnContexts == nil {
+				return managedcapabilities.Surface{}, false
+			}
+			return turnContexts.ObserveCapabilityMismatch(token, mismatches...)
+		},
+		ObserveMCPProviderCall: func(token, toolName, occurrence string) (managedcapabilities.Surface, error) {
+			if turnContexts == nil {
+				return managedcapabilities.Surface{}, fmt.Errorf("MCP turn context registry is unavailable")
+			}
+			return turnContexts.ObserveMCPProviderCall(token, toolName, occurrence)
 		},
 		MarkEmitKeyUsed: func(token, key string) bool {
 			if turnContexts == nil {
