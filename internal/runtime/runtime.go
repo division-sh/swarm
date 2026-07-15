@@ -606,6 +606,29 @@ func workflowModuleWithProviderPacks(module runtimepipeline.WorkflowModule, trig
 	return connectorPackWorkflowModule{WorkflowModule: module, source: source}, source, nil
 }
 
+func compiledChannelActivityTools(bindings []packs.OutboundBindingPlan) (map[string]runtimecontracts.ToolSchemaEntry, error) {
+	out := map[string]runtimecontracts.ToolSchemaEntry{}
+	for _, binding := range bindings {
+		operations := make([]string, 0, len(binding.Structural.Operations))
+		for operation := range binding.Structural.Operations {
+			operations = append(operations, operation)
+		}
+		sort.Strings(operations)
+		for _, operation := range operations {
+			id := binding.RuntimeActivityToolID(operation)
+			if _, exists := out[id]; exists {
+				return nil, fmt.Errorf("duplicate private channel activity tool %q", id)
+			}
+			tool, err := binding.Structural.OperationTool(operation)
+			if err != nil {
+				return nil, fmt.Errorf("channel binding %q operation %q: %w", binding.ID, operation, err)
+			}
+			out[id] = tool
+		}
+	}
+	return out, nil
+}
+
 func bootWarningsFatal() bool {
 	return runtimeEnvBool("SWARM_BOOT_WARNINGS_FATAL", true)
 }
@@ -965,6 +988,10 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		return nil, fmt.Errorf("runtime pipeline store must be provided by selected runtime store construction")
 	}
 	if pipelineStore != nil && pipelineStore.Enabled() {
+		channelActivityTools, err := compiledChannelActivityTools(opts.ChannelOutboundBindings)
+		if err != nil {
+			return nil, fmt.Errorf("compile channel activity tools: %w", err)
+		}
 		artifactRoot, err := runtimepipeline.ResolveArtifactRepoRoot("")
 		if err != nil {
 			return nil, fmt.Errorf("artifact repo root validation failed: %w", err)
@@ -992,6 +1019,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			Credentials:             rt.Credentials,
 			ManagedCredentials:      rt.ManagedCredentials,
 			MockConnectorResponses:  boot.MockConnectorResponses,
+			ChannelActivityTools:    channelActivityTools,
 			ArtifactRoot:            artifactRoot,
 			BundleHash:              opts.BundleSourceFact.BundleHash,
 			DecisionCardCadence: decisioncard.CadencePolicy{
@@ -1064,6 +1092,8 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		HumanTaskStore:     stores.HumanTaskStore,
 		WorkflowInstances:  pipelineStore,
 		WorkflowSource:     source,
+		ChannelBindings:    opts.ChannelOutboundBindings,
+		ActivityExecutor:   rt.Pipeline,
 		WorkspaceResolver:  rt.Workspace,
 		ModelRuntime:       rt.LLM,
 		AuthorityProvider:  rt.Authority,

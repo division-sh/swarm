@@ -5,6 +5,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/packs"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -60,6 +61,8 @@ type ExecutorOptions struct {
 	WorkflowInstances  WorkflowInstanceLoader
 	MCPClient          *runtimemcp.Client
 	WorkflowSource     semanticview.Source
+	ChannelBindings    []packs.OutboundBindingPlan
+	ActivityExecutor   DurableActivityExecutor
 	WorkspaceResolver  workspace.Resolver
 	ModelRuntime       llm.Runtime
 	AuthorityProvider  runtimeauthority.Provider

@@ -82,6 +82,13 @@ func ValidateToolImplementations(source semanticview.Source) ([]error, error) {
 			if !strings.Contains(name, ".") {
 				warnings = append(warnings, fmt.Errorf("tool %s uses handler_type mcp but is not prefixed with a server namespace", name))
 			}
+		case implementationChannel:
+			if !strings.HasPrefix(name, "channel.") || strings.TrimSpace(entry.Category) != "channel_operation" {
+				return warnings, fmt.Errorf("tool %s uses handler_type channel outside the compiled channel runtime surface", name)
+			}
+			if entry.HTTP != nil || entry.ManagedCredential != nil || len(entry.Credentials) != 0 {
+				return warnings, fmt.Errorf("tool %s channel runtime surface must not expose connector transport or credentials", name)
+			}
 		case "":
 			if rawType == "workflow_registered" || rawType == "api_call" {
 				warnings = append(warnings, fmt.Errorf("tool %s uses deprecated handler_type %s with no http block; tool is ignored until migrated to handler_type: http or mcp", name, rawType))

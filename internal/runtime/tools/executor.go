@@ -44,6 +44,8 @@ type Executor struct {
 	httpClient                     *http.Client
 	mcpClient                      *runtimemcp.Client
 	workflowSource                 semanticview.Source
+	channelOperations              map[string]channelOperation
+	activityExecutor               DurableActivityExecutor
 	workspaces                     workspace.Resolver
 	modelRuntime                   llm.Runtime
 	authority                      runtimeauthority.Provider
@@ -87,6 +89,8 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		httpClient:                     &http.Client{Timeout: 30 * time.Second},
 		mcpClient:                      opts.MCPClient,
 		workflowSource:                 opts.WorkflowSource,
+		channelOperations:              compileChannelOperations(opts.ChannelBindings),
+		activityExecutor:               opts.ActivityExecutor,
 		workspaces:                     opts.WorkspaceResolver,
 		modelRuntime:                   opts.ModelRuntime,
 		authority:                      runtimeauthority.ProviderOrNoop(opts.AuthorityProvider),
@@ -124,6 +128,9 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		},
 		func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error) {
 			return exec.execMCPTool(ctx, actor, tool, input)
+		},
+		func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error) {
+			return exec.execChannelOperation(ctx, actor, tool.Name, input)
 		},
 		exec.dispatchRoleScopedEntityTool,
 		exec.buildToolHandlers(),

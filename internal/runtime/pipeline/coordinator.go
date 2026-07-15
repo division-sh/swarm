@@ -48,6 +48,7 @@ type PipelineCoordinator struct {
 	credentials             runtimecredentials.Store
 	managedCredentials      runtimemanagedcredentials.Store
 	mockConnectorResponses  *providerconnectors.MockResponsePlan
+	channelActivityTools    map[string]runtimecontracts.ToolSchemaEntry
 	artifactRoot            string
 	bundleHash              string
 	decisionCardCadence     decisioncard.CadencePolicy
@@ -75,6 +76,7 @@ type PipelineCoordinatorOptions struct {
 	Credentials                      runtimecredentials.Store
 	ManagedCredentials               runtimemanagedcredentials.Store
 	MockConnectorResponses           *providerconnectors.MockResponsePlan
+	ChannelActivityTools             map[string]runtimecontracts.ToolSchemaEntry
 	ArtifactRoot                     string
 	BundleHash                       string
 	DecisionCardCadence              decisioncard.CadencePolicy
@@ -82,6 +84,14 @@ type PipelineCoordinatorOptions struct {
 	TestWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
 	TestLifecycleProbe               runtimelifecycleprobe.Observer
 	TestEngineEmitNow                func() time.Time
+}
+
+func copyActivityToolEntries(in map[string]runtimecontracts.ToolSchemaEntry) map[string]runtimecontracts.ToolSchemaEntry {
+	out := make(map[string]runtimecontracts.ToolSchemaEntry, len(in))
+	for name, tool := range in {
+		out[name] = tool
+	}
+	return out
 }
 
 func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
@@ -121,6 +131,7 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		credentials:                      credentials,
 		managedCredentials:               opts.ManagedCredentials,
 		mockConnectorResponses:           opts.MockConnectorResponses,
+		channelActivityTools:             copyActivityToolEntries(opts.ChannelActivityTools),
 		artifactRoot:                     strings.TrimSpace(opts.ArtifactRoot),
 		bundleHash:                       strings.TrimSpace(opts.BundleHash),
 		decisionCardCadence:              opts.DecisionCardCadence.Normalize(),

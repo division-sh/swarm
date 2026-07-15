@@ -493,14 +493,32 @@ func (p OutboundBindingPlan) RuntimeToolID(operation string) string {
 	return "channel." + strings.TrimSpace(p.ID) + "." + strings.TrimSpace(operation)
 }
 
+// RuntimeActivityToolID names the private compiled connector target used by
+// the channel adapter. It is intentionally absent from agent tool registries.
+func (p OutboundBindingPlan) RuntimeActivityToolID(operation string) string {
+	return "platform.channel_activity." + strings.TrimSpace(p.ID) + "." + strings.TrimSpace(operation)
+}
+
 func (p OutboundBindingPlan) RuntimeTools() (map[string]runtimecontracts.ToolSchemaEntry, error) {
 	out := make(map[string]runtimecontracts.ToolSchemaEntry, len(p.Structural.Operations))
 	for _, name := range sortedKeys(p.Structural.Operations) {
-		tool, err := p.Structural.OperationTool(name)
+		operation := p.Structural.Operations[name]
+		inputSchema, err := p.Structural.OperationInputSchema(name)
 		if err != nil {
 			return nil, err
 		}
-		out[p.RuntimeToolID(name)] = tool
+		outputSchema, err := interfaceOperationSchema(operation.Interface.Output, p.Structural.Schemas, p.Structural.OpaqueTypes)
+		if err != nil {
+			return nil, fmt.Errorf("channel operation %q output schema: %w", name, err)
+		}
+		out[p.RuntimeToolID(name)] = runtimecontracts.ToolSchemaEntry{
+			Category:     "channel_operation",
+			Description:  "Execute the configured " + name + " operation through channel binding " + p.ID + ".",
+			HandlerType:  "channel",
+			EffectClass:  strings.TrimSpace(operation.Interface.EffectClass),
+			InputSchema:  inputSchema,
+			OutputSchema: outputSchema,
+		}
 	}
 	return out, nil
 }
@@ -512,7 +530,7 @@ func (p OutboundBindingPlan) PrepareOperation(operation string, input any) (stri
 	}
 	contextValue := any(map[string]any{})
 	if len(compiled.Interface.Context) > 0 {
-		contextValue = p.Destination.Interface()
+		contextValue = map[string]any{"destination": p.Destination.Interface()}
 	}
 	prepared, err := p.Structural.PrepareOperationInput(operation, input, contextValue)
 	if err != nil {
@@ -581,7 +599,7 @@ func (p SatisfactionPlan) OperationTool(name string) (runtimecontracts.ToolSchem
 	if !ok {
 		return runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("channel operation %q is not compiled", name)
 	}
-	tool := operation.ToolSchema
+	tool := cloneToolSchemaEntry(operation.ToolSchema)
 	outputSchema, err := interfaceOperationSchema(operation.Interface.Output, p.Schemas, p.OpaqueTypes)
 	if err != nil {
 		return runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("channel operation %q output schema: %w", name, err)
@@ -592,6 +610,78 @@ func (p SatisfactionPlan) OperationTool(name string) (runtimecontracts.ToolSchem
 	}
 	tool.CompiledResult = &runtimecontracts.CompiledResultProjection{Fields: fields, OutputSchema: outputSchema}
 	return tool, nil
+}
+
+// OperationInputSchema is the provider-neutral operation input after applying
+// the finite constraints selected from the concrete connector generation.
+func (p SatisfactionPlan) OperationInputSchema(name string) (runtimecontracts.ToolInputSchema, error) {
+	operation, ok := p.Operations[strings.TrimSpace(name)]
+	if !ok {
+		return runtimecontracts.ToolInputSchema{}, fmt.Errorf("channel operation %q is not compiled", name)
+	}
+	inputSchema, err := interfaceOperationSchema(operation.Interface.Input, p.Schemas, p.OpaqueTypes)
+	if err != nil {
+		return runtimecontracts.ToolInputSchema{}, err
+	}
+	for _, key := range sortedKeys(p.Constraints) {
+		if !strings.HasPrefix(key, "presentation.") && key != "actions" && !strings.HasPrefix(key, "actions[].") {
+			continue
+		}
+		rootField := strings.Split(strings.TrimSpace(key), ".")[0]
+		rootField = strings.TrimSuffix(rootField, "[]")
+		if _, ok := operation.Interface.Input[rootField]; !ok {
+			continue
+		}
+		if err := replaceChannelSchemaPath(&inputSchema, key, p.Constraints[key]); err != nil {
+			return runtimecontracts.ToolInputSchema{}, fmt.Errorf("channel operation %q selected constraint %q: %w", name, key, err)
+		}
+	}
+	return inputSchema, nil
+}
+
+func replaceChannelSchemaPath(root *runtimecontracts.ToolInputSchema, path string, selected runtimecontracts.ToolInputSchema) error {
+	if root == nil {
+		return fmt.Errorf("input schema is missing")
+	}
+	parts := strings.Split(strings.ReplaceAll(strings.TrimSpace(path), "[]", ".[]"), ".")
+	updated, err := replaceChannelSchemaPathValue(*root, parts, cloneSchema(selected), path)
+	if err != nil {
+		return err
+	}
+	*root = updated
+	return nil
+}
+
+func replaceChannelSchemaPathValue(current runtimecontracts.ToolInputSchema, parts []string, selected runtimecontracts.ToolInputSchema, fullPath string) (runtimecontracts.ToolInputSchema, error) {
+	for len(parts) > 0 && parts[0] == "" {
+		parts = parts[1:]
+	}
+	if len(parts) == 0 {
+		return selected, nil
+	}
+	current = cloneSchema(current)
+	part := parts[0]
+	if part == "[]" {
+		if current.Items == nil {
+			return runtimecontracts.ToolInputSchema{}, fmt.Errorf("array item schema is missing for %q", fullPath)
+		}
+		updated, err := replaceChannelSchemaPathValue(*current.Items, parts[1:], selected, fullPath)
+		if err != nil {
+			return runtimecontracts.ToolInputSchema{}, err
+		}
+		current.Items = &updated
+		return current, nil
+	}
+	property, ok := current.Properties[part]
+	if !ok {
+		return runtimecontracts.ToolInputSchema{}, fmt.Errorf("schema path %q is missing", fullPath)
+	}
+	updated, err := replaceChannelSchemaPathValue(property, parts[1:], selected, fullPath)
+	if err != nil {
+		return runtimecontracts.ToolInputSchema{}, err
+	}
+	current.Properties[part] = updated
+	return current, nil
 }
 
 func (p SatisfactionPlan) PrepareOperationInput(name string, input, context any) (map[string]any, error) {
@@ -1081,13 +1171,16 @@ func validateOperationBinding(name string, operation runtimecontracts.PackInterf
 			if sourceSchema.Type != "array" || targetSchema.Type != "array" || sourceSchema.Items == nil || targetSchema.Items == nil {
 				return fmt.Errorf("channel operation %q each mapping %q -> %q requires array schemas", name, mapping.Each, target)
 			}
-			if err := validateEachItem(name, mapping, *sourceSchema.Items, *targetSchema.Items); err != nil {
+			itemSources, err := validateEachItem(name, mapping, *sourceSchema.Items, *targetSchema.Items)
+			if err != nil {
 				return err
 			}
 			if _, exists := usedSources[mapping.Each]; exists {
 				return fmt.Errorf("channel operation %q reuses source %q", name, mapping.Each)
 			}
-			usedSources[mapping.Each] = struct{}{}
+			for _, source := range itemSources {
+				usedSources[mapping.Each+"[]."+source] = struct{}{}
+			}
 			continue
 		}
 		sourceSchema, err := operationSourceSchema(operation, mapping.From, schemas, opaque)
@@ -1105,7 +1198,7 @@ func validateOperationBinding(name string, operation runtimecontracts.PackInterf
 	if err := requiredConnectorInputsMapped(name, tool.InputSchema, binding.Input); err != nil {
 		return err
 	}
-	if err := interfaceInputsConsumed(name, operation, usedSources); err != nil {
+	if err := interfaceInputsConsumed(name, operation, schemas, opaque, usedSources); err != nil {
 		return err
 	}
 	if len(operation.Output) == 0 {
@@ -1134,37 +1227,49 @@ func validateOperationBinding(name string, operation runtimecontracts.PackInterf
 	return requiredInterfaceOutputsMapped(name, operation, binding.Output, opaque)
 }
 
-func validateEachItem(name string, mapping ChannelMapping, sourceItem, targetItem runtimecontracts.ToolInputSchema) error {
+func validateEachItem(name string, mapping ChannelMapping, sourceItem, targetItem runtimecontracts.ToolInputSchema) ([]string, error) {
 	if len(mapping.Item) != 1 || len(mapping.Item[0]) == 0 {
-		return fmt.Errorf("channel operation %q each mapping must construct exactly one object per source item", name)
+		return nil, fmt.Errorf("channel operation %q each mapping must construct exactly one object per source item", name)
 	}
 	if targetItem.Type == "array" {
 		if targetItem.Items == nil {
-			return fmt.Errorf("channel operation %q target row schema has no item", name)
+			return nil, fmt.Errorf("channel operation %q target row schema has no item", name)
 		}
 		targetItem = *targetItem.Items
 	}
 	if sourceItem.Type != "object" || targetItem.Type != "object" {
-		return fmt.Errorf("channel operation %q each item source and target must be objects", name)
+		return nil, fmt.Errorf("channel operation %q each item source and target must be objects", name)
 	}
+	used := map[string]struct{}{}
 	for target, itemMapping := range mapping.Item[0] {
 		targetSchema, ok := schemaAt(targetItem, strings.Split(target, "."))
 		if !ok {
-			return fmt.Errorf("channel operation %q each item target %q is absent", name, target)
+			return nil, fmt.Errorf("channel operation %q each item target %q is absent", name, target)
 		}
 		source := strings.TrimPrefix(itemMapping.From, "item.")
 		if source == itemMapping.From {
-			return fmt.Errorf("channel operation %q each item source %q must start with item.", name, itemMapping.From)
+			return nil, fmt.Errorf("channel operation %q each item source %q must start with item.", name, itemMapping.From)
 		}
 		sourceSchema, ok := schemaAt(sourceItem, strings.Split(source, "."))
 		if !ok {
-			return fmt.Errorf("channel operation %q each item source %q is absent", name, itemMapping.From)
+			return nil, fmt.Errorf("channel operation %q each item source %q is absent", name, itemMapping.From)
 		}
 		if err := validateDirectionalRelation(name+" each item "+itemMapping.From+" -> "+target, sourceSchema, targetSchema, ""); err != nil {
-			return err
+			return nil, err
+		}
+		for _, path := range schemaRequiredLeafPaths(source, *sourceSchema) {
+			used[path] = struct{}{}
 		}
 	}
-	return requiredSchemaPathsMapped(name+" each item", targetItem, mapping.Item[0])
+	if err := requiredSchemaPathsMapped(name+" each item", targetItem, mapping.Item[0]); err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(used))
+	for path := range used {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths, nil
 }
 
 func validateEventBinding(name string, event runtimecontracts.PackInterfaceEvent, binding ChannelEventBinding, schemas, opaque map[string]runtimecontracts.ToolInputSchema, descriptor TriggerEvent) error {
@@ -1385,10 +1490,11 @@ func schemaAt(schema runtimecontracts.ToolInputSchema, path []string) (*runtimec
 }
 
 func requiredConnectorInputsMapped(name string, schema runtimecontracts.ToolInputSchema, mappings map[string]ChannelMapping) error {
-	for _, required := range schema.Required {
+	for _, required := range schemaRequiredLeafPaths("", schema) {
+		required = strings.TrimPrefix(required, ".")
 		found := false
 		for target := range mappings {
-			if target == required || strings.HasPrefix(target, required+".") {
+			if channelPathCovers(target, required) {
 				found = true
 				break
 			}
@@ -1400,19 +1506,25 @@ func requiredConnectorInputsMapped(name string, schema runtimecontracts.ToolInpu
 	return nil
 }
 
-func interfaceInputsConsumed(name string, operation runtimecontracts.PackInterfaceOperation, used map[string]struct{}) error {
+func interfaceInputsConsumed(name string, operation runtimecontracts.PackInterfaceOperation, schemas, opaque map[string]runtimecontracts.ToolInputSchema, used map[string]struct{}) error {
 	for group, fields := range map[string]map[string]runtimecontracts.PackInterfaceField{"input": operation.Input, "context": operation.Context} {
-		for fieldName := range fields {
+		for fieldName, field := range fields {
 			prefix := group + "." + fieldName
-			found := false
-			for source := range used {
-				if source == prefix || strings.HasPrefix(source, prefix+".") {
-					found = true
-					break
-				}
+			resolved, err := resolvedInterfaceFieldSchema(field, schemas, opaque)
+			if err != nil {
+				return err
 			}
-			if !found {
-				return fmt.Errorf("channel operation %q does not consume interface %s", name, prefix)
+			for _, leaf := range schemaRequiredLeafPaths(prefix, *resolved) {
+				found := false
+				for source := range used {
+					if channelPathCovers(source, leaf) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return fmt.Errorf("channel operation %q does not consume interface %s", name, leaf)
+				}
 			}
 		}
 	}
@@ -1426,7 +1538,14 @@ func requiredInterfaceOutputsMapped(name string, operation runtimecontracts.Pack
 			paths = schemaRequiredLeafPaths(fieldName, opaque[field.Opaque])
 		}
 		for _, path := range paths {
-			if _, ok := mappings[path]; !ok {
+			found := false
+			for target := range mappings {
+				if channelPathCovers(target, path) {
+					found = true
+					break
+				}
+			}
+			if !found {
 				return fmt.Errorf("channel operation %q does not map required interface output %q", name, path)
 			}
 		}
@@ -1437,7 +1556,14 @@ func requiredInterfaceOutputsMapped(name string, operation runtimecontracts.Pack
 func requiredSchemaPathsMapped(subject string, schema runtimecontracts.ToolInputSchema, mappings map[string]ChannelMapping) error {
 	for _, path := range schemaRequiredLeafPaths("", schema) {
 		path = strings.TrimPrefix(path, ".")
-		if _, ok := mappings[path]; !ok {
+		found := false
+		for target := range mappings {
+			if channelPathCovers(target, path) {
+				found = true
+				break
+			}
+		}
+		if !found {
 			return fmt.Errorf("%s does not map required target %q", subject, path)
 		}
 	}
@@ -1458,7 +1584,14 @@ func requiredInterfaceFieldPaths(fields map[string]runtimecontracts.PackInterfac
 }
 
 func schemaRequiredLeafPaths(prefix string, schema runtimecontracts.ToolInputSchema) []string {
-	if normalizeSchemaType(schema.Type) != "object" {
+	switch normalizeSchemaType(schema.Type) {
+	case "array":
+		if schema.Items == nil {
+			return []string{prefix}
+		}
+		return schemaRequiredLeafPaths(prefix+"[]", *schema.Items)
+	case "object":
+	default:
 		return []string{prefix}
 	}
 	var out []string
@@ -1474,6 +1607,15 @@ func schemaRequiredLeafPaths(prefix string, schema runtimecontracts.ToolInputSch
 		out = append(out, schemaRequiredLeafPaths(child, property)...)
 	}
 	return out
+}
+
+func channelPathCovers(mapped, required string) bool {
+	mapped = strings.TrimSpace(mapped)
+	required = strings.TrimSpace(required)
+	if mapped == "" || required == "" {
+		return mapped == required
+	}
+	return mapped == required || strings.HasPrefix(required, mapped+".") || strings.HasPrefix(required, mapped+"[")
 }
 
 func interfaceOpaqueSlots(definition runtimecontracts.PackInterfaceDefinition) []string {
@@ -1594,7 +1736,10 @@ func cloneSchema(in runtimecontracts.ToolInputSchema) runtimecontracts.ToolInput
 	out := in
 	out.Properties = cloneSchemaMap(in.Properties)
 	out.Required = append([]string(nil), in.Required...)
-	out.Enum = append([]runtimecontracts.SchemaLiteral(nil), in.Enum...)
+	out.Enum = make([]runtimecontracts.SchemaLiteral, len(in.Enum))
+	for index, literal := range in.Enum {
+		out.Enum[index] = runtimecontracts.SchemaLiteral{Node: cloneChannelYAMLNode(literal.Node)}
+	}
 	if in.Items != nil {
 		items := cloneSchema(*in.Items)
 		out.Items = &items
@@ -1607,16 +1752,115 @@ func cloneSchema(in runtimecontracts.ToolInputSchema) runtimecontracts.ToolInput
 		schema := cloneSchema(*in.AdditionalProperties.Schema)
 		out.AdditionalProperties.Schema = &schema
 	}
+	out.Minimum = cloneFloatPointer(in.Minimum)
+	out.Maximum = cloneFloatPointer(in.Maximum)
+	out.MinLength = cloneIntPointer(in.MinLength)
+	out.MaxLength = cloneIntPointer(in.MaxLength)
+	out.MinItems = cloneIntPointer(in.MinItems)
+	out.MaxItems = cloneIntPointer(in.MaxItems)
 	return out
 }
 
 func cloneMappingMap(in map[string]ChannelMapping) map[string]ChannelMapping {
 	out := make(map[string]ChannelMapping, len(in))
 	for key, value := range in {
-		value.Item = append([]map[string]ChannelMapping(nil), value.Item...)
+		items := value.Item
+		value.Item = make([]map[string]ChannelMapping, len(items))
+		for index, item := range items {
+			value.Item[index] = cloneMappingMap(item)
+		}
 		out[key] = value
 	}
 	return out
+}
+
+func cloneFloatPointer(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneChannelYAMLNode(node yaml.Node) yaml.Node {
+	out := node
+	out.Content = make([]*yaml.Node, len(node.Content))
+	for index, child := range node.Content {
+		if child == nil {
+			continue
+		}
+		cloned := cloneChannelYAMLNode(*child)
+		out.Content[index] = &cloned
+	}
+	if node.Alias != nil {
+		alias := cloneChannelYAMLNode(*node.Alias)
+		out.Alias = &alias
+	}
+	return out
+}
+
+func cloneToolSchemaEntry(in runtimecontracts.ToolSchemaEntry) runtimecontracts.ToolSchemaEntry {
+	out := in
+	out.InputSchema = cloneSchema(in.InputSchema)
+	out.OutputSchema = cloneSchema(in.OutputSchema)
+	if in.HTTP != nil {
+		httpSpec := *in.HTTP
+		httpSpec.Headers = cloneChannelStringMap(in.HTTP.Headers)
+		httpSpec.Body = cloneChannelTemplateValue(in.HTTP.Body)
+		out.HTTP = &httpSpec
+	}
+	out.ResponseMapping = cloneChannelTemplateMap(in.ResponseMapping)
+	if in.ResponseSuccess != nil {
+		check := *in.ResponseSuccess
+		check.Equals = cloneChannelTemplateValue(in.ResponseSuccess.Equals)
+		out.ResponseSuccess = &check
+	}
+	out.Credentials = append([]string(nil), in.Credentials...)
+	if in.ManagedCredential != nil {
+		managed := *in.ManagedCredential
+		managed.Scopes = append([]string(nil), in.ManagedCredential.Scopes...)
+		managed.TokenRequest.StaticHeaders = cloneChannelStringMap(in.ManagedCredential.TokenRequest.StaticHeaders)
+		out.ManagedCredential = &managed
+	}
+	if in.CompiledResult != nil {
+		projection := &runtimecontracts.CompiledResultProjection{
+			Fields:       make(map[string]runtimecontracts.CompiledResultField, len(in.CompiledResult.Fields)),
+			OutputSchema: cloneSchema(in.CompiledResult.OutputSchema),
+		}
+		for target, field := range in.CompiledResult.Fields {
+			projection.Fields[target] = field
+		}
+		out.CompiledResult = projection
+	}
+	return out
+}
+
+func cloneChannelTemplateMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = cloneChannelTemplateValue(value)
+	}
+	return out
+}
+
+func cloneChannelTemplateValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneChannelTemplateMap(typed)
+	case []any:
+		out := make([]any, len(typed))
+		for index, item := range typed {
+			out[index] = cloneChannelTemplateValue(item)
+		}
+		return out
+	case yaml.Node:
+		return cloneChannelYAMLNode(typed)
+	default:
+		return typed
+	}
 }
 
 func cloneChannelStringMap(in map[string]string) map[string]string {
@@ -1643,6 +1887,7 @@ func (p SatisfactionPlan) Clone() SatisfactionPlan {
 	out.Constraints = cloneSchemaMap(p.Constraints)
 	out.Operations = make(map[string]CompiledChannelOperation, len(p.Operations))
 	for name, operation := range p.Operations {
+		operation.ToolSchema = cloneToolSchemaEntry(operation.ToolSchema)
 		operation.Input = cloneMappingMap(operation.Input)
 		operation.Output = cloneMappingMap(operation.Output)
 		operation.Interface = cloneInterfaceDefinition(runtimecontracts.PackInterfaceDefinition{Operations: map[string]runtimecontracts.PackInterfaceOperation{name: operation.Interface}}).Operations[name]
