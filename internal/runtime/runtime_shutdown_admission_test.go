@@ -158,7 +158,9 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	am.Run(context.Background())
+	if err := am.Run(managedExecutionTestContext(t, context.Background())); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
 	if err := bus.Publish(context.Background(), eventtest.RootIngress("evt-in-1",
 		events.EventType("test.in"),
 		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
@@ -248,7 +250,9 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	am.Run(context.Background())
+	if err := am.Run(managedExecutionTestContext(t, context.Background())); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
 	if err := bus.Publish(context.Background(), eventtest.RootIngress("evt-in-1",
 		events.EventType("test.in"),
 		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {

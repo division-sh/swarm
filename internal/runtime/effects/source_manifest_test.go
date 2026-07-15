@@ -47,7 +47,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/llm/api_runtime.go:sendRequest:http_do:1":                                                           ownerManagedAgent,
 	"internal/runtime/llm/cli_runtime_process.go:runStreamingPrepared:process_launch:1":                                   ownerManagedAgent,
 	"internal/runtime/llm/cli_runtime_process.go:runWithPreparedInput:process_launch:1":                                   ownerManagedAgent,
-	"internal/runtime/llm/cli_runtime_startup_probe.go:runUntilCLIStartupInit:process_launch:1":                           ownerRuntimeDependency,
+	"internal/runtime/llm/cli_runtime_startup_probe.go:runUntilCLIStartupInit:process_launch:1":                           ownerManagedAgent,
 	"internal/runtime/llm/cli_tool_result_relay.go:runWorkspaceCommand:process_launch:1":                                  ownerManagedAgent,
 	"internal/runtime/llm/openai_compatible_runtime.go:sendRequest:http_do:1":                                             ownerManagedAgent,
 	"internal/runtime/llm/openai_responses_runtime.go:sendRequest:http_do:1":                                              ownerManagedAgent,

@@ -173,7 +173,7 @@ func TestExecutionProjectionReconfigureSerializesRestartSelection(t *testing.T) 
 	}
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()
-	am.Run(runCtx)
+	am.Run(managedExecutionTestContext(t, runCtx))
 
 	reconfigureDone := make(chan error, 1)
 	go func() {
@@ -242,7 +242,7 @@ func TestExecutionProjectionReconfigureSerializesBothRunModes(t *testing.T) {
 			runCtx, cancelRun := context.WithCancel(context.Background())
 			defer cancelRun()
 			runDone := make(chan struct{})
-			go func() { tc.run(am, runCtx); close(runDone) }()
+			go func() { tc.run(am, managedExecutionTestContext(t, runCtx)); close(runDone) }()
 			close(releaseBuild)
 			if err := <-reconfigureDone; err != nil {
 				t.Fatalf("ReconfigureAgent: %v", err)
@@ -289,7 +289,7 @@ func TestExecutionProjectionDirectiveLeaseFencesReplacement(t *testing.T) {
 	}
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()
-	am.Run(runCtx)
+	am.Run(managedExecutionTestContext(t, runCtx))
 	predecessor, ok := am.lifecycle.token(agentID)
 	if !ok {
 		t.Fatal("predecessor generation is not running")
@@ -340,7 +340,7 @@ func TestExecutionProjectionRunCancellationRemovesExactRoute(t *testing.T) {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	runCtx, cancelRun := context.WithCancel(context.Background())
-	am.Run(runCtx)
+	am.Run(managedExecutionTestContext(t, runCtx))
 	route, ok := bus.current(agentID)
 	if !ok {
 		t.Fatal("run did not install route")
@@ -380,7 +380,7 @@ func TestExecutionProjectionTeardownRemovesExactRoute(t *testing.T) {
 	}
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()
-	am.Run(runCtx)
+	am.Run(managedExecutionTestContext(t, runCtx))
 	route, ok := bus.current(agentID)
 	if !ok {
 		t.Fatal("run did not install route")
@@ -418,7 +418,7 @@ func TestExecutionProjectionNaturalLoopExitRemovesExactRoute(t *testing.T) {
 	}
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()
-	am.Run(runCtx)
+	am.Run(managedExecutionTestContext(t, runCtx))
 	route, ok := bus.current(agentID)
 	if !ok {
 		t.Fatal("run did not install route")
@@ -526,7 +526,7 @@ func TestExecutionProjectionRecoveryStartsPersistedRunningCell(t *testing.T) {
 	}
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()
-	am.Run(runCtx)
+	am.Run(managedExecutionTestContext(t, runCtx))
 	route, live := bus.current(agentID)
 	if !live {
 		t.Fatal("Run treated persisted phase as a live process and skipped activation")
@@ -552,7 +552,7 @@ func TestExecutionProjectionSpawnDuringRunActivatesRegisteredProjection(t *testi
 	am := NewAgentManager(bus, factory.Build)
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()
-	am.Run(runCtx)
+	am.Run(managedExecutionTestContext(t, runCtx))
 	const agentID = "projection-flow-activation"
 	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID}); err != nil {
 		t.Fatalf("SpawnAgent while running: %v", err)

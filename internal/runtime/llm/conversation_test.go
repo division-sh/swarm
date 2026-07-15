@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -100,10 +101,27 @@ type managedRoundRuntime struct {
 }
 
 func (r *managedRoundRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
-	return &Session{ID: "managed-session", AgentID: agentID}, nil
+	return &Session{ID: "22222222-2222-4222-8222-222222222222", AgentID: agentID, Memory: testMemory(), MemoryIdentity: testMemoryIdentity(agentID, "effect-test")}, nil
 }
 
-func (r *managedRoundRuntime) ContinueSession(ctx context.Context, _ *Session, _ Message) (*Response, error) {
+func (r *managedRoundRuntime) ProviderContract() ProviderContract {
+	return AnthropicAPIProviderContract()
+}
+
+func (r *managedRoundRuntime) ContinueSession(ctx context.Context, session *Session, _ Message) (*Response, error) {
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		return nil, errors.New("managed test runtime capability surface missing")
+	}
+	observed, err := ObserveAPIRequestCapabilitySurface(surface, []ToolDefinition{{Name: "echo"}})
+	if err != nil {
+		return nil, err
+	}
+	ctx = managedcapabilities.WithContext(ctx, observed)
+	ctx, _, err = prepareCompletionContext(ctx, runtimeeffects.NewCompletionController(r.harness, r.harness), nil, session, "")
+	if err != nil {
+		return nil, err
+	}
 	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte(fmt.Sprintf("turn-%d", r.calls+1)), nil)
 	if err != nil {
 		return nil, err
@@ -113,22 +131,27 @@ func (r *managedRoundRuntime) ContinueSession(ctx context.Context, _ *Session, _
 	}
 	input, output := int64(1), int64(1)
 	target := handle.Attempt().Authority.Target
+	surfaceJSON, err := json.Marshal(observed)
+	if err != nil {
+		return nil, err
+	}
 	if err := handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled, Evidence: map[string]any{"turn": r.calls + 1}},
 		Usage:      runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageExact, InputTokens: &input, OutputTokens: &output},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
-			Memory: target.Memory, FlowInstance: target.FlowInstance,
+			Memory: target.Memory, FlowInstance: target.FlowInstance, CapabilitySurfaceID: observed.ID, CapabilitySurface: surfaceJSON,
 		},
 		Spend: runtimeeffects.CompletionSpend{FlowInstance: "global", AgentID: target.AgentID, Model: "test-model", BackendProfile: "anthropic", Provider: "anthropic", Transport: "http", ResolvedModel: "test-model", InvocationType: "task"},
 	}); err != nil {
 		return nil, err
 	}
 	r.calls++
+	session.TurnCount++
 	if r.calls == 1 {
-		return &Response{Message: Message{Role: "assistant"}, ToolCalls: []ToolCall{{ID: "call-1", Name: "echo", Arguments: map[string]any{"text": "hello"}}}}, nil
+		return &Response{Message: Message{Role: "assistant"}, ToolCalls: []ToolCall{{ID: "call-1", Name: "echo", Arguments: map[string]any{"text": "hello"}}}, CapabilitySurface: &observed}, nil
 	}
-	return &Response{Message: Message{Role: "assistant", Content: "done"}}, nil
+	return &Response{Message: Message{Role: "assistant", Content: "done"}, CapabilitySurface: &observed}, nil
 }
 
 type managedEffectToolExecutor struct {
@@ -787,8 +810,8 @@ func TestConversation_ExecuteToolCalls_RelaysOversizedReadFileResultsForHelperRu
 		"size_bytes": len(huge),
 	}})
 
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1"})
-	ctx = withCLIUsableToolsForTurn(ctx, tools, &Response{
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	ctx = withConversationForkSandboxToolsForTurn(ctx, tools, &Response{
 		MCPServers:      map[string]string{"runtime-tools": "connected"},
 		MCPVisibleTools: []string{"mcp__runtime-tools__read_file"},
 	})
@@ -837,8 +860,8 @@ func TestConversation_ExecuteToolCalls_PreservesNearLimitReadFileResultWithCompa
 		},
 	})
 
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1"})
-	ctx = withCLIUsableToolsForTurn(ctx, tools, &Response{
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	ctx = withConversationForkSandboxToolsForTurn(ctx, tools, &Response{
 		MCPServers:      map[string]string{"runtime-tools": "connected"},
 		MCPVisibleTools: []string{"mcp__runtime-tools__read_file", "mcp__runtime-tools__emit_category_assessed"},
 	})
@@ -915,8 +938,8 @@ func TestConversation_ExecuteToolCalls_SuppressesReadFileRelayWhenObservedSurfac
 		"size_bytes": len(huge),
 	}})
 
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1"})
-	ctx = withCLIUsableToolsForTurn(ctx, tools, &Response{
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	ctx = withConversationForkSandboxToolsForTurn(ctx, tools, &Response{
 		MCPServers: map[string]string{"runtime-tools": "failed"},
 	})
 	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_file", Arguments: map[string]any{"path": "/data/test-signals-25.jsonl"}}})

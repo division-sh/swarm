@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
 
@@ -22,7 +23,8 @@ func asString(v any) string {
 }
 
 type MCPTurnContextStore interface {
-	RegisterTurnContextWithTTL(context.Context, time.Duration) string
-	RegisterTurnContextWithAllowedTools(context.Context, time.Duration, []string) string
+	RegisterTurnContextWithCapabilitySurface(context.Context, time.Duration, managedcapabilities.Surface) string
+	RegisterConversationForkSandboxTurnContext(context.Context, time.Duration, []string) string
+	ResolveManagedCapabilitySurface(string) (managedcapabilities.Surface, bool)
 	UnregisterTurnContext(string)
 }

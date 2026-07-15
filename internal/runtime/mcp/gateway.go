@@ -12,6 +12,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
@@ -31,6 +33,7 @@ type GatewayHooks struct {
 	WithInboundEvent               func(context.Context, events.Event) context.Context
 	WithEmittedEventsRecorder      func(context.Context, *runtimebus.EmittedEventsRecorder) context.Context
 	ResolveTurnContext             func(string) (TurnContext, bool)
+	ObserveCapabilityEvidence      func(string, ...managedcapabilities.DeliveryEvidence) (managedcapabilities.Surface, bool)
 	MarkEmitKeyUsed                func(string, string) bool
 	EmitToolsForActor              func(models.AgentConfig) []llm.ToolDefinition
 	EmitTools                      func(string) []llm.ToolDefinition
@@ -514,7 +517,7 @@ func (g *Gateway) withToolCapabilities(ctx context.Context, actor models.AgentCo
 func toolAllowedInContext(ctx context.Context, toolName string) bool {
 	set, ok := toolcapabilities.FromContext(ctx)
 	if !ok {
-		return true
+		return false
 	}
 	cap, ok := set.Capability(toolName)
 	if !ok {
@@ -566,7 +569,69 @@ func (g *Gateway) mcpToolsForRequest(r *http.Request) ([]ToolDef, error) {
 		return nil, err
 	}
 	ctx := g.baseContextForResolvedTurn(r.Context(), turn)
-	return g.mcpToolsForActorInContext(ctx, turn.Actor, turn.Allowed, true), nil
+	if turn.CapabilitySurface == nil {
+		if len(turn.ForkSandboxAllowed) == 0 {
+			return nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.forkchat_sandbox", nil, map[string]any{"reason": "sandbox_policy_missing"})
+		}
+		return g.mcpToolsForActorInContext(ctx, turn.Actor, turn.ForkSandboxAllowed, true), nil
+	}
+	tools, evidence, err := g.mcpToolsForCapabilitySurface(ctx, turn)
+	if err != nil {
+		return nil, err
+	}
+	if len(evidence) > 0 {
+		if g.hooks.ObserveCapabilityEvidence == nil {
+			return nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_evidence", nil, map[string]any{"reason": "evidence_owner_missing"})
+		}
+		if _, ok := g.hooks.ObserveCapabilityEvidence(ContextTokenFromRequest(r), evidence...); !ok {
+			return nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_evidence", nil, map[string]any{"reason": "evidence_settlement_failed"})
+		}
+	}
+	return tools, nil
+}
+
+func (g *Gateway) mcpToolsForCapabilitySurface(ctx context.Context, turn TurnContext) ([]ToolDef, []managedcapabilities.DeliveryEvidence, error) {
+	if turn.CapabilitySurface == nil {
+		return nil, nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", nil, map[string]any{"reason": "surface_missing"})
+	}
+	if err := turn.CapabilitySurface.Validate(); err != nil || turn.CapabilitySurface.ActorID != strings.TrimSpace(turn.Actor.ID) {
+		return nil, nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", err, map[string]any{"reason": "surface_invalid_or_mismatched"})
+	}
+	catalog := g.toolCatalogInContext(ctx, turn.Actor, true)
+	var names []string
+	var evidence []managedcapabilities.DeliveryEvidence
+	for _, tool := range turn.CapabilitySurface.Tools {
+		if !tool.Capability.Visible || !tool.Capability.Callable {
+			continue
+		}
+		for _, binding := range tool.Bindings {
+			if binding.Kind != managedcapabilities.BindingMCPTool {
+				continue
+			}
+			if _, ok := catalog[tool.Name]; !ok {
+				return nil, nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", nil, map[string]any{"reason": "planned_definition_missing", "tool": tool.Name})
+			}
+			names = append(names, tool.Name)
+			if !tool.EffectiveVisible || !tool.EffectiveCallable {
+				evidence = append(evidence, managedcapabilities.DeliveryEvidence{BindingKind: binding.Kind, ExactName: binding.ExactName, Kind: "mcp_listed", Status: managedcapabilities.EvidenceConfirmed, Detail: "exact turn-context tools/list response"})
+			}
+		}
+	}
+	sort.Strings(names)
+	out := make([]ToolDef, 0, len(names))
+	for _, name := range names {
+		def := catalog[name]
+		description := strings.TrimSpace(llm.DeliveredToolDescription(def))
+		if description == "" {
+			description = "Runtime tool"
+		}
+		schema := def.Schema
+		if schema == nil {
+			schema = map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": true}
+		}
+		out = append(out, ToolDef{Name: name, Description: description, InputSchema: schema})
+	}
+	return out, evidence, nil
 }
 
 func (g *Gateway) MCPToolsForActor(actor models.AgentConfig) []ToolDef {
@@ -737,7 +802,10 @@ func (g *Gateway) resolveRuntimeTurnContext(token string) (TurnContext, bool) {
 		return TurnContext{}, false
 	}
 	turn.Actor = g.hydrateActor(turn.Actor)
-	turn.Allowed = copyAllowedTools(turn.Allowed)
+	if turn.CapabilitySurface != nil {
+		copy := turn.CapabilitySurface.Clone()
+		turn.CapabilitySurface = &copy
+	}
 	return turn, strings.TrimSpace(turn.Actor.ID) != ""
 }
 
@@ -750,15 +818,28 @@ func (g *Gateway) runtimeTurnContextForRequest(r *http.Request, operation string
 	if !ok {
 		return TurnContext{}, g.newGatewayError(ErrCodeContextNotFound, operation, nil, nil)
 	}
+	if turn.CapabilitySurface == nil && len(turn.ForkSandboxAllowed) == 0 {
+		return TurnContext{}, g.newGatewayError(ErrCodeContextNotFound, operation, nil, map[string]any{"reason": "capability_surface_missing_or_mismatched"})
+	}
+	if turn.CapabilitySurface != nil && turn.CapabilitySurface.ActorID != strings.TrimSpace(turn.Actor.ID) {
+		return TurnContext{}, g.newGatewayError(ErrCodeContextNotFound, operation, nil, map[string]any{"reason": "capability_surface_missing_or_mismatched"})
+	}
 	return turn, nil
 }
 
 func (g *Gateway) baseContextForResolvedTurn(ctx context.Context, turn TurnContext) context.Context {
+	if turn.HasExecutionAdmission {
+		ctx = managedexecution.WithAdmission(ctx, turn.ExecutionAdmission)
+	}
+	if turn.EffectController != nil {
+		ctx = runtimeeffects.WithController(ctx, turn.EffectController)
+	}
+	if turn.HasEffectAuthority {
+		ctx = runtimeeffects.WithAuthority(ctx, turn.EffectAuthority)
+		ctx = runtimeeffects.WithExecutionMode(ctx, turn.EffectAuthority.ExecutionMode)
+	}
 	if turn.HasLifecycleToken {
 		ctx = runtimeeffects.WithLifecycleToken(ctx, turn.LifecycleToken)
-		if turn.EffectController != nil {
-			ctx = runtimeeffects.WithController(ctx, turn.EffectController)
-		}
 	} else if turn.DifferentOwner != "" {
 		ctx = runtimeeffects.WithDifferentOwner(ctx, turn.DifferentOwner)
 	}
@@ -781,11 +862,16 @@ func (g *Gateway) baseContextForResolvedTurn(ctx context.Context, turn TurnConte
 	if turn.Recorder != nil && g.hooks.WithEmittedEventsRecorder != nil {
 		ctx = g.hooks.WithEmittedEventsRecorder(ctx, turn.Recorder)
 	}
+	if turn.CapabilitySurface != nil {
+		ctx = managedcapabilities.WithContext(ctx, turn.CapabilitySurface.Clone())
+	}
 	return ctx
 }
 
 func mcpToolCallLogicalIdentitySegment(ctx context.Context, req RPCRequest) (string, error) {
-	if _, managed := runtimeeffects.LifecycleTokenFromContext(ctx); !managed {
+	_, lifecycleManaged := runtimeeffects.LifecycleTokenFromContext(ctx)
+	authority, authorityManaged := runtimeeffects.AuthorityFromContext(ctx)
+	if !lifecycleManaged && (!authorityManaged || (authority.Kind != runtimeeffects.AuthorityNormalAgent && authority.Kind != runtimeeffects.AuthoritySelectedContractFork && authority.Kind != runtimeeffects.AuthorityStartupProbe)) {
 		return "", nil
 	}
 	meta, ok := req.Params["_meta"].(map[string]any)
@@ -802,7 +888,14 @@ func mcpToolCallLogicalIdentitySegment(ctx context.Context, req RPCRequest) (str
 
 func (g *Gateway) contextForResolvedTurn(ctx context.Context, turn TurnContext) context.Context {
 	ctx = g.baseContextForResolvedTurn(ctx, turn)
-	return g.withToolCapabilities(ctx, turn.Actor, g.catalogNames(g.toolCatalogInContext(ctx, turn.Actor, true)), turn.Allowed)
+	if turn.CapabilitySurface == nil {
+		names := make([]string, 0, len(turn.ForkSandboxAllowed))
+		for name := range turn.ForkSandboxAllowed {
+			names = append(names, name)
+		}
+		return g.withToolCapabilities(ctx, turn.Actor, names, turn.ForkSandboxAllowed)
+	}
+	return toolcapabilities.WithContext(ctx, turn.CapabilitySurface.CapabilitySet())
 }
 
 func (g *Gateway) AuthorizeForTest(r *http.Request) error {

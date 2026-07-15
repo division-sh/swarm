@@ -9,6 +9,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
@@ -16,9 +18,9 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
-type cliUsableToolsContextKey struct{}
+type conversationForkSandboxToolsContextKey struct{}
 
-type cliUsableToolsContextValue struct {
+type conversationForkSandboxToolsContextValue struct {
 	tools []string
 }
 
@@ -152,6 +154,24 @@ func (c *Conversation) continueOnce(ctx context.Context, msg Message) (*Response
 		})
 	}
 	turnCtx := runtimeeffects.WithLogicalOperationIdentitySegment(ctx, fmt.Sprintf("provider_turn:%d", c.TurnCount+1))
+	if managedAgentExecutionContext(turnCtx) {
+		var authority managedcapabilities.Authority
+		var err error
+		turnCtx, authority, err = withProviderTurnAuthority(turnCtx, c.Session)
+		if err != nil {
+			return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_capability_turn_authority_invalid", "llm-conversation", "prepare_turn", map[string]any{"validation_error": err.Error()}, err)
+		}
+		_ = authority
+		capabilities, err := c.plannedToolCapabilities(turnCtx)
+		if err != nil {
+			return nil, err
+		}
+		surface, err := managedCapabilityPlanForTurn(turnCtx, c.runtime, c.Session, c.turnToolDefinitions(), capabilities)
+		if err != nil {
+			return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_capability_plan_invalid", "llm-conversation", "prepare_turn", map[string]any{"validation_error": err.Error()}, err)
+		}
+		turnCtx = managedcapabilities.WithContext(turnCtx, surface)
+	}
 	resp, err := c.runtime.ContinueSession(turnCtx, c.Session, msg)
 	if err != nil {
 		return nil, err
@@ -171,7 +191,32 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 		if len(resp.ToolCalls) == 0 {
 			return resp, nil
 		}
-		ctx = withCLIUsableToolsForTurn(ctx, c.turnToolDefinitions(), resp)
+		if surface, ok := capabilitySurfaceForResponse(resp); ok {
+			ctx = managedcapabilities.WithContext(ctx, surface)
+			if managedAgentExecutionContext(ctx) {
+				if surface.Authority.Kind != managedcapabilities.AuthorityProviderTurn || c.Session == nil || surface.Authority.SessionID != strings.TrimSpace(c.Session.ID) {
+					return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_turn_identity_mismatch", "llm-conversation", "authorize_tool_round", map[string]any{"surface_id": surface.ID})
+				}
+				actor, _ := models.ActorFromContext(ctx)
+				flowInstance := strings.TrimSpace(actor.CanonicalFlowPath())
+				if c.Session.Memory.Enabled {
+					flowInstance = strings.TrimSpace(c.Session.MemoryIdentity.FlowInstance)
+				}
+				ctx = runtimeeffects.WithUsageTarget(ctx, runtimeeffects.UsageTarget{
+					Kind: runtimeeffects.UsageTargetAgentTurn, ID: surface.Authority.ID, RunID: surface.Authority.RunID,
+					AgentID: surface.ActorID, SessionID: surface.Authority.SessionID, Memory: c.Session.Memory,
+					FlowInstance: flowInstance, EntityID: strings.TrimSpace(actor.EffectiveEntityID()),
+				})
+				authority, hasAuthority := runtimeeffects.AuthorityFromContext(ctx)
+				if !hasAuthority || authority.Target.ID != surface.Authority.ID {
+					return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_effect_target_missing", "llm-conversation", "authorize_tool_round", map[string]any{"surface_id": surface.ID})
+				}
+			}
+		} else if managedAgentExecutionContext(ctx) {
+			return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_surface_missing", "llm-conversation", "authorize_tool_round", nil)
+		} else {
+			ctx = withConversationForkSandboxToolsForTurn(ctx, c.turnToolDefinitions(), resp)
+		}
 		toolPayload, executed, err := c.executeToolCalls(ctx, resp.ToolCalls)
 		if err != nil {
 			return nil, err
@@ -196,6 +241,13 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 }
 
 func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (string, []executedToolCall, error) {
+	if managedAgentExecutionContext(ctx) {
+		surface, ok := managedcapabilities.FromContext(ctx)
+		if !ok {
+			return "", nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_surface_missing", "llm-conversation", "execute_tool", nil)
+		}
+		ctx = toolcapabilities.WithContext(ctx, surface.CapabilitySet())
+	}
 	ctx = c.withToolCapabilities(ctx)
 	results := make([]map[string]any, 0, len(calls))
 	executed := make([]executedToolCall, 0, len(calls))
@@ -368,6 +420,9 @@ func (c *Conversation) withToolCapabilities(ctx context.Context) context.Context
 	if c == nil || c.toolExecutor == nil || ctx == nil {
 		return ctx
 	}
+	if surface, ok := managedcapabilities.FromContext(ctx); ok {
+		return toolcapabilities.WithContext(ctx, surface.CapabilitySet())
+	}
 	actor, ok := models.ActorFromContext(ctx)
 	if !ok {
 		return ctx
@@ -390,6 +445,38 @@ func (c *Conversation) withToolCapabilities(ctx context.Context) context.Context
 	return toolcapabilities.WithContext(ctx, c.toolExecutor.ToolCapabilitiesForActor(actor, names, nil))
 }
 
+func (c *Conversation) plannedToolCapabilities(ctx context.Context) (toolcapabilities.Set, error) {
+	if c == nil || c.toolExecutor == nil {
+		return toolcapabilities.Set{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_executor_missing", "llm-conversation", "plan_turn", nil)
+	}
+	actor, ok := models.ActorFromContext(ctx)
+	if !ok {
+		return toolcapabilities.Set{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_actor_missing", "llm-conversation", "plan_turn", nil)
+	}
+	defs := c.turnToolDefinitions()
+	names := make([]string, 0, len(defs)+4)
+	for _, def := range defs {
+		if name := strings.TrimSpace(def.Name); name != "" {
+			names = append(names, name)
+		}
+	}
+	names = append(names, nativeCapabilityNames(actor)...)
+	if contextAware, ok := c.toolExecutor.(ContextAwareCapabilityToolExecutor); ok {
+		return contextAware.ToolCapabilitiesForActorInContext(ctx, actor, names, nil), nil
+	}
+	return c.toolExecutor.ToolCapabilitiesForActor(actor, names, nil), nil
+}
+
+func managedAgentExecutionContext(ctx context.Context) bool {
+	authority, ok := runtimeeffects.AuthorityFromContext(ctx)
+	if ok {
+		return authority.Kind == runtimeeffects.AuthorityNormalAgent || authority.Kind == runtimeeffects.AuthoritySelectedContractFork
+	}
+	admission, admitted := managedexecution.FromContext(ctx)
+	_, hasLifecycle := runtimeeffects.LifecycleTokenFromContext(ctx)
+	return admitted && admission.AuthorizesNormal() && hasLifecycle
+}
+
 func toolIsRoleScopedTypedReadInContext(ctx context.Context, name string) bool {
 	set, ok := toolcapabilities.FromContext(ctx)
 	if !ok {
@@ -408,7 +495,14 @@ func toolCallBatchHasRoleScopedTypedRead(ctx context.Context, calls []ToolCall) 
 }
 
 func runtimeReadFileFollowUpAllowedForTurn(ctx context.Context, tools []ToolDefinition) bool {
-	if usable, ok := cliUsableToolsForTurnFromContext(ctx); ok {
+	if surface, ok := managedcapabilities.FromContext(ctx); ok {
+		capability, found := surface.Capability("read_file")
+		return found && capability.Visible && capability.Callable
+	}
+	if managedAgentExecutionContext(ctx) {
+		return false
+	}
+	if usable, ok := conversationForkSandboxToolsForTurnFromContext(ctx); ok {
 		for _, name := range usable {
 			if name == "read_file" {
 				return true
@@ -417,7 +511,7 @@ func runtimeReadFileFollowUpAllowedForTurn(ctx context.Context, tools []ToolDefi
 		return false
 	}
 	actor, _ := models.ActorFromContext(ctx)
-	for _, name := range plannedCanonicalVisibleToolsForActor(actor, tools) {
+	for _, name := range conversationForkSandboxPlannedTools(actor, tools) {
 		if name == "read_file" {
 			return true
 		}
@@ -506,17 +600,17 @@ func toolInputPath(input any) string {
 	return strings.TrimSpace(pathCarrier.Path)
 }
 
-func withCLIUsableToolsForTurn(ctx context.Context, tools []ToolDefinition, resp *Response) context.Context {
+func withConversationForkSandboxToolsForTurn(ctx context.Context, tools []ToolDefinition, resp *Response) context.Context {
 	actor, _ := models.ActorFromContext(ctx)
-	usable := resolvedCLIUsableToolsForTurn(actor, tools, resp)
-	return context.WithValue(ctx, cliUsableToolsContextKey{}, cliUsableToolsContextValue{tools: append([]string(nil), usable...)})
+	usable := conversationForkSandboxUsableToolsForTurn(actor, tools, resp)
+	return context.WithValue(ctx, conversationForkSandboxToolsContextKey{}, conversationForkSandboxToolsContextValue{tools: append([]string(nil), usable...)})
 }
 
-func cliUsableToolsForTurnFromContext(ctx context.Context) ([]string, bool) {
+func conversationForkSandboxToolsForTurnFromContext(ctx context.Context) ([]string, bool) {
 	if ctx == nil {
 		return nil, false
 	}
-	v, ok := ctx.Value(cliUsableToolsContextKey{}).(cliUsableToolsContextValue)
+	v, ok := ctx.Value(conversationForkSandboxToolsContextKey{}).(conversationForkSandboxToolsContextValue)
 	if !ok {
 		return nil, false
 	}

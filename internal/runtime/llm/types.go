@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 )
 
 type ToolDefinition struct {
@@ -48,14 +49,16 @@ type ToolCall struct {
 }
 
 type Response struct {
-	Message           Message           `json:"message"`
-	ToolCalls         []ToolCall        `json:"tool_calls,omitempty"`
-	ObservedToolCalls []ToolCall        `json:"-"`
-	SessionID         string            `json:"session_id,omitempty"`
-	Raw               []byte            `json:"raw,omitempty"`
-	VisibleTools      []string          `json:"visible_tools,omitempty"`
-	MCPServers        map[string]string `json:"mcp_servers,omitempty"`
-	MCPVisibleTools   []string          `json:"mcp_visible_tools,omitempty"`
+	Message              Message                      `json:"message"`
+	ToolCalls            []ToolCall                   `json:"tool_calls,omitempty"`
+	ObservedToolCalls    []ToolCall                   `json:"-"`
+	SessionID            string                       `json:"session_id,omitempty"`
+	Raw                  []byte                       `json:"raw,omitempty"`
+	VisibleTools         []string                     `json:"visible_tools,omitempty"`
+	ProviderVisibleTools []string                     `json:"provider_visible_tools,omitempty"`
+	MCPServers           map[string]string            `json:"mcp_servers,omitempty"`
+	MCPVisibleTools      []string                     `json:"mcp_visible_tools,omitempty"`
+	CapabilitySurface    *managedcapabilities.Surface `json:"capability_surface,omitempty"`
 }
 
 type Session struct {

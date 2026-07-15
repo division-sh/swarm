@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
 )
@@ -17,6 +18,7 @@ const (
 	AuthorityNormalAgent          AuthorityKind = "normal_agent"
 	AuthoritySelectedContractFork AuthorityKind = "selected_contract_fork"
 	AuthorityConversationForkChat AuthorityKind = "conversation_fork_chat"
+	AuthorityStartupProbe         AuthorityKind = "startup_probe"
 )
 
 type UsageTargetKind string
@@ -62,6 +64,13 @@ func (t UsageTarget) Valid() bool {
 	}
 }
 
+func ProviderTurnTargetMatchesCapabilitySurface(target UsageTarget, surface managedcapabilities.Surface) bool {
+	return target.Kind == UsageTargetAgentTurn && target.Valid() &&
+		surface.Authority.Kind == managedcapabilities.AuthorityProviderTurn &&
+		surface.Authority.ID == target.ID && surface.ActorID == target.AgentID &&
+		surface.Authority.SessionID == target.SessionID && surface.Authority.RunID == target.RunID
+}
+
 type SelectedContractForkAuthority struct {
 	ExecutionID                string
 	ForkRunID                  string
@@ -80,12 +89,22 @@ type ConversationForkChatAuthority struct {
 	RequestHash         string
 }
 
+type StartupProbeAuthority struct {
+	ProbeID              string
+	StartupAuthorityID   string
+	StartupStateVersion  uint64
+	ActorID              string
+	ExecutionKind        string
+	ExecutionAuthorityID string
+}
+
 type Authority struct {
 	Kind            AuthorityKind
 	ID              string
 	Normal          LifecycleToken
 	SelectedFork    SelectedContractForkAuthority
 	ForkChat        ConversationForkChatAuthority
+	StartupProbe    StartupProbeAuthority
 	ExecutionOwner  string
 	LeaseExpiresAt  time.Time
 	FenceGeneration uint64
@@ -127,6 +146,10 @@ func (a Authority) Valid() bool {
 	case AuthorityConversationForkChat:
 		return validUUIDs(a.ForkChat.ForkTurnID, a.ForkChat.ForkID, a.ForkChat.RequestOccurrenceID) &&
 			a.ID == strings.TrimSpace(a.ForkChat.ForkTurnID) && nonEmpty(a.ForkChat.ActorTokenID, a.ForkChat.RequestHash)
+	case AuthorityStartupProbe:
+		return validUUIDs(a.StartupProbe.ProbeID, a.StartupProbe.StartupAuthorityID) &&
+			a.ID == strings.TrimSpace(a.StartupProbe.ProbeID) && a.StartupProbe.StartupStateVersion > 0 &&
+			nonEmpty(a.StartupProbe.ActorID, a.StartupProbe.ExecutionKind, a.StartupProbe.ExecutionAuthorityID)
 	default:
 		return false
 	}
@@ -139,6 +162,8 @@ func (a Authority) Generation() uint64 {
 	case AuthoritySelectedContractFork:
 		return a.SelectedFork.Generation
 	case AuthorityConversationForkChat:
+		return a.FenceGeneration
+	case AuthorityStartupProbe:
 		return a.FenceGeneration
 	default:
 		return 0
@@ -187,6 +212,13 @@ func (a Authority) Evidence() map[string]any {
 		evidence["actor_token_id"] = a.ForkChat.ActorTokenID
 		evidence["request_occurrence_id"] = a.ForkChat.RequestOccurrenceID
 		evidence["request_hash"] = a.ForkChat.RequestHash
+	case AuthorityStartupProbe:
+		evidence["probe_id"] = a.StartupProbe.ProbeID
+		evidence["startup_authority_id"] = a.StartupProbe.StartupAuthorityID
+		evidence["startup_state_version"] = a.StartupProbe.StartupStateVersion
+		evidence["actor_id"] = a.StartupProbe.ActorID
+		evidence["execution_kind"] = a.StartupProbe.ExecutionKind
+		evidence["execution_authority_id"] = a.StartupProbe.ExecutionAuthorityID
 	}
 	return evidence
 }

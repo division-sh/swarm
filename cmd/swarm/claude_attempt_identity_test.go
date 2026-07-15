@@ -19,6 +19,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -69,10 +71,20 @@ func (claudeAttemptProofWorkspace) ResolveWorkspace(context.Context, runtimeacto
 }
 
 type claudeAttemptProofAgent struct {
-	runtime *runtimellm.ClaudeCLIRuntime
-	config  runtimeactors.AgentConfig
-	calls   *atomic.Int32
-	session *runtimellm.Session
+	runtime      *runtimellm.ClaudeCLIRuntime
+	config       runtimeactors.AgentConfig
+	calls        *atomic.Int32
+	conversation *runtimellm.Conversation
+}
+
+type claudeAttemptProofToolExecutor struct{}
+
+func (claudeAttemptProofToolExecutor) Execute(context.Context, string, any) (any, error) {
+	return nil, fmt.Errorf("Claude attempt proof declares no callable tools")
+}
+
+func (claudeAttemptProofToolExecutor) ToolCapabilitiesForActor(runtimeactors.AgentConfig, []string, map[string]struct{}) toolcapabilities.Set {
+	return toolcapabilities.NewSet(nil)
 }
 
 func (a *claudeAttemptProofAgent) ID() string { return a.config.ID }
@@ -91,14 +103,11 @@ func (a *claudeAttemptProofAgent) OnEvent(ctx context.Context, evt events.Event)
 		AgentID:      a.config.ID,
 		FlowInstance: a.config.CanonicalFlowPath(),
 	})
-	if a.session == nil {
-		session, err := a.runtime.StartSession(ctx, a.config.ID, "Reply exactly ok.", nil)
-		if err != nil {
-			return nil, err
-		}
-		a.session = session
+	if a.conversation == nil {
+		a.conversation = runtimellm.NewConversation(a.config.ID, a.config.CanonicalFlowPath(), "Reply exactly ok.", nil, a.config.Memory, 25, a.runtime)
+		a.conversation.SetToolExecutor(claudeAttemptProofToolExecutor{})
 	}
-	_, err := a.runtime.ContinueSession(ctx, a.session, runtimellm.Message{Role: "user", Content: "Reply exactly ok."})
+	_, err := a.conversation.Step(ctx, "Reply exactly ok.")
 	return nil, err
 }
 
@@ -138,11 +147,11 @@ func TestClaudeAttemptStartRejectionRetriesThroughSelectedStore(t *testing.T) {
 			if err := manager.SpawnAgent(claudeAttemptProofAgentConfig()); err != nil {
 				t.Fatalf("spawn claude proof agent: %v", err)
 			}
-			manager.Run(context.Background())
+			runClaudeAttemptProofManager(t, manager)
 			t.Cleanup(func() { _ = manager.Shutdown() })
 
 			eventID := publishClaudeAttemptProofEvent(t, eventBus)
-			if err := manager.ReplayAgentBacklog(context.Background(), claudeAttemptProofAgentConfig().ID); err != nil {
+			if err := manager.ReplayAgentBacklog(claudeAttemptProofAdmissionContext(t), claudeAttemptProofAgentConfig().ID); err != nil {
 				t.Fatalf("process initial Claude proof delivery: %v", err)
 			}
 			first := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusError, calls)
@@ -151,7 +160,7 @@ func TestClaudeAttemptStartRejectionRetriesThroughSelectedStore(t *testing.T) {
 			}
 			writeClaudeAttemptProofDocker(t, dockerBin)
 			makeClaudeAttemptProofDeliveryRetryEligible(t, backend, eventID)
-			if err := manager.ReplayAgentBacklog(context.Background(), claudeAttemptProofAgentConfig().ID); err != nil {
+			if err := manager.ReplayAgentBacklog(claudeAttemptProofAdmissionContext(t), claudeAttemptProofAgentConfig().ID); err != nil {
 				t.Fatalf("replay claude proof delivery: %v", err)
 			}
 			processed := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusProcessed, calls)
@@ -209,10 +218,10 @@ func TestClaudePostlaunchFailurePreservesClassificationAndRestartRefusesProvider
 			if err := manager.SpawnAgent(claudeAttemptProofAgentConfig()); err != nil {
 				t.Fatalf("spawn claude proof agent: %v", err)
 			}
-			manager.Run(context.Background())
+			runClaudeAttemptProofManager(t, manager)
 
 			eventID := publishClaudeAttemptProofEvent(t, eventBus)
-			if err := manager.ReplayAgentBacklog(context.Background(), claudeAttemptProofAgentConfig().ID); err != nil {
+			if err := manager.ReplayAgentBacklog(claudeAttemptProofAdmissionContext(t), claudeAttemptProofAgentConfig().ID); err != nil {
 				t.Fatalf("process initial Claude proof delivery: %v", err)
 			}
 			receipt := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusError, calls)
@@ -229,10 +238,14 @@ func TestClaudePostlaunchFailurePreservesClassificationAndRestartRefusesProvider
 
 			makeClaudeAttemptProofDeliveryRetryEligible(t, backend, eventID)
 			restarted, _ := newClaudeAttemptProofManager(t, backend, dockerBin, calls)
-			if _, err := restarted.RecoverWithStartupReplayDiagnostics(context.Background()); err != nil {
-				t.Fatalf("recover restarted manager: %v", err)
+			recoveryCtx := claudeAttemptProofAdmissionContext(t)
+			if _, err := restarted.HydrateForStartup(recoveryCtx); err != nil {
+				t.Fatalf("hydrate restarted manager: %v", err)
 			}
-			if err := restarted.ReplayAgentBacklog(context.Background(), claudeAttemptProofAgentConfig().ID); err != nil {
+			if _, err := restarted.ReplayAfterStartupAdmission(recoveryCtx, true); err != nil {
+				t.Fatalf("replay restarted manager after admission: %v", err)
+			}
+			if err := restarted.ReplayAgentBacklog(claudeAttemptProofAdmissionContext(t), claudeAttemptProofAgentConfig().ID); err != nil {
 				t.Fatalf("replay postlaunch-failure delivery: %v", err)
 			}
 			dead := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusDeadLetter, calls)
@@ -272,7 +285,7 @@ func TestClaudeProviderHeadCommitFailureSettlesUncertain(t *testing.T) {
 			if err := manager.SpawnAgent(claudeAttemptProofAgentConfig()); err != nil {
 				t.Fatalf("spawn Claude provider-head fault agent: %v", err)
 			}
-			manager.Run(context.Background())
+			runClaudeAttemptProofManager(t, manager)
 			eventID := publishClaudeAttemptProofEvent(t, eventBus)
 			receipt := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusDeadLetter, calls)
 			if receipt.RetryCount != 0 || receipt.Failure == nil || receipt.Failure.Detail.Code != "provider_head_commit_injected" {
@@ -302,7 +315,7 @@ func TestClaudeProviderHeadCommitFailureSettlesUncertain(t *testing.T) {
 			if got := readClaudeAttemptProofCount(t, captureDir); got != 1 || calls.Load() != 1 {
 				t.Fatalf("after commit failure process_count=%d agent_calls=%d, want one", got, calls.Load())
 			}
-			if err := manager.ReplayAgentBacklog(context.Background(), claudeAttemptProofAgentConfig().ID); err != nil {
+			if err := manager.ReplayAgentBacklog(claudeAttemptProofAdmissionContext(t), claudeAttemptProofAgentConfig().ID); err != nil {
 				t.Fatalf("replay terminal provider-head fault delivery: %v", err)
 			}
 			if got := readClaudeAttemptProofCount(t, captureDir); got != 1 || calls.Load() != 1 {
@@ -342,7 +355,7 @@ func TestClaudeAttemptIdentitySelectedStoreMemoryAndProcessParity(t *testing.T) 
 					if err := manager.SpawnAgent(cfg); err != nil {
 						t.Fatalf("spawn Claude %s proof agent: %v", surface.name, err)
 					}
-					manager.Run(context.Background())
+					runClaudeAttemptProofManager(t, manager)
 					t.Cleanup(func() { _ = manager.Shutdown() })
 
 					eventID := publishClaudeAttemptProofEvent(t, eventBus, surface)
@@ -395,7 +408,7 @@ func TestAgentManagerDirectDeadLetterPersistsCanonicalEnvelopeSelectedStores(t *
 			if err := manager.SpawnAgent(claudeAttemptProofAgentConfig()); err != nil {
 				t.Fatalf("spawn chain-depth proof agent: %v", err)
 			}
-			manager.Run(context.Background())
+			runClaudeAttemptProofManager(t, manager)
 			t.Cleanup(func() { _ = manager.Shutdown() })
 
 			eventID := publishClaudeAttemptProofEvent(t, eventBus)
@@ -469,6 +482,30 @@ func newClaudeAttemptProofManager(t *testing.T, backend claudeAttemptProofBacken
 		return &claudeAttemptProofAgent{runtime: runtime, config: cfg, calls: calls}, nil
 	}, runtimemanager.AgentManagerOptions{LifecycleStore: backend.store, Sessions: backend.sessions}, backend.store)
 	return manager, eventBus
+}
+
+func claudeAttemptProofAdmissionContext(t testing.TB) context.Context {
+	t.Helper()
+	admission, err := managedexecution.New(
+		managedexecution.KindNormalRuntime,
+		"claude-attempt-proof-runtime",
+		1,
+		"",
+		"claude-attempt-proof-actors",
+		"claude-attempt-proof-bundle",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("build Claude attempt proof admission: %v", err)
+	}
+	return managedexecution.WithAdmission(context.Background(), admission)
+}
+
+func runClaudeAttemptProofManager(t testing.TB, manager *runtimemanager.AgentManager) {
+	t.Helper()
+	if err := manager.Run(claudeAttemptProofAdmissionContext(t)); err != nil {
+		t.Fatalf("run Claude attempt proof manager: %v", err)
+	}
 }
 
 func claudeAttemptProofAgentConfig(surfaces ...claudeAttemptProofSurface) runtimeactors.AgentConfig {

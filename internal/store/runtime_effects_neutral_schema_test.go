@@ -129,7 +129,7 @@ func nonCompletionRegistrationsForParity(t *testing.T) []runtimeeffects.Registra
 	actual := make(map[string]int)
 	var registrations []runtimeeffects.Registration
 	for _, registration := range runtimeeffects.Registrations() {
-		if registration.Kind == runtimeeffects.KindProviderTurn {
+		if registration.Kind == runtimeeffects.KindProviderTurn || registration.Kind == runtimeeffects.KindProviderStartupProbe {
 			continue
 		}
 		if _, duplicate := actual[registration.Adapter]; duplicate {
@@ -159,18 +159,26 @@ func newNeutralEffectParityFixture(t *testing.T, store neutralEffectParityStore,
 	ctx := context.Background()
 	now := time.Now().UTC()
 	agentID := "neutral-effect-parity-agent"
+	runID := managedNormalEffectStoreTestRunID(agentID)
 	if sqlite {
 		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES (?,'neutral','worker','regular','mock',0,'platform_default','active',7,3,'running',?)`, agentID, now); err != nil {
 			t.Fatalf("seed neutral effect agent: %v", err)
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+			t.Fatalf("seed neutral effect run: %v", err)
 		}
 	} else {
 		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES ($1,'neutral','worker','regular','mock',FALSE,'platform_default','active',7,3,'running',$2)`, agentID, now); err != nil {
 			t.Fatalf("seed neutral effect agent: %v", err)
 		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+			t.Fatalf("seed neutral effect run: %v", err)
+		}
 	}
 	token := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: agentID, Generation: 3}
 	authority := runtimeeffects.NormalAgentAuthority(token, fmt.Sprintf("agent:%s:%d:%d", agentID, token.RuntimeEpoch, token.Generation), now.Add(5*time.Minute))
 	ctx = runtimeeffects.WithController(runtimeeffects.WithLifecycleToken(ctx, token), runtimeeffects.NewController(store))
+	ctx = managedNormalEffectStoreTestContext(t, ctx, authority)
 	return neutralEffectParityFixture{store: store, db: db, sqlite: sqlite, authority: authority, ctx: ctx}
 }
 

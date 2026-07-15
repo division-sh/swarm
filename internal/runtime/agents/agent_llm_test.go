@@ -41,7 +41,7 @@ func testBoardDirective(text string) runtimeagentcontrol.BoardDirective {
 	}
 }
 
-func TestFormatEventForAgent_UsesPostCompositionToolSurface(t *testing.T) {
+func TestFormatEventForAgent_DoesNotNarrateIndependentToolSurface(t *testing.T) {
 	cfg := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-1",
@@ -77,21 +77,14 @@ func TestFormatEventForAgent_UsesPostCompositionToolSurface(t *testing.T) {
 			},
 		},
 	})
-	if !strings.Contains(formatted, "Available non-emit tools in this turn: get_entity, read_file, save_entity_field") {
-		t.Fatalf("expected post-composition non-emit summary, got %q", formatted)
-	}
-	if !strings.Contains(formatted, "Writable entity paths for save_entity_field in this turn: metadata, metadata.region, status") {
-		t.Fatalf("expected writable path summary, got %q", formatted)
-	}
-	if strings.Contains(formatted, "schedule") {
-		t.Fatalf("expected raw contract-only tool to stay out of event summary, got %q", formatted)
-	}
-	if !strings.Contains(formatted, "Available emit tools in this turn: emit_example") {
-		t.Fatalf("expected emit tool summary, got %q", formatted)
+	for _, stale := range []string{"Available non-emit tools", "Writable entity paths", "Available emit tools", "schedule", "get_entity", "read_file", "save_entity_field", "emit_example"} {
+		if strings.Contains(formatted, stale) {
+			t.Fatalf("event prompt retained independent capability narrative %q: %q", stale, formatted)
+		}
 	}
 }
 
-func TestFormatEventForAgent_UsesCanonicalNativeBuiltinNames(t *testing.T) {
+func TestFormatEventForAgent_DoesNotNarrateNativeBuiltinSurface(t *testing.T) {
 	cfg := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-1",
@@ -119,11 +112,10 @@ func TestFormatEventForAgent_UsesCanonicalNativeBuiltinNames(t *testing.T) {
 		{Name: "query_entities"},
 		{Name: "emit_example"},
 	})
-	if !strings.Contains(formatted, "Available native CLI tools in this turn: Bash, Edit, Read, Write") {
-		t.Fatalf("expected canonical native builtin summary, got %q", formatted)
-	}
-	if strings.Contains(formatted, "file_io") {
-		t.Fatalf("expected raw native contract flag to stay out of event summary, got %q", formatted)
+	for _, stale := range []string{"Available native CLI tools", "Bash", "Edit", "Read", "Write", "file_io"} {
+		if strings.Contains(formatted, stale) {
+			t.Fatalf("event prompt retained independent native capability narrative %q: %q", stale, formatted)
+		}
 	}
 }
 
@@ -874,8 +866,8 @@ func TestBoardStep_FactoryCreatedDirectiveTurnPreservesRoleScopedEmitToolSurface
 	if !containsString(rt.startTools, "emit_scan_requested") {
 		t.Fatalf("session tools = %v, want emit_scan_requested", rt.startTools)
 	}
-	if len(rt.inputs) == 0 || !strings.Contains(rt.inputs[0], "Available emit tools in this turn: emit_scan_requested") {
-		t.Fatalf("directive input = %q, want emit tool summary", firstOrEmpty(rt.inputs))
+	if len(rt.inputs) == 0 || strings.Contains(rt.inputs[0], "Available emit tools") {
+		t.Fatalf("directive input retained prompt-owned emit capability truth: %q", firstOrEmpty(rt.inputs))
 	}
 	if len(bus.events) != 1 || string(bus.events[0].Type()) != "scan.requested" {
 		t.Fatalf("published events = %#v, want one scan.requested event", bus.events)
@@ -940,8 +932,8 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 	if !containsString(rt.startTools, "emit_scan_requested") {
 		t.Fatalf("session tools = %v, want emit_scan_requested", rt.startTools)
 	}
-	if len(rt.inputs) == 0 || !strings.Contains(rt.inputs[0], "Available emit tools in this turn: emit_scan_requested") {
-		t.Fatalf("directive input = %q, want emit tool summary", firstOrEmpty(rt.inputs))
+	if len(rt.inputs) == 0 || strings.Contains(rt.inputs[0], "Available emit tools") {
+		t.Fatalf("directive input retained prompt-owned emit capability truth: %q", firstOrEmpty(rt.inputs))
 	}
 	if len(rt.inputs) < 2 || !strings.Contains(rt.inputs[1], "call the appropriate emit_* tool in this turn") {
 		t.Fatalf("remediation input = %q, want remediation prompt", firstOrEmpty(rt.inputs[1:]))

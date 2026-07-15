@@ -41,16 +41,17 @@ type EventSchemaCapabilities struct {
 }
 
 type ConversationSchemaCapabilities struct {
-	Sessions      SchemaFlavor
-	Audits        SchemaFlavor
-	Turns         SchemaFlavor
-	Forks         SchemaFlavor
-	ForkSnapshots SchemaFlavor
-	ForkTurns     SchemaFlavor
-	SessionRunID  bool
-	AuditRunID    bool
-	TurnRunID     bool
-	TurnBlocks    bool
+	Sessions           SchemaFlavor
+	Audits             SchemaFlavor
+	Turns              SchemaFlavor
+	CapabilitySurfaces SchemaFlavor
+	Forks              SchemaFlavor
+	ForkSnapshots      SchemaFlavor
+	ForkTurns          SchemaFlavor
+	SessionRunID       bool
+	AuditRunID         bool
+	TurnRunID          bool
+	TurnBlocks         bool
 }
 
 type StoreSchemaCapabilities struct {
@@ -266,11 +267,15 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 		Turns: detectSchemaFlavor(catalog, "agent_turns",
 			[]string{
 				"turn_id", "run_id", "agent_id", "session_id", "flow_instance", "memory_enabled", "memory_source", "entity_id",
-				"trigger_event_id", "trigger_event_type", "task_id", "available_tools", "tool_calls",
-				"emitted_events", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible",
+				"trigger_event_id", "trigger_event_type", "task_id", "capability_surface_id", "tool_calls",
+				"emitted_events",
 				"request_payload", "response_payload", "parse_ok", "latency_ms", "retry_count", "execution_mode",
 				"failure", "created_at",
 			},
+			nil,
+		),
+		CapabilitySurfaces: detectSchemaFlavor(catalog, "managed_agent_capability_surfaces",
+			[]string{"surface_id", "integrity_hash", "authority_kind", "authority_id", "execution_kind", "execution_authority_id", "run_id", "actor_id", "provider", "transport", "surface", "created_at"},
 			nil,
 		),
 		Forks: detectSchemaFlavor(catalog, "conversation_forks",

@@ -133,7 +133,7 @@ func TestAuthoredMockAlternativeStaticAndInstantiatedAgentsSpawnPersistRecoverLi
 		recovered[cfg.ID] = cfg
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{LLMBackend: llmselection.BackendAnthropic}, store)
-	if err := recoveryManager.Recover(context.Background()); err != nil {
+	if err := recoveryManager.Recover(managedExecutionTestContext(t, context.Background())); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	assertLiveMockAlternativeProjection(t, "recovered", recovered, staticCfg.ID, instantiatedCfg.ID)

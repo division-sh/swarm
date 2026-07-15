@@ -22,11 +22,11 @@ type sqliteRuntimeStartupLease struct {
 	owner string
 }
 
-func (s *SQLiteRuntimeStore) AcquireRuntimeStartupOwnership(ctx context.Context, ownerID string) (runtimestartupownership.Lease, error) {
+func (s *SQLiteRuntimeStore) AcquireRuntimeStartupOwnership(ctx context.Context, req runtimestartupownership.AcquireRequest) (runtimestartupownership.Lease, error) {
 	if s == nil || s.DB == nil {
 		return nil, nil
 	}
-	ownerID = strings.TrimSpace(ownerID)
+	ownerID := strings.TrimSpace(req.OwnerID)
 	if ownerID == "" {
 		return nil, fmt.Errorf("runtime owner id is required")
 	}
@@ -36,7 +36,54 @@ func (s *SQLiteRuntimeStore) AcquireRuntimeStartupOwnership(ctx context.Context,
 		return nil, fmt.Errorf("sqlite local runtime store already owned by another runtime instance")
 	}
 	s.startupOwner = ownerID
-	return &sqliteRuntimeStartupLease{store: s, owner: ownerID}, nil
+	authority, err := runtimestartupownership.NewColdAuthority(req, "sqlite_process_local")
+	if err != nil {
+		s.startupOwner = ""
+		return nil, err
+	}
+	if err := s.RecordRuntimeStartupAuthorityTransition(ctx, nil, authority); err != nil {
+		s.startupOwner = ""
+		return nil, err
+	}
+	rawLease := &sqliteRuntimeStartupLease{store: s, owner: ownerID}
+	return runtimestartupownership.NewLease(authority, s, rawLease.Release)
+}
+
+func (s *SQLiteRuntimeStore) RecordRuntimeStartupAuthorityTransition(ctx context.Context, previous *runtimestartupownership.Authority, next ...runtimestartupownership.Authority) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("sqlite store is required for startup authority evidence")
+	}
+	if err := runtimestartupownership.ValidateTransitionChain(previous, next...); err != nil {
+		return err
+	}
+	return s.runRuntimeMutation(ctx, "sqlite runtime startup authority", func(txctx context.Context, tx *sql.Tx) error {
+		leaseID := next[0].LeaseAuthorityID
+		var persistedRaw []byte
+		headErr := tx.QueryRowContext(txctx, `
+			SELECT snapshot FROM runtime_startup_authority_facts
+			WHERE lease_authority_id=?
+			ORDER BY transition_ordinal DESC LIMIT 1
+		`, leaseID).Scan(&persistedRaw)
+		if err := validatePersistedStartupAuthorityHead(persistedRaw, headErr, previous); err != nil {
+			return err
+		}
+		for _, authority := range next {
+			raw, err := json.Marshal(authority)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(txctx, `
+				INSERT INTO runtime_startup_authority_facts (
+					fact_id,authority_id,lease_authority_id,transition_ordinal,generation,state_version,state,owner_id,boot_id,
+					bundle_fingerprint,backend,handoff_id,snapshot,created_at
+				) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			`, uuid.NewString(), authority.AuthorityID, authority.LeaseAuthorityID, authority.TransitionOrdinal, authority.Generation, authority.StateVersion, authority.State,
+				authority.OwnerID, authority.BootID, authority.BundleFingerprint, authority.Backend, sqliteNullString(authority.HandoffID), string(raw), authority.RecordedAt.UTC()); err != nil {
+				return fmt.Errorf("record sqlite runtime startup authority: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 func (l *sqliteRuntimeStartupLease) Release(context.Context) error {

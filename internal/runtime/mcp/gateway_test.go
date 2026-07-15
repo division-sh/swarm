@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -13,8 +14,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
@@ -23,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/google/uuid"
 )
 
 const testGatewayToken = "gateway-token"
@@ -405,10 +410,81 @@ func newTestTurnContextRegistry() *TurnContextRegistry {
 
 func putTestTurnContext(t testing.TB, registry *TurnContextRegistry, token string, turn TurnContext) {
 	t.Helper()
+	if turn.CapabilitySurface != nil && !turn.HasExecutionAdmission {
+		generation := uint64(1)
+		if turn.LifecycleToken.Generation > 0 {
+			generation = uint64(turn.LifecycleToken.Generation)
+		}
+		admission, err := managedexecution.New(
+			managedexecution.KindNormalRuntime,
+			turn.CapabilitySurface.Authority.ExecutionAuthorityID,
+			generation,
+			"",
+			"gateway-test-actors",
+			"gateway-test-bundle",
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("build gateway test execution admission: %v", err)
+		}
+		turn.ExecutionAdmission = admission
+		turn.HasExecutionAdmission = true
+	}
+	if turn.CapabilitySurface != nil && turn.HasLifecycleToken && !turn.HasEffectAuthority {
+		authority := runtimeeffects.NormalAgentAuthority(
+			turn.LifecycleToken,
+			"gateway-test:"+turn.LifecycleToken.AgentID,
+			time.Now().UTC().Add(time.Minute),
+		)
+		authority.Target = runtimeeffects.UsageTarget{
+			Kind: runtimeeffects.UsageTargetAgentTurn, ID: turn.CapabilitySurface.Authority.ID,
+			RunID: turn.CapabilitySurface.Authority.RunID, AgentID: turn.CapabilitySurface.ActorID,
+			SessionID: turn.CapabilitySurface.Authority.SessionID, Memory: agentmemory.PlatformDefault(),
+			FlowInstance: strings.TrimSpace(turn.Actor.CanonicalFlowPath()),
+		}
+		turn.EffectAuthority = authority
+		turn.HasEffectAuthority = true
+	}
 	registry.PutTurnContextForTest(token, turn)
 	t.Cleanup(func() {
 		registry.UnregisterTurnContext(token)
 	})
+}
+
+func testCapabilitySurface(t testing.TB, actor models.AgentConfig, names ...string) *managedcapabilities.Surface {
+	t.Helper()
+	planned := make([]managedcapabilities.PlannedTool, 0, len(names))
+	for _, name := range names {
+		canonical := toolidentity.CanonicalName(name)
+		kind := toolcapabilities.KindStandard
+		if toolidentity.IsEmitToolName(canonical) {
+			kind = toolcapabilities.KindEmit
+		}
+		planned = append(planned, managedcapabilities.PlannedTool{
+			Name: canonical, DefinitionHash: "test-definition-" + canonical,
+			Capability: toolcapabilities.Capability{Name: canonical, Kind: kind, Visible: true, Callable: true},
+			Bindings:   []managedcapabilities.DeliveryBinding{{Kind: managedcapabilities.BindingMCPTool, ExactName: toolidentity.RuntimeToolsMCPPrefix + canonical, RequiredEvidenceKind: "mcp_listed"}},
+		})
+	}
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{
+		ActorID: actor.ID, RuntimeMode: "task", Provider: "test", Transport: "cli", ProviderContract: "test-contract",
+		Authority: managedcapabilities.Authority{Kind: managedcapabilities.AuthorityProviderTurn, ID: uuid.NewString(), ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: actor.ID, RunID: uuid.NewString(), SessionID: uuid.NewString(), TurnOrdinal: 1},
+		Tools:     planned,
+	})
+	if err != nil {
+		t.Fatalf("build test capability surface: %v", err)
+	}
+	var evidence []managedcapabilities.DeliveryEvidence
+	for _, tool := range surface.Tools {
+		for _, binding := range tool.Bindings {
+			evidence = append(evidence, managedcapabilities.DeliveryEvidence{BindingKind: binding.Kind, ExactName: binding.ExactName, Kind: "mcp_listed", Status: managedcapabilities.EvidenceConfirmed})
+		}
+	}
+	surface, err = surface.Observe(evidence...)
+	if err != nil {
+		t.Fatalf("observe test capability surface: %v", err)
+	}
+	return &surface
 }
 
 func TestGatewayHandleMCP_ProviderCallCoordinateSeparatesSiblingsAndFencesReplay(t *testing.T) {
@@ -423,7 +499,7 @@ func TestGatewayHandleMCP_ProviderCallCoordinateSeparatesSiblingsAndFencesReplay
 			EffectController:   controller,
 			LogicalIdentity:    identity,
 			HasLogicalIdentity: true,
-			Allowed:            map[string]struct{}{"write_file": {}},
+			CapabilitySurface:  testCapabilitySurface(t, models.AgentConfig{ID: harness.Token.AgentID}, "write_file"),
 		})
 	}
 	putTurn("ctx-provider-turn-1", "provider-turn-1")
@@ -479,6 +555,8 @@ func TestGatewayHandleMCP_ProviderCallCoordinateSeparatesSiblingsAndFencesReplay
 
 	if resp := call("ctx-provider-turn-1", float64(1), "toolu-call-1", float64(1)); resp.Error != nil {
 		t.Fatalf("first sibling failed: %#v", resp.Error)
+	} else if result, ok := resp.Result.(map[string]any); ok && result["isError"] == true {
+		t.Fatalf("first sibling returned tool error: %#v", result)
 	}
 	if resp := call("ctx-provider-turn-1", float64(2), "toolu-call-2", float64(2)); resp.Error != nil {
 		t.Fatalf("second identical sibling failed: %#v", resp.Error)
@@ -504,6 +582,102 @@ func TestGatewayHandleMCP_ProviderCallCoordinateSeparatesSiblingsAndFencesReplay
 	}
 }
 
+func TestGatewayHandleMCP_ManagedClaudeProviderTurnsPreserveExactUsageTarget(t *testing.T) {
+	for _, executionKind := range []managedcapabilities.ExecutionKind{
+		managedcapabilities.ExecutionNormalAgent,
+		managedcapabilities.ExecutionSelectedContractFork,
+	} {
+		t.Run(string(executionKind), func(t *testing.T) {
+			ctx, surface, harness := managedClaudeProviderTurnTestContext(t, executionKind)
+			registry := NewTurnContextRegistry(models.ActorFromContext)
+			authority, ok := runtimeeffects.AuthorityFromContext(ctx)
+			if !ok {
+				t.Fatal("managed Claude effect authority is missing")
+			}
+
+			for _, hostile := range []struct {
+				name   string
+				mutate func(*runtimeeffects.Authority)
+			}{
+				{name: "missing target", mutate: func(a *runtimeeffects.Authority) { a.Target = runtimeeffects.UsageTarget{} }},
+				{name: "different actor", mutate: func(a *runtimeeffects.Authority) { a.Target.AgentID = "different-agent" }},
+				{name: "different turn", mutate: func(a *runtimeeffects.Authority) { a.Target.ID = uuid.NewString() }},
+				{name: "different session", mutate: func(a *runtimeeffects.Authority) { a.Target.SessionID = uuid.NewString() }},
+				{name: "different run", mutate: func(a *runtimeeffects.Authority) { a.Target.RunID = uuid.NewString() }},
+			} {
+				hostileAuthority := authority
+				hostile.mutate(&hostileAuthority)
+				if token := registry.RegisterTurnContextWithCapabilitySurface(runtimeeffects.WithAuthority(ctx, hostileAuthority), time.Minute, surface); token != "" {
+					t.Fatalf("%s registration returned token %q", hostile.name, token)
+				}
+			}
+			if len(harness.Attempts) != 0 {
+				t.Fatalf("hostile registrations authorized %d attempts, want zero", len(harness.Attempts))
+			}
+
+			token := registry.RegisterTurnContextWithCapabilitySurface(ctx, time.Minute, surface)
+			if token == "" {
+				t.Fatal("exact managed Claude provider turn was not registered")
+			}
+			turn, ok := registry.ResolveTurnContext(token)
+			if !ok || !turn.HasEffectAuthority ||
+				!runtimeeffects.ProviderTurnTargetMatchesCapabilitySurface(turn.EffectAuthority.Target, surface) {
+				t.Fatalf("registered turn context lost exact provider target: %#v", turn)
+			}
+
+			dispatches := 0
+			gateway := NewGateway(testToolExecutor(func(callCtx context.Context, name string, input any) (any, error) {
+				request, err := json.Marshal(map[string]any{"name": name, "arguments": input})
+				if err != nil {
+					return nil, err
+				}
+				handle, err := runtimeeffects.Begin(callCtx, "authored_http_tool", request, map[string]string{"tool": name})
+				if err != nil {
+					return nil, err
+				}
+				if err := handle.MarkLaunched(callCtx); err != nil {
+					return nil, err
+				}
+				dispatches++
+				if err := handle.Succeed(callCtx, map[string]any{"ok": true}); err != nil {
+					return nil, err
+				}
+				return map[string]any{"ok": true}, nil
+			}), testGatewayToken, GatewayHooks{ResolveTurnContext: registry.ResolveTurnContext, WithActor: models.WithActor})
+			body, err := json.Marshal(RPCRequest{
+				JSONRPC: "2.0", Method: "tools/call", ID: float64(1),
+				Params: map[string]any{
+					"name": "write_file", "arguments": map[string]any{"path": "/workspace/result.txt", "content": "ok"},
+					"_meta": map[string]any{claudeCodeToolUseIDMetaKey: "toolu-exact-provider-turn"},
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body)), token)
+			authorizeGatewayRequest(req)
+			rec := httptest.NewRecorder()
+			gateway.Handler().ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("gateway status = %d body=%s", rec.Code, rec.Body.String())
+			}
+			resp := mustRPCResponse(t, rec)
+			if resp.Error != nil {
+				t.Fatalf("managed Claude tools/call error = %#v", resp.Error)
+			}
+			if result, ok := resp.Result.(map[string]any); ok && result["isError"] == true {
+				t.Fatalf("managed Claude tools/call result = %#v", result)
+			}
+			if dispatches != 1 || len(harness.Attempts) != 1 {
+				t.Fatalf("managed Claude dispatches=%d persisted attempts=%d, want 1/1", dispatches, len(harness.Attempts))
+			}
+			if state, ok := harness.StateForAdapter("authored_http_tool"); !ok || state != runtimeeffects.StateSettled {
+				t.Fatalf("managed Claude effect state=%q present=%t, want settled", state, ok)
+			}
+		})
+	}
+}
+
 func TestGatewayHandleMCP_ManagedCallWithoutProviderCoordinateFailsBeforeExecutor(t *testing.T) {
 	harness := effecttest.New()
 	registry := newTestTurnContextRegistry()
@@ -514,7 +688,7 @@ func TestGatewayHandleMCP_ManagedCallWithoutProviderCoordinateFailsBeforeExecuto
 		EffectController:   runtimeeffects.NewController(harness),
 		LogicalIdentity:    "provider-turn",
 		HasLogicalIdentity: true,
-		Allowed:            map[string]struct{}{"write_file": {}},
+		CapabilitySurface:  testCapabilitySurface(t, models.AgentConfig{ID: harness.Token.AgentID}, "write_file"),
 	})
 	executed := false
 	gateway := NewGateway(testToolExecutor(func(context.Context, string, any) (any, error) {
@@ -576,9 +750,10 @@ func runGatewayTransportPair(t *testing.T, reqCtx context.Context) (gatewayCtxOb
 	})
 
 	putTestTurnContext(t, registry, "ctx-transport-probe", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	mcpBody, err := json.Marshal(map[string]any{
@@ -722,9 +897,10 @@ func TestGatewayMCPToolsForRequest_UsesHydratedActorRoleForEmitTools(t *testing.
 	})
 
 	putTestTurnContext(t, registry, "ctx-hydrated-role", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "campaign-coordinator"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"}, "emit_scan_requested"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	req := withContextToken(httptest.NewRequest("POST", "/mcp", nil), "ctx-hydrated-role")
@@ -764,9 +940,10 @@ func TestGatewayMCPToolsForRequest_KeepsEmitToolsForDirectMCPContext(t *testing.
 	})
 
 	putTestTurnContext(t, registry, "ctx-1", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"}, "emit_scan_requested"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	req := withContextToken(httptest.NewRequest("POST", "/mcp", nil), "ctx-1")
@@ -800,9 +977,10 @@ func TestGatewayMCPToolsForRequest_PrefersActorScopedToolDefinitions(t *testing.
 	})
 
 	putTestTurnContext(t, registry, "ctx-actor-scoped", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	req := withContextToken(httptest.NewRequest("POST", "/mcp", nil), "ctx-actor-scoped")
@@ -821,9 +999,10 @@ func TestGatewayMCPToolsForRequest_PrefersActorScopedToolDefinitions(t *testing.
 func TestGatewayMCPToolsForRequest_ExposesFlowDataOnlyFromActorScopedCatalog(t *testing.T) {
 	registry := newTestTurnContextRegistry()
 	putTestTurnContext(t, registry, "ctx-flow-data", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "read_flow_data"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 	req := withContextToken(httptest.NewRequest("POST", "/mcp", nil), "ctx-flow-data")
 
@@ -861,8 +1040,8 @@ func TestGatewayMCPToolsForRequest_ExposesFlowDataOnlyFromActorScopedCatalog(t *
 		ResolveTurnContext: registry.ResolveTurnContext,
 	})
 
-	if tools := mustMCPToolsForRequest(t, undeclaredGateway, req); len(tools) != 0 {
-		t.Fatalf("undeclared actor saw runtime-wide read_flow_data fallback: %#v", tools)
+	if tools, err := undeclaredGateway.mcpToolsForRequest(req); err == nil {
+		t.Fatalf("undeclared actor resolved tools %#v, want fail-closed planned-definition mismatch", tools)
 	}
 }
 
@@ -881,9 +1060,10 @@ func TestGatewayMCPToolsForRequest_DoesNotFallbackToRuntimeWideToolsForEmptyActo
 	})
 
 	putTestTurnContext(t, registry, "ctx-role-scoped-empty", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator"}),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	req := withContextToken(httptest.NewRequest("POST", "/mcp", nil), "ctx-role-scoped-empty")
@@ -922,9 +1102,10 @@ func TestGatewayMCPToolsForRoleScopedActor_RetiresLegacyEntitySurface(t *testing
 
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator"}
 	putTestTurnContext(t, registry, "ctx-role-scoped-generated", TurnContext{
-		Actor:     actor,
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             actor,
+		CapabilitySurface: testCapabilitySurface(t, actor, "read_validation_case", "save_validation_case_business_brief"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), "ctx-role-scoped-generated")
@@ -943,14 +1124,14 @@ func TestGatewayMCPToolsForRoleScopedActor_RetiresLegacyEntitySurface(t *testing
 		legacyAllowed[def.Name] = struct{}{}
 	}
 	putTestTurnContext(t, registry, "ctx-role-scoped-legacy-allowed", TurnContext{
-		Actor:     actor,
-		Allowed:   legacyAllowed,
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             actor,
+		CapabilitySurface: testCapabilitySurface(t, actor, slices.Collect(maps.Keys(legacyAllowed))...),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 	allowedReq := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), "ctx-role-scoped-legacy-allowed")
-	if tools := mustMCPToolsForRequest(t, g, allowedReq); len(tools) != 0 {
-		t.Fatalf("legacy allowed_tools reintroduced role-scoped catalog entries: %#v", tools)
+	if tools, err := g.mcpToolsForRequest(allowedReq); err == nil {
+		t.Fatalf("legacy capability surface resolved tools %#v, want fail-closed planned-definition mismatch", tools)
 	}
 
 	for _, def := range legacyDefs {
@@ -1019,7 +1200,8 @@ func TestGatewayMCPToolsForRequest_FiltersRoleScopedToolsByTurnEntityEligibility
 	})
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "market-research-agent", Role: "market_research"}
 	putTestTurnContext(t, registry, "ctx-invalid-current-entity", TurnContext{
-		Actor: actor,
+		Actor:             actor,
+		CapabilitySurface: testCapabilitySurface(t, actor, "emit_market_research_scan_complete"),
 		Inbound: eventtest.RootIngress(
 			"evt-root",
 			events.EventType("discovery/market_research.corpus_file_assigned"),
@@ -1038,7 +1220,8 @@ func TestGatewayMCPToolsForRequest_FiltersRoleScopedToolsByTurnEntityEligibility
 		ExpiresAt:  time.Now().UTC().Add(time.Hour),
 	})
 	putTestTurnContext(t, registry, "ctx-valid-current-entity", TurnContext{
-		Actor: actor,
+		Actor:             actor,
+		CapabilitySurface: testCapabilitySurface(t, actor, "read_scan_campaign", "save_scan_campaign_mode", "emit_market_research_scan_complete"),
 		Inbound: eventtest.RootIngress(
 			"evt-scan",
 			events.EventType("discovery/market_research.corpus_file_assigned"),
@@ -1121,9 +1304,10 @@ func TestGatewayMCPToolsForRequest_IgnoresCallerAllowlist(t *testing.T) {
 	})
 
 	putTestTurnContext(t, registry, "ctx-ignore-allowlist", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities", "read_file"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	req := withContextToken(httptest.NewRequest("POST", "/mcp?allowed_tools=Read", nil), "ctx-ignore-allowlist")
@@ -1152,9 +1336,10 @@ func TestGatewayMCPToolsForRequest_DoesNotTrustUnknownCallerAllowlist(t *testing
 	})
 
 	putTestTurnContext(t, registry, "ctx-unknown-allowlist", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	req := withContextToken(httptest.NewRequest("POST", "/mcp?allowed_tools=does_not_exist", nil), "ctx-unknown-allowlist")
@@ -1217,9 +1402,10 @@ func TestGatewayHandleMCP_ToolsListUsesResolvedTurnContext(t *testing.T) {
 	})
 
 	putTestTurnContext(t, registry, "ctx-list", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	body, err := json.Marshal(map[string]any{
@@ -1306,9 +1492,10 @@ func TestGatewayHandleMCP_AllowsDistinctEmitPayloadsPerTurn(t *testing.T) {
 	})
 
 	putTestTurnContext(t, registry, "ctx-emit-gateway", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "emit_score_dimension_complete"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	handler := g.Handler()
@@ -1360,10 +1547,10 @@ func TestGatewayHandleMCP_AllowsPrefixedToolNameFromRuntimeOwnedTurnContext(t *t
 	})
 
 	putTestTurnContext(t, registry, "ctx-prefixed-emit", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		Allowed:   map[string]struct{}{"emit_score_dimension_complete": {}},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "emit_score_dimension_complete"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	body, err := json.Marshal(map[string]any{
@@ -1408,10 +1595,10 @@ func TestGatewayHandleMCP_DoesNotLetCallerAllowlistGrantToolAccess(t *testing.T)
 	})
 
 	putTestTurnContext(t, registry, "ctx-denied-allowlist", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		Allowed:   map[string]struct{}{"query_entities": {}},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	body, err := json.Marshal(map[string]any{
@@ -1456,9 +1643,10 @@ func TestGatewayHandleMCP_ToolsCallIncludesStructuredRuntimeErrorPayload(t *test
 	})
 
 	putTestTurnContext(t, registry, "ctx-runtime-error", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	body, err := json.Marshal(map[string]any{
@@ -1517,10 +1705,10 @@ func TestGatewayExecutionFailureEnvelopeParityAcrossToolsAndMCP(t *testing.T) {
 				return nil, tt.err
 			}), testGatewayToken, GatewayHooks{ResolveTurnContext: registry.ResolveTurnContext})
 			putTestTurnContext(t, registry, "ctx-parity", TurnContext{
-				Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-				Allowed:   map[string]struct{}{"query_entities": {}},
-				CreatedAt: time.Now().UTC(),
-				ExpiresAt: time.Now().UTC().Add(time.Hour),
+				Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+				CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities"),
+				CreatedAt:         time.Now().UTC(),
+				ExpiresAt:         time.Now().UTC().Add(time.Hour),
 			})
 
 			toolReq := withContextToken(httptest.NewRequest(http.MethodPost, "/tools/query_entities", strings.NewReader(`{"input":{}}`)), "ctx-parity")
@@ -1591,9 +1779,10 @@ func TestGatewayHandleMCP_ToolsCallRelaysOversizedReadFileResultsForHelperPath(t
 	})
 
 	putTestTurnContext(t, registry, "ctx-relay-read-file", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "read_file"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	body, err := json.Marshal(map[string]any{
@@ -1673,10 +1862,10 @@ func TestGatewayHandleMCP_ToolsCallSuppressesRuntimeReadFileFollowUpWithoutReadF
 	})
 
 	putTestTurnContext(t, registry, "ctx-query-only", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		Allowed:   map[string]struct{}{"query_entities": {}},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	body, err := json.Marshal(map[string]any{
@@ -1841,9 +2030,10 @@ func TestGatewayHandleMCP_ToolsCallPreservesLargeRelayPathReadInline(t *testing.
 	})
 
 	putTestTurnContext(t, registry, "ctx-read-relay-file", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "read_file"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	body, err := json.Marshal(map[string]any{
@@ -1896,9 +2086,10 @@ func TestGatewayHandleMCP_ToolsCallIncludesExplicitStartupProbeSuccessOutcome(t 
 	})
 
 	putTestTurnContext(t, registry, "ctx-startup-probe-success", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	body, err := json.Marshal(map[string]any{
@@ -1946,9 +2137,10 @@ func TestGatewayHandleMCP_ToolsCallIncludesExplicitStartupProbeValidationOnlyOut
 	})
 
 	putTestTurnContext(t, registry, "ctx-startup-probe-validation", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	body, err := json.Marshal(map[string]any{
@@ -2051,11 +2243,12 @@ func TestGatewayExecutionContext_UsesInboundTraceNotRequestTraceOnResolvedTurn(t
 		},
 	})
 	putTestTurnContext(t, registry, "ctx-trace", TurnContext{
-		Actor:      models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		Inbound:    eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{}),
-		HasInbound: true,
-		CreatedAt:  time.Now().UTC(),
-		ExpiresAt:  time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "get_entity"),
+		Inbound:           eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{}),
+		HasInbound:        true,
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), "ctx-trace")
@@ -2074,7 +2267,8 @@ func TestGatewayExecutionContext_RestoresTypedRuntimeLineageOnResolvedTurn(t *te
 		WithInboundEvent:   runtimebus.WithInboundEvent,
 	})
 	putTestTurnContext(t, registry, "ctx-lineage", TurnContext{
-		Actor: models.AgentConfig{ExecutionMode: "live", ID: "validation-coordinator", Role: "validation"},
+		Actor:             models.AgentConfig{ID: "validation-coordinator", Role: "validation"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "validation-coordinator", Role: "validation"}, "get_entity"),
 		Inbound: eventtest.RootIngress("3134bdf0-2ce0-4260-93bd-f0a45371b7d7",
 			events.EventType("validation/validation.package_ready"), "", "", nil, 0, "a6f6861a-d154-4d38-a2d6-1388f5bb6daf", "", events.EventEnvelope{}, time.Time{}),
 
@@ -2117,12 +2311,12 @@ func TestGatewayExecutionContext_RestoresTypedRuntimeLineageOnResolvedTurn(t *te
 func TestGatewayMCPExecutionContext_KeepsOtherRegistryTokensValidAfterGlobalEpochBump(t *testing.T) {
 	registryA := newTestTurnContextRegistry()
 	registryB := newTestTurnContextRegistry()
-	registryB.PutTurnContextForTest("ctx-b", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	putTestTurnContext(t, registryB, "ctx-b", TurnContext{
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
-	t.Cleanup(func() { registryB.UnregisterTurnContext("ctx-b") })
 
 	gatewayB := NewGateway(nil, "", GatewayHooks{
 		ResolveTurnContext:      registryB.ResolveTurnContext,
@@ -2375,9 +2569,10 @@ func TestGatewayHandleTool_IgnoresCallerSuppliedPrivilegeFields(t *testing.T) {
 	})
 
 	putTestTurnContext(t, registry, "ctx-analysis", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	body, err := json.Marshal(ToolGatewayRequest{
@@ -2410,9 +2605,10 @@ func TestGatewayHandleTool_AllowsLegitimateRuntimeOwnedActorContext(t *testing.T
 	})
 
 	putTestTurnContext(t, registry, "ctx-coordinator", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"}, "emit_score_dimension_complete"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	body, err := json.Marshal(ToolGatewayRequest{
@@ -2490,9 +2686,10 @@ func TestGatewayTransports_RejectLegacyQueryContextTokenCarrier(t *testing.T) {
 	})
 
 	putTestTurnContext(t, registry, "ctx-query-only", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	mcpBody, err := json.Marshal(map[string]any{
@@ -2544,9 +2741,10 @@ func TestGatewayTransports_AlignReadOnlyToolSuccessWithResolvedTurnContext(t *te
 	})
 
 	putTestTurnContext(t, registry, "ctx-query", TurnContext{
-		Actor:     models.AgentConfig{ExecutionMode: "live", ID: "analysis-agent", Role: "analysis"},
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "query_entities"),
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
 
 	mcpBody, err := json.Marshal(map[string]any{

@@ -489,7 +489,10 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 			s.mu.Unlock()
 		}
 		oldRT = s.swapCurrentRuntime(resolvedRoot, source, bundle, fact, identity, newRT)
-		handoff.Finalize()
+		if err := handoff.Finalize(); err != nil {
+			finalized = true
+			return s.CurrentProject(), fmt.Errorf("finalize runtime startup ownership handoff: %w", err)
+		}
 		finalized = true
 		return s.CurrentProject(), nil
 	}
@@ -648,7 +651,10 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Contex
 		return errors.Join(fmt.Errorf("restore predecessor runtime context: %w", err), quiesceErr, rollbackErr)
 	}
 	s.swapCurrentRuntime(predecessorRoot, predecessorContext.Source, predecessorBundle, predecessorContext.BundleSourceFact, predecessorContext.BundleIdentity, restored)
-	handoff.Finalize()
+	if err := handoff.Finalize(); err != nil {
+		finalized = true
+		return fmt.Errorf("finalize predecessor ownership restoration: %w", err)
+	}
 	finalized = true
 	return nil
 }

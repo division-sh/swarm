@@ -50,6 +50,9 @@ func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInv
 	if err := am.SpawnAgent(cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	am.Run(managedExecutionTestContext(t, runCtx))
 	lease := acquireReconfigureMemory(t, registry, cfg)
 	beforeExecution, ok := am.lifecycle.executionSnapshot(cfg.ID)
 	if !ok {

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
@@ -25,6 +27,7 @@ type Kind string
 
 const (
 	KindProviderTurn          Kind = "provider_turn"
+	KindProviderStartupProbe  Kind = "provider_startup_probe"
 	KindHTTPToolTarget        Kind = "http_tool_target"
 	KindManagedCredential     Kind = "managed_credential_request"
 	KindNativeWebSearchHTTP   Kind = "native_web_search_http"
@@ -164,6 +167,7 @@ type Registration struct {
 }
 
 var registrations = []Registration{
+	registration(KindProviderStartupProbe, EffectWriteOrUnknown, "claude_cli_startup_probe", "process", "internal/runtime/llm/cli_runtime_startup_probe.go", []string{"internal/runtime/llm/cli_runtime_startup_probe.go:runUntilCLIStartupInit:process_launch:1"}, "TestClaudeStartupProbeManagedCapabilityAuthority"),
 	registration(KindProviderTurn, EffectWriteOrUnknown, "anthropic_api", "http", "internal/runtime/llm/api_runtime.go", []string{"internal/runtime/llm/api_runtime.go:sendRequest:http_do:1"}, "TestManagedProviderEffectOutcomes/anthropic_api"),
 	registration(KindProviderTurn, EffectWriteOrUnknown, "openai_compatible", "http", "internal/runtime/llm/openai_compatible_runtime.go", []string{"internal/runtime/llm/openai_compatible_runtime.go:sendRequest:http_do:1"}, "TestManagedProviderEffectOutcomes/openai_compatible"),
 	registration(KindProviderTurn, EffectWriteOrUnknown, "openai_responses", "http", "internal/runtime/llm/openai_responses_runtime.go", []string{"internal/runtime/llm/openai_responses_runtime.go:sendRequest:http_do:1"}, "TestManagedProviderEffectOutcomes/openai_responses"),
@@ -228,6 +232,7 @@ type AuthorizeRequest struct {
 	Adapter            string
 	Transport          string
 	RequestFingerprint string
+	CapabilitySurface  *managedcapabilities.Surface
 	Lineage            map[string]string
 	Now                time.Time
 }
@@ -372,8 +377,34 @@ func Begin(ctx context.Context, adapter string, request []byte, lineage map[stri
 		return nil, err
 	}
 	controller, hasController := ControllerFromContext(ctx)
+	existingAuthority, hasExistingAuthority := AuthorityFromContext(ctx)
 	token, hasToken := LifecycleTokenFromContext(ctx)
 	differentOwner, hasDifferentOwner := DifferentOwnerFromContext(ctx)
+	if hasExistingAuthority {
+		if hasDifferentOwner {
+			return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_owner_conflict", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter), "different_owner": differentOwner})
+		}
+		if !hasController {
+			return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter), "authority_kind": existingAuthority.Kind})
+		}
+		if existingAuthority.Kind != AuthorityNormalAgent && existingAuthority.Kind != AuthoritySelectedContractFork {
+			return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_authority_kind_rejected", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter), "authority_kind": existingAuthority.Kind})
+		}
+		ctx = WithAuthority(ctx, existingAuthority)
+		operationID, err := canonicalOperationID(ctx, existingAuthority, strings.TrimSpace(adapter), lineage)
+		if err != nil {
+			return nil, err
+		}
+		surface, err := managedEffectCapabilitySurface(ctx, existingAuthority)
+		if err != nil {
+			return nil, err
+		}
+		attempt, err := controller.Authorize(ctx, AuthorizeRequest{OperationID: operationID, Adapter: adapter, RequestFingerprint: Fingerprint(request), CapabilitySurface: &surface, Lineage: lineage})
+		if err != nil {
+			return nil, err
+		}
+		return &Handle{controller: controller, attempt: attempt}, nil
+	}
 	if !hasToken {
 		if hasDifferentOwner {
 			return &Handle{differentOwner: differentOwner}, nil
@@ -388,18 +419,57 @@ func Begin(ctx context.Context, adapter string, request []byte, lineage map[stri
 	}
 	authority := NormalAgentAuthority(token, fmt.Sprintf("agent:%s:%d:%d", token.AgentID, token.RuntimeEpoch, token.Generation), time.Now().UTC().Add(5*time.Minute))
 	ctx = WithAuthority(ctx, authority)
+	surface, err := managedEffectCapabilitySurface(ctx, authority)
+	if err != nil {
+		return nil, err
+	}
 	fingerprint := Fingerprint(request)
 	operationID, err := canonicalOperationID(ctx, authority, strings.TrimSpace(adapter), lineage)
 	if err != nil {
 		return nil, err
 	}
 	attempt, err := controller.Authorize(ctx, AuthorizeRequest{
-		OperationID: operationID, Adapter: adapter, RequestFingerprint: fingerprint, Lineage: lineage,
+		OperationID: operationID, Adapter: adapter, RequestFingerprint: fingerprint, CapabilitySurface: &surface, Lineage: lineage,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &Handle{controller: controller, attempt: attempt}, nil
+}
+
+func managedEffectCapabilitySurface(ctx context.Context, authority Authority) (managedcapabilities.Surface, error) {
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok || surface.Authority.Kind != managedcapabilities.AuthorityProviderTurn || surface.HasMismatch() {
+		return managedcapabilities.Surface{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_effect_capability_surface_missing", "external-effects", "authorize_attempt", map[string]any{"authority_kind": authority.Kind})
+	}
+	admission, ok := managedexecution.FromContext(ctx)
+	if !ok {
+		return managedcapabilities.Surface{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_execution_admission_missing", "external-effects", "authorize_attempt", map[string]any{"authority_kind": authority.Kind})
+	}
+	switch authority.Kind {
+	case AuthorityNormalAgent:
+		normalActorID := strings.TrimSpace(authority.Normal.AgentID)
+		if !admission.AuthorizesNormal() || surface.Authority.ExecutionKind != managedcapabilities.ExecutionNormalAgent ||
+			surface.Authority.ExecutionAuthorityID != admission.ExecutionAuthorityID || surface.ActorID != normalActorID {
+			return managedcapabilities.Surface{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_effect_execution_authority_mismatch", "external-effects", "authorize_attempt", map[string]any{"authority_kind": authority.Kind, "surface_id": surface.ID})
+		}
+		if strings.TrimSpace(authority.Target.AgentID) != normalActorID {
+			return managedcapabilities.Surface{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_effect_turn_identity_mismatch", "external-effects", "authorize_attempt", map[string]any{"authority_kind": authority.Kind, "surface_id": surface.ID})
+		}
+	case AuthoritySelectedContractFork:
+		if !admission.AuthorizesSelected(authority.SelectedFork.ExecutionID, authority.SelectedFork.ForkRunID, authority.SelectedFork.Generation) ||
+			surface.Authority.ExecutionKind != managedcapabilities.ExecutionSelectedContractFork ||
+			surface.Authority.ExecutionAuthorityID != authority.SelectedFork.ExecutionID ||
+			surface.Authority.RunID != authority.SelectedFork.ForkRunID {
+			return managedcapabilities.Surface{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_effect_execution_authority_mismatch", "external-effects", "authorize_attempt", map[string]any{"authority_kind": authority.Kind, "surface_id": surface.ID})
+		}
+	default:
+		return managedcapabilities.Surface{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_effect_authority_kind_rejected", "external-effects", "authorize_attempt", map[string]any{"authority_kind": authority.Kind})
+	}
+	if !ProviderTurnTargetMatchesCapabilitySurface(authority.Target, surface) {
+		return managedcapabilities.Surface{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_effect_turn_identity_mismatch", "external-effects", "authorize_attempt", map[string]any{"authority_kind": authority.Kind, "surface_id": surface.ID})
+	}
+	return surface.Clone(), nil
 }
 
 func BeginCompletion(ctx context.Context, adapter string, request []byte, lineage map[string]string) (*Handle, error) {
@@ -424,12 +494,50 @@ func BeginCompletion(ctx context.Context, adapter string, request []byte, lineag
 		return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_execution_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter)}, err)
 	}
 	ctx = WithAuthority(ctx, authority)
+	var capabilitySurface *managedcapabilities.Surface
+	if authority.Target.Kind == UsageTargetAgentTurn {
+		surface, err := managedEffectCapabilitySurface(ctx, authority)
+		if err != nil {
+			return nil, err
+		}
+		capabilitySurface = &surface
+	}
 	operationID, err := canonicalOperationID(ctx, authority, strings.TrimSpace(adapter), lineage)
 	if err != nil {
 		return nil, err
 	}
 	attempt, err := controller.Authorize(ctx, AuthorizeRequest{
-		OperationID: operationID, Adapter: adapter, RequestFingerprint: Fingerprint(request), Lineage: lineage,
+		OperationID: operationID, Adapter: adapter, RequestFingerprint: Fingerprint(request),
+		CapabilitySurface: capabilitySurface, Lineage: lineage,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &Handle{controller: controller, attempt: attempt}, nil
+}
+
+func BeginStartupProbe(ctx context.Context, adapter string, request []byte, lineage map[string]string) (*Handle, error) {
+	controller, ok := ControllerFromContext(ctx)
+	if !ok {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "authorize_startup_probe", map[string]any{"adapter": strings.TrimSpace(adapter)})
+	}
+	authority, ok := AuthorityFromContext(ctx)
+	if !ok || (authority.Kind != AuthorityStartupProbe && authority.Kind != AuthoritySelectedContractFork) {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "startup_probe_authority_missing", "external-effects", "authorize_startup_probe", map[string]any{"adapter": strings.TrimSpace(adapter)})
+	}
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok || !startupProbeSurfaceMatchesAuthority(surface, authority) {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "startup_probe_capability_surface_mismatch", "external-effects", "authorize_startup_probe", map[string]any{"adapter": strings.TrimSpace(adapter)})
+	}
+	ctx = WithLogicalOperationIdentitySegment(ctx, "startup-probe:"+surface.Authority.ID)
+	operationID, err := canonicalOperationID(ctx, authority, strings.TrimSpace(adapter), lineage)
+	if err != nil {
+		return nil, err
+	}
+	cloned := surface.Clone()
+	attempt, err := controller.Authorize(ctx, AuthorizeRequest{
+		OperationID: operationID, Adapter: adapter, RequestFingerprint: Fingerprint(request),
+		CapabilitySurface: &cloned, Lineage: lineage,
 	})
 	if err != nil {
 		return nil, err
@@ -626,10 +734,29 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 		if err := authority.ValidateCompletionAdapter(req.Adapter); err != nil {
 			return Attempt{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_execution_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter}, err)
 		}
-	} else if authority.Kind != AuthorityNormalAgent {
-		return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_authority_kind_rejected", "external-effects", "authorize_attempt", map[string]any{
-			"adapter": req.Adapter, "authority_kind": authority.Kind,
-		})
+		if authority.Target.Kind == UsageTargetAgentTurn {
+			if req.CapabilitySurface == nil {
+				return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_surface_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
+			}
+			validated, err := managedEffectCapabilitySurface(managedcapabilities.WithContext(ctx, *req.CapabilitySurface), authority)
+			if err != nil {
+				return Attempt{}, err
+			}
+			req.CapabilitySurface = &validated
+		} else if req.CapabilitySurface != nil {
+			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_surface_owner_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter, "target_kind": authority.Target.Kind})
+		}
+	} else if registration.Kind == KindProviderStartupProbe {
+		if req.CapabilitySurface == nil || !startupProbeSurfaceMatchesAuthority(*req.CapabilitySurface, authority) {
+			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "startup_probe_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
+		}
+	} else {
+		if req.CapabilitySurface == nil {
+			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_effect_capability_surface_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter, "authority_kind": authority.Kind})
+		}
+		if _, err := managedEffectCapabilitySurface(managedcapabilities.WithContext(ctx, *req.CapabilitySurface), authority); err != nil {
+			return Attempt{}, err
+		}
 	}
 	if req.OperationID == "" {
 		return Attempt{}, fmt.Errorf("external effect logical operation id is required")
@@ -645,6 +772,26 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 		req.Now = time.Now().UTC()
 	}
 	return c.store.AuthorizeExternalAttempt(ctx, authority, req)
+}
+
+func startupProbeSurfaceMatchesAuthority(surface managedcapabilities.Surface, authority Authority) bool {
+	if surface.Validate() != nil || surface.Authority.Kind != managedcapabilities.AuthorityStartupProbe {
+		return false
+	}
+	switch authority.Kind {
+	case AuthorityStartupProbe:
+		return surface.Authority.ID == authority.StartupProbe.ProbeID &&
+			surface.Authority.ExecutionKind == managedcapabilities.ExecutionKind(authority.StartupProbe.ExecutionKind) &&
+			surface.Authority.ExecutionAuthorityID == authority.StartupProbe.ExecutionAuthorityID
+	case AuthoritySelectedContractFork:
+		return surface.Authority.ExecutionKind == managedcapabilities.ExecutionSelectedContractFork &&
+			surface.Authority.ExecutionAuthorityID == authority.SelectedFork.ExecutionID &&
+			surface.Authority.RunID == authority.SelectedFork.ForkRunID &&
+			surface.Authority.StartupOwnerID == authority.ExecutionOwner &&
+			surface.Authority.StartupGeneration == authority.SelectedFork.Generation
+	default:
+		return false
+	}
 }
 
 func AttemptID(operationID string, ordinal int) (string, error) {

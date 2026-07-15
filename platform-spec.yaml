@@ -6030,8 +6030,9 @@ engine:
         - 4. On the shipped CLI runtime, enable the provider-native capability through provider invocation and transport binding.
           These run locally on the same host — workspace scoping is inherent.
         - 5. On CLI, do not inject platform fallback tools, MCP shims, or local compatibility paths to satisfy native_tools.
-        - 6. Persisted turn surfaces on CLI (for example available_tools and MCP-visible facts) must reflect the same callable truth
-          observed for that turn.
+        - 6. The persisted managed-agent capability surface for the provider-turn authority must carry the exact planned
+          bindings and observed CLI/MCP delivery evidence from which effective callable truth is derived. Flat turn-level
+          tool-name or MCP-visibility arrays are not an alternate owner.
         provider_detection: The platform determines CLI native-tool support from the configured runtime adapter. Runtime startup
           probes may further fail closed if a declared capability cannot be bound or called on the shipped CLI runtime path.
       environment:
@@ -6053,8 +6054,9 @@ engine:
         provider_native: Provider-native tool usage is captured in the agent session transcript. For memory-disabled agents, the
           transcript is persisted (write-only) but never reloaded — providing a full audit trail without breaking stateless
           semantics.
-        surface_truth: On CLI, persisted available_tools and MCP-visible turn facts must describe only the tools that were
-          actually callable on that turn. The platform must not narrate native-tool fallback availability it cannot execute.
+        surface_truth: On CLI, the provider turn's canonical managed-agent capability surface must derive effective visibility
+          and callability only from the immutable plan plus exact delivery evidence observed for that authority. The platform
+          must not narrate native-tool fallback availability it cannot execute or persist duplicate flat tool/MCP summaries.
       boot_validation:
         checks:
         - All capability names in native_tools must be recognized (bash, web_search, file_io). Unknown names are a boot error.
@@ -10791,7 +10793,7 @@ platform_tables:
       - No production cleanup owner may use all-table truncate, cascading bulk truncation, table name heuristics, entity_id-only predicates, or flow_instance-only predicates.
       - Every platform_tables.tables entry must have exactly one destructive-reset cleanup classification in the typed cleanup catalog.
       - Apply and dry-run must consume the plan cleanup_runs snapshot only; runs created after the plan/quiescence envelope are out of scope for that cleanup call.
-      - Before deleting planned run-scoped rows, apply must sever nullable preserved/out-of-scope references into the cleanup set; current severed references are agent_sessions.successor_session_id, runs.forked_from_run_id/forked_from_event_id, runtime_ingress_state.transition_event_id, entity_mutations.caused_by_event, timers.source_timer_id, and mailbox.reply_context_id.
+      - Before deleting planned run-scoped rows, apply must sever nullable preserved/out-of-scope references into the cleanup set; current severed references are managed_agent_capability_surfaces.run_id, agent_sessions.successor_session_id, runs.forked_from_run_id/forked_from_event_id, runtime_ingress_state.transition_event_id, entity_mutations.caused_by_event, timers.source_timer_id, and mailbox.reply_context_id.
       - Fork-lineage cleanup must delete fork replay and selected-contract rows by fork/source run_id and by linked cleanup-owned event/delivery references before deleting event_deliveries or events; preserved fork/source run IDs are not sufficient proof that the row is out of scope.
       - Runtime-owned persisted facts that describe running or historical execution must carry an exact run_id, event lineage, or fork/source run lineage before destructive reset may delete them.
       - agent_directive_operations is retained replay/outcome authority rather than ordinary run history. Cleanup must fail closed while prepared, executing, executed, indeterminate, or unexpired succeeded/failed rows exist for a planned run; it may remove succeeded/failed rows only after expires_at.
@@ -10856,11 +10858,13 @@ platform_tables:
         - agent_lifecycle_operations
         - agent_lifecycle_transition_facts
         - agent_lifecycle_diagnostic_outbox
+        - runtime_startup_authority_facts
         - runtime_external_effect_operations
         - runtime_external_effect_attempts
         - run_fork_selected_contract_runtime_executions
         - budget_admission_scopes
         - runtime_effect_budget_reservations
+        - managed_agent_capability_surfaces
         - flow_instances
         - routing_rules
       request_scoped_bundle_catalog:
@@ -11284,13 +11288,15 @@ platform_tables:
             effect_kind        TEXT NOT NULL,
             effect_class       TEXT NOT NULL CHECK (effect_class IN ('read_only', 'write_or_unknown')),
             execution_mode     TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
-            authority_kind     TEXT NOT NULL CHECK (authority_kind IN ('normal_agent', 'selected_contract_fork', 'conversation_fork_chat')),
+            authority_kind     TEXT NOT NULL CHECK (authority_kind IN ('normal_agent', 'selected_contract_fork', 'conversation_fork_chat', 'startup_probe')),
             authority_id       TEXT NOT NULL,
             agent_id           TEXT REFERENCES agents(agent_id),
             runtime_epoch      BIGINT,
             generation         BIGINT,
             selected_execution_id UUID REFERENCES run_fork_selected_contract_runtime_executions(execution_id),
             fork_turn_id       UUID REFERENCES conversation_fork_turns(fork_turn_id),
+            startup_authority_id UUID,
+            capability_plan_fingerprint TEXT,
             authority_evidence JSONB NOT NULL DEFAULT '{}',
             lineage            JSONB NOT NULL DEFAULT '{}',
             request_fingerprint TEXT NOT NULL,
@@ -11298,7 +11304,9 @@ platform_tables:
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             completed_at       TIMESTAMPTZ,
-            CHECK ((authority_kind = 'normal_agent' AND agent_id IS NOT NULL AND runtime_epoch > 0 AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL) OR (authority_kind = 'selected_contract_fork' AND agent_id IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NOT NULL AND fork_turn_id IS NULL) OR (authority_kind = 'conversation_fork_chat' AND agent_id IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NOT NULL)),
+            CHECK (authority_kind = 'conversation_fork_chat' OR NULLIF(TRIM(COALESCE(capability_plan_fingerprint, '')), '') IS NOT NULL),
+            CHECK (authority_kind <> 'conversation_fork_chat' OR capability_plan_fingerprint IS NULL),
+            CHECK ((authority_kind = 'normal_agent' AND agent_id IS NOT NULL AND runtime_epoch > 0 AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'selected_contract_fork' AND agent_id IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NOT NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'conversation_fork_chat' AND agent_id IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NOT NULL AND startup_authority_id IS NULL) OR (authority_kind = 'startup_probe' AND agent_id IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL)),
             UNIQUE (authority_kind, authority_id, operation_id),
             INDEX idx_runtime_external_effect_operations_agent (agent_id, created_at) WHERE agent_id IS NOT NULL,
             INDEX idx_runtime_external_effect_operations_authority (authority_kind, authority_id, created_at),
@@ -11322,6 +11330,7 @@ platform_tables:
             usage_target_kind  TEXT CHECK (usage_target_kind IN ('agent_turn', 'conversation_fork_turn_completion')),
             usage_target_id    UUID,
             target_ordinal     INTEGER CHECK (target_ordinal IS NULL OR target_ordinal > 0),
+            capability_surface_id UUID REFERENCES managed_agent_capability_surfaces(surface_id),
             state              TEXT NOT NULL CHECK (state IN ('authorized', 'launched', 'response_observed', 'settled', 'terminal_failure', 'outcome_uncertain')),
             evidence           JSONB NOT NULL DEFAULT '{}',
             failure            JSONB,
@@ -11332,6 +11341,7 @@ platform_tables:
             updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE (operation_id, attempt_ordinal),
             CHECK ((usage_target_kind IS NULL AND usage_target_id IS NULL AND target_ordinal IS NULL) OR (usage_target_kind = 'agent_turn' AND usage_target_id IS NOT NULL AND target_ordinal IS NULL) OR (usage_target_kind = 'conversation_fork_turn_completion' AND usage_target_id IS NOT NULL AND target_ordinal > 0)),
+            CHECK ((usage_target_kind = 'conversation_fork_turn_completion' AND capability_surface_id IS NULL) OR (COALESCE(usage_target_kind, '') <> 'conversation_fork_turn_completion' AND capability_surface_id IS NOT NULL)),
             INDEX idx_runtime_external_effect_attempts_recovery (state, lease_expires_at, updated_at),
             INDEX idx_runtime_external_effect_attempts_target (usage_target_kind, usage_target_id) WHERE usage_target_id IS NOT NULL
         );
@@ -11561,8 +11571,52 @@ platform_tables:
       status_lifecycle: 'status remains active, suspended, terminated. orphaned and contaminated are
         termination reasons. superseded is represented by successor_session_id IS NOT NULL. Terminated
         rows are historical lineage and are never resurrected into live ownership.'
+    runtime_startup_authority_facts:
+      description: 'Append-only typed evidence for cold-start and prepared-handoff runtime ownership authority. Every boot, probe census, handoff transition, commit, rollback, finalization, and release is bound to exact owner, boot, lease generation, and bundle identity; an owner string or borrowed lease pointer is never sufficient execution authority.'
+      ddl: |
+        CREATE TABLE runtime_startup_authority_facts (
+            fact_id             UUID PRIMARY KEY,
+            authority_id        UUID NOT NULL,
+            lease_authority_id  UUID NOT NULL,
+            transition_ordinal  BIGINT NOT NULL CHECK (transition_ordinal > 0),
+            generation          BIGINT NOT NULL CHECK (generation > 0),
+            state_version       BIGINT NOT NULL CHECK (state_version > 0),
+            state               TEXT NOT NULL CHECK (state IN ('active','prepared','probe_settled','admitted','committed','rolled_back','finalized','released')),
+            owner_id            TEXT NOT NULL,
+            boot_id             UUID NOT NULL,
+            bundle_fingerprint  TEXT NOT NULL,
+            backend             TEXT NOT NULL,
+            handoff_id          UUID,
+            snapshot            JSONB NOT NULL,
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (lease_authority_id, transition_ordinal),
+            UNIQUE (authority_id, state_version),
+            INDEX idx_runtime_startup_lease (lease_authority_id, transition_ordinal),
+            INDEX idx_runtime_startup_boot (boot_id, created_at)
+        );
+    managed_agent_capability_surfaces:
+      description: 'Canonical selected-store owner for the exact managed-agent capability surface used by one provider turn or one startup probe. The immutable planned maximum combines contract definitions, toolcapabilities decisions, provider policy, and exact transport bindings. Typed delivery evidence may only confirm or narrow that plan; effective visible/callable facts are mechanically derived and persisted in surface. surface_id is deterministic for one exact authority and plan, while integrity_hash covers the complete planned/observed/effective value. Provider turns and startup probes are disjoint authority variants. Missing, mismatched, or reused authority is invalid; flat tool-name arrays are not an alternate persistence owner.'
+      ddl: |
+        CREATE TABLE managed_agent_capability_surfaces (
+            surface_id               UUID PRIMARY KEY,
+            integrity_hash           TEXT NOT NULL UNIQUE,
+            authority_kind          TEXT NOT NULL CHECK (authority_kind IN ('provider_turn', 'startup_probe')),
+            authority_id            UUID NOT NULL,
+            execution_kind          TEXT NOT NULL CHECK (execution_kind IN ('normal_agent', 'selected_contract_fork')),
+            execution_authority_id   TEXT NOT NULL,
+            run_id                   UUID REFERENCES runs(run_id),
+            actor_id                 TEXT NOT NULL,
+            provider                 TEXT NOT NULL,
+            transport                TEXT NOT NULL CHECK (transport IN ('api', 'cli', 'in_process')),
+            surface                  JSONB NOT NULL,
+            created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (authority_kind, authority_id),
+            INDEX idx_managed_capability_run (run_id, created_at) WHERE run_id IS NOT NULL,
+            INDEX idx_managed_capability_actor (actor_id, created_at),
+            INDEX idx_managed_capability_execution (execution_kind, execution_authority_id, created_at)
+        );
     agent_turns:
-      description: 'Append-only per-turn agent execution audit log. Records the triggering event context, visible tools,
+      description: 'Append-only per-turn agent execution audit log. Records the triggering event context, the exact managed capability surface identity,
         attempted tool calls, emitted event names, canonical per-turn turn_blocks, and sanitized request/response payloads.
         turn_blocks is the ordered per-turn projection/surface for the flight recorder. It is populated from the canonical
         platform.runtime_log stream plus turn-local publish/tool transcript context. turn_blocks MUST include exactly one
@@ -11584,12 +11638,9 @@ platform_tables:
             trigger_event_id                UUID,
             trigger_event_type              TEXT,
             task_id                         TEXT,
-            available_tools                 JSONB NOT NULL DEFAULT '[]',
+            capability_surface_id           UUID NOT NULL REFERENCES managed_agent_capability_surfaces(surface_id),
             tool_calls                      JSONB NOT NULL DEFAULT '[]',
             emitted_events                  JSONB NOT NULL DEFAULT '[]',
-            mcp_servers                     JSONB NOT NULL DEFAULT '{}',
-            mcp_tools_listed                JSONB NOT NULL DEFAULT '[]',
-            mcp_tools_visible               JSONB NOT NULL DEFAULT '[]',
             request_payload                 JSONB,
             response_payload                JSONB,
             turn_blocks                     JSONB NOT NULL DEFAULT '[]',
@@ -29645,13 +29696,61 @@ agent_lifecycle_authority:
     - provider startup through separate session acquire and live-conversation lookup
     - destructive session cleanup while its loaded runtime still admits or executes work
 
+managed_agent_capability_surface:
+  owner: one typed managed-agent capability surface persisted in managed_agent_capability_surfaces and carried by exact authority through every live consumer
+  scope:
+    execution_contexts: [normal_agent, selected_contract_fork]
+    authority_variants: [startup_probe, provider_turn]
+    rule: The surface is the sole aggregate owner of planned delivery bindings, observed delivery evidence, and mechanically derived effective visibility/callability for managed agents. Candidate definitions, toolcapabilities decisions, provider policy, and MCP discovery remain upstream owners of their own facts and cannot become parallel aggregate owners.
+    forkchat_exclusion: conversation.fork_chat remains governed by ConversationForkSandboxPolicy and conversation_fork_turns. It never acquires, persists, or authorizes through this managed-agent surface.
+  managed_execution_admission:
+    variants:
+      normal_agent: Exact admitted runtime startup authority generation, actor-census fingerprint, bundle fingerprint, and settled startup-probe surface identities.
+      selected_contract_fork: Exact current selected-contract execution ID, fork run ID, generation, actor-census fingerprint, bundle fingerprint, and settled startup-probe surface identities issued from the selected-fork authority established by llm_completion_execution_authority.
+    rule: The variants form a closed discriminated union. Missing, stale, terminal, cross-context, cross-run, cross-execution, cross-generation, actor/config-mismatched, or bundle-mismatched admission fails before gateway construction, provider work, agent loops, tool dispatch, relay dispatch, or event publication.
+  surface_identity:
+    planned_inputs: [actor_id, runtime_mode, provider, transport, provider_contract_identity, exact_execution_authority, candidate_definition_identity, toolcapabilities_decision, exact_delivery_bindings]
+    rule: surface_id is deterministic for one immutable plan and exact startup-probe or provider-turn authority. integrity_hash covers the complete planned, observed, mismatch, and effective value. Provider-turn and startup-probe authorities are disjoint and non-reusable.
+    bindings:
+      api_definition: Exact canonical tool name and definition/schema identity delivered in the live provider request.
+      provider_builtin: Exact provider-native name enabled and observed for the turn.
+      mcp_tool: Exact runtime MCP catalog name returned by tools/list under the turn context.
+      mcp_provider_visible: Exact MCP tool name observed through provider initialization/response evidence.
+      local_runtime: Explicit runtime-local binding only where the provider contract authorizes it; it is never inferred as fallback for an unavailable provider binding.
+  evidence:
+    statuses: [confirmed, unavailable, mismatch]
+    rule: Each planned binding names its required typed evidence kind. Effective visibility and callability require the upstream toolcapabilities decision to be visible/callable and every required delivery binding to have exact confirmed evidence. Missing evidence is not success. Unavailable evidence denies that tool. Any unplanned, duplicate, missing, schema-changed, cross-authority, or otherwise mismatched delivery records a typed mismatch and denies the complete surface.
+    monotonicity: Evidence may be added or narrowed from confirmed to unavailable/mismatch. Unavailable or mismatch evidence and mismatch facts cannot be removed, rewritten, or widened for the life of the surface.
+  startup_preflight:
+    owner: one provider-contract-aware managed preflight implementation that produces startup_probe surfaces and persists both successful and failed operation/evidence facts
+    startup_authority: Every cold-start and prepared-handoff state change compare-and-sets the exact persisted lease head. transition_ordinal is strictly consecutive across the lease even when handoff-local state_version restarts; rollback persists rolled_back plus restored active as one transaction. A restored active rollback head may prepare a later fully identified handoff candidate, but active status alone never admits candidate execution and the complete probe/commit protocol applies again. Missing/stale predecessors, ordinal gaps, partial rollback, and best-effort finalization fail closed on PostgreSQL and SQLite.
+    normal_cold_start: Settle every actor probe under the exact startup authority, persist the resulting surface identities, admit execution, and only then replay recoverable agent work or start managed-agent loops. System nodes may hydrate, subscribe, and queue work before admission, but cannot authorize provider turns or execute managed-agent deliveries until admission.
+    normal_replacement: Probe candidate actors under prepared handoff authority before commit; execute only after commit/admission. Probe failure rolls back without exposing candidate execution.
+    selected_contract_fork: Consume the exact current selected-fork completion authority and derive the selected managed-execution admission; settle provider/MCP preflight before gateway use, agent-loop start, or fork-event publication.
+    failure: Missing provider evidence, MCP tools/list or required startup tools/call failure, delivery mismatch, persistence failure, or authority loss fails closed with retained typed evidence and zero managed execution under that admission.
+  provider_turn:
+    rule: Every managed provider turn receives a fresh provider_turn authority under one admitted execution variant. The same surface identity is carried through API/CLI request construction or deterministic in-process execution, provider response normalization, MCP registration/list/call, response tool-call validation, direct executor and relay admission, managed effects, turn persistence, and supported readback.
+    api: Exact live-request definitions are the delivery evidence. Planned names alone are not observation.
+    cli: Allowed/disallowed provider arguments, native built-ins, MCP registration, provider-visible initialization facts, and local projections are exact bindings/evidence from the surface; prompt text is a rendering only and cannot authorize a tool.
+    in_process: Deterministic platform mock execution carries the exact local-runtime bindings and interpreter evidence in the same provider-turn surface. It is not reclassified as API or CLI transport and cannot authorize external effects.
+  enforcement:
+    mcp: tools/list exposes only exact effective surface tools for the same provider-turn and managed-execution authority. tools/call rejects missing, mismatched, unavailable, or differently authorized surfaces before dispatch.
+    executor_relay: Tool executor, local runtime, and relay paths consume the exact provider-turn surface and managed-execution admission. They cannot recompute a broader set from actor declarations, names, prompts, or provider defaults.
+    managed_effects: Every normal-agent, selected-contract-fork, or startup-probe managed effect attempt other than the separately owned forkchat sandbox persists its exact capability_surface_id. The logical operation persists the authority-independent capability_plan_fingerprint, so an eligible retry may bind a new preallocated turn surface but cannot widen or otherwise replace the callable plan. Forkchat attempts carry neither value.
+  persistence:
+    rule: agent_turns references exactly one provider-turn capability_surface_id. PostgreSQL and SQLite persist the same typed value and identity. Flat available_tools, mcp_servers, mcp_tools_listed, mcp_tools_visible, compatibility views, dual writes, tolerant readers, and reconstruction from transcripts are forbidden.
+    migration: A legacy non-empty turn table without exact canonical surfaces is not safely inferable and migration fails closed. Empty legacy schemas may be upgraded destructively. Preserved immutable capability evidence severs nullable run references before destructive run cleanup rather than being deleted or relabelled.
+  proof:
+    required: [API adapter delivery parity, Claude CLI startup and first-turn evidence, MCP tools/list and tools/call authorization, executor and relay denial, normal startup ordering, replacement handoff ordering, selected-fork preflight ordering, selected-fork non-completion effect binding, PostgreSQL and SQLite typed persistence parity, forkchat non-interference]
+
 managed_external_effect_authority:
   owner: runtime_external_effect_operations and runtime_external_effect_attempts in the selected store
   registration:
     required_fields: [effect_kind, effect_class, adapter, transport, launch_site, primitive_keys, launch_observed, prelaunch_failure, postlaunch_failure, outcome_mapping, canonical_evidence, settlement_recovery, proof]
     rule: Registration is incomplete unless every field is concrete and the source-derived primitive contract binds every actual launch/write boundary to its adapter, Begin admission, pre-primitive launched marker, outcome table, and named execution proof.
   context_authority:
-    managed_agent: Every adapter invocation requires the lifecycle token, selected-store controller, and typed logical-operation identity. Missing context fails closed before authorization.
+    managed_agent: Every adapter invocation requires the exact managed-execution admission, provider-turn capability surface, selected-store controller, and typed logical-operation identity. Normal agents additionally require their lifecycle token; selected-contract-fork agents require the exact selected execution authority. Missing or mismatched context fails closed before authorization.
+    startup_probe: Provider/MCP startup probing requires the exact startup-probe capability surface, startup authority, and selected-store controller. Startup authority cannot authorize a provider turn or be reused after execution admission.
     gateway_reentry: Turn-context registration and gateway reconstruction preserve lifecycle token, controller, the full explicit logical identity, inbound identity, and lineage. Managed Claude CLI MCP tools/call requests MUST carry the provider-owned non-empty params._meta["claudecode/toolUseId"] call-occurrence coordinate. The gateway refines the preserved provider-turn identity with that coordinate and fails closed before executor admission when it is absent. JSON-RPC id, progressToken, method, tool name, arguments, and other request content are correlation or fingerprint evidence, never occurrence identity; identical sibling calls remain distinct while replay of one provider call remains stable across transport-correlation replacement.
     different_owner: Runtime dependency, pipeline activity, credential lifecycle, operator infrastructure, and build/test infrastructure calls use a closed typed different-owner context. Unknown owner labels and missing lifecycle context fail closed.
   logical_operation:

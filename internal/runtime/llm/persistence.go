@@ -8,39 +8,36 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 type AgentTurnRecord struct {
-	AgentID          string
-	Memory           agentmemory.Plan
-	SessionID        string
-	RunID            string
-	EntityID         string
-	FlowInstance     string
-	TriggerEventID   string
-	TriggerEventType string
-	AvailableTools   []string
-	ToolCalls        []ToolCall
-	EmittedEvents    []string
-	FlightRecorder   []runtimebus.FlightRecorderEntry
-	MCPServers       map[string]string
-	MCPToolsListed   []string
-	MCPToolsVisible  []string
-	TaskID           string
-	RequestPayload   []byte
-	ResponseRaw      []byte
-	TurnBlocks       []TurnBlock
-	ParseOK          bool
-	Latency          time.Duration
-	RetryCount       int
-	Failure          *runtimefailures.Envelope
+	AgentID           string
+	Memory            agentmemory.Plan
+	SessionID         string
+	RunID             string
+	EntityID          string
+	FlowInstance      string
+	TriggerEventID    string
+	TriggerEventType  string
+	CapabilitySurface *managedcapabilities.Surface
+	ToolCalls         []ToolCall
+	EmittedEvents     []string
+	FlightRecorder    []runtimebus.FlightRecorderEntry
+	TaskID            string
+	RequestPayload    []byte
+	ResponseRaw       []byte
+	TurnBlocks        []TurnBlock
+	ParseOK           bool
+	Latency           time.Duration
+	RetryCount        int
+	Failure           *runtimefailures.Envelope
 }
 
 func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp *Response) AgentTurnRecord {
-	actor, _ := runtimeactors.ActorFromContext(ctx)
 	if s != nil {
 		if strings.TrimSpace(rec.SessionID) == "" {
 			rec.SessionID = strings.TrimSpace(s.ID)
@@ -52,12 +49,15 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 		if strings.TrimSpace(rec.FlowInstance) == "" {
 			rec.FlowInstance = s.MemoryIdentity.FlowInstance
 		}
-		if len(rec.MCPToolsListed) == 0 {
-			rec.MCPToolsListed = mcpListedToolsForSession(actor, s.Tools)
-		}
 	}
 	if strings.TrimSpace(rec.RunID) == "" {
 		rec.RunID = strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	}
+	if actor, ok := runtimeactors.ActorFromContext(ctx); ok && strings.TrimSpace(rec.EntityID) == "" {
+		// A managed turn belongs to the executing actor. The inbound event entity
+		// can identify a cross-flow sender and is only a fallback for unmanaged
+		// persistence paths without actor context.
+		rec.EntityID = strings.TrimSpace(actor.EffectiveEntityID())
 	}
 	if inbound, ok := runtimebus.InboundEventFromContext(ctx); ok {
 		if strings.TrimSpace(rec.TriggerEventID) == "" {
@@ -73,6 +73,11 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 			rec.FlowInstance = strings.TrimSpace(inbound.FlowInstance())
 		}
 	}
+	if actor, ok := runtimeactors.ActorFromContext(ctx); ok {
+		if strings.TrimSpace(rec.FlowInstance) == "" {
+			rec.FlowInstance = strings.TrimSpace(actor.CanonicalFlowPath())
+		}
+	}
 	if resp != nil && len(rec.ToolCalls) == 0 {
 		if len(resp.ObservedToolCalls) > 0 {
 			rec.ToolCalls = append([]ToolCall(nil), resp.ObservedToolCalls...)
@@ -80,20 +85,11 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 			rec.ToolCalls = append([]ToolCall(nil), resp.ToolCalls...)
 		}
 	}
-	if resp != nil && len(rec.AvailableTools) == 0 {
-		rec.AvailableTools = append([]string(nil), resolvedCLIUsableToolsForTurn(actor, sessionTools(s), resp)...)
-	}
-	if resp != nil && len(rec.MCPToolsVisible) == 0 {
-		rec.MCPToolsVisible = append([]string(nil), resp.MCPVisibleTools...)
-	}
-	if resp != nil && len(rec.MCPServers) == 0 && len(resp.MCPServers) > 0 {
-		rec.MCPServers = map[string]string{}
-		for name, status := range resp.MCPServers {
-			name = strings.TrimSpace(name)
-			status = strings.TrimSpace(status)
-			if name != "" && status != "" {
-				rec.MCPServers[name] = status
-			}
+	if rec.CapabilitySurface == nil {
+		if surface, ok := capabilitySurfaceForResponse(resp); ok {
+			rec.CapabilitySurface = &surface
+		} else if surface, ok := managedcapabilities.FromContext(ctx); ok {
+			rec.CapabilitySurface = &surface
 		}
 	}
 	if len(rec.EmittedEvents) == 0 {
@@ -117,25 +113,7 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 			rec.FlightRecorder = append([]runtimebus.FlightRecorderEntry(nil), eventRec.SnapshotFlightRecorder()...)
 		}
 	}
-	if len(rec.AvailableTools) == 0 && s != nil {
-		rec.AvailableTools = append([]string(nil), plannedCanonicalVisibleToolsForActor(actor, s.Tools)...)
-	}
 	return rec
-}
-
-func sessionTools(s *Session) []ToolDefinition {
-	if s == nil {
-		return nil
-	}
-	return s.Tools
-}
-
-func mcpListedToolsForSession(actor runtimeactors.AgentConfig, tools []ToolDefinition) []string {
-	if len(tools) == 0 {
-		return nil
-	}
-	surface := cliExecutionToolSurfaceForActor(actor, tools)
-	return append([]string(nil), surface.ProviderMCPTools...)
 }
 
 const runtimeToolsMCPPrefix = "mcp__runtime-tools__"

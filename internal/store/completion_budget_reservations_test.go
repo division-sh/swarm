@@ -74,6 +74,8 @@ func TestMockCompletionSpendDoesNotConsumeLiveAdmissionCap(t *testing.T) {
 			mockAuthority.ExecutionMode = runtimeeffects.ExecutionModeMock
 			mockAuthority.Target.ID = uuid.NewString()
 			mockCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(context.Background(), mockAuthority), runtimeeffects.NewController(fixture.primary))
+			mockCtx = runtimeeffects.WithExecutionMode(mockCtx, runtimeeffects.ExecutionModeMock)
+			mockCtx = withManagedCompletionTestSurface(t, mockCtx, mockAuthority, "mock_python")
 			mockCtx = runtimeeffects.WithLogicalOperationIdentity(mockCtx, "mock-spend-before-live-cap")
 			mockHandle, err := runtimeeffects.BeginCompletion(mockCtx, "mock_python", []byte("mock spend"), nil)
 			if err != nil {
@@ -85,7 +87,9 @@ func TestMockCompletionSpendDoesNotConsumeLiveAdmissionCap(t *testing.T) {
 			if err := mockHandle.MarkResponseObserved(mockCtx, map[string]any{"execution_mode": "mock"}); err != nil {
 				t.Fatalf("observe mock completion: %v", err)
 			}
-			if err := mockHandle.SettleCompletion(mockCtx, budgetAccountingSettlement(mockAuthority.Target, runtimeeffects.CompletionUsageEstimated, runtimeeffects.StateSettled, 10)); err != nil {
+			settlement := budgetAccountingSettlement(mockAuthority.Target, runtimeeffects.CompletionUsageEstimated, runtimeeffects.StateSettled, 10)
+			applyManagedCompletionTestSurface(t, settlement.AgentTurn, mockAuthority, "mock_python")
+			if err := mockHandle.SettleCompletion(mockCtx, settlement); err != nil {
 				t.Fatalf("settle mock completion: %v", err)
 			}
 
@@ -93,6 +97,8 @@ func TestMockCompletionSpendDoesNotConsumeLiveAdmissionCap(t *testing.T) {
 			liveAuthority.Target.ID = uuid.NewString()
 			liveAuthority.BudgetScopes = []runtimeeffects.BudgetAdmissionScope{{Kind: "system", CapUSD: 1}}
 			liveCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(context.Background(), liveAuthority), runtimeeffects.NewController(fixture.primary))
+			liveCtx = runtimeeffects.WithExecutionMode(liveCtx, runtimeeffects.ExecutionModeLive)
+			liveCtx = withManagedCompletionTestSurface(t, liveCtx, liveAuthority, "openai_compatible")
 			liveCtx = runtimeeffects.WithLogicalOperationIdentity(liveCtx, "live-cap-after-mock-spend")
 			liveHandle, err := runtimeeffects.BeginCompletion(liveCtx, "openai_compatible", []byte("live admission"), nil)
 			if err != nil {
@@ -138,6 +144,9 @@ func proveCompletionBudgetAdmissionRace(t *testing.T, fixture completionBudgetRa
 			defer wg.Done()
 			<-start
 			ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(context.Background(), candidate.authority), runtimeeffects.NewController(candidate.store))
+			if candidate.authority.Target.Kind == runtimeeffects.UsageTargetAgentTurn {
+				ctx = withManagedCompletionTestSurface(t, ctx, candidate.authority, "openai_responses")
+			}
 			ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, fmt.Sprintf("budget-race:%s:%d", candidate.identity, i))
 			handle, err := runtimeeffects.BeginCompletion(ctx, "openai_responses", []byte(candidate.identity), nil)
 			results <- result{handle: handle, err: err, label: candidate.identity}
@@ -286,6 +295,7 @@ func proveCompletionBudgetSettlementAccounting(t *testing.T, sqlite bool, exactn
 	authority := fixture.authority
 	authority.BudgetScopes = append([]runtimeeffects.BudgetAdmissionScope(nil), scopes...)
 	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(context.Background(), authority), runtimeeffects.NewController(fixture.store))
+	ctx = withManagedCompletionTestSurface(t, ctx, authority, "openai_compatible")
 	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "budget-accounting:"+string(exactness)+":"+string(state))
 	handle, err := runtimeeffects.BeginCompletion(ctx, "openai_compatible", []byte("budget accounting"), nil)
 	if err != nil {
@@ -298,6 +308,7 @@ func proveCompletionBudgetSettlementAccounting(t *testing.T, sqlite bool, exactn
 		t.Fatalf("observe budget-accounted completion: %v", err)
 	}
 	settlement := budgetAccountingSettlement(authority.Target, exactness, state, cost)
+	applyManagedCompletionTestSurface(t, settlement.AgentTurn, authority, "openai_compatible")
 	if err := handle.SettleCompletion(ctx, settlement); err != nil {
 		t.Fatalf("settle budget-accounted completion: %v", err)
 	}

@@ -55,7 +55,7 @@ func TestRun_UsesRuntimeShutdownAdmissionOwner(t *testing.T) {
 		RuntimeShutdownAdmissionClosed: closed.Load,
 	})
 
-	am.Run(context.Background())
+	am.Run(managedExecutionTestContext(t, context.Background()))
 
 	if am.IsRunning() {
 		t.Fatal("Run started manager even though runtime shutdown admission was already closed")
@@ -140,7 +140,7 @@ func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
-	am.Run(context.Background())
+	am.Run(managedExecutionTestContext(t, context.Background()))
 	if err := bus.Publish(context.Background(), eventtest.RootIngress("evt-in-1",
 		events.EventType("test.in"),
 		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
@@ -219,7 +219,7 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
-	am.Run(context.Background())
+	am.Run(managedExecutionTestContext(t, context.Background()))
 	if err := bus.Publish(context.Background(), eventtest.RootIngress("evt-in-1",
 		events.EventType("test.in"),
 		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {

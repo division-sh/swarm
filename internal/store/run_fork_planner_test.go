@@ -1159,12 +1159,13 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 	`, sessionID, runID, at.Add(-time.Second)); err != nil {
 		t.Fatalf("seed active session: %v", err)
 	}
+	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, pg, runID, "agent-a", sessionID, turnID, "session", "global")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, execution_mode, created_at
+			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, capability_surface_id, execution_mode, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'fork-planner', TRUE, 'authored', $4::uuid, 'fork.session', 'live', $5)
-	`, turnID, runID, sessionID, eventID, at); err != nil {
+		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'fork-planner', TRUE, 'authored', $4::uuid, 'fork.session', $5::uuid, 'live', $6)
+	`, turnID, runID, sessionID, eventID, capabilitySurfaceID, at); err != nil {
 		t.Fatalf("seed active turn: %v", err)
 	}
 

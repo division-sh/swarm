@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -111,7 +112,6 @@ func (r *AnthropicAPIRuntime) PersistConversationSnapshot(ctx context.Context, s
 }
 
 func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
-	actor, _ := runtimeactors.ActorFromContext(ctx)
 	lease, hydrated, resolved, err := startMemory(ctx, r.sessions, r.conversations, agentID, r.lockOwner)
 	if err != nil {
 		return nil, err
@@ -150,7 +150,7 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 			}
 			return ""
 		}(),
-		SystemPrompt: augmentAgentSystemPrompt(systemPrompt, actor, tools),
+		SystemPrompt: strings.TrimSpace(systemPrompt),
 		Tools:        tools,
 		Messages:     append([]Message(nil), hydrated.Messages...),
 		TurnCount:    hydrated.TurnCount,
@@ -208,6 +208,14 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 	if err != nil {
 		return nil, err
 	}
+	deliveredTools := make([]ToolDefinition, 0, len(reqBody.Tools))
+	for _, tool := range reqBody.Tools {
+		deliveredTools = append(deliveredTools, ToolDefinition{Name: tool.Name, Description: tool.Description, Schema: tool.InputSchema})
+	}
+	ctx, _, err = withObservedAPIRequestCapabilitySurface(ctx, deliveredTools)
+	if err != nil {
+		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "managed_capability_api_request_mismatch", "anthropic-api-adapter", "build_request", nil, err)
+	}
 	reqJSON, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
@@ -258,6 +266,9 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 
 	resp := convertAnthropicResponse(parsed)
 	resp.Raw = rawResp
+	if surface, ok := managedcapabilities.FromContext(ctx); ok {
+		resp.CapabilitySurface = &surface
+	}
 	usage, ok := extractUsageTokensFromJSON(rawResp)
 	if !ok {
 		usageErr := fmt.Errorf("anthropic response missing usage")

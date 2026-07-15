@@ -7,13 +7,14 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/google/uuid"
 )
 
 type scriptedLLMRuntime struct {
 	mu             sync.Mutex
-	nextID         int
 	responses      map[string]llm.Response
 	agentEventFlow map[string][]scriptedAgentFixtureStep
 }
@@ -62,19 +63,23 @@ func (r *scriptedLLMRuntime) StartSession(_ context.Context, agentID, systemProm
 	if r == nil {
 		return nil, fmt.Errorf("scripted llm runtime is nil")
 	}
-	r.mu.Lock()
-	r.nextID++
-	sessionID := fmt.Sprintf("scripted-%s-%d", strings.TrimSpace(agentID), r.nextID)
-	r.mu.Unlock()
 	return &llm.Session{
-		ID:           sessionID,
+		ID:           uuid.NewString(),
 		AgentID:      strings.TrimSpace(agentID),
 		SystemPrompt: systemPrompt,
 		Tools:        append([]llm.ToolDefinition(nil), tools...),
 	}, nil
 }
 
-func (r *scriptedLLMRuntime) ContinueSession(_ context.Context, session *llm.Session, message llm.Message) (*llm.Response, error) {
+func (*scriptedLLMRuntime) ProviderContract() llm.ProviderContract {
+	return llm.AnthropicAPIProviderContract()
+}
+
+func (*scriptedLLMRuntime) PersistConversationSnapshot(context.Context, *llm.Session) error {
+	return nil
+}
+
+func (r *scriptedLLMRuntime) ContinueSession(ctx context.Context, session *llm.Session, message llm.Message) (*llm.Response, error) {
 	if r == nil {
 		return nil, fmt.Errorf("scripted llm runtime is nil")
 	}
@@ -100,6 +105,17 @@ func (r *scriptedLLMRuntime) ContinueSession(_ context.Context, session *llm.Ses
 	}
 	if session != nil {
 		session.Messages = append(session.Messages, response.Message)
+	}
+	if surface, ok := managedcapabilities.FromContext(ctx); ok {
+		var deliveredTools []llm.ToolDefinition
+		if session != nil {
+			deliveredTools = session.Tools
+		}
+		observed, err := llm.ObserveAPIRequestCapabilitySurface(surface, deliveredTools)
+		if err != nil {
+			return nil, err
+		}
+		response.CapabilitySurface = &observed
 	}
 	return &response, nil
 }

@@ -79,10 +79,6 @@ review_subject:
 	if len(metadataProps) != 0 {
 		t.Fatalf("read_review_subject_metadata should not accept selector/entity_id input, got schema %#v", metadataSchema)
 	}
-	summaryLines := llm.AgentVisibleToolSummaryLinesForActor(actor, defs)
-	if containsString(summaryLines, "Writable entity paths for save_entity_field") {
-		t.Fatalf("legacy save_entity_field writable path summary remained visible: %#v", summaryLines)
-	}
 }
 
 func TestToolDefinitionsForActor_ExcludeForeignReadTargets(t *testing.T) {

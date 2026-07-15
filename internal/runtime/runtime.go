@@ -26,6 +26,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -184,6 +185,9 @@ type Runtime struct {
 	ownershipHandoffPending bool
 	replacementQuiesced     bool
 	ownerID                 string
+	bootID                  string
+	startupAdmission        managedexecution.Admission
+	pendingOwnershipHandoff runtimestartupownership.Handoff
 	shutdownGate            shutdownAdmission
 	backgroundActive        atomic.Int64
 	payloadValidator        runtimebus.PayloadValidator
@@ -259,7 +263,17 @@ func (rt *Runtime) PrepareInitialStartupOwnership(ctx context.Context) error {
 	if rt.cancelStart != nil || rt.ownershipLease != nil || rt.pendingOwnershipLease != nil {
 		return fmt.Errorf("runtime already started or has pending startup ownership")
 	}
-	lease, err := rt.Stores.StartupOwnership.AcquireRuntimeStartupOwnership(ctx, rt.ownerID)
+	if strings.TrimSpace(rt.ownerID) == "" {
+		rt.ownerID = newRuntimeOwnerID()
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(rt.bootID)); err != nil {
+		rt.bootID = uuid.NewString()
+	}
+	lease, err := rt.Stores.StartupOwnership.AcquireRuntimeStartupOwnership(ctx, runtimestartupownership.AcquireRequest{
+		OwnerID:           rt.ownerID,
+		BootID:            rt.bootID,
+		BundleFingerprint: coalesceRuntimeIdentity(rt.Options.BundleFingerprint),
+	})
 	if err != nil {
 		return err
 	}
@@ -293,6 +307,7 @@ type StartupOwnershipHandoff struct {
 	predecessor *Runtime
 	candidate   *Runtime
 	lease       runtimestartupownership.Lease
+	typed       runtimestartupownership.Handoff
 	active      bool
 	committed   bool
 }
@@ -329,36 +344,71 @@ func (rt *Runtime) PrepareStartupOwnershipHandoff(predecessor *Runtime) (*Startu
 	predecessor.ownershipHandoffPending = true
 	rt.pendingOwnershipLease = lease
 	rt.pendingOwnershipOwned = false
-	return &StartupOwnershipHandoff{predecessor: predecessor, candidate: rt, lease: lease, active: true}, nil
+	typed, err := lease.PrepareHandoff(context.Background(), runtimestartupownership.HandoffRequest{
+		CandidateOwnerID: rt.ownerID, CandidateBootID: rt.bootID,
+		CandidateBundleFingerprint: coalesceRuntimeIdentity(rt.Options.BundleFingerprint),
+	})
+	if err != nil {
+		predecessor.ownershipHandoffPending = false
+		rt.pendingOwnershipLease = nil
+		return nil, err
+	}
+	rt.pendingOwnershipHandoff = typed
+	return &StartupOwnershipHandoff{predecessor: predecessor, candidate: rt, lease: lease, typed: typed, active: true}, nil
 }
 
 func (h *StartupOwnershipHandoff) Commit() error {
 	if h == nil || !h.active {
 		return nil
 	}
+	if h.committed {
+		return nil
+	}
 	h.predecessor.lifecycleMu.Lock()
-	defer h.predecessor.lifecycleMu.Unlock()
 	h.candidate.lifecycleMu.Lock()
-	defer h.candidate.lifecycleMu.Unlock()
 	if h.predecessor.ownershipLease != h.lease || h.candidate.ownershipLease != h.lease || !h.candidate.ownershipLeaseBorrowed {
+		h.candidate.lifecycleMu.Unlock()
+		h.predecessor.lifecycleMu.Unlock()
 		return fmt.Errorf("runtime startup ownership handoff state changed before commit")
+	}
+	authority, err := h.typed.Commit(context.Background())
+	if err != nil {
+		h.candidate.lifecycleMu.Unlock()
+		h.predecessor.lifecycleMu.Unlock()
+		return err
 	}
 	h.predecessor.ownershipLease = nil
 	h.candidate.ownershipLeaseBorrowed = false
 	h.candidate.pendingOwnershipLease = nil
+	h.candidate.pendingOwnershipHandoff = nil
 	h.candidate.pendingOwnershipOwned = false
 	h.committed = true
+	startCtx := h.candidate.startCtx
+	h.candidate.lifecycleMu.Unlock()
+	h.predecessor.lifecycleMu.Unlock()
+	if _, err := h.candidate.admitManagedExecution(startCtx, authority, false); err != nil {
+		return fmt.Errorf("activate replacement managed execution after ownership commit: %w", err)
+	}
+	if h.candidate.Manager != nil {
+		if err := h.candidate.Manager.Run(h.candidate.startCtx); err != nil {
+			return fmt.Errorf("start replacement managed execution after ownership commit: %w", err)
+		}
+	}
 	return nil
 }
 
-func (h *StartupOwnershipHandoff) Finalize() {
+func (h *StartupOwnershipHandoff) Finalize() error {
 	if h == nil || !h.active || !h.committed {
-		return
+		return nil
+	}
+	if _, err := h.typed.Finalize(context.Background()); err != nil {
+		return err
 	}
 	h.predecessor.lifecycleMu.Lock()
 	h.predecessor.ownershipHandoffPending = false
 	h.predecessor.lifecycleMu.Unlock()
 	h.active = false
+	return nil
 }
 
 func (h *StartupOwnershipHandoff) Rollback() error {
@@ -378,6 +428,9 @@ func (h *StartupOwnershipHandoff) Rollback() error {
 			h.candidate.ownershipLeaseBorrowed = false
 		}
 		h.predecessor.ownershipLease = h.lease
+		if _, err := h.typed.Rollback(context.Background()); err != nil {
+			return err
+		}
 		h.predecessor.ownershipHandoffPending = false
 		h.candidate.pendingOwnershipLease = nil
 		h.candidate.pendingOwnershipOwned = false
@@ -392,6 +445,12 @@ func (h *StartupOwnershipHandoff) Rollback() error {
 	if h.candidate.pendingOwnershipLease == h.lease {
 		h.candidate.pendingOwnershipLease = nil
 		h.candidate.pendingOwnershipOwned = false
+	}
+	if h.candidate.pendingOwnershipHandoff == h.typed {
+		h.candidate.pendingOwnershipHandoff = nil
+	}
+	if _, err := h.typed.Rollback(context.Background()); err != nil {
+		return err
 	}
 	h.predecessor.ownershipHandoffPending = false
 	h.active = false
@@ -678,6 +737,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	mcpTurns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
 	rt := &Runtime{
 		ownerID:              newRuntimeOwnerID(),
+		bootID:               uuid.NewString(),
 		Config:               cfg,
 		Stores:               stores,
 		Options:              opts,
@@ -1049,6 +1109,12 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if rt == nil {
 		return fmt.Errorf("runtime is nil")
 	}
+	if strings.TrimSpace(rt.ownerID) == "" {
+		rt.ownerID = newRuntimeOwnerID()
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(rt.bootID)); err != nil {
+		rt.bootID = uuid.NewString()
+	}
 	bootStartedAt := rt.Options.BootStartedAt
 	if bootStartedAt.IsZero() {
 		bootStartedAt = time.Now().UTC()
@@ -1067,7 +1133,9 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	borrowedLease := lease != nil && !preparedOwnedLease
 	if rt.Stores.StartupOwnership != nil && lease == nil {
 		var err error
-		lease, err = rt.Stores.StartupOwnership.AcquireRuntimeStartupOwnership(ctx, rt.ownerID)
+		lease, err = rt.Stores.StartupOwnership.AcquireRuntimeStartupOwnership(ctx, runtimestartupownership.AcquireRequest{
+			OwnerID: rt.ownerID, BootID: rt.bootID, BundleFingerprint: coalesceRuntimeIdentity(rt.Options.BundleFingerprint),
+		})
 		if err != nil {
 			rt.emitBootProgress(5, "startup_ownership_lease", "FAILED", err.Error())
 			cancelStart()
@@ -1080,7 +1148,21 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	} else if preparedOwnedLease {
 		rt.emitBootProgress(5, "startup_ownership_lease", "ok", "prepared_owner="+rt.ownerID)
 	} else {
-		rt.emitBootProgress(5, "startup_ownership_lease", "skipped", "startup ownership store unavailable")
+		authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
+			OwnerID: rt.ownerID, BootID: rt.bootID, BundleFingerprint: coalesceRuntimeIdentity(rt.Options.BundleFingerprint),
+		}, "memory")
+		if err != nil {
+			cancelStart()
+			rt.lifecycleMu.Unlock()
+			return err
+		}
+		lease, err = runtimestartupownership.NewLease(authority, nil, nil)
+		if err != nil {
+			cancelStart()
+			rt.lifecycleMu.Unlock()
+			return err
+		}
+		rt.emitBootProgress(5, "startup_ownership_lease", "ok", "memory_owner="+rt.ownerID)
 	}
 	rt.startCtx = startCtx
 	rt.cancelStart = cancelStart
@@ -1208,80 +1290,18 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.emitBootProgress(11, "manager_recovery_if_enabled", "skipped", "persistent startup recovery disabled")
 	} else if rt.Config.Runtime.RecoveryOnStartup && rt.Manager != nil {
 		startupRecoveryDecision.ManagerRecoveryAttempted = true
-		managerReplaySummary, err := rt.Manager.RecoverWithStartupReplayDiagnostics(ctx)
-		startupRecoveryDecision.ManagerReplayCount = managerReplaySummary.ReplayedCount
-		startupRecoveryDecision.ManagerSkipCount = managerReplaySummary.SkippedCount
-		startupRecoveryDecision.ManagerDropCount = managerReplaySummary.DroppedCount
+		_, err := rt.Manager.HydrateForStartup(ctx)
 		if err != nil {
-			startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
-			startupRecoveryDecision.ReasonCode = startupRecoveryReasonRecoverFailed
-			startupRecoveryDecision.Failure = newStartupRecoveryFailure(runtimefailures.ClassDependencyUnavailable, "startup_manager_recovery_failed", "recover_manager", nil, err)
-			if rt.Logger != nil {
-				handleRuntimeLogPersistenceError("runtime", "recovery_failed", rt.Logger.Error(ctx, "runtime", "recovery_failed", nil, err))
-			}
-			startupRecoveryDecision.ManagerResetAttempted = true
-			if resetErr := rt.Manager.ResetRuntimeStateWithSource("startup_recovery_failed"); resetErr != nil {
-				startupRecoveryDecision.ManagerResetFailure = newStartupRecoveryFailure(runtimefailures.ClassInternalFailure, "startup_manager_reset_failed", "reset_manager", nil, resetErr)
-				if rt.Logger != nil {
-					handleRuntimeLogPersistenceError("runtime", "recovery_reset_failed", rt.Logger.Error(ctx, "runtime", "recovery_reset_failed", nil, resetErr))
-				}
-			}
-			if rt.Stores.MailboxStore != nil {
-				ctxPayload := mustJSON(map[string]any{
-					"failure":     *startupRecoveryDecision.Failure,
-					"instruction": "Runtime recovery failed. Reinitialize or repair persisted runtime state before restart.",
-				})
-				if _, mailboxErr := rt.Stores.MailboxStore.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-					FromAgent: "runtime",
-					Type:      "alert",
-					Priority:  "critical",
-					Status:    "pending",
-					Context:   ctxPayload,
-					Summary:   runtimeTruncateString("Runtime recovery failed: "+err.Error(), 200),
-				}); mailboxErr != nil {
-					if rt.Logger != nil {
-						handleRuntimeLogPersistenceError("runtime", "recovery_mailbox_insert_failed", rt.Logger.Error(ctx, "runtime", "recovery_mailbox_insert_failed", nil, mailboxErr))
-					}
-				}
-			}
-			payload := mustJSON(map[string]any{
-				"failure":         *startupRecoveryDecision.Failure,
-				"failed_event_id": nil,
-				"timestamp":       time.Now().UTC().Format(time.RFC3339Nano),
-			})
-			if publishErr := rt.Bus.Publish(ctx, events.NewRuntimeDiagnosticEvent(
-				uuid.NewString(),
-				events.EventType("platform.recovery_failed"),
-				"runtime",
-				"",
-				payload,
-				0,
-				"",
-				"",
-				events.EventEnvelope{},
-				time.Now(),
-			)); publishErr != nil {
-				if rt.Logger != nil {
-					handleRuntimeLogPersistenceError("runtime", "recovery_failed_publish_failed", rt.Logger.Error(ctx, "runtime", "recovery_failed_publish_failed", nil, publishErr))
-				}
-			}
-		} else if startupRecoveryDecision.Outcome != startupRecoveryOutcomeDegraded && startupRecoveryDecision.ManagerDropCount > 0 {
-			startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
-			startupRecoveryDecision.ReasonCode = startupRecoveryReasonRecoverFailed
-			startupRecoveryDecision.Failure = runtimefailures.CloneEnvelope(managerReplaySummary.FirstDroppedFailure)
-			if startupRecoveryDecision.Failure == nil {
-				startupRecoveryDecision.Failure = newStartupRecoveryFailure(runtimefailures.ClassInternalFailure, "startup_manager_replay_dropped_without_failure", "recover_manager", map[string]any{"dropped_count": startupRecoveryDecision.ManagerDropCount}, nil)
-			}
+			rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, err)
 		}
 		status := "ok"
 		if startupRecoveryDecision.Outcome == startupRecoveryOutcomeDegraded {
 			status = string(startupRecoveryDecision.Outcome)
 		}
-		rt.emitBootProgress(11, "manager_recovery_if_enabled", status, fmt.Sprintf("%d replayed, %d skipped, %d dropped", startupRecoveryDecision.ManagerReplayCount, startupRecoveryDecision.ManagerSkipCount, startupRecoveryDecision.ManagerDropCount))
+		rt.emitBootProgress(11, "manager_recovery_if_enabled", status, "state hydrated; replay awaits managed execution admission")
 	} else {
 		rt.emitBootProgress(11, "manager_recovery_if_enabled", "skipped", "recovery_on_startup disabled or manager unavailable")
 	}
-	rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
 	if rt.Bus != nil {
 		sweeperConfig := rt.Options.TestOutboxSweeperConfig
 		if sweeperConfig == (runtimebus.OutboxSweeperConfig{}) {
@@ -1339,17 +1359,69 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	rt.emitBootProgress(15, "workspace_validation_and_system_containers", "ok", fmt.Sprintf("%d system containers", len(rt.Options.SystemContainers)))
 	startupProbe, _ := llm.StartupVisibleToolSurfaceProberForRuntime(rt.LLM)
-	if err := validateClaudeMCPToolsForManagedAgents(ctx, rt.Config, source, rt.Options.ToolGatewayBinding, startupProbe, rt.MCPTurns, rt.ToolExecutor, rt.Manager); err != nil {
+	startupAuthority, err := rt.currentStartupProbeAuthority()
+	if err != nil {
+		rt.emitBootProgress(16, "mcp_tool_validation", "FAILED", err.Error())
+		return err
+	}
+	var preflightAuthority ManagedProviderPreflightAuthority
+	hasManagedAgents, err := workflowSourceOrManagerDeclaresAgents(source, rt.Manager)
+	if err != nil {
+		return err
+	}
+	if claudeEnabled, backendErr := isClaudeCLIBackend(rt.Config); backendErr != nil {
+		return backendErr
+	} else if claudeEnabled && hasManagedAgents {
+		preflightAuthority, err = rt.managedProviderPreflightAuthority(startupAuthority)
+		if err != nil {
+			rt.emitBootProgress(16, "mcp_tool_validation", "FAILED", err.Error())
+			return err
+		}
+	}
+	surfaceIDs, err := ValidateManagedProviderPreflight(ctx, rt.Config, source, rt.Options.ToolGatewayBinding, rt.LLM, startupProbe, rt.MCPTurns, rt.ToolExecutor, rt.Manager, preflightAuthority)
+	if err != nil {
 		rt.emitBootProgress(16, "mcp_tool_validation", "FAILED", err.Error())
 		return fmt.Errorf("claude runtime mcp validation failed: %w", err)
 	}
-	rt.emitBootProgress(16, "mcp_tool_validation", "ok", "")
-	if rt.Manager != nil {
-		rt.Manager.Run(startCtx)
+	settledAuthority, handoffPending, err := rt.settleManagedStartupPreflight(ctx, surfaceIDs)
+	if err != nil {
+		rt.emitBootProgress(16, "mcp_tool_validation", "FAILED", err.Error())
+		return fmt.Errorf("settle managed startup preflight: %w", err)
+	}
+	rt.emitBootProgress(16, "mcp_tool_validation", "ok", fmt.Sprintf("%d capability surfaces settled", len(surfaceIDs)))
+	if rt.Manager != nil && !handoffPending {
+		activation, activateErr := rt.admitManagedExecution(startCtx, settledAuthority, rt.Config.Runtime.RecoveryOnStartup && !skipPersistentStartupRecovery)
+		if activateErr != nil {
+			rt.emitBootProgress(17, "manager_event_loop_start", "FAILED", activateErr.Error())
+			return fmt.Errorf("activate managed execution: %w", activateErr)
+		}
+		startCtx = managedexecution.WithAdmission(startCtx, activation.Admission)
+		if rt.Config.Runtime.RecoveryOnStartup && !skipPersistentStartupRecovery {
+			startupRecoveryDecision.ManagerReplayCount = activation.ReplaySummary.ReplayedCount
+			startupRecoveryDecision.ManagerSkipCount = activation.ReplaySummary.SkippedCount
+			startupRecoveryDecision.ManagerDropCount = activation.ReplaySummary.DroppedCount
+			if activation.ReplayErr != nil {
+				rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, activation.ReplayErr)
+			} else if startupRecoveryDecision.Outcome != startupRecoveryOutcomeDegraded && startupRecoveryDecision.ManagerDropCount > 0 {
+				startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
+				startupRecoveryDecision.ReasonCode = startupRecoveryReasonRecoverFailed
+				startupRecoveryDecision.Failure = runtimefailures.CloneEnvelope(activation.ReplaySummary.FirstDroppedFailure)
+				if startupRecoveryDecision.Failure == nil {
+					startupRecoveryDecision.Failure = newStartupRecoveryFailure(runtimefailures.ClassInternalFailure, "startup_manager_replay_dropped_without_failure", "recover_manager", map[string]any{"dropped_count": startupRecoveryDecision.ManagerDropCount}, nil)
+				}
+			}
+		}
+		if err := rt.Manager.Run(startCtx); err != nil {
+			rt.emitBootProgress(17, "manager_event_loop_start", "FAILED", err.Error())
+			return fmt.Errorf("start managed execution loops: %w", err)
+		}
 		rt.emitBootProgress(17, "manager_event_loop_start", "ok", "")
+	} else if handoffPending {
+		rt.emitBootProgress(17, "manager_event_loop_start", "deferred", "replacement execution awaits startup ownership commit")
 	} else {
 		rt.emitBootProgress(17, "manager_event_loop_start", "skipped", "manager unavailable")
 	}
+	rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
 	if rt.Stores.SQLDB != nil && rt.Logger != nil {
 	}
 	var bootCheck <-chan events.Event
@@ -1381,6 +1453,49 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	started = true
 	return nil
+}
+
+func (rt *Runtime) recordStartupManagerRecoveryFailure(ctx context.Context, decision *startupRecoveryDecisionReport, recoveryErr error) {
+	if rt == nil || decision == nil || recoveryErr == nil {
+		return
+	}
+	decision.Outcome = startupRecoveryOutcomeDegraded
+	decision.ReasonCode = startupRecoveryReasonRecoverFailed
+	decision.Failure = newStartupRecoveryFailure(runtimefailures.ClassDependencyUnavailable, "startup_manager_recovery_failed", "recover_manager", nil, recoveryErr)
+	if rt.Logger != nil {
+		handleRuntimeLogPersistenceError("runtime", "recovery_failed", rt.Logger.Error(ctx, "runtime", "recovery_failed", nil, recoveryErr))
+	}
+	decision.ManagerResetAttempted = true
+	if rt.Manager != nil {
+		if resetErr := rt.Manager.ResetRuntimeStateWithSource("startup_recovery_failed"); resetErr != nil {
+			decision.ManagerResetFailure = newStartupRecoveryFailure(runtimefailures.ClassInternalFailure, "startup_manager_reset_failed", "reset_manager", nil, resetErr)
+			if rt.Logger != nil {
+				handleRuntimeLogPersistenceError("runtime", "recovery_reset_failed", rt.Logger.Error(ctx, "runtime", "recovery_reset_failed", nil, resetErr))
+			}
+		}
+	}
+	if rt.Stores.MailboxStore != nil {
+		ctxPayload := mustJSON(map[string]any{
+			"failure":     *decision.Failure,
+			"instruction": "Runtime recovery failed. Reinitialize or repair persisted runtime state before restart.",
+		})
+		if _, mailboxErr := rt.Stores.MailboxStore.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+			FromAgent: "runtime", Type: "alert", Priority: "critical", Status: "pending", Context: ctxPayload,
+			Summary: runtimeTruncateString("Runtime recovery failed: "+recoveryErr.Error(), 200),
+		}); mailboxErr != nil && rt.Logger != nil {
+			handleRuntimeLogPersistenceError("runtime", "recovery_mailbox_insert_failed", rt.Logger.Error(ctx, "runtime", "recovery_mailbox_insert_failed", nil, mailboxErr))
+		}
+	}
+	payload := mustJSON(map[string]any{
+		"failure": *decision.Failure, "failed_event_id": nil, "timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if rt.Bus != nil {
+		if publishErr := rt.Bus.Publish(ctx, events.NewRuntimeDiagnosticEvent(
+			uuid.NewString(), events.EventType("platform.recovery_failed"), "runtime", "", payload, 0, "", "", events.EventEnvelope{}, time.Now(),
+		)); publishErr != nil && rt.Logger != nil {
+			handleRuntimeLogPersistenceError("runtime", "recovery_failed_publish_failed", rt.Logger.Error(ctx, "runtime", "recovery_failed_publish_failed", nil, publishErr))
+		}
+	}
 }
 
 func (rt *Runtime) startSystemNodesAndWaitForSubscriptions(ctx context.Context, startCtx context.Context) (int, error) {

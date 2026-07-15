@@ -18,6 +18,8 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -83,6 +85,17 @@ type selectedContractAgentRuntimeFactory struct {
 	options     runtimemanager.AgentManagerOptions
 	bindManager func(runtimetools.Manager)
 	cleanup     func()
+	preflight   *selectedContractAgentRuntimePreflight
+}
+
+type selectedContractAgentRuntimePreflight struct {
+	config       *config.Config
+	source       semanticview.Source
+	gateway      toolgateway.Binding
+	modelRuntime runtimellm.Runtime
+	probe        runtimellm.StartupVisibleToolSurfaceProber
+	turns        runtimellm.MCPTurnContextStore
+	tools        *runtimetools.Executor
 }
 
 func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loaded LoadedSelectedContractSource, planning store.RunForkSelectedContractRecipientPlanning, options SelectedContractAgentRuntimeOptions) (selectedContractAgentRuntimePlan, error) {
@@ -172,17 +185,21 @@ func selectedContractAgentRuntimeUnsupportedError(agents []string, reason string
 	)
 }
 
-func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus) (*selectedContractAgentRuntime, error) {
+func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus) (*selectedContractAgentRuntime, managedexecution.Admission, error) {
+	admission, authority, err := selectedContractManagedExecutionAuthority(ctx)
+	if err != nil {
+		return nil, managedexecution.Admission{}, err
+	}
 	if len(req.AgentRuntime.Records) == 0 {
 		manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 			SemanticSource:    req.LoadedSource.Source,
 			WorkflowInstances: runtimepipeline.NewWorkflowInstanceStore(req.Store.DB),
 		}, req.Store)
-		return &selectedContractAgentRuntime{manager: manager}, nil
+		return &selectedContractAgentRuntime{manager: manager}, admission, nil
 	}
 	builder, err := buildSelectedContractAgentRuntimeFactory(req, bus)
 	if err != nil {
-		return nil, err
+		return nil, managedexecution.Admission{}, err
 	}
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, builder.factory, builder.options, req.Store)
 	if builder.bindManager != nil {
@@ -203,7 +220,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	}()
 	for _, rec := range req.AgentRuntime.Records {
 		if err := manager.RegisterEphemeralAgentForExecution(ctx, rec); err != nil && !errors.Is(err, runtimemanager.ErrAgentAlreadyExists) {
-			return nil, fmt.Errorf("%s materialize agent %s: %w", store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner, strings.TrimSpace(rec.Config.ID), err)
+			return nil, managedexecution.Admission{}, fmt.Errorf("%s materialize agent %s: %w", store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner, strings.TrimSpace(rec.Config.ID), err)
 		}
 		bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{
 			AgentID:      rec.Config.ID,
@@ -211,9 +228,63 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			FlowInstance: rec.Config.CanonicalFlowPath(),
 		})
 	}
-	manager.RunAuthoritativeDeliveryOnly(ctx)
+	if builder.preflight != nil {
+		controller, ok := runtimeeffects.ControllerFromContext(ctx)
+		if !ok {
+			return nil, managedexecution.Admission{}, fmt.Errorf("selected-fork managed provider preflight requires the existing effect controller")
+		}
+		surfaceIDs, err := swaruntime.ValidateManagedProviderPreflight(
+			ctx,
+			builder.preflight.config,
+			builder.preflight.source,
+			builder.preflight.gateway,
+			builder.preflight.modelRuntime,
+			builder.preflight.probe,
+			builder.preflight.turns,
+			builder.preflight.tools,
+			manager,
+			swaruntime.ManagedProviderPreflightAuthority{
+				ExecutionKind:        managedcapabilities.ExecutionSelectedContractFork,
+				ExecutionAuthorityID: authority.SelectedFork.ExecutionID,
+				RunID:                authority.SelectedFork.ForkRunID,
+				StartupOwnerID:       authority.ExecutionOwner,
+				StartupGeneration:    authority.SelectedFork.Generation,
+				EffectController:     controller,
+				CapabilityStore:      req.Store,
+				EffectAuthority: func(string, string) (runtimeeffects.Authority, error) {
+					return authority, nil
+				},
+			},
+		)
+		if err != nil {
+			return nil, managedexecution.Admission{}, err
+		}
+		admission, err = admission.WithCapabilitySurfaces(surfaceIDs)
+		if err != nil {
+			return nil, managedexecution.Admission{}, err
+		}
+		ctx = managedexecution.WithAdmission(ctx, admission)
+	}
+	if err := manager.RunAuthoritativeDeliveryOnly(ctx); err != nil {
+		return nil, managedexecution.Admission{}, err
+	}
 	started = true
-	return &selectedContractAgentRuntime{manager: manager, cleanup: builder.cleanup}, nil
+	return &selectedContractAgentRuntime{manager: manager, cleanup: builder.cleanup}, admission, nil
+}
+
+func selectedContractManagedExecutionAuthority(ctx context.Context) (managedexecution.Admission, runtimeeffects.Authority, error) {
+	admission, ok := managedexecution.FromContext(ctx)
+	if !ok || admission.Kind != managedexecution.KindSelectedContractFork {
+		return managedexecution.Admission{}, runtimeeffects.Authority{}, fmt.Errorf("selected-fork managed execution admission is required")
+	}
+	authority, ok := runtimeeffects.AuthorityFromContext(ctx)
+	if !ok || authority.Kind != runtimeeffects.AuthoritySelectedContractFork || !authority.Valid() {
+		return managedexecution.Admission{}, runtimeeffects.Authority{}, fmt.Errorf("selected-fork effect authority is required")
+	}
+	if !admission.AuthorizesSelected(authority.SelectedFork.ExecutionID, authority.SelectedFork.ForkRunID, authority.SelectedFork.Generation) {
+		return managedexecution.Admission{}, runtimeeffects.Authority{}, fmt.Errorf("selected-fork managed execution admission does not match effect authority")
+	}
+	return admission, authority, nil
 }
 
 func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus) (selectedContractAgentRuntimeFactory, error) {
@@ -322,6 +393,18 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 			managerRef = manager
 		},
 		cleanup: cleanup,
+		preflight: &selectedContractAgentRuntimePreflight{
+			config:       options.Config,
+			source:       source,
+			gateway:      binding,
+			modelRuntime: modelRuntime,
+			probe: func() runtimellm.StartupVisibleToolSurfaceProber {
+				probe, _ := runtimellm.StartupVisibleToolSurfaceProberForRuntime(modelRuntime)
+				return probe
+			}(),
+			turns: mcpTurns,
+			tools: exec,
+		},
 	}, nil
 }
 

@@ -8,7 +8,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/google/uuid"
 )
 
 type Harness struct {
@@ -34,21 +37,78 @@ func New() *Harness {
 
 func (h *Harness) Context(identity string) context.Context {
 	ctx := runtimeeffects.WithLifecycleToken(context.Background(), h.Token)
+	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewCompletionController(h, h))
+	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, h.Token.AgentID, h.Token.Generation, "", "effect-test-actors", "effect-test-bundle", nil)
+	if err != nil {
+		panic(err)
+	}
+	ctx = managedexecution.WithAdmission(ctx, admission)
+	target := runtimeeffects.UsageTarget{
+		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: h.Token.AgentID,
+		SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "effect-test",
+	}
+	ctx = runtimeeffects.WithUsageTarget(ctx, target)
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{
+		ActorID: h.Token.AgentID, RuntimeMode: "task", Provider: "effect-test", Transport: "api", ProviderContract: "effect-test",
+		Authority: managedcapabilities.Authority{
+			Kind: managedcapabilities.AuthorityProviderTurn, ID: target.ID, ExecutionKind: managedcapabilities.ExecutionNormalAgent,
+			ExecutionAuthorityID: admission.ExecutionAuthorityID, RunID: target.RunID, SessionID: target.SessionID, TurnOrdinal: 1,
+		},
+		CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		panic(err)
+	}
+	ctx = managedcapabilities.WithContext(ctx, surface)
 	return runtimeeffects.WithLogicalOperationIdentity(ctx, identity)
 }
 
 func (h *Harness) CompletionContext(identity string) context.Context {
 	ctx := h.Context(identity)
-	return runtimeeffects.WithUsageTarget(ctx, runtimeeffects.UsageTarget{
+	target := runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: "11111111-1111-4111-8111-111111111111",
 		RunID: "33333333-3333-4333-8333-333333333333", AgentID: h.Token.AgentID,
 		SessionID: "22222222-2222-4222-8222-222222222222", FlowInstance: "effect-test",
 		Memory: agentmemory.PlatformDefault(),
+	}
+	ctx = runtimeeffects.WithUsageTarget(ctx, target)
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{
+		ActorID: h.Token.AgentID, RuntimeMode: "task", Provider: "effect-test", Transport: "api", ProviderContract: "effect-test",
+		Authority: managedcapabilities.Authority{
+			Kind: managedcapabilities.AuthorityProviderTurn, ID: target.ID, ExecutionKind: managedcapabilities.ExecutionNormalAgent,
+			ExecutionAuthorityID: h.Token.AgentID, RunID: target.RunID, SessionID: target.SessionID, TurnOrdinal: 1,
+		},
+		CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return managedcapabilities.WithContext(ctx, surface)
+}
+
+func (h *Harness) StartupProbeContext(ctx context.Context, surface managedcapabilities.Surface) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(h))
+	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "startup-probe:"+surface.Authority.ID)
+	ctx = managedcapabilities.WithContext(ctx, surface)
+	return runtimeeffects.WithAuthority(ctx, runtimeeffects.Authority{
+		Kind: runtimeeffects.AuthorityStartupProbe, ID: surface.Authority.ID,
+		ExecutionOwner: surface.Authority.StartupOwnerID, LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: surface.Authority.StartupGeneration,
+		ExecutionMode: runtimeeffects.ExecutionModeLive,
+		StartupProbe: runtimeeffects.StartupProbeAuthority{
+			ProbeID: surface.Authority.ID, StartupAuthorityID: surface.Authority.ExecutionAuthorityID, StartupStateVersion: 1,
+			ActorID: surface.ActorID, ExecutionKind: string(surface.Authority.ExecutionKind), ExecutionAuthorityID: surface.Authority.ExecutionAuthorityID,
+		},
 	})
 }
 
 func (h *Harness) IsExternalEffectAuthorityCurrent(_ context.Context, authority runtimeeffects.Authority) (bool, error) {
+	if authority.Kind == runtimeeffects.AuthorityStartupProbe {
+		return authority.Valid(), nil
+	}
 	return authority.Normal == h.Token, nil
 }
 
@@ -58,8 +118,11 @@ func (h *Harness) AuthorizeExternalAttempt(_ context.Context, authority runtimee
 	if h.AuthorizeErr != nil {
 		return runtimeeffects.Attempt{}, h.AuthorizeErr
 	}
-	if authority.Normal != h.Token {
+	if authority.Kind == runtimeeffects.AuthorityNormalAgent && authority.Normal != h.Token {
 		return runtimeeffects.Attempt{}, fmt.Errorf("stale lifecycle token")
+	}
+	if authority.Kind != runtimeeffects.AuthorityNormalAgent && !authority.Valid() {
+		return runtimeeffects.Attempt{}, fmt.Errorf("invalid managed effect authority")
 	}
 	if _, exists := h.Attempts[req.AttemptID]; exists {
 		return runtimeeffects.Attempt{}, fmt.Errorf("logical effect replay refused")

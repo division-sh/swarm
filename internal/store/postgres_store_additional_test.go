@@ -3811,12 +3811,14 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 		t.Fatalf("expected redacted email, got %#v", rec.Messages)
 	}
 
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1", RunID: identity.RunID, FlowInstance: identity.FlowInstance,
+	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+		AgentID: "a1", RunID: identity.RunID, FlowInstance: identity.FlowInstance,
 		Memory: agentmemory.Authored(true), SessionID: uuid.NewString(),
 	}); err == nil {
 		t.Fatal("expected missing session row error")
 	}
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1",
+	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
 		RunID:          identity.RunID,
 		FlowInstance:   identity.FlowInstance,
 		Memory:         agentmemory.Authored(true),
@@ -3826,28 +3828,24 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 		ResponseRaw:    []byte(`{"y":2}`),
 		ParseOK:        true,
 		Latency:        10 * time.Millisecond,
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("AppendAgentTurn: %v", err)
 	}
 
-	var availableToolsJSON, toolCallsJSON, emittedEventsJSON, mcpServersJSON, mcpToolsListedJSON, mcpToolsVisibleJSON string
+	var toolCallsJSON, emittedEventsJSON string
 	if err := db.QueryRowContext(ctx, `
 		SELECT
-			COALESCE(available_tools::text, '[]'),
 			COALESCE(tool_calls::text, '[]'),
-			COALESCE(emitted_events::text, '[]'),
-			COALESCE(mcp_servers::text, '{}'),
-			COALESCE(mcp_tools_listed::text, '[]'),
-			COALESCE(mcp_tools_visible::text, '[]')
+			COALESCE(emitted_events::text, '[]')
 		FROM agent_turns
 		WHERE agent_id = 'a1' AND session_id = $1::uuid
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, sessionID).Scan(&availableToolsJSON, &toolCallsJSON, &emittedEventsJSON, &mcpServersJSON, &mcpToolsListedJSON, &mcpToolsVisibleJSON); err != nil {
+	`, sessionID).Scan(&toolCallsJSON, &emittedEventsJSON); err != nil {
 		t.Fatalf("load agent_turns row: %v", err)
 	}
-	if availableToolsJSON != "[]" || toolCallsJSON != "[]" || emittedEventsJSON != "[]" || mcpServersJSON != "{}" || mcpToolsListedJSON != "[]" || mcpToolsVisibleJSON != "[]" {
-		t.Fatalf("expected empty structured telemetry defaults, got tools=%s calls=%s emitted=%s mcp_servers=%s mcp_listed=%s mcp_visible=%s", availableToolsJSON, toolCallsJSON, emittedEventsJSON, mcpServersJSON, mcpToolsListedJSON, mcpToolsVisibleJSON)
+	if toolCallsJSON != "[]" || emittedEventsJSON != "[]" {
+		t.Fatalf("expected empty turn telemetry defaults, got calls=%s emitted=%s", toolCallsJSON, emittedEventsJSON)
 	}
 }
 
@@ -3908,7 +3906,8 @@ func TestManagerStore_AppendAgentTurn_PersistsObservedToolCalls(t *testing.T) {
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
 	identity := specMemoryIdentity("a1", "global")
 
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1", RunID: identity.RunID, FlowInstance: identity.FlowInstance,
+	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+		AgentID: "a1", RunID: identity.RunID, FlowInstance: identity.FlowInstance,
 		Memory: agentmemory.Authored(true), SessionID: sessionID,
 		ToolCalls: []runtimellm.ToolCall{
 			{Name: "query_entities", Arguments: map[string]any{"entity_type": "company"}},
@@ -4273,7 +4272,8 @@ func TestManagerStore_AppendStatelessAgentTurnPersistsTurnBlocks(t *testing.T) {
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
 
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1", RunID: runID, FlowInstance: "global",
+	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+		AgentID: "a1", RunID: runID, FlowInstance: "global",
 		Memory: agentmemory.PlatformDefault(), SessionID: sessionID,
 		TurnBlocks: []runtimellm.TurnBlock{
 			{Kind: "dispatch", Title: "scoring/vertical.marginal", Data: json.RawMessage(`{"trigger_event_type":"scoring/vertical.marginal"}`)},
@@ -4308,7 +4308,8 @@ func TestManagerStore_AppendStatelessAgentTurnCanonicalizesTurnBlocksThroughSing
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
 
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1", RunID: runID, FlowInstance: "global",
+	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+		AgentID: "a1", RunID: runID, FlowInstance: "global",
 		Memory:           agentmemory.PlatformDefault(),
 		SessionID:        sessionID,
 		TriggerEventType: "task.run",
@@ -4352,7 +4353,8 @@ func TestManagerStore_AppendAgentTurn_LeavesLiveSessionRuntimeStateForLiveOwners
 		t.Fatalf("UpsertConversation(session): %v", err)
 	}
 
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1",
+	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
 		RunID:          identity.RunID,
 		FlowInstance:   identity.FlowInstance,
 		Memory:         agentmemory.Authored(true),
@@ -4361,7 +4363,7 @@ func TestManagerStore_AppendAgentTurn_LeavesLiveSessionRuntimeStateForLiveOwners
 		ResponseRaw:    []byte(`{"result":"done"}`),
 		ParseOK:        true,
 		Latency:        10 * time.Millisecond,
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("AppendAgentTurn: %v", err)
 	}
 
@@ -4411,7 +4413,8 @@ func TestManagerStore_AppendAgentTurn_PreservesLiveSessionRetryLineageRuntimeSta
 		t.Fatalf("seed live runtime_state: %v", err)
 	}
 
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1",
+	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
 		RunID:          identity.RunID,
 		FlowInstance:   identity.FlowInstance,
 		Memory:         agentmemory.Authored(true),
@@ -4420,7 +4423,7 @@ func TestManagerStore_AppendAgentTurn_PreservesLiveSessionRetryLineageRuntimeSta
 		ResponseRaw:    []byte(`{"result":"done"}`),
 		ParseOK:        true,
 		Latency:        10 * time.Millisecond,
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("AppendAgentTurn: %v", err)
 	}
 
@@ -4451,7 +4454,8 @@ func TestManagerStore_AppendAgentTurnRollsBackStatelessAuditAndTurnWhenTurnInser
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
-	err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1",
+	err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
 		RunID:          runID,
 		FlowInstance:   "global",
 		Memory:         agentmemory.PlatformDefault(),
@@ -4491,7 +4495,8 @@ func TestManagerStore_StatelessTurnPersistsAuditEvidenceWithoutLiveMemory(t *tes
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1",
+	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
 		RunID:          runID,
 		FlowInstance:   "global",
 		Memory:         agentmemory.Authored(false),
@@ -4542,7 +4547,8 @@ func TestManagerStore_StatelessAppendTurnFailsClosedWithoutAuditCapabilityAndDoe
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
 	runID := uuid.NewString()
-	err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1",
+	err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
 		RunID:          runID,
 		FlowInstance:   "global",
 		Memory:         agentmemory.PlatformDefault(),
@@ -4588,7 +4594,8 @@ func TestManagerStore_MemoryConversationDoesNotPersistStatelessAuditRow(t *testi
 		t.Fatalf("UpsertConversation(memory): %v", err)
 	}
 
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1",
+	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
 		RunID:          identity.RunID,
 		FlowInstance:   identity.FlowInstance,
 		Memory:         agentmemory.Authored(true),
@@ -4597,7 +4604,7 @@ func TestManagerStore_MemoryConversationDoesNotPersistStatelessAuditRow(t *testi
 		ResponseRaw:    []byte(`{"ok":true}`),
 		ParseOK:        true,
 		Latency:        5 * time.Millisecond,
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("AppendAgentTurn(memory): %v", err)
 	}
 
@@ -4627,7 +4634,8 @@ func TestManagerStore_AppendStatelessTurnCreatesCanonicalAuditRow(t *testing.T) 
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1", RunID: runID, FlowInstance: "global",
+	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+		AgentID: "a1", RunID: runID, FlowInstance: "global",
 		Memory: agentmemory.PlatformDefault(), SessionID: sessionID,
 		RequestPayload: []byte(`{"kind":"stateless"}`), ResponseRaw: []byte(`{"ok":true}`),
 		ParseOK: true, Latency: 5 * time.Millisecond,
@@ -4663,7 +4671,8 @@ func TestManagerStore_AppendStatelessTurnPersistsEntityAsAuditMetadata(t *testin
 	entityID := uuid.NewString()
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1",
+	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
 		SessionID:      sessionID,
 		RunID:          runID,
 		Memory:         agentmemory.Authored(false),
@@ -4672,7 +4681,7 @@ func TestManagerStore_AppendStatelessTurnPersistsEntityAsAuditMetadata(t *testin
 		ResponseRaw:    []byte(`{"ok":true}`),
 		ParseOK:        true,
 		Latency:        5 * time.Millisecond,
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("AppendAgentTurn(stateless entity metadata): %v", err)
 	}
 
@@ -4733,7 +4742,8 @@ func TestManagerStore_AppendStatelessTurnPersistsFlowInstanceAuditIdentity(t *te
 	flowInstance := "review/inst-1"
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1",
+	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
 		SessionID:      sessionID,
 		RunID:          runID,
 		FlowInstance:   flowInstance,
@@ -4742,7 +4752,7 @@ func TestManagerStore_AppendStatelessTurnPersistsFlowInstanceAuditIdentity(t *te
 		ResponseRaw:    []byte(`{"ok":true}`),
 		ParseOK:        true,
 		Latency:        5 * time.Millisecond,
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("AppendAgentTurn(stateless flow): %v", err)
 	}
 
@@ -4801,7 +4811,8 @@ func TestManagerStore_AppendAgentTurn_FailsOnMalformedCanonicalRuntimeLogTurnBlo
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
 	sessionID := uuid.NewString()
-	err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1",
+	err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+		AgentID:      "a1",
 		Memory:       agentmemory.PlatformDefault(),
 		SessionID:    sessionID,
 		RunID:        specEntityStateRunID,
@@ -4830,7 +4841,8 @@ func TestManagerStore_AppendAgentTurn_FailsOnNonStringCanonicalRuntimeLogTurnBlo
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
 	sessionID := uuid.NewString()
-	err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: "a1",
+	err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+		AgentID:      "a1",
 		Memory:       agentmemory.PlatformDefault(),
 		SessionID:    sessionID,
 		RunID:        specEntityStateRunID,
@@ -5427,7 +5439,8 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 
 	identity := specMemoryIdentity(ceoID, "operating/global")
 	sessionID := acquireLiveTestSession(t, ctx, db, identity.AgentID, identity.FlowInstance)
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{AgentID: identity.AgentID,
+	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+		AgentID:        identity.AgentID,
 		Memory:         agentmemory.Authored(true),
 		SessionID:      sessionID,
 		RunID:          identity.RunID,
@@ -5618,7 +5631,8 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 	}); err != nil {
 		t.Fatalf("seed conversation: %v", err)
 	}
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), runtimellm.AgentTurnRecord{SessionID: uuid.NewString(),
+	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+		SessionID:      uuid.NewString(),
 		AgentID:        identity.AgentID,
 		RunID:          identity.RunID,
 		FlowInstance:   identity.FlowInstance,

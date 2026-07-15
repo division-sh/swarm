@@ -17,6 +17,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -712,13 +713,16 @@ func (am *AgentManager) resolveAgentDirectiveRunTarget(ctx context.Context, agen
 	}, nil
 }
 
-func (am *AgentManager) Run(ctx context.Context) {
+func (am *AgentManager) Run(ctx context.Context) error {
+	if _, err := managedexecution.Require(ctx); err != nil {
+		return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_execution_admission_missing", "agent-manager", "start_loops", nil, err)
+	}
 	if am.shutdownAdmissionClosedLocked() {
-		return
+		return errRuntimeShuttingDown
 	}
 	runCtx, started := am.lifecycle.beginRun(ctx, AgentRunModeStandard)
 	if !started {
-		return
+		return fmt.Errorf("agent manager is already running")
 	}
 	am.runMu.Lock()
 	am.authBreakerTripped = false
@@ -745,19 +749,23 @@ func (am *AgentManager) Run(ctx context.Context) {
 			am.lifecycle.finishShutdown()
 		}
 	}()
+	return nil
 }
 
 // RunAuthoritativeDeliveryOnly starts agent loops with authoritative recipient
 // channels only. It intentionally avoids live subscription patterns and
 // retry/recovery loops so selected-fork execution can consume canonical
 // recipient planning without reintroducing subscription-derived recipient truth.
-func (am *AgentManager) RunAuthoritativeDeliveryOnly(ctx context.Context) {
+func (am *AgentManager) RunAuthoritativeDeliveryOnly(ctx context.Context) error {
+	if _, err := managedexecution.Require(ctx); err != nil {
+		return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_execution_admission_missing", "agent-manager", "start_authoritative_loops", nil, err)
+	}
 	if am.shutdownAdmissionClosedLocked() {
-		return
+		return errRuntimeShuttingDown
 	}
 	runCtx, started := am.lifecycle.beginRun(ctx, AgentRunModeAuthoritativeDeliveryOnly)
 	if !started {
-		return
+		return fmt.Errorf("agent manager is already running")
 	}
 	am.runMu.Lock()
 	am.authBreakerTripped = false
@@ -778,15 +786,22 @@ func (am *AgentManager) RunAuthoritativeDeliveryOnly(ctx context.Context) {
 			am.lifecycle.finishShutdown()
 		}
 	}()
+	return nil
 }
 
 func (am *AgentManager) Recover(ctx context.Context) error {
-	_, err := am.recover(ctx, false)
+	if _, err := am.HydrateForStartup(ctx); err != nil {
+		return err
+	}
+	_, err := am.ReplayAfterStartupAdmission(ctx, false)
 	return err
 }
 
 func (am *AgentManager) RecoverWithStartupReplayDiagnostics(ctx context.Context) (StartupReplaySummary, error) {
-	return am.recover(ctx, true)
+	if _, err := am.HydrateForStartup(ctx); err != nil {
+		return StartupReplaySummary{}, err
+	}
+	return am.ReplayAfterStartupAdmission(ctx, true)
 }
 
 func (am *AgentManager) ReconcileDirectiveOperations(ctx context.Context) error {
@@ -840,7 +855,7 @@ func (am *AgentManager) projectLifecycleDiagnostics(ctx context.Context) error {
 	}
 }
 
-func (am *AgentManager) recover(ctx context.Context, startupReplayDiagnostics bool) (StartupReplaySummary, error) {
+func (am *AgentManager) HydrateForStartup(ctx context.Context) (StartupReplaySummary, error) {
 	summary := StartupReplaySummary{}
 	if am.store == nil {
 		return summary, nil
@@ -880,10 +895,20 @@ func (am *AgentManager) recover(ctx context.Context, startupReplayDiagnostics bo
 	if err := am.restoreSelectedContractRouteRecoveries(ctx); err != nil {
 		return summary, err
 	}
+	return summary, nil
+}
+
+func (am *AgentManager) ReplayAfterStartupAdmission(ctx context.Context, startupReplayDiagnostics bool) (StartupReplaySummary, error) {
+	if _, err := managedexecution.Require(ctx); err != nil {
+		return StartupReplaySummary{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_execution_admission_missing", "agent-manager", "startup_replay", nil, err)
+	}
+	summary := StartupReplaySummary{}
+	if am == nil || am.bus == nil {
+		return summary, nil
+	}
 	if err := runtimepipeline.NewRecoveryManagerWith(am.bus.Store(), am.bus).Recover(ctx); err != nil {
 		return summary, fmt.Errorf("recover pipeline receipts: %w", err)
 	}
-
 	if startupReplayDiagnostics {
 		ctx = withStartupManagerReplayDiagnostics(ctx)
 	}

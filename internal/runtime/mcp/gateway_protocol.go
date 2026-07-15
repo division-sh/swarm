@@ -13,8 +13,10 @@ import (
 )
 
 const (
-	contextTokenHeader         = "X-SWARM-Context-Token"
-	claudeCodeToolUseIDMetaKey = "claudecode/toolUseId"
+	contextTokenHeader = "X-SWARM-Context-Token"
+	// ClaudeCodeToolUseIDMetaKey is the provider-owned MCP call identity key.
+	ClaudeCodeToolUseIDMetaKey = "claudecode/toolUseId"
+	claudeCodeToolUseIDMetaKey = ClaudeCodeToolUseIDMetaKey
 
 	maxToolResultBytes        = 16 * 1024
 	maxReadFileResultBytes    = 256 * 1024

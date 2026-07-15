@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -264,7 +263,7 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	}
 }
 
-func TestClaudeCLIRuntime_StartSessionAugmentsSystemPromptWithSwarmTools(t *testing.T) {
+func TestClaudeCLIRuntime_StartSessionPreservesBusinessPrompt(t *testing.T) {
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil)
 	ctx := withTestStatelessMemory(unmanagedLLMTestContext())
 
@@ -278,27 +277,12 @@ func TestClaudeCLIRuntime_StartSessionAugmentsSystemPromptWithSwarmTools(t *test
 	if s == nil {
 		t.Fatal("expected session")
 	}
-	if !strings.Contains(s.SystemPrompt, cliToolInvocationMarker) {
-		t.Fatalf("expected CLI tool note in system prompt, got %q", s.SystemPrompt)
-	}
-	if !strings.Contains(s.SystemPrompt, "emit_market_research_scan_complete") {
-		t.Fatalf("expected emit tool name in system prompt, got %q", s.SystemPrompt)
-	}
-	if !strings.Contains(s.SystemPrompt, "mcp__runtime-tools__read_file") {
-		t.Fatalf("expected provider-visible runtime tool name in system prompt, got %q", s.SystemPrompt)
-	}
-	if strings.Contains(s.SystemPrompt, "\n- read_file\n") {
-		t.Fatalf("did not expect raw non-emit runtime tool fallback in system prompt, got %q", s.SystemPrompt)
-	}
-	if strings.Contains(s.SystemPrompt, "Claude CLI native tools available in this turn") {
-		t.Fatalf("did not expect native builtin prompt section, got %q", s.SystemPrompt)
-	}
-	if !strings.Contains(s.SystemPrompt, "Do not write JSON files under `/workspace/events`") {
-		t.Fatalf("expected emit workaround warning in system prompt, got %q", s.SystemPrompt)
+	if s.SystemPrompt != "base prompt" {
+		t.Fatalf("system prompt = %q, want business intent unchanged", s.SystemPrompt)
 	}
 }
 
-func TestAnthropicAPIRuntime_StartSessionAugmentsSystemPromptWithDerivedToolSurface(t *testing.T) {
+func TestAnthropicAPIRuntime_StartSessionPreservesBusinessPrompt(t *testing.T) {
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil)
 	ctx := runtimeactors.WithActor(
 		withTestStatelessMemory(unmanagedLLMTestContext()),
@@ -331,23 +315,8 @@ func TestAnthropicAPIRuntime_StartSessionAugmentsSystemPromptWithDerivedToolSurf
 	if s == nil {
 		t.Fatal("expected session")
 	}
-	if !strings.Contains(s.SystemPrompt, deliveryToolSurfaceMarker) {
-		t.Fatalf("expected derived delivery section in system prompt, got %q", s.SystemPrompt)
-	}
-	if !strings.Contains(s.SystemPrompt, "Available emit tools in this turn: emit_market_research_scan_complete") {
-		t.Fatalf("expected emit tool summary in system prompt, got %q", s.SystemPrompt)
-	}
-	if !strings.Contains(s.SystemPrompt, "Available non-emit tools in this turn: query_entities") {
-		t.Fatalf("expected non-emit tool summary in system prompt, got %q", s.SystemPrompt)
-	}
-	if !strings.Contains(s.SystemPrompt, "Writable entity paths for save_entity_field in this turn: metadata, metadata.region, status") {
-		t.Fatalf("expected writable path summary in system prompt, got %q", s.SystemPrompt)
-	}
-	if !strings.Contains(s.SystemPrompt, "Available native CLI tools in this turn: Edit, Read, Write") {
-		t.Fatalf("expected native tool summary in system prompt, got %q", s.SystemPrompt)
-	}
-	if strings.Contains(s.SystemPrompt, "mcp__runtime-tools__query_entities") {
-		t.Fatalf("did not expect CLI-only MCP narration in API system prompt, got %q", s.SystemPrompt)
+	if s.SystemPrompt != "base prompt" {
+		t.Fatalf("system prompt = %q, want business intent unchanged", s.SystemPrompt)
 	}
 }
 
@@ -380,30 +349,6 @@ func TestPublishAgentStarted_LogsActiveTransitionOnlyAfterRealDeliveryMark(t *te
 	}
 }
 
-func TestEnrichTurnRecord_UsesCanonicalVisibleToolsForNativeCapabilities(t *testing.T) {
-	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "analysis-agent",
-		NativeTools: runtimeactors.NativeToolConfig{
-			FileIO: true,
-			Bash:   true,
-		},
-	})
-	rec := enrichTurnRecord(ctx, &Session{
-		ID: "session-1",
-		Tools: []ToolDefinition{
-			{Name: "emit_category_assessed"},
-		},
-	}, AgentTurnRecord{
-		AgentID:   "analysis-agent",
-		SessionID: "session-1",
-	}, nil)
-
-	if !slices.Equal(rec.AvailableTools, []string{"bash", "emit_category_assessed", "read_file", "write_file"}) {
-		t.Fatalf("available_tools = %#v", rec.AvailableTools)
-	}
-}
-
 func TestEnrichTurnRecord_CarriesInboundFlowInstance(t *testing.T) {
 	ctx := runtimebus.WithInboundEvent(unmanagedLLMTestContext(), eventtest.RootIngress(
 		"11111111-1111-1111-1111-111111111111",
@@ -432,143 +377,6 @@ func TestEnrichTurnRecord_CarriesInboundFlowInstance(t *testing.T) {
 	}
 }
 
-func TestEnrichTurnRecord_FiltersCLIControlToolsFromObservedVisibleTools(t *testing.T) {
-	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "analysis-agent",
-		NativeTools: runtimeactors.NativeToolConfig{
-			FileIO: true,
-		},
-	})
-	rec := enrichTurnRecord(ctx, &Session{
-		ID: "session-1",
-		Tools: []ToolDefinition{
-			{Name: "emit_category_assessed"},
-		},
-	}, AgentTurnRecord{
-		AgentID:   "analysis-agent",
-		SessionID: "session-1",
-	}, &Response{
-		VisibleTools: []string{"ExitPlanMode", "emit_category_assessed", "read_file", "write_file"},
-	})
-
-	if !slices.Equal(rec.AvailableTools, []string{"emit_category_assessed", "read_file", "write_file"}) {
-		t.Fatalf("available_tools = %#v", rec.AvailableTools)
-	}
-}
-
-func TestEnrichTurnRecord_UsesEmitFallbackWhenObservedCLISurfaceExistsWithoutVisibleNonEmitTools(t *testing.T) {
-	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "analysis-agent",
-		NativeTools: runtimeactors.NativeToolConfig{
-			FileIO: true,
-		},
-	})
-	rec := enrichTurnRecord(ctx, &Session{
-		ID: "session-1",
-		Tools: []ToolDefinition{
-			{Name: "emit_category_assessed"},
-			{Name: "read_file"},
-		},
-	}, AgentTurnRecord{
-		AgentID:   "analysis-agent",
-		SessionID: "session-1",
-	}, &Response{
-		MCPServers: map[string]string{
-			"runtime-tools": "failed",
-		},
-	})
-
-	if !slices.Equal(rec.AvailableTools, []string{"emit_category_assessed"}) {
-		t.Fatalf("available_tools = %#v", rec.AvailableTools)
-	}
-}
-
-func TestEnrichTurnRecord_PreservesEmitFallbackAlongsideObservedSupportedReadFileSurface(t *testing.T) {
-	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "analysis-agent",
-		NativeTools: runtimeactors.NativeToolConfig{
-			FileIO: true,
-		},
-	})
-	rec := enrichTurnRecord(ctx, &Session{
-		ID: "session-1",
-		Tools: []ToolDefinition{
-			{Name: "emit_category_assessed"},
-			{Name: "read_file"},
-		},
-	}, AgentTurnRecord{
-		AgentID:   "analysis-agent",
-		SessionID: "session-1",
-	}, &Response{
-		MCPServers:      map[string]string{"runtime-tools": "connected"},
-		MCPVisibleTools: []string{"mcp__runtime-tools__read_file"},
-	})
-
-	if !slices.Equal(rec.AvailableTools, []string{"emit_category_assessed", "read_file"}) {
-		t.Fatalf("available_tools = %#v", rec.AvailableTools)
-	}
-}
-
-func TestEnrichTurnRecord_NativeBuiltinsDoNotLeakIntoMCPToolsListed(t *testing.T) {
-	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "analysis-agent",
-		NativeTools: runtimeactors.NativeToolConfig{
-			FileIO:    true,
-			Bash:      true,
-			WebSearch: true,
-		},
-	})
-	rec := enrichTurnRecord(ctx, &Session{
-		ID: "session-1",
-		Tools: []ToolDefinition{
-			{Name: "emit_category_assessed"},
-			{Name: "read_file"},
-			{Name: "write_file"},
-			{Name: "bash"},
-			{Name: "web_search"},
-		},
-	}, AgentTurnRecord{
-		AgentID:   "analysis-agent",
-		SessionID: "session-1",
-	}, nil)
-
-	if !slices.Equal(rec.MCPToolsListed, []string{"mcp__runtime-tools__emit_category_assessed"}) {
-		t.Fatalf("mcp_tools_listed = %#v", rec.MCPToolsListed)
-	}
-	if !slices.Equal(rec.AvailableTools, []string{"bash", "emit_category_assessed", "read_file", "web_search", "write_file"}) {
-		t.Fatalf("available_tools = %#v", rec.AvailableTools)
-	}
-}
-
-func TestEnrichTurnRecord_UsesPlannedConfiguredSurfaceWhenObservedMetadataIsAbsent(t *testing.T) {
-	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "analysis-agent",
-	})
-	rec := enrichTurnRecord(ctx, &Session{
-		ID: "session-1",
-		Tools: []ToolDefinition{
-			{Name: "emit_category_assessed"},
-			{Name: "query_entities"},
-		},
-	}, AgentTurnRecord{
-		AgentID:   "analysis-agent",
-		SessionID: "session-1",
-	}, &Response{
-		ToolCalls: []ToolCall{
-			{Name: "query_entities", Arguments: map[string]any{"entity_type": "company"}},
-		},
-	})
-
-	if !slices.Equal(rec.AvailableTools, []string{"emit_category_assessed", "query_entities"}) {
-		t.Fatalf("available_tools = %#v", rec.AvailableTools)
-	}
-}
-
 func TestEnrichTurnRecord_PrefersObservedToolCallsForPersistenceWhenExecutionCallsAreSuppressed(t *testing.T) {
 	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
 		ExecutionMode: "live",
@@ -591,61 +399,6 @@ func TestEnrichTurnRecord_PrefersObservedToolCallsForPersistenceWhenExecutionCal
 
 	if len(rec.ToolCalls) != 1 || rec.ToolCalls[0].Name != "emit_category_assessed" {
 		t.Fatalf("tool_calls = %#v", rec.ToolCalls)
-	}
-}
-
-func TestClaudeCLIRuntimePrompt_HidesNativeCapabilityFallbackToolsFromPostamble(t *testing.T) {
-	actor := runtimeactors.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "analysis-agent",
-		NativeTools: runtimeactors.NativeToolConfig{
-			FileIO: true,
-			Bash:   true,
-		},
-	}
-	prompt := augmentCLISystemPrompt("base prompt", actor, []ToolDefinition{
-		{Name: "emit_market_research_scan_complete"},
-		{Name: "read_file"},
-		{Name: "write_file"},
-		{Name: "bash"},
-	})
-
-	if !strings.Contains(prompt, "emit_market_research_scan_complete") {
-		t.Fatalf("expected non-native runtime tool in prompt, got %q", prompt)
-	}
-	for _, name := range []string{"read_file", "write_file", "bash"} {
-		if strings.Contains(prompt, "\n- "+name+"\n") {
-			t.Fatalf("did not expect native capability tool %q in prompt, got %q", name, prompt)
-		}
-	}
-	for _, name := range []string{"mcp__runtime-tools__read_file", "mcp__runtime-tools__write_file", "mcp__runtime-tools__bash"} {
-		if strings.Contains(prompt, name) {
-			t.Fatalf("did not expect fallback MCP tool %q in prompt, got %q", name, prompt)
-		}
-	}
-	if strings.Contains(prompt, "Claude CLI native tools available in this turn") {
-		t.Fatalf("did not expect native builtin prompt section, got %q", prompt)
-	}
-}
-
-func TestClaudeCLIRuntimePrompt_IncludesWritableEntityPathSummary(t *testing.T) {
-	actor := runtimeactors.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "analysis-agent",
-		Role:          "analysis",
-	}
-	prompt := augmentCLISystemPrompt("base prompt", actor, []ToolDefinition{
-		{Name: "save_entity_field", Schema: map[string]any{
-			"properties": map[string]any{
-				"field": map[string]any{
-					"enum": []any{"status", "metadata.region", "metadata"},
-				},
-			},
-		}},
-	})
-
-	if !strings.Contains(prompt, "Writable entity paths for save_entity_field in this turn: metadata, metadata.region, status") {
-		t.Fatalf("expected writable path summary in prompt, got %q", prompt)
 	}
 }
 
@@ -851,6 +604,7 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 		t.Fatalf("start-session marks = %d, want 1", len(publisher.marks))
 	}
 	publisher.marks = nil
+	ctx = managedProviderTestContext(t, ctx, runtime, s, nil)
 
 	if _, err := runtime.ContinueSession(ctx, s, Message{Role: "user", Content: "hello"}); err != nil {
 		t.Fatalf("ContinueSession: %v", err)
@@ -1023,20 +777,8 @@ func TestEnrichTurnRecordIncludesTriggerToolsAndEmits(t *testing.T) {
 	if rec.EntityID != "22222222-2222-2222-2222-222222222222" {
 		t.Fatalf("entity_id = %q", rec.EntityID)
 	}
-	if len(rec.AvailableTools) != 1 || rec.AvailableTools[0] != "emit_category_assessed" {
-		t.Fatalf("available_tools = %#v", rec.AvailableTools)
-	}
 	if len(rec.ToolCalls) != 1 || rec.ToolCalls[0].Name != "emit_category_assessed" {
 		t.Fatalf("tool_calls = %#v", rec.ToolCalls)
-	}
-	if got := rec.MCPServers["runtime-tools"]; got != "connected" {
-		t.Fatalf("mcp_servers = %#v", rec.MCPServers)
-	}
-	if len(rec.MCPToolsListed) != 2 || rec.MCPToolsListed[0] != "mcp__runtime-tools__emit_category_assessed" || rec.MCPToolsListed[1] != "mcp__runtime-tools__read_file" {
-		t.Fatalf("mcp_tools_listed = %#v", rec.MCPToolsListed)
-	}
-	if len(rec.MCPToolsVisible) != 1 || rec.MCPToolsVisible[0] != "mcp__runtime-tools__emit_category_assessed" {
-		t.Fatalf("mcp_tools_visible = %#v", rec.MCPToolsVisible)
 	}
 	if len(rec.EmittedEvents) != 2 || rec.EmittedEvents[0] != "discovery/category.assessed" || rec.EmittedEvents[1] != "discovery/scan_complete" {
 		t.Fatalf("emitted_events = %#v", rec.EmittedEvents)

@@ -16,10 +16,15 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/google/uuid"
 )
 
 func TestParseExternalDispatchRateLimitGrammar(t *testing.T) {
@@ -314,7 +319,7 @@ func TestGatewayToolPathProjectsHTTPRateLimitTimeout(t *testing.T) {
 
 	gateway := runtimemcp.NewGateway(exec, "gateway-token", runtimemcp.GatewayHooks{
 		WithActor:          models.WithActor,
-		ResolveTurnContext: fixedTurnContextResolver(actor),
+		ResolveTurnContext: fixedTurnContextResolver(t, actor),
 	})
 	body, _ := json.Marshal(runtimemcp.ToolGatewayRequest{Input: map[string]any{}})
 	req := httptest.NewRequest(http.MethodPost, "/tools/check_domain", bytes.NewReader(body))
@@ -349,7 +354,7 @@ func TestGatewayMCPToolsCallProjectsRateLimitedRuntimeError(t *testing.T) {
 
 	gateway := runtimemcp.NewGateway(exec, "gateway-token", runtimemcp.GatewayHooks{
 		WithActor:          models.WithActor,
-		ResolveTurnContext: fixedTurnContextResolver(actor),
+		ResolveTurnContext: fixedTurnContextResolver(t, actor),
 	})
 	body, _ := json.Marshal(map[string]any{
 		"id":     "req-1",
@@ -682,16 +687,61 @@ func newRateLimitedMCPTestServer(t *testing.T, recorder *dispatchTimeRecorder, t
 	}))
 }
 
-func fixedTurnContextResolver(actor models.AgentConfig) func(string) (runtimemcp.TurnContext, bool) {
+func fixedTurnContextResolver(t testing.TB, actor models.AgentConfig) func(string) (runtimemcp.TurnContext, bool) {
+	t.Helper()
+	planned := make([]managedcapabilities.PlannedTool, 0, len(actor.Tools))
+	for _, raw := range actor.Tools {
+		name := toolidentity.CanonicalName(raw)
+		planned = append(planned, managedcapabilities.PlannedTool{
+			Name:           name,
+			DefinitionHash: "rate-limit-test-definition-" + name,
+			Capability:     toolcapabilities.Capability{Name: name, Kind: toolcapabilities.KindStandard, Visible: true, Callable: true},
+			Bindings: []managedcapabilities.DeliveryBinding{{
+				Kind: managedcapabilities.BindingMCPTool, ExactName: toolidentity.RuntimeToolsMCPPrefix + name, RequiredEvidenceKind: "mcp_listed",
+			}},
+		})
+	}
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{
+		ActorID: actor.ID, RuntimeMode: "task", Provider: "test", Transport: "cli", ProviderContract: "rate-limit-test",
+		Authority: managedcapabilities.Authority{
+			Kind: managedcapabilities.AuthorityProviderTurn, ID: uuid.NewString(), ExecutionKind: managedcapabilities.ExecutionNormalAgent,
+			ExecutionAuthorityID: actor.ID, SessionID: uuid.NewString(), TurnOrdinal: 1,
+		},
+		Tools: planned,
+	})
+	if err != nil {
+		t.Fatalf("build rate-limit test capability surface: %v", err)
+	}
+	evidence := make([]managedcapabilities.DeliveryEvidence, 0, len(surface.Tools))
+	for _, tool := range surface.Tools {
+		for _, binding := range tool.Bindings {
+			evidence = append(evidence, managedcapabilities.DeliveryEvidence{
+				BindingKind: binding.Kind, ExactName: binding.ExactName, Kind: binding.RequiredEvidenceKind, Status: managedcapabilities.EvidenceConfirmed,
+			})
+		}
+	}
+	surface, err = surface.Observe(evidence...)
+	if err != nil {
+		t.Fatalf("observe rate-limit test capability surface: %v", err)
+	}
+	admission, err := managedexecution.New(
+		managedexecution.KindNormalRuntime, actor.ID, 1, "", "rate-limit-test-actors", "rate-limit-test-bundle", []string{surface.ID},
+	)
+	if err != nil {
+		t.Fatalf("build rate-limit test execution admission: %v", err)
+	}
 	return func(token string) (runtimemcp.TurnContext, bool) {
 		if strings.TrimSpace(token) != "ctx-rate-limit" {
 			return runtimemcp.TurnContext{}, false
 		}
 		return runtimemcp.TurnContext{
-			Actor:          actor,
-			DifferentOwner: runtimeeffects.OwnerBuildTestInfrastructure,
-			CreatedAt:      time.Now().UTC(),
-			ExpiresAt:      time.Now().UTC().Add(time.Hour),
+			Actor:                 actor,
+			ExecutionAdmission:    admission,
+			HasExecutionAdmission: true,
+			CapabilitySurface:     &surface,
+			DifferentOwner:        runtimeeffects.OwnerBuildTestInfrastructure,
+			CreatedAt:             time.Now().UTC(),
+			ExpiresAt:             time.Now().UTC().Add(time.Hour),
 		}, true
 	}
 }

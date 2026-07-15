@@ -11,9 +11,10 @@ import (
 	"strings"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
-	"github.com/google/uuid"
 )
 
 const cliStartupProbePrompt = "Startup validation probe. Do not call any tools. Reply with the exact text ok."
@@ -34,14 +35,28 @@ func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, a
 	s := &Session{
 		ID:           ensurePlatformSessionID(""),
 		AgentID:      strings.TrimSpace(actor.ID),
-		SystemPrompt: augmentCLISystemPrompt(systemPrompt, actor, tools),
+		SystemPrompt: strings.TrimSpace(systemPrompt),
 		Tools:        append([]ToolDefinition(nil), tools...),
+	}
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok || surface.Authority.Kind != managedcapabilities.AuthorityStartupProbe {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "startup_probe_capability_surface_missing", "claude-cli-adapter", "startup_probe", nil)
+	}
+	handle, err := runtimeeffects.BeginStartupProbe(ctx, "claude_cli_startup_probe", jsonBytes(map[string]any{
+		"actor_id": actor.ID, "system_prompt": s.SystemPrompt, "tools": s.Tools, "surface_id": surface.ID,
+	}), nil)
+	if err != nil {
+		return nil, err
+	}
+	childSessionID := strings.TrimSpace(handle.Attempt().AttemptID)
+	if childSessionID == "" {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "startup_probe_attempt_identity_missing", "claude-cli-adapter", "startup_probe", nil)
 	}
 
 	buildArgs := func(includeSystemPrompt bool) ([]string, string, error) {
 		args := []string{
 			"-p",
-			"--session-id", uuid.NewString(),
+			"--session-id", childSessionID,
 			"--output-format", "stream-json",
 		}
 		args = appendClaudePrintModeArgs(args, r.cfg)
@@ -51,10 +66,14 @@ func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, a
 				args = append(args, "--system-prompt", sys)
 			}
 		}
-		if disallowed := strings.TrimSpace(claudeDisallowedBuiltinToolsArgForActor(actor, s.Tools)); disallowed != "" {
+		allowed, disallowed, err := claudeToolArgumentsForContext(ctx, actor, s.Tools)
+		if err != nil {
+			return nil, "", err
+		}
+		if disallowed = strings.TrimSpace(disallowed); disallowed != "" {
 			args = append(args, "--disallowedTools", disallowed)
 		}
-		if allowed := strings.TrimSpace(claudeAllowedToolsArgForActor(actor, s.Tools)); allowed != "" {
+		if allowed = strings.TrimSpace(allowed); allowed != "" {
 			args = append(args, "--allowedTools", allowed)
 		}
 		mcpConfig, contextToken, enabled, err := r.buildMCPConfigArg(ctx, s)
@@ -72,39 +91,43 @@ func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, a
 		defer r.mcpTurns.UnregisterTurnContext(contextToken)
 	}
 	if err != nil {
+		_ = handle.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassSchemaInvalid, "startup_probe_prelaunch_rejected", "claude-cli-adapter", "startup_probe", nil, err)
 		return nil, err
 	}
 
-	resp, err := r.runUntilCLIStartupInit(ctx, args, target, cliStartupProbePrompt)
-	return resp, err
-}
-
-func ObservedCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition, resp *Response) []string {
-	return observedCanonicalVisibleToolsForActor(actor, tools, resp)
-}
-
-func PlannedCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
-	return plannedCanonicalVisibleToolsForActor(actor, tools)
-}
-
-func ObservedProviderNativeVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition, resp *Response) []string {
-	if resp == nil {
-		return nil
+	resp, err := r.runUntilCLIStartupInit(ctx, args, target, cliStartupProbePrompt, handle)
+	if err != nil {
+		return nil, err
 	}
-	return filterProviderNativeVisibleToolsForActor(actor, tools, resp.VisibleTools)
+	observed, err := observeCLIResponse(surface, resp)
+	if err != nil {
+		_ = handle.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassSchemaInvalid, "startup_probe_surface_observation_failed", "claude-cli-adapter", "startup_probe", nil, err)
+		return nil, err
+	}
+	resp.CapabilitySurface = &observed
+	if err := ValidateCLIProviderCapabilitySurface(observed, resp); err != nil {
+		_ = handle.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassSchemaInvalid, "startup_probe_provider_surface_mismatch", "claude-cli-adapter", "startup_probe", map[string]any{"surface_id": observed.ID, "integrity_hash": observed.IntegrityHash}, err)
+		return nil, err
+	}
+	if err := handle.MarkResponseObserved(ctx, map[string]any{"surface_id": observed.ID, "integrity_hash": observed.IntegrityHash}); err != nil {
+		return nil, err
+	}
+	if err := handle.Succeed(ctx, map[string]any{"surface_id": observed.ID, "integrity_hash": observed.IntegrityHash}); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
-func PlannedProviderNativeVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
-	return providerNativeCanonicalVisibleToolsForActor(actor, tools)
-}
-
-func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []string, target *workspace.Target, input string) (*Response, error) {
+func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []string, target *workspace.Target, input string, handle *runtimeeffects.Handle) (*Response, error) {
 	timeout := r.effectiveCLITimeout(ctx)
 	if _, err := requireClaudeExecutionTarget(target); err != nil {
+		failStartupProbePrelaunch(ctx, handle, err)
 		return nil, err
 	}
 	if strings.TrimSpace(input) == "" {
-		return nil, errors.New("startup probe requires non-empty prompt")
+		err := errors.New("startup probe requires non-empty prompt")
+		failStartupProbePrelaunch(ctx, handle, err)
+		return nil, err
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -112,19 +135,27 @@ func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []st
 
 	cmd, err := r.buildCommand(runCtx, args, target)
 	if err != nil {
+		failStartupProbePrelaunch(ctx, handle, err)
 		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		failStartupProbePrelaunch(ctx, handle, err)
 		return nil, fmt.Errorf("create claude stdout pipe: %w", err)
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		failStartupProbePrelaunch(ctx, handle, err)
 		return nil, fmt.Errorf("create claude stderr pipe: %w", err)
 	}
 	cmd.Stdin = strings.NewReader(input)
 
+	if err := handle.MarkLaunched(ctx); err != nil {
+		_ = handle.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassLifecycleConflict, "startup_probe_launch_mark_failed", "claude-cli-adapter", "startup_probe", nil, err)
+		return nil, err
+	}
 	if err := cmd.Start(); err != nil {
+		_ = handle.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassConnectorFailure, "claude_cli_startup_launch_rejected", "claude-cli-adapter", "startup_probe", nil, err)
 		return nil, fmt.Errorf("claude cli run failed: %w", err)
 	}
 
@@ -150,19 +181,34 @@ func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []st
 			if result.resp != nil {
 				stdoutText = strings.TrimSpace(string(result.resp.Raw))
 			}
-			return nil, claudeCLIProcessFailure(stderrText, stdoutText, "claude_cli_startup_probe_failed", "startup_probe", waitErr)
+			failure := claudeCLIProcessFailure(stderrText, stdoutText, "claude_cli_startup_probe_failed", "startup_probe", waitErr)
+			_ = handle.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "claude_cli_startup_outcome_uncertain", "claude-cli-adapter", "startup_probe", nil, failure)
+			return nil, failure
 		}
 		return result.resp, nil
 	}
 
 	stderrText := strings.TrimSpace(string(joinRawLines(stderrLines)))
 	if isClaudeAuthOutput(stderrText) {
-		return nil, claudeCLIProcessFailure(stderrText, "", "claude_cli_startup_probe_failed", "startup_probe", waitErr)
+		failure := claudeCLIProcessFailure(stderrText, "", "claude_cli_startup_probe_failed", "startup_probe", waitErr)
+		_ = handle.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "claude_cli_startup_outcome_uncertain", "claude-cli-adapter", "startup_probe", nil, failure)
+		return nil, failure
 	}
 	if waitErr != nil {
-		return nil, claudeCLIProcessFailure(stderrText, "", "claude_cli_startup_probe_failed", "startup_probe", waitErr)
+		failure := claudeCLIProcessFailure(stderrText, "", "claude_cli_startup_probe_failed", "startup_probe", waitErr)
+		_ = handle.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "claude_cli_startup_outcome_uncertain", "claude-cli-adapter", "startup_probe", nil, failure)
+		return nil, failure
 	}
-	return nil, runtimefailures.New(runtimefailures.ClassConnectorFailure, "claude_cli_startup_surface_missing", "claude-cli-adapter", "startup_probe", nil)
+	failure := runtimefailures.New(runtimefailures.ClassConnectorFailure, "claude_cli_startup_surface_missing", "claude-cli-adapter", "startup_probe", nil)
+	_ = handle.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "claude_cli_startup_outcome_uncertain", "claude-cli-adapter", "startup_probe", nil, failure)
+	return nil, failure
+}
+
+func failStartupProbePrelaunch(ctx context.Context, handle *runtimeeffects.Handle, err error) {
+	if handle == nil || err == nil {
+		return
+	}
+	_ = handle.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassConnectorFailure, "claude_cli_startup_prelaunch_rejected", "claude-cli-adapter", "startup_probe", nil, err)
 }
 
 func readCLIStartupInit(rc io.ReadCloser) cliStartupProbeResult {

@@ -10,9 +10,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
+	"github.com/google/uuid"
 )
 
 func TestStartupProbeToolsCallAcceptsOnlyClosedTypedCombinations(t *testing.T) {
@@ -90,7 +93,22 @@ func TestStartupCallRejectsManualOrMutatedTransportBinding(t *testing.T) {
 func startupFailureTestBinding(t *testing.T, serverURL string) (context.Context, llm.MCPHTTPBinding) {
 	t.Helper()
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
-	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "startup-agent"})
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "startup-agent"})
+	surface, err := llm.ManagedCapabilitySurfaceForStartup(
+		ctx,
+		&llm.ClaudeCLIRuntime{},
+		[]llm.ToolDefinition{{Name: "health_check"}},
+		toolcapabilities.NewSet([]toolcapabilities.Capability{{Name: "health_check", Visible: true, Callable: true}}),
+		managedcapabilities.Authority{
+			Kind: managedcapabilities.AuthorityStartupProbe, ID: uuid.NewString(),
+			ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: "startup-test-authority",
+			StartupOwnerID: "startup-test-owner", StartupGeneration: 1,
+		},
+	)
+	if err != nil {
+		t.Fatalf("ManagedCapabilitySurfaceForStartup: %v", err)
+	}
+	ctx = managedcapabilities.WithContext(ctx, surface)
 	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
 	binding, enabled, err := llm.BuildMCPHTTPBinding(
 		ctx,

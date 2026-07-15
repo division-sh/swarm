@@ -393,6 +393,7 @@ func (fx *deliveryLifecycleFixture) snapshot(t *testing.T, ctx context.Context, 
 
 func (fx *deliveryLifecycleFixture) recoverSeenEventIDs(t *testing.T, ctx context.Context) []string {
 	t.Helper()
+	ctx = managedConformanceExecutionContext(t, ctx, "delivery-lifecycle-conformance")
 	var (
 		mu   sync.Mutex
 		seen []string

@@ -5,12 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -80,17 +80,19 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 		{Name: "write_file"},
 	}
 
-	resp, err := runtime.ProbeStartupVisibleToolSurface(runtimeactors.WithActor(context.Background(), actor), actor, "system prompt", tools)
+	resp, err := runtime.ProbeStartupVisibleToolSurface(managedStartupProbeTestContext(t, actor, tools), actor, "system prompt", tools)
 	if err != nil {
 		t.Fatalf("ProbeStartupVisibleToolSurface: %v", err)
 	}
 	if got := resp.SessionID; got != "provider-startup-1" {
 		t.Fatalf("session_id = %q, want provider-startup-1", got)
 	}
-	got := ObservedCanonicalVisibleToolsForActor(actor, tools, resp)
-	want := PlannedCanonicalVisibleToolsForActor(actor, tools)
-	if !slices.Equal(got, want) {
-		t.Fatalf("observed visible tools = %#v, want %#v", got, want)
+	if resp.CapabilitySurface == nil {
+		t.Fatal("startup response is missing canonical capability surface")
+	}
+	got := resp.CapabilitySurface.EffectiveNames()
+	if len(got) != 2 || got[0] != "read_file" || got[1] != "write_file" {
+		t.Fatalf("effective startup tools = %#v, want [read_file write_file]", got)
 	}
 }
 
@@ -161,7 +163,7 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 		{Name: "write_file"},
 	}
 
-	if _, err := runtime.ProbeStartupVisibleToolSurface(runtimeactors.WithActor(context.Background(), actor), actor, "system prompt", tools); err != nil {
+	if _, err := runtime.ProbeStartupVisibleToolSurface(managedStartupProbeTestContext(t, actor, tools), actor, "system prompt", tools); err != nil {
 		t.Fatalf("ProbeStartupVisibleToolSurface: %v", err)
 	}
 
@@ -216,8 +218,9 @@ exit 127
 			},
 		})
 
-	actor := runtimeactors.AgentConfig{ExecutionMode: "live", ID: "market-research-agent"}
-	_, err := runtime.ProbeStartupVisibleToolSurface(runtimeactors.WithActor(context.Background(), actor), actor, "system prompt", []ToolDefinition{{Name: "emit_event"}})
+	actor := runtimeactors.AgentConfig{ID: "market-research-agent"}
+	tools := []ToolDefinition{{Name: "emit_event"}}
+	_, err := runtime.ProbeStartupVisibleToolSurface(managedStartupProbeTestContext(t, actor, tools), actor, "system prompt", tools)
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_startup_probe_failed" {
 		t.Fatalf("ProbeStartupVisibleToolSurface failure = %#v, want generic connector failure", failure)
@@ -264,7 +267,14 @@ exit 1
 			},
 		})
 
-	actor := runtimeactors.AgentConfig{ExecutionMode: "live", ID: "market-research-agent"}
-	_, err := runtime.ProbeStartupVisibleToolSurface(runtimeactors.WithActor(context.Background(), actor), actor, "system prompt", []ToolDefinition{{Name: "emit_event"}})
+	actor := runtimeactors.AgentConfig{ID: "market-research-agent"}
+	tools := []ToolDefinition{{Name: "emit_event"}}
+	_, err := runtime.ProbeStartupVisibleToolSurface(managedStartupProbeTestContext(t, actor, tools), actor, "system prompt", tools)
 	assertClaudeAuthenticationFailure(t, err)
+}
+
+func managedStartupProbeTestContext(t *testing.T, actor runtimeactors.AgentConfig, tools []ToolDefinition) context.Context {
+	t.Helper()
+	ctx, surface := testManagedCLISurfaceContext(t, actor, tools)
+	return effecttest.New().StartupProbeContext(ctx, surface)
 }

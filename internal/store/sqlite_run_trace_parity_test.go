@@ -364,22 +364,25 @@ func insertSQLiteTraceTurn(t *testing.T, ctx context.Context, sqliteStore *SQLit
 func insertSQLiteTraceTurnWithMemory(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, turnID, runID, agentID, sessionID, eventID, eventName string, memoryEnabled bool, createdAt time.Time) {
 	t.Helper()
 	memorySource := "platform_default"
+	runtimeMode := "task"
 	if memoryEnabled {
 		memorySource = "authored"
+		runtimeMode = "session"
 	}
+	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, sqliteStore, runID, agentID, sessionID, turnID, runtimeMode, "global")
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
-			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
+			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
+			emitted_events,
 			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, failure, execution_mode, created_at
 		) VALUES (
 			?, ?, ?, ?, 'flow-a', ?, ?, NULL,
-			?, ?, 'task-1', '[]', '[]',
-			'[]', '{}', '[]', '[]',
+			?, ?, 'task-1', ?, '[]',
+			'[]',
 			'{}', '{}', '[]', 1, 0, 0, NULL, 'live', ?
 		)
-	`, turnID, runID, agentID, sessionID, memoryEnabled, memorySource, eventID, eventName, createdAt); err != nil {
+	`, turnID, runID, agentID, sessionID, memoryEnabled, memorySource, eventID, eventName, capabilitySurfaceID, createdAt); err != nil {
 		t.Fatalf("seed turn %s/%s: %v", agentID, turnID, err)
 	}
 }

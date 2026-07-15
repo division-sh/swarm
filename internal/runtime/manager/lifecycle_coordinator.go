@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
@@ -480,6 +481,7 @@ func (c *agentLifecycleCoordinator) acquireExecution(ctx context.Context, agentI
 	execution.leases++
 	snapshot := snapshotExecution(execution)
 	generationCtx := execution.generationCtx
+	runCtx := c.runCtx
 	c.mu.Unlock()
 
 	if ctx == nil {
@@ -487,6 +489,9 @@ func (c *agentLifecycleCoordinator) acquireExecution(ctx context.Context, agentI
 	}
 	leaseCtx, cancel := context.WithCancel(ctx)
 	stopGenerationCancel := context.AfterFunc(generationCtx, cancel)
+	if admission, ok := managedexecution.FromContext(runCtx); ok {
+		leaseCtx = managedexecution.WithAdmission(leaseCtx, admission)
+	}
 	leaseCtx = runtimeeffects.WithLifecycleToken(leaseCtx, snapshot.Token)
 	if store, ok := c.store.(runtimeeffects.Store); ok && store != nil {
 		leaseCtx = runtimeeffects.WithController(leaseCtx, runtimeeffects.NewController(store))

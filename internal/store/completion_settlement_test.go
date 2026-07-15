@@ -45,7 +45,7 @@ func proveCompletionProviderHeadSettlement(t *testing.T, fixture completionSettl
 	t.Helper()
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "provider-head:success")
 	handle := beginObservedCompletionForSettlementTest(t, ctx, "claude_cli", "success")
-	settlement := completionSettlementForTest(handle.Attempt().Authority.Target, fixture, "provider-head-current", "provider-head-next")
+	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "claude_cli", "provider-head-current", "provider-head-next")
 	if err := handle.SettleCompletion(ctx, settlement); err != nil {
 		t.Fatalf("settle completion with provider head: %v", err)
 	}
@@ -68,7 +68,7 @@ func proveCompletionProviderHeadConflictCommitsUncertainty(t *testing.T, fixture
 	t.Helper()
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "provider-head:conflict")
 	handle := beginObservedCompletionForSettlementTest(t, ctx, "claude_cli", "conflict")
-	settlement := completionSettlementForTest(handle.Attempt().Authority.Target, fixture, "stale-provider-head", "provider-head-next")
+	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "claude_cli", "stale-provider-head", "provider-head-next")
 	err := handle.SettleCompletion(ctx, settlement)
 	if err == nil {
 		t.Fatal("provider-head conflict returned nil")
@@ -114,12 +114,13 @@ func TestCompletionPrelaunchFailureDoesNotSpendPostgres(t *testing.T) {
 func proveCompletionPrelaunchFailureDoesNotSpend(t *testing.T, fixture completionSettlementFixture) {
 	t.Helper()
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "completion-prelaunch-failure")
+	ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "claude_cli")
 	handle, err := runtimeeffects.BeginCompletion(ctx, "claude_cli", []byte("prelaunch"), nil)
 	if err != nil {
 		t.Fatalf("authorize prelaunch completion: %v", err)
 	}
 	failure := runtimefailures.FromError(context.Canceled, "completion-test", "launch_rejected")
-	settlement := completionSettlementForTest(handle.Attempt().Authority.Target, fixture, "", "")
+	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "claude_cli", "", "")
 	settlement.Settlement = runtimeeffects.Settlement{State: runtimeeffects.StateTerminalFailure, Failure: &failure.Failure}
 	settlement.Usage = runtimeeffects.CompletionUsage{ResolvedModel: "claude-test", Exactness: runtimeeffects.CompletionUsageUnavailable}
 	settlement.AgentTurn.Failure = &failure.Failure
@@ -154,6 +155,7 @@ func TestCompletionAttemptHeartbeatFencesRecoveryPostgres(t *testing.T) {
 func proveCompletionAttemptHeartbeatFencesRecovery(t *testing.T, fixture completionSettlementFixture) {
 	t.Helper()
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "completion-heartbeat")
+	ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "anthropic_api")
 	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("heartbeat"), nil)
 	if err != nil {
 		t.Fatalf("authorize heartbeat completion: %v", err)
@@ -221,6 +223,7 @@ func completionAttemptLease(t *testing.T, fixture completionSettlementFixture, a
 func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture completionSettlementFixture) {
 	t.Helper()
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "ordinary-recovery:authorized")
+	ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "anthropic_api")
 	authorized, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("authorized"), nil)
 	if err != nil {
 		t.Fatalf("authorize live completion: %v", err)
@@ -251,6 +254,7 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 	secondAuthority := fixture.authority
 	secondAuthority.Target.ID = uuid.NewString()
 	ctx = runtimeeffects.WithLogicalOperationIdentity(runtimeeffects.WithAuthority(fixture.context, secondAuthority), "ordinary-recovery:launched")
+	ctx = withManagedCompletionTestSurface(t, ctx, secondAuthority, "anthropic_api")
 	launched, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("launched"), nil)
 	if err != nil {
 		t.Fatalf("authorize launched completion: %v", err)
@@ -274,7 +278,7 @@ func proveCompletionProviderHeadStaleAuthorityCannotSettle(t *testing.T, fixture
 	t.Helper()
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "provider-head:stale-authority")
 	handle := beginObservedCompletionForSettlementTest(t, ctx, "claude_cli", "stale-authority")
-	settlement := completionSettlementForTest(handle.Attempt().Authority.Target, fixture, "provider-head-current", "provider-head-next")
+	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "claude_cli", "provider-head-current", "provider-head-next")
 	stale := handle.Attempt()
 	stale.Authority.Normal.Generation++
 	stale.Authority.FenceGeneration++
@@ -332,6 +336,11 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 
 func beginObservedCompletionForSettlementTest(t *testing.T, ctx context.Context, adapter, request string) *runtimeeffects.Handle {
 	t.Helper()
+	authority, ok := runtimeeffects.AuthorityFromContext(ctx)
+	if !ok {
+		t.Fatal("managed completion test authority is missing")
+	}
+	ctx = withManagedCompletionTestSurface(t, ctx, authority, adapter)
 	handle, err := runtimeeffects.BeginCompletion(ctx, adapter, []byte(request), nil)
 	if err != nil {
 		t.Fatalf("authorize completion: %v", err)
@@ -345,9 +354,10 @@ func beginObservedCompletionForSettlementTest(t *testing.T, ctx context.Context,
 	return handle
 }
 
-func completionSettlementForTest(target runtimeeffects.UsageTarget, fixture completionSettlementFixture, expectedHead, newHead string) runtimeeffects.CompletionSettlement {
+func completionSettlementForTest(t testing.TB, target runtimeeffects.UsageTarget, fixture completionSettlementFixture, adapter, expectedHead, newHead string) runtimeeffects.CompletionSettlement {
+	t.Helper()
 	input, output := int64(12), int64(4)
-	return runtimeeffects.CompletionSettlement{
+	settlement := runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled, Evidence: map[string]any{"provider_result": true}},
 		Usage: runtimeeffects.CompletionUsage{
 			ResolvedModel: "claude-test", Exactness: runtimeeffects.CompletionUsageExact,
@@ -369,6 +379,10 @@ func completionSettlementForTest(target runtimeeffects.UsageTarget, fixture comp
 		},
 		Now: time.Now().UTC(),
 	}
+	authority := fixture.authority
+	authority.Target = target
+	applyManagedCompletionTestSurface(t, settlement.AgentTurn, authority, adapter)
+	return settlement
 }
 
 func requireCompletionSettlementRows(t *testing.T, fixture completionSettlementFixture, attemptID, turnID string, wantState runtimeeffects.State, wantRows, wantReservations int) {

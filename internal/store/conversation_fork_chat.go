@@ -664,20 +664,21 @@ func loadConversationForkSourceAgent(ctx context.Context, owner conversationFork
 func loadConversationForkSourceTurn(ctx context.Context, owner conversationForkStore, tx *sql.Tx, fork OperatorConversationForkSession) (ConversationForkSourceTurn, error) {
 	row := owner.queryRow(ctx, tx, `
 		SELECT
-			CAST(turn_id AS TEXT),
-			COALESCE(request_payload, '{}'),
-			COALESCE(response_payload, '{}'),
-			COALESCE(tool_calls, '[]'),
-			COALESCE(available_tools, '[]'),
-			created_at
-		FROM agent_turns
-		WHERE session_id = ?
-		  AND turn_id = ?
+			CAST(t.turn_id AS TEXT),
+			COALESCE(t.request_payload, '{}'),
+			COALESCE(t.response_payload, '{}'),
+			COALESCE(t.tool_calls, '[]'),
+			c.surface,
+			t.created_at
+		FROM agent_turns t
+		JOIN managed_agent_capability_surfaces c ON c.surface_id = t.capability_surface_id
+		WHERE t.session_id = ?
+		  AND t.turn_id = ?
 	`, fork.SourceSessionID, fork.ForkPoint.TurnID)
 	var out ConversationForkSourceTurn
-	var requestRaw, responseRaw, toolCallsRaw, availableToolsRaw []byte
+	var requestRaw, responseRaw, toolCallsRaw, capabilitySurfaceRaw []byte
 	var createdAt conversationForkTimeValue
-	if err := row.Scan(&out.TurnID, &requestRaw, &responseRaw, &toolCallsRaw, &availableToolsRaw, &createdAt); err != nil {
+	if err := row.Scan(&out.TurnID, &requestRaw, &responseRaw, &toolCallsRaw, &capabilitySurfaceRaw, &createdAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ConversationForkSourceTurn{}, &EntityReadParamError{Field: "fork_id", Reason: "source turn is unavailable"}
 		}
@@ -689,7 +690,15 @@ func loadConversationForkSourceTurn(ctx context.Context, owner conversationForkS
 	out.RequestPayload = cloneRawMessage(requestRaw)
 	out.ResponsePayload = cloneRawMessage(responseRaw)
 	out.ToolCalls = cloneRawMessage(toolCallsRaw)
-	out.AvailableTools = cloneRawMessage(availableToolsRaw)
+	surface, err := decodeManagedCapabilitySurface(capabilitySurfaceRaw)
+	if err != nil {
+		return ConversationForkSourceTurn{}, fmt.Errorf("decode conversation fork source capability surface: %w", err)
+	}
+	availableToolsRaw, err := json.Marshal(surface.EffectiveNames())
+	if err != nil {
+		return ConversationForkSourceTurn{}, fmt.Errorf("encode conversation fork source effective tools: %w", err)
+	}
+	out.AvailableTools = availableToolsRaw
 	return out, nil
 }
 

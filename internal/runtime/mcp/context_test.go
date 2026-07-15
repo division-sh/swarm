@@ -7,12 +7,93 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	"github.com/google/uuid"
 )
+
+func managedClaudeProviderTurnTestContext(t testing.TB, executionKind managedcapabilities.ExecutionKind) (context.Context, managedcapabilities.Surface, *effecttest.Harness) {
+	t.Helper()
+	harness := effecttest.New()
+	actorID := "normal-claude-agent"
+	if executionKind == managedcapabilities.ExecutionSelectedContractFork {
+		actorID = "selected-claude-agent"
+	}
+	harness.Token.AgentID = actorID
+	target := runtimeeffects.UsageTarget{
+		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: actorID,
+		SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "claude-provider-turn",
+	}
+	var (
+		authority runtimeeffects.Authority
+		admission managedexecution.Admission
+		err       error
+	)
+	switch executionKind {
+	case managedcapabilities.ExecutionNormalAgent:
+		admission, err = managedexecution.New(managedexecution.KindNormalRuntime, "normal-claude-execution", harness.Token.Generation, "", "test-actors", "test-config", nil)
+		authority = runtimeeffects.NormalAgentAuthority(harness.Token, "normal-claude-owner", time.Now().UTC().Add(time.Minute))
+	case managedcapabilities.ExecutionSelectedContractFork:
+		executionID := uuid.NewString()
+		admission, err = managedexecution.New(managedexecution.KindSelectedContractFork, executionID, 1, target.RunID, "test-actors", "test-config", nil)
+		authority = runtimeeffects.Authority{
+			Kind: runtimeeffects.AuthoritySelectedContractFork, ID: executionID,
+			SelectedFork: runtimeeffects.SelectedContractForkAuthority{
+				ExecutionID: executionID, ForkRunID: target.RunID, Generation: 1,
+				AdmissionFingerprint: "test-admission", ContainerPlanFingerprint: "test-container",
+				ActorCensusFingerprint: "test-actors", EffectiveConfigFingerprint: "test-config",
+			},
+			ExecutionOwner: "selected-claude-owner", LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: 1,
+			ExecutionMode: runtimeeffects.ExecutionModeLive,
+		}
+	default:
+		t.Fatalf("unsupported managed execution kind %q", executionKind)
+	}
+	if err != nil {
+		t.Fatalf("build managed Claude execution admission: %v", err)
+	}
+	authority.Target = target
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{
+		ActorID: actorID, RuntimeMode: "task", Provider: "claude", Transport: "cli", ProviderContract: "claude-cli-test",
+		Authority: managedcapabilities.Authority{
+			Kind: managedcapabilities.AuthorityProviderTurn, ID: target.ID, ExecutionKind: executionKind,
+			ExecutionAuthorityID: admission.ExecutionAuthorityID, RunID: target.RunID, SessionID: target.SessionID, TurnOrdinal: 1,
+		},
+		Tools: []managedcapabilities.PlannedTool{{
+			Name: "write_file", DefinitionHash: "test-definition-write-file",
+			Capability: toolcapabilities.Capability{Name: "write_file", Visible: true, Callable: true},
+			Bindings: []managedcapabilities.DeliveryBinding{{
+				Kind: managedcapabilities.BindingMCPTool, ExactName: "mcp__runtime-tools__write_file", RequiredEvidenceKind: "mcp_listed",
+			}},
+		}},
+		CreatedAt: time.Unix(1, 0).UTC(),
+	})
+	if err != nil {
+		t.Fatalf("build managed Claude capability surface: %v", err)
+	}
+	surface, err = surface.Observe(managedcapabilities.DeliveryEvidence{
+		BindingKind: managedcapabilities.BindingMCPTool, ExactName: "mcp__runtime-tools__write_file",
+		Kind: "mcp_listed", Status: managedcapabilities.EvidenceConfirmed,
+	})
+	if err != nil {
+		t.Fatalf("observe managed Claude capability surface: %v", err)
+	}
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: actorID})
+	ctx = runtimeeffects.WithAuthority(ctx, authority)
+	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
+	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(harness))
+	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "claude-provider-turn")
+	ctx = managedexecution.WithAdmission(ctx, admission)
+	ctx = managedcapabilities.WithContext(ctx, surface)
+	return ctx, surface, harness
+}
 
 func TestTurnContextRegistry_ResetIsScopedToRegistry(t *testing.T) {
 	registryA := NewTurnContextRegistry(nil)
@@ -46,7 +127,7 @@ func TestTurnContextRegistry_ResetIsScopedToRegistry(t *testing.T) {
 func TestTurnContextRegistryPreservesManagedEffectAuthority(t *testing.T) {
 	harness := effecttest.New()
 	registry := NewTurnContextRegistry(models.ActorFromContext)
-	ctx := models.WithActor(harness.Context("gateway-turn"), models.AgentConfig{ExecutionMode: "live", ID: harness.Token.AgentID})
+	ctx := models.WithActor(harness.CompletionContext("gateway-turn"), models.AgentConfig{ID: harness.Token.AgentID})
 	token := registry.RegisterTurnContext(ctx)
 	turn, ok := registry.ResolveTurnContext(token)
 	if !ok {
@@ -54,6 +135,9 @@ func TestTurnContextRegistryPreservesManagedEffectAuthority(t *testing.T) {
 	}
 	if !turn.HasLifecycleToken || turn.LifecycleToken != harness.Token || turn.EffectController == nil {
 		t.Fatalf("managed effect authority was not preserved: %#v", turn)
+	}
+	if !turn.HasExecutionAdmission || !turn.ExecutionAdmission.AuthorizesNormal() {
+		t.Fatalf("managed execution admission was not preserved: %#v", turn)
 	}
 	if !turn.HasLogicalIdentity || turn.LogicalIdentity != "gateway-turn" {
 		t.Fatalf("managed logical identity was not preserved: %#v", turn)
@@ -65,6 +149,9 @@ func TestTurnContextRegistryPreservesManagedEffectAuthority(t *testing.T) {
 	if _, ok := runtimeeffects.ControllerFromContext(base); !ok {
 		t.Fatal("restored effect controller is missing")
 	}
+	if admission, ok := managedexecution.FromContext(base); !ok || !admission.AuthorizesNormal() {
+		t.Fatalf("restored managed execution admission = %#v ok=%v", admission, ok)
+	}
 	if identity, ok := runtimeeffects.LogicalOperationIdentityFromContext(base); !ok || identity != "gateway-turn" {
 		t.Fatalf("restored logical identity = %q ok=%v", identity, ok)
 	}
@@ -74,8 +161,8 @@ func TestTurnContextRegistryPreservesSiblingLogicalIdentityAndIgnoresMCPTranspor
 	harness := effecttest.New()
 	registry := NewTurnContextRegistry(models.ActorFromContext)
 	register := func(identity string) TurnContext {
-		ctx := runtimeeffects.WithLogicalOperationIdentity(harness.Context("inbound-event"), identity)
-		ctx = models.WithActor(ctx, models.AgentConfig{ExecutionMode: "live", ID: harness.Token.AgentID})
+		ctx := runtimeeffects.WithLogicalOperationIdentity(harness.CompletionContext("inbound-event"), identity)
+		ctx = models.WithActor(ctx, models.AgentConfig{ID: harness.Token.AgentID})
 		token := registry.RegisterTurnContext(ctx)
 		turn, ok := registry.ResolveTurnContext(token)
 		if !ok {
@@ -158,7 +245,7 @@ func TestMCPToolCallLogicalIdentityRequiresProviderCallCoordinateForManagedTurns
 
 func TestTurnContextRegistry_PreservesTypedRuntimeLineage(t *testing.T) {
 	registry := NewTurnContextRegistry(models.ActorFromContext)
-	ctx := models.WithActor(unmanagedMCPTestContext(), models.AgentConfig{ExecutionMode: "live", ID: "selected-agent"})
+	ctx, _, _ := managedClaudeProviderTurnTestContext(t, managedcapabilities.ExecutionNormalAgent)
 	ctx = runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
 		Owner:               "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage",
 		RunID:               "9b06692c-353c-4479-8e92-70927f5e4937",

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -23,6 +24,13 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 	plan, identity, err := validateTurnMemory(rec)
 	if err != nil {
 		return err
+	}
+	if rec.CapabilitySurface == nil {
+		return fmt.Errorf("sqlite agent turn requires exact managed capability surface")
+	}
+	capabilitySurfacePayload, err := json.Marshal(rec.CapabilitySurface)
+	if err != nil {
+		return fmt.Errorf("encode sqlite agent turn managed capability surface: %w", err)
 	}
 	rec = runtimellm.CanonicalizeTurnForPersistence(rec)
 	if _, err := runtimellm.DecodeCanonicalRuntimeLogTurnBlocks(rec.TurnBlocks); err != nil {
@@ -58,18 +66,24 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 		} else if err := ensureSQLiteStatelessAuditTx(txctx, tx, rec, plan, identity, now); err != nil {
 			return err
 		}
-		turnID := uuid.NewString()
-		_, err := tx.ExecContext(txctx, `
+		surface, err := insertManagedCapabilitySurfaceSQLite(txctx, tx, capabilitySurfacePayload)
+		if err != nil {
+			return err
+		}
+		if err := validateManagedAgentTurnSurface(surface, identity.AgentID, rec.SessionID, identity.RunID); err != nil {
+			return err
+		}
+		turnID := surface.Authority.ID
+		_, err = tx.ExecContext(txctx, `
 			INSERT INTO agent_turns (
 				turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-				trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls, emitted_events,
-				mcp_servers, mcp_tools_listed, mcp_tools_visible, request_payload, response_payload, turn_blocks,
-				parse_ok, latency_ms, retry_count, execution_mode, failure, created_at
-			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+				trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
+				emitted_events,
+				request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, execution_mode, failure, created_at
+			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		`, turnID, identity.RunID, identity.AgentID, strings.TrimSpace(rec.SessionID), sqliteNullString(identity.FlowInstance),
 			plan.Enabled, string(plan.Source), sqliteNullUUID(rec.EntityID), sqliteNullUUID(rec.TriggerEventID), sqliteNullString(rec.TriggerEventType),
-			sqliteNullString(rec.TaskID), normalizeJSONArray(rec.AvailableTools), normalizeJSONArray(rec.ToolCalls), normalizeJSONArray(rec.EmittedEvents),
-			normalizeJSONObject(rec.MCPServers), normalizeJSONArray(rec.MCPToolsListed), normalizeJSONArray(rec.MCPToolsVisible),
+			sqliteNullString(rec.TaskID), surface.ID, normalizeJSONArray(rec.ToolCalls), normalizeJSONArray(rec.EmittedEvents),
 			sqliteNullString(normalizeJSONPayload(rec.RequestPayload)), sqliteNullString(normalizeJSONPayload(rec.ResponseRaw)), normalizeJSONArray(rec.TurnBlocks),
 			rec.ParseOK, latencyMS, rec.RetryCount, executionMode, sqliteNullString(failurePayload), now)
 		if err != nil {

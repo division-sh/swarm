@@ -1,15 +1,48 @@
 package llm
 
 import (
+	"context"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
+	"github.com/google/uuid"
 )
+
+func TestObserveMockRuntimeCapabilitySurfaceBindsExactInterpreterInput(t *testing.T) {
+	tool := ToolDefinition{Name: "echo", Description: "Echo text", Schema: map[string]any{"type": "object"}}
+	actor := runtimeactors.AgentConfig{ID: "mock-agent", ExecutionMode: runtimeeffects.ExecutionModeMock}
+	ctx := runtimeactors.WithActor(context.Background(), actor)
+	surface, err := managedCapabilityPlan(ctx, &MockRuntime{}, "mock", []ToolDefinition{tool}, toolcapabilities.NewSet([]toolcapabilities.Capability{{
+		Name: tool.Name, Visible: true, Callable: true,
+	}}), managedcapabilities.Authority{
+		Kind: managedcapabilities.AuthorityProviderTurn, ID: uuid.NewString(), ExecutionKind: managedcapabilities.ExecutionNormalAgent,
+		ExecutionAuthorityID: uuid.NewString(), SessionID: uuid.NewString(), TurnOrdinal: 1,
+	})
+	if err != nil {
+		t.Fatalf("plan mock capability surface: %v", err)
+	}
+	if got := surface.PlannedBindingNames(managedcapabilities.BindingLocalRuntime); !slices.Equal(got, []string{"echo"}) {
+		t.Fatalf("local-runtime bindings = %v", got)
+	}
+	if got := surface.EffectiveNames(); len(got) != 0 {
+		t.Fatalf("effective tools before interpreter observation = %v", got)
+	}
+	observed, err := ObserveMockRuntimeCapabilitySurface(surface, []ToolDefinition{tool}, "sha256:module")
+	if err != nil {
+		t.Fatalf("observe mock capability surface: %v", err)
+	}
+	if got := observed.EffectiveNames(); !slices.Equal(got, []string{"echo"}) {
+		t.Fatalf("effective tools after interpreter observation = %v", got)
+	}
+}
 
 func TestExecuteMockCompletionUsesPythonAndCanonicalCompletionAuthority(t *testing.T) {
 	source := []byte(`

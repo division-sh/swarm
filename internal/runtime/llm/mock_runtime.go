@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -76,8 +77,7 @@ func (r *MockRuntime) PersistConversationSnapshot(ctx context.Context, session *
 }
 
 func (r *MockRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
-	actor, err := requireMockActor(ctx, agentID)
-	if err != nil {
+	if _, err := requireMockActor(ctx, agentID); err != nil {
 		return nil, err
 	}
 	if err := ValidateProviderToolDefinitions(tools); err != nil {
@@ -100,7 +100,7 @@ func (r *MockRuntime) StartSession(ctx context.Context, agentID, systemPrompt st
 			return ""
 		}()),
 		AgentID: agentID, Memory: resolved.Plan, MemoryIdentity: resolved.Identity,
-		SystemPrompt: augmentAgentSystemPrompt(systemPrompt, actor, tools), Tools: append([]ToolDefinition(nil), tools...),
+		SystemPrompt: strings.TrimSpace(systemPrompt), Tools: append([]ToolDefinition(nil), tools...),
 		Messages: append([]Message(nil), hydrated.Messages...), TurnCount: hydrated.TurnCount, Watchdog: hydrated.Watchdog,
 	}
 	if resolved.Enabled() {
@@ -147,6 +147,10 @@ func (r *MockRuntime) ContinueSession(ctx context.Context, session *Session, mes
 	if err != nil {
 		return nil, fmt.Errorf("marshal mock completion input: %w", err)
 	}
+	ctx, _, err = withObservedMockRuntimeCapabilitySurface(ctx, session.Tools, actor.Mock.Digest)
+	if err != nil {
+		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "managed_capability_in_process_request_mismatch", "mock-python-adapter", "build_request", nil, err)
+	}
 	ctx, targetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, session, entityID)
 	if err != nil {
 		return nil, err
@@ -155,6 +159,11 @@ func (r *MockRuntime) ContinueSession(ctx context.Context, session *Session, mes
 	start := time.Now()
 	response, raw, usage, dispatch, executeErr := executeMockCompletion(ctx, actor, session.Tools, requestJSON)
 	latency := time.Since(start)
+	if response != nil {
+		if surface, ok := managedcapabilities.FromContext(ctx); ok {
+			response.CapabilitySurface = &surface
+		}
+	}
 	turn := enrichTurnRecord(ctx, session, AgentTurnRecord{
 		AgentID: session.AgentID, SessionID: session.ID, RequestPayload: requestJSON, ResponseRaw: raw,
 		ParseOK: executeErr == nil, Latency: latency,

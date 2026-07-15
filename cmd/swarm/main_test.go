@@ -34,6 +34,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -82,10 +84,18 @@ type servedEventPublishBlockingLLMRuntime struct {
 	release <-chan struct{}
 }
 
+func (r servedEventPublishBlockingLLMRuntime) ProviderContract() runtimellm.ProviderContract {
+	return runtimellm.AnthropicAPIProviderContract()
+}
+
 type servedSessionCleanupProofLLMRuntime struct {
 	store   *store.PostgresStore
 	started chan<- string
 	release <-chan struct{}
+}
+
+func (r servedSessionCleanupProofLLMRuntime) ProviderContract() runtimellm.ProviderContract {
+	return runtimellm.AnthropicAPIProviderContract()
 }
 
 func chdirForTest(t *testing.T, dir string) {
@@ -148,12 +158,19 @@ func (a delayedRunStatusAgent) OnEvent(ctx context.Context, evt events.Event) ([
 	return []events.Event{out}, nil
 }
 
-func (r servedEventPublishBlockingLLMRuntime) StartSession(_ context.Context, agentID string, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
+func (r servedEventPublishBlockingLLMRuntime) StartSession(ctx context.Context, agentID string, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
+	execution, ok := agentmemory.FromContext(ctx)
+	memory := agentmemory.PlatformDefault()
+	if ok {
+		memory = execution.Plan
+	}
 	return &runtimellm.Session{
-		ID:           uuid.NewString(),
-		AgentID:      agentID,
-		SystemPrompt: systemPrompt,
-		Tools:        append([]runtimellm.ToolDefinition(nil), tools...),
+		ID:             uuid.NewString(),
+		AgentID:        agentID,
+		SystemPrompt:   systemPrompt,
+		Tools:          append([]runtimellm.ToolDefinition(nil), tools...),
+		Memory:         memory,
+		MemoryIdentity: execution.Identity,
 	}, nil
 }
 
@@ -184,8 +201,15 @@ func (r servedSessionCleanupProofLLMRuntime) StartSession(ctx context.Context, a
 	if !ok {
 		return nil, errors.New("served session cleanup proof requires canonical memory execution")
 	}
+	lease, err := r.store.Acquire(ctx, execution.Identity, "served-cleanup-start")
+	if err != nil {
+		return nil, err
+	}
+	if err := r.store.Release(ctx, lease); err != nil {
+		return nil, err
+	}
 	return &runtimellm.Session{
-		ID: uuid.NewString(), AgentID: agentID, SystemPrompt: systemPrompt,
+		ID: lease.SessionID, AgentID: agentID, SystemPrompt: systemPrompt,
 		Tools: append([]runtimellm.ToolDefinition(nil), tools...), Memory: execution.Plan, MemoryIdentity: execution.Identity,
 	}, nil
 }
@@ -199,10 +223,15 @@ func (r servedSessionCleanupProofLLMRuntime) ContinueSession(ctx context.Context
 		return nil, err
 	}
 	defer func() { _ = r.store.Release(context.Background(), lease) }()
-	runID := runtimecorrelation.RunIDFromContext(ctx)
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		return nil, errors.New("served session cleanup proof requires managed capability surface")
+	}
+	runID := session.MemoryIdentity.RunID
 	err = r.store.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
 		AgentID: session.AgentID, Memory: session.Memory, SessionID: lease.SessionID,
-		FlowInstance: session.MemoryIdentity.FlowInstance, RunID: runID, ResponseRaw: []byte(`{"proof":"in-flight"}`), ParseOK: true,
+		FlowInstance: session.MemoryIdentity.FlowInstance, RunID: runID, CapabilitySurface: &surface,
+		ResponseRaw: []byte(`{"proof":"in-flight"}`), ParseOK: true,
 	})
 	if err != nil {
 		return nil, err
@@ -216,12 +245,16 @@ func (r servedSessionCleanupProofLLMRuntime) ContinueSession(ctx context.Context
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	return &runtimellm.Response{Message: runtimellm.Message{Role: "assistant", Content: "released"}, SessionID: lease.SessionID}, nil
+	return &runtimellm.Response{Message: runtimellm.Message{Role: "assistant", Content: "released"}, SessionID: lease.SessionID, CapabilitySurface: &surface}, nil
 }
 
 type servedLiveAgentProofLLMRuntime struct {
 	calls             *atomic.Int32
 	directiveFailures bool
+}
+
+func (servedLiveAgentProofLLMRuntime) ProviderContract() runtimellm.ProviderContract {
+	return runtimellm.AnthropicAPIProviderContract()
 }
 
 type servedDirectivePersistenceFaults struct {
@@ -281,16 +314,23 @@ func (s *servedSQLiteDirectiveFaultStore) RecordDirectiveExecuted(ctx context.Co
 	return op, err
 }
 
-func (servedLiveAgentProofLLMRuntime) StartSession(_ context.Context, agentID string, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
+func (servedLiveAgentProofLLMRuntime) StartSession(ctx context.Context, agentID string, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
+	execution, ok := agentmemory.FromContext(ctx)
+	memory := agentmemory.PlatformDefault()
+	if ok {
+		memory = execution.Plan
+	}
 	return &runtimellm.Session{
-		ID:           uuid.NewString(),
-		AgentID:      agentID,
-		SystemPrompt: systemPrompt,
-		Tools:        append([]runtimellm.ToolDefinition(nil), tools...),
+		ID:             uuid.NewString(),
+		AgentID:        agentID,
+		SystemPrompt:   systemPrompt,
+		Tools:          append([]runtimellm.ToolDefinition(nil), tools...),
+		Memory:         memory,
+		MemoryIdentity: execution.Identity,
 	}, nil
 }
 
-func (r servedLiveAgentProofLLMRuntime) ContinueSession(_ context.Context, session *runtimellm.Session, message runtimellm.Message) (*runtimellm.Response, error) {
+func (r servedLiveAgentProofLLMRuntime) ContinueSession(ctx context.Context, session *runtimellm.Session, message runtimellm.Message) (*runtimellm.Response, error) {
 	if r.calls != nil {
 		r.calls.Add(1)
 	}
@@ -309,9 +349,17 @@ func (r servedLiveAgentProofLLMRuntime) ContinueSession(_ context.Context, sessi
 	if session != nil {
 		sessionID = session.ID
 	}
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		return nil, errors.New("served live agent proof requires managed capability surface")
+	}
+	observed, err := runtimellm.ObserveAPIRequestCapabilitySurface(surface, session.Tools)
+	if err != nil {
+		return nil, err
+	}
 	return &runtimellm.Response{
 		Message:   runtimellm.Message{Role: "tool", Content: `[{"ok":true,"result":"handled live agent event"}]`},
-		SessionID: sessionID,
+		SessionID: sessionID, CapabilitySurface: &observed,
 	}, nil
 }
 
@@ -333,6 +381,23 @@ func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, en
 		t.Fatalf("publish root event: %v", err)
 	}
 	return eventID
+}
+
+func managedRuntimeAdmissionContextForTest(t testing.TB, ctx context.Context) context.Context {
+	t.Helper()
+	admission, err := managedexecution.New(
+		managedexecution.KindNormalRuntime,
+		"cmd-swarm-test-authority",
+		1,
+		"",
+		"cmd-swarm-test-actors",
+		"cmd-swarm-test-bundle",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("managedexecution.New: %v", err)
+	}
+	return managedexecution.WithAdmission(ctx, admission)
 }
 
 func seedRunStatusEntityState(t *testing.T, db *sql.DB, runID, entityID string) {
@@ -5559,6 +5624,35 @@ func seedServedConversationForkSource(t *testing.T, db *sql.DB, backend, runID s
 		Turn1At: now.Add(-2 * time.Minute), Turn2At: now.Add(-time.Minute),
 	}
 	ctx := context.Background()
+	capabilityIDs := make([]string, 0, 2)
+	var capabilityStore managedcapabilities.Persistence
+	switch backend {
+	case "postgres":
+		capabilityStore = &store.PostgresStore{DB: db}
+	case "sqlite":
+		capabilityStore = &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: db}}
+	default:
+		t.Fatalf("unknown conversation fork proof backend %q", backend)
+	}
+	for i, turnID := range []string{fixture.Turn1ID, fixture.Turn2ID} {
+		surface, err := managedcapabilities.New(managedcapabilities.Plan{
+			ActorID: fixture.AgentID, RuntimeMode: "session", Provider: "served-fork-source", Transport: "api",
+			ProviderContract: "served-conversation-fork-source-v1",
+			Authority: managedcapabilities.Authority{
+				Kind: managedcapabilities.AuthorityProviderTurn, ID: turnID,
+				ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: "served-conversation-fork-source",
+				RunID: fixture.RunID, SessionID: fixture.SessionID, TurnOrdinal: i + 1,
+			},
+			CreatedAt: []time.Time{fixture.Turn1At, fixture.Turn2At}[i],
+		})
+		if err != nil {
+			t.Fatalf("build %s conversation fork source capability: %v", backend, err)
+		}
+		if err := capabilityStore.SaveManagedCapabilitySurface(ctx, surface); err != nil {
+			t.Fatalf("seed %s conversation fork source capability: %v", backend, err)
+		}
+		capabilityIDs = append(capabilityIDs, surface.ID)
+	}
 	var statements []struct {
 		query string
 		args  []any
@@ -5571,7 +5665,7 @@ func seedServedConversationForkSource(t *testing.T, db *sql.DB, backend, runID s
 		}{
 			{`INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor) VALUES ($1, 'fork-source', 'researcher', 'regular', 'openai_compatible', TRUE, 'authored', '{"type":"researcher","model":"regular","resolved_model":"gpt-compatible","resolved_llm_provider":"openai_compatible","resolved_llm_transport":"api","execution_mode":"live"}'::jsonb)`, []any{fixture.AgentID}},
 			{`INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'fork-source', TRUE, 'authored', 'active', $4, $4)`, []any{fixture.SessionID, fixture.RunID, fixture.AgentID, now.Add(-3 * time.Minute)}},
-			{`INSERT INTO agent_turns (execution_mode, turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, parse_ok, created_at) VALUES ('live',$1::uuid,$2::uuid,$3,$4::uuid,'fork-source',TRUE,'authored',$5::uuid,'task.ready',true,$6),('live',$7::uuid,$2::uuid,$3,$4::uuid,'fork-source',TRUE,'authored',$8::uuid,'task.done',true,$9)`, []any{fixture.Turn1ID, fixture.RunID, fixture.AgentID, fixture.SessionID, fixture.Event1ID, fixture.Turn1At, fixture.Turn2ID, fixture.Event2ID, fixture.Turn2At}},
+			{`INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, capability_surface_id, parse_ok, execution_mode, created_at) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,'fork-source',TRUE,'authored',$5::uuid,'task.ready',$6::uuid,true,'live',$7),($8::uuid,$2::uuid,$3,$4::uuid,'fork-source',TRUE,'authored',$9::uuid,'task.done',$10::uuid,true,'live',$11)`, []any{fixture.Turn1ID, fixture.RunID, fixture.AgentID, fixture.SessionID, fixture.Event1ID, capabilityIDs[0], fixture.Turn1At, fixture.Turn2ID, fixture.Event2ID, capabilityIDs[1], fixture.Turn2At}},
 			{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid,$2::uuid,'flow/forkchat','default','after','{}'::jsonb,'{"name":"After"}'::jsonb,'{}'::jsonb,2,$3,$3,$3)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},
 			{`INSERT INTO entity_mutations (run_id, entity_id, field, old_value, new_value, writer_type, writer_id, created_at) VALUES ($1::uuid,$2::uuid,'current_state',NULL,'"draft"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'name',NULL,'"Before"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'current_state','"draft"'::jsonb,'"after"'::jsonb,'platform','test',$4)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
 		}
@@ -5582,12 +5676,10 @@ func seedServedConversationForkSource(t *testing.T, db *sql.DB, backend, runID s
 		}{
 			{`INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor) VALUES (?, 'fork-source', 'researcher', 'regular', 'openai_compatible', 1, 'authored', '{"type":"researcher","model":"regular","resolved_model":"gpt-compatible","resolved_llm_provider":"openai_compatible","resolved_llm_transport":"api","execution_mode":"live"}')`, []any{fixture.AgentID}},
 			{`INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at) VALUES (?, ?, ?, 'fork-source', 1, 'authored', 'active', ?, ?)`, []any{fixture.SessionID, fixture.RunID, fixture.AgentID, now.Add(-3 * time.Minute), now.Add(-3 * time.Minute)}},
-			{`INSERT INTO agent_turns (execution_mode, turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, parse_ok, created_at) VALUES ('live',?,?,?,?,'fork-source',1,'authored',?,'task.ready',true,?),('live',?,?,?,?,'fork-source',1,'authored',?,'task.done',true,?)`, []any{fixture.Turn1ID, fixture.RunID, fixture.AgentID, fixture.SessionID, fixture.Event1ID, fixture.Turn1At, fixture.Turn2ID, fixture.RunID, fixture.AgentID, fixture.SessionID, fixture.Event2ID, fixture.Turn2At}},
+			{`INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, capability_surface_id, parse_ok, execution_mode, created_at) VALUES (?,?,?,?,'fork-source',1,'authored',?,'task.ready',?,true,'live',?),(?,?,?,?,'fork-source',1,'authored',?,'task.done',?,true,'live',?)`, []any{fixture.Turn1ID, fixture.RunID, fixture.AgentID, fixture.SessionID, fixture.Event1ID, capabilityIDs[0], fixture.Turn1At, fixture.Turn2ID, fixture.RunID, fixture.AgentID, fixture.SessionID, fixture.Event2ID, capabilityIDs[1], fixture.Turn2At}},
 			{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?,?,'flow/forkchat','default','after','{}','{"name":"After"}','{}',2,?,?,?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second), fixture.Turn1At.Add(10 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
 			{`INSERT INTO entity_mutations (run_id, entity_id, field, old_value, new_value, writer_type, writer_id, created_at) VALUES (?,?,'current_state',NULL,'"draft"','platform','test',?),(?,?,'name',NULL,'"Before"','platform','test',?),(?,?,'current_state','"draft"','"after"','platform','test',?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},
 		}
-	default:
-		t.Fatalf("unknown conversation fork proof backend %q", backend)
 	}
 	for _, statement := range statements {
 		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
@@ -12629,7 +12721,9 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: testAgent.id, Model: "regular"}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	am.Run(context.Background())
+	if err := am.Run(managedRuntimeAdmissionContextForTest(t, context.Background())); err != nil {
+		t.Fatalf("AgentManager.Run: %v", err)
+	}
 	defer func() { _ = am.Shutdown() }()
 
 	runID := uuid.NewString()
@@ -12742,7 +12836,9 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: testAgent.id, Model: "regular"}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	am.Run(context.Background())
+	if err := am.Run(managedRuntimeAdmissionContextForTest(t, context.Background())); err != nil {
+		t.Fatalf("AgentManager.Run: %v", err)
+	}
 	defer func() { _ = am.Shutdown() }()
 
 	runID := uuid.NewString()

@@ -48,6 +48,8 @@ func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer
 		return selectedRuntimeAuthorityMatches(authority, current), nil
 	case runtimeeffects.AuthorityConversationForkChat:
 		return forkChatAuthorityCurrentPostgres(ctx, q, authority)
+	case runtimeeffects.AuthorityStartupProbe:
+		return startupProbeAuthorityCurrentPostgres(ctx, q, authority)
 	default:
 		return false, nil
 	}
@@ -88,6 +90,8 @@ func externalEffectAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, 
 		return selectedRuntimeAuthorityMatches(authority, current), nil
 	case runtimeeffects.AuthorityConversationForkChat:
 		return forkChatAuthorityCurrentSQLite(ctx, q, authority)
+	case runtimeeffects.AuthorityStartupProbe:
+		return startupProbeAuthorityCurrentSQLite(ctx, q, authority)
 	default:
 		return false, nil
 	}
@@ -203,6 +207,17 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 			  AND execution_owner=$6 AND fence_generation=$7 AND lease_expires_at>CURRENT_TIMESTAMP
 		`, forkchat.ForkTurnID, forkchat.ForkID, forkchat.ActorTokenID, forkchat.RequestOccurrenceID,
 			forkchat.RequestHash, authority.ExecutionOwner, authority.FenceGeneration)
+	case runtimeeffects.AuthorityStartupProbe:
+		startup := authority.StartupProbe
+		res, err = tx.ExecContext(ctx, `
+			UPDATE runtime_startup_authority_facts SET created_at=created_at
+			WHERE authority_id=$1::uuid AND state_version=$2 AND state IN ('active','prepared')
+			  AND owner_id=$3 AND generation=$4 AND NOT EXISTS (
+			    SELECT 1 FROM runtime_startup_authority_facts newer
+			    WHERE newer.lease_authority_id=runtime_startup_authority_facts.lease_authority_id
+			      AND newer.transition_ordinal>runtime_startup_authority_facts.transition_ordinal
+			  )
+		`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration)
 	default:
 		return invalidExternalAuthority(authority, "unsupported_kind")
 	}
@@ -241,6 +256,17 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 			  AND execution_owner=? AND fence_generation=? AND `+sqliteCurrentLeaseSQL+`
 		`, forkchat.ForkTurnID, forkchat.ForkID, forkchat.ActorTokenID, forkchat.RequestOccurrenceID,
 			forkchat.RequestHash, authority.ExecutionOwner, authority.FenceGeneration)
+	case runtimeeffects.AuthorityStartupProbe:
+		startup := authority.StartupProbe
+		res, err = tx.ExecContext(ctx, `
+			UPDATE runtime_startup_authority_facts SET created_at=created_at
+			WHERE authority_id=? AND state_version=? AND state IN ('active','prepared')
+			  AND owner_id=? AND generation=? AND NOT EXISTS (
+			    SELECT 1 FROM runtime_startup_authority_facts newer
+			    WHERE newer.lease_authority_id=runtime_startup_authority_facts.lease_authority_id
+			      AND newer.transition_ordinal>runtime_startup_authority_facts.transition_ordinal
+			  )
+		`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration)
 	default:
 		return invalidExternalAuthority(authority, "unsupported_kind")
 	}
@@ -305,6 +331,8 @@ func externalEffectAttemptLeasePostgres(ctx context.Context, q schemaQueryer, au
 			return time.Time{}, fmt.Errorf("load selected-contract attempt lease: %w", err)
 		}
 		return lease.UTC(), nil
+	case runtimeeffects.AuthorityStartupProbe:
+		return authority.LeaseExpiresAt.UTC(), nil
 	case runtimeeffects.AuthorityConversationForkChat:
 		var lease time.Time
 		err := q.QueryRowContext(ctx, `
@@ -336,6 +364,8 @@ func externalEffectAttemptLeaseSQLite(ctx context.Context, q schemaQueryer, auth
 			return time.Time{}, fmt.Errorf("load sqlite selected-contract attempt lease: %w", err)
 		}
 		return lease.Time.UTC(), nil
+	case runtimeeffects.AuthorityStartupProbe:
+		return authority.LeaseExpiresAt.UTC(), nil
 	case runtimeeffects.AuthorityConversationForkChat:
 		var lease conversationForkTimeValue
 		err := q.QueryRowContext(ctx, `
@@ -350,6 +380,28 @@ func externalEffectAttemptLeaseSQLite(ctx context.Context, q schemaQueryer, auth
 	default:
 		return time.Time{}, fmt.Errorf("load sqlite attempt lease for unsupported authority kind %q", authority.Kind)
 	}
+}
+
+func startupProbeAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
+	startup := authority.StartupProbe
+	var count int
+	err := q.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM runtime_startup_authority_facts f
+		WHERE f.authority_id=$1::uuid AND f.state_version=$2 AND f.state IN ('active','prepared') AND f.owner_id=$3 AND f.generation=$4
+		  AND NOT EXISTS (SELECT 1 FROM runtime_startup_authority_facts newer WHERE newer.lease_authority_id=f.lease_authority_id AND newer.transition_ordinal>f.transition_ordinal)
+	`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration).Scan(&count)
+	return count == 1, err
+}
+
+func startupProbeAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
+	startup := authority.StartupProbe
+	var count int
+	err := q.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM runtime_startup_authority_facts f
+		WHERE f.authority_id=? AND f.state_version=? AND f.state IN ('active','prepared') AND f.owner_id=? AND f.generation=?
+		  AND NOT EXISTS (SELECT 1 FROM runtime_startup_authority_facts newer WHERE newer.lease_authority_id=f.lease_authority_id AND newer.transition_ordinal>f.transition_ordinal)
+	`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration).Scan(&count)
+	return count == 1, err
 }
 
 type selectedRuntimeAuthorityRow struct {
