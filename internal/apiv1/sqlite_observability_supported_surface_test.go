@@ -171,11 +171,11 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 		t.Fatalf("seed sqlite run: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
+		INSERT INTO events (run_id, event_id, event_name, entity_id, scope, payload, execution_mode, produced_by, produced_by_type, created_at)
 		VALUES
-			(?, ?, 'trace.event_only', NULL, 'global', '{}', 'runtime', 'platform', ?),
-			(?, ?, 'trace.late_delivery', NULL, 'global', '{}', 'runtime', 'platform', ?),
-			(?, ?, 'trace.second_delivery', NULL, 'global', '{}', 'runtime', 'platform', ?)
+			(?, ?, 'trace.event_only', NULL, 'global', '{}', 'live', 'runtime', 'platform', ?),
+			(?, ?, 'trace.late_delivery', NULL, 'global', '{}', 'live', 'runtime', 'platform', ?),
+			(?, ?, 'trace.second_delivery', NULL, 'global', '{}', 'live', 'runtime', 'platform', ?)
 	`, runID, eventOnlyID, base, runID, lateDeliveryID, base, runID, secondDeliveryID, base.Add(time.Second)); err != nil {
 		t.Fatalf("seed sqlite events: %v", err)
 	}

@@ -92,8 +92,7 @@ func proveLifecycleConcurrentPartialReconfigure(t *testing.T, store lifecycleOcc
 		}
 		return lifecycleOccurrenceAgent{id: cfg.ID}, nil
 	}, runtimemanager.AgentManagerOptions{LifecycleStore: store, Sessions: store}, store)
-	cfg := runtimeactors.AgentConfig{
-		ID:       "concurrent-partial-reconfigure-agent",
+	cfg := runtimeactors.AgentConfig{ExecutionMode: "live", ID: "concurrent-partial-reconfigure-agent",
 		Role:     "worker",
 		Type:     "sonnet",
 		Model:    "regular",
@@ -117,14 +116,14 @@ func proveLifecycleConcurrentPartialReconfigure(t *testing.T, store lifecycleOcc
 
 	firstErr := make(chan error, 1)
 	go func() {
-		firstErr <- manager.ReconfigureAgent(cfg.ID, runtimeactors.AgentConfig{Memory: agentmemory.Authored(false)})
+		firstErr <- manager.ReconfigureAgent(cfg.ID, runtimeactors.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(false)})
 	}()
 	<-firstBuildEntered
 	secondStarted := make(chan struct{})
 	secondErr := make(chan error, 1)
 	go func() {
 		close(secondStarted)
-		secondErr <- manager.ReconfigureAgent(cfg.ID, runtimeactors.AgentConfig{Tools: []string{"tool-b"}})
+		secondErr <- manager.ReconfigureAgent(cfg.ID, runtimeactors.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-b"}})
 	}()
 	<-secondStarted
 	secondBuiltBeforeFirstCommit := false
@@ -246,8 +245,7 @@ func proveLifecycleReconfigureOccurrenceIdentity(t *testing.T, store lifecycleOc
 	manager := runtimemanager.NewAgentManagerWithOptions(nil, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return lifecycleOccurrenceAgent{id: cfg.ID}, nil
 	}, runtimemanager.AgentManagerOptions{LifecycleStore: store, Sessions: store}, store)
-	cfg := runtimeactors.AgentConfig{
-		ID:       "reconfigure-occurrence-agent",
+	cfg := runtimeactors.AgentConfig{ExecutionMode: "live", ID: "reconfigure-occurrence-agent",
 		Role:     "worker",
 		Type:     "sonnet",
 		Model:    "regular",
@@ -264,7 +262,7 @@ func proveLifecycleReconfigureOccurrenceIdentity(t *testing.T, store lifecycleOc
 	}
 	initialGeneration := agents[0].LifecycleGeneration
 	for i, tool := range []string{"tool-a", "tool-b", "tool-a", "tool-b"} {
-		if err := manager.ReconfigureAgent(cfg.ID, runtimeactors.AgentConfig{Tools: []string{tool}}); err != nil {
+		if err := manager.ReconfigureAgent(cfg.ID, runtimeactors.AgentConfig{ExecutionMode: "live", Tools: []string{tool}}); err != nil {
 			t.Fatalf("reconfigure occurrence %d (%s): %v", i+1, tool, err)
 		}
 		agents, err = store.LoadAgents(context.Background())
@@ -277,7 +275,7 @@ func proveLifecycleReconfigureOccurrenceIdentity(t *testing.T, store lifecycleOc
 	}
 	assertLifecycleReconfigureOperationCount(t, db, sqlite, cfg.ID, 4)
 
-	if err := manager.ReconfigureAgent(cfg.ID, runtimeactors.AgentConfig{Tools: []string{"tool-b"}}); err != nil {
+	if err := manager.ReconfigureAgent(cfg.ID, runtimeactors.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-b"}}); err != nil {
 		t.Fatalf("same-current reconfigure: %v", err)
 	}
 	assertLifecycleReconfigureOperationCount(t, db, sqlite, cfg.ID, 4)
@@ -313,7 +311,8 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	rec := runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID: agentID, Role: "worker", Type: "sonnet", Model: "regular", FlowID: "global",
-			Memory: agentmemory.Authored(true), FlowPath: "global",
+			ExecutionMode: runtimeeffects.ExecutionModeLive,
+			Memory:        agentmemory.Authored(true), FlowPath: "global",
 			Config: []byte(`{"system_prompt":"test"}`),
 		},
 		Status: "active", HiredBy: "test", StartedAt: now,

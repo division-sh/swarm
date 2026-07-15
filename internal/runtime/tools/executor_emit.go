@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -114,6 +115,9 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		envelope,
 		time.Now(),
 	)
+	if mode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
+		emitted = emitted.WithExecutionMode(mode)
+	}
 	if runtimepinrouting.PinDeclaredOutput(e.workflowSource, flowID, eventType) {
 		usePublishAuthority := false
 		if planner, ok := e.bus.(publishRecipientPlanner); ok && planner != nil {
@@ -188,6 +192,9 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 				resolution.Envelope,
 				emitted.CreatedAt(),
 			)
+			if mode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
+				emitted = emitted.WithExecutionMode(mode)
+			}
 		}
 	}
 	if err := e.bus.Publish(ctx, emitted); err != nil {

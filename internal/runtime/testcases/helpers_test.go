@@ -75,6 +75,7 @@ func hasAll(values []string, want ...string) bool {
 
 func agentConfigFromEntry(id string, entry runtimecontracts.AgentRegistryEntry) models.AgentConfig {
 	return models.AgentConfig{
+		ExecutionMode: "live",
 		ID:            id,
 		Type:          entry.Type,
 		Role:          entry.Role,

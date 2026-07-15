@@ -519,8 +519,8 @@ func seedPostgresLegacyFailures(t testing.TB, ctx context.Context, db *sql.DB) l
 	ids := legacyFailureIDs{delivery: uuid.NewString(), receipt: uuid.NewString(), deadLetter: uuid.NewString(), activity: uuid.NewString(), activityResult: uuid.NewString()}
 	eventID := uuid.NewString()
 	mustExecTest(t, ctx, db, `
-		INSERT INTO events (event_id, event_name, payload, produced_by_type)
-		VALUES ($1::uuid, 'activity.failed', '{"activity_id":"activity-a","error":"provider failed"}'::jsonb, 'platform')
+		INSERT INTO events (execution_mode, event_id, event_name, payload, produced_by_type)
+		VALUES ('live', $1::uuid, 'activity.failed', '{"activity_id":"activity-a","error":"provider failed"}'::jsonb, 'platform')
 	`, ids.activityResult)
 	mustExecTest(t, ctx, db, `
 		INSERT INTO event_deliveries (delivery_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, last_error)

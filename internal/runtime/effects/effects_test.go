@@ -4,7 +4,27 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/google/uuid"
 )
+
+func TestCompletionAuthorityPreservesExecutionMode(t *testing.T) {
+	token := LifecycleToken{RuntimeEpoch: 1, AgentID: "agent-1", Generation: 2}
+	ctx := WithExecutionMode(WithLifecycleToken(context.Background(), token), ExecutionModeMock)
+	authority, ok := CompletionAuthorityFromContext(ctx)
+	if !ok {
+		t.Fatal("CompletionAuthorityFromContext returned no authority")
+	}
+	if authority.ExecutionMode != ExecutionModeMock {
+		t.Fatalf("execution mode = %q, want mock", authority.ExecutionMode)
+	}
+	ctx = WithUsageTarget(ctx, UsageTarget{Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: "agent-1", SessionID: uuid.NewString(), Memory: agentmemory.Authored(false)})
+	authority, ok = CompletionAuthorityFromContext(ctx)
+	if !ok || authority.ExecutionMode != ExecutionModeMock {
+		t.Fatalf("targeted authority = %#v, want mock mode preserved", authority)
+	}
+}
 
 type effectStoreProbe struct {
 	authorizations []AuthorizeRequest

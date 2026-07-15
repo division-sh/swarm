@@ -168,6 +168,7 @@ var registrations = []Registration{
 	registration(KindProviderTurn, EffectWriteOrUnknown, "openai_compatible", "http", "internal/runtime/llm/openai_compatible_runtime.go", []string{"internal/runtime/llm/openai_compatible_runtime.go:sendRequest:http_do:1"}, "TestManagedProviderEffectOutcomes/openai_compatible"),
 	registration(KindProviderTurn, EffectWriteOrUnknown, "openai_responses", "http", "internal/runtime/llm/openai_responses_runtime.go", []string{"internal/runtime/llm/openai_responses_runtime.go:sendRequest:http_do:1"}, "TestManagedProviderEffectOutcomes/openai_responses"),
 	registration(KindProviderTurn, EffectWriteOrUnknown, "claude_cli", "process", "internal/runtime/llm/cli_runtime_process.go", []string{"internal/runtime/llm/cli_runtime_process.go:runWithPreparedInput:process_launch:1", "internal/runtime/llm/cli_runtime_process.go:runStreamingPrepared:process_launch:1"}, "TestManagedClaudeCLIEffectOutcomes"),
+	registration(KindProviderTurn, EffectReadOnly, "mock_python", "in_process", "internal/runtime/llm/mock_runtime.go", nil, "TestMockRuntimeEndToEnd"),
 	registration(KindHTTPToolTarget, EffectWriteOrUnknown, "authored_http_tool", "http", "internal/runtime/tools/executor_http.go", []string{"internal/runtime/tools/executor_http.go:execHTTPRequestOnce:http_do:1"}, "TestManagedToolEffectOutcomes/authored_http_tool"),
 	registration(KindManagedCredential, EffectWriteOrUnknown, "managed_credential", "http", "internal/runtime/managedcredentials/store.go", []string{"internal/runtime/managedcredentials/store.go:exchange:http_do:1", "internal/runtime/managedcredentials/store.go:exchangeGitHubAppInstallation:http_do:1"}, "TestManagedCredentialEffectOutcomes"),
 	registration(KindNativeWebSearchHTTP, EffectWriteOrUnknown, "native_web_search", "http", "internal/runtime/tools/executor_native.go", []string{"internal/runtime/tools/executor_native.go:doNormalizedSearch:http_do:1"}, "TestManagedToolEffectOutcomes/native_web_search"),
@@ -195,6 +196,9 @@ func registration(kind Kind, class EffectClass, adapter, transport, launchSite s
 		PrimitiveKeys:      append([]string(nil), primitiveKeys...),
 		PrelaunchFailure:   StateTerminalFailure,
 		PostlaunchFailure:  postlaunch,
+	}
+	if len(primitiveKeys) == 0 {
+		registration.LaunchObserved = "state=launched must commit before deterministic in-process execution"
 	}
 	if adapter == "claude_cli" {
 		registration.SettlementRecovery = fmt.Sprintf("authorized=%s; exact zero-process-launch terminal failure may authorize next ordinal; launched/response_observed=%s; postlaunch replay=no_redispatch", StateTerminalFailure, StateOutcomeUncertain)
@@ -322,6 +326,9 @@ func (c *Controller) IsCurrent(ctx context.Context, token LifecycleToken) (bool,
 		return false, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "check_generation", nil)
 	}
 	authority := NormalAgentAuthority(token, fmt.Sprintf("agent:%s:%d:%d", token.AgentID, token.RuntimeEpoch, token.Generation), time.Now().UTC().Add(5*time.Minute))
+	if mode, found := ExecutionModeFromContext(ctx); found {
+		authority.ExecutionMode = mode
+	}
 	return c.store.IsExternalEffectAuthorityCurrent(ctx, authority)
 }
 
@@ -361,6 +368,9 @@ type Handle struct {
 }
 
 func Begin(ctx context.Context, adapter string, request []byte, lineage map[string]string) (*Handle, error) {
+	if err := admitExecutionMode(ctx, adapter); err != nil {
+		return nil, err
+	}
 	controller, hasController := ControllerFromContext(ctx)
 	token, hasToken := LifecycleTokenFromContext(ctx)
 	differentOwner, hasDifferentOwner := DifferentOwnerFromContext(ctx)
@@ -393,6 +403,9 @@ func Begin(ctx context.Context, adapter string, request []byte, lineage map[stri
 }
 
 func BeginCompletion(ctx context.Context, adapter string, request []byte, lineage map[string]string) (*Handle, error) {
+	if err := admitExecutionMode(ctx, adapter); err != nil {
+		return nil, err
+	}
 	if _, differentOwner := DifferentOwnerFromContext(ctx); differentOwner {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_owner_conflict", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter)})
 	}
@@ -422,6 +435,20 @@ func BeginCompletion(ctx context.Context, adapter string, request []byte, lineag
 		return nil, err
 	}
 	return &Handle{controller: controller, attempt: attempt}, nil
+}
+
+func admitExecutionMode(ctx context.Context, adapter string) error {
+	mode, found := ExecutionModeFromContext(ctx)
+	if !found || mode != ExecutionModeMock || strings.TrimSpace(adapter) == "mock_python" {
+		return nil
+	}
+	registration, registered := RegistrationFor(adapter)
+	attributes := map[string]any{"action": "execute_external_effect", "adapter": strings.TrimSpace(adapter), "execution_mode": mode}
+	if registered {
+		attributes["effect_kind"] = registration.Kind
+		attributes["transport"] = registration.Transport
+	}
+	return runtimefailures.New(runtimefailures.ClassAuthorizationDenied, "mock_external_effect_forbidden", "external-effects", "authorize_attempt", attributes)
 }
 
 func canonicalOperationID(ctx context.Context, authority Authority, adapter string, lineage map[string]string) (string, error) {

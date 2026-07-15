@@ -894,6 +894,12 @@ func validateAgentUsageResult(item store.OperatorAgentUsage) error {
 	}
 	for i, row := range item.Breakdown {
 		prefix := fmt.Sprintf("breakdown[%d]", i)
+		if row.ExecutionMode != "live" && row.ExecutionMode != "mock" {
+			return fmt.Errorf("agent.usage owner returned malformed result: %s.execution_mode=%q is invalid", prefix, row.ExecutionMode)
+		}
+		if strings.TrimSpace(row.CostDisplay) == "" {
+			return fmt.Errorf("agent.usage owner returned malformed result: %s.cost_display is required", prefix)
+		}
 		switch row.UsageAccounting {
 		case store.AgentUsageAccountingExact, store.AgentUsageAccountingEstimated:
 		default:

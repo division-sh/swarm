@@ -66,7 +66,7 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 		return agent, nil
 	}, pg)
 	if err := manager.RegisterEphemeralAgentForExecution(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{ID: agent.id, Role: "test"},
+		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Role: "test"},
 	}); err != nil {
 		t.Fatalf("RegisterEphemeralAgentForExecution: %v", err)
 	}

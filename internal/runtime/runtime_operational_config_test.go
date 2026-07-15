@@ -223,7 +223,7 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T
 	}
 	managerStore := &recoveryGuardManagerStore{
 		agents: []runtimemanager.PersistedAgent{{
-			Config: runtimeactors.AgentConfig{ID: "persisted-agent"},
+			Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "persisted-agent"},
 		}},
 	}
 	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
@@ -313,7 +313,7 @@ func TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads(t 
 	managerStore := &recoveryDisabledManagerStore{
 		recoveryGuardManagerStore: recoveryGuardManagerStore{
 			agents: []runtimemanager.PersistedAgent{{
-				Config: runtimeactors.AgentConfig{ID: "persisted-agent"},
+				Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "persisted-agent"},
 			}},
 		},
 	}

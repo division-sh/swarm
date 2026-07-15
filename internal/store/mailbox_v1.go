@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
 var ErrMailboxV1NotFound = errors.New("mailbox item not found")
@@ -34,6 +35,7 @@ type MailboxV1Item struct {
 	Status         string         `json:"status"`
 	Priority       string         `json:"priority"`
 	SourceEventID  string         `json:"source_event_id"`
+	ExecutionMode  string         `json:"execution_mode,omitempty"`
 	SourceRunID    string         `json:"-"`
 	SourceFlow     string         `json:"source_flow"`
 	SourceEntityID string         `json:"source_entity_id,omitempty"`
@@ -123,6 +125,7 @@ func (s *PostgresStore) ListV1MailboxItems(ctx context.Context, opts MailboxV1Li
 			COALESCE(m.decision_notes, ''),
 			COALESCE(m.from_agent, ''),
 			COALESCE(e.run_id::text, ''),
+			COALESCE(e.execution_mode, ''),
 			COALESCE(m.reply_context_id, '')
 		FROM mailbox m
 		LEFT JOIN events e ON e.event_id = m.source_event_id
@@ -277,6 +280,7 @@ type mailboxV1Row struct {
 	DecisionNotes  string
 	FromAgent      string
 	RunID          string
+	ExecutionMode  string
 	ReplyContextID string
 }
 
@@ -316,6 +320,7 @@ func (s *PostgresStore) loadMailboxV1RowTx(ctx context.Context, tx *sql.Tx, id s
 			COALESCE(m.decision_notes, ''),
 			COALESCE(m.from_agent, ''),
 			COALESCE(e.run_id::text, ''),
+			COALESCE(e.execution_mode, ''),
 			COALESCE(m.reply_context_id, '')
 		FROM mailbox m
 		LEFT JOIN events e ON e.event_id = m.source_event_id
@@ -358,6 +363,7 @@ func scanMailboxV1Rows(rows *sql.Rows) ([]mailboxV1Row, error) {
 			&row.DecisionNotes,
 			&row.FromAgent,
 			&row.RunID,
+			&row.ExecutionMode,
 			&row.ReplyContextID,
 		); err != nil {
 			return nil, fmt.Errorf("scan v1 mailbox item: %w", err)
@@ -369,12 +375,26 @@ func scanMailboxV1Rows(rows *sql.Rows) ([]mailboxV1Row, error) {
 		if row.Payload == nil {
 			row.Payload = map[string]any{}
 		}
+		if err := validateMailboxV1ExecutionMode(row.ExecutionMode); err != nil {
+			return nil, err
+		}
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate v1 mailbox items: %w", err)
 	}
 	return out, nil
+}
+
+func validateMailboxV1ExecutionMode(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	if _, ok := executionmode.Parse(raw); !ok {
+		return fmt.Errorf("mailbox source event has invalid execution_mode %q", raw)
+	}
+	return nil
 }
 
 func (r mailboxV1Row) projectItem() MailboxV1Item {
@@ -384,6 +404,7 @@ func (r mailboxV1Row) projectItem() MailboxV1Item {
 		Status:         mailboxV1APIStatus(r.Status, r.Decision, r.DeferredUntil),
 		Priority:       mailboxV1PriorityForSeverity(r.Priority),
 		SourceEventID:  strings.TrimSpace(r.SourceEventID),
+		ExecutionMode:  strings.TrimSpace(r.ExecutionMode),
 		SourceRunID:    strings.TrimSpace(r.RunID),
 		SourceFlow:     mailboxV1SourceFlow(r.FlowInstance),
 		SourceEntityID: strings.TrimSpace(r.EntityID),

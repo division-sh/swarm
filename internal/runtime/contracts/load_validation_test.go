@@ -467,6 +467,17 @@ subscriptions: [scan.requested]
 	}
 }
 
+func TestAgentRegistryEntryDecodesPythonMockPerformance(t *testing.T) {
+	var entry AgentRegistryEntry
+	err := yaml.Unmarshal([]byte("id: assistant\nmodel: regular\nmemory: false\nmock:\n  kind: python\n  module: mocks/assistant.py\n"), &entry)
+	if err != nil {
+		t.Fatalf("decode agent: %v", err)
+	}
+	if entry.Mock.Kind != "python" || entry.Mock.Module != "mocks/assistant.py" {
+		t.Fatalf("mock performance = %#v", entry.Mock)
+	}
+}
+
 func TestEffectiveAgentRegistryEntryAppliesLayer1PlatformDefaults(t *testing.T) {
 	var entry AgentRegistryEntry
 	err := yaml.Unmarshal([]byte(`

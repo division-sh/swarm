@@ -86,11 +86,12 @@ func TestOpenAICompatibleRuntimeConversationToolBudgetAndPersistence(t *testing.
 	}
 
 	ctx := runtimeactors.WithActor(harness.Context("openai-compatible-tool-loop"), runtimeactors.AgentConfig{
-		ID:       "agent-1",
-		Model:    "cheap",
-		EntityID: "entity-1",
-		FlowPath: "support/inst-1",
-		Memory:   testMemory(),
+		ExecutionMode: "live",
+		ID:            "agent-1",
+		Model:         "cheap",
+		EntityID:      "entity-1",
+		FlowPath:      "support/inst-1",
+		Memory:        testMemory(),
 	})
 	ctx = withTestMemory(ctx, "agent-1", "support/inst-1")
 	conv := NewConversation("agent-1", "task-1", "system prompt", []ToolDefinition{{
@@ -144,7 +145,7 @@ func TestOpenAICompatibleRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 	runtime := NewOpenAICompatibleRuntime(openAICompatibleTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
 	runtime.completionController = runtimeeffects.NewCompletionController(harness, harness)
 	runtime.credentials = testProviderCredentialResolver(t, "OPENAI_COMPATIBLE_API_KEY", "test-key")
-	ctx := runtimeactors.WithActor(harness.CompletionContext("openai-compatible-missing-usage"), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular", FlowPath: "test/stateless"})
+	ctx := runtimeactors.WithActor(harness.CompletionContext("openai-compatible-missing-usage"), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1", Model: "regular", FlowPath: "test/stateless"})
 	ctx = withTestStatelessMemory(ctx)
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
@@ -176,7 +177,7 @@ func TestAnthropicAPIRuntimeFailsClosedWhenUsageMissingForBudgetAccounting(t *te
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 
-	ctx := runtimeactors.WithActor(harness.CompletionContext("anthropic-missing-usage"), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular", FlowPath: "test/stateless"})
+	ctx := runtimeactors.WithActor(harness.CompletionContext("anthropic-missing-usage"), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1", Model: "regular", FlowPath: "test/stateless"})
 	ctx = withTestStatelessMemory(ctx)
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {

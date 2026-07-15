@@ -46,8 +46,9 @@ func TestGenerateEmitToolsForActor_FallsBackToRoleWhenConfigIsSilent(t *testing.
 	})
 	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
 	actor := models.AgentConfig{
-		ID:   "campaign-coordinator",
-		Role: "campaign_coordinator",
+		ExecutionMode: "live",
+		ID:            "campaign-coordinator",
+		Role:          "campaign_coordinator",
 	}
 
 	tools := registry.GenerateEmitToolsForActor(actor, nil)
@@ -122,7 +123,7 @@ func TestEmitRegistry_KeepsRuntimeSourcesIsolated(t *testing.T) {
 
 	registryA := NewEmitRegistry(sourceA, runtimeauthority.NewSourceProvider(sourceA))
 	registryB := NewEmitRegistry(sourceB, runtimeauthority.NewSourceProvider(sourceB))
-	actor := models.AgentConfig{ID: "coordinator", Role: "coordinator"}
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "coordinator", Role: "coordinator"}
 
 	toolsA := registryA.GenerateEmitToolsForActor(actor, nil)
 	toolsB := registryB.GenerateEmitToolsForActor(actor, nil)
@@ -199,11 +200,12 @@ func TestGenerateEmitToolsForActor_FailsClosedOnDuplicateLocalToolNames(t *testi
 	}
 	registry := NewEmitRegistry(semanticview.Wrap(bundle), nil)
 	actor := models.AgentConfig{
-		ID:         "dual-scope-agent",
-		Role:       "reviewer",
-		FlowID:     "review",
-		FlowPath:   "review",
-		EmitEvents: []string{"review/task.requested", "validation/task.requested"},
+		ExecutionMode: "live",
+		ID:            "dual-scope-agent",
+		Role:          "reviewer",
+		FlowID:        "review",
+		FlowPath:      "review",
+		EmitEvents:    []string{"review/task.requested", "validation/task.requested"},
 	}
 
 	var warnings []string
@@ -253,11 +255,12 @@ func TestGenerateEmitToolsForActor_ResolvesInstanceScopedFlowEmitEventsThroughOw
 	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
 
 	tools := registry.GenerateEmitToolsForActor(models.AgentConfig{
-		ID:         "review-coordinator-inst-1",
-		Role:       "review_coordinator",
-		FlowID:     "review",
-		FlowPath:   "review/inst-1",
-		EmitEvents: []string{"review/inst-1/scan.requested"},
+		ExecutionMode: "live",
+		ID:            "review-coordinator-inst-1",
+		Role:          "review_coordinator",
+		FlowID:        "review",
+		FlowPath:      "review/inst-1",
+		EmitEvents:    []string{"review/inst-1/scan.requested"},
 	}, nil)
 
 	if len(tools) != 1 {
@@ -301,9 +304,10 @@ func TestGenerateEmitToolsForActor_ProviderSchemaNormalizesPrecisionRefs(t *test
 	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
 
 	defs := registry.GenerateEmitToolsForActor(models.AgentConfig{
-		ID:         "market-research-agent",
-		Role:       "market_research",
-		EmitEvents: []string{"category.assessed"},
+		ExecutionMode: "live",
+		ID:            "market-research-agent",
+		Role:          "market_research",
+		EmitEvents:    []string{"category.assessed"},
 	}, nil)
 	if len(defs) != 1 {
 		t.Fatalf("tool count = %d, want 1 (%#v)", len(defs), defs)
@@ -365,9 +369,10 @@ func TestGenerateEmitToolsForActor_GeneratedSchemaIsClosedRequiredAndRejectsUnde
 	}
 	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
 	defs := registry.GenerateEmitToolsForActor(models.AgentConfig{
-		ID:         "analysis-agent",
-		Role:       "analysis",
-		EmitEvents: []string{"vertical.derived"},
+		ExecutionMode: "live",
+		ID:            "analysis-agent",
+		Role:          "analysis",
+		EmitEvents:    []string{"vertical.derived"},
 	}, nil)
 	if len(defs) != 1 {
 		t.Fatalf("tool count = %d, want 1 (%#v)", len(defs), defs)

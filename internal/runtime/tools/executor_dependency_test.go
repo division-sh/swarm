@@ -79,7 +79,7 @@ func (*humanTaskPersistenceStub) CompleteHumanTaskOutcome(context.Context, strin
 func TestExecutorMailboxSendFailsWithoutMailboxStore(t *testing.T) {
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{AuthorityProvider: allowMailboxAuthority{}})
 
-	_, err := exec.execMailboxSend(unmanagedToolTestContext(), models.AgentConfig{ID: "agent-1", EntityID: "entity-1"}, map[string]any{
+	_, err := exec.execMailboxSend(unmanagedToolTestContext(), models.AgentConfig{ExecutionMode: "live", ID: "agent-1", EntityID: "entity-1"}, map[string]any{
 		"type": "approval",
 	})
 	if err == nil || !strings.Contains(err.Error(), "mailbox store is not configured") {
@@ -94,7 +94,7 @@ func TestExecutorMailboxSendUsesConstructorOwnedMailboxStore(t *testing.T) {
 		AuthorityProvider: allowMailboxAuthority{},
 	})
 
-	out, err := exec.execMailboxSend(unmanagedToolTestContext(), models.AgentConfig{ID: "agent-1", EntityID: "entity-1"}, map[string]any{
+	out, err := exec.execMailboxSend(unmanagedToolTestContext(), models.AgentConfig{ExecutionMode: "live", ID: "agent-1", EntityID: "entity-1"}, map[string]any{
 		"type":    "approval",
 		"summary": "Need review",
 	})

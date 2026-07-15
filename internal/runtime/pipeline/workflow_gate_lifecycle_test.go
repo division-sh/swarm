@@ -13,7 +13,9 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -125,7 +127,8 @@ func TestHumanTaskDecisionRoutesDirectlyToRequesterInOneMutationOnBothStores(t *
 				}
 				card, err := decisioncard.New(decisioncard.Card{
 					CardID: uuid.NewString(), RunID: runID, Anchor: anchor, Snapshot: snapshot,
-					BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", CreatedAt: now,
+					ExecutionMode: "live",
+					BundleHash:    "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", CreatedAt: now,
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -221,7 +224,8 @@ func TestHumanTaskDeferredAndExpiredOutcomesUseRequesterRouteOnBothStores(t *tes
 				}
 				card, err := decisioncard.New(decisioncard.Card{
 					CardID: uuid.NewString(), RunID: runID, Anchor: anchor, Snapshot: snapshot,
-					BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", CreatedAt: now,
+					ExecutionMode: "live",
+					BundleHash:    "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", CreatedAt: now,
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -286,6 +290,7 @@ func TestWorkflowGateEntryUsesOneTransactionAndRollsBackOnCardFailure(t *testing
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			workflowStore, ctx := tc.open(t)
+			ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 			now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()
 			instance := WorkflowInstance{
@@ -555,6 +560,7 @@ func TestInitialStageLifecycleArmsStandingGateOnBothStores(t *testing.T) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			workflowStore, ctx := tc.open(t)
+			ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 			runID := runtimeRunID(ctx)
 			ensureGateLifecycleRun(t, workflowStore, runID)
 			entityID := uuid.NewString()

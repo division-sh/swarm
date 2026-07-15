@@ -14,8 +14,9 @@ import (
 func TestLoadPromptForAgent_UsesPromptRefAndWorkspaceRoleFallback(t *testing.T) {
 	resolver := NewBundlePromptResolver(loadPromptTestBundle(t, repoRoot(t)))
 	prompt, found, err := resolver.LoadPromptForAgent(models.AgentConfig{
-		ID:   "cos-entity-1",
-		Role: "ops_lead",
+		ExecutionMode: "live",
+		ID:            "cos-entity-1",
+		Role:          "ops_lead",
 	}, "")
 	if err != nil {
 		t.Fatalf("LoadPromptForAgent: %v", err)
@@ -39,8 +40,9 @@ func TestBundlePromptResolver_KeepsBundleStateIsolated(t *testing.T) {
 	}
 
 	promptA, found, err := NewBundlePromptResolver(bundleA).LoadPromptForAgent(models.AgentConfig{
-		ID:   "ops-lead",
-		Role: "ops_lead",
+		ExecutionMode: "live",
+		ID:            "ops-lead",
+		Role:          "ops_lead",
 	}, "")
 	if err != nil {
 		t.Fatalf("resolver A LoadPromptForAgent: %v", err)
@@ -49,8 +51,9 @@ func TestBundlePromptResolver_KeepsBundleStateIsolated(t *testing.T) {
 		t.Fatal("expected prompt for resolver A")
 	}
 	promptB, found, err := NewBundlePromptResolver(bundleB).LoadPromptForAgent(models.AgentConfig{
-		ID:   "ops-lead",
-		Role: "ops_lead",
+		ExecutionMode: "live",
+		ID:            "ops-lead",
+		Role:          "ops_lead",
 	}, "")
 	if err != nil {
 		t.Fatalf("resolver B LoadPromptForAgent: %v", err)
@@ -145,9 +148,10 @@ parent-agent:
 	}
 
 	resolution, found, err := NewBundlePromptResolver(bundle).ResolvePromptFileForAgent(models.AgentConfig{
-		ID:          "parent-agent-shard-1",
-		ParentAgent: "parent-agent",
-		Role:        "parent_role",
+		ExecutionMode: "live",
+		ID:            "parent-agent-shard-1",
+		ParentAgent:   "parent-agent",
+		Role:          "parent_role",
 	}, "")
 	if err != nil {
 		t.Fatalf("ResolvePromptFileForAgent shard parent: %v", err)
@@ -233,8 +237,9 @@ func TestPromptVariableValues_UsesSpecResolutionOrder(t *testing.T) {
 		}},
 	}
 	cfg := models.AgentConfig{
-		ID:       "agent-42",
-		FlowPath: "flows/demo/inst-1",
+		ExecutionMode: "live",
+		ID:            "agent-42",
+		FlowPath:      "flows/demo/inst-1",
 		Config: mustPromptJSON(t, map[string]any{
 			"team_name": "instance",
 			"memory":    true,
@@ -373,9 +378,10 @@ func TestLoadPromptForAgent_FailsClosedWhenRuntimeCriteriaWidensContractDelivery
 	}
 
 	_, found, err := NewBundlePromptResolver(bundle).LoadPromptForAgent(models.AgentConfig{
-		ID:       "cto-agent",
-		Role:     "cto",
-		Criteria: []string{"feasibility_exclusions"},
+		ExecutionMode: "live",
+		ID:            "cto-agent",
+		Role:          "cto",
+		Criteria:      []string{"feasibility_exclusions"},
 	}, "")
 	if found {
 		t.Fatal("LoadPromptForAgent found prompt, want criteria authority failure")
@@ -389,8 +395,9 @@ func TestLoadPromptForAgent_FailsClosedWhenCriteriaRefsHaveNoPromptFile(t *testi
 	t.Run("runtime config criteria", func(t *testing.T) {
 		resolver := NewBundlePromptResolver(&WorkflowContractBundle{})
 		_, found, err := resolver.LoadPromptForAgent(models.AgentConfig{
-			ID:       "cto-agent",
-			Criteria: []string{"feasibility_exclusions"},
+			ExecutionMode: "live",
+			ID:            "cto-agent",
+			Criteria:      []string{"feasibility_exclusions"},
 		}, "")
 		if found {
 			t.Fatal("LoadPromptForAgent found prompt, want criteria delivery failure")
@@ -410,7 +417,7 @@ func TestLoadPromptForAgent_FailsClosedWhenCriteriaRefsHaveNoPromptFile(t *testi
 			},
 		}
 		resolver := NewBundlePromptResolver(bundle)
-		_, found, err := resolver.LoadPromptForAgent(models.AgentConfig{ID: "cto-agent"}, "")
+		_, found, err := resolver.LoadPromptForAgent(models.AgentConfig{ExecutionMode: "live", ID: "cto-agent"}, "")
 		if found {
 			t.Fatal("LoadPromptForAgent found prompt, want criteria delivery failure")
 		}

@@ -77,7 +77,7 @@ worker-agent:
 	if err != nil {
 		t.Fatalf("newRuntimePromptResolver: %v", err)
 	}
-	prompt, found, err := resolver.LoadPromptForAgent(models.AgentConfig{ID: "worker-agent"}, "")
+	prompt, found, err := resolver.LoadPromptForAgent(models.AgentConfig{ExecutionMode: "live", ID: "worker-agent"}, "")
 	if err != nil {
 		t.Fatalf("LoadPromptForAgent: %v", err)
 	}

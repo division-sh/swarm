@@ -141,9 +141,10 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(
 		withTestMemory(runtimeactors.WithActor(effects.Context("claude-supported-read-file"), runtimeactors.AgentConfig{
-			ID:       "market-research-agent",
-			FlowPath: "market/inst-1",
-			Memory:   testMemory(),
+			ExecutionMode: "live",
+			ID:            "market-research-agent",
+			FlowPath:      "market/inst-1",
+			Memory:        testMemory(),
 			NativeTools: runtimeactors.NativeToolConfig{
 				FileIO: true,
 			},

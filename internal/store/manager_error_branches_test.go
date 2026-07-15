@@ -21,7 +21,7 @@ func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 
 	// UpsertAgent: missing id.
-	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{Config: runtimeactors.AgentConfig{}}); err == nil {
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{Config: runtimeactors.AgentConfig{ExecutionMode: "live"}}); err == nil {
 		t.Fatal("expected missing agent id error")
 	}
 
@@ -74,7 +74,7 @@ func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 	// UpsertEventReceipt should accept empty errText; also exercise invalid status guardrails indirectly.
 	aid := "a1"
 	_ = pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{ID: aid, Role: "r", FlowID: "global", Type: "stub", Model: "regular", Config: []byte(`{"subscriptions":["*"]}`)},
+		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: aid, Role: "r", FlowID: "global", Type: "stub", Model: "regular", Config: []byte(`{"subscriptions":["*"]}`)},
 		Status: "active", HiredBy: "t", StartedAt: time.Now(),
 	})
 	evtID := uuid.NewString()

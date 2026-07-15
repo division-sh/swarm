@@ -140,10 +140,10 @@ func TestSQLiteRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
+		INSERT INTO events (execution_mode, run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES
-			(?, ?, 'item.received', NULL, 'global', '{}', 'runtime', 'platform', ?),
-			(?, ?, 'platform.runtime_log', NULL, 'global', '{}', 'runtime', 'platform', ?)
+			('live', ?, ?, 'item.received', NULL, 'global', '{}', 'runtime', 'platform', ?),
+			('live', ?, ?, 'platform.runtime_log', NULL, 'global', '{}', 'runtime', 'platform', ?)
 	`, runID, businessEvent, base, runID, runtimeLogEvent, base.Add(time.Millisecond)); err != nil {
 		t.Fatalf("seed trace rows: %v", err)
 	}
@@ -179,8 +179,8 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES (?, ?, 'trace.task_audit', NULL, 'global', '{}', 'runtime', 'platform', ?)
+		INSERT INTO events (execution_mode, run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ('live', ?, ?, 'trace.task_audit', NULL, 'global', '{}', 'runtime', 'platform', ?)
 	`, runID, eventID, base); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -286,8 +286,8 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 	}
 	for _, event := range events {
 		if _, err := sqliteStore.DB.ExecContext(ctx, `
-			INSERT INTO events (run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES (?, ?, ?, NULL, 'global', '{}', 'runtime', 'platform', ?)
+			INSERT INTO events (execution_mode, run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
+			VALUES ('live', ?, ?, ?, NULL, 'global', '{}', 'runtime', 'platform', ?)
 		`, fixture.runID, event.id, event.name, event.at); err != nil {
 			t.Fatalf("seed event %s: %v", event.name, err)
 		}
@@ -372,12 +372,12 @@ func insertSQLiteTraceTurnWithMemory(t *testing.T, ctx context.Context, sqliteSt
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, failure, created_at
+			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, failure, execution_mode, created_at
 		) VALUES (
 			?, ?, ?, ?, 'flow-a', ?, ?, NULL,
 			?, ?, 'task-1', '[]', '[]',
 			'[]', '{}', '[]', '[]',
-			'{}', '{}', '[]', 1, 0, 0, NULL, ?
+			'{}', '{}', '[]', 1, 0, 0, NULL, 'live', ?
 		)
 	`, turnID, runID, agentID, sessionID, memoryEnabled, memorySource, eventID, eventName, createdAt); err != nil {
 		t.Fatalf("seed turn %s/%s: %v", agentID, turnID, err)

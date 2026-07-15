@@ -138,10 +138,10 @@ func seedHistoricalReplayRecoverySourceRun(t *testing.T, db *sql.DB, sourceRunID
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.ready', $3::uuid, NULL, 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.ready', $3::uuid, NULL, 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, sourceRunID, eventID, entityID, at); err != nil {
 		t.Fatalf("seed source event: %v", err)
 	}
@@ -457,9 +457,9 @@ func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing
 	goodEventID := uuid.NewString()
 	goodRecipientID := "agent-good"
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			$1::uuid, 'system.recover', 'global', '{}'::jsonb, 'runtime', 'platform', now()
 		)
 	`, badEventID); err != nil {
@@ -735,9 +735,9 @@ func TestRecoveryManager_DoesNotEmitAftermathLogForRuntimeLogReplayCandidate(t *
 
 	eventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			$1::uuid, 'platform.runtime_log', 'global', '{"message":"prior diagnostics"}'::jsonb, 'runtime', 'platform', now()
 		)
 	`, eventID); err != nil {

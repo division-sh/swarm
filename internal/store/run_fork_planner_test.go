@@ -28,19 +28,19 @@ func TestRunForkPlanner_ResolvesCommitOrderedEventRevisionsAndRejectsTimestampSe
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.first', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.first', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, firstEventID, at); err != nil {
 		t.Fatalf("seed first event: %v", err)
 	}
 	firstRevision := captureRunForkTestRevision(t, db, runID)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.second', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.second', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, secondEventID, at); err != nil {
 		t.Fatalf("seed second event: %v", err)
 	}
@@ -90,8 +90,8 @@ func TestRunForkPlanner_FailsClosedForOpenReplyContextAtForkPoint(t *testing.T) 
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ($1::uuid, $2::uuid, 'provider.requested', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ('live', $1::uuid, $2::uuid, 'provider.requested', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, requestEventID, at); err != nil {
 		t.Fatalf("seed request event: %v", err)
 	}
@@ -140,10 +140,10 @@ func TestRunForkPlanner_ReconstructsEntityStateAtForkPointFromMutations(t *testi
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.before', $3::uuid, 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.before', $3::uuid, 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, runID, firstEventID, entityID, at); err != nil {
 		t.Fatalf("seed first event: %v", err)
 	}
@@ -161,10 +161,10 @@ func TestRunForkPlanner_ReconstructsEntityStateAtForkPointFromMutations(t *testi
 	}
 	captureRunForkTestRevision(t, db, runID)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.after', $3::uuid, 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.after', $3::uuid, 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, runID, secondEventID, entityID, at); err != nil {
 		t.Fatalf("seed second event: %v", err)
 	}
@@ -220,10 +220,10 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.work', 'review/inst-1', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.work', 'review/inst-1', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -338,10 +338,10 @@ func TestRunForkPlanner_PendingUnstartedDeliveryIsDeliveryEventReplayReady(t *te
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.safe_pending', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.safe_pending', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -394,10 +394,10 @@ func TestRunForkPlanner_NodePendingDeliveryRemainsBlocked(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.node_pending', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.node_pending', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -486,10 +486,10 @@ func TestRunForkPlanner_NonAgentDeliveryStatesRemainNamedBlockers(t *testing.T) 
 				t.Fatalf("seed run: %v", err)
 			}
 			if _, err := db.ExecContext(ctx, `
-				INSERT INTO events (
+				INSERT INTO events (execution_mode,
 					run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 				)
-				VALUES ($1::uuid, $2::uuid, 'fork.non_agent', 'global', '{}'::jsonb, 'test', 'platform', $3)
+				VALUES ('live', $1::uuid, $2::uuid, 'fork.non_agent', 'global', '{}'::jsonb, 'test', 'platform', $3)
 			`, runID, eventID, at); err != nil {
 				t.Fatalf("seed event: %v", err)
 			}
@@ -551,10 +551,10 @@ func TestRunForkPlanner_ReplayScopeMarkerRemainsCommittedReplayBlocker(t *testin
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.replay_scope', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.replay_scope', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -600,10 +600,10 @@ func TestRunForkPlanner_SystemDeliveryRowsAreNotCanonicalEventDeliveries(t *test
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.system_delivery', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.system_delivery', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -637,10 +637,10 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.state', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.state', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, runID, eventID, entityID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -757,10 +757,10 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.timer_route', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.timer_route', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, runID, eventID, entityID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -824,10 +824,10 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.work', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.work', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -908,10 +908,10 @@ func TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork(t *test
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.work', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.work', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -980,10 +980,10 @@ func TestRunForkPlanner_SuppressesPostForkTerminalMetadata(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.work', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.work', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -1046,10 +1046,10 @@ func TestRunForkPlanner_AccountsForReceiptOnlyPlatformAndNodeProcessing(t *testi
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.work', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.work', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -1136,10 +1136,10 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.session', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.session', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -1161,9 +1161,9 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, created_at
+			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, execution_mode, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'fork-planner', TRUE, 'authored', $4::uuid, 'fork.session', $5)
+		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'fork-planner', TRUE, 'authored', $4::uuid, 'fork.session', 'live', $5)
 	`, turnID, runID, sessionID, eventID, at); err != nil {
 		t.Fatalf("seed active turn: %v", err)
 	}
@@ -1204,10 +1204,10 @@ func TestRunForkPlanner_ActiveConversationAuditRemainsPolicyBlocker(t *testing.T
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.task_audit', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.task_audit', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -1252,10 +1252,10 @@ func TestRunForkPlanner_TerminatedSessionBeforeForkIsLineageOnly(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.completed_session', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.completed_session', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -1306,10 +1306,10 @@ func TestRunForkPlanner_TerminatedAuditStillBlocksWithoutAtForkTerminationProof(
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.terminated_audit', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.terminated_audit', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}

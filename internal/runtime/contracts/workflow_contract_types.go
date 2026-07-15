@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
+	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1918,6 +1919,7 @@ type AgentRegistryEntry struct {
 	NodeType               string                          `yaml:"node_type"`
 	Model                  string                          `yaml:"model"`
 	Memory                 bool                            `yaml:"memory"`
+	Mock                   mockperformance.Performance     `yaml:"mock" json:"mock,omitempty"`
 	MemoryPlan             agentmemory.Plan                `yaml:"-" json:"memory_plan"`
 	MaxTurnsPerTask        int                             `yaml:"max_turns_per_task"`
 	PromptInputs           []string                        `yaml:"prompt_inputs" json:"prompt_inputs,omitempty"`
@@ -2012,6 +2014,7 @@ var agentRegistryEntryFieldOptions = map[string]struct{}{
 	"node_type":          {},
 	"model":              {},
 	"memory":             {},
+	"mock":               {},
 	"max_turns_per_task": {},
 	"subscriptions":      {},
 	"prompt_inputs":      {},

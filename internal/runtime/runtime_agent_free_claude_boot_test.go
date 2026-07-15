@@ -126,7 +126,7 @@ func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupBinding(t *test
 		t.Fatalf("NewRuntime: %v", err)
 	}
 	t.Cleanup(func() { _ = rt.Shutdown() })
-	if err := rt.Manager.SpawnAgent(runtimeactors.AgentConfig{ID: "recovered-agent", Role: "recovered", Model: "regular", Config: json.RawMessage(`{"system_prompt":"Recovered agent"}`)}); err != nil {
+	if err := rt.Manager.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: "recovered-agent", Role: "recovered", Model: "regular", Config: json.RawMessage(`{"system_prompt":"Recovered agent"}`)}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 

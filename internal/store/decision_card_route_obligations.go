@@ -43,7 +43,7 @@ func (s *PostgresStore) ListDueDecisionRouteObligations(ctx context.Context, now
 		SELECT e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name,
 			COALESCE(e.produced_by, ''), COALESCE(e.entity_id::text, ''),
 			COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'), e.payload,
-			e.created_at, COALESCE(e.source_event_id::text, ''),
+			e.created_at, COALESCE(e.source_event_id::text, ''), e.execution_mode,
 			COALESCE(e.source_route, '{}'::jsonb), COALESCE(e.target_route, '{}'::jsonb),
 			COALESCE(e.target_set, '[]'::jsonb)
 		FROM decision_card_route_obligations o
@@ -73,7 +73,7 @@ func (s *SQLiteRuntimeStore) ListDueDecisionRouteObligations(ctx context.Context
 		SELECT e.event_id, COALESCE(e.run_id, ''), e.event_name,
 			COALESCE(e.produced_by, ''), COALESCE(e.entity_id, ''),
 			COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'), e.payload,
-			e.created_at, COALESCE(e.source_event_id, ''),
+			e.created_at, COALESCE(e.source_event_id, ''), e.execution_mode,
 			COALESCE(e.source_route, '{}'), COALESCE(e.target_route, '{}'),
 			COALESCE(e.target_set, '[]')
 		FROM decision_card_route_obligations o
@@ -92,10 +92,10 @@ func scanDecisionRouteObligationEvents(rows *sql.Rows, limit int) ([]events.Pers
 	defer rows.Close()
 	out := make([]events.PersistedReplayEvent, 0, limit)
 	for rows.Next() {
-		var eventID, runID, eventName, producedBy, entityID, flowInstance, scope, sourceEventID string
+		var eventID, runID, eventName, producedBy, entityID, flowInstance, scope, sourceEventID, executionMode string
 		var payloadRaw, createdAtRaw, sourceRouteRaw, targetRouteRaw, targetSetRaw any
 		if err := rows.Scan(&eventID, &runID, &eventName, &producedBy, &entityID, &flowInstance, &scope,
-			&payloadRaw, &createdAtRaw, &sourceEventID, &sourceRouteRaw, &targetRouteRaw, &targetSetRaw); err != nil {
+			&payloadRaw, &createdAtRaw, &sourceEventID, &executionMode, &sourceRouteRaw, &targetRouteRaw, &targetSetRaw); err != nil {
 			return nil, fmt.Errorf("scan decision route obligation: %w", err)
 		}
 		createdAt, ok, err := sqliteTimeValue(createdAtRaw)
@@ -105,6 +105,10 @@ func scanDecisionRouteObligationEvents(rows *sql.Rows, limit int) ([]events.Pers
 		evt := events.NewProjectionEvent(eventID, events.EventType(eventName), producedBy, "", sqliteJSONRawMessage(payloadRaw), 0,
 			runID, sourceEventID, eventEnvelopeFromStorage(entityID, flowInstance, scope,
 				sqliteJSONRawMessage(sourceRouteRaw), sqliteJSONRawMessage(targetRouteRaw), sqliteJSONRawMessage(targetSetRaw)), createdAt.UTC())
+		evt, err = eventWithStoredExecutionMode(evt, executionMode)
+		if err != nil {
+			return nil, err
+		}
 		record := events.PersistedReplayEvent{Event: evt}
 		if strings.TrimSpace(runID) == "" {
 			record.ReplayFailure = replayAdmissionFailure("missing_canonical_run_id")

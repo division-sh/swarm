@@ -266,7 +266,7 @@ func TestAnthropicProviderAdmissionNeverRedispatchesAmbiguousFailure(t *testing.
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 
-	ctx := runtimeactors.WithActor(harness.CompletionContext("anthropic-admission-no-redispatch"), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular, FlowPath: "test/stateless"})
+	ctx := runtimeactors.WithActor(harness.CompletionContext("anthropic-admission-no-redispatch"), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1", Model: llmselection.ModelAliasRegular, FlowPath: "test/stateless"})
 	ctx = withTestStatelessMemory(ctx)
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
@@ -394,7 +394,7 @@ func TestClaudeCLIProviderAdmissionRejectsBeforeSubprocessDispatch(t *testing.T)
 	}
 	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil)
 	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
-	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
+	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1", Model: llmselection.ModelAliasRegular})
 	scriptPath, countFile := writeProviderAdmissionFakeDocker(t, `cat >/dev/null
 printf '%s\n' '{"result":"done"}'
 `)
@@ -436,7 +436,7 @@ func TestClaudeCLIUnstructuredPromptTransportFailureDoesNotRetry(t *testing.T) {
 	}
 	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil)
 	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
-	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
+	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1", Model: llmselection.ModelAliasRegular})
 	scriptPath, countFile := writeProviderAdmissionFakeDocker(t, `cat >/dev/null
 if [ "$count" = "1" ]; then
   printf '%s\n' 'input must be provided either through stdin or as a prompt argument when using --print' >&2

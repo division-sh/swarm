@@ -83,11 +83,11 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionMarksCompletedAndIgnoresRu
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
 	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, run_id, event_name, entity_id, flow_instance, source_route, target_route, target_set,
 			scope, payload, chain_depth, produced_by, produced_by_type, source_event_id, created_at
 		)
-		VALUES (?, ?, ?, NULL, NULL, '{}', '{}', '[]', 'global', ?, 0, 'runtime', 'platform', ?, ?)
+		VALUES ('live', ?, ?, ?, NULL, NULL, '{}', '{}', '[]', 'global', ?, 0, 'runtime', 'platform', ?, ?)
 	`, uuid.NewString(), fixture.RunID, runtimeLogEventName, `{"message":"diagnostic"}`, fixture.EventID, time.Now().UTC()); err != nil {
 		t.Fatalf("seed sqlite runtime log: %v", err)
 	}
@@ -155,10 +155,10 @@ func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
 	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO events (event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES
-			(?, ?, 'scan.requested', ?, 'entity', '{}', 'test', 'agent', ?),
-			(?, ?, 'scan.replayed', ?, 'entity', '{}', 'test', 'agent', ?)
+			('live', ?, ?, 'scan.requested', ?, 'entity', '{}', 'test', 'agent', ?),
+			('live', ?, ?, 'scan.replayed', ?, 'entity', '{}', 'test', 'agent', ?)
 	`, uuid.NewString(), runID, eventEntityA, now.Add(time.Second), uuid.NewString(), runID, eventEntityB, now.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed sqlite events: %v", err)
 	}

@@ -84,8 +84,8 @@ func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 		"src", "", []byte(`{"entity_id":"`+uuid.NewString()+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ($1::uuid, $2, NULLIF($3,'')::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
+		INSERT INTO events (execution_mode, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ('live', $1::uuid, $2, NULLIF($3,'')::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
 	`, evt.ID(), string(evt.Type()), evt.EntityID(), string(evt.Payload())); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -158,8 +158,8 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 	)
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ($1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
+		INSERT INTO events (execution_mode, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ('live', $1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
 	`, evt.ID(), string(evt.Type()), entityID, string(evt.Payload())); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -215,9 +215,9 @@ func TestSystemNodeRunner_SkipsQuiescedDestructiveResetDelivery(t *testing.T) {
 	ctx := testPipelineRunContext(t, db)
 	eventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			$1::uuid, $2::uuid, 'source.evt', 'global', '{}'::jsonb, 'src', 'agent', now()
 		)
 	`, eventID, testPipelineRunID); err != nil {
@@ -316,8 +316,8 @@ func TestSystemNodeRunner_FailsClosedWithoutCanonicalEventReceiptsCapability(t *
 	)
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ($1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
+		INSERT INTO events (execution_mode, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ('live', $1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
 	`, evt.ID(), string(evt.Type()), entityID, string(evt.Payload())); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -359,8 +359,8 @@ func TestSystemNodeRunner_UsesCanonicalEventReceiptsCapabilityForIdempotency(t *
 	)
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ($1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
+		INSERT INTO events (execution_mode, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ('live', $1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
 	`, evt.ID(), string(evt.Type()), entityID, string(evt.Payload())); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -409,8 +409,8 @@ func TestSystemNodeRunner_SkipsWithoutPersistedNodeDeliveryAuthority(t *testing.
 	)
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ($1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
+		INSERT INTO events (execution_mode, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ('live', $1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
 	`, evt.ID(), string(evt.Type()), entityID, string(evt.Payload())); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -510,8 +510,8 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 	)
 
 	if _, err := db.ExecContext(context.Background(), `
-		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ($1::uuid, $2, NULLIF($3,'')::uuid, 'runtime', 'entity', $4::jsonb, 'analysis-agent', 'agent', now())
+		INSERT INTO events (execution_mode, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ('live', $1::uuid, $2, NULLIF($3,'')::uuid, 'runtime', 'entity', $4::jsonb, 'analysis-agent', 'agent', now())
 	`, evt.ID(), string(evt.Type()), evt.EntityID(), string(evt.Payload())); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}

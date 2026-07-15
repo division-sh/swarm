@@ -136,7 +136,8 @@ func TestProviderRuntimesFailBeforeAgentStartedWhenExactAcquireHydrateFails(t *t
 			runtime := construct(registry, publisher)
 			ctx := withTestMemory(unmanagedLLMTestContext(), "agent-1", "support/instance-1")
 			ctx = runtimeactors.WithActor(ctx, runtimeactors.AgentConfig{
-				ID: "agent-1", Model: "regular", Memory: testMemory(), FlowPath: "support/instance-1",
+				ExecutionMode: "live",
+				ID:            "agent-1", Model: "regular", Memory: testMemory(), FlowPath: "support/instance-1",
 			})
 			if _, err := runtime.StartSession(ctx, "agent-1", "system", nil); !errors.Is(err, wantErr) {
 				t.Fatalf("StartSession error = %v, want exact acquire-hydrate failure", err)
@@ -175,9 +176,10 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, publisher)
 	ctx := runtimeactors.WithActor(withTestStatelessMemory(unmanagedLLMTestContext()), runtimeactors.AgentConfig{
-		ID:       "agent-1",
-		Model:    "regular",
-		EntityID: "entity-1",
+		ExecutionMode: "live",
+		ID:            "agent-1",
+		Model:         "regular",
+		EntityID:      "entity-1",
 	})
 
 	s, err := runtime.StartSession(ctx, "agent-1", "system", nil)
@@ -225,8 +227,9 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, publisher)
 	ctx := runtimeactors.WithActor(withTestStatelessMemory(unmanagedLLMTestContext()), runtimeactors.AgentConfig{
-		ID:    "agent-2",
-		Model: "cheap",
+		ExecutionMode: "live",
+		ID:            "agent-2",
+		Model:         "cheap",
 	})
 
 	s, err := runtime.StartSession(ctx, "agent-2", "system", nil)
@@ -300,7 +303,8 @@ func TestAnthropicAPIRuntime_StartSessionAugmentsSystemPromptWithDerivedToolSurf
 	ctx := runtimeactors.WithActor(
 		withTestStatelessMemory(unmanagedLLMTestContext()),
 		runtimeactors.AgentConfig{
-			ID: "agent-3",
+			ExecutionMode: "live",
+			ID:            "agent-3",
 			NativeTools: runtimeactors.NativeToolConfig{
 				FileIO: true,
 			},
@@ -350,8 +354,9 @@ func TestAnthropicAPIRuntime_StartSessionAugmentsSystemPromptWithDerivedToolSurf
 func TestPublishAgentStarted_LogsActiveTransitionOnlyAfterRealDeliveryMark(t *testing.T) {
 	publisher := &eventPublisherStub{markChanged: true}
 	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
-		ID:       "agent-1",
-		EntityID: "entity-1",
+		ExecutionMode: "live",
+		ID:            "agent-1",
+		EntityID:      "entity-1",
 	})
 
 	publishAgentStarted(ctx, publisher, &Session{
@@ -377,7 +382,8 @@ func TestPublishAgentStarted_LogsActiveTransitionOnlyAfterRealDeliveryMark(t *te
 
 func TestEnrichTurnRecord_UsesCanonicalVisibleToolsForNativeCapabilities(t *testing.T) {
 	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
-		ID: "analysis-agent",
+		ExecutionMode: "live",
+		ID:            "analysis-agent",
 		NativeTools: runtimeactors.NativeToolConfig{
 			FileIO: true,
 			Bash:   true,
@@ -428,7 +434,8 @@ func TestEnrichTurnRecord_CarriesInboundFlowInstance(t *testing.T) {
 
 func TestEnrichTurnRecord_FiltersCLIControlToolsFromObservedVisibleTools(t *testing.T) {
 	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
-		ID: "analysis-agent",
+		ExecutionMode: "live",
+		ID:            "analysis-agent",
 		NativeTools: runtimeactors.NativeToolConfig{
 			FileIO: true,
 		},
@@ -452,7 +459,8 @@ func TestEnrichTurnRecord_FiltersCLIControlToolsFromObservedVisibleTools(t *test
 
 func TestEnrichTurnRecord_UsesEmitFallbackWhenObservedCLISurfaceExistsWithoutVisibleNonEmitTools(t *testing.T) {
 	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
-		ID: "analysis-agent",
+		ExecutionMode: "live",
+		ID:            "analysis-agent",
 		NativeTools: runtimeactors.NativeToolConfig{
 			FileIO: true,
 		},
@@ -479,7 +487,8 @@ func TestEnrichTurnRecord_UsesEmitFallbackWhenObservedCLISurfaceExistsWithoutVis
 
 func TestEnrichTurnRecord_PreservesEmitFallbackAlongsideObservedSupportedReadFileSurface(t *testing.T) {
 	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
-		ID: "analysis-agent",
+		ExecutionMode: "live",
+		ID:            "analysis-agent",
 		NativeTools: runtimeactors.NativeToolConfig{
 			FileIO: true,
 		},
@@ -505,7 +514,8 @@ func TestEnrichTurnRecord_PreservesEmitFallbackAlongsideObservedSupportedReadFil
 
 func TestEnrichTurnRecord_NativeBuiltinsDoNotLeakIntoMCPToolsListed(t *testing.T) {
 	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
-		ID: "analysis-agent",
+		ExecutionMode: "live",
+		ID:            "analysis-agent",
 		NativeTools: runtimeactors.NativeToolConfig{
 			FileIO:    true,
 			Bash:      true,
@@ -536,7 +546,8 @@ func TestEnrichTurnRecord_NativeBuiltinsDoNotLeakIntoMCPToolsListed(t *testing.T
 
 func TestEnrichTurnRecord_UsesPlannedConfiguredSurfaceWhenObservedMetadataIsAbsent(t *testing.T) {
 	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
-		ID: "analysis-agent",
+		ExecutionMode: "live",
+		ID:            "analysis-agent",
 	})
 	rec := enrichTurnRecord(ctx, &Session{
 		ID: "session-1",
@@ -560,7 +571,8 @@ func TestEnrichTurnRecord_UsesPlannedConfiguredSurfaceWhenObservedMetadataIsAbse
 
 func TestEnrichTurnRecord_PrefersObservedToolCallsForPersistenceWhenExecutionCallsAreSuppressed(t *testing.T) {
 	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
-		ID: "analysis-agent",
+		ExecutionMode: "live",
+		ID:            "analysis-agent",
 	})
 	rec := enrichTurnRecord(ctx, &Session{
 		ID: "session-1",
@@ -584,7 +596,8 @@ func TestEnrichTurnRecord_PrefersObservedToolCallsForPersistenceWhenExecutionCal
 
 func TestClaudeCLIRuntimePrompt_HidesNativeCapabilityFallbackToolsFromPostamble(t *testing.T) {
 	actor := runtimeactors.AgentConfig{
-		ID: "analysis-agent",
+		ExecutionMode: "live",
+		ID:            "analysis-agent",
 		NativeTools: runtimeactors.NativeToolConfig{
 			FileIO: true,
 			Bash:   true,
@@ -617,8 +630,9 @@ func TestClaudeCLIRuntimePrompt_HidesNativeCapabilityFallbackToolsFromPostamble(
 
 func TestClaudeCLIRuntimePrompt_IncludesWritableEntityPathSummary(t *testing.T) {
 	actor := runtimeactors.AgentConfig{
-		ID:   "analysis-agent",
-		Role: "analysis",
+		ExecutionMode: "live",
+		ID:            "analysis-agent",
+		Role:          "analysis",
 	}
 	prompt := augmentCLISystemPrompt("base prompt", actor, []ToolDefinition{
 		{Name: "save_entity_field", Schema: map[string]any{
@@ -665,8 +679,9 @@ func TestPublishAgentStarted_LogsRuntimeFailures(t *testing.T) {
 		publishErr: errors.New("publish boom"),
 	}
 	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
-		ID:       "agent-1",
-		EntityID: "entity-1",
+		ExecutionMode: "live",
+		ID:            "agent-1",
+		EntityID:      "entity-1",
 	})
 
 	publishAgentStarted(ctx, publisher, &Session{
@@ -820,10 +835,11 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 			withTestMemory(effects.Context("anthropic-reused-session"), "agent-1", "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
-			ID:       "agent-1",
-			Model:    "regular",
-			Memory:   testMemory(),
-			FlowPath: "support/inst-1",
+			ExecutionMode: "live",
+			ID:            "agent-1",
+			Model:         "regular",
+			Memory:        testMemory(),
+			FlowPath:      "support/inst-1",
 		},
 	)
 
@@ -862,10 +878,11 @@ func TestAnthropicAPIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(
 			withTestMemory(unmanagedLLMTestContext(), "agent-1", "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
-			ID:       "agent-1",
-			Model:    "regular",
-			Memory:   testMemory(),
-			FlowPath: "support/inst-1",
+			ExecutionMode: "live",
+			ID:            "agent-1",
+			Model:         "regular",
+			Memory:        testMemory(),
+			FlowPath:      "support/inst-1",
 		},
 	)
 
@@ -896,10 +913,11 @@ func TestClaudeCLIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(t *
 			withTestMemory(unmanagedLLMTestContext(), "agent-1", "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
-			ID:       "agent-1",
-			Model:    "regular",
-			Memory:   testMemory(),
-			FlowPath: "support/inst-1",
+			ExecutionMode: "live",
+			ID:            "agent-1",
+			Model:         "regular",
+			Memory:        testMemory(),
+			FlowPath:      "support/inst-1",
 		},
 	)
 

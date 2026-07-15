@@ -64,8 +64,8 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence(t
 		t.Fatalf("seed runs: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type)
-		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform')
+		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type, execution_mode)
+		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform', 'live')
 	`, sourceRunID, eventID); err != nil {
 		t.Fatalf("seed fork point event: %v", err)
 	}
@@ -119,8 +119,8 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection
 		t.Fatalf("seed runs: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type)
-		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform')
+		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type, execution_mode)
+		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform', 'live')
 	`, sourceRunID, eventID); err != nil {
 		t.Fatalf("seed fork point event: %v", err)
 	}
@@ -181,8 +181,8 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJS
 		t.Fatalf("seed runs: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type)
-		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform')
+		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type, execution_mode)
+		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform', 'live')
 	`, sourceRunID, eventID); err != nil {
 		t.Fatalf("seed fork point event: %v", err)
 	}
@@ -239,8 +239,8 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 		t.Fatalf("seed runs: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type)
-		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform')
+		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type, execution_mode)
+		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform', 'live')
 	`, sourceRunID, eventID); err != nil {
 		t.Fatalf("seed fork point event: %v", err)
 	}
@@ -306,8 +306,8 @@ func TestRecordRunForkSelectedContractRouteRecoveryRejectsJSONBTamperDuringManag
 		t.Fatalf("seed runs: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type)
-		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform')
+		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type, execution_mode)
+		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform', 'live')
 	`, sourceRunID, eventID); err != nil {
 		t.Fatalf("seed fork point event: %v", err)
 	}

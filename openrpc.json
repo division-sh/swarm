@@ -9662,6 +9662,9 @@
           "agent_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
+          "execution_mode": {
+            "$ref": "#/components/schemas/ExecutionMode"
+          },
           "flow_instance": {
             "description": "Present when the agent is owned by a flow instance.",
             "minLength": 1,
@@ -9694,6 +9697,7 @@
           "model",
           "memory",
           "memory_source",
+          "execution_mode",
           "status"
         ],
         "type": "object"
@@ -9733,6 +9737,14 @@
             "minLength": 1,
             "type": "string"
           },
+          "cost_display": {
+            "description": "Author-facing cost qualification; mock rows are always labeled hypothetical rather than provider-billed.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "execution_mode": {
+            "$ref": "#/components/schemas/ExecutionMode"
+          },
           "invocation_type": {
             "description": "Backend profile id recorded by the spend ledger, such as anthropic, claude_cli, openai_compatible, or openai_responses.",
             "minLength": 1,
@@ -9771,6 +9783,7 @@
           }
         },
         "required": [
+          "execution_mode",
           "usage_accounting",
           "invocation_type",
           "model",
@@ -9779,6 +9792,7 @@
           "provider",
           "transport",
           "resolved_model",
+          "cost_display",
           "totals"
         ],
         "type": "object"
@@ -10707,6 +10721,9 @@
         "additionalProperties": false,
         "description": "Fork-local transcript turn. It intentionally is not an agent_turns row and may not have a live trigger event.",
         "properties": {
+          "execution_mode": {
+            "$ref": "#/components/schemas/ExecutionMode"
+          },
           "failure": {
             "$ref": "#/components/schemas/FailureEnvelope"
           },
@@ -10757,7 +10774,8 @@
           "turn_index",
           "turn_id",
           "parse_ok",
-          "latency_ms"
+          "latency_ms",
+          "execution_mode"
         ],
         "type": "object"
       },
@@ -10861,6 +10879,9 @@
             "minimum": 0,
             "type": "integer"
           },
+          "execution_mode": {
+            "$ref": "#/components/schemas/ExecutionMode"
+          },
           "failure": {
             "$ref": "#/components/schemas/FailureEnvelope"
           },
@@ -10894,7 +10915,8 @@
           "completed_at",
           "duration_ms",
           "activity_counts",
-          "parse_ok"
+          "parse_ok",
+          "execution_mode"
         ],
         "type": "object"
       },
@@ -10990,6 +11012,9 @@
           "effect_content_hash": {
             "type": "string"
           },
+          "execution_mode": {
+            "$ref": "#/components/schemas/ExecutionMode"
+          },
           "run_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
@@ -11010,6 +11035,7 @@
         "required": [
           "card_id",
           "run_id",
+          "execution_mode",
           "anchor_kind",
           "anchor",
           "scope",
@@ -11258,6 +11284,9 @@
           "deferred_until": {
             "$ref": "#/components/schemas/Timestamp"
           },
+          "execution_mode": {
+            "$ref": "#/components/schemas/ExecutionMode"
+          },
           "kind": {
             "const": "decision_card",
             "type": "string"
@@ -11282,6 +11311,7 @@
           "kind",
           "card_id",
           "run_id",
+          "execution_mode",
           "anchor_kind",
           "anchor",
           "scope",
@@ -11806,6 +11836,13 @@
           "new_deliveries"
         ],
         "type": "object"
+      },
+      "ExecutionMode": {
+        "enum": [
+          "live",
+          "mock"
+        ],
+        "type": "string"
       },
       "FailureClass": {
         "enum": [
@@ -13282,6 +13319,9 @@
           "entity_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
+          "execution_mode": {
+            "$ref": "#/components/schemas/ExecutionMode"
+          },
           "failure": {
             "$ref": "#/components/schemas/FailureEnvelope"
           },
@@ -13322,7 +13362,8 @@
           "completed_at",
           "duration_ms",
           "activity",
-          "parse_ok"
+          "parse_ok",
+          "execution_mode"
         ],
         "type": "object"
       },

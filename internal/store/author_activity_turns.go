@@ -28,6 +28,7 @@ type authorActivityTurn struct {
 	UsageExactness   string
 	InputTokens      *int64
 	OutputTokens     *int64
+	ExecutionMode    string
 	Failure          *runtimefailures.Envelope
 	OccurredAt       time.Time
 }
@@ -53,6 +54,7 @@ func recordAuthorActivityTurn(ctx context.Context, turn authorActivityTurn) erro
 			SubjectType: "agent", SubjectID: turn.AgentID, TurnID: turn.TurnID, DurationMS: &duration,
 			ParseOK: &parseOK, UsageExactness: turn.UsageExactness, InputTokens: turn.InputTokens,
 			OutputTokens: turn.OutputTokens, RetryCount: &retry, EventType: turn.TriggerEventType,
+			ExecutionMode: turn.ExecutionMode,
 		},
 		Failure: turn.Failure,
 	}); err != nil {
@@ -70,7 +72,7 @@ func recordAuthorActivityTurn(ctx context.Context, turn authorActivityTurn) erro
 			OccurredAt: turn.OccurredAt.UTC(), RunID: turn.RunID, EntityID: turn.EntityID, AgentID: turn.AgentID, FlowID: turn.FlowID,
 			Projection: runtimeauthoractivity.Projection{
 				SubjectType: "agent", SubjectID: turn.AgentID, TurnID: turn.TurnID,
-				ToolName: item.ToolName, ToolUseID: item.ToolUseID,
+				ToolName: item.ToolName, ToolUseID: item.ToolUseID, ExecutionMode: turn.ExecutionMode,
 			},
 		}); err != nil {
 			return err
@@ -79,7 +81,7 @@ func recordAuthorActivityTurn(ctx context.Context, turn authorActivityTurn) erro
 	return nil
 }
 
-func recordCompletionTurnAuthorActivity(ctx context.Context, settlement runtimeeffects.CompletionSettlement) error {
+func recordCompletionTurnAuthorActivity(ctx context.Context, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) error {
 	if settlement.AgentTurn == nil {
 		return nil
 	}
@@ -95,6 +97,7 @@ func recordCompletionTurnAuthorActivity(ctx context.Context, settlement runtimee
 		FlowID: settlement.Spend.FlowInstance, TriggerEventType: t.TriggerEventType, Blocks: blocks,
 		ParseOK: t.ParseOK, DurationMS: t.LatencyMS, RetryCount: t.RetryCount,
 		UsageExactness: string(settlement.Usage.Exactness), InputTokens: settlement.Usage.InputTokens,
-		OutputTokens: settlement.Usage.OutputTokens, Failure: t.Failure, OccurredAt: settlement.Now.UTC(),
+		OutputTokens: settlement.Usage.OutputTokens, ExecutionMode: string(attempt.Authority.ExecutionMode),
+		Failure: t.Failure, OccurredAt: settlement.Now.UTC(),
 	})
 }

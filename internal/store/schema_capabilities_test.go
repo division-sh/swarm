@@ -31,7 +31,7 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 	)
 	addColumns("events",
 		"event_id", "run_id", "event_name", "entity_id", "flow_instance", "scope", "payload",
-		"chain_depth", "produced_by", "produced_by_type", "source_event_id", "idempotency_key", "created_at",
+		"execution_mode", "chain_depth", "produced_by", "produced_by_type", "source_event_id", "idempotency_key", "created_at",
 	)
 	addColumns("event_deliveries",
 		"run_id", "event_id", "subscriber_type", "subscriber_id", "status", "retry_count",
@@ -70,7 +70,7 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 		"trigger_event_id", "trigger_event_type", "task_id", "available_tools", "tool_calls",
 		"emitted_events", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible",
 		"request_payload", "response_payload", "turn_blocks", "parse_ok", "latency_ms",
-		"retry_count", "failure", "created_at",
+		"retry_count", "execution_mode", "failure", "created_at",
 	)
 	addColumns("mailbox",
 		"item_id", "entity_id", "flow_instance", "scope", "item_type", "source_event_id",
@@ -268,6 +268,7 @@ func TestPostgresStore_CanonicalCapabilityReaders(t *testing.T) {
 		AddRow("events", "flow_instance").
 		AddRow("events", "scope").
 		AddRow("events", "payload").
+		AddRow("events", "execution_mode").
 		AddRow("events", "chain_depth").
 		AddRow("events", "produced_by").
 		AddRow("events", "produced_by_type").

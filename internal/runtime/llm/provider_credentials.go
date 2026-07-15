@@ -75,11 +75,11 @@ func IsMissingProviderCredential(err error) bool {
 
 func (r ProviderCredentialResolver) Resolve(ctx context.Context, profile llmselection.Profile) (ProviderCredential, error) {
 	key := ProviderCredentialKey(profile)
-	if key == "" {
-		return ProviderCredential{}, fmt.Errorf("provider credential key is required for backend %q", strings.TrimSpace(profile.ID))
-	}
 	if !profile.Credential.Required {
 		return ProviderCredential{Key: key}, nil
+	}
+	if key == "" {
+		return ProviderCredential{}, fmt.Errorf("provider credential key is required for backend %q", strings.TrimSpace(profile.ID))
 	}
 	envPresent := r.envPresent(key)
 	value, ok, err := r.storeValue(ctx, key)
@@ -115,6 +115,9 @@ func (r ProviderCredentialResolver) Resolve(ctx context.Context, profile llmsele
 
 func (r ProviderCredentialResolver) Inspect(ctx context.Context, profile llmselection.Profile) (ProviderCredential, error) {
 	key := ProviderCredentialKey(profile)
+	if !profile.Credential.Required {
+		return ProviderCredential{Key: key}, nil
+	}
 	if key == "" {
 		return ProviderCredential{}, fmt.Errorf("provider credential key is required for backend %q", strings.TrimSpace(profile.ID))
 	}

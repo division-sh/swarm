@@ -43,13 +43,13 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 		t.Fatalf("seed runs: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
+		INSERT INTO events (execution_mode, run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES
-			($1::uuid, $2::uuid, 'scan.requested', NULL, 'global', '{}'::jsonb, 'test', 'agent', $3),
-			($1::uuid, gen_random_uuid(), 'scan.completed', NULL, 'global', '{}'::jsonb, 'test', 'agent', $4),
-			($5::uuid, $6::uuid, 'scan.requested', NULL, 'global', '{}'::jsonb, 'test', 'agent', $7),
-			($8::uuid, $9::uuid, 'scan.failed', $10::uuid, 'global', '{}'::jsonb, 'test', 'agent', $12),
-			($8::uuid, gen_random_uuid(), 'scan.replayed', $11::uuid, 'global', '{}'::jsonb, 'test', 'agent', $13)
+			('live', $1::uuid, $2::uuid, 'scan.requested', NULL, 'global', '{}'::jsonb, 'test', 'agent', $3),
+			('live', $1::uuid, gen_random_uuid(), 'scan.completed', NULL, 'global', '{}'::jsonb, 'test', 'agent', $4),
+			('live', $5::uuid, $6::uuid, 'scan.requested', NULL, 'global', '{}'::jsonb, 'test', 'agent', $7),
+			('live', $8::uuid, $9::uuid, 'scan.failed', $10::uuid, 'global', '{}'::jsonb, 'test', 'agent', $12),
+			('live', $8::uuid, gen_random_uuid(), 'scan.replayed', $11::uuid, 'global', '{}'::jsonb, 'test', 'agent', $13)
 	`, newer, newerEvent, now.Add(time.Second), now.Add(2*time.Second), middle, middleEvent, now.Add(-time.Hour+time.Second), older, olderEvent, olderEventOnlyA, olderEventOnlyB, now.Add(-2*time.Hour+time.Second), now.Add(-2*time.Hour+2*time.Second)); err != nil {
 		t.Fatalf("seed events: %v", err)
 	}

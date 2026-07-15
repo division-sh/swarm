@@ -455,8 +455,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DoesNotDeleteRunsCreatedAfte
 		t.Fatalf("seed late run: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by_type)
-		VALUES ($1::uuid, $2::uuid, 'late.event', 'global', '{}'::jsonb, 'external')
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by_type)
+		VALUES ('live', $1::uuid, $2::uuid, 'late.event', 'global', '{}'::jsonb, 'external')
 	`, lateEvent, lateRun); err != nil {
 		t.Fatalf("seed late event: %v", err)
 	}
@@ -573,8 +573,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		t.Fatalf("seed preserved run: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO events (event_id, run_id, event_name, entity_id, flow_instance, scope, payload, produced_by_type)
-		VALUES ($1::uuid, $2::uuid, 'cleanup.event', $3::uuid, 'flow/a', 'entity', '{}'::jsonb, 'external')
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, entity_id, flow_instance, scope, payload, produced_by_type)
+		VALUES ('live', $1::uuid, $2::uuid, 'cleanup.event', $3::uuid, 'flow/a', 'entity', '{}'::jsonb, 'external')
 	`, eventID, runID, entityID); err != nil {
 		t.Fatalf("seed cleanup event: %v", err)
 	}
@@ -757,10 +757,10 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 		t.Fatalf("seed runs: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO events (event_id, run_id, event_name, entity_id, flow_instance, scope, payload, produced_by_type) VALUES
-			($1::uuid, $4::uuid, 'cleanup.event', $7::uuid, 'flow/a', 'entity', '{}'::jsonb, 'external'),
-			($2::uuid, $5::uuid, 'source.event', $7::uuid, 'flow/a', 'entity', '{}'::jsonb, 'external'),
-			($3::uuid, $6::uuid, 'fork.event', $7::uuid, 'flow/a', 'entity', '{}'::jsonb, 'platform')
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, entity_id, flow_instance, scope, payload, produced_by_type) VALUES
+			('live', $1::uuid, $4::uuid, 'cleanup.event', $7::uuid, 'flow/a', 'entity', '{}'::jsonb, 'external'),
+			('live', $2::uuid, $5::uuid, 'source.event', $7::uuid, 'flow/a', 'entity', '{}'::jsonb, 'external'),
+			('live', $3::uuid, $6::uuid, 'fork.event', $7::uuid, 'flow/a', 'entity', '{}'::jsonb, 'platform')
 	`, cleanupEventID, preservedSourceEventID, preservedForkEventID, cleanupRunID, preservedSourceRunID, preservedForkRunID, entityID); err != nil {
 		t.Fatalf("seed events: %v", err)
 	}
@@ -1128,10 +1128,10 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		INSERT INTO decision_cards (
 			card_id, run_id, anchor_kind, anchor, status, snapshot, card_content_hash,
 			decision_schema_hash, bundle_hash, effective_cadence, provenance, fields,
-			created_at, updated_at
+			execution_mode, created_at, updated_at
 		) VALUES (
 			$1::uuid, $2::uuid, 'human_task', '{}'::jsonb, 'pending', '{}'::jsonb, 'content-hash',
-			'schema-hash', 'bundle-hash', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, now(), now()
+			'schema-hash', 'bundle-hash', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 'live', now(), now()
 		)
 	`, humanTaskCardID, runA); err != nil {
 		t.Fatalf("seed human-task decision card: %v", err)
@@ -1148,12 +1148,12 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		t.Fatalf("seed human-task continuation: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO events (event_id, run_id, event_name, entity_id, flow_instance, scope, payload, produced_by_type) VALUES
-			($1::uuid, $3::uuid, 'source.event', $5::uuid, 'flow/a', 'entity', '{}'::jsonb, 'external'),
-			($2::uuid, $4::uuid, 'fork.event', $5::uuid, 'flow/a', 'entity', '{}'::jsonb, 'platform'),
-			($6::uuid, NULL, 'platform.runtime_log', NULL, NULL, 'global', '{}'::jsonb, 'platform'),
-			($7::uuid, $3::uuid, 'timer.event', $5::uuid, 'flow/a', 'entity', '{}'::jsonb, 'node'),
-			($8::uuid, $3::uuid, 'extra.event', $5::uuid, 'flow/a', 'entity', '{}'::jsonb, 'agent')
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, entity_id, flow_instance, scope, payload, produced_by_type) VALUES
+			('live', $1::uuid, $3::uuid, 'source.event', $5::uuid, 'flow/a', 'entity', '{}'::jsonb, 'external'),
+			('live', $2::uuid, $4::uuid, 'fork.event', $5::uuid, 'flow/a', 'entity', '{}'::jsonb, 'platform'),
+			('live', $6::uuid, NULL, 'platform.runtime_log', NULL, NULL, 'global', '{}'::jsonb, 'platform'),
+			('live', $7::uuid, $3::uuid, 'timer.event', $5::uuid, 'flow/a', 'entity', '{}'::jsonb, 'node'),
+			('live', $8::uuid, $3::uuid, 'extra.event', $5::uuid, 'flow/a', 'entity', '{}'::jsonb, 'agent')
 	`, sourceEvent, forkEvent, runA, runB, entityID, noRunEvent, timerForkEvent, uuid.NewString()); err != nil {
 		t.Fatalf("seed events: %v", err)
 	}
@@ -1236,8 +1236,8 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		t.Fatalf("seed conversation forks: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO agent_turns (run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source)
-		VALUES ($1::uuid, 'agent-a', $2::uuid, 'cleanup', TRUE, 'authored')
+		INSERT INTO agent_turns (run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, execution_mode)
+		VALUES ($1::uuid, 'agent-a', $2::uuid, 'cleanup', TRUE, 'authored', 'live')
 	`, runA, sessionID); err != nil {
 		t.Fatalf("seed agent turn: %v", err)
 	}
@@ -1300,8 +1300,8 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		t.Fatalf("seed mailbox: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO spend_ledger (entity_id, flow_instance, agent_id, model, invocation_type)
-		VALUES ($1::uuid, 'flow/a', 'agent-a', 'model', 'agent_turn')
+		INSERT INTO spend_ledger (execution_mode, entity_id, flow_instance, agent_id, model, invocation_type)
+		VALUES ('live', $1::uuid, 'flow/a', 'agent-a', 'model', 'agent_turn')
 	`, entityID); err != nil {
 		t.Fatalf("seed spend ledger: %v", err)
 	}

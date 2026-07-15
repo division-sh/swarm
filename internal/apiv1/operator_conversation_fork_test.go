@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -236,6 +237,7 @@ func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *test
 			Turn: store.OperatorConversationTurn{
 				TurnIndex:       1,
 				TurnID:          "00000000-0000-0000-0000-000000000402",
+				ExecutionMode:   "live",
 				RequestPayload:  []byte(`{"message":"inspect"}`),
 				ResponsePayload: []byte(`{"message":"forkchat sandbox response: inspect"}`),
 				ParseOK:         true,
@@ -537,6 +539,10 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 		},
 		Snapshot: store.ConversationForkSnapshot{
 			SnapshotOwner: store.ConversationForkChatSnapshotOwner,
+			SourceAgent: runtimeactors.AgentConfig{
+				ID: "agent-source", Type: "managed", Role: "researcher", Model: llmselection.ModelAliasRegular,
+				ExecutionMode: runtimeeffects.ExecutionModeLive, Memory: agentmemory.PlatformDefault(),
+			},
 			EntitySnapshot: []store.ConversationForkEntitySnapshot{{
 				EntityID:     "entity-1",
 				CurrentState: "draft",

@@ -212,6 +212,9 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 	}
 	rec.InvocationType = strings.TrimSpace(strings.ToLower(rec.InvocationType))
 	rec.UsageAccounting = strings.TrimSpace(strings.ToLower(rec.UsageAccounting))
+	if !rec.ExecutionMode.Valid() {
+		return fmt.Errorf("spend execution_mode must be live or mock")
+	}
 	if rec.FlowInstance == "" {
 		return fmt.Errorf("spend flow_instance is required")
 	}
@@ -305,6 +308,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 		Scope:    budgetScope(scope, entityID),
 		EntityID: entityID,
 		Since:    start,
+		LiveOnly: true,
 	})
 	if err != nil {
 		return err

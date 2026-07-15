@@ -552,6 +552,7 @@ func newProposedEffectTestCard(t *testing.T, runID string, now time.Time, genera
 	}
 	card, err := decisioncard.New(decisioncard.Card{
 		CardID: continuation.CardID, RunID: runID, Anchor: anchor, Snapshot: snapshot,
+		ExecutionMode:     "live",
 		EffectContentHash: continuation.EffectContentHash,
 		BundleHash:        "bundle-v1:sha256:" + strings.Repeat("a", 64), WorkflowVersion: "1",
 		CreatedAt: now,

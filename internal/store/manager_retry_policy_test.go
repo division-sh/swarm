@@ -377,13 +377,14 @@ func TestUpsertEventReceipt_ConcurrentTerminalReceiptsConvergeStandaloneRuntimeR
 	agentB := "agent-" + uuid.NewString()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:       agentB,
-			Type:     "test",
-			Role:     "test",
-			FlowID:   "worker",
-			Model:    "regular",
-			EntityID: entityID,
-			Config:   []byte(`{"system_prompt":"x"}`),
+			ID:            agentB,
+			Type:          "test",
+			Role:          "test",
+			FlowID:        "worker",
+			Model:         "regular",
+			ExecutionMode: "live",
+			EntityID:      entityID,
+			Config:        []byte(`{"system_prompt":"x"}`),
 		},
 		Status:    "active",
 		HiredBy:   "test",
@@ -1165,13 +1166,14 @@ func seedEntityAndAgent(t *testing.T, ctx context.Context, pg *store.PostgresSto
 	agentID = "agent-" + uuid.NewString()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:       agentID,
-			Type:     "test",
-			Role:     "test",
-			FlowID:   "worker",
-			Model:    "regular",
-			EntityID: entityID,
-			Config:   []byte(`{"system_prompt":"x"}`),
+			ID:            agentID,
+			Type:          "test",
+			Role:          "test",
+			FlowID:        "worker",
+			Model:         "regular",
+			ExecutionMode: "live",
+			EntityID:      entityID,
+			Config:        []byte(`{"system_prompt":"x"}`),
 		},
 		Status:    "active",
 		HiredBy:   "test",

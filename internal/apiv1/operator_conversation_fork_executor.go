@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
-	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -38,10 +37,12 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared stor
 	conv := runtimellm.NewConversation(actor.ID, prepared.Fork.ForkID, conversationForkChatSystemPrompt(prepared), tools, agentmemory.PlatformDefault(), 8, e.Runtime)
 	conv.SetToolExecutor(toolExec)
 	ctx = runtimeactors.WithActor(ctx, actor)
+	ctx = runtimeeffects.WithExecutionMode(ctx, actor.ExecutionMode)
 	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, prepared.RequestOccurrenceID)
 	ctx = runtimeeffects.WithAuthority(ctx, runtimeeffects.Authority{
 		Kind: runtimeeffects.AuthorityConversationForkChat, ID: prepared.ForkTurnID,
 		ExecutionOwner: prepared.ExecutionOwner, LeaseExpiresAt: prepared.LeaseExpiresAt, FenceGeneration: prepared.FenceGeneration,
+		ExecutionMode: actor.ExecutionMode,
 		ForkChat: runtimeeffects.ConversationForkChatAuthority{
 			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, ActorTokenID: prepared.ActorTokenID,
 			RequestOccurrenceID: prepared.RequestOccurrenceID, RequestHash: prepared.RequestHash,
@@ -66,14 +67,17 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared stor
 }
 
 func conversationForkChatActor(prepared store.ConversationForkChatPrepared) runtimeactors.AgentConfig {
-	return runtimeactors.AgentConfig{
-		ID:     strings.TrimSpace(prepared.Fork.SourceAgentID),
-		Type:   "forkchat",
-		Role:   "forkchat",
-		Model:  llmselection.ModelAliasRegular,
-		Memory: agentmemory.PlatformDefault(),
-		Tools:  append([]string(nil), prepared.AvailableTools...),
-	}
+	actor := prepared.Snapshot.SourceAgent
+	actor.ID = strings.TrimSpace(prepared.Fork.SourceAgentID)
+	actor.Type = "forkchat"
+	actor.Role = "forkchat"
+	actor.Memory = agentmemory.PlatformDefault()
+	actor.Tools = append([]string(nil), prepared.AvailableTools...)
+	actor.Subscriptions = nil
+	actor.EmitEvents = nil
+	actor.NativeTools = runtimeactors.NativeToolConfig{}
+	actor.NormalizeRuntimeDescriptor()
+	return actor
 }
 
 func conversationForkChatSystemPrompt(prepared store.ConversationForkChatPrepared) string {

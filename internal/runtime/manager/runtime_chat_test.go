@@ -114,7 +114,7 @@ func (b *directiveTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLo
 
 func installDirectiveTestAgent(t *testing.T, am *AgentManager, agent Agent) {
 	t.Helper()
-	rec := PersistedAgent{Config: models.AgentConfig{ID: agent.ID()}, Status: "active", HiredBy: "test"}
+	rec := PersistedAgent{Config: models.AgentConfig{ExecutionMode: "live", ID: agent.ID()}, Status: "active", HiredBy: "test"}
 	if err := am.lifecycle.registerExecution(context.Background(), rec, false, agent); err != nil {
 		t.Fatalf("register directive test agent: %v", err)
 	}

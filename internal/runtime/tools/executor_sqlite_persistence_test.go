@@ -55,10 +55,11 @@ func (allowHumanTaskAuthority) AuthorizeMailboxSend(actor models.AgentConfig) er
 
 func TestEntityTools_SQLiteBackendNeutralEntityPersistence(t *testing.T) {
 	actor := models.AgentConfig{
-		ID:    "tester",
-		Type:  "internal",
-		Role:  "operator",
-		Tools: []string{"create_entity", "get_entity", "save_entity_field", "query_entities", "query_metrics", "search_entities"},
+		ExecutionMode: "live",
+		ID:            "tester",
+		Type:          "internal",
+		Role:          "operator",
+		Tools:         []string{"create_entity", "get_entity", "save_entity_field", "query_entities", "query_metrics", "search_entities"},
 	}
 	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", `
 types: {}
@@ -179,7 +180,7 @@ func TestSQLiteEntityPersistence_MarshalsStructuredFilterValues(t *testing.T) {
 }
 
 func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
-	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
 	ensureSQLiteEntityToolTestRun(t, sqliteStore)
@@ -256,7 +257,8 @@ func TestHumanTaskRequestCreatesTypedCardAndContinuationOnBothStores(t *testing.
 				Config: cfg, HumanTaskStore: tc.store, AuthorityProvider: allowHumanTaskAuthority{},
 			})
 			requester := models.AgentConfig{
-				ID: "requester", Role: "worker", FlowPath: "provider", EntityID: uuid.NewString(),
+				ExecutionMode: "live",
+				ID:            "requester", Role: "worker", FlowPath: "provider", EntityID: uuid.NewString(),
 				Tools: []string{"human_task_request"}, Permissions: []string{"human_task_request"},
 			}
 			ctx, replyContextID, sourceEventID := seedReplyToolContext(t, tc.store)
@@ -342,8 +344,8 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 			t.Fatalf("seed postgres reply tool run: %v", err)
 		}
 		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `
-			INSERT INTO events (run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ($1::uuid, $2::uuid, 'provider.requested', 'global', '{}'::jsonb, 'requester', 'node', $3)
+			INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+			VALUES ('live', $1::uuid, $2::uuid, 'provider.requested', 'global', '{}'::jsonb, 'requester', 'node', $3)
 		`, runID, requestEventID, now); err != nil {
 			t.Fatalf("seed postgres reply tool event: %v", err)
 		}
@@ -352,8 +354,8 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 			t.Fatalf("seed sqlite reply tool run: %v", err)
 		}
 		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `
-			INSERT INTO events (run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES (?, ?, 'provider.requested', 'global', '{}', 'requester', 'node', ?)
+			INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+			VALUES ('live', ?, ?, 'provider.requested', 'global', '{}', 'requester', 'node', ?)
 		`, runID, requestEventID, now); err != nil {
 			t.Fatalf("seed sqlite reply tool event: %v", err)
 		}

@@ -378,7 +378,7 @@ func TestConversationStep_ResolvesToolCalls(t *testing.T) {
 	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}}, testMemory(), 10, rt)
 	c.SetToolExecutor(te)
 
-	resp, err := c.Step(models.WithActor(context.Background(), models.AgentConfig{ID: "a1", Role: "analysis"}), "start")
+	resp, err := c.Step(models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1", Role: "analysis"}), "start")
 	if err != nil {
 		t.Fatalf("step error: %v", err)
 	}
@@ -413,7 +413,7 @@ func TestConversationStep_SeparatesManagedProviderRoundsAndToolCalls(t *testing.
 	conversation := NewConversation("effect-test-agent", "task-1", "system", []ToolDefinition{{Name: "echo"}}, testMemory(), 10, runtime)
 	conversation.SetToolExecutor(tools)
 
-	ctx := models.WithActor(harness.CompletionContext("inbound-event-1"), models.AgentConfig{ID: "effect-test-agent", Role: "analysis"})
+	ctx := models.WithActor(harness.CompletionContext("inbound-event-1"), models.AgentConfig{ExecutionMode: "live", ID: "effect-test-agent", Role: "analysis"})
 	response, err := conversation.Step(ctx, "start")
 	if err != nil {
 		t.Fatalf("Step: %v", err)
@@ -436,8 +436,9 @@ func TestConversationStep_AttachesCanonicalToolCapabilitySetToExecutionContext(t
 	c.SetToolExecutor(te)
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{
-		ID:   "analysis-agent",
-		Role: "analysis",
+		ExecutionMode: "live",
+		ID:            "analysis-agent",
+		Role:          "analysis",
 	})
 	if _, err := c.Step(ctx, "start"); err != nil {
 		t.Fatalf("step error: %v", err)
@@ -456,8 +457,9 @@ func TestConversationExecuteToolCalls_PreservesEmptyTurnDenialContext(t *testing
 	c.SetToolExecutor(te)
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{
-		ID:   "market-research-agent",
-		Role: "market_research",
+		ExecutionMode: "live",
+		ID:            "market-research-agent",
+		Role:          "market_research",
 	})
 	raw, executed, _ := c.executeToolCalls(ctx, []ToolCall{{
 		Name:      "read_scan_campaign",
@@ -480,7 +482,7 @@ func TestConversationStep_NoExecutorReturnsInitialToolCall(t *testing.T) {
 	rt := &fakeRuntime{}
 	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}, {Name: "echo"}}, testMemory(), 10, rt)
 
-	resp, err := c.Step(models.WithActor(context.Background(), models.AgentConfig{ID: "a1", Role: "analysis"}), "start")
+	resp, err := c.Step(models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1", Role: "analysis"}), "start")
 	if err != nil {
 		t.Fatalf("step error: %v", err)
 	}
@@ -574,7 +576,7 @@ func TestConversation_ExecuteToolCalls_RoleScopedTypedReadPreservesLargeValidati
 	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_validation_case"}}, testMemory(), 4, &fakeRuntime{})
 	c.SetToolExecutor(roleScopedTypedReadExec{payload: payload})
 
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1"})
 	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_validation_case", Arguments: map[string]any{}}})
 	if strings.Contains(raw, `"truncated"`) || strings.Contains(raw, `"preview"`) || strings.Contains(raw, `"follow_up"`) {
 		t.Fatalf("typed read projection used lossy metadata: %s", raw)
@@ -602,7 +604,7 @@ func TestConversation_ExecuteToolCalls_RoleScopedTypedReadFieldPreservesComplete
 	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_validation_case_mvp_spec"}}, testMemory(), 4, &fakeRuntime{})
 	c.SetToolExecutor(roleScopedTypedReadExec{payload: field})
 
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1"})
 	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_validation_case_mvp_spec", Arguments: map[string]any{}}})
 	if strings.Contains(raw, `"truncated"`) || strings.Contains(raw, `"preview"`) || strings.Contains(raw, `"follow_up"`) {
 		t.Fatalf("typed field read projection used lossy metadata: %s", raw)
@@ -622,7 +624,7 @@ func TestConversation_ExecuteToolCalls_RoleScopedTypedReadFailsClosedWhenTooLarg
 	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_validation_case"}}, testMemory(), 4, &fakeRuntime{})
 	c.SetToolExecutor(roleScopedTypedReadExec{payload: payload})
 
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1"})
 	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_validation_case", Arguments: map[string]any{}}})
 	if strings.Contains(raw, `"truncated"`) || strings.Contains(raw, `"preview"`) || strings.Contains(raw, `"follow_up"`) {
 		t.Fatalf("typed read oversize emitted lossy metadata: %s", raw)
@@ -643,7 +645,7 @@ func TestConversation_ExecuteToolCalls_RoleScopedTypedReadNearCapFitsEnvelope(t 
 	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_validation_case"}}, testMemory(), 4, &fakeRuntime{})
 	c.SetToolExecutor(roleScopedTypedReadExec{payload: payload})
 
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1"})
 	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_validation_case", Arguments: map[string]any{}}})
 	if strings.Contains(raw, "__runtime_guardrail__") {
 		t.Fatalf("near-cap typed read tripped batch guardrail: %s", raw)
@@ -665,7 +667,7 @@ func TestConversation_ExecuteToolCalls_ReadPrefixedNonRoleScopedToolKeepsLegacyP
 	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_custom_report"}}, testMemory(), 4, &fakeRuntime{})
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
 
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1"})
 	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_custom_report", Arguments: map[string]any{}}})
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
@@ -714,7 +716,7 @@ func TestConversation_ExecuteToolCalls_RelaysOversizedResultsForHelperRuntime(t 
 	c.Session = &Session{ID: "sess-relay", AgentID: "a1", Tools: tools}
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
 
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1"})
 	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
@@ -750,7 +752,7 @@ func TestConversation_ExecuteToolCalls_SuppressesRuntimeReadFileFollowUpWithoutR
 	c.Session = &Session{ID: "sess-relay", AgentID: "a1", Tools: tools}
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
 
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1"})
 	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "query_entities", Arguments: map[string]any{"entity_type": "company"}}})
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
@@ -785,7 +787,7 @@ func TestConversation_ExecuteToolCalls_RelaysOversizedReadFileResultsForHelperRu
 		"size_bytes": len(huge),
 	}})
 
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1"})
 	ctx = withCLIUsableToolsForTurn(ctx, tools, &Response{
 		MCPServers:      map[string]string{"runtime-tools": "connected"},
 		MCPVisibleTools: []string{"mcp__runtime-tools__read_file"},
@@ -835,7 +837,7 @@ func TestConversation_ExecuteToolCalls_PreservesNearLimitReadFileResultWithCompa
 		},
 	})
 
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1"})
 	ctx = withCLIUsableToolsForTurn(ctx, tools, &Response{
 		MCPServers:      map[string]string{"runtime-tools": "connected"},
 		MCPVisibleTools: []string{"mcp__runtime-tools__read_file", "mcp__runtime-tools__emit_category_assessed"},
@@ -913,7 +915,7 @@ func TestConversation_ExecuteToolCalls_SuppressesReadFileRelayWhenObservedSurfac
 		"size_bytes": len(huge),
 	}})
 
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1"})
 	ctx = withCLIUsableToolsForTurn(ctx, tools, &Response{
 		MCPServers: map[string]string{"runtime-tools": "failed"},
 	})
@@ -945,7 +947,7 @@ func TestConversation_ExecuteToolCalls_FailsClosedWhenHelperRelayWriteFails(t *t
 	c.Session = &Session{ID: "sess-relay", AgentID: "a1", Tools: tools}
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
 
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1"})
 	raw, executed, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
@@ -977,7 +979,7 @@ func TestConversationStep_TerminatesAfterSuccessfulEmitToolCalls(t *testing.T) {
 	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}}, testMemory(), 10, rt)
 	c.SetToolExecutor(te)
 
-	resp, err := c.Step(models.WithActor(context.Background(), models.AgentConfig{ID: "a1", Role: "analysis"}), "start")
+	resp, err := c.Step(models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1", Role: "analysis"}), "start")
 	if err != nil {
 		t.Fatalf("step error: %v", err)
 	}
@@ -1018,7 +1020,7 @@ func TestConversationStep_ContinuesWhenAnyNonEmitToolIsPresent(t *testing.T) {
 			{Name: "echo", Arguments: map[string]any{"text": "hello"}},
 		},
 	}
-	resp, err := c.resolveToolCalls(models.WithActor(context.Background(), models.AgentConfig{ID: "a1", Role: "analysis"}), initial)
+	resp, err := c.resolveToolCalls(models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1", Role: "analysis"}), initial)
 	if err != nil {
 		t.Fatalf("resolveToolCalls error: %v", err)
 	}
@@ -1100,7 +1102,7 @@ func TestExecuteToolCalls_UsesCapabilityKindForTerminalBehavior(t *testing.T) {
 	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}}, testMemory(), 10, &fakeRuntime{})
 	c.SetToolExecutor(te)
 
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1", Role: "analysis"})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "a1", Role: "analysis"})
 	_, executed, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "emit_scan_requested", Arguments: map[string]any{"x": 1}}})
 	if len(executed) != 1 {
 		t.Fatalf("executed length = %d, want 1", len(executed))

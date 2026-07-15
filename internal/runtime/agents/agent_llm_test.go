@@ -19,6 +19,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -42,10 +43,11 @@ func testBoardDirective(text string) runtimeagentcontrol.BoardDirective {
 
 func TestFormatEventForAgent_UsesPostCompositionToolSurface(t *testing.T) {
 	cfg := models.AgentConfig{
-		ID:     "agent-1",
-		Role:   "operator",
-		FlowID: "task",
-		Tools:  []string{"schedule", "get_entity", "emit_example"},
+		ExecutionMode: "live",
+		ID:            "agent-1",
+		Role:          "operator",
+		FlowID:        "task",
+		Tools:         []string{"schedule", "get_entity", "emit_example"},
 	}
 	evt := eventtest.RootIngress(
 		"evt-1",
@@ -91,9 +93,10 @@ func TestFormatEventForAgent_UsesPostCompositionToolSurface(t *testing.T) {
 
 func TestFormatEventForAgent_UsesCanonicalNativeBuiltinNames(t *testing.T) {
 	cfg := models.AgentConfig{
-		ID:     "agent-1",
-		Role:   "operator",
-		FlowID: "task",
+		ExecutionMode: "live",
+		ID:            "agent-1",
+		Role:          "operator",
+		FlowID:        "task",
 		NativeTools: models.NativeToolConfig{
 			FileIO: true,
 			Bash:   true,
@@ -126,9 +129,10 @@ func TestFormatEventForAgent_UsesCanonicalNativeBuiltinNames(t *testing.T) {
 
 func TestFormatEventForAgent_DoesNotAdvertiseCLIOnlyControlTools(t *testing.T) {
 	cfg := models.AgentConfig{
-		ID:     "agent-1",
-		Role:   "operator",
-		FlowID: "task",
+		ExecutionMode: "live",
+		ID:            "agent-1",
+		Role:          "operator",
+		FlowID:        "task",
 	}
 	evt := eventtest.RootIngress(
 		"evt-1",
@@ -156,7 +160,8 @@ func TestFormatEventForAgent_DoesNotAdvertiseCLIOnlyControlTools(t *testing.T) {
 
 func TestFilterTools_RemovesLegacyEntityToolsWhenConstrained(t *testing.T) {
 	allowed, constrained := extractAllowedToolSet(models.AgentConfig{
-		Tools: []string{"emit_example", "get_entity"},
+		ExecutionMode: "live",
+		Tools:         []string{"emit_example", "get_entity"},
 	})
 	if !constrained {
 		t.Fatal("expected constrained tool set")
@@ -259,8 +264,9 @@ func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
 	}
 	agent := &LLMAgent{
 		cfg: models.AgentConfig{
-			ID:   "cos-entity-1",
-			Role: "ops_lead",
+			ExecutionMode: "live",
+			ID:            "cos-entity-1",
+			Role:          "ops_lead",
 			Config: mustAgentConfigJSON(t, map[string]any{
 				"team_name": "Acme Ops",
 			}),
@@ -362,6 +368,9 @@ func copyBundleTree(t *testing.T, srcRoot, dstRoot string) {
 
 func mustNewLLMAgent(t *testing.T, cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition) *LLMAgent {
 	t.Helper()
+	if !cfg.ExecutionMode.Valid() {
+		cfg.ExecutionMode = runtimeeffects.ExecutionModeLive
+	}
 	agent, err := NewLLMAgent(cfg, modelRuntime, toolExecutor, tools)
 	if err != nil {
 		t.Fatalf("NewLLMAgent: %v", err)
@@ -385,10 +394,11 @@ func TestNewLLMAgent_UsesConfiguredEmitEventsAndAllowedTools(t *testing.T) {
 	}), nil)
 	agent, err := NewLLMAgentWithOptions(
 		models.AgentConfig{
-			ID:         "coordinator-1",
-			Role:       "coordinator",
-			Tools:      []string{"schedule"},
-			EmitEvents: []string{"coord.done"},
+			ExecutionMode: "live",
+			ID:            "coordinator-1",
+			Role:          "coordinator",
+			Tools:         []string{"schedule"},
+			EmitEvents:    []string{"coord.done"},
 		},
 		nil,
 		nil,
@@ -474,7 +484,7 @@ func TestLLMAgent_OnEvent_UsesSinglePostStepExecutionPath(t *testing.T) {
 		},
 	}
 	agent := mustNewLLMAgent(t,
-		models.AgentConfig{ID: "analysis-1", Role: "analysis"},
+		models.AgentConfig{ExecutionMode: "live", ID: "analysis-1", Role: "analysis"},
 		rt,
 		nil,
 		nil,
@@ -601,7 +611,7 @@ func roleScopedCapabilitiesForAgentTest(names []string, currentEntityEligible bo
 
 func TestBoardStep_ReturnsErrorWhenDirectiveDoesNotAct(t *testing.T) {
 	agent := mustNewLLMAgent(t,
-		models.AgentConfig{ID: "coordinator-1", Role: "coordinator"},
+		models.AgentConfig{ExecutionMode: "live", ID: "coordinator-1", Role: "coordinator"},
 		&boardTestRuntime{
 			steps: []*llm.Response{
 				{Message: llm.Message{Role: "assistant", Content: "I will emit scan_requested now."}},
@@ -623,7 +633,7 @@ func TestBoardStep_ReturnsErrorWhenDirectiveDoesNotAct(t *testing.T) {
 
 func TestBoardStep_RemediatesAndSucceedsWhenDirectiveEmits(t *testing.T) {
 	agent := mustNewLLMAgent(t,
-		models.AgentConfig{ID: "coordinator-1", Role: "coordinator"},
+		models.AgentConfig{ExecutionMode: "live", ID: "coordinator-1", Role: "coordinator"},
 		&boardTestRuntime{
 			steps: []*llm.Response{
 				{Message: llm.Message{Role: "assistant", Content: "I will emit scan_requested now."}},
@@ -652,9 +662,10 @@ func TestBoardStep_RemediatesAndSucceedsWhenDirectiveEmits(t *testing.T) {
 func TestNewLLMAgentDefaultsToMemoryDisabled(t *testing.T) {
 	agent := mustNewLLMAgent(t,
 		models.AgentConfig{
-			ID:       "entity-agent-1",
-			Role:     "operator",
-			EntityID: "ent-1",
+			ExecutionMode: "live",
+			ID:            "entity-agent-1",
+			Role:          "operator",
+			EntityID:      "ent-1",
 		},
 		nil,
 		nil,
@@ -670,8 +681,9 @@ func TestNewLLMAgentFactory_PrefersActorScopedToolDefinitions(t *testing.T) {
 		{Name: "global_only"},
 	}, LLMAgentOptions{})
 	agent, err := factory(models.AgentConfig{
-		ID:    "analysis-agent",
-		Tools: []string{"query_entities"},
+		ExecutionMode: "live",
+		ID:            "analysis-agent",
+		Tools:         []string{"query_entities"},
 		Config: mustAgentConfigJSON(t, map[string]any{
 			"system_prompt": "You are here.",
 		}),
@@ -706,9 +718,10 @@ func TestLLMAgentOnEvent_FiltersRoleScopedToolsByTurnEntityEligibility(t *testin
 	}
 	factory := NewLLMAgentFactory(rt, contextAwareFactoryToolExec{}, nil, LLMAgentOptions{})
 	agent, err := factory(models.AgentConfig{
-		ID:     "market-research-agent",
-		Role:   "market_research",
-		Memory: agentmemory.Authored(false),
+		ID:            "market-research-agent",
+		Role:          "market_research",
+		Memory:        agentmemory.Authored(false),
+		ExecutionMode: runtimeeffects.ExecutionModeLive,
 		Config: mustAgentConfigJSON(t, map[string]any{
 			"system_prompt": "You are here.",
 		}),
@@ -830,8 +843,9 @@ func TestBoardStep_FactoryCreatedDirectiveTurnPreservesRoleScopedEmitToolSurface
 		},
 	}
 	agent, bus := newFactoryDirectiveAgent(t, models.AgentConfig{
-		ID:   "campaign-coordinator",
-		Role: "campaign_coordinator",
+		ExecutionMode: "live",
+		ID:            "campaign-coordinator",
+		Role:          "campaign_coordinator",
 		Config: mustAgentConfigJSON(t, map[string]any{
 			"system_prompt": "You coordinate workflow launch.",
 		}),
@@ -885,11 +899,12 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 		},
 	}
 	agent, bus := newFactoryDirectiveAgent(t, models.AgentConfig{
-		ID:         "campaign-coordinator",
-		Role:       "campaign_coordinator",
-		FlowID:     "campaign-flow",
-		FlowPath:   "campaign-flow/inst-1",
-		EmitEvents: []string{"campaign-flow/inst-1/scan.requested"},
+		ExecutionMode: "live",
+		ID:            "campaign-coordinator",
+		Role:          "campaign_coordinator",
+		FlowID:        "campaign-flow",
+		FlowPath:      "campaign-flow/inst-1",
+		EmitEvents:    []string{"campaign-flow/inst-1/scan.requested"},
 		Config: mustAgentConfigJSON(t, map[string]any{
 			"system_prompt": "You coordinate workflow launch.",
 		}),
@@ -967,10 +982,11 @@ func TestLLMAgent_StatelessTurnBudgetFailureResetsConversationAndRetries(t *test
 	rt := &taskRetryRuntime{}
 	agent := mustNewLLMAgent(t,
 		models.AgentConfig{
-			ID:       "spec-reviewer",
-			Role:     "spec_reviewer",
-			EntityID: "ent-1",
-			Memory:   agentmemory.Authored(false),
+			ExecutionMode: "live",
+			ID:            "spec-reviewer",
+			Role:          "spec_reviewer",
+			EntityID:      "ent-1",
+			Memory:        agentmemory.Authored(false),
 		},
 		rt,
 		nil,
@@ -1020,9 +1036,10 @@ func TestLLMAgent_OnEvent_SeedsRunIDIntoConversationContext(t *testing.T) {
 	rt := &runIDCaptureRuntime{}
 	agent := mustNewLLMAgent(t,
 		models.AgentConfig{
-			ID:       "analysis-agent",
-			Role:     "analysis_agent",
-			EntityID: "ent-1",
+			ExecutionMode: "live",
+			ID:            "analysis-agent",
+			Role:          "analysis_agent",
+			EntityID:      "ent-1",
 		},
 		rt,
 		nil,
@@ -1100,8 +1117,9 @@ func (s nativeCapabilityRuntimeStub) ProviderContract() llm.ProviderContract {
 func TestNewLLMAgent_DoesNotInjectNativeFallbackToolsWithoutExecutorAdmission(t *testing.T) {
 	agent := mustNewLLMAgent(t,
 		models.AgentConfig{
-			ID:   "researcher-1",
-			Role: "researcher",
+			ExecutionMode: "live",
+			ID:            "researcher-1",
+			Role:          "researcher",
 			NativeTools: models.NativeToolConfig{
 				Bash:      true,
 				WebSearch: true,
@@ -1126,8 +1144,9 @@ func TestNewLLMAgent_DoesNotInjectNativeFallbackToolsWithoutExecutorAdmission(t 
 func TestNewLLMAgent_DoesNotInjectNativeFallbackToolsWhenProviderSupportsCapability(t *testing.T) {
 	agent := mustNewLLMAgent(t,
 		models.AgentConfig{
-			ID:   "ops-1",
-			Role: "ops",
+			ExecutionMode: "live",
+			ID:            "ops-1",
+			Role:          "ops",
 			NativeTools: models.NativeToolConfig{
 				Bash:      true,
 				WebSearch: true,

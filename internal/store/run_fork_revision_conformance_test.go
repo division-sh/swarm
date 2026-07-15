@@ -101,8 +101,8 @@ func TestRunForkRevisionCaptureReusesTransactionRevisionAndRollbackPublishesNoth
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, scope, produced_by_type)
-		VALUES ($1::uuid, $2::uuid, 'revision.rollback', 'global', 'platform')
+		INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, produced_by_type)
+		VALUES ('live', $1::uuid, $2::uuid, 'revision.rollback', 'global', 'platform')
 	`, runID, eventID); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestRunForkRevisionCaptureSerializesSameRunCommitVisibility(t *testing.T) {
 		t.Fatalf("begin first transaction: %v", err)
 	}
 	defer func() { _ = first.Rollback() }()
-	if _, err := first.ExecContext(ctx, `INSERT INTO events (run_id,event_id,event_name,scope,produced_by_type) VALUES ($1::uuid,$2::uuid,'revision.first','global','platform')`, runID, firstEventID); err != nil {
+	if _, err := first.ExecContext(ctx, `INSERT INTO events (execution_mode, run_id,event_id,event_name,scope,produced_by_type) VALUES ('live', $1::uuid,$2::uuid,'revision.first','global','platform')`, runID, firstEventID); err != nil {
 		t.Fatalf("seed first event: %v", err)
 	}
 	firstRevision, err := runforkrevision.Capture(ctx, first, runID, runforkrevision.FamilyEvents)
@@ -185,7 +185,7 @@ func TestRunForkRevisionCaptureSerializesSameRunCommitVisibility(t *testing.T) {
 		t.Fatalf("begin second transaction: %v", err)
 	}
 	defer func() { _ = second.Rollback() }()
-	if _, err := second.ExecContext(ctx, `INSERT INTO events (run_id,event_id,event_name,scope,produced_by_type) VALUES ($1::uuid,$2::uuid,'revision.second','global','platform')`, runID, secondEventID); err != nil {
+	if _, err := second.ExecContext(ctx, `INSERT INTO events (execution_mode, run_id,event_id,event_name,scope,produced_by_type) VALUES ('live', $1::uuid,$2::uuid,'revision.second','global','platform')`, runID, secondEventID); err != nil {
 		t.Fatalf("seed second event: %v", err)
 	}
 	type captureResult struct {
@@ -415,7 +415,7 @@ func TestRunForkRevisionCaptureOrdersMultiRunLocksDeterministically(t *testing.T
 		}
 		defer func() { _ = tx.Rollback() }()
 		for _, runID := range order {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO events (run_id,event_id,event_name,scope,produced_by_type) VALUES ($1::uuid,$2::uuid,'revision.multi','global','platform')`, runID, uuid.NewString()); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO events (execution_mode, run_id,event_id,event_name,scope,produced_by_type) VALUES ('live', $1::uuid,$2::uuid,'revision.multi','global','platform')`, runID, uuid.NewString()); err != nil {
 				results <- workerResult{err: err}
 				return
 			}
@@ -456,8 +456,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 	agentID := "revision-lifecycle-agent"
 	agent := runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			ID: agentID, FlowID: runForkRevisionFlowInstance, FlowPath: runForkRevisionFlowInstance, Role: "worker", Type: "sonnet", Model: "regular",
+		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agentID, FlowID: runForkRevisionFlowInstance, FlowPath: runForkRevisionFlowInstance, Role: "worker", Type: "sonnet", Model: "regular",
 			Memory: agentmemory.Authored(true),
 			Config: []byte(`{"system_prompt":"revision proof"}`),
 		},
@@ -495,7 +494,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 	if _, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed lifecycle source run: %v", err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO events (run_id,event_id,event_name,scope,produced_by_type,created_at) VALUES ($1::uuid,$2::uuid,'lifecycle.revision','global','platform',$3)`, runID, eventID, now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO events (execution_mode, run_id,event_id,event_name,scope,produced_by_type,created_at) VALUES ('live', $1::uuid,$2::uuid,'lifecycle.revision','global','platform',$3)`, runID, eventID, now); err != nil {
 		t.Fatalf("seed lifecycle source event: %v", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -563,7 +562,7 @@ func TestRunForkRevisionSessionProjectionIgnoresExcludedWriterChurnAndTracksStat
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed session projection run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO events (run_id,event_id,event_name,scope,produced_by_type,created_at) VALUES ($1::uuid,$2::uuid,'session.projection','global','platform',$3)`, runID, eventID, at); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO events (execution_mode, run_id,event_id,event_name,scope,produced_by_type,created_at) VALUES ('live', $1::uuid,$2::uuid,'session.projection','global','platform',$3)`, runID, eventID, at); err != nil {
 		t.Fatalf("seed session projection event: %v", err)
 	}
 	seedRunForkSessionProjection(t, db, runID, agentID, sessionID, "active", at)
@@ -719,7 +718,7 @@ func TestRunForkRevisionDeletionPublishesTombstoneAndUnrevisionedDriftFailsClose
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO events (run_id,event_id,event_name,scope,produced_by_type) VALUES ($1::uuid,$2::uuid,'revision.delete','global','platform')`, runID, eventID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO events (execution_mode, run_id,event_id,event_name,scope,produced_by_type) VALUES ('live', $1::uuid,$2::uuid,'revision.delete','global','platform')`, runID, eventID); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO timers (timer_id,run_id,timer_name,fire_event,fire_at,owner_agent,task_type,status) VALUES ($1::uuid,$2::uuid,'revision-delete','timer.fire',NOW(),'agent-a','timer','active')`, timerID, runID); err != nil {

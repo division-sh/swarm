@@ -155,10 +155,10 @@ func TestPostgresRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t
 		t.Fatalf("marshal runtime log payload: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES (gen_random_uuid(), $1::uuid, 'platform.runtime_log', 'global', $2::jsonb, 'runtime', 'platform', NOW())
+		VALUES ('live', gen_random_uuid(), $1::uuid, 'platform.runtime_log', 'global', $2::jsonb, 'runtime', 'platform', NOW())
 	`, runID, string(payload)); err != nil {
 		t.Fatalf("seed postgres runtime log: %v", err)
 	}
@@ -209,8 +209,8 @@ func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
 	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by_type, created_at)
-		VALUES (?, ?, 'platform.runtime_log', 'global', ?, 'platform', ?)
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by_type, created_at)
+		VALUES ('live', ?, ?, 'platform.runtime_log', 'global', ?, 'platform', ?)
 	`, uuid.NewString(), runID, json.RawMessage(`{"log_level":"warn","message":"direct fallback source","details":{"component":"source-parity","action":"direct_runtime_source"}}`), time.Now().UTC()); err != nil {
 		t.Fatalf("seed direct sqlite runtime log fallback row: %v", err)
 	}

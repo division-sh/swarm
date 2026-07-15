@@ -52,7 +52,7 @@ import (
 )
 
 func unclassifiedProducer(ctx context.Context, db *sql.DB) error {
-	_, err := db.ExecContext(ctx, "INSERT INTO events(event_id) VALUES (?)", "evt")
+	_, err := db.ExecContext(ctx, "INSERT INTO events(execution_mode, event_id) VALUES ('live', ?)", "evt")
 	return err
 }
 `,

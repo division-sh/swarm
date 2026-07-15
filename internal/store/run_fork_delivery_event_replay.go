@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
 )
 
@@ -34,6 +35,7 @@ type runForkReplaySourceEvent struct {
 	FlowInstance   sql.NullString
 	Scope          string
 	Payload        json.RawMessage
+	ExecutionMode  executionmode.Mode
 	ProducedBy     sql.NullString
 	ProducedByType sql.NullString
 	HandlerNode    sql.NullString
@@ -89,7 +91,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, classifier
 			}
 			if inserted {
 				envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, nullStringText(sourceEvent.EntityID)), nullStringText(sourceEvent.FlowInstance))
-				replayed := events.NewReplayEvent(forkEventID, events.EventType(sourceEvent.EventName), nullStringText(sourceEvent.ProducedBy), "", sourceEvent.Payload, 0, events.EventLineage{RunID: lineage.ForkRunID}, envelope, now)
+				replayed := events.NewReplayEvent(forkEventID, events.EventType(sourceEvent.EventName), nullStringText(sourceEvent.ProducedBy), "", sourceEvent.Payload, 0, events.EventLineage{RunID: lineage.ForkRunID}, envelope, now).WithExecutionMode(sourceEvent.ExecutionMode)
 				if err := recordPersistedEventAuthorActivity(ctx, classifier, replayed, nullStringText(sourceEvent.ProducedBy), nullStringText(sourceEvent.ProducedByType)); err != nil {
 					return result, err
 				}
@@ -167,6 +169,7 @@ func loadRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceRunID, 
 			flow_instance,
 			scope,
 			COALESCE(payload, '{}'::jsonb),
+			execution_mode,
 			produced_by,
 			produced_by_type,
 			handler_node
@@ -180,6 +183,7 @@ func loadRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceRunID, 
 		&event.FlowInstance,
 		&event.Scope,
 		&event.Payload,
+		&event.ExecutionMode,
 		&event.ProducedBy,
 		&event.ProducedByType,
 		&event.HandlerNode,
@@ -193,6 +197,9 @@ func loadRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceRunID, 
 	if !json.Valid(event.Payload) {
 		return runForkReplaySourceEvent{}, fmt.Errorf("source event %s payload is not valid json", sourceEventID)
 	}
+	if !event.ExecutionMode.Valid() {
+		return runForkReplaySourceEvent{}, fmt.Errorf("source event %s has invalid execution_mode %q", sourceEventID, event.ExecutionMode)
+	}
 	return event, nil
 }
 
@@ -200,14 +207,14 @@ func insertRunForkReplayEvent(ctx context.Context, tx *sql.Tx, forkRunID, forkEv
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO events (
 			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
-			chain_depth, produced_by, produced_by_type, handler_node, source_event_id, created_at
+			execution_mode, chain_depth, produced_by, produced_by_type, handler_node, source_event_id, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, $3, NULLIF($4, '')::uuid, NULLIF($5, ''), $6, $7::jsonb,
-			0, NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), NULL, $11
+			$8, 0, NULLIF($9, ''), NULLIF($10, ''), NULLIF($11, ''), NULL, $12
 		)
 		ON CONFLICT (event_id) DO NOTHING
-	`, forkEventID, forkRunID, event.EventName, nullStringText(event.EntityID), nullStringText(event.FlowInstance), event.Scope, string(event.Payload), nullStringText(event.ProducedBy), nullStringText(event.ProducedByType), nullStringText(event.HandlerNode), now)
+	`, forkEventID, forkRunID, event.EventName, nullStringText(event.EntityID), nullStringText(event.FlowInstance), event.Scope, string(event.Payload), event.ExecutionMode, nullStringText(event.ProducedBy), nullStringText(event.ProducedByType), nullStringText(event.HandlerNode), now)
 	if err != nil {
 		return false, fmt.Errorf("insert fork replay event %s from source event %s: %w", forkEventID, event.EventID, err)
 	}

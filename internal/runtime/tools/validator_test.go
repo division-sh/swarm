@@ -70,7 +70,7 @@ func TestToolInputValidator_UsesActorScopedDefinitionsWhenAvailable(t *testing.T
 		}}, nil
 	})
 
-	child := &models.AgentConfig{ID: "child-agent"}
+	child := &models.AgentConfig{ExecutionMode: "live", ID: "child-agent"}
 	if err := validator.Validate(child, "save_entity_field", map[string]any{
 		"entity_id": "entity-1",
 		"field":     "child_only",

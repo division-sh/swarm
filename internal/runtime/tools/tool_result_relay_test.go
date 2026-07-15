@@ -50,7 +50,7 @@ func TestExecutorPersistOversizedToolResultRelay_DockerChunksLargeReadFileResult
 			return nil, nil, 0, nil
 		},
 	}
-	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{ID: "market-research-agent"})
+	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{ExecutionMode: "live", ID: "market-research-agent"})
 	raw, err := json.Marshal(map[string]any{
 		"content":    strings.Repeat("x", toolResultRelayChunkBytes+512),
 		"size_bytes": toolResultRelayChunkBytes + 512,
@@ -187,7 +187,7 @@ func TestExecutorPersistOversizedToolResultRelay_HostWithoutBackingMountFailsClo
 			return nil, nil, 0, nil
 		},
 	}
-	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{ID: "market-research-agent"})
+	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{ExecutionMode: "live", ID: "market-research-agent"})
 
 	_, err := exec.PersistOversizedToolResultRelay(ctx, "sql_execute", []byte(`{"blob":"hello"}`))
 	failure, ok := runtimefailures.As(err)
@@ -221,8 +221,9 @@ func newHostRelayExecutor(t *testing.T) (*Executor, models.AgentConfig, *workspa
 		t.Fatalf("EnsurePrereqs: %v", err)
 	}
 	actor := models.AgentConfig{
-		ID:          "market-research-agent",
-		NativeTools: models.NativeToolConfig{FileIO: true, Bash: true},
+		ExecutionMode: "live",
+		ID:            "market-research-agent",
+		NativeTools:   models.NativeToolConfig{FileIO: true, Bash: true},
 	}
 	target, err := manager.ResolveWorkspace(ctx, actor)
 	if err != nil {

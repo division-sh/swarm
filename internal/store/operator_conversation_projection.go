@@ -62,6 +62,7 @@ type OperatorConversationActivityCounts struct {
 // activity and author-visible text are available only from exact turn detail.
 type OperatorConversationTurnListItem struct {
 	TurnID           string                             `json:"turn_id"`
+	ExecutionMode    string                             `json:"execution_mode"`
 	Ordinal          int                                `json:"ordinal"`
 	CompletedAt      time.Time                          `json:"completed_at"`
 	DurationMS       int                                `json:"duration_ms"`
@@ -78,6 +79,7 @@ type OperatorConversationTurnListItem struct {
 // turn. Raw provider payloads and private evidence never enter this type.
 type OperatorPublicConversationTurn struct {
 	TurnID                 string                          `json:"turn_id"`
+	ExecutionMode          string                          `json:"execution_mode"`
 	Ordinal                int                             `json:"ordinal"`
 	CompletedAt            time.Time                       `json:"completed_at"`
 	DurationMS             int                             `json:"duration_ms"`
@@ -128,6 +130,7 @@ type conversationTurnRecord struct {
 	LatencyMS        int
 	RetryCount       int
 	UsageExactness   string
+	ExecutionMode    string
 	InputTokens      sql.NullInt64
 	OutputTokens     sql.NullInt64
 	Failure          *runtimefailures.Envelope
@@ -288,6 +291,18 @@ func (s conversationForkStore) loadOperatorConversationSummary(ctx context.Conte
 	}
 	item.Summary = runtimeState.Summary
 	item.Metadata = projectOperatorConversationSummaryMetadata(runtimeState)
+	if err := s.queryRow(ctx, s.db, `
+		SELECT execution_mode
+		FROM agent_turns
+		WHERE session_id = ?
+		ORDER BY created_at DESC, turn_id DESC
+		LIMIT 1
+	`, sessionID).Scan(&item.ExecutionMode); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return OperatorConversationSummary{}, fmt.Errorf("load conversation execution mode: %w", err)
+	}
+	if item.ExecutionMode != "" && item.ExecutionMode != "live" && item.ExecutionMode != "mock" {
+		return OperatorConversationSummary{}, fmt.Errorf("invalid persisted conversation execution_mode %q", item.ExecutionMode)
+	}
 	return item, nil
 }
 
@@ -345,14 +360,14 @@ func (s conversationForkStore) listOperatorConversationTurns(ctx context.Context
 				COALESCE(trigger_event_type, '') AS trigger_event_type,
 				COALESCE(task_id, '') AS task_id, COALESCE(CAST(turn_blocks AS TEXT), '[]') AS turn_blocks,
 				parse_ok, COALESCE(latency_ms, 0) AS latency_ms, COALESCE(retry_count, 0) AS retry_count,
-				COALESCE(usage_exactness, '') AS usage_exactness, input_tokens, output_tokens,
+				COALESCE(usage_exactness, '') AS usage_exactness, execution_mode, input_tokens, output_tokens,
 				COALESCE(CAST(failure AS TEXT), 'null') AS failure, created_at
 			FROM agent_turns
 			WHERE session_id = ?
 		)
 		SELECT ordinal, turn_id, run_id, agent_id, session_id, entity_id,
 			trigger_event_id, trigger_event_type, task_id, turn_blocks, parse_ok, latency_ms,
-			retry_count, usage_exactness, input_tokens, output_tokens, failure, created_at
+			retry_count, usage_exactness, execution_mode, input_tokens, output_tokens, failure, created_at
 		FROM ordered
 		WHERE %s
 		ORDER BY created_at DESC, turn_id DESC
@@ -427,14 +442,14 @@ func (s conversationForkStore) loadOperatorConversationTurn(ctx context.Context,
 				COALESCE(trigger_event_type, '') AS trigger_event_type,
 				COALESCE(task_id, '') AS task_id, COALESCE(CAST(turn_blocks AS TEXT), '[]') AS turn_blocks,
 				parse_ok, COALESCE(latency_ms, 0) AS latency_ms, COALESCE(retry_count, 0) AS retry_count,
-				COALESCE(usage_exactness, '') AS usage_exactness, input_tokens, output_tokens,
+				COALESCE(usage_exactness, '') AS usage_exactness, execution_mode, input_tokens, output_tokens,
 				COALESCE(CAST(failure AS TEXT), 'null') AS failure, created_at
 			FROM agent_turns
 			WHERE session_id = ?
 		)
 		SELECT ordinal, turn_id, run_id, agent_id, session_id, entity_id, trigger_event_id,
 			trigger_event_type, task_id, turn_blocks, parse_ok, latency_ms, retry_count,
-			usage_exactness, input_tokens, output_tokens, failure, created_at
+			usage_exactness, execution_mode, input_tokens, output_tokens, failure, created_at
 		FROM ordered
 		WHERE turn_id = ?
 	`, runIDProjection), sessionID, turnID)
@@ -637,7 +652,7 @@ func scanConversationTurnRecord(scanner operatorRowScanner) (conversationTurnRec
 		&record.Ordinal, &record.TurnID, &record.RunID, &record.AgentID, &record.SessionID,
 		&record.EntityID, &record.TriggerEventID, &record.TriggerEventType, &record.TaskID,
 		&record.TurnBlocksRaw, &record.ParseOK, &record.LatencyMS, &record.RetryCount,
-		&record.UsageExactness, &record.InputTokens, &record.OutputTokens, &failureRaw, &createdAtRaw,
+		&record.UsageExactness, &record.ExecutionMode, &record.InputTokens, &record.OutputTokens, &failureRaw, &createdAtRaw,
 	); err != nil {
 		return conversationTurnRecord{}, err
 	}
@@ -678,6 +693,7 @@ func projectPublicConversationTurn(record conversationTurnRecord) (OperatorPubli
 	}
 	turn := OperatorPublicConversationTurn{
 		TurnID:                 strings.TrimSpace(record.TurnID),
+		ExecutionMode:          strings.TrimSpace(record.ExecutionMode),
 		Ordinal:                record.Ordinal,
 		CompletedAt:            record.CreatedAt,
 		DurationMS:             record.LatencyMS,
@@ -694,6 +710,9 @@ func projectPublicConversationTurn(record conversationTurnRecord) (OperatorPubli
 		AgentID:                strings.TrimSpace(record.AgentID),
 		SessionID:              strings.TrimSpace(record.SessionID),
 		RunID:                  strings.TrimSpace(record.RunID),
+	}
+	if turn.ExecutionMode != "live" && turn.ExecutionMode != "mock" {
+		return OperatorPublicConversationTurn{}, fmt.Errorf("invalid persisted conversation execution_mode %q", turn.ExecutionMode)
 	}
 	if record.UsageExactness != "" {
 		switch record.UsageExactness {
@@ -741,6 +760,7 @@ func operatorConversationTurnListItemFromPublic(turn OperatorPublicConversationT
 	}
 	return OperatorConversationTurnListItem{
 		TurnID:           turn.TurnID,
+		ExecutionMode:    turn.ExecutionMode,
 		Ordinal:          turn.Ordinal,
 		CompletedAt:      turn.CompletedAt,
 		DurationMS:       turn.DurationMS,

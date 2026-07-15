@@ -490,7 +490,7 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 		return agent, nil
 	}, faults)
 	if err := manager.RegisterEphemeralAgentForExecution(context.Background(), runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{ID: agent.id, Role: "test"},
+		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Role: "test"},
 		Status: "active",
 	}); err != nil {
 		t.Fatalf("register agent: %v", err)

@@ -128,10 +128,11 @@ func TestExecutorTelemetry_LogsSuccess(t *testing.T) {
 
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:       "agent-1",
-		Role:     "analysis",
-		EntityID: "entity-1",
-		Tools:    []string{"check_domain"},
+		ExecutionMode: "live",
+		ID:            "agent-1",
+		Role:          "analysis",
+		EntityID:      "entity-1",
+		Tools:         []string{"check_domain"},
 	})
 
 	if _, err := exec.Execute(ctx, "check_domain", map[string]any{"domain": "example.com"}); err != nil {
@@ -166,7 +167,8 @@ func TestExecutorTelemetry_LogsDeniedExecution(t *testing.T) {
 	bus := &telemetryBusStub{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID: "agent-2",
+		ExecutionMode: "live",
+		ID:            "agent-2",
 	})
 
 	if _, err := exec.Execute(ctx, "workflow_custom_tool", map[string]any{"x": 1}); err == nil {
@@ -223,9 +225,10 @@ func TestExecutorTelemetry_LogsExecutionFailure(t *testing.T) {
 
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:       "agent-3",
-		EntityID: "entity-3",
-		Tools:    []string{"check_domain"},
+		ExecutionMode: "live",
+		ID:            "agent-3",
+		EntityID:      "entity-3",
+		Tools:         []string{"check_domain"},
 	})
 
 	if _, err := exec.Execute(ctx, "check_domain", map[string]any{"domain": "example.com"}); err == nil {
@@ -281,7 +284,7 @@ func TestExecutorTelemetry_PreservesTypedLineageForToolDiagnostics(t *testing.T)
 				},
 			},
 		})
-		actor := models.AgentConfig{ID: "selected-agent", EntityID: "entity-typed-lineage", Tools: []string{"check_domain"}}
+		actor := models.AgentConfig{ExecutionMode: "live", ID: "selected-agent", EntityID: "entity-typed-lineage", Tools: []string{"check_domain"}}
 		exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
 
 		if _, err := exec.Execute(selectedForkToolContext(actor), "check_domain", map[string]any{"domain": "example.com"}); err != nil {
@@ -295,7 +298,7 @@ func TestExecutorTelemetry_PreservesTypedLineageForToolDiagnostics(t *testing.T)
 
 	t.Run("denied", func(t *testing.T) {
 		bus := &telemetryBusStub{}
-		actor := models.AgentConfig{ID: "selected-agent"}
+		actor := models.AgentConfig{ExecutionMode: "live", ID: "selected-agent"}
 		exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{})
 
 		if _, err := exec.Execute(selectedForkToolContext(actor), "workflow_custom_tool", map[string]any{"x": 1}); err == nil {
@@ -333,7 +336,7 @@ func TestExecutorTelemetry_PreservesTypedLineageForToolDiagnostics(t *testing.T)
 				},
 			},
 		})
-		actor := models.AgentConfig{ID: "selected-agent", EntityID: "entity-typed-lineage", Tools: []string{"check_domain"}}
+		actor := models.AgentConfig{ExecutionMode: "live", ID: "selected-agent", EntityID: "entity-typed-lineage", Tools: []string{"check_domain"}}
 		exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
 
 		if _, err := exec.Execute(selectedForkToolContext(actor), "check_domain", map[string]any{"domain": "example.com"}); err == nil {
@@ -363,8 +366,9 @@ func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) 
 	})
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:       "agent-emit-1",
-		EntityID: "entity-actor",
+		ExecutionMode: "live",
+		ID:            "agent-emit-1",
+		EntityID:      "entity-actor",
 		EmitEvents: []string{
 			"category.assessed",
 		},
@@ -444,9 +448,10 @@ func TestExecutorTelemetry_PreservesTypedLineageForEmitToolOutcome(t *testing.T)
 	})
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
 	actor := models.AgentConfig{
-		ID:         "selected-agent",
-		EntityID:   "entity-typed-lineage",
-		EmitEvents: []string{"category.assessed"},
+		ExecutionMode: "live",
+		ID:            "selected-agent",
+		EntityID:      "entity-typed-lineage",
+		EmitEvents:    []string{"category.assessed"},
 	}
 
 	if _, err := exec.Execute(selectedForkToolContext(actor), "emit_category_assessed", map[string]any{"category": "AP automation"}); err != nil {
@@ -475,8 +480,9 @@ func TestExecutorTelemetry_EmitToolLogsSchemaValidationFailureSeparatelyFromPubl
 	})
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:         "agent-emit-2",
-		EmitEvents: []string{"category.assessed"},
+		ExecutionMode: "live",
+		ID:            "agent-emit-2",
+		EmitEvents:    []string{"category.assessed"},
 	})
 
 	if _, err := exec.Execute(ctx, "emit_category_assessed", map[string]any{}); err == nil {
@@ -517,8 +523,9 @@ func TestExecutorTelemetry_EmitToolLogsUndeclaredFieldSchemaValidationFailure(t 
 	})
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:       "agent-emit-undeclared",
-		EntityID: "entity-actor",
+		ExecutionMode: "live",
+		ID:            "agent-emit-undeclared",
+		EntityID:      "entity-actor",
 		EmitEvents: []string{
 			"category.assessed",
 		},
@@ -591,8 +598,9 @@ func TestExecutorTelemetry_EmitToolLogsPublishFailureWithCanonicalEventIdentity(
 	})
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:         "agent-emit-3",
-		EmitEvents: []string{"category.assessed"},
+		ExecutionMode: "live",
+		ID:            "agent-emit-3",
+		EmitEvents:    []string{"category.assessed"},
 	})
 
 	if _, err := exec.Execute(ctx, "emit_category_assessed", map[string]any{"category": "finops"}); err == nil {
@@ -640,8 +648,9 @@ func TestExecutorTelemetry_EmitToolLogsPayloadShapeFailureBeforeSchemaValidation
 	})
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:         "agent-emit-4",
-		EmitEvents: []string{"category.assessed"},
+		ExecutionMode: "live",
+		ID:            "agent-emit-4",
+		EmitEvents:    []string{"category.assessed"},
 	})
 
 	if _, err := exec.Execute(ctx, "emit_category_assessed", func() {}); err == nil {
@@ -675,7 +684,7 @@ func TestExecutorTelemetry_EmitToolLogsPayloadShapeFailureBeforeSchemaValidation
 func TestExecutorTelemetry_EmitToolLogsInvalidEmitToolNameOutcome(t *testing.T) {
 	bus := &telemetryBusStub{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{})
-	actor := models.AgentConfig{ID: "agent-emit-5"}
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "agent-emit-5"}
 
 	if _, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_not_registered", map[string]any{}); err == nil {
 		t.Fatal("expected invalid emit tool name failure")
@@ -717,8 +726,9 @@ func TestExecutorTelemetry_EmitToolCapsOversizedPayloadSnapshotsOnSchemaValidati
 	})
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:         "agent-emit-6",
-		EmitEvents: []string{"category.assessed"},
+		ExecutionMode: "live",
+		ID:            "agent-emit-6",
+		EmitEvents:    []string{"category.assessed"},
 	})
 	oversizedPayload := map[string]any{"category": "finops"}
 	for i := 0; i < 80; i++ {

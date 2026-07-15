@@ -14,8 +14,9 @@ import (
 func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 	t.Run("agent fire allowed with permission", func(t *testing.T) {
 		err := NewToolAuthorizer(nil, nil).Authorize(unmanagedToolTestContext(), models.AgentConfig{
-			ID:          "ops-1",
-			Permissions: []string{"agent_fire"},
+			ExecutionMode: "live",
+			ID:            "ops-1",
+			Permissions:   []string{"agent_fire"},
 		}, "agent_fire")
 		if err != nil {
 			t.Fatalf("expected agent_fire to be allowed: %v", err)
@@ -24,15 +25,17 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 
 	t.Run("agent fire denied without permission", func(t *testing.T) {
 		err := NewToolAuthorizer(nil, nil).Authorize(unmanagedToolTestContext(), models.AgentConfig{
-			ID: "ops-2",
+			ExecutionMode: "live",
+			ID:            "ops-2",
 		}, "agent_fire")
 		requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "tool_not_allowed")
 	})
 
 	t.Run("schedule allowed with permission", func(t *testing.T) {
 		err := NewToolAuthorizer(nil, nil).Authorize(unmanagedToolTestContext(), models.AgentConfig{
-			ID:          "ops-3",
-			Permissions: []string{"schedule"},
+			ExecutionMode: "live",
+			ID:            "ops-3",
+			Permissions:   []string{"schedule"},
 		}, "schedule")
 		if err != nil {
 			t.Fatalf("expected schedule to be allowed: %v", err)
@@ -41,14 +44,16 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 
 	t.Run("schedule denied without permission", func(t *testing.T) {
 		err := NewToolAuthorizer(nil, nil).Authorize(unmanagedToolTestContext(), models.AgentConfig{
-			ID: "ops-4",
+			ExecutionMode: "live",
+			ID:            "ops-4",
 		}, "schedule")
 		requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "tool_not_allowed")
 	})
 
 	t.Run("universal tool bypasses permission tier", func(t *testing.T) {
 		err := NewToolAuthorizer(nil, nil).Authorize(unmanagedToolTestContext(), models.AgentConfig{
-			ID: "ops-5",
+			ExecutionMode: "live",
+			ID:            "ops-5",
 		}, "agent_message")
 		if err != nil {
 			t.Fatalf("expected universal tool to be allowed: %v", err)
@@ -57,15 +62,17 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 
 	t.Run("actor config tier still applies to non-gated tools", func(t *testing.T) {
 		err := NewToolAuthorizer(nil, nil).Authorize(unmanagedToolTestContext(), models.AgentConfig{
-			ID: "ops-6",
+			ExecutionMode: "live",
+			ID:            "ops-6",
 		}, "workflow_custom_tool")
 		requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "tool_not_allowed")
 	})
 
 	t.Run("actor config still allows explicitly listed workflow tool", func(t *testing.T) {
 		authErr := NewToolAuthorizer(nil, nil).Authorize(unmanagedToolTestContext(), models.AgentConfig{
-			ID:    "ops-7",
-			Tools: []string{"workflow_custom_tool"},
+			ExecutionMode: "live",
+			ID:            "ops-7",
+			Tools:         []string{"workflow_custom_tool"},
 		}, "workflow_custom_tool")
 		if authErr != nil {
 			t.Fatalf("expected listed workflow tool to be allowed: %v", authErr)
@@ -74,8 +81,9 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 
 	t.Run("provider native read allowed when file_io enabled", func(t *testing.T) {
 		authErr := NewToolAuthorizer(nil, nil).Authorize(unmanagedToolTestContext(), models.AgentConfig{
-			ID:          "ops-8",
-			NativeTools: models.NativeToolConfig{FileIO: true},
+			ExecutionMode: "live",
+			ID:            "ops-8",
+			NativeTools:   models.NativeToolConfig{FileIO: true},
 		}, "Read")
 		if authErr != nil {
 			t.Fatalf("expected provider native Read to be allowed: %v", authErr)
@@ -84,8 +92,9 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 
 	t.Run("actor config tool aliases are canonicalized", func(t *testing.T) {
 		authErr := NewToolAuthorizer(nil, nil).Authorize(unmanagedToolTestContext(), models.AgentConfig{
-			ID:    "ops-9",
-			Tools: []string{"Read"},
+			ExecutionMode: "live",
+			ID:            "ops-9",
+			Tools:         []string{"Read"},
 		}, "read_file")
 		if authErr != nil {
 			t.Fatalf("expected aliased configured tool to be allowed: %v", authErr)
@@ -229,8 +238,9 @@ func TestToolAuthorizer_ExplicitEmitEventsAllowEmitTool(t *testing.T) {
 		return classifyToolAuthorization(actor, toolName, nil, registry)
 	})
 	err := auth.Authorize(unmanagedToolTestContext(), models.AgentConfig{
-		ID:         "coordinator-1",
-		EmitEvents: []string{"coord.done"},
+		ExecutionMode: "live",
+		ID:            "coordinator-1",
+		EmitEvents:    []string{"coord.done"},
 	}, "emit_coord_done")
 	if err != nil {
 		t.Fatalf("expected configured emit tool to be allowed: %v", err)
@@ -253,8 +263,9 @@ func TestToolAuthorizer_ScopedEmitEventsAllowLocalEmitTool(t *testing.T) {
 		return classifyToolAuthorization(actor, toolName, nil, registry)
 	})
 	err := auth.Authorize(unmanagedToolTestContext(), models.AgentConfig{
-		ID:         "market-research-agent",
-		EmitEvents: []string{"discovery/category.assessed"},
+		ExecutionMode: "live",
+		ID:            "market-research-agent",
+		EmitEvents:    []string{"discovery/category.assessed"},
 	}, "emit_category_assessed")
 	if err != nil {
 		t.Fatalf("expected scoped configured emit tool to be allowed: %v", err)
@@ -277,8 +288,9 @@ func TestToolAuthorizer_AllowsMCPPrefixedEmitToolAlias(t *testing.T) {
 		return classifyToolAuthorization(actor, toolName, nil, registry)
 	})
 	err := auth.Authorize(unmanagedToolTestContext(), models.AgentConfig{
-		ID:         "market-research-agent",
-		EmitEvents: []string{"market_research.scan_complete"},
+		ExecutionMode: "live",
+		ID:            "market-research-agent",
+		EmitEvents:    []string{"market_research.scan_complete"},
 	}, "mcp__runtime-tools__emit_market_research_scan_complete")
 	if err != nil {
 		t.Fatalf("expected MCP-prefixed emit tool alias to be allowed: %v", err)

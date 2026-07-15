@@ -279,6 +279,9 @@ func (r *sqliteOperatorAgentConversationReadSurface) ListOperatorConversations(c
 			return OperatorConversationListResult{}, err
 		}
 		item.Metadata.LiveTurn = operatorLiveTurnFromPublic(turn)
+		if turn != nil {
+			item.ExecutionMode = turn.ExecutionMode
+		}
 		conversations = append(conversations, item)
 	}
 	if err := rows.Err(); err != nil {

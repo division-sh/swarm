@@ -81,6 +81,7 @@ func TestExecutorReadFlowDataFailsClosedForUndeclaredAndEscapingFiles(t *testing
 func TestExecutorReadFlowDataNotVisibleWithoutDeclaration(t *testing.T) {
 	source, _ := loadFlowDataToolSource(t)
 	actor := models.AgentConfig{
+		ExecutionMode:  "live",
 		ID:             "other-agent",
 		Role:           "other",
 		FlowID:         "support",
@@ -100,10 +101,11 @@ func TestExecutorReadFlowDataNotVisibleWithoutDeclaration(t *testing.T) {
 func TestExecutorReadFlowDataRejectsRoleModeImpersonation(t *testing.T) {
 	source, _ := loadFlowDataToolSource(t)
 	actor := models.AgentConfig{
-		ID:       "impostor",
-		Role:     "factory_cto",
-		FlowID:   "static",
-		FlowPath: "support",
+		ExecutionMode: "live",
+		ID:            "impostor",
+		Role:          "factory_cto",
+		FlowID:        "static",
+		FlowPath:      "support",
 	}
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
 
@@ -199,6 +201,7 @@ func TestExecutorReadFlowDataRequiresWorkflowSource(t *testing.T) {
 
 func flowDataActor() models.AgentConfig {
 	return models.AgentConfig{
+		ExecutionMode:  "live",
 		ID:             "factory-cto",
 		Role:           "factory_cto",
 		FlowID:         "support",

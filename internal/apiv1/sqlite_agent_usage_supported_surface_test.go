@@ -23,10 +23,10 @@ func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
 	since := time.Date(2026, 5, 21, 9, 0, 0, 0, time.UTC)
 	until := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
 	for _, rec := range []budgetspend.SpendRecord{
-		{FlowInstance: "flow/a", AgentID: "agent-1", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 100, OutputTokens: 25, CostUSD: 0.000675, InvocationType: "anthropic", UsageAccounting: storepkg.AgentUsageAccountingExact, RecordedAt: since},
-		{FlowInstance: "flow/a", AgentID: "agent-1", Model: "sonnet", ModelAlias: "regular", BackendProfile: "claude_cli", Provider: "claude", Transport: "cli", ResolvedModel: "sonnet", InputTokens: 50, OutputTokens: 10, CostUSD: 0.000300, InvocationType: "claude_cli", UsageAccounting: storepkg.AgentUsageAccountingEstimated, RecordedAt: since.Add(time.Minute)},
-		{FlowInstance: "flow/a", AgentID: "agent-1", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 7, OutputTokens: 3, CostUSD: 0.000010, InvocationType: "anthropic", UsageAccounting: storepkg.AgentUsageAccountingExact, RecordedAt: until},
-		{FlowInstance: "flow/a", AgentID: "agent-2", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 999, OutputTokens: 999, CostUSD: 1.000000, InvocationType: "anthropic", UsageAccounting: storepkg.AgentUsageAccountingExact, RecordedAt: since.Add(time.Minute)},
+		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 100, OutputTokens: 25, CostUSD: 0.000675, InvocationType: "anthropic", UsageAccounting: storepkg.AgentUsageAccountingExact, RecordedAt: since},
+		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", Model: "sonnet", ModelAlias: "regular", BackendProfile: "claude_cli", Provider: "claude", Transport: "cli", ResolvedModel: "sonnet", InputTokens: 50, OutputTokens: 10, CostUSD: 0.000300, InvocationType: "claude_cli", UsageAccounting: storepkg.AgentUsageAccountingEstimated, RecordedAt: since.Add(time.Minute)},
+		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 7, OutputTokens: 3, CostUSD: 0.000010, InvocationType: "anthropic", UsageAccounting: storepkg.AgentUsageAccountingExact, RecordedAt: until},
+		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-2", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 999, OutputTokens: 999, CostUSD: 1.000000, InvocationType: "anthropic", UsageAccounting: storepkg.AgentUsageAccountingExact, RecordedAt: since.Add(time.Minute)},
 	} {
 		if err := sqliteStore.RecordSpend(ctx, rec); err != nil {
 			t.Fatalf("RecordSpend(%s/%s): %v", rec.AgentID, rec.UsageAccounting, err)
@@ -83,9 +83,9 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO events (
-			event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
+			event_id, run_id, event_name, entity_id, scope, payload, execution_mode, produced_by, produced_by_type, created_at
 		) VALUES (
-			?, ?, 'task.ready', ?, 'global', '{}', 'runtime', 'agent', ?
+			?, ?, 'task.ready', ?, 'global', '{}', 'live', 'runtime', 'agent', ?
 		)
 	`, eventID, runID, entityID, now.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed event: %v", err)
@@ -133,11 +133,12 @@ func seedSQLiteAgentUsageAgent(t *testing.T, ctx context.Context, sqliteStore *s
 	t.Helper()
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:     agentID,
-			Role:   "researcher",
-			Type:   "managed",
-			Model:  "cheap",
-			Config: json.RawMessage(`{"system_prompt":"usage"}`),
+			ID:            agentID,
+			Role:          "researcher",
+			Type:          "managed",
+			Model:         "cheap",
+			ExecutionMode: "live",
+			Config:        json.RawMessage(`{"system_prompt":"usage"}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),

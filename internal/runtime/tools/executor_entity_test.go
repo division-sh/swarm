@@ -331,7 +331,7 @@ func TestEntityTools_CreateEntityAcceptsAnnotatedJSONBFields(t *testing.T) {
 }
 
 func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testing.T) {
-	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{
 		"create_entity",
 		"get_entity",
 		"get_subject_status",
@@ -411,7 +411,7 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 }
 
 func TestRoleScopedEntityTools_ExcludeEqualityParticipantWriteAffordances(t *testing.T) {
-	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"validation": {
 			SchemaYAML: `
@@ -484,7 +484,7 @@ validation-orchestrator:
 }
 
 func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *testing.T) {
-	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{
 		"get_entity",
 		"save_entity_field",
 		"query_entities",
@@ -553,7 +553,7 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 }
 
 func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(t *testing.T) {
-	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
 	source := semanticview.Wrap(bundle)
 	if errs := runtimetools.ValidateGeneratedToolSchemaClosureForSource(source); len(errs) > 0 {
@@ -604,7 +604,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 }
 
 func TestRoleScopedEntityTools_NonOptedActorReceivesGeneratedSurfaceByDefault(t *testing.T) {
-	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"get_entity", "query_entities"}}
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"get_entity", "query_entities"}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, false)
 	_, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 
@@ -620,7 +620,7 @@ func TestRoleScopedEntityTools_NonOptedActorReceivesGeneratedSurfaceByDefault(t 
 }
 
 func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing.T) {
-	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{
 		"create_entity",
 		"get_entity",
 		"save_entity_field",
@@ -701,7 +701,7 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 }
 
 func TestRoleScopedEntityTools_ReadsLargeValidationCaseWithoutLoss(t *testing.T) {
-	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator"}
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator"}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
 	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 	entityID := uuid.NewString()
@@ -922,9 +922,10 @@ func TestEntityTools_SaveEntityFieldAllowsNestedListWritePath(t *testing.T) {
 
 func TestEntityTools_SaveEntityFieldRejectsInvalidDottedPathsBeforePersistence(t *testing.T) {
 	ctx, exec, db := newEntityToolTestHarnessWithActor(t, models.AgentConfig{
-		ID:    "tester",
-		Role:  "operator",
-		Tools: []string{"create_entity", "get_entity", "save_entity_field"},
+		ExecutionMode: "live",
+		ID:            "tester",
+		Role:          "operator",
+		Tools:         []string{"create_entity", "get_entity", "save_entity_field"},
 	})
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "review/inst-1",
@@ -988,9 +989,10 @@ func TestEntityTools_SaveEntityFieldRejectsInvalidDottedPathsBeforePersistence(t
 
 func TestEntityTools_SaveEntityFieldRejectsImmutableFieldUpdateAfterCreate(t *testing.T) {
 	actor := models.AgentConfig{
-		ID:    "tester",
-		Role:  "operator",
-		Tools: []string{"create_entity", "save_entity_field", "get_entity"},
+		ExecutionMode: "live",
+		ID:            "tester",
+		Role:          "operator",
+		Tools:         []string{"create_entity", "save_entity_field", "get_entity"},
 	}
 	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", "", `
 accounts:
@@ -1029,9 +1031,10 @@ accounts:
 
 func TestEntityTools_ReadsIgnoreLegacyUndeclaredStoredFields(t *testing.T) {
 	ctx, exec, db := newEntityToolTestHarnessWithActor(t, models.AgentConfig{
-		ID:    "tester",
-		Role:  "operator",
-		Tools: []string{"create_entity", "get_entity", "query_entities"},
+		ExecutionMode: "live",
+		ID:            "tester",
+		Role:          "operator",
+		Tools:         []string{"create_entity", "get_entity", "query_entities"},
 	})
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "review/inst-1",
@@ -1138,9 +1141,10 @@ func TestEntityTools_SaveEntityField_LogsMutationRow(t *testing.T) {
 
 func TestEntityTools_SaveEntityField_LogsNestedMutationRow(t *testing.T) {
 	ctx, exec, db := newEntityToolTestHarnessWithActor(t, models.AgentConfig{
-		ID:    "tester",
-		Role:  "operator",
-		Tools: []string{"create_entity", "get_entity", "save_entity_field"},
+		ExecutionMode: "live",
+		ID:            "tester",
+		Role:          "operator",
+		Tools:         []string{"create_entity", "get_entity", "save_entity_field"},
 	})
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "review/inst-1",
@@ -1279,10 +1283,11 @@ func TestEntityTools_GetEntityReturnsStoredCurrentState(t *testing.T) {
 
 func TestEntityTools_GetEntityReturnsForkLocalMaterializedRevision(t *testing.T) {
 	actor := models.AgentConfig{
-		ID:    "tester",
-		Type:  "internal",
-		Role:  "operator",
-		Tools: []string{"get_entity"},
+		ExecutionMode: "live",
+		ID:            "tester",
+		Type:          "internal",
+		Role:          "operator",
+		Tools:         []string{"get_entity"},
 	}
 	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", `
 types: {}
@@ -1306,12 +1311,12 @@ accounts:
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'fork.state_entry', $4::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $5),
-			($1::uuid, $3::uuid, 'fork.field_only', $4::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $6)
+			('live', $1::uuid, $2::uuid, 'fork.state_entry', $4::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $5),
+			('live', $1::uuid, $3::uuid, 'fork.field_only', $4::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $6)
 	`, sourceRunID, stateEventID, forkEventID, entityID, at, forkAt); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -1377,10 +1382,11 @@ accounts:
 
 func TestEntityTools_SaveEntityFieldAfterForkActivationUsesForkRunID(t *testing.T) {
 	actor := models.AgentConfig{
-		ID:    "tester",
-		Type:  "internal",
-		Role:  "operator",
-		Tools: []string{"get_entity", "save_entity_field"},
+		ExecutionMode: "live",
+		ID:            "tester",
+		Type:          "internal",
+		Role:          "operator",
+		Tools:         []string{"get_entity", "save_entity_field"},
 	}
 	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", `
 types: {}
@@ -1404,12 +1410,12 @@ accounts:
 		t.Fatalf("seed source run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'fork.state_entry', $4::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $5),
-			($1::uuid, $3::uuid, 'fork.field_only', $4::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $6)
+			('live', $1::uuid, $2::uuid, 'fork.state_entry', $4::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $5),
+			('live', $1::uuid, $3::uuid, 'fork.field_only', $4::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $6)
 	`, sourceRunID, stateEventID, forkEventID, entityID, at, forkAt); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -1664,7 +1670,7 @@ func TestEntityTools_ReadToolsRejectForeignExplicitTargetContract(t *testing.T) 
 campaign:
   status: text
 `,
-			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ID: "researcher", Role: "researcher", Tools: []string{"query_entities", "query_metrics", "search_entities"}}),
+			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "researcher", Role: "researcher", Tools: []string{"query_entities", "query_metrics", "search_entities"}}),
 		},
 		"signal-search": {
 			EntitiesYAML: `
@@ -1676,9 +1682,10 @@ signal:
 		},
 	})
 	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
-		ID:    "researcher",
-		Role:  "researcher",
-		Tools: []string{"query_entities", "query_metrics", "search_entities"},
+		ExecutionMode: "live",
+		ID:            "researcher",
+		Role:          "researcher",
+		Tools:         []string{"query_entities", "query_metrics", "search_entities"},
 	}, bundle)
 	subjectID := uuid.NewString()
 	seedEntityStateRow(t, db, uuid.NewString(), subjectID, "discovery/run-1", "campaign", "active", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
@@ -1757,9 +1764,10 @@ signal:
 
 func TestEntityTools_RootActorImplicitReadToolsDoNotReadChildFlowRows(t *testing.T) {
 	actor := models.AgentConfig{
-		ID:    "rooter",
-		Role:  "rooter",
-		Tools: []string{"query_entities", "search_entities", "query_metrics"},
+		ExecutionMode: "live",
+		ID:            "rooter",
+		Role:          "rooter",
+		Tools:         []string{"query_entities", "search_entities", "query_metrics"},
 	}
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
@@ -1843,9 +1851,10 @@ child_subject:
 
 func TestEntityTools_BracketListTypeRefsAcrossConsumers(t *testing.T) {
 	actor := models.AgentConfig{
-		ID:    "validator",
-		Role:  "validator",
-		Tools: []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
+		ExecutionMode: "live",
+		ID:            "validator",
+		Role:          "validator",
+		Tools:         []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
 	}
 	bundle := loadWave1EntityToolBundle(t, actor, "validation", "validation_case", `
 types:
@@ -1988,7 +1997,7 @@ func TestEntityTools_ReadTargetValidationRejectsUndeclaredBeforeEval(t *testing.
 campaign:
   status: text
 `,
-			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ID: "researcher", Role: "researcher", Tools: []string{"query_entities", "query_metrics", "search_entities"}}),
+			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "researcher", Role: "researcher", Tools: []string{"query_entities", "query_metrics", "search_entities"}}),
 		},
 		"signal-search": {
 			EntitiesYAML: `
@@ -1999,9 +2008,10 @@ signal:
 		},
 	})
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
-		ID:    "researcher",
-		Role:  "researcher",
-		Tools: []string{"query_entities", "query_metrics", "search_entities"},
+		ExecutionMode: "live",
+		ID:            "researcher",
+		Role:          "researcher",
+		Tools:         []string{"query_entities", "query_metrics", "search_entities"},
 	}, bundle)
 
 	_, err := exec.Execute(ctx, "query_entities", map[string]any{
@@ -2144,9 +2154,10 @@ func TestEntityTools_CreateEntityRejectsCallerSuppliedSubjectID(t *testing.T) {
 
 func TestEntityTools_ConstrainedAllowedToolsDoNotPermitLegacyEntityTools(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutorWithActor(t, models.AgentConfig{
-		ID:    "tester",
-		Role:  "operator",
-		Tools: []string{"emit_something"},
+		ExecutionMode: "live",
+		ID:            "tester",
+		Role:          "operator",
+		Tools:         []string{"emit_something"},
 	})
 	entityID := uuid.NewString()
 	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
@@ -2166,9 +2177,10 @@ func TestEntityTools_ConstrainedAllowedToolsDoNotPermitLegacyEntityTools(t *test
 
 func TestEntityTools_CreateEntityRejectsFlowWithoutEntityContract(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutorWithBundle(t, models.AgentConfig{
-		ID:    "tester",
-		Role:  "operator",
-		Tools: []string{"create_entity", "save_entity_field", "get_entity"},
+		ExecutionMode: "live",
+		ID:            "tester",
+		Role:          "operator",
+		Tools:         []string{"create_entity", "save_entity_field", "get_entity"},
 	}, &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{InitialStage: "queued"},
 	})
@@ -2188,7 +2200,7 @@ func TestEntityTools_SaveEntityFieldRejectsCrossFlowWrite(t *testing.T) {
 analysis:
   status: text
 `,
-			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ID: "analyzer", Role: "analyzer", Tools: []string{"save_entity_field", "get_entity"}}),
+			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"save_entity_field", "get_entity"}}),
 		},
 		"other-flow": {
 			EntitiesYAML: `
@@ -2200,9 +2212,10 @@ foreign:
 		},
 	})
 	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
-		ID:    "analyzer",
-		Role:  "analyzer",
-		Tools: []string{"save_entity_field", "get_entity"},
+		ExecutionMode: "live",
+		ID:            "analyzer",
+		Role:          "analyzer",
+		Tools:         []string{"save_entity_field", "get_entity"},
 	}, bundle)
 	entityID := uuid.NewString()
 	seedEntityStateRow(t, db, entityID, entityID, "other-flow/inst-1", "foreign", "queued", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
@@ -2225,7 +2238,7 @@ func TestEntityTools_SaveEntityFieldCrossFlowDenialPreservesSelectedForkRuntimeL
 analysis:
   status: text
 `,
-			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ID: "analyzer", Role: "analyzer", Tools: []string{"save_entity_field", "get_entity"}}),
+			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"save_entity_field", "get_entity"}}),
 		},
 		"other-flow": {
 			EntitiesYAML: `
@@ -2237,9 +2250,10 @@ foreign:
 		},
 	})
 	actor := models.AgentConfig{
-		ID:    "analyzer",
-		Role:  "analyzer",
-		Tools: []string{"save_entity_field", "get_entity"},
+		ExecutionMode: "live",
+		ID:            "analyzer",
+		Role:          "analyzer",
+		Tools:         []string{"save_entity_field", "get_entity"},
 	}
 	_, db, _ := testutil.StartPostgres(t)
 	ensureEntityToolTestRun(t, db)
@@ -2281,13 +2295,14 @@ func TestEntityTools_SaveEntityFieldAllowsSameFlowWrite(t *testing.T) {
 analysis:
   status: text
 `,
-			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ID: "analyzer", Role: "analyzer", Tools: []string{"create_entity", "save_entity_field", "get_entity"}}),
+			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"create_entity", "save_entity_field", "get_entity"}}),
 		},
 	})
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
-		ID:    "analyzer",
-		Role:  "analyzer",
-		Tools: []string{"create_entity", "save_entity_field", "get_entity"},
+		ExecutionMode: "live",
+		ID:            "analyzer",
+		Role:          "analyzer",
+		Tools:         []string{"create_entity", "save_entity_field", "get_entity"},
 	}, bundle)
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "analyzer-flow/inst-1",
@@ -2312,13 +2327,14 @@ func TestEntityTools_SaveEntityFieldAllowsSameFlowWriteWithoutSubjectLink(t *tes
 analysis:
   status: text
 `,
-			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ID: "analyzer", Role: "analyzer", Tools: []string{"create_entity", "save_entity_field", "get_entity"}}),
+			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"create_entity", "save_entity_field", "get_entity"}}),
 		},
 	})
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
-		ID:    "analyzer",
-		Role:  "analyzer",
-		Tools: []string{"create_entity", "save_entity_field", "get_entity"},
+		ExecutionMode: "live",
+		ID:            "analyzer",
+		Role:          "analyzer",
+		Tools:         []string{"create_entity", "save_entity_field", "get_entity"},
 	}, bundle)
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "analyzer-flow/inst-1",
@@ -2343,7 +2359,7 @@ func TestEntityTools_GetEntityRejectsCrossFlowRead(t *testing.T) {
 analysis:
   status: text
 `,
-			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ID: "analyzer", Role: "analyzer", Tools: []string{"get_entity"}}),
+			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"get_entity"}}),
 		},
 		"other-flow": {
 			EntitiesYAML: `
@@ -2355,9 +2371,10 @@ foreign:
 		},
 	})
 	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
-		ID:    "analyzer",
-		Role:  "analyzer",
-		Tools: []string{"get_entity"},
+		ExecutionMode: "live",
+		ID:            "analyzer",
+		Role:          "analyzer",
+		Tools:         []string{"get_entity"},
 	}, bundle)
 	entityID := uuid.NewString()
 	seedEntityStateRow(t, db, entityID, entityID, "other-flow/inst-1", "foreign", "open", map[string]any{"status": "foreign"}, time.Now().UTC().Truncate(time.Second))
@@ -2374,9 +2391,10 @@ foreign:
 
 func TestEntityTools_ExistingEntityFlowInstanceAcceptsDeclaredRootAndExactPath(t *testing.T) {
 	actor := models.AgentConfig{
-		ID:    "validator",
-		Role:  "validator",
-		Tools: []string{"create_entity", "get_entity", "save_entity_field", "query_entities", "query_metrics", "search_entities"},
+		ExecutionMode: "live",
+		ID:            "validator",
+		Role:          "validator",
+		Tools:         []string{"create_entity", "get_entity", "save_entity_field", "query_entities", "query_metrics", "search_entities"},
 	}
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"validation": {
@@ -2588,7 +2606,7 @@ func TestEntityTools_FlowOwnedActorCannotReadForeignEntityAndCanWriteOwnEntity(t
 analysis:
   status: text
 `,
-			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ID: "analyzer", Role: "analyzer", Tools: []string{"create_entity", "get_entity", "save_entity_field"}}),
+			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "analyzer", Role: "analyzer", Tools: []string{"create_entity", "get_entity", "save_entity_field"}}),
 		},
 		"other-flow": {
 			EntitiesYAML: `
@@ -2600,9 +2618,10 @@ foreign:
 		},
 	})
 	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
-		ID:    "analyzer",
-		Role:  "analyzer",
-		Tools: []string{"create_entity", "get_entity", "save_entity_field"},
+		ExecutionMode: "live",
+		ID:            "analyzer",
+		Role:          "analyzer",
+		Tools:         []string{"create_entity", "get_entity", "save_entity_field"},
 	}, bundle)
 
 	scoringID := uuid.NewString()
@@ -2640,9 +2659,10 @@ foreign:
 func newEntityToolTestExecutor(t *testing.T) (context.Context, *runtimetools.Executor) {
 	t.Helper()
 	ctx, exec, _ := newEntityToolTestHarnessWithActor(t, models.AgentConfig{
-		ID:    "tester",
-		Role:  "operator",
-		Tools: []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
+		ExecutionMode: "live",
+		ID:            "tester",
+		Role:          "operator",
+		Tools:         []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
 	})
 	return ctx, exec
 }
@@ -2687,14 +2707,16 @@ func newEntityToolTestExecutorWithBundle(t *testing.T, actor models.AgentConfig,
 func newAnnotatedEntityToolExecutor(t *testing.T) (context.Context, *runtimetools.Executor) {
 	t.Helper()
 	return newEntityToolTestExecutorWithBundle(t, models.AgentConfig{
-		ID:    "tester",
-		Type:  "internal",
-		Role:  "operator",
-		Tools: []string{"create_entity", "get_entity", "save_entity_field", "search_entities"},
+		ExecutionMode: "live",
+		ID:            "tester",
+		Type:          "internal",
+		Role:          "operator",
+		Tools:         []string{"create_entity", "get_entity", "save_entity_field", "search_entities"},
 	}, loadWave1EntityToolBundle(t, models.AgentConfig{
-		ID:    "tester",
-		Role:  "operator",
-		Tools: []string{"create_entity", "get_entity", "save_entity_field", "search_entities"},
+		ExecutionMode: "live",
+		ID:            "tester",
+		Role:          "operator",
+		Tools:         []string{"create_entity", "get_entity", "save_entity_field", "search_entities"},
 	}, "validation", "validation", `
 types:
   Brief:
@@ -2715,9 +2737,10 @@ validation:
 func newEntityToolTestHarness(t *testing.T) (context.Context, *runtimetools.Executor, *sql.DB) {
 	t.Helper()
 	return newEntityToolTestHarnessWithActor(t, models.AgentConfig{
-		ID:    "tester",
-		Role:  "operator",
-		Tools: []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
+		ExecutionMode: "live",
+		ID:            "tester",
+		Role:          "operator",
+		Tools:         []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
 	})
 }
 

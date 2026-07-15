@@ -73,6 +73,8 @@ func (f RuntimeFactory) Build() (Runtime, error) {
 		runtime = NewOpenAIResponsesRuntimeWithProviderCredentials(f.Cfg, f.Sessions, f.LockOwner, f.Conversations, f.Events, providerCredentials)
 		runtime.(*OpenAIResponsesRuntime).providerAdmission = providerAdmission
 		runtime.(*OpenAIResponsesRuntime).completionController = f.CompletionController
+	case llmselection.BackendMock:
+		runtime = NewMockRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Conversations, f.Events, f.CompletionController)
 	default:
 		return nil, fmt.Errorf("unsupported llm backend profile: %s", profile.ID)
 	}

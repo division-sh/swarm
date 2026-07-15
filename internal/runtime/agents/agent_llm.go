@@ -17,6 +17,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -156,8 +157,12 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 
 	a.applyPromptForEvent(evt)
 	a.prepareConversationForInvocation(evt)
+	if !a.cfg.ExecutionMode.Valid() {
+		return nil, fmt.Errorf("agent %s has no resolved execution mode", strings.TrimSpace(a.cfg.ID))
+	}
 
 	ctx = models.WithActor(ctx, a.cfg)
+	ctx = runtimeeffects.WithExecutionMode(ctx, a.cfg.ExecutionMode)
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
 	ctx = runtimebus.WithInboundEvent(ctx, evt)
 	ctx = agentmemory.WithExecution(ctx, a.cfg.Memory, agentmemory.Identity{RunID: evt.RunID(), AgentID: a.cfg.ID, FlowInstance: a.cfg.CanonicalFlowPath()})

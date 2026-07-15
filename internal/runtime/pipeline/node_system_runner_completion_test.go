@@ -778,10 +778,10 @@ func seedSQLiteSystemNodeCompletionEventWithoutDelivery(t *testing.T, db *sql.DB
 		t.Fatalf("seed sqlite run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
 			chain_depth, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			?, ?, 'worker/work.assign', ?, 'example', 'entity', '{}',
 			0, 'external', ?
 		)
@@ -884,10 +884,10 @@ func seedSystemNodeCompletionEventWithoutDelivery(t *testing.T, db *sql.DB, runI
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
 			chain_depth, produced_by, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			$1::uuid, $2::uuid, 'example.started', $3::uuid, 'example', 'entity', '{}'::jsonb,
 			0, 'test', 'external', now()
 		)

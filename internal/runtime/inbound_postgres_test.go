@@ -1018,6 +1018,7 @@ func seedPostgresInboundGatewayRuntime(
 	}
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
+			ExecutionMode: "live",
 			ID:            agentID,
 			Role:          "observer",
 			FlowID:        "global",
@@ -1084,6 +1085,7 @@ func seedSQLiteInboundGatewayRuntime(
 	}
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
+			ExecutionMode: "live",
 			ID:            agentID,
 			Role:          "observer",
 			FlowID:        "global",

@@ -143,11 +143,12 @@ func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
 	bus := &publishBusCapture{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
-		ID:         "market-research-agent",
-		Role:       "market_research",
-		FlowID:     "discovery",
-		FlowPath:   "discovery",
-		EmitEvents: []string{"category.assessed"},
+		ExecutionMode: "live",
+		ID:            "market-research-agent",
+		Role:          "market_research",
+		FlowID:        "discovery",
+		FlowPath:      "discovery",
+		EmitEvents:    []string{"category.assessed"},
 	}
 
 	_, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_category_assessed", map[string]any{
@@ -325,12 +326,13 @@ func criteriaCitationEmitTestExecutorWithAgent(agent runtimecontracts.AgentRegis
 	bus := &publishBusCapture{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
-		ID:         "cto-agent",
-		Role:       "cto",
-		FlowID:     "validation",
-		FlowPath:   "validation",
-		EmitEvents: []string{"cto.spec_vetoed"},
-		Criteria:   []string{"feasibility_exclusions"},
+		ExecutionMode: "live",
+		ID:            "cto-agent",
+		Role:          "cto",
+		FlowID:        "validation",
+		FlowPath:      "validation",
+		EmitEvents:    []string{"cto.spec_vetoed"},
+		Criteria:      []string{"feasibility_exclusions"},
 	}
 	return exec, bus, actor
 }
@@ -398,11 +400,12 @@ func TestHandleEmitTool_PreservesInboundChildFlowOwnerWithinActorScope(t *testin
 	bus := &publishBusCapture{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
-		ID:         "business-research-agent",
-		Role:       "business_research",
-		FlowID:     "validation",
-		FlowPath:   "validation",
-		EmitEvents: []string{"research.completed"},
+		ExecutionMode: "live",
+		ID:            "business-research-agent",
+		Role:          "business_research",
+		FlowID:        "validation",
+		FlowPath:      "validation",
+		EmitEvents:    []string{"research.completed"},
 	}
 	inbound := eventtest.RootIngress(
 		"",
@@ -466,11 +469,12 @@ func TestHandleEmitTool_DoesNotAdoptForeignInboundFlowOwner(t *testing.T) {
 	bus := &publishBusCapture{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
-		ID:         "business-research-agent",
-		Role:       "business_research",
-		FlowID:     "validation",
-		FlowPath:   "validation",
-		EmitEvents: []string{"research.completed"},
+		ExecutionMode: "live",
+		ID:            "business-research-agent",
+		Role:          "business_research",
+		FlowID:        "validation",
+		FlowPath:      "validation",
+		EmitEvents:    []string{"research.completed"},
 	}
 	inbound := eventtest.RootIngress(
 		"",
@@ -538,11 +542,12 @@ func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
 	bus := &publishBusCapture{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
-		ID:         "discovery-coordinator",
-		Role:       "discovery_coordinator",
-		FlowID:     "discovery",
-		FlowPath:   "discovery",
-		EmitEvents: []string{"vertical.discovered"},
+		ExecutionMode: "live",
+		ID:            "discovery-coordinator",
+		Role:          "discovery_coordinator",
+		FlowID:        "discovery",
+		FlowPath:      "discovery",
+		EmitEvents:    []string{"vertical.discovered"},
 	}
 
 	_, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_vertical_discovered", map[string]any{
@@ -616,12 +621,13 @@ func TestHandleEmitTool_TargetsParentRouteForChildPinOutput(t *testing.T) {
 		}},
 	})
 	actor := models.AgentConfig{
-		ID:         "analyzer",
-		Role:       "analyzer",
-		FlowID:     "analyzer-flow",
-		FlowPath:   "analyzer-flow/inst-1",
-		EntityID:   "22222222-2222-2222-2222-222222222222",
-		EmitEvents: []string{"analyzer-flow/analysis.done"},
+		ExecutionMode: "live",
+		ID:            "analyzer",
+		Role:          "analyzer",
+		FlowID:        "analyzer-flow",
+		FlowPath:      "analyzer-flow/inst-1",
+		EntityID:      "22222222-2222-2222-2222-222222222222",
+		EmitEvents:    []string{"analyzer-flow/analysis.done"},
 	}
 	childRoute := events.RouteIdentity{
 		FlowID:       "analyzer-flow",
@@ -709,12 +715,13 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 		}},
 	})
 	actor := models.AgentConfig{
-		ID:         "analyzer",
-		Role:       "analyzer",
-		FlowID:     "analyzer-flow",
-		FlowPath:   "analyzer-flow/inst-1",
-		EntityID:   "22222222-2222-2222-2222-222222222222",
-		EmitEvents: []string{"analyzer-flow/analysis.done"},
+		ExecutionMode: "live",
+		ID:            "analyzer",
+		Role:          "analyzer",
+		FlowID:        "analyzer-flow",
+		FlowPath:      "analyzer-flow/inst-1",
+		EntityID:      "22222222-2222-2222-2222-222222222222",
+		EmitEvents:    []string{"analyzer-flow/analysis.done"},
 	}
 	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RootIngress("", events.EventType("analyzer-flow/analysis.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
@@ -769,11 +776,12 @@ func TestHandleEmitTool_StaticChildPinOutputTargetsDeliveryEntity(t *testing.T) 
 	bus := &publishBusCapture{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
-		ID:         "analyzer",
-		Role:       "analyzer",
-		FlowID:     "analyzer-flow",
-		FlowPath:   "root/analyzer-flow",
-		EmitEvents: []string{"analyzer-flow/analysis.done"},
+		ExecutionMode: "live",
+		ID:            "analyzer",
+		Role:          "analyzer",
+		FlowID:        "analyzer-flow",
+		FlowPath:      "root/analyzer-flow",
+		EmitEvents:    []string{"analyzer-flow/analysis.done"},
 	}
 	inbound := eventtest.RootIngress(
 		"",
@@ -843,11 +851,12 @@ func TestHandleEmitTool_RootStaticPinOutputStillRequiresTarget(t *testing.T) {
 	bus := &publishBusCapture{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
-		ID:         "analyzer",
-		Role:       "analyzer",
-		FlowID:     "analyzer-flow",
-		FlowPath:   "analyzer-flow",
-		EmitEvents: []string{"analyzer-flow/analysis.done"},
+		ExecutionMode: "live",
+		ID:            "analyzer",
+		Role:          "analyzer",
+		FlowID:        "analyzer-flow",
+		FlowPath:      "analyzer-flow",
+		EmitEvents:    []string{"analyzer-flow/analysis.done"},
 	}
 	inbound := eventtest.RootIngress(
 		"",
@@ -896,9 +905,10 @@ func TestHandleEmitTool_RootSchemaPinOutputStillRequiresTarget(t *testing.T) {
 	bus := &publishBusCapture{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
-		ID:         "root-agent",
-		Role:       "root-agent",
-		EmitEvents: []string{"root.ready"},
+		ExecutionMode: "live",
+		ID:            "root-agent",
+		Role:          "root-agent",
+		EmitEvents:    []string{"root.ready"},
 	}
 
 	_, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_root_ready", map[string]any{})
@@ -925,12 +935,13 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 	}
 	emitRegistry := NewEmitRegistry(source, nil)
 	actor := models.AgentConfig{
-		ID:         "producer-agent",
-		Role:       "producer",
-		FlowID:     "producer",
-		FlowPath:   "producer",
-		EntityID:   "producer-entity",
-		EmitEvents: []string{"deploy.done"},
+		ExecutionMode: "live",
+		ID:            "producer-agent",
+		Role:          "producer",
+		FlowID:        "producer",
+		FlowPath:      "producer",
+		EntityID:      "producer-entity",
+		EmitEvents:    []string{"deploy.done"},
 	}
 	if tools := emitRegistry.GenerateEmitToolsForActor(actor, nil); !emitToolDefinitionsContain(tools, "emit_deploy_done") {
 		t.Fatalf("generated emit tools = %#v, want emit_deploy_done", tools)
@@ -990,12 +1001,13 @@ func TestHandleEmitTool_FailsClosedForConnectedOutputWithoutCanonicalRouteAuthor
 	raw := eb.SubscribeInternal("raw-listener", events.EventType("producer/deploy.done"), events.EventType("deploy.done"))
 	emitRegistry := NewEmitRegistry(source, nil)
 	actor := models.AgentConfig{
-		ID:         "producer-agent",
-		Role:       "producer",
-		FlowID:     "producer",
-		FlowPath:   "producer",
-		EntityID:   "producer-entity",
-		EmitEvents: []string{"deploy.done"},
+		ExecutionMode: "live",
+		ID:            "producer-agent",
+		Role:          "producer",
+		FlowID:        "producer",
+		FlowPath:      "producer",
+		EntityID:      "producer-entity",
+		EmitEvents:    []string{"deploy.done"},
 	}
 	exec := NewExecutorWithOptions(eb, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 
@@ -1050,9 +1062,10 @@ func TestHandleEmitTool_FailsClosedOnUndeclaredPayloadField(t *testing.T) {
 	bus := &publishBusCapture{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
-		ID:         "market-research-agent",
-		Role:       "market_research",
-		EmitEvents: []string{"category.assessed"},
+		ExecutionMode: "live",
+		ID:            "market-research-agent",
+		Role:          "market_research",
+		EmitEvents:    []string{"category.assessed"},
 	}
 
 	_, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_category_assessed", map[string]any{
@@ -1085,9 +1098,10 @@ func TestHandleEmitTool_AllowsDeclaredTemplateIDBusinessPayload(t *testing.T) {
 	bus := &publishBusCapture{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
-		ID:         "repo-agent",
-		Role:       "repo_agent",
-		EmitEvents: []string{"repo.template.selected"},
+		ExecutionMode: "live",
+		ID:            "repo-agent",
+		Role:          "repo_agent",
+		EmitEvents:    []string{"repo.template.selected"},
 	}
 
 	_, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_repo_template_selected", map[string]any{
@@ -1147,9 +1161,10 @@ func TestHandleEmitTool_AllowsValidWave1EventPayloadTypes(t *testing.T) {
 	bus := &publishBusCapture{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
-		ID:         "market-research-agent",
-		Role:       "market_research",
-		EmitEvents: []string{"scan.completed"},
+		ExecutionMode: "live",
+		ID:            "market-research-agent",
+		Role:          "market_research",
+		EmitEvents:    []string{"scan.completed"},
 	}
 
 	_, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_scan_completed", map[string]any{
@@ -1239,11 +1254,12 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 
 	reviewActor := models.AgentConfig{
-		ID:         "review-agent",
-		Role:       "reviewer",
-		FlowID:     "review",
-		FlowPath:   "review",
-		EmitEvents: []string{"review/task.requested"},
+		ExecutionMode: "live",
+		ID:            "review-agent",
+		Role:          "reviewer",
+		FlowID:        "review",
+		FlowPath:      "review",
+		EmitEvents:    []string{"review/task.requested"},
 	}
 	_, err := exec.handleEmitTool(unmanagedToolTestContext(), reviewActor, "emit_task_requested", map[string]any{
 		"details": map[string]any{
@@ -1258,11 +1274,12 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 	}
 
 	validationActor := models.AgentConfig{
-		ID:         "validation-agent",
-		Role:       "validator",
-		FlowID:     "validation",
-		FlowPath:   "validation",
-		EmitEvents: []string{"validation/task.requested"},
+		ExecutionMode: "live",
+		ID:            "validation-agent",
+		Role:          "validator",
+		FlowID:        "validation",
+		FlowPath:      "validation",
+		EmitEvents:    []string{"validation/task.requested"},
 	}
 	_, err = exec.handleEmitTool(unmanagedToolTestContext(), validationActor, "emit_task_requested", map[string]any{
 		"details": map[string]any{
@@ -1331,11 +1348,12 @@ func TestHandleEmitTool_FailsClosedOnSameActorDuplicateLeafScopedSchemas(t *test
 	bus := &publishBusCapture{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
-		ID:         "dual-scope-agent",
-		Role:       "reviewer",
-		FlowID:     "review",
-		FlowPath:   "review",
-		EmitEvents: []string{"review/task.requested", "validation/task.requested"},
+		ExecutionMode: "live",
+		ID:            "dual-scope-agent",
+		Role:          "reviewer",
+		FlowID:        "review",
+		FlowPath:      "review",
+		EmitEvents:    []string{"review/task.requested", "validation/task.requested"},
 	}
 
 	_, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_task_requested", map[string]any{
@@ -1376,9 +1394,10 @@ func TestHandleEmitTool_FailsClosedOnNamedTypeViolation(t *testing.T) {
 	bus := &publishBusCapture{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
-		ID:         "market-research-agent",
-		Role:       "market_research",
-		EmitEvents: []string{"scan.completed"},
+		ExecutionMode: "live",
+		ID:            "market-research-agent",
+		Role:          "market_research",
+		EmitEvents:    []string{"scan.completed"},
 	}
 
 	_, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_scan_completed", map[string]any{

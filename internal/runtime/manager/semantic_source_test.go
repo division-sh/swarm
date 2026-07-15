@@ -26,7 +26,7 @@ func TestDefaultManagerAgentID_UsesInjectedSemanticSource(t *testing.T) {
 	})
 	am := NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{SemanticSource: source})
 
-	got := am.defaultManagerAgentID(runtimeactors.AgentConfig{ID: "worker-1", Role: "worker"})
+	got := am.defaultManagerAgentID(runtimeactors.AgentConfig{ExecutionMode: "live", ID: "worker-1", Role: "worker"})
 	if got != "control-injected" {
 		t.Fatalf("defaultManagerAgentID = %q, want control-injected", got)
 	}
@@ -34,7 +34,7 @@ func TestDefaultManagerAgentID_UsesInjectedSemanticSource(t *testing.T) {
 
 func TestDefaultManagerAgentID_DoesNotUseAmbientWorkflowSemanticSource(t *testing.T) {
 	am := NewAgentManager(nil, nil)
-	got := am.defaultManagerAgentID(runtimeactors.AgentConfig{ID: "worker-1", Role: "worker"})
+	got := am.defaultManagerAgentID(runtimeactors.AgentConfig{ExecutionMode: "live", ID: "worker-1", Role: "worker"})
 	if got != "" {
 		t.Fatalf("defaultManagerAgentID = %q, want empty without injected semantic source", got)
 	}

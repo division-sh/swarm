@@ -462,7 +462,7 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 	}
 	managerStore := &startupRecoveryManagerStore{
 		agents: []runtimemanager.PersistedAgent{{
-			Config: runtimeactors.AgentConfig{ID: "persisted-agent"},
+			Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "persisted-agent"},
 		}},
 	}
 
@@ -735,7 +735,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	managerStore := &startupManagerReplayRuntimeStore{
 		agents: []runtimemanager.PersistedAgent{{
-			Config:    runtimeactors.AgentConfig{ID: "agent-a"},
+			Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-a"},
 			StartedAt: time.Now().UTC(),
 		}},
 		pending: map[string][]events.Event{

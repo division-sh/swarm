@@ -307,7 +307,7 @@ func Resolve(input ResolutionInput, evt events.Event) Resolution {
 		evt.ParentEventID(),
 		resolution.Envelope,
 		evt.CreatedAt(),
-	)
+	).WithExecutionMode(evt.ExecutionMode())
 	return resolution
 }
 

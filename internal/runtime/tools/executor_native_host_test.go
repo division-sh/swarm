@@ -117,25 +117,26 @@ func TestNativeFileToolsUseHostExecutionTargetWithoutShell(t *testing.T) {
 		},
 	}
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:          "writer",
-		NativeTools: models.NativeToolConfig{FileIO: true},
+		ExecutionMode: "live",
+		ID:            "writer",
+		NativeTools:   models.NativeToolConfig{FileIO: true},
 	})
 
-	readWorkspace, err := exec.execNativeReadFile(ctx, models.AgentConfig{ID: "writer"}, map[string]any{"path": "/workspace/input.txt"})
+	readWorkspace, err := exec.execNativeReadFile(ctx, models.AgentConfig{ExecutionMode: "live", ID: "writer"}, map[string]any{"path": "/workspace/input.txt"})
 	if err != nil {
 		t.Fatalf("execNativeReadFile workspace: %v", err)
 	}
 	if got := readWorkspace.(map[string]any)["content"]; got != "workspace content" {
 		t.Fatalf("workspace read content = %#v", got)
 	}
-	readData, err := exec.execNativeReadFile(ctx, models.AgentConfig{ID: "writer"}, map[string]any{"path": "/data/ref.txt"})
+	readData, err := exec.execNativeReadFile(ctx, models.AgentConfig{ExecutionMode: "live", ID: "writer"}, map[string]any{"path": "/data/ref.txt"})
 	if err != nil {
 		t.Fatalf("execNativeReadFile data: %v", err)
 	}
 	if got := readData.(map[string]any)["content"]; got != "data content" {
 		t.Fatalf("data read content = %#v", got)
 	}
-	readContracts, err := exec.execNativeReadFile(ctx, models.AgentConfig{ID: "writer"}, map[string]any{"path": "/opt/swarm/contracts/package.yaml"})
+	readContracts, err := exec.execNativeReadFile(ctx, models.AgentConfig{ExecutionMode: "live", ID: "writer"}, map[string]any{"path": "/opt/swarm/contracts/package.yaml"})
 	if err != nil {
 		t.Fatalf("execNativeReadFile contracts: %v", err)
 	}
@@ -143,7 +144,7 @@ func TestNativeFileToolsUseHostExecutionTargetWithoutShell(t *testing.T) {
 		t.Fatalf("contracts read content = %#v", got)
 	}
 
-	written, err := exec.execNativeWriteFile(ctx, models.AgentConfig{ID: "writer"}, map[string]any{"path": "/workspace/nested/output.txt", "content": "hello"})
+	written, err := exec.execNativeWriteFile(ctx, models.AgentConfig{ExecutionMode: "live", ID: "writer"}, map[string]any{"path": "/workspace/nested/output.txt", "content": "hello"})
 	if err != nil {
 		t.Fatalf("execNativeWriteFile workspace: %v", err)
 	}
@@ -155,7 +156,7 @@ func TestNativeFileToolsUseHostExecutionTargetWithoutShell(t *testing.T) {
 	}
 
 	for _, forbidden := range []string{"/data/out.txt", "/opt/swarm/contracts/out.txt", "/tmp/out.txt", workspaceDir} {
-		_, err := exec.execNativeWriteFile(ctx, models.AgentConfig{ID: "writer"}, map[string]any{"path": forbidden, "content": "nope"})
+		_, err := exec.execNativeWriteFile(ctx, models.AgentConfig{ExecutionMode: "live", ID: "writer"}, map[string]any{"path": forbidden, "content": "nope"})
 		if err == nil {
 			t.Fatalf("execNativeWriteFile(%q) succeeded, want fail closed", forbidden)
 		}
@@ -167,7 +168,7 @@ func TestNativeFileToolsUseHostExecutionTargetWithoutShell(t *testing.T) {
 	if err := os.Symlink(dataDir, filepath.Join(workspaceDir, "link")); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	_, err = exec.execNativeReadFile(ctx, models.AgentConfig{ID: "writer"}, map[string]any{"path": "/workspace/link/ref.txt"})
+	_, err = exec.execNativeReadFile(ctx, models.AgentConfig{ExecutionMode: "live", ID: "writer"}, map[string]any{"path": "/workspace/link/ref.txt"})
 	if err == nil || !strings.Contains(err.Error(), "escapes /workspace") {
 		t.Fatalf("execNativeReadFile symlink error = %v, want escape rejection", err)
 	}
@@ -202,8 +203,9 @@ func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *tes
 	}
 
 	actor := models.AgentConfig{
-		ID:          "host-file-agent",
-		NativeTools: models.NativeToolConfig{FileIO: true, Bash: true},
+		ExecutionMode: "live",
+		ID:            "host-file-agent",
+		NativeTools:   models.NativeToolConfig{FileIO: true, Bash: true},
 	}
 	target, err := manager.ResolveWorkspace(ctx, actor)
 	if err != nil {
@@ -309,8 +311,9 @@ func TestExecutorHostNativeBashUsesExplicitHostManagerTarget(t *testing.T) {
 	}
 
 	actor := models.AgentConfig{
-		ID:          "host-bash-agent",
-		NativeTools: models.NativeToolConfig{Bash: true},
+		ExecutionMode: "live",
+		ID:            "host-bash-agent",
+		NativeTools:   models.NativeToolConfig{Bash: true},
 	}
 	target, err := manager.ResolveWorkspace(ctx, actor)
 	if err != nil {
@@ -385,18 +388,19 @@ func TestNativeFileToolsKeepDockerWorkspaceCommandExecution(t *testing.T) {
 		}
 	}
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:          "docker-file-agent",
-		NativeTools: models.NativeToolConfig{FileIO: true},
+		ExecutionMode: "live",
+		ID:            "docker-file-agent",
+		NativeTools:   models.NativeToolConfig{FileIO: true},
 	})
 
-	read, err := exec.execNativeReadFile(ctx, models.AgentConfig{ID: "docker-file-agent"}, map[string]any{"path": "/workspace/input.txt"})
+	read, err := exec.execNativeReadFile(ctx, models.AgentConfig{ExecutionMode: "live", ID: "docker-file-agent"}, map[string]any{"path": "/workspace/input.txt"})
 	if err != nil {
 		t.Fatalf("execNativeReadFile docker: %v", err)
 	}
 	if got := read.(map[string]any)["content"]; got != "docker content" {
 		t.Fatalf("docker read content = %#v", got)
 	}
-	written, err := exec.execNativeWriteFile(ctx, models.AgentConfig{ID: "docker-file-agent"}, map[string]any{"path": "out/result.txt", "content": "hello"})
+	written, err := exec.execNativeWriteFile(ctx, models.AgentConfig{ExecutionMode: "live", ID: "docker-file-agent"}, map[string]any{"path": "out/result.txt", "content": "hello"})
 	if err != nil {
 		t.Fatalf("execNativeWriteFile docker: %v", err)
 	}
@@ -416,7 +420,8 @@ func TestNativeFallbackToolSurfaceConsumesWorkspaceExecutionTarget(t *testing.T)
 		},
 	}
 	actor := models.AgentConfig{
-		ID: "host-agent",
+		ExecutionMode: "live",
+		ID:            "host-agent",
 		NativeTools: models.NativeToolConfig{
 			Bash:   true,
 			FileIO: true,
@@ -459,7 +464,8 @@ func TestNativeFallbackToolSurfaceRejectsStrictProviderNativeRuntime(t *testing.
 		},
 	})
 	actor := models.AgentConfig{
-		ID: "strict-provider-agent",
+		ExecutionMode: "live",
+		ID:            "strict-provider-agent",
 		NativeTools: models.NativeToolConfig{
 			Bash:      true,
 			FileIO:    true,
@@ -512,8 +518,9 @@ func TestNativeWorkspaceCommandRequiresActorBashAuthorization(t *testing.T) {
 		},
 	})
 	actorCtx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:          "host-no-bash",
-		NativeTools: models.NativeToolConfig{FileIO: true},
+		ExecutionMode: "live",
+		ID:            "host-no-bash",
+		NativeTools:   models.NativeToolConfig{FileIO: true},
 	})
 	_, err := exec.Execute(actorCtx, "bash", map[string]any{"command": "printf should-not-run > denied.txt"})
 	requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "tool_not_allowed")

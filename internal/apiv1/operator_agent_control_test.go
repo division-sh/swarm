@@ -278,7 +278,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	manager := runtimemanager.NewAgentManager(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
 	}, pg)
-	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ID: agent.id, Model: "regular"}); err != nil {
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular"}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	handler := testHandler(t, Options{
@@ -332,7 +332,7 @@ func TestOperatorAgentSendDirectiveUsesLegacyRunBundleSourceUntilSourceStampingO
 	manager := runtimemanager.NewAgentManager(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
 	}, pg)
-	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ID: agent.id, Model: "regular"}); err != nil {
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular"}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	handler := testHandler(t, Options{

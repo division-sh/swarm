@@ -489,6 +489,7 @@ func settleForkChatCompletionForTest(t *testing.T, ctx context.Context, s forkCh
 	authority := runtimeeffects.Authority{
 		Kind: runtimeeffects.AuthorityConversationForkChat, ID: prepared.ForkTurnID,
 		ExecutionOwner: prepared.ExecutionOwner, LeaseExpiresAt: prepared.LeaseExpiresAt, FenceGeneration: prepared.FenceGeneration,
+		ExecutionMode: prepared.Snapshot.SourceAgent.ExecutionMode,
 		ForkChat: runtimeeffects.ConversationForkChatAuthority{
 			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, ActorTokenID: prepared.ActorTokenID,
 			RequestOccurrenceID: prepared.RequestOccurrenceID, RequestHash: prepared.RequestHash,
@@ -588,8 +589,8 @@ func seedConversationForkSource(t *testing.T, db execQueryer, base time.Time) co
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source)
-		VALUES ($1, $2, 'researcher', 'cheap', TRUE, 'authored')
+		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source, runtime_descriptor)
+		VALUES ($1, $2, 'researcher', 'cheap', TRUE, 'authored', '{"type":"researcher","execution_mode":"live"}'::jsonb)
 	`, source.agentID, conversationForkSourceFlowInstance); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
@@ -605,11 +606,11 @@ func seedConversationForkSource(t *testing.T, db execQueryer, base time.Time) co
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source,
-			trigger_event_id, trigger_event_type, parse_ok, created_at
+			trigger_event_id, trigger_event_type, parse_ok, execution_mode, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, $3, $4::uuid, $5, TRUE, 'authored', $6::uuid, 'task.ready', true, $7),
-			($8::uuid, $2::uuid, $3, $4::uuid, $5, TRUE, 'authored', $9::uuid, 'task.done', true, $10)
+			($1::uuid, $2::uuid, $3, $4::uuid, $5, TRUE, 'authored', $6::uuid, 'task.ready', true, 'live', $7),
+			($8::uuid, $2::uuid, $3, $4::uuid, $5, TRUE, 'authored', $9::uuid, 'task.done', true, 'live', $10)
 	`, source.turn1ID, source.runID, source.agentID, source.sessionID, conversationForkSourceFlowInstance, source.event1ID, source.turn1At, source.turn2ID, source.event2ID, source.turn2At); err != nil {
 		t.Fatalf("seed turns: %v", err)
 	}

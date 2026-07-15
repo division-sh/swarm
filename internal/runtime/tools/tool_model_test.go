@@ -65,8 +65,9 @@ func TestExecutor_HTTPToolExecutesTemplateAndResponseMapping(t *testing.T) {
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:    "agent-1",
-		Tools: []string{"check_domain"},
+		ExecutionMode: "live",
+		ID:            "agent-1",
+		Tools:         []string{"check_domain"},
 	})
 	out, err := exec.Execute(ctx, "check_domain", map[string]any{"domain": "example.com"})
 	if err != nil {
@@ -134,7 +135,7 @@ func TestExecutor_HTTPResponseSuccessPolicyParityCases(t *testing.T) {
 			}
 			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"policy_probe": tool}})
 			exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
-			ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{ID: "agent-1", Tools: []string{"policy_probe"}})
+			ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{ExecutionMode: "live", ID: "agent-1", Tools: []string{"policy_probe"}})
 			_, err := exec.Execute(ctx, "policy_probe", map[string]any{})
 			if !tc.wantFailure {
 				if err != nil {
@@ -202,8 +203,9 @@ func TestExecutor_HTTPToolEncodesURLTemplateComponentsAndPreservesRawHeaderBody(
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:    "agent-1",
-		Tools: []string{"x_search_tweets"},
+		ExecutionMode: "live",
+		ID:            "agent-1",
+		Tools:         []string{"x_search_tweets"},
 	})
 	if _, err := exec.Execute(ctx, "x_search_tweets", map[string]any{
 		"segment": "team/a b",
@@ -353,8 +355,9 @@ func TestExecutor_HTTPToolUsesImportedPackageCredentialBinding(t *testing.T) {
 	}
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:    "worker-agent",
-		Tools: []string{"send_provider"},
+		ExecutionMode: "live",
+		ID:            "worker-agent",
+		Tools:         []string{"send_provider"},
 	})
 
 	out, err := exec.Execute(ctx, "send_provider", map[string]any{})
@@ -391,9 +394,10 @@ func TestExecutor_HTTPToolUsesImportedPackageCredentialBindingForRenderedActorID
 	}
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:       "worker-agent-rendered",
-		FlowPath: "worker/instance-1",
-		Tools:    []string{"send_provider"},
+		ExecutionMode: "live",
+		ID:            "worker-agent-rendered",
+		FlowPath:      "worker/instance-1",
+		Tools:         []string{"send_provider"},
 	})
 
 	out, err := exec.Execute(ctx, "send_provider", map[string]any{})
@@ -421,8 +425,9 @@ func TestExecutor_HTTPToolFailsClosedWhenImportedCredentialBindingMissing(t *tes
 	}
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:    "worker-agent",
-		Tools: []string{"send_provider"},
+		ExecutionMode: "live",
+		ID:            "worker-agent",
+		Tools:         []string{"send_provider"},
 	})
 
 	_, err = exec.Execute(ctx, "send_provider", map[string]any{})
@@ -448,8 +453,9 @@ func TestExecutor_HTTPToolFailsClosedWhenImportedCredentialRequiresMissing(t *te
 	}
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:    "worker-agent",
-		Tools: []string{"send_provider"},
+		ExecutionMode: "live",
+		ID:            "worker-agent",
+		Tools:         []string{"send_provider"},
 	})
 
 	_, err = exec.Execute(ctx, "send_provider", map[string]any{})
@@ -475,7 +481,7 @@ func TestExecutor_NativeWebSearchUsesImportedPolicyAndCredentialBinding(t *testi
 		t.Fatalf("Set tenant_provider_key: %v", err)
 	}
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
-	actor := models.AgentConfig{ID: "worker-agent-rendered", FlowPath: "worker/instance-1", NativeTools: models.NativeToolConfig{WebSearch: true}}
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "worker-agent-rendered", FlowPath: "worker/instance-1", NativeTools: models.NativeToolConfig{WebSearch: true}}
 
 	cfg, err := exec.resolveWebSearchProviderConfig(actor)
 	if err != nil {
@@ -549,8 +555,9 @@ func TestExecutor_MCPToolExecutesDiscoveredServerTool(t *testing.T) {
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:    "agent-1",
-		Tools: []string{"infra.ping"},
+		ExecutionMode: "live",
+		ID:            "agent-1",
+		Tools:         []string{"infra.ping"},
 	})
 	out, err := exec.Execute(ctx, "infra.ping", map[string]any{"target": "svc"})
 	if err != nil {
@@ -579,7 +586,7 @@ func TestExecutor_ToolDefinitionsForActor_ExcludesContractMCPWithoutDiscovery(t 
 	})
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
-	defs := exec.ToolDefinitionsForActor(models.AgentConfig{ID: "agent-1", Tools: []string{"infra.ping"}})
+	defs := exec.ToolDefinitionsForActor(models.AgentConfig{ExecutionMode: "live", ID: "agent-1", Tools: []string{"infra.ping"}})
 
 	names := make([]string, 0, len(defs))
 	for _, def := range defs {
@@ -618,9 +625,10 @@ func TestExecutor_ToolDefinitionsForActor_UsesSharedActorRegistry(t *testing.T) 
 		},
 	})
 	defs := exec.ToolDefinitionsForActor(models.AgentConfig{
-		ID:          "agent-1",
-		Tools:       []string{"check_domain"},
-		NativeTools: models.NativeToolConfig{FileIO: true},
+		ExecutionMode: "live",
+		ID:            "agent-1",
+		Tools:         []string{"check_domain"},
+		NativeTools:   models.NativeToolConfig{FileIO: true},
 	})
 
 	names := make([]string, 0, len(defs))

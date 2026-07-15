@@ -118,6 +118,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 
 func budgetRecoverySpend(entityID, flowInstance string, cost float64, at time.Time) budgetspend.SpendRecord {
 	return budgetspend.SpendRecord{
+		ExecutionMode:   "live",
 		EntityID:        entityID,
 		FlowInstance:    flowInstance,
 		AgentID:         "budget-recovery-agent",

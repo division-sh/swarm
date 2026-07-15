@@ -477,7 +477,8 @@ func claudeAttemptProofAgentConfig(surfaces ...claudeAttemptProofSurface) runtim
 		surface = surfaces[0]
 	}
 	cfg := runtimeactors.AgentConfig{
-		ID: "claude-attempt-proof-agent", Type: "sonnet", Role: "worker", FlowID: "global", Model: "regular",
+		ExecutionMode: "live",
+		ID:            "claude-attempt-proof-agent", Type: "sonnet", Role: "worker", FlowID: "global", Model: "regular",
 		LLMBackend: "claude_cli", Memory: agentmemory.Authored(surface.memory), FlowPath: "proof/inst-1",
 	}
 	return cfg

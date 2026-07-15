@@ -53,6 +53,7 @@ func (s *SQLiteRuntimeStore) ListV1MailboxItems(ctx context.Context, opts Mailbo
 			COALESCE(m.decision_notes, ''),
 			COALESCE(m.from_agent, ''),
 			COALESCE(e.run_id, ''),
+			COALESCE(e.execution_mode, ''),
 			COALESCE(m.reply_context_id, '')
 		FROM mailbox m
 		LEFT JOIN events e ON e.event_id = m.source_event_id
@@ -172,6 +173,7 @@ func (s *SQLiteRuntimeStore) loadSQLiteMailboxV1RowTx(ctx context.Context, tx *s
 			COALESCE(m.decision_notes, ''),
 			COALESCE(m.from_agent, ''),
 			COALESCE(e.run_id, ''),
+			COALESCE(e.execution_mode, ''),
 			COALESCE(m.reply_context_id, '')
 		FROM mailbox m
 		LEFT JOIN events e ON e.event_id = m.source_event_id
@@ -218,6 +220,7 @@ func scanSQLiteMailboxV1Rows(rows *sql.Rows) ([]mailboxV1Row, error) {
 			&row.DecisionNotes,
 			&row.FromAgent,
 			&row.RunID,
+			&row.ExecutionMode,
 			&row.ReplyContextID,
 		); err != nil {
 			return nil, fmt.Errorf("scan sqlite v1 mailbox item: %w", err)
@@ -229,6 +232,9 @@ func scanSQLiteMailboxV1Rows(rows *sql.Rows) ([]mailboxV1Row, error) {
 		}
 		if row.Payload == nil {
 			row.Payload = map[string]any{}
+		}
+		if err := validateMailboxV1ExecutionMode(row.ExecutionMode); err != nil {
+			return nil, err
 		}
 		if at, ok, err := sqliteTimeValue(createdAtRaw); err != nil {
 			return nil, fmt.Errorf("scan sqlite v1 mailbox created_at: %w", err)

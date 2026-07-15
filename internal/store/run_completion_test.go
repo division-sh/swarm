@@ -35,10 +35,10 @@ func seedNormalRunCompletionFixture(t *testing.T, db *sql.DB, state, flowInstanc
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
 			chain_depth, produced_by, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			$1::uuid, $2::uuid, 'example.started', $3::uuid, NULLIF($4,''), 'entity', '{}'::jsonb,
 			0, 'test', 'external', now()
 		)
@@ -108,10 +108,10 @@ func TestPostgresStore_ConvergeNormalRunCompletion_MarksCompletedWhenTerminalAnd
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
 			chain_depth, produced_by, produced_by_type, source_event_id, created_at
-		) VALUES (
+		) VALUES ('live',
 			gen_random_uuid(), $1::uuid, $2, NULL, NULL, 'global', '{"message":"diagnostic"}'::jsonb,
 			0, 'runtime', 'platform', $3::uuid, now()
 		)

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -231,6 +232,7 @@ type Event struct {
 	envelope        EventEnvelope
 	deliveryContext DeliveryContext
 	createdAt       time.Time
+	executionMode   executionmode.Mode
 }
 
 type deliveryContextKey struct{}
@@ -255,12 +257,13 @@ func DeliveryContextFromContext(ctx context.Context) DeliveryContext {
 }
 
 type eventJSON struct {
-	ID          string          `json:"id"`
-	Type        EventType       `json:"type"`
-	SourceAgent string          `json:"source_agent"`
-	TaskID      string          `json:"task_id,omitempty"`
-	Payload     json.RawMessage `json:"payload"`
-	CreatedAt   time.Time       `json:"created_at"`
+	ID            string             `json:"id"`
+	Type          EventType          `json:"type"`
+	SourceAgent   string             `json:"source_agent"`
+	TaskID        string             `json:"task_id,omitempty"`
+	Payload       json.RawMessage    `json:"payload"`
+	CreatedAt     time.Time          `json:"created_at"`
+	ExecutionMode executionmode.Mode `json:"execution_mode"`
 }
 
 type PersistedReplayEvent struct {
@@ -291,7 +294,7 @@ func NewDiagnosticDirectEvent(id string, eventType EventType, sourceAgent, taskI
 }
 
 func NewChildEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, parent Event, envelope EventEnvelope, createdAt time.Time) Event {
-	return NewChildEventWithLineage(id, eventType, sourceAgent, taskID, payload, chainDepth, LineageFromEvent(parent), envelope, createdAt)
+	return NewChildEventWithLineage(id, eventType, sourceAgent, taskID, payload, chainDepth, LineageFromEvent(parent), envelope, createdAt).WithExecutionMode(parent.ExecutionMode())
 }
 
 func NewChildEventWithLineage(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, lineage EventLineage, envelope EventEnvelope, createdAt time.Time) Event {
@@ -356,6 +359,7 @@ func newEvent(class EventAdmissionClass, id string, eventType EventType, sourceA
 		parentEventID:  strings.TrimSpace(parentEventID),
 		envelope:       envelope.Normalized(),
 		createdAt:      createdAt,
+		executionMode:  executionmode.Live,
 	}
 	if !evt.createdAt.IsZero() {
 		evt.createdAt = evt.createdAt.UTC()
@@ -365,12 +369,13 @@ func newEvent(class EventAdmissionClass, id string, eventType EventType, sourceA
 
 func (e Event) MarshalJSON() ([]byte, error) {
 	return json.Marshal(eventJSON{
-		ID:          e.ID(),
-		Type:        e.Type(),
-		SourceAgent: e.SourceAgent(),
-		TaskID:      e.TaskID(),
-		Payload:     e.Payload(),
-		CreatedAt:   e.CreatedAt(),
+		ID:            e.ID(),
+		Type:          e.Type(),
+		SourceAgent:   e.SourceAgent(),
+		TaskID:        e.TaskID(),
+		Payload:       e.Payload(),
+		CreatedAt:     e.CreatedAt(),
+		ExecutionMode: e.ExecutionMode(),
 	})
 }
 
@@ -391,7 +396,22 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 		EventEnvelope{},
 		raw.CreatedAt,
 	)
+	if !raw.ExecutionMode.Valid() {
+		return fmt.Errorf("event execution_mode must be live or mock")
+	}
+	*e = e.WithExecutionMode(raw.ExecutionMode)
 	return nil
+}
+
+func (e Event) ExecutionMode() executionmode.Mode {
+	return e.executionMode
+}
+
+func (e Event) WithExecutionMode(mode executionmode.Mode) Event {
+	if mode.Valid() {
+		e.executionMode = mode
+	}
+	return e
 }
 
 func clonePayload(payload json.RawMessage) json.RawMessage {

@@ -20,17 +20,20 @@ func (s *PostgresStore) RecordSpend(ctx context.Context, rec budgetspend.SpendRe
 		return fmt.Errorf("postgres budget spend store is required")
 	}
 	rec = normalizeBudgetSpendRecord(rec)
+	if !rec.ExecutionMode.Valid() {
+		return fmt.Errorf("record postgres spend: execution_mode must be live or mock")
+	}
 	if err := validateBudgetSpendEntity(rec.EntityID); err != nil {
 		return err
 	}
 	_, err := s.DB.ExecContext(ctx, `
 			INSERT INTO spend_ledger (
-				entity_id, flow_instance, agent_id, model, model_alias, backend_profile, provider, transport, resolved_model,
+				execution_mode, entity_id, flow_instance, agent_id, model, model_alias, backend_profile, provider, transport, resolved_model,
 				input_tokens, output_tokens, cost_usd, invocation_type, usage_accounting, created_at
 			) VALUES (
-				NULLIF($1,'')::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+				$1, NULLIF($2,'')::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
 			)
-		`, rec.EntityID, rec.FlowInstance, rec.AgentID, rec.Model, rec.ModelAlias, rec.BackendProfile, rec.Provider, rec.Transport, rec.ResolvedModel, rec.InputTokens, rec.OutputTokens, rec.CostUSD, rec.InvocationType, rec.UsageAccounting, rec.RecordedAt)
+		`, rec.ExecutionMode, rec.EntityID, rec.FlowInstance, rec.AgentID, rec.Model, rec.ModelAlias, rec.BackendProfile, rec.Provider, rec.Transport, rec.ResolvedModel, rec.InputTokens, rec.OutputTokens, rec.CostUSD, rec.InvocationType, rec.UsageAccounting, rec.RecordedAt)
 	if err != nil {
 		return fmt.Errorf("record postgres spend: %w", err)
 	}
@@ -87,14 +90,16 @@ func (s *PostgresStore) SumSpendUSD(ctx context.Context, query budgetspend.Spend
 			SELECT COALESCE(SUM(cost_usd), 0)
 			FROM spend_ledger
 			WHERE created_at >= $1
-		`, query.Since).Scan(&spent)
+			  AND ($2::boolean = FALSE OR execution_mode = 'live')
+		`, query.Since, query.LiveOnly).Scan(&spent)
 	case budgetspend.ScopeGlobal:
 		err = s.DB.QueryRowContext(ctx, `
 			SELECT COALESCE(SUM(cost_usd), 0)
 			FROM spend_ledger
 			WHERE entity_id IS NULL
 			  AND created_at >= $1
-		`, query.Since).Scan(&spent)
+			  AND ($2::boolean = FALSE OR execution_mode = 'live')
+		`, query.Since, query.LiveOnly).Scan(&spent)
 	case budgetspend.ScopeEntity:
 		if err := validateBudgetSpendEntityRequired(query.EntityID); err != nil {
 			return 0, err
@@ -104,7 +109,8 @@ func (s *PostgresStore) SumSpendUSD(ctx context.Context, query budgetspend.Spend
 			FROM spend_ledger
 			WHERE entity_id = $1::uuid
 			  AND created_at >= $2
-		`, query.EntityID, query.Since).Scan(&spent)
+			  AND ($3::boolean = FALSE OR execution_mode = 'live')
+		`, query.EntityID, query.Since, query.LiveOnly).Scan(&spent)
 	default:
 		return 0, fmt.Errorf("unsupported budget spend scope %q", query.Scope)
 	}
@@ -119,16 +125,19 @@ func (s *SQLiteRuntimeStore) RecordSpend(ctx context.Context, rec budgetspend.Sp
 		return fmt.Errorf("sqlite budget spend store is required")
 	}
 	rec = normalizeBudgetSpendRecord(rec)
+	if !rec.ExecutionMode.Valid() {
+		return fmt.Errorf("record sqlite spend: execution_mode must be live or mock")
+	}
 	if err := validateBudgetSpendEntity(rec.EntityID); err != nil {
 		return err
 	}
 	if err := s.runRuntimeMutation(ctx, "sqlite budget spend record", func(txctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(txctx, `
 			INSERT INTO spend_ledger (
-				entity_id, flow_instance, agent_id, model, model_alias, backend_profile, provider, transport, resolved_model,
+				execution_mode, entity_id, flow_instance, agent_id, model, model_alias, backend_profile, provider, transport, resolved_model,
 				input_tokens, output_tokens, cost_usd, invocation_type, usage_accounting, created_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, sqliteNullUUID(rec.EntityID), rec.FlowInstance, rec.AgentID, rec.Model, rec.ModelAlias, rec.BackendProfile, rec.Provider, rec.Transport, rec.ResolvedModel, rec.InputTokens, rec.OutputTokens, rec.CostUSD, rec.InvocationType, rec.UsageAccounting, rec.RecordedAt.UTC())
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, rec.ExecutionMode, sqliteNullUUID(rec.EntityID), rec.FlowInstance, rec.AgentID, rec.Model, rec.ModelAlias, rec.BackendProfile, rec.Provider, rec.Transport, rec.ResolvedModel, rec.InputTokens, rec.OutputTokens, rec.CostUSD, rec.InvocationType, rec.UsageAccounting, rec.RecordedAt.UTC())
 		return err
 	}); err != nil {
 		return fmt.Errorf("record sqlite spend: %w", err)
@@ -196,14 +205,16 @@ func (s *SQLiteRuntimeStore) SumSpendUSD(ctx context.Context, query budgetspend.
 			SELECT COALESCE(SUM(cost_usd), 0)
 			FROM spend_ledger
 			WHERE created_at >= ?
-		`, query.Since.UTC()).Scan(&spent)
+			  AND (? = 0 OR execution_mode = 'live')
+		`, query.Since.UTC(), query.LiveOnly).Scan(&spent)
 	case budgetspend.ScopeGlobal:
 		err = s.DB.QueryRowContext(ctx, `
 			SELECT COALESCE(SUM(cost_usd), 0)
 			FROM spend_ledger
 			WHERE entity_id IS NULL
 			  AND created_at >= ?
-		`, query.Since.UTC()).Scan(&spent)
+			  AND (? = 0 OR execution_mode = 'live')
+		`, query.Since.UTC(), query.LiveOnly).Scan(&spent)
 	case budgetspend.ScopeEntity:
 		if err := validateBudgetSpendEntityRequired(query.EntityID); err != nil {
 			return 0, err
@@ -213,7 +224,8 @@ func (s *SQLiteRuntimeStore) SumSpendUSD(ctx context.Context, query budgetspend.
 			FROM spend_ledger
 			WHERE entity_id = ?
 			  AND created_at >= ?
-		`, query.EntityID, query.Since.UTC()).Scan(&spent)
+			  AND (? = 0 OR execution_mode = 'live')
+		`, query.EntityID, query.Since.UTC(), query.LiveOnly).Scan(&spent)
 	default:
 		return 0, fmt.Errorf("unsupported budget spend scope %q", query.Scope)
 	}

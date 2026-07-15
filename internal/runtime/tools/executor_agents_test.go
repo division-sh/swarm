@@ -126,10 +126,11 @@ func TestAuthorizeManage_AllowsAncestorManagerChain(t *testing.T) {
 		},
 	}
 	actor := models.AgentConfig{
-		ID:          "control",
-		Role:        "control",
-		Permissions: []string{"agent_fire"},
-		FlowPath:    "review/inst-1",
+		ExecutionMode: "live",
+		ID:            "control",
+		Role:          "control",
+		Permissions:   []string{"agent_fire"},
+		FlowPath:      "review/inst-1",
 	}
 	target := manager.agents["worker"]
 
@@ -155,7 +156,8 @@ func TestExecAgentFire_UsesAuthorizedManagerLifecyclePath(t *testing.T) {
 	})
 
 	result, err := exec.ExecAgentFireDirect(models.AgentConfig{
-		ID: "manager-1", Role: "manager", Permissions: []string{"agent_fire"}, FlowPath: "review/inst-1",
+		ExecutionMode: "live",
+		ID:            "manager-1", Role: "manager", Permissions: []string{"agent_fire"}, FlowPath: "review/inst-1",
 	}, map[string]any{"agent_id": "worker-1"})
 	if err != nil {
 		t.Fatalf("ExecAgentFireDirect: %v", err)
@@ -185,7 +187,8 @@ func TestExecAgentReconfigure_UsesAuthorizedManagerLifecyclePath(t *testing.T) {
 	})
 
 	result, err := exec.ExecAgentReconfigureDirect(models.AgentConfig{
-		ID: "manager-1", Role: "manager", Permissions: []string{"agent_reconfigure"}, FlowPath: "review/inst-1",
+		ExecutionMode: "live",
+		ID:            "manager-1", Role: "manager", Permissions: []string{"agent_reconfigure"}, FlowPath: "review/inst-1",
 	}, map[string]any{"agent_id": "worker-1", "model": "fast"})
 	if err != nil {
 		t.Fatalf("ExecAgentReconfigureDirect: %v", err)
@@ -228,19 +231,21 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 	}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
 	ctx := WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ID:          "control",
-		Role:        "control",
-		Permissions: []string{"message_flow"},
-		EntityID:    "entity-a",
-		FlowPath:    "review/inst-1",
+		ExecutionMode: "live",
+		ID:            "control",
+		Role:          "control",
+		Permissions:   []string{"message_flow"},
+		EntityID:      "entity-a",
+		FlowPath:      "review/inst-1",
 	})
 
 	if _, err := exec.execAgentMessage(ctx, models.AgentConfig{
-		ID:          "control",
-		Role:        "control",
-		Permissions: []string{"message_flow"},
-		EntityID:    "entity-a",
-		FlowPath:    "review/inst-1",
+		ExecutionMode: "live",
+		ID:            "control",
+		Role:          "control",
+		Permissions:   []string{"message_flow"},
+		EntityID:      "entity-a",
+		FlowPath:      "review/inst-1",
 	}, map[string]any{
 		"target_agent_id": "target-1",
 		"message":         "hello",
@@ -269,10 +274,11 @@ func TestExecAgentHire_DeniesDelegatedPermissionEscalation(t *testing.T) {
 	})
 
 	_, err := exec.ExecAgentHireDirect(models.AgentConfig{
-		ID:          "manager-1",
-		Role:        "manager",
-		Permissions: []string{"agent_hire"},
-		FlowPath:    "review/inst-1",
+		ExecutionMode: "live",
+		ID:            "manager-1",
+		Role:          "manager",
+		Permissions:   []string{"agent_hire"},
+		FlowPath:      "review/inst-1",
 	}, map[string]any{
 		"config": map[string]any{
 			"id":               "worker-1",
@@ -307,11 +313,12 @@ func TestExecAgentHire_DeniesDelegatedToolEscalation(t *testing.T) {
 	})
 
 	_, err := exec.ExecAgentHireDirect(models.AgentConfig{
-		ID:          "manager-1",
-		Role:        "manager",
-		Permissions: []string{"agent_hire"},
-		FlowPath:    "review/inst-1",
-		Tools:       []string{"lookup_data"},
+		ExecutionMode: "live",
+		ID:            "manager-1",
+		Role:          "manager",
+		Permissions:   []string{"agent_hire"},
+		FlowPath:      "review/inst-1",
+		Tools:         []string{"lookup_data"},
 	}, map[string]any{
 		"config": map[string]any{
 			"id":               "worker-1",
@@ -347,10 +354,11 @@ func TestExecAgentHire_DeniesRoleBasedEmitEscalation(t *testing.T) {
 	})
 
 	_, err := exec.ExecAgentHireDirect(models.AgentConfig{
-		ID:          "manager-1",
-		Role:        "manager",
-		Permissions: []string{"agent_hire"},
-		FlowPath:    "review/inst-1",
+		ExecutionMode: "live",
+		ID:            "manager-1",
+		Role:          "manager",
+		Permissions:   []string{"agent_hire"},
+		FlowPath:      "review/inst-1",
 	}, map[string]any{
 		"config": map[string]any{
 			"id":               "worker-1",
@@ -388,13 +396,14 @@ func TestExecAgentHire_AllowsDelegablePrivileges(t *testing.T) {
 	})
 
 	_, err := exec.ExecAgentHireDirect(models.AgentConfig{
-		ID:          "manager-1",
-		Role:        "manager",
-		Permissions: []string{"agent_hire", "schedule"},
-		Tools:       []string{"lookup_data"},
-		NativeTools: models.NativeToolConfig{FileIO: true},
-		EmitEvents:  []string{"review.started"},
-		FlowPath:    "review/inst-1",
+		ExecutionMode: "live",
+		ID:            "manager-1",
+		Role:          "manager",
+		Permissions:   []string{"agent_hire", "schedule"},
+		Tools:         []string{"lookup_data"},
+		NativeTools:   models.NativeToolConfig{FileIO: true},
+		EmitEvents:    []string{"review.started"},
+		FlowPath:      "review/inst-1",
 	}, map[string]any{
 		"config": map[string]any{
 			"id":               "worker-1",
@@ -448,11 +457,12 @@ func TestExecAgentHire_FailsClosedWhenNativeToolFallbackIsNotAdmitted(t *testing
 	})
 
 	_, err := exec.ExecAgentHireDirect(models.AgentConfig{
-		ID:          "manager-1",
-		Role:        "manager",
-		Permissions: []string{"agent_hire"},
-		NativeTools: models.NativeToolConfig{FileIO: true},
-		FlowPath:    "review/inst-1",
+		ExecutionMode: "live",
+		ID:            "manager-1",
+		Role:          "manager",
+		Permissions:   []string{"agent_hire"},
+		NativeTools:   models.NativeToolConfig{FileIO: true},
+		FlowPath:      "review/inst-1",
 	}, map[string]any{
 		"config": map[string]any{
 			"id":               "worker-1",
@@ -508,10 +518,11 @@ func TestExecAgentHire_PreservesMemoryPresenceAndProvenance(t *testing.T) {
 				input["memory"] = tc.memory
 			}
 			_, err := exec.ExecAgentHireDirect(models.AgentConfig{
-				ID:          "manager-1",
-				Role:        "manager",
-				Permissions: []string{"agent_hire"},
-				FlowPath:    "review/inst-1",
+				ExecutionMode: "live",
+				ID:            "manager-1",
+				Role:          "manager",
+				Permissions:   []string{"agent_hire"},
+				FlowPath:      "review/inst-1",
 			}, input)
 			if err != nil {
 				t.Fatalf("ExecAgentHireDirect: %v", err)
@@ -543,9 +554,10 @@ func TestExecAgentHire_RejectsMemoryWithoutFlowInstanceOwner(t *testing.T) {
 	})
 
 	_, err := exec.ExecAgentHireDirect(models.AgentConfig{
-		ID:          "manager-1",
-		Role:        "manager",
-		Permissions: []string{"agent_hire"},
+		ExecutionMode: "live",
+		ID:            "manager-1",
+		Role:          "manager",
+		Permissions:   []string{"agent_hire"},
 	}, map[string]any{
 		"config": map[string]any{
 			"id":               "worker-1",
@@ -595,10 +607,11 @@ func TestExecAgentHireRejectsRetiredAndInvalidMemoryModeInputs(t *testing.T) {
 				WorkflowSource:    source,
 			})
 			_, err := exec.ExecAgentHireDirect(models.AgentConfig{
-				ID:          "manager-1",
-				Role:        "manager",
-				Permissions: []string{"agent_hire"},
-				FlowPath:    "review/inst-1",
+				ExecutionMode: "live",
+				ID:            "manager-1",
+				Role:          "manager",
+				Permissions:   []string{"agent_hire"},
+				FlowPath:      "review/inst-1",
 			}, tt.input)
 			if err == nil || !strings.Contains(err.Error(), tt.contains) {
 				t.Fatalf("ExecAgentHireDirect error = %v, want %q", err, tt.contains)
@@ -633,10 +646,11 @@ func TestExecAgentReconfigure_DeniesNativeToolEscalation(t *testing.T) {
 	})
 
 	_, err := exec.ExecAgentReconfigureDirect(models.AgentConfig{
-		ID:          "manager-1",
-		Role:        "manager",
-		Permissions: []string{"agent_reconfigure"},
-		FlowPath:    "review/inst-1",
+		ExecutionMode: "live",
+		ID:            "manager-1",
+		Role:          "manager",
+		Permissions:   []string{"agent_reconfigure"},
+		FlowPath:      "review/inst-1",
 	}, map[string]any{
 		"agent_id": "worker-1",
 		"config": map[string]any{
@@ -680,11 +694,12 @@ func TestExecAgentReconfigure_FailsClosedWhenNativeToolFallbackIsNotAdmitted(t *
 	})
 
 	_, err := exec.ExecAgentReconfigureDirect(models.AgentConfig{
-		ID:          "manager-1",
-		Role:        "manager",
-		Permissions: []string{"agent_reconfigure"},
-		NativeTools: models.NativeToolConfig{FileIO: true},
-		FlowPath:    "review/inst-1",
+		ExecutionMode: "live",
+		ID:            "manager-1",
+		Role:          "manager",
+		Permissions:   []string{"agent_reconfigure"},
+		NativeTools:   models.NativeToolConfig{FileIO: true},
+		FlowPath:      "review/inst-1",
 	}, map[string]any{
 		"agent_id": "worker-1",
 		"config": map[string]any{
@@ -730,7 +745,8 @@ func TestExecAgentReconfigure_PreservesMemoryPresence(t *testing.T) {
 				Manager: manager, AuthorityProvider: runtimeauthority.NewSourceProvider(source), WorkflowSource: source,
 			})
 			_, err := exec.ExecAgentReconfigureDirect(models.AgentConfig{
-				ID: "manager-1", Role: "manager", Permissions: []string{"agent_reconfigure"}, FlowPath: "review/inst-1",
+				ExecutionMode: "live",
+				ID:            "manager-1", Role: "manager", Permissions: []string{"agent_reconfigure"}, FlowPath: "review/inst-1",
 			}, tc.input)
 			if err != nil {
 				t.Fatalf("ExecAgentReconfigureDirect: %v", err)

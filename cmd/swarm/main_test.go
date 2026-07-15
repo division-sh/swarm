@@ -40,6 +40,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -5386,7 +5387,13 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 	chatKey := keyPrefix + "-chat"
 	chatParams := map[string]any{"fork_id": turnFork.Fork.ForkID, "message": "inspect snapshot and try emit_event", "idempotency_key": chatKey}
 	var chat store.ConversationForkChatResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork_chat", chatParams, &chat)
+	chatResponse := requestServedJSONRPC(t, rt.Endpoint, "conversation.fork_chat", chatParams)
+	if chatResponse.Error != nil {
+		t.Fatalf("conversation.fork_chat error = %#v\n%s", chatResponse.Error, servedConversationForkTurnDebug(t, rt.DB, rt.Backend, turnFork.Fork.ForkID))
+	}
+	if err := json.Unmarshal(chatResponse.Result, &chat); err != nil {
+		t.Fatalf("decode conversation.fork_chat result: %v\n%s", err, string(chatResponse.Result))
+	}
 	if chat.IdempotencyReplayed || chat.Turn.TurnIndex != 2 || chat.Snapshot.SourceTurn.TurnID != fixture.Turn1ID {
 		t.Fatalf("%s fork chat = %#v", rt.Backend, chat)
 	}
@@ -5497,9 +5504,9 @@ func seedServedConversationForkSource(t *testing.T, db *sql.DB, backend, runID s
 			query string
 			args  []any
 		}{
-			{`INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source) VALUES ($1, 'fork-source', 'researcher', 'gpt-compatible', TRUE, 'authored')`, []any{fixture.AgentID}},
+			{`INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor) VALUES ($1, 'fork-source', 'researcher', 'regular', 'openai_compatible', TRUE, 'authored', '{"type":"researcher","model":"regular","resolved_model":"gpt-compatible","resolved_llm_provider":"openai_compatible","resolved_llm_transport":"api","execution_mode":"live"}'::jsonb)`, []any{fixture.AgentID}},
 			{`INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'fork-source', TRUE, 'authored', 'active', $4, $4)`, []any{fixture.SessionID, fixture.RunID, fixture.AgentID, now.Add(-3 * time.Minute)}},
-			{`INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, parse_ok, created_at) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,'fork-source',TRUE,'authored',$5::uuid,'task.ready',true,$6),($7::uuid,$2::uuid,$3,$4::uuid,'fork-source',TRUE,'authored',$8::uuid,'task.done',true,$9)`, []any{fixture.Turn1ID, fixture.RunID, fixture.AgentID, fixture.SessionID, fixture.Event1ID, fixture.Turn1At, fixture.Turn2ID, fixture.Event2ID, fixture.Turn2At}},
+			{`INSERT INTO agent_turns (execution_mode, turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, parse_ok, created_at) VALUES ('live',$1::uuid,$2::uuid,$3,$4::uuid,'fork-source',TRUE,'authored',$5::uuid,'task.ready',true,$6),('live',$7::uuid,$2::uuid,$3,$4::uuid,'fork-source',TRUE,'authored',$8::uuid,'task.done',true,$9)`, []any{fixture.Turn1ID, fixture.RunID, fixture.AgentID, fixture.SessionID, fixture.Event1ID, fixture.Turn1At, fixture.Turn2ID, fixture.Event2ID, fixture.Turn2At}},
 			{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid,$2::uuid,'flow/forkchat','default','after','{}'::jsonb,'{"name":"After"}'::jsonb,'{}'::jsonb,2,$3,$3,$3)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},
 			{`INSERT INTO entity_mutations (run_id, entity_id, field, old_value, new_value, writer_type, writer_id, created_at) VALUES ($1::uuid,$2::uuid,'current_state',NULL,'"draft"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'name',NULL,'"Before"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'current_state','"draft"'::jsonb,'"after"'::jsonb,'platform','test',$4)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
 		}
@@ -5508,9 +5515,9 @@ func seedServedConversationForkSource(t *testing.T, db *sql.DB, backend, runID s
 			query string
 			args  []any
 		}{
-			{`INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source) VALUES (?, 'fork-source', 'researcher', 'gpt-compatible', 1, 'authored')`, []any{fixture.AgentID}},
+			{`INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor) VALUES (?, 'fork-source', 'researcher', 'regular', 'openai_compatible', 1, 'authored', '{"type":"researcher","model":"regular","resolved_model":"gpt-compatible","resolved_llm_provider":"openai_compatible","resolved_llm_transport":"api","execution_mode":"live"}')`, []any{fixture.AgentID}},
 			{`INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at) VALUES (?, ?, ?, 'fork-source', 1, 'authored', 'active', ?, ?)`, []any{fixture.SessionID, fixture.RunID, fixture.AgentID, now.Add(-3 * time.Minute), now.Add(-3 * time.Minute)}},
-			{`INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, parse_ok, created_at) VALUES (?,?,?,?,'fork-source',1,'authored',?,'task.ready',true,?),(?,?,?,?,'fork-source',1,'authored',?,'task.done',true,?)`, []any{fixture.Turn1ID, fixture.RunID, fixture.AgentID, fixture.SessionID, fixture.Event1ID, fixture.Turn1At, fixture.Turn2ID, fixture.RunID, fixture.AgentID, fixture.SessionID, fixture.Event2ID, fixture.Turn2At}},
+			{`INSERT INTO agent_turns (execution_mode, turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, parse_ok, created_at) VALUES ('live',?,?,?,?,'fork-source',1,'authored',?,'task.ready',true,?),('live',?,?,?,?,'fork-source',1,'authored',?,'task.done',true,?)`, []any{fixture.Turn1ID, fixture.RunID, fixture.AgentID, fixture.SessionID, fixture.Event1ID, fixture.Turn1At, fixture.Turn2ID, fixture.RunID, fixture.AgentID, fixture.SessionID, fixture.Event2ID, fixture.Turn2At}},
 			{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?,?,'flow/forkchat','default','after','{}','{"name":"After"}','{}',2,?,?,?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second), fixture.Turn1At.Add(10 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
 			{`INSERT INTO entity_mutations (run_id, entity_id, field, old_value, new_value, writer_type, writer_id, created_at) VALUES (?,?,'current_state',NULL,'"draft"','platform','test',?),(?,?,'name',NULL,'"Before"','platform','test',?),(?,?,'current_state','"draft"','"after"','platform','test',?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},
 		}
@@ -5602,6 +5609,32 @@ func requireServedConversationForkTurnState(t *testing.T, db *sql.DB, backend, f
 	if got != want {
 		t.Fatalf("%s conversation fork turn %d state = %q, want %q", backend, turnIndex, got, want)
 	}
+}
+
+func servedConversationForkTurnDebug(t *testing.T, db *sql.DB, backend, forkID string) string {
+	t.Helper()
+	query := `SELECT turn_index, state, COALESCE(CAST(failure AS TEXT), '') FROM conversation_fork_turns WHERE fork_id=? ORDER BY turn_index`
+	if backend == "postgres" {
+		query = `SELECT turn_index, state, COALESCE(failure::text, '') FROM conversation_fork_turns WHERE fork_id=$1::uuid ORDER BY turn_index`
+	}
+	rows, err := db.QueryContext(context.Background(), query, forkID)
+	if err != nil {
+		return fmt.Sprintf("conversation_fork_turns: %v", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var turnIndex int
+		var state, failure string
+		if err := rows.Scan(&turnIndex, &state, &failure); err != nil {
+			return fmt.Sprintf("conversation_fork_turns scan: %v", err)
+		}
+		out = append(out, fmt.Sprintf("turn=%d state=%s failure=%s", turnIndex, state, failure))
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Sprintf("conversation_fork_turns rows: %v", err)
+	}
+	return "conversation_fork_turns: " + strings.Join(out, "; ")
 }
 
 func setServedConversationForkExpiry(t *testing.T, db *sql.DB, backend, forkID string, expiresAt time.Time) {
@@ -6270,8 +6303,9 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	}
 	card, err := decisioncard.New(decisioncard.Card{
 		CardID: activation.CardID, RunID: runID, Anchor: anchor,
-		Snapshot:   snapshot,
-		BundleHash: bundleHash, WorkflowVersion: "1.0.0",
+		ExecutionMode: executionmode.Live,
+		Snapshot:      snapshot,
+		BundleHash:    bundleHash, WorkflowVersion: "1.0.0",
 		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
 		Provenance:       provenance, CreatedAt: now,
 	})
@@ -7372,8 +7406,8 @@ func seedServedLiveAgentPendingBacklogDelivery(t *testing.T, db *sql.DB, backend
 			t.Fatalf("seed postgres live-agent backlog run: %v", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ($1::uuid, $2::uuid, 'thing.agent_hold', 'global', '{"note":"backlog"}'::jsonb, 'test', 'agent', $3)
+			INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+			VALUES ('live', $1::uuid, $2::uuid, 'thing.agent_hold', 'global', '{"note":"backlog"}'::jsonb, 'test', 'agent', $3)
 		`, eventID, runID, now); err != nil {
 			t.Fatalf("seed postgres live-agent backlog event: %v", err)
 		}
@@ -7394,8 +7428,8 @@ func seedServedLiveAgentPendingBacklogDelivery(t *testing.T, db *sql.DB, backend
 			t.Fatalf("seed sqlite live-agent backlog run: %v", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES (?, ?, 'thing.agent_hold', 'global', '{"note":"backlog"}', 'test', 'agent', ?)
+			INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+			VALUES ('live', ?, ?, 'thing.agent_hold', 'global', '{"note":"backlog"}', 'test', 'agent', ?)
 		`, eventID, runID, now); err != nil {
 			t.Fatalf("seed sqlite live-agent backlog event: %v", err)
 		}
@@ -7519,8 +7553,8 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 			t.Fatalf("seed postgres run-control pending run: %v", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ($1::uuid, $2::uuid, 'control.stop.pending', 'global', '{}'::jsonb, 'test', 'agent', $3)
+			INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+			VALUES ('live', $1::uuid, $2::uuid, 'control.stop.pending', 'global', '{}'::jsonb, 'test', 'agent', $3)
 		`, eventID, runID, now); err != nil {
 			t.Fatalf("seed postgres run-control pending event: %v", err)
 		}
@@ -7541,8 +7575,8 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 			t.Fatalf("seed sqlite run-control pending run: %v", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES (?, ?, 'control.stop.pending', 'global', '{}', 'test', 'agent', ?)
+			INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+			VALUES ('live', ?, ?, 'control.stop.pending', 'global', '{}', 'test', 'agent', ?)
 		`, eventID, runID, now); err != nil {
 			t.Fatalf("seed sqlite run-control pending event: %v", err)
 		}
@@ -7990,11 +8024,11 @@ func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourc
 		t.Fatalf("load served join fork frontier timestamp: %v", err)
 	}
 	if _, err := tx.ExecContext(context.Background(), `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, run_id, event_name, entity_id, flow_instance, scope, source_event_id,
 			payload, produced_by, produced_by_type, created_at
 		)
-		VALUES (
+		VALUES ('live',
 			$1::uuid, $2::uuid, 'fork.probe', $3::uuid, $4, 'entity', $5::uuid,
 			'{"marker":"replayed"}'::jsonb, 'join-proof', 'platform', $6
 		)
@@ -10388,7 +10422,7 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source, runtime_descriptor)
-		VALUES ('agent-a', 'startup-recovery', 'operator', 'default', TRUE, 'authored', '{"type":"default"}'::jsonb)
+		VALUES ('agent-a', 'startup-recovery', 'operator', 'default', TRUE, 'authored', '{"type":"default","execution_mode":"live"}'::jsonb)
 	`); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
@@ -10511,9 +10545,9 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string) (string,
 		t.Fatalf("seed sqlite active run: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			?, ?, 'serve.abandon.test', 'global', '{}', 'test', 'agent', ?
 		)
 	`, eventID, runID, now); err != nil {
@@ -10609,9 +10643,9 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 		t.Fatalf("seed unavailable bundle run %s: %v", source, err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			$1::uuid, $2::uuid, $3, 'global', '{}'::jsonb, 'test', 'agent', now()
 		)
 	`, eventID, runID, "startup."+source+".event"); err != nil {
@@ -11068,10 +11102,10 @@ func TestRunForkRuntimeOwnerHarness_DryRunUsesCanonicalPlannerJSON(t *testing.T)
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.cli', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.cli', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -11125,10 +11159,10 @@ func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t 
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.cli.pending', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.cli.pending', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -11179,10 +11213,10 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'flow-a/work.begin', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ('live', $1::uuid, $2::uuid, 'flow-a/work.begin', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -11507,10 +11541,10 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvance
 	at := time.Unix(1700000313, 0).UTC()
 	seedRunForkCLISelectedExecutionSource(t, db, sourceRunID, entityID, sourceEventID, at)
 	if _, err := db.ExecContext(context.Background(), `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'source.after', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'source.after', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, sourceRunID, afterEventID, entityID, at.Add(time.Second)); err != nil {
 		t.Fatalf("seed post-fork source event: %v", err)
 	}
@@ -11562,10 +11596,10 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.cli.materialize', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.cli.materialize', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, runID, eventID, entityID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -11904,10 +11938,10 @@ func seedRunForkCLIActivationSourceWithoutRevision(t *testing.T, db *sql.DB, run
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.cli.activate', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+		VALUES ('live', $1::uuid, $2::uuid, 'fork.cli.activate', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
 	`, runID, eventID, entityID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -11952,10 +11986,10 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'flow-a/1', 'entity', $5::jsonb, 'test', 'platform', $6)
+		VALUES ('live', $1::uuid, $2::uuid, $3, $4::uuid, 'flow-a/1', 'entity', $5::jsonb, 'test', 'platform', $6)
 	`, runID, eventID, eventName, entityID, fmt.Sprintf(`{"entity_id":%q}`, entityID), at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -11998,10 +12032,10 @@ func seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, d
 	t.Helper()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES (
+		VALUES ('live',
 			$1::uuid, $2::uuid, 'platform.runtime_log', NULL, NULL, 'global',
 			'{"level":"info","message":"diagnostic platform row must remain lineage-only"}'::jsonb,
 			'pipeline', 'platform', $3
@@ -12522,7 +12556,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 		}
 		return testAgent, nil
 	}, pg)
-	if err := am.SpawnAgent(runtimeactors.AgentConfig{ID: testAgent.id, Model: "regular"}); err != nil {
+	if err := am.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: testAgent.id, Model: "regular"}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	am.Run(context.Background())
@@ -12635,7 +12669,7 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 		}
 		return testAgent, nil
 	}, pg)
-	if err := am.SpawnAgent(runtimeactors.AgentConfig{ID: testAgent.id, Model: "regular"}); err != nil {
+	if err := am.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: testAgent.id, Model: "regular"}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	am.Run(context.Background())
@@ -14858,9 +14892,9 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 		t.Fatalf("seed active mismatched run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			$1::uuid, $2::uuid, 'serve.abandon.test', 'global', '{}'::jsonb, 'test', 'agent', now()
 		)
 	`, eventID, runID); err != nil {

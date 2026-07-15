@@ -166,7 +166,7 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 				e.ParentEventID(),
 				e.Envelope(),
 				e.CreatedAt(),
-			)
+			).WithExecutionMode(e.ExecutionMode())
 		}
 		if am.shouldSkipAlreadyPublishedOutput(ctx, e.ID()) {
 			continue

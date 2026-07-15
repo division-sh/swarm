@@ -586,3 +586,93 @@ pins:
 	}
 	return root
 }
+
+// CopyStandingTelegramMockServe replaces both standing-memory proof agents
+// with contract-owned Python performances while preserving the real ingress,
+// entity, event, tool, and connector execution path.
+func CopyStandingTelegramMockServe(t testing.TB, telegramBaseURL string) string {
+	t.Helper()
+	root := CopyStandingTelegramMemoryServe(t, telegramBaseURL)
+	writeClosedVariantFile(t, root, "flows/telegram-chat/nodes.yaml", `telegram-responder:
+  id: telegram-responder
+  execution_type: system_node
+  subscribes_to: [telegram.reply_requested]
+  event_handlers:
+    telegram.reply_requested:
+      activity:
+        id: telegram_send_message
+        tool: telegram.send_message
+        approval: {decision: send_telegram_message}
+        input:
+          chat_id: {cel: payload.chat_id}
+          text: {cel: payload.text}
+telegram-revision:
+  id: telegram-revision
+  execution_type: system_node
+  subscribes_to: [telegram-chat.telegram_send_message.revision_requested]
+  event_handlers:
+    telegram-chat.telegram_send_message.revision_requested: {}
+`)
+	files := map[string]string{
+		"flows/telegram-chat/agents.yaml": `phrase-bot:
+  id: phrase-bot-{instance_id}
+  role: phrase_bot
+  prompt_ref: phrase-bot
+  model: regular
+  memory: false
+  subscriptions: [inbound.telegram.text_message]
+  emit_events: [telegram.reply_requested]
+  mock:
+    kind: python
+    module: mocks/phrase-bot.py
+`,
+		"flows/memory-singleton/agents.yaml": `memory-bot:
+  id: memory-bot
+  role: memory_bot
+  prompt_ref: memory-bot
+  model: regular
+  memory: true
+  subscriptions: [memory.ping]
+  mock:
+    kind: python
+    module: mocks/memory-bot.py
+`,
+		"mocks/phrase-bot.py": `def handle(input):
+    event = input.get("event") or {}
+    payload = event.get("payload") or {}
+    return {
+        "calls": [{
+            "name": "emit_telegram_reply_requested",
+            "arguments": {
+                "chat_id": str(payload.get("chat_id", "")),
+                "text": "Swarm mock heard: " + str(payload.get("text", "")),
+            },
+        }],
+        "usage": {"input_tokens": 12, "output_tokens": 4},
+    }
+`,
+		"mocks/memory-bot.py": `def handle(input):
+    event = input.get("event") or {}
+    payload = event.get("payload") or {}
+    messages = input.get("messages") or []
+    last_role = messages[-1].get("role", "") if messages else ""
+    if str(payload.get("text", "")) == "request review" and last_role != "tool":
+        return {
+            "calls": [{
+                "name": "read_memory_state",
+                "arguments": {},
+            }],
+            "usage": {"input_tokens": 7, "output_tokens": 3},
+        }
+    history = " | ".join(str(message.get("content", "")) for message in messages)
+    return {
+        "text": "mock memory observed: " + history,
+        "usage": {"input_tokens": 6, "output_tokens": 2},
+    }
+`,
+	}
+	for name, source := range files {
+		writeClosedVariantFile(t, root, filepath.ToSlash(name), source)
+	}
+	return root
+}

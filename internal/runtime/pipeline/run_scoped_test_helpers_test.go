@@ -118,10 +118,10 @@ func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Even
 		createdAt = time.Now().UTC()
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
+		INSERT INTO events (execution_mode,
 			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
 			produced_by, produced_by_type, created_at
-		) VALUES (
+		) VALUES ('live',
 			$1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7::jsonb,
 			$8, 'agent', $9
 		)

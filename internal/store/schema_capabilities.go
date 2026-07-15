@@ -208,7 +208,7 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 		Log: detectSchemaFlavor(catalog, "events",
 			[]string{
 				"event_id", "event_name", "entity_id", "flow_instance", "scope", "payload",
-				"chain_depth", "produced_by", "produced_by_type", "source_event_id", "created_at",
+				"execution_mode", "chain_depth", "produced_by", "produced_by_type", "source_event_id", "created_at",
 			},
 			[]string{"id", "type", "source_agent", "task_id", "entity_id", "payload", "created_at"},
 		),
@@ -268,7 +268,7 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 				"turn_id", "run_id", "agent_id", "session_id", "flow_instance", "memory_enabled", "memory_source", "entity_id",
 				"trigger_event_id", "trigger_event_type", "task_id", "available_tools", "tool_calls",
 				"emitted_events", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible",
-				"request_payload", "response_payload", "parse_ok", "latency_ms", "retry_count",
+				"request_payload", "response_payload", "parse_ok", "latency_ms", "retry_count", "execution_mode",
 				"failure", "created_at",
 			},
 			nil,
@@ -286,7 +286,7 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 			[]string{
 				"fork_id", "source_session_id", "source_run_id", "source_agent_id",
 				"fork_point_turn_id", "fork_point_turn_index", "fork_point_selected_at",
-				"source_turn", "entity_snapshot", "snapshot_owner", "created_at",
+				"source_turn", "entity_snapshot", "source_agent_config", "snapshot_owner", "created_at",
 			},
 			nil,
 		),

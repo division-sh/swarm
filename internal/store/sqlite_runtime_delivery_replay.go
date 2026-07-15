@@ -476,6 +476,7 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.
 			e.payload,
 			e.created_at,
 			COALESCE(e.source_event_id, ''),
+			e.execution_mode,
 			COALESCE(e.source_route, '{}'),
 			COALESCE(e.target_route, '{}'),
 			COALESCE(e.target_set, '[]')
@@ -500,7 +501,7 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.
 	defer rows.Close()
 	out := make([]events.PersistedReplayEvent, 0, limit)
 	for rows.Next() {
-		var eventID, runID, eventName, producedBy, sourceEventID string
+		var eventID, runID, eventName, producedBy, sourceEventID, executionMode string
 		var entityID, flowInstance, scope string
 		var payloadRaw, createdAtRaw, sourceRouteRaw, targetRouteRaw, targetSetRaw any
 		if err := rows.Scan(
@@ -514,6 +515,7 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.
 			&payloadRaw,
 			&createdAtRaw,
 			&sourceEventID,
+			&executionMode,
 			&sourceRouteRaw,
 			&targetRouteRaw,
 			&targetSetRaw,
@@ -542,6 +544,10 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.
 			eventEnvelopeFromStorage(entityID, flowInstance, scope, sourceRoute, targetRoute, targetSet),
 			createdAt,
 		)
+		evt, err = eventWithStoredExecutionMode(evt, executionMode)
+		if err != nil {
+			return nil, err
+		}
 		record := events.PersistedReplayEvent{Event: evt}
 		if strings.TrimSpace(evt.RunID()) == "" {
 			record.ReplayFailure = replayAdmissionFailure("missing_canonical_run_id")
@@ -569,6 +575,7 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsWithPendingDeliveriesForRun(ctx con
 			e.payload,
 			e.created_at,
 			COALESCE(e.source_event_id, ''),
+			e.execution_mode,
 			COALESCE(e.source_route, '{}'),
 			COALESCE(e.target_route, '{}'),
 			COALESCE(e.target_set, '[]')
@@ -592,7 +599,7 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsWithPendingDeliveriesForRun(ctx con
 	defer rows.Close()
 	out := make([]events.PersistedReplayEvent, 0, limit)
 	for rows.Next() {
-		var eventID, eventRunID, eventName, producedBy, sourceEventID string
+		var eventID, eventRunID, eventName, producedBy, sourceEventID, executionMode string
 		var entityID, flowInstance, scope string
 		var payloadRaw, createdAtRaw, sourceRouteRaw, targetRouteRaw, targetSetRaw any
 		if err := rows.Scan(
@@ -606,6 +613,7 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsWithPendingDeliveriesForRun(ctx con
 			&payloadRaw,
 			&createdAtRaw,
 			&sourceEventID,
+			&executionMode,
 			&sourceRouteRaw,
 			&targetRouteRaw,
 			&targetSetRaw,
@@ -634,6 +642,10 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsWithPendingDeliveriesForRun(ctx con
 			eventEnvelopeFromStorage(entityID, flowInstance, scope, sourceRoute, targetRoute, targetSet),
 			createdAt,
 		)
+		evt, err = eventWithStoredExecutionMode(evt, executionMode)
+		if err != nil {
+			return nil, err
+		}
 		record := events.PersistedReplayEvent{Event: evt}
 		if strings.TrimSpace(evt.RunID()) == "" {
 			record.ReplayFailure = replayAdmissionFailure("missing_canonical_run_id")
@@ -1010,6 +1022,7 @@ func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(ctx context.Context, ag
 			e.payload,
 			e.created_at,
 			COALESCE(e.source_event_id, ''),
+			e.execution_mode,
 			CASE WHEN d.delivery_id IS NULL THEN 0 ELSE 1 END,
 			COALESCE(d.status, ''),
 			COALESCE(d.retry_count, 0),
@@ -1042,7 +1055,7 @@ func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(ctx context.Context, ag
 	out := make([]events.Event, 0, limit)
 	now := s.now()
 	for rows.Next() {
-		var eventID, runID, eventName, producedBy, sourceEventID string
+		var eventID, runID, eventName, producedBy, sourceEventID, executionMode string
 		var entityID, flowInstance, scope string
 		var payloadRaw, createdAtRaw, deliveryCreatedAtRaw, deliveryDeliveredAtRaw any
 		var deliveryFound, receiptFound int
@@ -1058,6 +1071,7 @@ func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(ctx context.Context, ag
 			&payloadRaw,
 			&createdAtRaw,
 			&sourceEventID,
+			&executionMode,
 			&deliveryFound,
 			&record.DeliveryStatus,
 			&record.DeliveryRetryCount,
@@ -1098,6 +1112,10 @@ func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(ctx context.Context, ag
 			events.EventEnvelope{EntityID: entityID, FlowInstance: flowInstance, Scope: events.EventScope(scope)},
 			createdAt,
 		)
+		record.Event, err = eventWithStoredExecutionMode(record.Event, executionMode)
+		if err != nil {
+			return nil, err
+		}
 		if !record.isPending(now) {
 			continue
 		}
@@ -1194,6 +1212,7 @@ func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.C
 			e.payload,
 			e.created_at,
 			COALESCE(e.source_event_id, ''),
+			e.execution_mode,
 			1,
 			COALESCE(d.status, ''),
 			COALESCE(d.retry_count, 0),
@@ -1222,6 +1241,7 @@ func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.C
 			eventID, runID         string
 			eventName, producedBy  string
 			sourceEventID          string
+			executionMode          string
 			entityID, flowInstance string
 			scope                  string
 			payloadRaw             any
@@ -1241,6 +1261,7 @@ func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.C
 			&payloadRaw,
 			&eventCreatedRaw,
 			&sourceEventID,
+			&executionMode,
 			&record.DeliveryFound,
 			&record.DeliveryStatus,
 			&record.DeliveryRetryCount,
@@ -1286,6 +1307,10 @@ func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.C
 			},
 			eventCreatedAt,
 		)
+		record.Event, err = eventWithStoredExecutionMode(record.Event, executionMode)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, record)
 	}
 	if err := rows.Err(); err != nil {

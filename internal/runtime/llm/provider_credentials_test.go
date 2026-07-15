@@ -56,3 +56,17 @@ func TestProviderCredentialResolver_EnvOnlyFailsClosed(t *testing.T) {
 		t.Fatalf("Resolve failure = %#v, want authentication required", failure)
 	}
 }
+
+func TestProviderCredentialResolver_ActiveCredentiallessProfileNeedsNoSyntheticKey(t *testing.T) {
+	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendMock)
+	if err != nil {
+		t.Fatalf("ResolveActiveBackend: %v", err)
+	}
+	resolver := NewProviderCredentialResolver(nil)
+	if credential, resolveErr := resolver.Resolve(context.Background(), profile); resolveErr != nil || credential.Key != "" || credential.Value != "" {
+		t.Fatalf("Resolve credential = %#v err=%v, want empty credential", credential, resolveErr)
+	}
+	if credential, inspectErr := resolver.Inspect(context.Background(), profile); inspectErr != nil || credential.Key != "" || credential.Value != "" {
+		t.Fatalf("Inspect credential = %#v err=%v, want empty credential", credential, inspectErr)
+	}
+}

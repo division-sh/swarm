@@ -93,6 +93,7 @@ func TestBudgetTracker_RecordSpendNormalizesThroughBudgetSpendOwner(t *testing.T
 	store := &budgetSpendStoreCapture{}
 	tracker := &BudgetTracker{store: store}
 	if err := tracker.RecordSpend(context.Background(), SpendRecord{
+		ExecutionMode:   "live",
 		FlowInstance:    " flow/1 ",
 		AgentID:         " agent-1 ",
 		Model:           " claude ",

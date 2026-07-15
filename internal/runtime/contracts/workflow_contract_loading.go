@@ -82,7 +82,7 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths) (*WorkflowContractB
 				Paths:     pkgPaths,
 				Manifest:  manifest,
 			})
-			projectView, err := loadProjectContractView(pkgPaths, manifest)
+			projectView, err := loadProjectContractView(paths.ContractsRoot, pkgPaths, manifest)
 			if err != nil {
 				return nil, err
 			}
@@ -120,7 +120,7 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths) (*WorkflowContractB
 			if len(flowEntities) > 0 {
 				bundle.flowEntities[flow.ID] = flowEntities
 			}
-			flowView, err := loadFlowContractView(flow, schema)
+			flowView, err := loadFlowContractView(paths.ContractsRoot, flow, schema)
 			if err != nil {
 				return nil, err
 			}

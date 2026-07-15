@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	stdcontext "context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -160,7 +161,7 @@ func validatePythonPolicyModuleDeclaration(context, moduleID string, module Poli
 	if len(errs) > 0 {
 		return errs
 	}
-	if err := pythonmodule.ValidateSource(pythonmodule.Request{
+	if err := pythonmodule.ValidateSource(stdcontext.Background(), pythonmodule.Request{
 		ModuleID:    moduleID,
 		RowID:       "policy.modules." + moduleID,
 		Digest:      strings.TrimSpace(module.Digest),

@@ -218,14 +218,20 @@ func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, inte
 	if err != nil {
 		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, err
 	}
+	executionMode, err := decisioncard.CausalExecutionMode(ctx)
+	if err != nil {
+		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, err
+	}
 	provenance, err := canonicaljson.FromGo(map[string]any{
 		"source_event": intent.SourceEventID, "flow_id": intent.FlowID.String(), "flow_instance": flowInstance, "node_id": intent.NodeID.String(),
+		"execution_mode": executionMode,
 	})
 	if err != nil {
 		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, fmt.Errorf("admit proposed-effect provenance: %w", err)
 	}
 	card, err := decisioncard.New(decisioncard.Card{
 		CardID: continuation.CardID, RunID: runID, Anchor: anchor, Snapshot: snapshot,
+		ExecutionMode:     executionMode,
 		EffectContentHash: effectHash, BundleHash: bundleHash, WorkflowVersion: workflowVersion,
 		EffectiveCadence: pc.decisionCardCadence.Stamp(createdAt), Provenance: provenance, CreatedAt: createdAt,
 	})

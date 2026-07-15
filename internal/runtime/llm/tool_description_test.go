@@ -54,7 +54,7 @@ func TestAnthropicAPIRuntimeBuildRequest_DeliversUsageInToolDescription(t *testi
 		}},
 	}
 
-	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1", Model: "regular"})
 	req, err := runtime.buildRequest(ctx, session, Message{Role: "user", Content: "continue"})
 	if err != nil {
 		t.Fatalf("buildRequest: %v", err)

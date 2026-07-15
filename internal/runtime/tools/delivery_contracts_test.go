@@ -12,7 +12,8 @@ import (
 
 func TestToolDefinitionsForActor_DeriveRoleScopedEntitySchemasFromActorContract(t *testing.T) {
 	actor := models.AgentConfig{
-		ID: "analyzer",
+		ExecutionMode: "live",
+		ID:            "analyzer",
 		// Type is config-authored; it must not be trusted to restore legacy tools.
 		Type:  "internal",
 		Role:  "analyzer",
@@ -86,9 +87,10 @@ review_subject:
 
 func TestToolDefinitionsForActor_ExcludeForeignReadTargets(t *testing.T) {
 	actor := models.AgentConfig{
-		ID:    "researcher",
-		Role:  "researcher",
-		Tools: []string{"search_entities", "query_entities", "query_metrics"},
+		ExecutionMode: "live",
+		ID:            "researcher",
+		Role:          "researcher",
+		Tools:         []string{"search_entities", "query_entities", "query_metrics"},
 	}
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"discovery": {
@@ -129,9 +131,10 @@ signal:
 
 func TestToolDefinitionsForActor_HideEntityScopedUniversalToolsWithoutActorContract(t *testing.T) {
 	lifecycle := models.AgentConfig{
-		ID:    "lifecycle-coordinator",
-		Role:  "lifecycle-coordinator",
-		Tools: []string{"schedule"},
+		ExecutionMode: "live",
+		ID:            "lifecycle-coordinator",
+		Role:          "lifecycle-coordinator",
+		Tools:         []string{"schedule"},
 	}
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"validation": {
@@ -139,14 +142,14 @@ func TestToolDefinitionsForActor_HideEntityScopedUniversalToolsWithoutActorContr
 validation_case:
   status: text
 `,
-			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ID: "validator", Role: "validator"}),
+			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "validator", Role: "validator"}),
 		},
 		"scoring": {
 			EntitiesYAML: `
 vertical:
   status: text
 `,
-			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ID: "scorer", Role: "scorer"}),
+			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "scorer", Role: "scorer"}),
 		},
 	})
 
@@ -164,9 +167,10 @@ vertical:
 
 func TestToolDefinitionsForActor_RetireSameNameEntityToolOverrideWithoutActorContract(t *testing.T) {
 	lifecycle := models.AgentConfig{
-		ID:    "lifecycle-coordinator",
-		Role:  "lifecycle-coordinator",
-		Tools: []string{"get_entity"},
+		ExecutionMode: "live",
+		ID:            "lifecycle-coordinator",
+		Role:          "lifecycle-coordinator",
+		Tools:         []string{"get_entity"},
 	}
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"lifecycle": {
@@ -191,7 +195,7 @@ get_entity:
 validation_case:
   status: text
 `,
-			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ID: "validator", Role: "validator"}),
+			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ExecutionMode: "live", ID: "validator", Role: "validator"}),
 		},
 	})
 

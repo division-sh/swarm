@@ -62,13 +62,14 @@ type OperatorAgentListResult struct {
 }
 
 type OperatorAgentSummary struct {
-	AgentID      string `json:"agent_id"`
-	Role         string `json:"role"`
-	Type         string `json:"type"`
-	Model        string `json:"model"`
-	Memory       bool   `json:"memory"`
-	MemorySource string `json:"memory_source"`
-	Status       string `json:"status"`
+	AgentID       string `json:"agent_id"`
+	Role          string `json:"role"`
+	Type          string `json:"type"`
+	Model         string `json:"model"`
+	ExecutionMode string `json:"execution_mode"`
+	Memory        bool   `json:"memory"`
+	MemorySource  string `json:"memory_source"`
+	Status        string `json:"status"`
 
 	RuntimeFlowID         string                              `json:"-"`
 	FlowInstance          string                              `json:"flow_instance,omitempty"`
@@ -211,14 +212,15 @@ type OperatorConversationListResult struct {
 }
 
 type OperatorConversationSummary struct {
-	SessionID    string     `json:"session_id"`
-	AgentID      string     `json:"agent_id"`
-	RunID        string     `json:"run_id,omitempty"`
-	StartedAt    time.Time  `json:"started_at"`
-	EndedAt      *time.Time `json:"ended_at,omitempty"`
-	TurnCount    int        `json:"turn_count"`
-	MessageCount int        `json:"message_count"`
-	Status       string     `json:"status"`
+	SessionID     string     `json:"session_id"`
+	AgentID       string     `json:"agent_id"`
+	ExecutionMode string     `json:"execution_mode,omitempty"`
+	RunID         string     `json:"run_id,omitempty"`
+	StartedAt     time.Time  `json:"started_at"`
+	EndedAt       *time.Time `json:"ended_at,omitempty"`
+	TurnCount     int        `json:"turn_count"`
+	MessageCount  int        `json:"message_count"`
+	Status        string     `json:"status"`
 
 	Kind         string                              `json:"-"`
 	FlowInstance string                              `json:"-"`
@@ -283,6 +285,7 @@ type OperatorConversationWatchdog struct {
 type OperatorConversationTurn struct {
 	TurnIndex        int                             `json:"turn_index"`
 	TurnID           string                          `json:"turn_id"`
+	ExecutionMode    string                          `json:"execution_mode"`
 	TriggerEventID   string                          `json:"trigger_event_id"`
 	TriggerEventType string                          `json:"trigger_event_type"`
 	RequestPayload   json.RawMessage                 `json:"request_payload,omitempty"`
@@ -551,6 +554,9 @@ func (r *OperatorAgentConversationReadSurface) ListOperatorConversations(ctx con
 			return OperatorConversationListResult{}, err
 		}
 		item.Metadata.LiveTurn = operatorLiveTurnFromPublic(turn)
+		if turn != nil {
+			item.ExecutionMode = turn.ExecutionMode
+		}
 		conversations = append(conversations, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -764,6 +770,7 @@ func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projec
 		Role:                  strings.TrimSpace(row.Config.Role),
 		Type:                  agentPersistedType(row.Config, strings.TrimSpace(row.Config.Model)),
 		Model:                 strings.TrimSpace(row.Config.Model),
+		ExecutionMode:         string(row.Config.ExecutionMode),
 		Memory:                memory.Enabled,
 		MemorySource:          string(memory.Source),
 		Status:                projection.v1Status(),

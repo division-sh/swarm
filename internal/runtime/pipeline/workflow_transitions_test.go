@@ -79,6 +79,7 @@ func canonicalTransitionSchemaRows() *sqlmock.Rows {
 		AddRow("events", "flow_instance").
 		AddRow("events", "scope").
 		AddRow("events", "payload").
+		AddRow("events", "execution_mode").
 		AddRow("events", "chain_depth").
 		AddRow("events", "produced_by").
 		AddRow("events", "produced_by_type").

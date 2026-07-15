@@ -198,10 +198,11 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 	store := &recoveryTestStore{
 		agents: []PersistedAgent{{
 			Config: models.AgentConfig{
-				ID:       "reviewer-inst-1",
-				Role:     "reviewer",
-				EntityID: "ent-1",
-				Config:   mustRecoveryJSON(t, map[string]any{"tools": []string{"agent_message"}}),
+				ExecutionMode: "live",
+				ID:            "reviewer-inst-1",
+				Role:          "reviewer",
+				EntityID:      "ent-1",
+				Config:        mustRecoveryJSON(t, map[string]any{"tools": []string{"agent_message"}}),
 			},
 			StartedAt: time.Now().UTC(),
 		}},
@@ -483,6 +484,7 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 	store := &recoveryTestStore{
 		agents: []PersistedAgent{{
 			Config: models.AgentConfig{
+				ExecutionMode:   "live",
 				ID:              "reviewer-inst-1",
 				Type:            "review-worker",
 				Role:            "reviewer",
@@ -572,7 +574,8 @@ func TestRecoverWithStartupReplayDiagnostics_LogsCanonicalManagerReplayAftermath
 		recoveryTestStore: recoveryTestStore{
 			agents: []PersistedAgent{{
 				Config: models.AgentConfig{
-					ID: "agent-a",
+					ExecutionMode: "live",
+					ID:            "agent-a",
 				},
 				StartedAt: now,
 			}},
@@ -659,7 +662,7 @@ func TestReplayAgentBacklog_DoesNotEmitStartupAftermathOutsideStartupRecovery(t 
 		return startupReplayTestAgent{id: cfg.ID}, nil
 	}, store)
 	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
-		Config: models.AgentConfig{ID: "agent-a"},
+		Config: models.AgentConfig{ExecutionMode: "live", ID: "agent-a"},
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
@@ -695,7 +698,7 @@ func TestReplayBacklogReportsDirectReplayCount(t *testing.T) {
 		return startupReplayTestAgent{id: cfg.ID}, nil
 	}, store)
 	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
-		Config: models.AgentConfig{ID: "agent-a"},
+		Config: models.AgentConfig{ExecutionMode: "live", ID: "agent-a"},
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}

@@ -58,6 +58,7 @@ type Projection struct {
 	Transport          string     `json:"transport,omitempty"`
 	AuthorityKind      string     `json:"authority_kind,omitempty"`
 	AuthorityID        string     `json:"authority_id,omitempty"`
+	ExecutionMode      string     `json:"execution_mode,omitempty"`
 	TurnID             string     `json:"turn_id,omitempty"`
 	DurationMS         *int       `json:"duration_ms,omitempty"`
 	ParseOK            *bool      `json:"parse_ok,omitempty"`
@@ -170,7 +171,7 @@ var kindContracts = map[Kind]kindContract{
 	},
 	KindEventEmitted: {
 		Transitions: set("emitted"), SourceOwner: "events", SourceIdentityRequired: true,
-		AllowedProjectionFields:  set("event_type", "producer_type", "producer_id"),
+		AllowedProjectionFields:  set("event_type", "producer_type", "producer_id", "execution_mode"),
 		RequiredProjectionFields: set("event_type", "producer_type", "producer_id"),
 		SubjectStrategy:          subjectProducer,
 	},
@@ -200,25 +201,25 @@ var kindContracts = map[Kind]kindContract{
 	},
 	KindEffectLifecycle: {
 		Transitions: set("launched", "terminal_failure", "outcome_uncertain"), SourceOwner: "runtime_external_effect_attempts", SourceIdentityRequired: true,
-		AllowedProjectionFields:  set("adapter", "transport", "authority_kind", "authority_id", "effect_class", "attempt"),
+		AllowedProjectionFields:  set("adapter", "transport", "authority_kind", "authority_id", "effect_class", "attempt", "execution_mode"),
 		RequiredProjectionFields: set("adapter", "transport", "authority_kind", "authority_id"), FailureTransitions: set("terminal_failure", "outcome_uncertain"),
 		SubjectStrategy: subjectAdapter,
 	},
 	KindTurnLifecycle: {
 		Transitions: set("completed", "failed"), SourceOwner: "agent_turns", SourceIdentityRequired: true,
-		AllowedProjectionFields:  set("subject_type", "subject_id", "turn_id", "duration_ms", "parse_ok", "usage_exactness", "input_tokens", "output_tokens", "retry_count", "event_type"),
+		AllowedProjectionFields:  set("subject_type", "subject_id", "turn_id", "duration_ms", "parse_ok", "usage_exactness", "input_tokens", "output_tokens", "retry_count", "event_type", "execution_mode"),
 		RequiredProjectionFields: set("subject_type", "subject_id"), FailureTransitions: set("failed"),
 		SubjectStrategy: subjectTypedIdentity, SubjectTypes: set("agent"),
 	},
 	KindTurnToolCompleted: {
 		Transitions: set("completed"), SourceOwner: "agent_turns", SourceIdentityRequired: true,
-		AllowedProjectionFields:  set("subject_type", "subject_id", "turn_id", "tool_name", "tool_use_id"),
+		AllowedProjectionFields:  set("subject_type", "subject_id", "turn_id", "tool_name", "tool_use_id", "execution_mode"),
 		RequiredProjectionFields: set("subject_type", "subject_id"),
 		SubjectStrategy:          subjectTypedIdentity, SubjectTypes: set("agent"),
 	},
 	KindCardLifecycle: {
 		Transitions: set("created", "decided", "deferred", "expired", "superseded"), SourceOwner: "decision_card_changes", SourceIdentityRequired: true,
-		AllowedProjectionFields:  set("subject_type", "subject_id", "card_id", "anchor_kind", "anchor_id", "decision_id", "verdict", "defer_until", "supersede_reason"),
+		AllowedProjectionFields:  set("subject_type", "subject_id", "card_id", "anchor_kind", "anchor_id", "decision_id", "verdict", "defer_until", "supersede_reason", "execution_mode"),
 		RequiredProjectionFields: set("subject_type", "subject_id"),
 		SubjectStrategy:          subjectTypedIdentity, SubjectTypes: set("card"),
 	},
@@ -342,6 +343,9 @@ func validateProjection(kind Kind, contract kindContract, projection Projection)
 		if _, ok := contract.SubjectTypes[subjectType]; !ok {
 			return fmt.Errorf("author activity %s subject_type %q is not registered", kind, subjectType)
 		}
+	}
+	if mode := strings.TrimSpace(projection.ExecutionMode); mode != "" && mode != "live" && mode != "mock" {
+		return fmt.Errorf("author activity %s execution_mode %q is not registered", kind, mode)
 	}
 	return nil
 }

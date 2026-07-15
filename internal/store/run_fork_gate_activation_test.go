@@ -31,9 +31,10 @@ func TestMaterializeRunForkDecisionCardsCreatesForkLocalPendingAuthority(t *test
 	}
 	sourceCard, err := decisioncard.New(decisioncard.Card{
 		CardID: sourceActivation.CardID, RunID: sourceRunID,
-		Anchor:     newDecisionCardTestStageAnchor("launch/review", "launch", entityID, sourceActivation.Stage, sourceActivation.ActivationID),
-		Snapshot:   freezeDecisionCardTestSnapshot(t, sourceActivation.DecisionID, map[string]any{"summary": "source snapshot"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "done"}}),
-		BundleHash: sourceActivation.BundleHash, WorkflowVersion: "1", CreatedAt: now,
+		ExecutionMode: "live",
+		Anchor:        newDecisionCardTestStageAnchor("launch/review", "launch", entityID, sourceActivation.Stage, sourceActivation.ActivationID),
+		Snapshot:      freezeDecisionCardTestSnapshot(t, sourceActivation.DecisionID, map[string]any{"summary": "source snapshot"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "done"}}),
+		BundleHash:    sourceActivation.BundleHash, WorkflowVersion: "1", CreatedAt: now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +97,8 @@ func TestMaterializeRunForkDecisionCardsPreservesCommittedSemanticFields(t *test
 	}
 	sourceCard, err := decisioncard.New(decisioncard.Card{
 		CardID: sourceActivation.CardID, RunID: sourceRunID,
-		Anchor: newDecisionCardTestStageAnchor("launch/review", "launch", entityID, sourceActivation.Stage, sourceActivation.ActivationID),
+		ExecutionMode: "live",
+		Anchor:        newDecisionCardTestStageAnchor("launch/review", "launch", entityID, sourceActivation.Stage, sourceActivation.ActivationID),
 		Snapshot: freezeDecisionCardTestSnapshot(t, sourceActivation.DecisionID, map[string]any{"safe_integer": safeInteger}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 			"approve": {Verdict: "approve", AdvancesTo: "done", Input: map[string]runtimecontracts.WorkflowGateInputField{"score": {Type: "integer", Required: true}}},
 		}),
