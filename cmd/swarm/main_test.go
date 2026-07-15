@@ -4017,6 +4017,9 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	if rpc.Result.SourceRunID != sourceRunID || rpc.Result.BundleHash != projection.BundleHash || rpc.Result.ExecutedEventCount != 1 {
 		t.Fatalf("run.fork result = %#v, want source=%s bundle_hash=%s executed=1", rpc.Result, sourceRunID, projection.BundleHash)
 	}
+	if !rpc.Result.SourceFrozen || rpc.Result.SourceRunStatus != store.RunForkSourceFrozenStatus {
+		t.Fatalf("run.fork source outcome = %#v, want frozen/forked", rpc.Result)
+	}
 	if rpc.Result.ForkRunID == "" || rpc.Result.ForkEventID != sourceEventID {
 		t.Fatalf("run.fork fork identity = %#v, want fork run and source fork event %s", rpc.Result, sourceEventID)
 	}
@@ -4044,6 +4047,67 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	}
 	if lineageRows != 1 {
 		t.Fatalf("selected-contract execution lineage rows = %d, want 1", lineageRows)
+	}
+
+	advancedSourceRunID := uuid.NewString()
+	advancedEntityID := uuid.NewString()
+	advancedSourceEventID := uuid.NewString()
+	advancedAfterEventID := uuid.NewString()
+	advancedAt := at.Add(10 * time.Second)
+	seedRunForkSelectedExecutionSourceEvent(t, db, advancedSourceRunID, advancedEntityID, advancedSourceEventID, "task.requested", "complete-task", "pending", "Serve Advanced Entity", "serve-advanced-test", advancedAt)
+	if _, err := db.ExecContext(ctx, `
+		UPDATE runs
+		SET bundle_hash = $2,
+		    bundle_source = $3
+		WHERE run_id = $1::uuid
+	`, advancedSourceRunID, projection.BundleHash, storerunlifecycle.BundleSourcePersisted); err != nil {
+		t.Fatalf("stamp advanced source run bundle identity: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			execution_mode, run_id, event_id, event_name, entity_id, flow_instance,
+			scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ('live', $1::uuid, $2::uuid, 'source.after', $3::uuid, 'flow-a/1',
+			'entity', '{}'::jsonb, 'test', 'platform', $4)
+	`, advancedSourceRunID, advancedAfterEventID, advancedEntityID, advancedAt.Add(time.Second)); err != nil {
+		t.Fatalf("seed post-fork source event: %v", err)
+	}
+	captureRunForkCLIRevision(t, db, advancedSourceRunID, runforkrevision.FamilyEvents)
+
+	var stdout, stderr bytes.Buffer
+	cliOpts := defaultRootCommandOptions()
+	cliOpts.apiRPCEndpointOverride = "http://" + apiAddr + "/v1/rpc"
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{
+		"run", "fork", advancedSourceRunID,
+		"--at-event", advancedSourceEventID,
+		"--confirm-source-freeze",
+		"--idempotency-key", "db-loaded-serve-advanced-fork",
+		"--json",
+	}, &stdout, &stderr, cliOpts)
+	if code != 0 {
+		t.Fatalf("advanced swarm run fork code=%d stderr=%s stdout=%s\nserve output:\n%s", code, stderr.String(), stdout.String(), serve.outputString())
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("advanced swarm run fork stderr=%q, want empty", stderr.String())
+	}
+	var advancedResult apiv1.RunForkExecutionResult
+	if err := json.Unmarshal(stdout.Bytes(), &advancedResult); err != nil {
+		t.Fatalf("decode advanced swarm run fork json: %v\n%s", err, stdout.String())
+	}
+	if advancedResult.SourceRunID != advancedSourceRunID || advancedResult.SourceFrozen || advancedResult.SourceRunStatus != "running" || advancedResult.ForkRunStatus != store.RunForkActivatedStatus {
+		t.Fatalf("advanced run.fork result = %#v, want preserved running source and activated fork", advancedResult)
+	}
+	var advancedSourceStatus, advancedContinuedAs string
+	if err := db.QueryRowContext(ctx, `
+		SELECT status, COALESCE(continued_as_run_id::text, '')
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, advancedSourceRunID).Scan(&advancedSourceStatus, &advancedContinuedAs); err != nil {
+		t.Fatalf("load advanced source outcome: %v", err)
+	}
+	if advancedSourceStatus != "running" || advancedContinuedAs != "" {
+		t.Fatalf("advanced source status/continued_as = %q/%q, want running with no freeze pointer", advancedSourceStatus, advancedContinuedAs)
 	}
 
 	if code := serve.stop(); code != 0 {

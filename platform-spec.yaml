@@ -21923,9 +21923,12 @@ cli_specification:
       behavior: >
         Public run-fork CLI. `swarm run fork` is the public command (CLI v2.2); top-level `swarm fork` is a retired spelling that fails closed. The bundle selector flag is
         `--bundle-hash`; draft `--bundle` is superseded by #1001. `--at-event` is an explicit fork-event selector only.
-        A currently running or paused source requires `--confirm-source-freeze`; an interactive TTY may obtain the same
-        explicit confirmation after warning that the source is permanently frozen and continues as the fork. Non-TTY
-        callers must pass the flag. Terminal sources fail closed without a confirmation ceremony.
+        A currently running or paused source requires `--confirm-source-freeze`; this authorizes the operation to
+        permanently freeze an unadvanced source, while the selected source-advanced branch-divergence path preserves
+        the source as an independently live branch. An interactive TTY may obtain the same explicit conditional
+        authorization after warning that the operation may freeze the source. Non-TTY callers must pass the flag.
+        Terminal sources fail closed without a confirmation ceremony. The result reports the actual source outcome
+        through required source_frozen and source_run_status fields.
         The CLI validates source_run_id and fork_event_id as currently UUID-shaped runtime IDs before calling the
         handler, calls /v1/rpc run.fork exactly once, and renders only server-owned fork results.
       implemented_dependencies:
@@ -24243,10 +24246,13 @@ api_specification:
               $ref: '#/components/schemas/EventReplayDelivery'
       RunForkResult:
         type: object
+        description: Reports both the activated fork and the actual source lifecycle outcome. source_frozen is true exactly when source_run_status is forked; otherwise the source-advanced branch preserved the reported source status.
         additionalProperties: false
         required:
         - owner
         - source_run_id
+        - source_run_status
+        - source_frozen
         - fork_run_id
         - fork_event_id
         - fork_run_status
@@ -24258,6 +24264,11 @@ api_specification:
             description: Canonical runtime/store owner that executed the selected-contract fork.
           source_run_id:
             $ref: '#/components/schemas/OpaqueId'
+          source_run_status:
+            $ref: '#/components/schemas/RunStatus'
+          source_frozen:
+            type: boolean
+            description: True only when activation permanently froze the source; false when source advancement selected branch divergence and preserved the source.
           fork_run_id:
             $ref: '#/components/schemas/OpaqueId'
           fork_event_id:
@@ -27516,7 +27527,7 @@ api_specification:
           $ref: '#/components/schemas/BundleHash'
       - name: confirm_source_freeze
         required: false
-        description: Must be true when the selected operation freezes a running or paused source. The mutation rechecks source activity and this acknowledgment in the source-freeze transaction. Terminal sources refuse without requiring confirmation.
+        description: Must be true before forking a running or paused source. It authorizes the operation to permanently freeze an unadvanced source; source advancement may instead select branch divergence and preserve the source. The mutation rechecks source activity and this authorization in the source-freeze transaction, and the result reports the actual source_frozen and source_run_status outcome. Terminal sources refuse without requiring confirmation.
         schema:
           type: boolean
           default: false

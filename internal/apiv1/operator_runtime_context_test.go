@@ -484,6 +484,8 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 		result: RunForkExecutionResult{
 			Owner:              "runtime.run_fork.selected_contract_execution",
 			SourceRunID:        runForkTestSourceRunID,
+			SourceRunStatus:    store.RunForkSourceFrozenStatus,
+			SourceFrozen:       true,
 			ForkRunID:          runForkTestForkRunID,
 			ForkEventID:        runForkTestEventID,
 			ForkRunStatus:      "running",

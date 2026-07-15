@@ -34,6 +34,8 @@ type forkCommandOptions struct {
 type runForkResult struct {
 	Owner              string `json:"owner"`
 	SourceRunID        string `json:"source_run_id"`
+	SourceRunStatus    string `json:"source_run_status"`
+	SourceFrozen       *bool  `json:"source_frozen"`
 	ForkRunID          string `json:"fork_run_id"`
 	ForkEventID        string `json:"fork_event_id"`
 	ForkRunStatus      string `json:"fork_run_status"`
@@ -62,7 +64,7 @@ func newForkCommand(opts rootCommandOptions) *cobra.Command {
 	setCLIArgDiscoveryHint(cmd, "List run ids with `swarm run list`.")
 	cmd.Flags().StringVar(&forkOpts.bundleHash, "bundle-hash", "", "Target bundle hash for run.fork selection")
 	cmd.Flags().StringVar(&forkOpts.atEvent, "at-event", "", "Fork at this source event id")
-	cmd.Flags().BoolVar(&forkOpts.confirmSourceFreeze, "confirm-source-freeze", false, "Confirm that an active source run will be permanently frozen")
+	cmd.Flags().BoolVar(&forkOpts.confirmSourceFreeze, "confirm-source-freeze", false, "Authorize permanently freezing an active source unless source advancement preserves it")
 	cmd.Flags().StringVar(&forkOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for retry-safe fork creation")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIOutputFlags(cmd, &forkOpts.output)
@@ -162,7 +164,7 @@ func requireRunForkSourceFreezeConfirmation(opts rootCommandOptions, sourceRunID
 	if !controlStdinIsTerminal(opts) {
 		return returnCLIValidationError(errOut, fmt.Errorf("run %s is active; pass --confirm-source-freeze for non-TTY invocations", sourceRunID))
 	}
-	fmt.Fprintf(errOut, "WARNING: this permanently freezes run %s; its state continues as the fork.\n", sourceRunID)
+	fmt.Fprintf(errOut, "WARNING: this operation may permanently freeze run %s; source advancement instead preserves it as a live branch.\n", sourceRunID)
 	fmt.Fprint(errOut, "Continue? [y/N] ")
 	input := opts.input
 	if input == nil {
@@ -174,7 +176,7 @@ func requireRunForkSourceFreezeConfirmation(opts rootCommandOptions, sourceRunID
 	}
 	answer := strings.ToLower(strings.TrimSpace(line))
 	if answer != "y" && answer != "yes" {
-		return returnCLIValidationError(errOut, fmt.Errorf("aborted; source run was not frozen"))
+		return returnCLIValidationError(errOut, fmt.Errorf("aborted; run fork was not started"))
 	}
 	return nil
 }
@@ -210,6 +212,7 @@ func validateRunForkResult(result runForkResult) error {
 	}{
 		{name: "owner", value: result.Owner},
 		{name: "source_run_id", value: result.SourceRunID},
+		{name: "source_run_status", value: result.SourceRunStatus},
 		{name: "fork_run_id", value: result.ForkRunID},
 		{name: "fork_event_id", value: result.ForkEventID},
 		{name: "fork_run_status", value: result.ForkRunStatus},
@@ -221,6 +224,18 @@ func validateRunForkResult(result runForkResult) error {
 	}
 	if result.ExecutedEventCount < 0 {
 		return fmt.Errorf("malformed run.fork result: executed_event_count must be non-negative")
+	}
+	if result.SourceFrozen == nil {
+		return fmt.Errorf("malformed run.fork result: source_frozen is required")
+	}
+	sourceStatus := strings.ToLower(strings.TrimSpace(result.SourceRunStatus))
+	switch sourceStatus {
+	case "running", "paused", "completed", "failed", "cancelled", "forked":
+	default:
+		return fmt.Errorf("malformed run.fork result: source_run_status %q is invalid", result.SourceRunStatus)
+	}
+	if *result.SourceFrozen != (sourceStatus == "forked") {
+		return fmt.Errorf("malformed run.fork result: source_frozen=%t contradicts source_run_status %q", *result.SourceFrozen, result.SourceRunStatus)
 	}
 	if _, err := validateRunForkUUIDValue("source_run_id", result.SourceRunID); err != nil {
 		return fmt.Errorf("malformed run.fork result: %w", err)
@@ -243,6 +258,7 @@ func writeRunForkHuman(w io.Writer, result runForkResult) {
 	}
 	fmt.Fprintln(w, "Fork created")
 	fmt.Fprintf(w, "source_run_id=%s fork_run_id=%s fork_event_id=%s\n", result.SourceRunID, result.ForkRunID, result.ForkEventID)
+	fmt.Fprintf(w, "source_status=%s source_frozen=%t\n", formatCLIHumanCode(cliHumanCodeRunStatus, result.SourceRunStatus), *result.SourceFrozen)
 	fmt.Fprintf(w, "status=%s bundle_hash=%s executed_event_count=%d\n", formatCLIHumanCode(cliHumanCodeRunStatus, result.ForkRunStatus), result.BundleHash, result.ExecutedEventCount)
 	fmt.Fprintf(w, "owner=%s\n", result.Owner)
 }

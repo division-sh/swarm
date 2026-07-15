@@ -26,6 +26,8 @@ func TestOperatorRunForkHandlersUseAvailabilityAndSelectedExecutor(t *testing.T)
 		result: RunForkExecutionResult{
 			Owner:              "runtime.run_fork.selected_contract_execution",
 			SourceRunID:        runForkTestSourceRunID,
+			SourceRunStatus:    store.RunForkSourceFrozenStatus,
+			SourceFrozen:       true,
 			ForkRunID:          runForkTestForkRunID,
 			ForkEventID:        runForkTestEventID,
 			ForkRunStatus:      "running",
@@ -45,6 +47,9 @@ func TestOperatorRunForkHandlersUseAvailabilityAndSelectedExecutor(t *testing.T)
 	result := asMap(t, resp.Result)
 	if result["fork_run_id"] != runForkTestForkRunID || result["source_run_id"] != runForkTestSourceRunID {
 		t.Fatalf("run.fork result = %#v", result)
+	}
+	if result["source_run_status"] != store.RunForkSourceFrozenStatus || result["source_frozen"] != true {
+		t.Fatalf("run.fork source outcome = %#v, want frozen/forked", result)
 	}
 	if result["bundle_hash"] != runForkTestBundleHash {
 		t.Fatalf("run.fork bundle_hash = %#v, want %q", result["bundle_hash"], runForkTestBundleHash)
@@ -66,6 +71,49 @@ func TestOperatorRunForkHandlersUseAvailabilityAndSelectedExecutor(t *testing.T)
 	}
 	if executor.calls != 1 {
 		t.Fatalf("executor calls after replay = %d, want 1", executor.calls)
+	}
+}
+
+func TestOperatorRunForkHandlersExposePreservedSourceOutcome(t *testing.T) {
+	executor := &recordingRunForkExecutor{
+		result: RunForkExecutionResult{
+			Owner:              "runtime.run_fork.selected_contract_execution",
+			SourceRunID:        runForkTestSourceRunID,
+			SourceRunStatus:    "running",
+			SourceFrozen:       false,
+			ForkRunID:          runForkTestForkRunID,
+			ForkEventID:        runForkTestEventID,
+			ForkRunStatus:      "running",
+			ExecutedEventCount: 1,
+		},
+	}
+	handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
+		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+	}}, executor)
+
+	resp := rpcCall(t, handler, fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":"fork-preserved","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"confirm_source_freeze":true}}`,
+		runForkTestSourceRunID,
+		runForkTestEventID,
+	))
+	if resp.Error != nil {
+		t.Fatalf("run.fork error = %#v", resp.Error)
+	}
+	result := asMap(t, resp.Result)
+	if result["source_run_status"] != "running" || result["source_frozen"] != false {
+		t.Fatalf("run.fork source outcome = %#v, want preserved/running", result)
+	}
+}
+
+func TestValidateRunForkExecutionResultRejectsContradictorySourceOutcome(t *testing.T) {
+	for _, result := range []RunForkExecutionResult{
+		{SourceRunStatus: "", SourceFrozen: false},
+		{SourceRunStatus: "running", SourceFrozen: true},
+		{SourceRunStatus: store.RunForkSourceFrozenStatus, SourceFrozen: false},
+	} {
+		if err := validateRunForkExecutionResult(result); err == nil {
+			t.Fatalf("validateRunForkExecutionResult(%#v) error = nil", result)
+		}
 	}
 }
 

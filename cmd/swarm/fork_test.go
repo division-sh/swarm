@@ -50,7 +50,7 @@ func TestForkCommandUsesRunForkRPCAndRenders(t *testing.T) {
 		"fork_event_id":         forkEventID,
 		"idempotency_key":       "idem-fork-1",
 	})
-	for _, want := range []string{"Fork created", "source_run_id=" + sourceRunID, "fork_run_id=33333333-3333-3333-3333-333333333333", "bundle_hash=" + bundleHash, "owner=run.fork.selected_contracts.v1"} {
+	for _, want := range []string{"Fork created", "source_run_id=" + sourceRunID, "source_status=forked source_frozen=true", "fork_run_id=33333333-3333-3333-3333-333333333333", "bundle_hash=" + bundleHash, "owner=run.fork.selected_contracts.v1"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -69,7 +69,10 @@ func TestForkCommandJSONPreservesAPIShape(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
-		writeJSONRPCResult(t, w, captured.ID, validRunForkResult(sourceRunID, bundleHash))
+		result := validRunForkResult(sourceRunID, bundleHash)
+		result["source_run_status"] = "running"
+		result["source_frozen"] = false
+		writeJSONRPCResult(t, w, captured.ID, result)
 	}))
 	defer server.Close()
 
@@ -83,7 +86,7 @@ func TestForkCommandJSONPreservesAPIShape(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatalf("decode stdout json: %v\n%s", err, stdout.String())
 	}
-	if decoded["source_run_id"] != sourceRunID || decoded["fork_run_id"] != "33333333-3333-3333-3333-333333333333" {
+	if decoded["source_run_id"] != sourceRunID || decoded["fork_run_id"] != "33333333-3333-3333-3333-333333333333" || decoded["source_run_status"] != "running" || decoded["source_frozen"] != false {
 		t.Fatalf("json run fork result = %#v", decoded)
 	}
 	for _, wrapper := range []string{"run", "fork", "run"} {
@@ -201,6 +204,42 @@ func TestForkCommandFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 			wantCode:   cliExitRuntime,
 			wantStderr: "malformed run.fork result: owner is required",
 		},
+		{
+			name: "malformed missing source status",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validRunForkResult(sourceRunID, bundleHash)
+				delete(result, "source_run_status")
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   cliExitRuntime,
+			wantStderr: "malformed run.fork result: source_run_status is required",
+		},
+		{
+			name: "malformed missing source frozen",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validRunForkResult(sourceRunID, bundleHash)
+				delete(result, "source_frozen")
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   cliExitRuntime,
+			wantStderr: "malformed run.fork result: source_frozen is required",
+		},
+		{
+			name: "malformed contradictory source outcome",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validRunForkResult(sourceRunID, bundleHash)
+				result["source_run_status"] = "running"
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   cliExitRuntime,
+			wantStderr: "source_frozen=true contradicts source_run_status \"running\"",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setCLIAPITestToken(t, "test-token")
@@ -236,8 +275,8 @@ func TestForkCommandConfirmsOnlyActiveSourceFreeze(t *testing.T) {
 		wantStderr    string
 	}{
 		{name: "active non tty requires flag", status: "running", args: []string{"run", "fork", sourceRunID}, wantCode: cliExitValidation, wantCalls: 1, wantStderr: "pass --confirm-source-freeze"},
-		{name: "active tty refusal aborts", status: "paused", args: []string{"run", "fork", sourceRunID}, input: "n\n", stdinTerminal: true, wantCode: cliExitValidation, wantCalls: 1, wantStderr: "source run was not frozen"},
-		{name: "active tty confirmation proceeds", status: "running", args: []string{"run", "fork", sourceRunID}, input: "yes\n", stdinTerminal: true, wantCalls: 2, wantConfirmed: true, wantStderr: "Continue? [y/N]"},
+		{name: "active tty refusal aborts", status: "paused", args: []string{"run", "fork", sourceRunID}, input: "n\n", stdinTerminal: true, wantCode: cliExitValidation, wantCalls: 1, wantStderr: "run fork was not started"},
+		{name: "active tty confirmation proceeds", status: "running", args: []string{"run", "fork", sourceRunID}, input: "yes\n", stdinTerminal: true, wantCalls: 2, wantConfirmed: true, wantStderr: "may permanently freeze"},
 		{name: "terminal source needs no ceremony", status: "completed", args: []string{"run", "fork", sourceRunID}, wantCalls: 2},
 		{name: "explicit flag bypasses preflight", status: "running", args: []string{"run", "fork", sourceRunID, "--confirm-source-freeze"}, wantCalls: 1, wantConfirmed: true},
 	} {
@@ -298,6 +337,8 @@ func validRunForkResult(sourceRunID, bundleHash string) map[string]any {
 	return map[string]any{
 		"owner":                "run.fork.selected_contracts.v1",
 		"source_run_id":        sourceRunID,
+		"source_run_status":    "forked",
+		"source_frozen":        true,
 		"fork_run_id":          "33333333-3333-3333-3333-333333333333",
 		"fork_event_id":        "44444444-4444-4444-4444-444444444444",
 		"fork_run_status":      "running",
