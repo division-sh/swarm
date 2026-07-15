@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -11,6 +12,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/google/uuid"
@@ -38,6 +40,7 @@ type TurnContext struct {
 	ForkSandboxAllowed    map[string]struct{}
 	Recorder              *runtimebus.EmittedEventsRecorder
 	Emitted               map[string]struct{}
+	MCPCallOccurrences    map[string]struct{}
 	CreatedAt             time.Time
 	ExpiresAt             time.Time
 }
@@ -173,6 +176,115 @@ func (r *TurnContextRegistry) ObserveCapabilityEvidence(token string, evidence .
 	return updated, true
 }
 
+func (r *TurnContextRegistry) ObserveCapabilityMismatch(token string, mismatches ...managedcapabilities.DeliveryMismatch) (managedcapabilities.Surface, bool) {
+	if r == nil || strings.TrimSpace(token) == "" || len(mismatches) == 0 {
+		return managedcapabilities.Surface{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pruneLocked(time.Now().UTC())
+	turn, ok := r.data[strings.TrimSpace(token)]
+	if !ok || turn.CapabilitySurface == nil {
+		return managedcapabilities.Surface{}, false
+	}
+	updated, err := turn.CapabilitySurface.ObserveMismatch(mismatches...)
+	if err != nil {
+		return managedcapabilities.Surface{}, false
+	}
+	turn.CapabilitySurface = capabilitySurfacePointer(updated)
+	r.data[strings.TrimSpace(token)] = turn
+	return updated, true
+}
+
+func (r *TurnContextRegistry) ObserveMCPProviderCall(token, toolName, occurrence string) (managedcapabilities.Surface, error) {
+	if r == nil || strings.TrimSpace(token) == "" {
+		return managedcapabilities.Surface{}, fmt.Errorf("MCP provider call requires turn context token")
+	}
+	canonical := toolidentity.CanonicalName(toolName)
+	occurrence = strings.TrimSpace(occurrence)
+	if canonical == "" || occurrence == "" {
+		return managedcapabilities.Surface{}, fmt.Errorf("MCP provider call requires canonical tool and provider occurrence")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pruneLocked(time.Now().UTC())
+	token = strings.TrimSpace(token)
+	turn, ok := r.data[token]
+	if !ok || turn.CapabilitySurface == nil {
+		return managedcapabilities.Surface{}, fmt.Errorf("MCP provider call turn context is unavailable")
+	}
+	surface := turn.CapabilitySurface.Clone()
+	if surface.HasMismatch() {
+		return managedcapabilities.Surface{}, fmt.Errorf("MCP provider call capability surface is mismatched")
+	}
+	if surface.Authority.Kind == managedcapabilities.AuthorityProviderTurn &&
+		(!turn.HasEffectAuthority || !runtimeeffects.ProviderTurnTargetMatchesCapabilitySurface(turn.EffectAuthority.Target, surface)) {
+		updated, err := surface.ObserveMismatch(managedcapabilities.DeliveryMismatch{
+			BindingKind: managedcapabilities.BindingMCPProvider, ExactName: toolidentity.RuntimeToolsMCPPrefix + canonical,
+			Kind: "mcp_provider_call_authority_mismatch", Detail: "provider call authority does not match the planned turn surface",
+		})
+		if err != nil {
+			return managedcapabilities.Surface{}, err
+		}
+		turn.CapabilitySurface = capabilitySurfacePointer(updated)
+		r.data[token] = turn
+		return updated, fmt.Errorf("MCP provider call authority does not match capability surface")
+	}
+	exactName := toolidentity.RuntimeToolsMCPPrefix + canonical
+	planned := false
+	for _, tool := range surface.Tools {
+		if tool.Name != canonical || !tool.Capability.Visible || !tool.Capability.Callable {
+			continue
+		}
+		for _, binding := range tool.Bindings {
+			if binding.Kind == managedcapabilities.BindingMCPProvider && binding.ExactName == exactName {
+				planned = true
+				break
+			}
+		}
+	}
+	if !planned {
+		updated, err := surface.ObserveMismatch(managedcapabilities.DeliveryMismatch{
+			BindingKind: managedcapabilities.BindingMCPProvider, ExactName: exactName,
+			Kind: "unplanned_mcp_provider_call", Detail: "provider called a tool outside the planned callable surface",
+		})
+		if err != nil {
+			return managedcapabilities.Surface{}, err
+		}
+		turn.CapabilitySurface = capabilitySurfacePointer(updated)
+		r.data[token] = turn
+		return updated, fmt.Errorf("MCP provider call tool %q is not planned", canonical)
+	}
+	occurrenceKey := runtimeeffects.Fingerprint([]byte(occurrence))
+	if _, replay := turn.MCPCallOccurrences[occurrenceKey]; replay {
+		updated, err := surface.ObserveMismatch(managedcapabilities.DeliveryMismatch{
+			BindingKind: managedcapabilities.BindingMCPProvider, ExactName: exactName,
+			Kind: "replayed_mcp_provider_call", Detail: "provider-owned tools/call occurrence was already consumed",
+		})
+		if err != nil {
+			return managedcapabilities.Surface{}, err
+		}
+		turn.CapabilitySurface = capabilitySurfacePointer(updated)
+		r.data[token] = turn
+		return updated, fmt.Errorf("MCP provider call occurrence was already consumed")
+	}
+	updated, err := surface.Observe(managedcapabilities.DeliveryEvidence{
+		BindingKind: managedcapabilities.BindingMCPProvider, ExactName: exactName,
+		Kind: "mcp_visible", Status: managedcapabilities.EvidenceConfirmed,
+		Detail: "exact provider-owned tools/call occurrence",
+	})
+	if err != nil {
+		return managedcapabilities.Surface{}, err
+	}
+	if turn.MCPCallOccurrences == nil {
+		turn.MCPCallOccurrences = map[string]struct{}{}
+	}
+	turn.MCPCallOccurrences[occurrenceKey] = struct{}{}
+	turn.CapabilitySurface = capabilitySurfacePointer(updated)
+	r.data[token] = turn
+	return updated, nil
+}
+
 func (r *TurnContextRegistry) ResolveTurnContext(token string) (TurnContext, bool) {
 	if r == nil {
 		return TurnContext{}, false
@@ -254,6 +366,13 @@ func (r *TurnContextRegistry) put(token string, data TurnContext) {
 		}
 		data.Emitted = cloned
 	}
+	if data.MCPCallOccurrences != nil {
+		cloned := make(map[string]struct{}, len(data.MCPCallOccurrences))
+		for key := range data.MCPCallOccurrences {
+			cloned[key] = struct{}{}
+		}
+		data.MCPCallOccurrences = cloned
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.pruneLocked(now)
@@ -279,6 +398,13 @@ func (r *TurnContextRegistry) get(token string) (TurnContext, bool) {
 			cloned[key] = struct{}{}
 		}
 		v.Emitted = cloned
+	}
+	if v.MCPCallOccurrences != nil {
+		cloned := make(map[string]struct{}, len(v.MCPCallOccurrences))
+		for key := range v.MCPCallOccurrences {
+			cloned[key] = struct{}{}
+		}
+		v.MCPCallOccurrences = cloned
 	}
 	return v, ok
 }

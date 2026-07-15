@@ -29714,8 +29714,8 @@ managed_agent_capability_surface:
     bindings:
       api_definition: Exact canonical tool name and definition/schema identity delivered in the live provider request.
       provider_builtin: Exact provider-native name enabled and observed for the turn.
-      mcp_tool: Exact runtime MCP catalog name returned by tools/list under the turn context.
-      mcp_provider_visible: Exact MCP tool name observed through provider initialization/response evidence.
+      mcp_tool: Exact runtime MCP catalog name returned by tools/list under the turn context. The delivered description and schema MUST match the planned candidate_definition_identity; a same-name definition with changed description or schema is a typed mismatch, not confirmation.
+      mcp_provider_visible: Exact MCP tool name observed through provider initialization/response evidence. For a CLI provider_turn, the exact provider-owned tools/call occurrence confirms this existing binding immediately before authorization; registration and tools/list MUST NOT pre-confirm it.
       local_runtime: Explicit runtime-local binding only where the provider contract authorizes it; it is never inferred as fallback for an unavailable provider binding.
   evidence:
     statuses: [confirmed, unavailable, mismatch]
@@ -29731,10 +29731,10 @@ managed_agent_capability_surface:
   provider_turn:
     rule: Every managed provider turn receives a fresh provider_turn authority under one admitted execution variant. The same surface identity is carried through API/CLI request construction or deterministic in-process execution, provider response normalization, MCP registration/list/call, response tool-call validation, direct executor and relay admission, managed effects, turn persistence, and supported readback.
     api: Exact live-request definitions are the delivery evidence. Planned names alone are not observation.
-    cli: Allowed/disallowed provider arguments, native built-ins, MCP registration, provider-visible initialization facts, and local projections are exact bindings/evidence from the surface; prompt text is a rendering only and cannot authorize a tool.
+    cli: Allowed/disallowed provider arguments, native built-ins, MCP registration, provider-visible initialization facts, and local projections are exact bindings/evidence from the surface; prompt text is a rendering only and cannot authorize a tool. A provider-owned MCP tools/call occurrence atomically confirms its exact planned mcp_provider_visible binding and consumes that occurrence before tool authorization. Unplanned tools, authority mismatch, missing occurrence coordinates, and replayed occurrences fail closed before executor admission.
     in_process: Deterministic platform mock execution carries the exact local-runtime bindings and interpreter evidence in the same provider-turn surface. It is not reclassified as API or CLI transport and cannot authorize external effects.
   enforcement:
-    mcp: tools/list exposes only exact effective surface tools for the same provider-turn and managed-execution authority. tools/call rejects missing, mismatched, unavailable, or differently authorized surfaces before dispatch.
+    mcp: tools/list exposes only planned surface tools whose exact delivered name, description, and schema match the canonical candidate definition identity for the same provider-turn and managed-execution authority; any difference records a typed mismatch and denies the complete surface. tools/call settles exact provider-turn MCP visibility from the provider-owned call occurrence before authorization and rejects missing, mismatched, unavailable, unplanned, differently authorized, missing-coordinate, or replayed calls before executor dispatch.
     executor_relay: Tool executor, local runtime, and relay paths consume the exact provider-turn surface and managed-execution admission. They cannot recompute a broader set from actor declarations, names, prompts, or provider defaults.
     managed_effects: Every normal-agent, selected-contract-fork, or startup-probe managed effect attempt other than the separately owned forkchat sandbox persists its exact capability_surface_id. The logical operation persists the authority-independent capability_plan_fingerprint, so an eligible retry may bind a new preallocated turn surface but cannot widen or otherwise replace the callable plan. Forkchat attempts carry neither value.
   persistence:

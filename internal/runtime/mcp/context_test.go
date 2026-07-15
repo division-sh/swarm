@@ -16,6 +16,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/google/uuid"
 )
 
@@ -67,23 +68,17 @@ func managedClaudeProviderTurnTestContext(t testing.TB, executionKind managedcap
 			ExecutionAuthorityID: admission.ExecutionAuthorityID, RunID: target.RunID, SessionID: target.SessionID, TurnOrdinal: 1,
 		},
 		Tools: []managedcapabilities.PlannedTool{{
-			Name: "write_file", DefinitionHash: "test-definition-write-file",
+			Name: "write_file", DefinitionHash: llm.ToolDefinitionIdentity(llmToolDefinitionForMCP(mcpToolDefinition("write_file", llm.ToolDefinition{Name: "write_file"}))),
 			Capability: toolcapabilities.Capability{Name: "write_file", Visible: true, Callable: true},
-			Bindings: []managedcapabilities.DeliveryBinding{{
-				Kind: managedcapabilities.BindingMCPTool, ExactName: "mcp__runtime-tools__write_file", RequiredEvidenceKind: "mcp_listed",
-			}},
+			Bindings: []managedcapabilities.DeliveryBinding{
+				{Kind: managedcapabilities.BindingMCPTool, ExactName: "mcp__runtime-tools__write_file", RequiredEvidenceKind: "mcp_listed"},
+				{Kind: managedcapabilities.BindingMCPProvider, ExactName: "mcp__runtime-tools__write_file", RequiredEvidenceKind: "mcp_visible"},
+			},
 		}},
 		CreatedAt: time.Unix(1, 0).UTC(),
 	})
 	if err != nil {
 		t.Fatalf("build managed Claude capability surface: %v", err)
-	}
-	surface, err = surface.Observe(managedcapabilities.DeliveryEvidence{
-		BindingKind: managedcapabilities.BindingMCPTool, ExactName: "mcp__runtime-tools__write_file",
-		Kind: "mcp_listed", Status: managedcapabilities.EvidenceConfirmed,
-	})
-	if err != nil {
-		t.Fatalf("observe managed Claude capability surface: %v", err)
 	}
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: actorID})
 	ctx = runtimeeffects.WithAuthority(ctx, authority)
