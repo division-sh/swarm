@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +14,7 @@ import (
 )
 
 func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	packageKey := "project"
@@ -83,7 +82,7 @@ func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(
 }
 
 func TestSQLiteStandingServiceReconcileRejectsUnknownTerminalityWithCommand(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
@@ -106,7 +105,7 @@ func TestSQLiteStandingServiceReconcileRejectsUnknownTerminalityWithCommand(t *t
 }
 
 func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
@@ -208,7 +207,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 }
 
 func TestSQLiteStandingServiceSetOrphansRemovedDeclaration(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
@@ -254,7 +253,7 @@ func TestPostgresStandingServiceReplacementIsScopedAndAtomic(t *testing.T) {
 
 func testStandingServiceReplacementIsScopedAndAtomic(t *testing.T, workflowStore *runtimepipeline.WorkflowInstanceStore) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityRuntimeContext()
 	makeCandidate := func(flowID, hashDigit string) runtimepipeline.StandingServiceCandidate {
 		return runtimepipeline.StandingServiceCandidate{
 			ServiceID: runtimeflowidentity.StandingServiceID("project", flowID), PackageKey: "project", FlowID: flowID,
@@ -321,7 +320,7 @@ func testStandingServiceReplacementIsScopedAndAtomic(t *testing.T, workflowStore
 }
 
 func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityRuntimeContext()
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
@@ -399,7 +398,7 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 }
 
 func TestSQLiteRunStopRefusesCurrentStandingGenerationWithTeachingCommand(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")

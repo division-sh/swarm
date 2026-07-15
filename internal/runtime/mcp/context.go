@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -21,28 +22,32 @@ import (
 type actorResolverFn func(context.Context) (models.AgentConfig, bool)
 
 type TurnContext struct {
-	Actor                 models.AgentConfig
-	Inbound               events.Event
-	HasInbound            bool
-	RuntimeLineage        runtimecorrelation.RuntimeLineage
-	HasRuntimeLineage     bool
-	LifecycleToken        runtimeeffects.LifecycleToken
-	HasLifecycleToken     bool
-	EffectController      *runtimeeffects.Controller
-	EffectAuthority       runtimeeffects.Authority
-	HasEffectAuthority    bool
-	DifferentOwner        runtimeeffects.DifferentOwner
-	LogicalIdentity       string
-	HasLogicalIdentity    bool
-	CapabilitySurface     *managedcapabilities.Surface
-	ExecutionAdmission    managedexecution.Admission
-	HasExecutionAdmission bool
-	ForkSandboxAllowed    map[string]struct{}
-	Recorder              *runtimebus.EmittedEventsRecorder
-	Emitted               map[string]struct{}
-	MCPCallOccurrences    map[string]struct{}
-	CreatedAt             time.Time
-	ExpiresAt             time.Time
+	Actor                  models.AgentConfig
+	Inbound                events.Event
+	HasInbound             bool
+	RuntimeLineage         runtimecorrelation.RuntimeLineage
+	HasRuntimeLineage      bool
+	AuthorActivityScope    runtimeauthoractivity.Scope
+	HasAuthorActivityScope bool
+	BundleSourceFact       runtimecorrelation.BundleSourceFact
+	HasBundleSourceFact    bool
+	LifecycleToken         runtimeeffects.LifecycleToken
+	HasLifecycleToken      bool
+	EffectController       *runtimeeffects.Controller
+	EffectAuthority        runtimeeffects.Authority
+	HasEffectAuthority     bool
+	DifferentOwner         runtimeeffects.DifferentOwner
+	LogicalIdentity        string
+	HasLogicalIdentity     bool
+	CapabilitySurface      *managedcapabilities.Surface
+	ExecutionAdmission     managedexecution.Admission
+	HasExecutionAdmission  bool
+	ForkSandboxAllowed     map[string]struct{}
+	Recorder               *runtimebus.EmittedEventsRecorder
+	Emitted                map[string]struct{}
+	MCPCallOccurrences     map[string]struct{}
+	CreatedAt              time.Time
+	ExpiresAt              time.Time
 }
 
 type TurnContextRegistry struct {
@@ -100,31 +105,37 @@ func (r *TurnContextRegistry) RegisterTurnContextWithCapabilitySurface(ctx conte
 	recorder, _ := runtimebus.EmittedEventsRecorderFromContext(ctx)
 	inbound, hasInbound := runtimebus.InboundEventFromContext(ctx)
 	lineage, hasLineage := runtimecorrelation.RuntimeLineageFromContext(ctx)
+	authorActivityScope, hasAuthorActivityScope := runtimeauthoractivity.ScopeFromContext(ctx)
+	bundleSourceFact, hasBundleSourceFact := runtimecorrelation.BundleSourceFactFromContext(ctx)
 	lifecycleToken, hasLifecycleToken := runtimeeffects.LifecycleTokenFromContext(ctx)
 	effectController, _ := runtimeeffects.ControllerFromContext(ctx)
 	executionAdmission, hasExecutionAdmission := managedexecution.FromContext(ctx)
 	differentOwner, _ := runtimeeffects.DifferentOwnerFromContext(ctx)
 	logicalIdentity, hasLogicalIdentity := runtimeeffects.LogicalOperationIdentityFromContext(ctx)
 	r.put(token, TurnContext{
-		Actor:                 actor,
-		Inbound:               inbound,
-		HasInbound:            hasInbound,
-		RuntimeLineage:        lineage,
-		HasRuntimeLineage:     hasLineage,
-		LifecycleToken:        lifecycleToken,
-		HasLifecycleToken:     hasLifecycleToken,
-		EffectController:      effectController,
-		EffectAuthority:       effectAuthority,
-		HasEffectAuthority:    hasEffectAuthority,
-		DifferentOwner:        differentOwner,
-		LogicalIdentity:       logicalIdentity,
-		HasLogicalIdentity:    hasLogicalIdentity,
-		CapabilitySurface:     capabilitySurfacePointer(surface),
-		ExecutionAdmission:    executionAdmission,
-		HasExecutionAdmission: hasExecutionAdmission,
-		Recorder:              recorder,
-		CreatedAt:             now,
-		ExpiresAt:             now.Add(ttl),
+		Actor:                  actor,
+		Inbound:                inbound,
+		HasInbound:             hasInbound,
+		RuntimeLineage:         lineage,
+		HasRuntimeLineage:      hasLineage,
+		AuthorActivityScope:    authorActivityScope,
+		HasAuthorActivityScope: hasAuthorActivityScope,
+		BundleSourceFact:       bundleSourceFact,
+		HasBundleSourceFact:    hasBundleSourceFact,
+		LifecycleToken:         lifecycleToken,
+		HasLifecycleToken:      hasLifecycleToken,
+		EffectController:       effectController,
+		EffectAuthority:        effectAuthority,
+		HasEffectAuthority:     hasEffectAuthority,
+		DifferentOwner:         differentOwner,
+		LogicalIdentity:        logicalIdentity,
+		HasLogicalIdentity:     hasLogicalIdentity,
+		CapabilitySurface:      capabilitySurfacePointer(surface),
+		ExecutionAdmission:     executionAdmission,
+		HasExecutionAdmission:  hasExecutionAdmission,
+		Recorder:               recorder,
+		CreatedAt:              now,
+		ExpiresAt:              now.Add(ttl),
 	})
 	return token
 }

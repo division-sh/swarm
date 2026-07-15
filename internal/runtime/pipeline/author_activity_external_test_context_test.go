@@ -33,6 +33,27 @@ type testAuthorActivityCatalogRegistrar interface {
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 }
 
+func registerDifferentTestAuthorActivityEvents(t *testing.T, eventStore any, eventTypes ...string) {
+	t.Helper()
+	registrar, ok := eventStore.(testAuthorActivityCatalogRegistrar)
+	if !ok {
+		t.Fatalf("event store %T lacks author activity catalog registration", eventStore)
+	}
+	descriptors := make([]runtimeauthoractivity.EventDescriptor, 0, len(eventTypes))
+	for _, eventType := range eventTypes {
+		descriptors = append(descriptors, runtimeauthoractivity.EventDescriptor{
+			EventType: strings.TrimSpace(eventType), Disposition: runtimeauthoractivity.StoryDifferent,
+		})
+	}
+	lease, err := registrar.RegisterAuthorActivityEventCatalog(
+		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash), descriptors,
+	)
+	if err != nil {
+		t.Fatalf("register test author activity event catalog: %v", err)
+	}
+	t.Cleanup(lease.Release)
+}
+
 func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts runtimebus.EventBusOptions, differentEvents ...string) (*runtimebus.EventBus, error) {
 	t.Helper()
 	if registrar, ok := eventStore.(testAuthorActivityCatalogRegistrar); ok {

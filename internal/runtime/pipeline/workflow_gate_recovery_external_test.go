@@ -559,6 +559,10 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 		for _, verdict := range []string{"approve", "revise", "reject"} {
 			t.Run(storeCase.name+"/"+verdict, func(t *testing.T) {
 				selected := storeCase.open(t)
+				registerDifferentTestAuthorActivityEvents(t, selected.events,
+					"send_support_reply.revision_requested",
+					"send_support_reply.rejected",
+				)
 				ctx := testAuthorActivityContext(context.Background())
 				runID, entityID := uuid.NewString(), uuid.NewString()
 				insertGateRecoveryRun(t, selected, runID)

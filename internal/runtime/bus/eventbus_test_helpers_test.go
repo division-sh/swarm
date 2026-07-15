@@ -31,7 +31,8 @@ custom.mixed_node_agent custom.no_subscribers custom.node_only custom.node_only_
 custom.node_only_tx custom.non_transactional custom.paused custom.pool_saturation custom.publish_mutation_post_commit
 custom.receipt_failure custom.replay.checked custom.replay_pool_saturation custom.root custom.routed custom.run_control
 custom.run_control.acked custom.run_control.deferred custom.run_control.intercepted custom.run_control.postcommit
-custom.run_control.postcommit.deferred custom.shared_claim custom.snapshot custom.trigger deploy.done human_task.approved
+custom.run_control.postcommit.deferred custom.shared_claim custom.snapshot custom.trigger custom.exact_duplicate_noop
+custom.terminal_refusal deploy.done human_task.approved
 inbound.proof inbound.proof.normalized item.received legacy.event mailbox.card_decided opco.spinup_requested
 operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested
 operating/inst-1/opco.product_initialization_requested operating/opco.product_initialization_requested pipeline.start

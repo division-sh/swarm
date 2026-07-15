@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -149,6 +150,39 @@ func TestTurnContextRegistryPreservesManagedEffectAuthority(t *testing.T) {
 	}
 	if identity, ok := runtimeeffects.LogicalOperationIdentityFromContext(base); !ok || identity != "gateway-turn" {
 		t.Fatalf("restored logical identity = %q ok=%v", identity, ok)
+	}
+}
+
+func TestTurnContextRegistryPreservesAuthorActivityScopeAndRequiredSourceIdentity(t *testing.T) {
+	registry := NewTurnContextRegistry(models.ActorFromContext)
+	scope := runtimeauthoractivity.BundleScope("runtime-instance", "bundle-hash")
+	source := runtimecorrelation.BundleSourceFact{
+		BundleHash:        "bundle-hash",
+		BundleSource:      "test-bundle",
+		BundleFingerprint: "bundle-fingerprint",
+	}
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "selected-agent"})
+	ctx = runtimeauthoractivity.WithScope(ctx, scope)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, source)
+
+	token := registry.RegisterTurnContext(ctx)
+	turn, ok := registry.ResolveTurnContext(token)
+	if !ok {
+		t.Fatal("ResolveTurnContext returned false")
+	}
+	if !turn.HasAuthorActivityScope || turn.AuthorActivityScope != scope {
+		t.Fatalf("author activity scope = %#v present=%v, want %#v", turn.AuthorActivityScope, turn.HasAuthorActivityScope, scope)
+	}
+	if !turn.HasBundleSourceFact || turn.BundleSourceFact != source {
+		t.Fatalf("bundle source fact = %#v present=%v, want %#v", turn.BundleSourceFact, turn.HasBundleSourceFact, source)
+	}
+
+	restored := (&Gateway{}).baseContextForResolvedTurn(context.Background(), turn)
+	if got, ok := runtimeauthoractivity.ScopeFromContext(restored); !ok || got != scope {
+		t.Fatalf("restored author activity scope = %#v present=%v, want %#v", got, ok, scope)
+	}
+	if got, ok := runtimecorrelation.BundleSourceFactFromContext(restored); !ok || got != source {
+		t.Fatalf("restored bundle source fact = %#v present=%v, want %#v", got, ok, source)
 	}
 }
 

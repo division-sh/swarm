@@ -369,6 +369,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		OriginalTransportMetadata: mustJSON(map[string]any{"method": r.Method, "content_type": r.Header.Get("Content-Type")}),
 	}
 	pubCtx := runtimebus.WithCurrentRuntimeEpoch(requestCtx)
+	pubCtx = g.bus.WithBundleFingerprint(pubCtx)
 	if existing, found, loadErr := g.store.LoadInboundPublicationByIdentity(pubCtx, provider, entityID, providerEventID); loadErr != nil {
 		http.Error(w, "read inbound publication failed", http.StatusServiceUnavailable)
 		return

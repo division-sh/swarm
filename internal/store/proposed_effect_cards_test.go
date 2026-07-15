@@ -127,7 +127,7 @@ func TestNormalRunCompletionRequiresSettledProposedEffectsParity(t *testing.T) {
 		for _, testCase := range testCases {
 			backend, testCase := backend, testCase
 			t.Run(backend+"/"+testCase.name, func(t *testing.T) {
-				ctx := context.Background()
+				ctx := testAuthorActivityContext()
 				cards, runID := decisionCardTestStore(t, backend)
 				store := cards.(decisioncard.ProposedEffectStore)
 				db, postgres := decisionCardStoreDB(t, cards)

@@ -4517,7 +4517,7 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 
 func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime, runID string, now time.Time) (string, string) {
 	t.Helper()
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(servedControlProofAuthorActivityContext(t, rt), runID)
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	bundleHash := strings.TrimSpace(rt.BundleHash)

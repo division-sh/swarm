@@ -513,22 +513,12 @@ func TestServeAuthorActivityAttachmentFailureKeepsRuntimeHealthy(t *testing.T) {
 		}
 	}
 
-	oldBuildStores := buildStoresForServe
-	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
-		stores, err := oldBuildStores(ctx, selection, cfg)
-		if err != nil {
-			return storeBundle{}, err
-		}
-		stores.EventStore = authorActivityHeadFailureEventStore{EventStore: stores.EventStore}
-		return stores, nil
-	}
-	t.Cleanup(func() { buildStoresForServe = oldBuildStores })
-
 	process := startServeRuntimeTestProcess(t, serveOptions{
 		ConfigPath:    writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
 		ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, RequireBundleMatch: false, Dev: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{},
+		TestAfterAuthorActivityHead: func() error { return errors.New("author activity head unavailable") },
 	})
 	process.waitForReadyLine()
 	output := process.outputString()

@@ -150,7 +150,7 @@ func convergeTerminalAdmissionRun(
 
 func TestPostgresTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := newTestPostgresStore(t, db)
 	harness := terminalEventAdmissionHarness{
 		append: pg.AppendEvent,
 		appendTx: func(ctx context.Context, evt events.Event) error {
@@ -243,7 +243,7 @@ func TestSQLiteTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 
 func TestPostgresRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	store := &PostgresStore{DB: db}
+	store := newTestPostgresStore(t, db)
 	assertRuntimeLogAdmissionPreservesEveryRunStatus(t, runtimeLogStatusHarness{
 		appendOrdinary: store.AppendEvent,
 		transition: func(ctx context.Context, runID, eventID, status string) error {
@@ -410,7 +410,7 @@ func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 
 func assertRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T, harness runtimeLogStatusHarness) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	for _, status := range []string{"running", "paused", "completed", "cancelled", "failed", "forked"} {
 		status := status
 		t.Run(status, func(t *testing.T) {
@@ -506,7 +506,7 @@ func TestJSONSemanticallyEqualPreservesExactNumbers(t *testing.T) {
 
 func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHarness) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	for _, status := range []string{"completed", "cancelled", "failed", "forked"} {
 		status := status
 		t.Run(status, func(t *testing.T) {
