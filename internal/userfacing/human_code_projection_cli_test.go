@@ -356,7 +356,7 @@ func TestCLIHumanCodePublicConsumersUseSharedProjector(t *testing.T) {
 }
 
 func TestCLIHumanCodeConsumerGuardRejectsRawRegisteredCode(t *testing.T) {
-	const source = `package main
+	const source = `package cliapp
 import (
 	"fmt"
 	"io"
@@ -556,37 +556,13 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Names:  []string{"mode"},
 		Reason: "flow composition mode is an authoring-view concept, not ConversationMode",
 	},
-	"local_preflight.go\x00writeLocalPreflightText": {
+	"local_preflight.go\x00WriteLocalPreflightText": {
 		Names:  []string{"mode"},
 		Reason: "preflight mode is a typed diagnostic rendering input, not a registered conversation mode",
 	},
 	"logs.go\x00writeRuntimeLogFollowEntry": {
 		Names:  []string{"action"},
 		Reason: "runtime-log action is exact LogEntry evidence, not a registered watchdog action",
-	},
-	"serve_lifecycle_presentation.go\x00writeBootEventLocked": {
-		Names:  []string{"status"},
-		Reason: "canonical serve boot progress status is a lifecycle-presentation taxonomy, not a registered API code family",
-	},
-	"serve_lifecycle_presentation.go\x00writeResolvedFactsLocked": {
-		Names:  []string{"status"},
-		Reason: "author-facing recovery status is an explicit serve lifecycle projection, not a registered API code family",
-	},
-	"main.go\x00printRunForkActivation": {
-		Names:  []string{"forkrunstatus", "sourcerunstatus"},
-		Reason: "private legacy run-fork runtime-owner harness explicitly excluded by the approved gate",
-	},
-	"main.go\x00printRunForkMaterialization": {
-		Names:  []string{"forkrunstatus"},
-		Reason: "private legacy run-fork runtime-owner harness explicitly excluded by the approved gate",
-	},
-	"main.go\x00printRunForkPlan": {
-		Names:  []string{"sourcerunstatus", "status"},
-		Reason: "private legacy run-fork runtime-owner harness explicitly excluded by the approved gate",
-	},
-	"main.go\x00printSelectedContractExecution": {
-		Names:  []string{"forkrunstatus", "sourcerunstatus"},
-		Reason: "private legacy run-fork runtime-owner harness explicitly excluded by the approved gate",
 	},
 	"target_resolution.go\x00writeDoctorTargetText": {
 		Names:  []string{"mode", "mode", "status", "status", "status", "status", "status", "status", "status", "status", "status", "status"},
@@ -640,7 +616,7 @@ func parseProductionCLIHumanCodeFiles(t *testing.T) (*token.FileSet, []cliHumanC
 
 func productionCLIHumanCodeFiles(t *testing.T) []string {
 	t.Helper()
-	paths, err := filepath.Glob(filepath.Join(humanProjectionRepoRoot(t), "cmd", "swarm", "*.go"))
+	paths, err := filepath.Glob(filepath.Join(humanProjectionRepoRoot(t), "internal", "cliapp", "*.go"))
 	if err != nil {
 		t.Fatalf("glob production CLI files: %v", err)
 	}
@@ -709,7 +685,7 @@ func cliHumanCodeTypeCheck(t *testing.T, fileSet *token.FileSet, files []cliHuma
 		Selections: map[*ast.SelectorExpr]*types.Selection{},
 	}
 	config := types.Config{Importer: importer.ForCompiler(fileSet, "gc", cliHumanCodeExportLookup(humanProjectionRepoRoot(t)))}
-	if _, err := config.Check("github.com/division-sh/swarm/cmd/swarm", fileSet, astFiles, info); err != nil {
+	if _, err := config.Check("github.com/division-sh/swarm/internal/cliapp", fileSet, astFiles, info); err != nil {
 		t.Fatalf("type-check production CLI consumer audit: %v", err)
 	}
 	return info
