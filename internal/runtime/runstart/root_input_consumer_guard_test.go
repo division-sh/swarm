@@ -66,7 +66,7 @@ func dispatchRPC() {
 	runstart.AsRootInputValidationError()
 }
 `)
-	writeGuardFixture("cmd/swarm/synthetic.go", `package main
+	writeGuardFixture("internal/cliapp/synthetic.go", `package cliapp
 func syntheticCommandConsumer() { runstart.ValidateInputEvents() }
 `)
 
@@ -75,7 +75,7 @@ func syntheticCommandConsumer() { runstart.ValidateInputEvents() }
 		t.Fatalf("scan fixture consumers: %v", err)
 	}
 	err = checkRootInputConsumerAudit(consumerCalls)
-	if err == nil || !strings.Contains(err.Error(), "cmd/swarm/synthetic.go:syntheticCommandConsumer") {
+	if err == nil || !strings.Contains(err.Error(), "internal/cliapp/synthetic.go:syntheticCommandConsumer") {
 		t.Fatalf("guard error = %v, want unregistered command consumer", err)
 	}
 }

@@ -396,7 +396,7 @@ rows:
     fact: cli_api_dashboard_operator_consumers
     disposition: split_sibling
     owner: store.run_fork.replay_resume_admission
-    enforcement_point: cmd/swarm/main.go
+    enforcement_point: internal/serveapp/main.go
     proof_refs:
       - {kind: go_test, name: TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady}
       - {kind: go_test, name: TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON}

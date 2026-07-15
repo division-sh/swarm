@@ -34,7 +34,7 @@ search_dimensions:
       - internal/store/event_receipt_store.go
       - internal/store/sqlite_runtime_delivery_replay.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
-      - cmd/swarm/main_test.go
+      - internal/serveapp/main_runtime_test.go
     canonical_layer: durable_delivery_authority
   - id: delivery_route_model
     pattern: '\bDeliveryRoute\b|delivery routes|delivery route'
@@ -152,7 +152,7 @@ search_dimensions:
       - internal/runtime/bus/delivery_planner.go
       - internal/runtime/bus/eventbus_routing.go
       - internal/apiv1/operator_event_publish.go
-      - cmd/swarm/event_publish.go
+      - internal/cliapp/event_publish.go
     canonical_layer: event_context
   - id: semantic_scope
     pattern: 'EventScope|semantic scope|inferEventScope|Scope\(\)|ScopeEntity|ScopeFlow|ScopeGlobal|scope inference'
@@ -172,7 +172,7 @@ search_dimensions:
       - internal/events/types.go
       - internal/runtime/bus/delivery_planner.go
       - internal/apiv1/operator_event_publish.go
-      - cmd/swarm/event_publish_test.go
+      - internal/cliapp/event_publish_test.go
     canonical_layer: event_context
   - id: run_source_event_context
     pattern: 'run_id|RunID|source_event_id|SourceEventID|ParentEventID|source event'
@@ -183,7 +183,7 @@ search_dimensions:
       - internal/events/types.go
       - internal/store/events.go
       - internal/apiv1/operator_event_publish.go
-      - cmd/swarm/event_publish.go
+      - internal/cliapp/event_publish.go
     canonical_layer: event_context
   - id: route_event_key_derivation
     pattern: 'routedEventKeysForPlan|concreteFlowInstanceEventKey|eventContextLocalEventForFlowInstance|route key|event key|eventKeys|routeKey'
@@ -234,7 +234,7 @@ search_dimensions:
       - platform-spec.yaml
       - internal/store/event_receipt_store.go
       - internal/store/sqlite_schema.go
-      - cmd/swarm/main_test.go
+      - internal/serveapp/main_runtime_test.go
     canonical_layer: completion_evidence_non_authority
   - id: settlement_backfill
     pattern: '(?i)settlement|backfill|SettleDelivery'
@@ -323,7 +323,7 @@ seam_families:
       - internal/runtime/pipeline/coordinator.go
       - internal/runtime/pipeline/workflow_instance_activation.go
       - internal/apiv1/operator_event_publish.go
-      - cmd/swarm/main_test.go
+      - internal/serveapp/main_runtime_test.go
     search_dimensions: [event_name_type, semantic_scope, entity_context, run_source_event_context, flow_instance, target_set, target_context]
     notes: >
       Event producers and adapters stamp event name/type, semantic scope,
@@ -371,7 +371,7 @@ seam_families:
       - internal/runtime/bus/eventbus_delivery_projection_test.go
       - internal/runtime/bus/final_flow_instance_authoring_route_test.go
       - internal/runtime/bus/route_plan.go
-      - cmd/swarm/connect_delivery_one_codemod_test.go
+      - internal/cliapp/connect_delivery_one_codemod_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
     search_dimensions: [connect_route_plan, route_plan, route_plan_source_reason]
     notes: >
@@ -503,7 +503,7 @@ seam_families:
     classification: valid_consumer
     paths:
       - platform-spec.yaml
-      - cmd/swarm/claude_attempt_identity_test.go
+      - internal/serveapp/claude_attempt_identity_test.go
       - internal/apiv1/openrpc_mutating_runtime_test.go
       - internal/apiv1/operator_event_replay.go
       - internal/apiv1/operator_event_replay_test.go
@@ -660,7 +660,7 @@ seam_families:
       - internal/apiv1/operator_read.go
       - internal/store/operator_observability_read_surface.go
       - internal/dashboard/server/observability_sql.go
-      - cmd/swarm/main_test.go
+      - internal/serveapp/main_runtime_test.go
       - openrpc.json
     search_dimensions: [public_readback, event_name_type, entity_context, run_source_event_context, event_deliveries, event_receipts]
     invalid_authority:
@@ -676,7 +676,7 @@ seam_families:
     layer: test_fixture_semantics
     classification: valid_consumer
     paths:
-      - cmd/swarm/main_test.go
+      - internal/serveapp/main_runtime_test.go
       - internal/store/run_fork_selected_contract_execution_mutation_test.go
       - internal/store/manager_retry_policy_test.go
       - internal/store/run_control_test.go

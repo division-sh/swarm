@@ -30,9 +30,9 @@ func TestUserFacingDiagnosticIssueRefPatternRejectsInternalIssues(t *testing.T) 
 
 func TestUserFacingDiagnosticSourcesDoNotLeakInternalIssueRefs(t *testing.T) {
 	files := []string{
-		"cmd/swarm/main.go",
-		"cmd/swarm/target_resolution.go",
-		"cmd/swarm/local_context_registry.go",
+		"internal/serveapp/main.go",
+		"internal/cliapp/target_resolution.go",
+		"internal/cliapp/local_context_registry.go",
 		"internal/runtime/bootverify/workflow_composition_connect_checks.go",
 		"internal/runtime/bootverify/workflow_output_pin_key_carries_checks.go",
 		"internal/runtime/contracts/workflow_contract_tree.go",

@@ -42,7 +42,7 @@ rows:
     concepts:
       - producer-side backend branching after construction
     owners:
-      - cmd/swarm/store_facade_guard_test.go
+      - internal/serveapp/store_facade_guard_test.go
       - selectedRuntimeStoreFacade
     proof_refs:
       - kind: go_test
