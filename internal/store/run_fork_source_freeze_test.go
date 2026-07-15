@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -380,29 +382,49 @@ func seedRunForkFreezeExternalEffectAuthority(t *testing.T, ctx context.Context,
 	if live {
 		operationState, attemptState, leaseExpiry, completedAt = "launched", "launched", now.Add(time.Minute), nil
 	}
+	turnID, sessionID := uuid.NewString(), uuid.NewString()
+	authority := runtimeeffects.NormalAgentAuthority(
+		runtimeeffects.LifecycleToken{RuntimeEpoch: 1, AgentID: agentID, Generation: 1},
+		"freeze-worker",
+		leaseExpiry,
+	)
+	authority.Target = runtimeeffects.UsageTarget{
+		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: lineage.SourceRunID,
+		AgentID: agentID, SessionID: sessionID, Memory: agentmemory.PlatformDefault(), FlowInstance: "freeze/effect",
+	}
+	capabilitySurface := managedCompletionTestSurface(t, authority, "test")
+	if err := (&PostgresStore{DB: db}).SaveManagedCapabilitySurface(ctx, capabilitySurface); err != nil {
+		t.Fatalf("seed source-freeze external-effect capability surface: %v", err)
+	}
+	capabilityPlanFingerprint, err := capabilitySurface.PlanFingerprint()
+	if err != nil {
+		t.Fatalf("fingerprint source-freeze external-effect capability plan: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runtime_external_effect_operations (
 			operation_id, effect_kind, effect_class, execution_mode, authority_kind, authority_id,
-			agent_id, runtime_epoch, generation, authority_evidence, lineage, request_fingerprint,
+			agent_id, runtime_epoch, generation, capability_plan_fingerprint, authority_evidence, lineage, request_fingerprint,
 			state, created_at, updated_at, completed_at
 		) VALUES (
-			$1::uuid, 'tool', 'write_or_unknown', 'live', 'normal_agent', 'freeze-authority',
-			$2, 1, 1, '{}'::jsonb, jsonb_build_object('run_id', $3::text), 'fingerprint',
-			$4, $5, $5, $6
+			$1::uuid, 'tool', 'write_or_unknown', 'live', 'normal_agent', $2,
+			$2, 1, 1, $3, '{}'::jsonb, jsonb_build_object('run_id', $4::text), 'fingerprint',
+			$5, $6, $6, $7
 		)
-	`, operationID, agentID, lineage.SourceRunID, operationState, now, completedAt); err != nil {
+	`, operationID, agentID, capabilityPlanFingerprint, lineage.SourceRunID, operationState, now, completedAt); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runtime_external_effect_attempts (
 			attempt_id, operation_id, attempt_ordinal, adapter, transport, execution_mode,
 			runtime_epoch, generation, execution_owner, lease_expires_at, fence_generation,
+			usage_target_kind, usage_target_id, capability_surface_id,
 			state, evidence, authorized_at, launched_at, completed_at, updated_at
 		) VALUES (
 			$1::uuid, $2::uuid, 1, 'test', 'process', 'live', 1, 1, 'freeze-worker', $3, 1,
-			$4, '{}'::jsonb, $5::timestamptz, CASE WHEN $4 = 'launched' THEN $5::timestamptz ELSE NULL END, $6::timestamptz, $5::timestamptz
+			'agent_turn', $4::uuid, $5::uuid,
+			$6, '{}'::jsonb, $7::timestamptz, CASE WHEN $6 = 'launched' THEN $7::timestamptz ELSE NULL END, $8::timestamptz, $7::timestamptz
 		)
-	`, uuid.NewString(), operationID, leaseExpiry, attemptState, now, completedAt); err != nil {
+	`, uuid.NewString(), operationID, leaseExpiry, turnID, capabilitySurface.ID, attemptState, now, completedAt); err != nil {
 		t.Fatal(err)
 	}
 }
