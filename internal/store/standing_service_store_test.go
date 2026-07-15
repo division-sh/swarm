@@ -127,10 +127,10 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	agentID := "standing-agent"
 	sessionID := uuid.NewString()
 	timerID := uuid.NewString()
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO events (event_id, run_id, event_name, payload) VALUES (?, ?, 'standing.work', '{}')`, eventID, created.RunID); err != nil {
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO events (execution_mode, event_id, run_id, event_name, payload) VALUES ('live', ?, ?, 'standing.work', '{}')`, eventID, created.RunID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO events (event_id, run_id, event_name, payload) VALUES (?, ?, 'standing.unsettled', '{}')`, unsettledEventID, created.RunID); err != nil {
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO events (execution_mode, event_id, run_id, event_name, payload) VALUES ('live', ?, ?, 'standing.unsettled', '{}')`, unsettledEventID, created.RunID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.DB.ExecContext(ctx, `INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status) VALUES (?, ?, ?, 'agent', ?, 'in_progress')`, uuid.NewString(), created.RunID, eventID, agentID); err != nil {
@@ -338,10 +338,10 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	eventID := uuid.NewString()
 	unsettledEventID := uuid.NewString()
 	agentID := "standing-agent"
-	if _, err := db.ExecContext(ctx, `INSERT INTO events (event_id, run_id, event_name, payload) VALUES ($1::uuid, $2::uuid, 'standing.work', '{}')`, eventID, created[0].RunID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO events (execution_mode, event_id, run_id, event_name, payload) VALUES ('live', $1::uuid, $2::uuid, 'standing.work', '{}')`, eventID, created[0].RunID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO events (event_id, run_id, event_name, payload) VALUES ($1::uuid, $2::uuid, 'standing.unsettled', '{}')`, unsettledEventID, created[0].RunID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO events (execution_mode, event_id, run_id, event_name, payload) VALUES ('live', $1::uuid, $2::uuid, 'standing.unsettled', '{}')`, unsettledEventID, created[0].RunID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status) VALUES ($1::uuid, $2::uuid, $3::uuid, 'agent', $4, 'in_progress')`, uuid.NewString(), created[0].RunID, eventID, agentID); err != nil {

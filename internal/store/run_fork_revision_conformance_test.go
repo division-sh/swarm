@@ -239,8 +239,8 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (run_id,event_id,event_name,scope,produced_by_type)
-		VALUES ($1::uuid,$2::uuid,'revision.delivery.seed','global','platform')
+		INSERT INTO events (execution_mode,run_id,event_id,event_name,scope,produced_by_type)
+		VALUES ('live',$1::uuid,$2::uuid,'revision.delivery.seed','global','platform')
 	`, runID, seedEventID); err != nil {
 		t.Fatalf("seed delivery event: %v", err)
 	}
@@ -261,8 +261,8 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 		t.Fatalf("lock event publication run: %v", err)
 	}
 	if _, err := publishTx.ExecContext(ctx, `
-		INSERT INTO events (run_id,event_id,event_name,scope,produced_by_type)
-		VALUES ($1::uuid,$2::uuid,'revision.delivery.concurrent','global','platform')
+		INSERT INTO events (execution_mode,run_id,event_id,event_name,scope,produced_by_type)
+		VALUES ('live',$1::uuid,$2::uuid,'revision.delivery.concurrent','global','platform')
 	`, runID, publishedEventID); err != nil {
 		t.Fatalf("stage published event: %v", err)
 	}
