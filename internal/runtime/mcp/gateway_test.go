@@ -739,6 +739,11 @@ func TestGatewayHandleMCP_ManagedClaudeCLIChronologyNormalAndSelectedFork(t *tes
 			if len(settledEvidence) != 2 || !providerConfirmed {
 				t.Fatalf("provider-call evidence = %#v, want exact MCP provider confirmation", settledEvidence)
 			}
+			if _, err := llm.ObserveCLIResponseCapabilitySurface(settledTurn.CapabilitySurface.Clone(), &llm.Response{
+				MCPServers: map[string]string{"runtime-tools": "connected"}, MCPVisibleTools: []string{"mcp__runtime-tools__write_file"},
+			}); err != nil {
+				t.Fatalf("provider response could not confirm the call-settled canonical evidence: %v", err)
+			}
 
 			call.ID = "replacement-transport-id"
 			replay := callMCPGateway(t, gateway, token, call)
