@@ -43,6 +43,18 @@ func (eb *EventBus) PrepareInboundDeliveryBatchInMutation(ctx context.Context, b
 	if err != nil {
 		return nil, err
 	}
+	projection, ok := runtimeauthoractivity.InboundProjectionFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("typed inbound author projection context is required for inbound delivery")
+	}
+	wantProjection := runtimeauthoractivity.InboundProjection{
+		SubjectType: validated.AuthorSubjectType,
+		SubjectID:   validated.AuthorSubjectID,
+		Summary:     validated.AuthorSummary,
+	}
+	if projection != wantProjection {
+		return nil, fmt.Errorf("typed inbound author projection context does not match the validated inbound delivery batch")
+	}
 	mutation, ok := eb.eventMutationFromContext(ctx)
 	if !ok || mutation == nil {
 		return nil, fmt.Errorf("typed event mutation context is required for inbound delivery")
@@ -51,11 +63,6 @@ func (eb *EventBus) PrepareInboundDeliveryBatchInMutation(ctx context.Context, b
 	if err != nil {
 		return nil, err
 	}
-	txctx = runtimeauthoractivity.WithInboundProjection(txctx, runtimeauthoractivity.InboundProjection{
-		SubjectType: validated.AuthorSubjectType,
-		SubjectID:   validated.AuthorSubjectID,
-		Summary:     validated.AuthorSummary,
-	})
 	prepared := make([]PreparedPublish, 0, len(validated.Events))
 	for _, item := range validated.Events {
 		itemCtx := txctx

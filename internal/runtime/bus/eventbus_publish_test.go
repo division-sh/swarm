@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -2720,7 +2721,8 @@ func TestPrepareInboundDeliveryBatchRollsBackAllDerivedEventsWithCallerMutation(
 
 			err = runner.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
 				wrapped := &failingInboundBatchMutation{EventMutation: mutation, failAppend: 2}
-				_, prepareErr := eb.PrepareInboundDeliveryBatchInMutation(wrapped.Context(), batch)
+				prepareCtx := runtimeauthoractivity.WithInboundProjection(wrapped.Context(), runtimeauthoractivity.InboundProjection{})
+				_, prepareErr := eb.PrepareInboundDeliveryBatchInMutation(prepareCtx, batch)
 				return prepareErr
 			})
 			if err == nil || !strings.Contains(err.Error(), "injected normalized append failure") {

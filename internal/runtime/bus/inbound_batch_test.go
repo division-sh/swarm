@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
@@ -95,7 +96,7 @@ func TestPrepareInboundDeliveryBatchRejectsInvalidProviderOutputAuthorizationBef
 			batch := inboundBatchPreflightBatch(expected)
 			tc.mutate(&batch)
 			mutation := &inboundBatchPreflightMutation{}
-			if _, err := bus.PrepareInboundDeliveryBatchInMutation(mutation.Context(), batch); err == nil {
+			if _, err := bus.PrepareInboundDeliveryBatchInMutation(inboundBatchProjectionContext(mutation.Context(), batch), batch); err == nil {
 				t.Fatal("PrepareInboundDeliveryBatchInMutation error = nil, want fail-closed authorization rejection")
 			}
 			if mutation.appendCalls != 0 {
@@ -119,11 +120,53 @@ func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthori
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	mutation := &inboundBatchPreflightMutation{}
-	if _, err := bus.PrepareInboundDeliveryBatchInMutation(mutation.Context(), inboundBatchPreflightBatch(expected)); err == nil || !strings.Contains(err.Error(), "mutation append sentinel") {
+	batch := inboundBatchPreflightBatch(expected)
+	if _, err := bus.PrepareInboundDeliveryBatchInMutation(inboundBatchProjectionContext(mutation.Context(), batch), batch); err == nil || !strings.Contains(err.Error(), "mutation append sentinel") {
 		t.Fatalf("PrepareInboundDeliveryBatchInMutation error = %v, want mutation sentinel", err)
 	}
 	if mutation.appendCalls != 1 {
 		t.Fatalf("AppendEvent calls = %d, want one", mutation.appendCalls)
+	}
+}
+
+func TestPrepareInboundDeliveryBatchRequiresSingleMatchingProjectionContextBeforeMutation(t *testing.T) {
+	expected := runtimeprovideroutput.Authorization{
+		Provider: "telegram", Event: "inbound.telegram.text_message",
+		PackID: "provider.telegram", PackVersion: "1.0.0",
+		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "generation-current",
+	}
+	bus, err := newScopedTestEventBus(&InMemoryEventStore{}, EventBusOptions{
+		ProviderOutputVerifier: inboundBatchAuthorizationVerifier{expected: expected},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	batch := inboundBatchPreflightBatch(expected)
+	batch.AuthorSubjectType = "chat"
+	batch.AuthorSubjectID = "42"
+	batch.AuthorSummary = "hello"
+
+	testCases := []struct {
+		name string
+		ctx  func(context.Context) context.Context
+	}{
+		{name: "missing", ctx: func(ctx context.Context) context.Context { return ctx }},
+		{name: "mismatched", ctx: func(ctx context.Context) context.Context {
+			return runtimeauthoractivity.WithInboundProjection(ctx, runtimeauthoractivity.InboundProjection{
+				SubjectType: "chat", SubjectID: "different", Summary: "hello",
+			})
+		}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mutation := &inboundBatchPreflightMutation{}
+			if _, err := bus.PrepareInboundDeliveryBatchInMutation(tc.ctx(mutation.Context()), batch); err == nil || !strings.Contains(err.Error(), "inbound author projection context") {
+				t.Fatalf("PrepareInboundDeliveryBatchInMutation error = %v, want projection-context rejection", err)
+			}
+			if mutation.appendCalls != 0 {
+				t.Fatalf("AppendEvent calls = %d, want zero", mutation.appendCalls)
+			}
+		})
 	}
 }
 
@@ -159,7 +202,7 @@ func TestPrepareInboundDeliveryBatchRejectsNonExclusiveOrMisorderedOutputsBefore
 			batch := inboundBatchPreflightBatch(expected)
 			tc.mutate(&batch)
 			mutation := &inboundBatchPreflightMutation{}
-			if _, err := bus.PrepareInboundDeliveryBatchInMutation(mutation.Context(), batch); err == nil {
+			if _, err := bus.PrepareInboundDeliveryBatchInMutation(inboundBatchProjectionContext(mutation.Context(), batch), batch); err == nil {
 				t.Fatal("PrepareInboundDeliveryBatchInMutation error = nil, want cardinality/order rejection")
 			}
 			if mutation.appendCalls != 0 {
@@ -208,7 +251,8 @@ func TestPrepareInboundDeliveryBatchSharesTransactionRouteOverlayAcrossOrderedCh
 	mutation := &inboundBatchOverlayMutation{
 		ctx: runtimepipeline.WithPipelineSQLTxContext(context.Background(), &sql.Tx{}),
 	}
-	if _, err := bus.PrepareInboundDeliveryBatchInMutation(mutation.Context(), inboundBatchPreflightBatch(expected)); err != nil {
+	batch := inboundBatchPreflightBatch(expected)
+	if _, err := bus.PrepareInboundDeliveryBatchInMutation(inboundBatchProjectionContext(mutation.Context(), batch), batch); err != nil {
 		t.Fatalf("PrepareInboundDeliveryBatchInMutation: %v", err)
 	}
 	if len(mutation.overlays) != 2 || mutation.overlays[0] == nil || mutation.overlays[1] == nil {
@@ -230,6 +274,14 @@ func inboundBatchPreflightBatch(authorization runtimeprovideroutput.Authorizatio
 			},
 		},
 	}
+}
+
+func inboundBatchProjectionContext(ctx context.Context, batch InboundDeliveryBatch) context.Context {
+	return runtimeauthoractivity.WithInboundProjection(ctx, runtimeauthoractivity.InboundProjection{
+		SubjectType: batch.AuthorSubjectType,
+		SubjectID:   batch.AuthorSubjectID,
+		Summary:     batch.AuthorSummary,
+	})
 }
 
 func inboundBatchPreflightEvent(eventName string) events.Event {

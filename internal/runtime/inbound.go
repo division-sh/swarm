@@ -388,8 +388,9 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		if projectionErr != nil {
 			return projectionErr
 		}
+		mutationCtx := runtimeauthoractivity.WithInboundProjection(mutation.Context(), authorProjection)
 		var prepareErr error
-		prepared, prepareErr = g.bus.PrepareInboundDeliveryBatchInMutation(mutation.Context(), runtimebus.InboundDeliveryBatch{
+		prepared, prepareErr = g.bus.PrepareInboundDeliveryBatchInMutation(mutationCtx, runtimebus.InboundDeliveryBatch{
 			Provider:          provider,
 			AuthorSubjectType: authorProjection.SubjectType,
 			AuthorSubjectID:   authorProjection.SubjectID,
@@ -410,7 +411,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 				Authorization: published[index].Authorization, RecipientManifest: manifest,
 			}
 		}
-		return mutation.FinalizeInboundPublication(mutation.Context(), finalization)
+		return mutation.FinalizeInboundPublication(mutationCtx, finalization)
 	})
 	if err != nil {
 		if g.logger != nil {
