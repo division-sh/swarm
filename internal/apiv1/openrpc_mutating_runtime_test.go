@@ -1355,6 +1355,8 @@ func (e *mutatingProbeRunForkExecutor) ExecuteRunFork(_ context.Context, req Run
 	return RunForkExecutionResult{
 		Owner:              "runtime.run_fork.selected_contract_execution",
 		SourceRunID:        strings.TrimSpace(req.SourceRunID),
+		SourceRunStatus:    store.RunForkSourceFrozenStatus,
+		SourceFrozen:       true,
 		ForkRunID:          runForkTestForkRunID,
 		ForkEventID:        strings.TrimSpace(req.ForkEventID),
 		ForkRunStatus:      "running",

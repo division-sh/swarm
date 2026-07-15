@@ -45,6 +45,8 @@ type RunForkExecutionRequest struct {
 type RunForkExecutionResult struct {
 	Owner              string `json:"owner"`
 	SourceRunID        string `json:"source_run_id"`
+	SourceRunStatus    string `json:"source_run_status"`
+	SourceFrozen       bool   `json:"source_frozen"`
 	ForkRunID          string `json:"fork_run_id"`
 	ForkEventID        string `json:"fork_event_id"`
 	ForkRunStatus      string `json:"fork_run_status"`
@@ -89,6 +91,8 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 	return RunForkExecutionResult{
 		Owner:              strings.TrimSpace(result.Owner),
 		SourceRunID:        strings.TrimSpace(result.Materialization.SourceRunID),
+		SourceRunStatus:    strings.TrimSpace(result.Activation.SourceRunStatus),
+		SourceFrozen:       result.Activation.SourceFrozen,
 		ForkRunID:          strings.TrimSpace(result.Materialization.ForkRunID),
 		ForkEventID:        strings.TrimSpace(result.Materialization.ForkPoint.EventID),
 		ForkRunStatus:      status,
@@ -130,7 +134,7 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 	if activeRunStatus(availability.Status) && !params.ConfirmSourceFreeze {
 		return nil, NewInvalidParamsError(map[string]any{
 			"field":  "confirm_source_freeze",
-			"reason": "must be true when forking a running or paused source because the source is permanently frozen",
+			"reason": "must be true when forking a running or paused source because the operation may permanently freeze it unless source advancement selects branch divergence",
 		})
 	}
 	sourceBundleHash := strings.TrimSpace(availability.BundleHash)
@@ -192,6 +196,9 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 		if result.BundleHash == "" {
 			result.BundleHash = params.BundleHash
 		}
+		if err := validateRunForkExecutionResult(result); err != nil {
+			return store.APIIdempotencyCompletion{}, err
+		}
 		response, err := json.Marshal(result)
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
@@ -208,7 +215,23 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 		}
 		return nil, fmt.Errorf("decode run.fork response: %w", err)
 	}
+	if err := validateRunForkExecutionResult(stored); err != nil {
+		return nil, err
+	}
 	return stored, nil
+}
+
+func validateRunForkExecutionResult(result RunForkExecutionResult) error {
+	status := strings.ToLower(strings.TrimSpace(result.SourceRunStatus))
+	switch status {
+	case "running", "paused", "completed", "failed", "cancelled", store.RunForkSourceFrozenStatus:
+	default:
+		return fmt.Errorf("run.fork result has invalid source_run_status %q", result.SourceRunStatus)
+	}
+	if result.SourceFrozen != (status == store.RunForkSourceFrozenStatus) {
+		return fmt.Errorf("run.fork result source_frozen=%t contradicts source_run_status %q", result.SourceFrozen, result.SourceRunStatus)
+	}
+	return nil
 }
 
 type runForkParams struct {

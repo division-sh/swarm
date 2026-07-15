@@ -6162,7 +6162,7 @@
         {
           "name": "confirm_source_freeze",
           "required": false,
-          "description": "Must be true when the selected operation freezes a running or paused source. The mutation rechecks source activity and this acknowledgment in the source-freeze transaction. Terminal sources refuse without requiring confirmation.",
+          "description": "Must be true before forking a running or paused source. It authorizes the operation to permanently freeze an unadvanced source; source advancement may instead select branch divergence and preserve the source. The mutation rechecks source activity and this authorization in the source-freeze transaction, and the result reports the actual source_frozen and source_run_status outcome. Terminal sources refuse without requiring confirmation.",
           "schema": {
             "default": false,
             "type": "boolean"
@@ -12667,6 +12667,7 @@
       },
       "RunForkResult": {
         "additionalProperties": false,
+        "description": "Reports both the activated fork and the actual source lifecycle outcome. source_frozen is true exactly when source_run_status is forked; otherwise the source-advanced branch preserved the reported source status.",
         "properties": {
           "bundle_hash": {
             "$ref": "#/components/schemas/BundleHash"
@@ -12688,13 +12689,22 @@
             "description": "Canonical runtime/store owner that executed the selected-contract fork.",
             "type": "string"
           },
+          "source_frozen": {
+            "description": "True only when activation permanently froze the source; false when source advancement selected branch divergence and preserved the source.",
+            "type": "boolean"
+          },
           "source_run_id": {
             "$ref": "#/components/schemas/OpaqueId"
+          },
+          "source_run_status": {
+            "$ref": "#/components/schemas/RunStatus"
           }
         },
         "required": [
           "owner",
           "source_run_id",
+          "source_run_status",
+          "source_frozen",
           "fork_run_id",
           "fork_event_id",
           "fork_run_status",
