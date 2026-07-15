@@ -19,7 +19,18 @@ func TestPlatformSpecPromotesVersionedRoutingTopologyArtifact(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, routing, "evolution_rule"), "Runtime recipients")
 	assertScalarContains(t, mustMappingValue(t, routing, "endpoint_rule"), "immutable authored endpoint census")
 	assertScalarContains(t, mustMappingValue(t, routing, "endpoint_rule"), "interface exposures")
-	assertScalarContains(t, mustMappingValue(t, routing, "resolution_rule"), "select-or-create")
+	resolutionRule := mustMappingValue(t, routing, "resolution_rule")
+	assertScalarContains(t, resolutionRule, "connect edges are edge-only")
+	assertScalarContains(t, resolutionRule, "receiver-owned input")
+	assertScalarContains(t, resolutionRule, "address, create, select, select-or-create, fan-in, and reply")
+	assertScalarContains(t, resolutionRule, "target_set")
+	assertScalarContains(t, resolutionRule, "typed-reply facts")
+	assertScalarContains(t, resolutionRule, "fan-out remains non-runnable under #1934")
+	for _, retired := range []string{"broadcast declarations", "delivery declarations"} {
+		if strings.Contains(resolutionRule.Value, retired) {
+			t.Fatalf("resolution_rule retains retired connect authority %q: %s", retired, resolutionRule.Value)
+		}
+	}
 	assertScalarContains(t, mustMappingValue(t, routing, "identity_rule"), "fail closed")
 	assertScalarContains(t, mustMappingValue(t, routing, "delivery_scope_rule"), "Delivery between authored producers and consumers has exactly two canonical scopes")
 	assertScalarContains(t, mustMappingValue(t, routing, "delivery_scope_rule"), "Standing ingress is admission")
