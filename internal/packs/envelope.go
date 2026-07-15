@@ -20,9 +20,11 @@ const (
 	EnvelopeFileName          = "pack.yaml"
 	TriggerManifestFileName   = "trigger.yaml"
 	ConnectorManifestFileName = "connector.yaml"
+	ChannelManifestFileName   = "channel.yaml"
 
 	TypeTrigger   = "trigger"
 	TypeConnector = "connector"
+	TypeChannel   = "channel"
 
 	ProvenancePlatform = "platform"
 	ProvenanceExternal = "external"
@@ -35,6 +37,7 @@ type Envelope struct {
 	Version         string       `yaml:"version"`
 	PlatformVersion string       `yaml:"platform_version"`
 	Type            string       `yaml:"type"`
+	Implements      []string     `yaml:"implements,omitempty"`
 	ManifestHash    string       `yaml:"manifest_hash"`
 	Provenance      Provenance   `yaml:"provenance"`
 	Capabilities    Capabilities `yaml:"capabilities"`
@@ -62,8 +65,9 @@ type CanCapabilities struct {
 }
 
 type Requires struct {
-	Secrets            []string `yaml:"secrets,omitempty" json:"secrets"`
-	ManagedCredentials []string `yaml:"managed_credentials,omitempty" json:"managed_credentials"`
+	Secrets            []string          `yaml:"secrets,omitempty" json:"secrets"`
+	ManagedCredentials []string          `yaml:"managed_credentials,omitempty" json:"managed_credentials"`
+	Packs              map[string]string `yaml:"packs,omitempty" json:"packs,omitempty"`
 }
 
 type Loaded struct {
@@ -105,6 +109,8 @@ func ManifestFileNameForType(packType string) string {
 		return TriggerManifestFileName
 	case TypeConnector:
 		return ConnectorManifestFileName
+	case TypeChannel:
+		return ChannelManifestFileName
 	default:
 		return ""
 	}
@@ -138,7 +144,7 @@ func (e Envelope) ValidateCommon(runningPlatformVersion string) error {
 		return fmt.Errorf("pack %q platform_version is incompatible: %w", id, err)
 	}
 	switch strings.TrimSpace(e.Type) {
-	case TypeTrigger, TypeConnector:
+	case TypeTrigger, TypeConnector, TypeChannel:
 	default:
 		return fmt.Errorf("pack %q has unsupported type %q", id, e.Type)
 	}
@@ -155,6 +161,13 @@ func (e Envelope) ValidateCommon(runningPlatformVersion string) error {
 	}
 	if err := e.Requires.Validate(id); err != nil {
 		return err
+	}
+	if strings.TrimSpace(e.Type) == TypeChannel {
+		if len(e.Implements) != 1 || strings.TrimSpace(e.Implements[0]) == "" {
+			return fmt.Errorf("pack %q type channel must declare exactly one implements identity", id)
+		}
+	} else if len(e.Implements) != 0 {
+		return fmt.Errorf("pack %q type %s must not declare implements", id, e.Type)
 	}
 	if len(e.Tests) == 0 {
 		return fmt.Errorf("pack %q tests are required", id)
@@ -214,9 +227,26 @@ func (c Capabilities) ValidateForType(packID, packType string) error {
 		return c.validateTrigger(packID)
 	case TypeConnector:
 		return c.validateConnector(packID)
+	case TypeChannel:
+		return c.validateChannel(packID)
 	default:
 		return fmt.Errorf("pack %q has unsupported type %q", packID, packType)
 	}
+}
+
+func (c Capabilities) validateChannel(packID string) error {
+	if strings.TrimSpace(c.Can.ReceiveHTTPSRoute) != "" || strings.TrimSpace(c.Can.VerifySecret) != "" || len(c.Can.EmitEvents) != 0 || c.Can.PersistDedupeMarkers || len(c.Can.CallProviderActions) != 0 || c.Can.LowerThroughActivity || c.Can.JournalActivityAttempts {
+		return fmt.Errorf("pack %q channel capabilities are derived from its satisfied trigger and connector dependencies", packID)
+	}
+	if len(c.Cannot) == 0 {
+		return fmt.Errorf("pack %q capabilities.cannot is required", packID)
+	}
+	for _, item := range c.Cannot {
+		if strings.TrimSpace(item) == "" {
+			return fmt.Errorf("pack %q capabilities.cannot must not contain empty entries", packID)
+		}
+	}
+	return nil
 }
 
 func (c Capabilities) validateTrigger(packID string) error {
@@ -305,6 +335,16 @@ func (r Requires) Validate(packID string) error {
 			return fmt.Errorf("pack %q requires.managed_credentials contains duplicate %q", packID, credential)
 		}
 		managedSeen[credential] = struct{}{}
+	}
+	for role, id := range r.Packs {
+		role = strings.TrimSpace(role)
+		id = strings.TrimSpace(id)
+		if role != TypeTrigger && role != TypeConnector {
+			return fmt.Errorf("pack %q requires.packs role %q is unsupported", packID, role)
+		}
+		if id == "" {
+			return fmt.Errorf("pack %q requires.packs.%s is required", packID, role)
+		}
 	}
 	return nil
 }

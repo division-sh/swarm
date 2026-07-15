@@ -127,24 +127,39 @@ type LoadedPack struct {
 	Source       string
 }
 
-type PlatformPackIdentity struct {
-	ID       string `yaml:"id"`
-	Provider string `yaml:"provider"`
-}
-
-var requiredPlatformPackIdentities = []PlatformPackIdentity{
-	{ID: "provider.github", Provider: "github"},
-	{ID: "provider.intercom", Provider: "intercom"},
-	{ID: "provider.shopify", Provider: "shopify"},
-	{ID: "provider.slack", Provider: "slack"},
-	{ID: "provider.stripe", Provider: "stripe"},
-	{ID: "provider.telegram", Provider: "telegram"},
-	{ID: "provider.twilio", Provider: "twilio"},
-	{ID: "provider.typeform", Provider: "typeform"},
-}
-
-func RequiredPlatformPackIdentities() []PlatformPackIdentity {
-	return append([]PlatformPackIdentity(nil), requiredPlatformPackIdentities...)
+func (s *CatalogSnapshot) PackDescriptors() []packs.TriggerPackDescriptor {
+	if s == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(s.byID))
+	for id := range s.byID {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	out := make([]packs.TriggerPackDescriptor, 0, len(ids))
+	for _, id := range ids {
+		entry := s.byID[id]
+		events := map[string]packs.TriggerEvent{}
+		for _, output := range entry.Manifest.OutputManifest() {
+			if output.Kind != OutputKindNormalized {
+				continue
+			}
+			fields := make(map[string]packs.TriggerEventField, len(output.Fields))
+			for name, projection := range output.Fields {
+				projection = projection.Normalized()
+				fields[name] = packs.TriggerEventField{Type: projection.Type, Required: !projection.Optional}
+			}
+			events[output.Event] = packs.TriggerEvent{Name: output.Event, Fields: fields}
+		}
+		out = append(out, packs.TriggerPackDescriptor{
+			Identity: packs.PackIdentity{
+				ID: entry.Identity.ID, Version: entry.Identity.Version, ManifestHash: entry.Identity.ManifestHash,
+				Type: packs.TypeTrigger, Source: entry.Source,
+			},
+			Provider: entry.Manifest.Provider, GenerationID: s.generationID, Events: events,
+		})
+	}
+	return out
 }
 
 func NewCatalogSnapshot(entries ...CatalogEntry) (*CatalogSnapshot, error) {
@@ -227,28 +242,12 @@ func loadPackDirs(runningPlatformVersion, expectedProvenance string, dirs ...str
 }
 
 func NewCatalogSnapshotFromPackDirs(runningPlatformVersion string, platformDirs, externalDirs []string) (*CatalogSnapshot, []LoadedPack, error) {
-	return newCatalogSnapshotFromPackDirs(runningPlatformVersion, platformDirs, externalDirs, false)
-}
-
-func NewCatalogSnapshotFromRequiredPlatformPackDirs(runningPlatformVersion string, platformDirs, externalDirs []string) (*CatalogSnapshot, []LoadedPack, error) {
-	return newCatalogSnapshotFromPackDirs(runningPlatformVersion, platformDirs, externalDirs, true)
-}
-
-func newCatalogSnapshotFromPackDirs(runningPlatformVersion string, platformDirs, externalDirs []string, requireCompletePlatformInventory bool) (*CatalogSnapshot, []LoadedPack, error) {
 	if err := rejectDuplicatePackDirectories(platformDirs, externalDirs); err != nil {
 		return nil, nil, err
 	}
 	platformPacks, err := LoadPlatformPackDirs(runningPlatformVersion, platformDirs...)
 	if err != nil {
 		return nil, nil, err
-	}
-	if requireCompletePlatformInventory {
-		if err := validateLoadedPackIdentities(platformPacks); err != nil {
-			return nil, nil, err
-		}
-		if err := validateRequiredPlatformPackInventory(platformPacks); err != nil {
-			return nil, nil, err
-		}
 	}
 	externalPacks, err := LoadExternalPackDirs(runningPlatformVersion, externalDirs...)
 	if err != nil {
@@ -265,54 +264,6 @@ func newCatalogSnapshotFromPackDirs(runningPlatformVersion string, platformDirs,
 		return nil, nil, err
 	}
 	return snapshot, loaded, nil
-}
-
-func validateRequiredPlatformPackInventory(loaded []LoadedPack) error {
-	expected := make(map[string]string, len(requiredPlatformPackIdentities))
-	for _, identity := range requiredPlatformPackIdentities {
-		expected[strings.TrimSpace(identity.ID)] = NormalizeProviderName(identity.Provider)
-	}
-
-	seen := make(map[string]struct{}, len(loaded))
-	unexpected := make([]string, 0)
-	mismatched := make([]string, 0)
-	for _, pack := range loaded {
-		id := strings.TrimSpace(pack.Envelope.ID)
-		provider := NormalizeProviderName(pack.Manifest.Provider)
-		expectedProvider, ok := expected[id]
-		if !ok {
-			unexpected = append(unexpected, fmt.Sprintf("%q provider=%q from %s", id, provider, loadedPackSource(pack)))
-			continue
-		}
-		seen[id] = struct{}{}
-		if provider != expectedProvider {
-			mismatched = append(mismatched, fmt.Sprintf("%q declares provider=%q, expected provider=%q from %s", id, provider, expectedProvider, loadedPackSource(pack)))
-		}
-	}
-
-	missing := make([]string, 0)
-	for _, identity := range requiredPlatformPackIdentities {
-		if _, ok := seen[identity.ID]; !ok {
-			missing = append(missing, fmt.Sprintf("%q provider=%q", identity.ID, identity.Provider))
-		}
-	}
-	if len(missing) == 0 && len(unexpected) == 0 && len(mismatched) == 0 {
-		return nil
-	}
-	sort.Strings(missing)
-	sort.Strings(unexpected)
-	sort.Strings(mismatched)
-	parts := make([]string, 0, 3)
-	if len(missing) > 0 {
-		parts = append(parts, "missing identities "+strings.Join(missing, ", "))
-	}
-	if len(unexpected) > 0 {
-		parts = append(parts, "unexpected identities "+strings.Join(unexpected, ", "))
-	}
-	if len(mismatched) > 0 {
-		parts = append(parts, "identity/provider mismatches "+strings.Join(mismatched, ", "))
-	}
-	return fmt.Errorf("required provider trigger platform inventory mismatch: %s; configure elevated provider_triggers.packs.platform_dirs with exactly the required first-party identities", strings.Join(parts, "; "))
 }
 
 func rejectDuplicatePackDirectories(platformDirs, externalDirs []string) error {

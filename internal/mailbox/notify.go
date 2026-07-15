@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"net/smtp"
-	"net/url"
 	"strings"
 	"time"
 
@@ -94,102 +93,6 @@ func (n *WebhookNotifier) NotifyCritical(ctx context.Context, item runtimetools.
 		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
 	}
 	return nil
-}
-
-type ChatNotifier struct {
-	BotToken string
-	ChatID   string
-	BaseURL  string
-	Client   *http.Client
-}
-
-func (n *ChatNotifier) NotifyCritical(ctx context.Context, item runtimetools.MailboxItem) error {
-	if strings.TrimSpace(n.BotToken) == "" || strings.TrimSpace(n.ChatID) == "" {
-		return fmt.Errorf("telegram token and chat id are required")
-	}
-	baseURL := strings.TrimSpace(n.BaseURL)
-	if baseURL == "" {
-		baseURL = "https://api.telegram.org"
-	}
-	client := n.Client
-	if client == nil {
-		client = &http.Client{Timeout: 8 * time.Second}
-	}
-	text := fmt.Sprintf(
-		"[Platform] CRITICAL mailbox item\nid=%s\nentity=%s\ntype=%s\nfrom=%s\nsummary=%s",
-		item.ID,
-		item.EffectiveEntityID(),
-		item.Type,
-		item.FromAgent,
-		strings.TrimSpace(item.Summary),
-	)
-	form := url.Values{}
-	form.Set("chat_id", n.ChatID)
-	form.Set("text", text)
-	endpoint := fmt.Sprintf("%s/bot%s/sendMessage", strings.TrimRight(baseURL, "/"), n.BotToken)
-	return sendTelegramWithRetry(ctx, client, endpoint, form)
-}
-
-// NotifyText sends an arbitrary text message to the configured Telegram chat.
-func (n *ChatNotifier) NotifyText(ctx context.Context, text string) error {
-	if strings.TrimSpace(n.BotToken) == "" || strings.TrimSpace(n.ChatID) == "" {
-		return fmt.Errorf("telegram token and chat id are required")
-	}
-	baseURL := strings.TrimSpace(n.BaseURL)
-	if baseURL == "" {
-		baseURL = "https://api.telegram.org"
-	}
-	client := n.Client
-	if client == nil {
-		client = &http.Client{Timeout: 8 * time.Second}
-	}
-	form := url.Values{}
-	form.Set("chat_id", n.ChatID)
-	form.Set("text", strings.TrimSpace(text))
-	endpoint := fmt.Sprintf("%s/bot%s/sendMessage", strings.TrimRight(baseURL, "/"), n.BotToken)
-	return sendTelegramWithRetry(ctx, client, endpoint, form)
-}
-
-func sendTelegramWithRetry(ctx context.Context, client *http.Client, endpoint string, form url.Values) error {
-	if client == nil {
-		client = &http.Client{Timeout: 8 * time.Second}
-	}
-	const maxAttempts = 3
-	var lastErr error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
-		if err != nil {
-			return fmt.Errorf("build telegram request: %w", err)
-		}
-		req.Header.Set("content-type", "application/x-www-form-urlencoded")
-		resp, err := client.Do(req)
-		if err == nil {
-			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-				resp.Body.Close()
-				return nil
-			}
-			lastErr = fmt.Errorf("telegram returned status %d", resp.StatusCode)
-			resp.Body.Close()
-		} else {
-			lastErr = fmt.Errorf("send telegram: %w", err)
-		}
-
-		if attempt >= maxAttempts {
-			break
-		}
-		backoff := time.Duration(1<<(attempt-1)) * time.Second // 1s, 2s
-		timer := time.NewTimer(backoff)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("telegram send failed")
-	}
-	return lastErr
 }
 
 type EmailNotifier struct {

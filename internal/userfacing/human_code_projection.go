@@ -80,8 +80,10 @@ var humanCodePhrases = map[HumanCodeFamily]map[string]string{
 		"observed": "observed", "warning_emitted": "warning emitted",
 	},
 	HumanCodeProviderSubjectKind: {
-		"provider_trigger":   "provider trigger pack",
-		"provider_connector": "provider connector",
+		"provider_trigger":         "provider trigger pack",
+		"provider_connector":       "provider connector",
+		"channel_pack":             "channel pack",
+		"channel_outbound_binding": "channel outbound binding",
 	},
 	HumanCodeProviderSubjectStatus: {
 		"READY": "READY", "NOT_READY": "NOT READY", "AVAILABLE": "AVAILABLE",
@@ -94,6 +96,8 @@ var humanCodePhrases = map[HumanCodeFamily]map[string]string{
 		"call_provider_action":      "call provider action",
 		"lower_through_activity":    "lower through platform.activity_requested",
 		"journal_activity_attempts": "journal non-idempotent attempts in activity_attempts",
+		"satisfy_pack_interface":    "satisfy pack interface",
+		"deliver_channel_outbound":  "deliver channel outbound",
 	},
 	HumanCodeProviderGuarantee: {
 		"emit_undeclared_events":                   "emit undeclared events",

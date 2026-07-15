@@ -50,6 +50,9 @@
 
 # Project-contained paths: relative paths under the project when used in ./swarm.yaml
 # Project config may use these only as relative paths that stay inside the project root.
+# channels:
+#   packs:
+#     external_dirs: ["./channel-packs"] # Project-contained channel pack directories.
 # paths:
 #   agent_config_map_file: ./agent-config-map.yaml # Project-contained agent config map file.
 #   contracts_path: ./contracts # Project-contained contract bundle root.
@@ -73,6 +76,13 @@
 
 # Settings for this machine only: put these in .swarm/swarm.yaml
 # These keys are machine-specific or unsafe if committed to a shared project file.
+# channels:
+#   bindings:
+#     hitl:
+#       destination: "-1001234567890" # Deployment-owned opaque destination for the HITL outbound binding.
+#       pack: provider.telegram.hitl_channel # Channel pack selected for the HITL outbound binding.
+#   packs:
+#     platform_dirs: ["packs/channels/telegram"] # Selected platform channel pack directories; machine/operator config only.
 # database:
 #   host: 127.0.0.1 # Postgres host for postgres store deployments.
 #   name: swarm # Postgres database name.
@@ -93,7 +103,7 @@
 #   swarm_dir: .swarm # Swarm state directory.
 # provider_triggers:
 #   packs:
-#     platform_dirs: ["packs/provider-triggers/github", "packs/provider-triggers/intercom", "packs/provider-triggers/shopify", "packs/provider-triggers/slack", "packs/provider-triggers/stripe", "packs/provider-triggers/telegram", "packs/provider-triggers/twilio", "packs/provider-triggers/typeform"] # Required first-party provider trigger pack directories; machine/operator config only.
+#     platform_dirs: ["packs/provider-triggers/telegram"] # Selected platform provider trigger pack directories; machine/operator config only.
 # store:
 #   backend: sqlite # Runtime store backend.
 #   sqlite:

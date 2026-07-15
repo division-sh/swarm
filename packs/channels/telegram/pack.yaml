@@ -1,0 +1,21 @@
+id: provider.telegram.hitl_channel
+version: 0.1.0
+platform_version: '>=0.7.0 <0.8.0'
+type: channel
+implements: [swarm.hitl-channel/v1]
+manifest_hash: sha256:d5df1d1ade80a3dff4f9733dca1ee7054f04d523fa2358cc5cd488e91bab9def
+provenance:
+  source: platform
+capabilities:
+  can: {}
+  cannot:
+    - inspect provider opaque references
+    - select inbound targets
+    - bypass activity attempts
+requires:
+  packs:
+    trigger: provider.telegram
+    connector: provider.telegram.connector
+tests:
+  - packs/hitl_channel_telegram
+  - runtime/hitl_channel_durable_operation

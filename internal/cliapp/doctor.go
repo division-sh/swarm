@@ -136,6 +136,30 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		report.add(localPreflightProviderPackPrerequisite, "provider_trigger_pack_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix provider_triggers.packs.platform_dirs, provider_triggers.packs.external_dirs, or the referenced provider pack envelope")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
+	platformSpec, err := loadServePlatformSpecDocument(resolvedPaths.PlatformSpecPath)
+	if err != nil {
+		report := configReport
+		report.add(localPreflightProviderPackPrerequisite, "channel_interface_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --platform-spec or the declared channel interface")
+		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
+	}
+	providerCredentials, err := buildProviderCredentialStore()
+	if err != nil {
+		report := configReport
+		report.add(localPreflightProviderPackPrerequisite, "channel_provider_credentials_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix provider credential configuration")
+		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
+	}
+	managedCredentials, err := buildManagedCredentialStore()
+	if err != nil {
+		report := configReport
+		report.add(localPreflightProviderPackPrerequisite, "channel_managed_credentials_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix managed credential configuration")
+		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
+	}
+	channelPacks, err := loadConfiguredChannelPacks(ctx, repo, cfgResult, platformSpec, providerPackLoad.Catalog, providerCredentials, managedCredentials)
+	if err != nil {
+		report := configReport
+		report.add(localPreflightProviderPackPrerequisite, "channel_pack_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix channels.packs, channels.bindings, or the selected channel dependencies")
+		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
+	}
 	apiListenAddr, mcpListenAddr, err := resolveCLIServeListenerAddresses(cliServeListenerAddressOptions{
 		APIListenAddr:        opts.apiListenAddr,
 		MCPListenAddr:        opts.mcpListenAddr,
@@ -211,6 +235,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		ContractSecretSeverity: localPreflightCommandSeverityForContractSecrets("doctor"),
 		ProviderTriggerPacks:   providerPackLoad.Loaded,
 		ProviderTriggerCatalog: providerPackLoad.Catalog,
+		ChannelPacks:           channelPacks,
 	})
 	report.SchemaInventory = configReport.SchemaInventory
 	addUnifiedConfigDiagnosticsToReport(&report, cfgResult.Diagnostics)

@@ -2,12 +2,15 @@ id: provider.telegram.connector
 version: 0.1.0
 platform_version: ">=0.7.0 <0.8.0"
 type: connector
-manifest_hash: sha256:bfd99be3bb8d0b65b70faac200246b0abf61b381c1571e58dc3b2599d2d6422f
+manifest_hash: sha256:7b14446d1444ed0ac0b0c52a9fd83db308b7990ecf93308e0b0e01462027af6d
 provenance:
   source: platform
 capabilities:
   can:
     call_provider_actions:
+      - telegram.answer_callback
+      - telegram.edit_message
+      - telegram.send_interactive
       - telegram.send_message
     lower_through_activity: true
     journal_activity_attempts: true

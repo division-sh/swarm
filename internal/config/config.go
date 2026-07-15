@@ -20,6 +20,7 @@ type Config struct {
 	Workspace        WorkspaceConfig        `yaml:"workspace"`
 	LLM              LLMConfig              `yaml:"llm"`
 	ProviderTriggers ProviderTriggersConfig `yaml:"provider_triggers"`
+	Channels         ChannelsConfig         `yaml:"channels"`
 	Extensions       map[string]any         `yaml:",inline"`
 
 	typedExtensions ExtensionsConfig `yaml:"-"`
@@ -44,6 +45,21 @@ type ProviderTriggersConfig struct {
 type ProviderTriggerPacksConfig struct {
 	PlatformDirs []string `yaml:"platform_dirs"`
 	ExternalDirs []string `yaml:"external_dirs"`
+}
+
+type ChannelsConfig struct {
+	Packs    ChannelPacksConfig              `yaml:"packs"`
+	Bindings map[string]ChannelBindingConfig `yaml:"bindings"`
+}
+
+type ChannelPacksConfig struct {
+	PlatformDirs []string `yaml:"platform_dirs"`
+	ExternalDirs []string `yaml:"external_dirs"`
+}
+
+type ChannelBindingConfig struct {
+	Pack        string `yaml:"pack"`
+	Destination any    `yaml:"destination"`
 }
 
 type DatabaseConfig struct {
@@ -256,6 +272,9 @@ func (c *Config) validate(backendOverride string) error {
 	if err := c.validateProviderTriggerPacks(); err != nil {
 		return err
 	}
+	if err := c.validateChannels(); err != nil {
+		return err
+	}
 	if err := c.validateRetiredLLMModelConfig(); err != nil {
 		return err
 	}
@@ -364,6 +383,46 @@ func validateProviderTriggerPackDirs(key string, dirs []string) error {
 		}
 		if _, exists := seen[dir]; exists {
 			return fmt.Errorf("provider_triggers.packs.%s contains duplicate %q", key, dir)
+		}
+		seen[dir] = struct{}{}
+	}
+	return nil
+}
+
+func (c *Config) validateChannels() error {
+	if c == nil {
+		return nil
+	}
+	if err := validateChannelPackDirs("platform_dirs", c.Channels.Packs.PlatformDirs); err != nil {
+		return err
+	}
+	if err := validateChannelPackDirs("external_dirs", c.Channels.Packs.ExternalDirs); err != nil {
+		return err
+	}
+	for rawID, binding := range c.Channels.Bindings {
+		id := strings.TrimSpace(rawID)
+		if id == "" {
+			return fmt.Errorf("channels.bindings id must be non-empty")
+		}
+		if strings.TrimSpace(binding.Pack) == "" {
+			return fmt.Errorf("channels.bindings.%s.pack is required", id)
+		}
+		if binding.Destination == nil {
+			return fmt.Errorf("channels.bindings.%s.destination is required", id)
+		}
+	}
+	return nil
+}
+
+func validateChannelPackDirs(key string, dirs []string) error {
+	seen := map[string]struct{}{}
+	for index, raw := range dirs {
+		dir := strings.TrimSpace(raw)
+		if dir == "" {
+			return fmt.Errorf("channels.packs.%s[%d] must be non-empty", key, index)
+		}
+		if _, exists := seen[dir]; exists {
+			return fmt.Errorf("channels.packs.%s contains duplicate %q", key, dir)
 		}
 		seen[dir] = struct{}{}
 	}

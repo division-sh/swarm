@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
@@ -232,16 +233,144 @@ func (a *ToolAdditionalProperties) UnmarshalYAML(node *yaml.Node) error {
 	}
 }
 
+func (a ToolAdditionalProperties) MarshalYAML() (any, error) {
+	if a.Allowed != nil {
+		return *a.Allowed, nil
+	}
+	if a.Schema != nil {
+		return a.Schema, nil
+	}
+	return nil, nil
+}
+
 func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
 	if s == nil {
 		return nil
+	}
+	if node == nil || node.Kind != yaml.MappingNode {
+		return fmt.Errorf("tool schema must be a mapping")
+	}
+	allowed := map[string]struct{}{
+		"type": {}, "description": {}, "properties": {}, "required": {}, "items": {}, "enum": {},
+		"additionalProperties": {}, "minimum": {}, "maximum": {}, "pattern": {},
+		"minLength": {}, "maxLength": {}, "minItems": {}, "maxItems": {},
+	}
+	for index := 0; index < len(node.Content); index += 2 {
+		key := strings.TrimSpace(node.Content[index].Value)
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("tool schema field %q is unsupported", key)
+		}
 	}
 	type alias ToolInputSchema
 	var aux alias
 	if err := node.Decode(&aux); err != nil {
 		return err
 	}
+	if aux.MinLength != nil && *aux.MinLength < 0 {
+		return fmt.Errorf("tool schema minLength must be >= 0")
+	}
+	if aux.MaxLength != nil && *aux.MaxLength < 0 {
+		return fmt.Errorf("tool schema maxLength must be >= 0")
+	}
+	if aux.MinLength != nil && aux.MaxLength != nil && *aux.MinLength > *aux.MaxLength {
+		return fmt.Errorf("tool schema minLength must be <= maxLength")
+	}
+	if aux.MinItems != nil && *aux.MinItems < 0 {
+		return fmt.Errorf("tool schema minItems must be >= 0")
+	}
+	if aux.MaxItems != nil && *aux.MaxItems < 0 {
+		return fmt.Errorf("tool schema maxItems must be >= 0")
+	}
+	if aux.MinItems != nil && aux.MaxItems != nil && *aux.MinItems > *aux.MaxItems {
+		return fmt.Errorf("tool schema minItems must be <= maxItems")
+	}
+	if strings.TrimSpace(aux.Pattern) != "" {
+		if _, err := regexp.Compile(aux.Pattern); err != nil {
+			return fmt.Errorf("tool schema pattern is invalid: %w", err)
+		}
+	}
 	*s = ToolInputSchema(aux)
+	return nil
+}
+
+func (d *PackInterfaceDefinition) UnmarshalYAML(node *yaml.Node) error {
+	if d == nil {
+		return nil
+	}
+	if err := rejectUnknownYAMLFields(node, "pack interface", "kind", "schemas", "operations", "events"); err != nil {
+		return err
+	}
+	type alias PackInterfaceDefinition
+	var decoded alias
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*d = PackInterfaceDefinition(decoded)
+	return nil
+}
+
+func (o *PackInterfaceOperation) UnmarshalYAML(node *yaml.Node) error {
+	if o == nil {
+		return nil
+	}
+	if err := rejectUnknownYAMLFields(node, "pack interface operation", "effect_class", "input", "context", "output"); err != nil {
+		return err
+	}
+	type alias PackInterfaceOperation
+	var decoded alias
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*o = PackInterfaceOperation(decoded)
+	return nil
+}
+
+func (e *PackInterfaceEvent) UnmarshalYAML(node *yaml.Node) error {
+	if e == nil {
+		return nil
+	}
+	if err := rejectUnknownYAMLFields(node, "pack interface event", "required_fields"); err != nil {
+		return err
+	}
+	type alias PackInterfaceEvent
+	var decoded alias
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*e = PackInterfaceEvent(decoded)
+	return nil
+}
+
+func (f *PackInterfaceField) UnmarshalYAML(node *yaml.Node) error {
+	if f == nil {
+		return nil
+	}
+	if err := rejectUnknownYAMLFields(node, "pack interface field", "schema", "opaque"); err != nil {
+		return err
+	}
+	type alias PackInterfaceField
+	var decoded alias
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*f = PackInterfaceField(decoded)
+	return nil
+}
+
+func rejectUnknownYAMLFields(node *yaml.Node, subject string, allowed ...string) error {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return fmt.Errorf("%s must be a mapping", subject)
+	}
+	known := make(map[string]struct{}, len(allowed))
+	for _, field := range allowed {
+		known[field] = struct{}{}
+	}
+	for index := 0; index < len(node.Content); index += 2 {
+		field := strings.TrimSpace(node.Content[index].Value)
+		if _, ok := known[field]; !ok {
+			return fmt.Errorf("%s field %q is unsupported", subject, field)
+		}
+	}
 	return nil
 }
 

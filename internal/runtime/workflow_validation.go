@@ -33,6 +33,8 @@ type WorkflowContractValidationOptions struct {
 	ModelAliases                   llmselection.ModelAliases
 	AllowHarnessInputs             bool
 	ProviderTriggerCatalog         *providertriggers.CatalogSnapshot
+	ChannelPlans                   []packs.SatisfactionPlan
+	ChannelOutboundBindings        []packs.OutboundBindingPlan
 }
 
 type WorkflowContractValidationResult struct {
@@ -153,6 +155,24 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	result.CapabilitySubjects, err = ProviderTriggerCapabilitySubjects(source, opts.ProviderTriggerCatalog)
 	if err != nil {
 		return result, fmt.Errorf("provider trigger capability projection failed: %w", err)
+	}
+	for _, plan := range opts.ChannelPlans {
+		subject, subjectErr := plan.CapabilitySubject()
+		if subjectErr != nil {
+			return result, fmt.Errorf("channel pack capability projection failed: %w", subjectErr)
+		}
+		result.CapabilitySubjects = append(result.CapabilitySubjects, subject)
+	}
+	for _, binding := range opts.ChannelOutboundBindings {
+		subject, subjectErr := binding.CapabilitySubject()
+		if subjectErr != nil {
+			return result, fmt.Errorf("channel outbound capability projection failed: %w", subjectErr)
+		}
+		result.CapabilitySubjects = append(result.CapabilitySubjects, subject)
+	}
+	result.CapabilitySubjects, err = packs.NormalizeSubjects(result.CapabilitySubjects)
+	if err != nil {
+		return result, fmt.Errorf("capability projection normalization failed: %w", err)
 	}
 
 	return result, nil

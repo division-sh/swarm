@@ -38,6 +38,39 @@ type PackRegistry struct {
 	byProvider map[string]map[string]LoadedPack
 }
 
+func (r *PackRegistry) PackDescriptors() []packs.ConnectorPackDescriptor {
+	if r == nil {
+		return nil
+	}
+	byID := map[string]LoadedPack{}
+	for _, byTool := range r.byProvider {
+		for _, pack := range byTool {
+			byID[strings.TrimSpace(pack.Envelope.ID)] = pack
+		}
+	}
+	ids := make([]string, 0, len(byID))
+	for id := range byID {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	out := make([]packs.ConnectorPackDescriptor, 0, len(ids))
+	for _, id := range ids {
+		pack := byID[id]
+		tools := make(map[string]runtimecontracts.ToolSchemaEntry, len(pack.Manifest.Tools))
+		for name, tool := range pack.Manifest.Tools {
+			tools[name] = tool
+		}
+		out = append(out, packs.ConnectorPackDescriptor{
+			Identity: packs.PackIdentity{
+				ID: pack.Envelope.ID, Version: pack.Envelope.Version, ManifestHash: pack.Envelope.ManifestHash,
+				Type: packs.TypeConnector, Source: pack.Source,
+			},
+			Provider: pack.Manifest.Provider, Tools: tools,
+		})
+	}
+	return out
+}
+
 type InstalledTool struct {
 	Provider string
 	ToolID   string

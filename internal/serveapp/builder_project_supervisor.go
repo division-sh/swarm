@@ -14,6 +14,7 @@ import (
 	builderpkg "github.com/division-sh/swarm/internal/builder"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
@@ -39,6 +40,9 @@ type runtimeProjectSupervisor struct {
 	providerCredentials runtimecredentials.Store
 	providerTriggers    *providertriggers.CatalogSnapshot
 	loadProviderCatalog func() (*providertriggers.CatalogSnapshot, error)
+	loadChannelPacks    func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error)
+	channelPlans        []packs.SatisfactionPlan
+	channelBindings     []packs.OutboundBindingPlan
 	startRuntime        func(context.Context, *runtime.Runtime) error
 	quiesceRuntime      func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
 	shutdownRuntime     func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
@@ -75,6 +79,15 @@ func (s *runtimeProjectSupervisor) SetRuntimeContextManager(manager *runtime.Run
 	s.currentBundleIdentity = identity
 }
 
+func (s *runtimeProjectSupervisor) SetChannelPackLoader(loader func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error)) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.loadChannelPacks = loader
+}
+
 func newRuntimeProjectSupervisor(
 	RepoRoot string,
 	platformSpecPath string,
@@ -96,7 +109,7 @@ func newRuntimeProjectSupervisor(
 	if len(devMode) > 0 {
 		dev = devMode[0]
 	}
-	return &runtimeProjectSupervisor{
+	supervisor := &runtimeProjectSupervisor{
 		RepoRoot:            strings.TrimSpace(RepoRoot),
 		platformSpecPath:    strings.TrimSpace(platformSpecPath),
 		cfg:                 cfg,
@@ -164,6 +177,11 @@ func newRuntimeProjectSupervisor(
 		currentBundle: initialBundle,
 		currentRT:     initialRT,
 	}
+	if initialRT != nil {
+		supervisor.channelPlans = append([]packs.SatisfactionPlan(nil), initialRT.Options.ChannelPlans...)
+		supervisor.channelBindings = append([]packs.OutboundBindingPlan(nil), initialRT.Options.ChannelOutboundBindings...)
+	}
+	return supervisor
 }
 
 func (s *runtimeProjectSupervisor) CurrentSource() semanticview.Source {
@@ -263,6 +281,16 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if candidateCatalog == nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("candidate provider-trigger catalog is required")
 	}
+	candidateChannelPlans := append([]packs.SatisfactionPlan(nil), s.channelPlans...)
+	candidateChannelBindings := append([]packs.OutboundBindingPlan(nil), s.channelBindings...)
+	if s.loadChannelPacks != nil {
+		channelLoad, loadErr := s.loadChannelPacks(ctx, source, candidateCatalog)
+		if loadErr != nil {
+			return builderpkg.ProjectStatus{}, fmt.Errorf("load candidate channel packs: %w", loadErr)
+		}
+		candidateChannelPlans = channelLoad.Plans
+		candidateChannelBindings = channelLoad.Bindings
+	}
 	if err := s.validateSource(ctx, source, candidateCatalog); err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
@@ -309,16 +337,18 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		Config: s.cfg,
 		Stores: s.stores.runtimeStores(),
 		Options: runtime.RuntimeOptions{
-			SelfCheck:              false,
-			WorkflowModule:         module,
-			WorkspaceLifecycle:     workspaces,
-			BundleFingerprint:      bundleIdentity.Fingerprint,
-			BundleSourceFact:       bundleSourceFact,
-			RuntimeInstanceID:      s.runtimeInstanceID,
-			Credentials:            s.credentials,
-			ManagedCredentials:     managedCredentialStore,
-			ProviderCredentials:    s.providerCredentials,
-			ProviderTriggerCatalog: candidateCatalog,
+			SelfCheck:               false,
+			WorkflowModule:          module,
+			WorkspaceLifecycle:      workspaces,
+			BundleFingerprint:       bundleIdentity.Fingerprint,
+			BundleSourceFact:        bundleSourceFact,
+			RuntimeInstanceID:       s.runtimeInstanceID,
+			Credentials:             s.credentials,
+			ManagedCredentials:      managedCredentialStore,
+			ProviderCredentials:     s.providerCredentials,
+			ProviderTriggerCatalog:  candidateCatalog,
+			ChannelPlans:            candidateChannelPlans,
+			ChannelOutboundBindings: candidateChannelBindings,
 		},
 	})
 	if err != nil {
@@ -329,6 +359,10 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
+	s.mu.Lock()
+	s.channelPlans = append([]packs.SatisfactionPlan(nil), candidateChannelPlans...)
+	s.channelBindings = append([]packs.OutboundBindingPlan(nil), candidateChannelBindings...)
+	s.mu.Unlock()
 	slog.Info("builder project loaded", "project_dir", filepath.Clean(resolvedRoot), "workflow", strings.TrimSpace(status.WorkflowName))
 	return status, nil
 }

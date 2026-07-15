@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
@@ -89,6 +90,40 @@ func TestRuntimeProjectSupervisorRejectsHarnessInputReplacementBeforeQuiesce(t *
 	}
 	if supervisor.CurrentRuntime() != oldRuntime || !ready.Load() {
 		t.Fatal("harness replacement disturbed the ready predecessor runtime")
+	}
+}
+
+func TestRuntimeProjectSupervisorReloadRecompilesAndInstallsChannelPlans(t *testing.T) {
+	projectRoot := writeProjectRoot(t)
+	var captured runtimepkg.RuntimeDeps
+	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
+		captured = deps
+		return &runtimepkg.Runtime{Options: deps.Options}, nil
+	})
+	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
+	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
+	loads := 0
+	supervisor.SetChannelPackLoader(func(_ context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot) (channelPackLoad, error) {
+		loads++
+		if source == nil || catalog == nil {
+			t.Fatal("channel reload compiler received nil source or accepted trigger catalog")
+		}
+		plan := packs.SatisfactionPlan{Channel: packs.PackIdentity{ID: "provider.mock.channel"}}
+		binding := packs.OutboundBindingPlan{ID: "ops", Structural: plan}
+		return channelPackLoad{Plans: []packs.SatisfactionPlan{plan}, Bindings: []packs.OutboundBindingPlan{binding}}, nil
+	})
+
+	if _, err := supervisor.OpenProject(context.Background(), projectRoot); err != nil {
+		t.Fatalf("OpenProject: %v", err)
+	}
+	if loads != 1 {
+		t.Fatalf("channel compiler calls = %d, want one", loads)
+	}
+	if len(captured.Options.ChannelPlans) != 1 || captured.Options.ChannelPlans[0].Channel.ID != "provider.mock.channel" {
+		t.Fatalf("replacement runtime channel plans = %#v", captured.Options.ChannelPlans)
+	}
+	if len(captured.Options.ChannelOutboundBindings) != 1 || captured.Options.ChannelOutboundBindings[0].ID != "ops" {
+		t.Fatalf("replacement runtime channel bindings = %#v", captured.Options.ChannelOutboundBindings)
 	}
 }
 
@@ -321,7 +356,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/chat-b/telegram", strings.NewReader(`{"update_id":99,"message":{"message_id":7,"chat":{"id":42},"text":"hello"}}`))
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/chat-b/telegram", strings.NewReader(`{"update_id":99,"message":{"message_id":7,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"hello"}}`))
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
 	rec := httptest.NewRecorder()
 	runtimeProcessInboundHandler{contexts: manager}.ServeHTTP(rec, req)

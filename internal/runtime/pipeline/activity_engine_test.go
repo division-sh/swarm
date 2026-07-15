@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -297,6 +298,185 @@ func TestActivityCredentialRedactionGuarantee(t *testing.T) {
 	}
 	if strings.Contains(string(raw), secret) || strings.Contains(err.Error(), secret) {
 		t.Fatalf("credential value leaked through failure: envelope=%s error=%v", raw, err)
+	}
+}
+
+func TestActivityHTTPAppliesConnectorThenChannelResultProjection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true,"result":{"message_id":42}}`)
+	}))
+	defer server.Close()
+	allow := false
+	minLength := 1
+	result, err := executePreparedActivityHTTPTool(context.Background(), preparedActivityHTTPTool{
+		toolName: "telegram.send_interactive",
+		method:   http.MethodPost,
+		url:      server.URL,
+		timeout:  time.Second,
+		client:   server.Client(),
+		success:  &runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.ok", Equals: true},
+		responseMapping: map[string]any{
+			"message_id": "{{response.body.result.message_id}}",
+		},
+		outputSchema: runtimecontracts.ToolInputSchema{
+			Type: "object", Required: []string{"message_id"},
+			AdditionalProperties: runtimecontracts.ToolAdditionalProperties{Allowed: &allow},
+			Properties:           map[string]runtimecontracts.ToolInputSchema{"message_id": {Type: "integer"}},
+		},
+		compiledResult: &runtimecontracts.CompiledResultProjection{
+			Fields: map[string]runtimecontracts.CompiledResultField{
+				"delivery_reference.id": {From: "result.message_id", Convert: runtimecontracts.FieldProjectionConvertNumberToText},
+			},
+			OutputSchema: runtimecontracts.ToolInputSchema{
+				Type: "object", Required: []string{"delivery_reference"},
+				AdditionalProperties: runtimecontracts.ToolAdditionalProperties{Allowed: &allow},
+				Properties: map[string]runtimecontracts.ToolInputSchema{
+					"delivery_reference": {
+						Type: "object", Required: []string{"id"}, AdditionalProperties: runtimecontracts.ToolAdditionalProperties{Allowed: &allow},
+						Properties: map[string]runtimecontracts.ToolInputSchema{"id": {Type: "string", MinLength: &minLength}},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("executePreparedActivityHTTPTool: %v", err)
+	}
+	want := map[string]any{"delivery_reference": map[string]any{"id": "42"}}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("result = %#v, want %#v", result, want)
+	}
+}
+
+func TestChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStores(t *testing.T) {
+	for _, tc := range activityBoringStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			runID := uuid.NewString()
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"ok":true,"result":{"message_id":42}}`)
+			}))
+			defer server.Close()
+
+			db, store, sqlite := newActivityJournalStoreForCase(t, ctx, tc.kind)
+			seedActivityRun(t, db, sqlite, runID)
+			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
+				"channel.ops.deliver": testCompiledChannelActivityTool(server.URL),
+			}})
+			bus := &recordingPipelineBus{}
+			pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, WorkflowStore: store})
+			intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
+			intent.Tool = "channel.ops.deliver"
+			intent.ActivityID = "channel_deliver"
+			intent.SuccessEvent = "channel.deliver.succeeded"
+			intent.FailureEvent = "channel.deliver.failed"
+			request, err := activityRequestEmitIntent(intent)
+			if err != nil {
+				t.Fatalf("activityRequestEmitIntent: %v", err)
+			}
+			if handled, err := pc.handleEventResult(ctx, request.Event); err != nil || !handled {
+				t.Fatalf("first handle = %v, err=%v", handled, err)
+			}
+			if handled, err := pc.handleEventResult(ctx, request.Event); err != nil || !handled {
+				t.Fatalf("replay handle = %v, err=%v", handled, err)
+			}
+			if calls.Load() != 1 {
+				t.Fatalf("provider calls = %d, want one across replay", calls.Load())
+			}
+			if len(bus.publishes) != 2 || bus.publishes[0].ID() != bus.publishes[1].ID() {
+				t.Fatalf("published replay events = %#v, want same journaled result twice", bus.publishes)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(bus.publishes[1].Payload(), &payload); err != nil {
+				t.Fatalf("decode replay payload: %v", err)
+			}
+			want := map[string]any{"delivery_reference": map[string]any{"id": "42"}}
+			if !reflect.DeepEqual(payload["result"], want) {
+				t.Fatalf("journaled channel result = %#v, want %#v", payload["result"], want)
+			}
+		})
+	}
+}
+
+func TestChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossSelectedStores(t *testing.T) {
+	for _, tc := range activityBoringStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			runID := uuid.NewString()
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				_, _ = io.WriteString(w, `{"ok":true,"result":{"message_id":42}}`)
+			}))
+			defer server.Close()
+			db, store, sqlite := newActivityJournalStoreForCase(t, ctx, tc.kind)
+			seedActivityRun(t, db, sqlite, runID)
+			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
+				"channel.ops.deliver": testCompiledChannelActivityTool(server.URL),
+			}})
+			bus := &recordingPipelineBus{}
+			pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, WorkflowStore: store})
+			intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
+			intent.Tool = "channel.ops.deliver"
+			intent.ActivityID = "channel_deliver"
+			intent.SuccessEvent = "channel.deliver.succeeded"
+			intent.FailureEvent = "channel.deliver.failed"
+			if _, inserted, err := store.StartActivityAttempt(ctx, activityAttemptStartRecord(intent, activityInputHash(intent.Input))); err != nil || !inserted {
+				t.Fatalf("seed committed same-key claim: inserted=%v err=%v", inserted, err)
+			}
+			request, err := activityRequestEmitIntent(intent)
+			if err != nil {
+				t.Fatalf("activityRequestEmitIntent: %v", err)
+			}
+			if handled, err := pc.handleEventResult(ctx, request.Event); err != nil || !handled {
+				t.Fatalf("reconcile committed claim = %v, err=%v", handled, err)
+			}
+			if calls.Load() != 0 || len(bus.publishes) != 0 {
+				t.Fatalf("committed claim redispatched provider: calls=%d publishes=%d", calls.Load(), len(bus.publishes))
+			}
+		})
+	}
+}
+
+func newActivityJournalStoreForCase(t *testing.T, ctx context.Context, kind activityBoringStoreKind) (*sql.DB, *WorkflowInstanceStore, bool) {
+	t.Helper()
+	if kind == activityBoringStoreSQLite {
+		db, store := newSQLiteActivityJournalStore(t, ctx)
+		return db, store, true
+	}
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	return db, NewWorkflowInstanceStore(db), false
+}
+
+func testCompiledChannelActivityTool(url string) runtimecontracts.ToolSchemaEntry {
+	allow := false
+	minLength := 1
+	return runtimecontracts.ToolSchemaEntry{
+		HandlerType: "http", EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+		HTTP:            &runtimecontracts.HTTPToolSpec{Method: http.MethodPost, URL: url},
+		ResponseSuccess: &runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.ok", Equals: true},
+		ResponseMapping: map[string]any{"message_id": "{{response.body.result.message_id}}"},
+		OutputSchema: runtimecontracts.ToolInputSchema{
+			Type: "object", Required: []string{"message_id"}, AdditionalProperties: runtimecontracts.ToolAdditionalProperties{Allowed: &allow},
+			Properties: map[string]runtimecontracts.ToolInputSchema{"message_id": {Type: "integer"}},
+		},
+		CompiledResult: &runtimecontracts.CompiledResultProjection{
+			Fields: map[string]runtimecontracts.CompiledResultField{"delivery_reference.id": {From: "result.message_id", Convert: runtimecontracts.FieldProjectionConvertNumberToText}},
+			OutputSchema: runtimecontracts.ToolInputSchema{
+				Type: "object", Required: []string{"delivery_reference"}, AdditionalProperties: runtimecontracts.ToolAdditionalProperties{Allowed: &allow},
+				Properties: map[string]runtimecontracts.ToolInputSchema{
+					"delivery_reference": {
+						Type: "object", Required: []string{"id"}, AdditionalProperties: runtimecontracts.ToolAdditionalProperties{Allowed: &allow},
+						Properties: map[string]runtimecontracts.ToolInputSchema{"id": {Type: "string", MinLength: &minLength}},
+					},
+				},
+			},
+		},
 	}
 }
 

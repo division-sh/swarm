@@ -18,6 +18,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
@@ -92,6 +93,9 @@ type RuntimeOptions struct {
 	ManagedCredentials               runtimemanagedcredentials.Store
 	ProviderCredentials              runtimecredentials.Store
 	ProviderTriggerCatalog           *providertriggers.CatalogSnapshot
+	MockConnectorResponses           *providerconnectors.MockResponsePlan
+	ChannelPlans                     []packs.SatisfactionPlan
+	ChannelOutboundBindings          []packs.OutboundBindingPlan
 	BootStartedAt                    time.Time
 	BootProgress                     func(BootProgressEvent)
 	SystemContainers                 []string
@@ -551,6 +555,9 @@ func ensureWorkflowBootWiring(opts RuntimeOptions, executionMode runtimeeffects.
 	validationOpts.ManagedCredentials = opts.ManagedCredentials
 	validationOpts.ProviderTriggerCatalog = opts.ProviderTriggerCatalog
 	validationOpts.ExecutionMode = executionMode
+	validationOpts.MockConnectorResponses = opts.MockConnectorResponses
+	validationOpts.ChannelPlans = opts.ChannelPlans
+	validationOpts.ChannelOutboundBindings = opts.ChannelOutboundBindings
 	result, err := ValidateWorkflowContractSurface(context.Background(), source, validationOpts)
 	if err != nil {
 		return nil, err
@@ -567,7 +574,7 @@ func (m connectorPackWorkflowModule) SemanticSource() semanticview.Source {
 	return m.source
 }
 
-func workflowModuleWithProviderPacks(module runtimepipeline.WorkflowModule, triggerCatalog *providertriggers.CatalogSnapshot) (runtimepipeline.WorkflowModule, semanticview.Source, error) {
+func workflowModuleWithProviderPacks(module runtimepipeline.WorkflowModule, triggerCatalog *providertriggers.CatalogSnapshot, channelBindings []packs.OutboundBindingPlan) (runtimepipeline.WorkflowModule, semanticview.Source, error) {
 	if module == nil {
 		return nil, nil, nil
 	}
@@ -576,6 +583,23 @@ func workflowModuleWithProviderPacks(module runtimepipeline.WorkflowModule, trig
 		return nil, nil, err
 	}
 	source, err = SourceWithProviderTriggerEvents(source, triggerCatalog)
+	if err != nil {
+		return nil, nil, err
+	}
+	channelTools := map[string]runtimecontracts.ToolSchemaEntry{}
+	for _, binding := range channelBindings {
+		tools, err := binding.RuntimeTools()
+		if err != nil {
+			return nil, nil, fmt.Errorf("compile channel binding %q runtime tools: %w", binding.ID, err)
+		}
+		for id, tool := range tools {
+			if _, exists := channelTools[id]; exists {
+				return nil, nil, fmt.Errorf("duplicate channel runtime tool %q", id)
+			}
+			channelTools[id] = tool
+		}
+	}
+	source, err = semanticview.WithRuntimeTools(source, channelTools)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -640,7 +664,7 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	}
 	var source semanticview.Source
 	if opts.WorkflowModule != nil {
-		workflowModule, wrappedSource, err := workflowModuleWithProviderPacks(opts.WorkflowModule, opts.ProviderTriggerCatalog)
+		workflowModule, wrappedSource, err := workflowModuleWithProviderPacks(opts.WorkflowModule, opts.ProviderTriggerCatalog, opts.ChannelOutboundBindings)
 		if err != nil {
 			return validatedRuntimeDeps{}, fmt.Errorf("provider connector pack import failed: %w", err)
 		}

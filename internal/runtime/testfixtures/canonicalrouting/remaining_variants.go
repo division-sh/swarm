@@ -551,7 +551,7 @@ pins:
 		"flows/telegram-chat/schema.yaml": `name: telegram-chat
 mode: template
 instance:
-  by: chat_id
+  by: conversation_reference
   on_missing: create
   on_conflict: reuse
 initial_state: active
@@ -562,13 +562,13 @@ pins:
       - name: telegram_text_message
         event: inbound.telegram.text_message
         source: external
-        resolution: {mode: select-or-create, instance_key: chat_id}
+        resolution: {mode: select-or-create, instance_key: conversation_reference}
         carries:
-          chat_id: {from: payload.chat_id, type: text}
+          conversation_reference: {from: payload.conversation_reference, type: text}
   outputs: {events: []}
 `,
 		"flows/telegram-chat/types.yaml": "{}\n", "flows/telegram-chat/policy.yaml": "{}\n",
-		"flows/telegram-chat/entities.yaml": "chat:\n  chat_id:\n    type: text\n    indexed: true\n    _unused_reason: populated from the normalized input resolution carry\n  last_message:\n    type: text\n    initial: \"\"\n",
+		"flows/telegram-chat/entities.yaml": "chat:\n  conversation_reference:\n    type: text\n    indexed: true\n    _unused_reason: populated from the normalized input resolution carry\n  last_message:\n    type: text\n    initial: \"\"\n",
 		"flows/telegram-chat/events.yaml":   "telegram.reply_requested:\n  chat_id: text\n  text: text\n  author_summary_field: text\n",
 		"flows/telegram-chat/nodes.yaml": `telegram-responder:
   id: telegram-responder
@@ -605,7 +605,7 @@ pins:
       text: "{{input.text}}"
 `, toolURL),
 		"flows/telegram-chat/agents.yaml":           "phrase-bot:\n  id: phrase-bot-{instance_id}\n  role: phrase_bot\n  prompt_ref: phrase-bot\n  model: regular\n  memory: true\n  subscriptions: [inbound.telegram.text_message]\n  emit_events: [telegram.reply_requested]\n",
-		"flows/telegram-chat/prompts/phrase-bot.md": "Reply to each Telegram message by emitting telegram.reply_requested with the same chat_id.\n",
+		"flows/telegram-chat/prompts/phrase-bot.md": "Reply to each Telegram message by emitting telegram.reply_requested with chat_id set to the event conversation_reference.\n",
 	}
 	for name, source := range files {
 		writeClosedVariantFile(t, root, filepath.ToSlash(name), source)

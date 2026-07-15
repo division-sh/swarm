@@ -18,26 +18,58 @@ event_type:
 event_name:
   literal: inbound.telegram
 normalized_events:
+  - event: inbound.telegram.callback_action
+    author_subject:
+      type: chat
+      field: conversation_reference
+    fields:
+      token:
+        from: callback_query.data
+        type: text
+      interaction_reference:
+        from: callback_query.id
+        type: text
+      external_account_reference:
+        from: callback_query.from.id
+        type: text
+        convert: number_to_text
+      conversation_reference:
+        from: callback_query.message.chat.id
+        type: text
+        convert: number_to_text
+      provider_message_reference:
+        from: callback_query.message.message_id
+        type: text
+        convert: number_to_text
+    when:
+      absent: [message]
+      equals:
+        callback_query.message.chat.type: private
   - event: inbound.telegram.text_message
     author_summary_field: text
     author_subject:
       type: chat
-      field: chat_id
+      field: conversation_reference
     fields:
-      chat_id:
-        from: message.chat.id
-        type: text
-        convert: number_to_text
       text:
         from: message.text
         type: text
-      message_id:
+      external_account_reference:
+        from: message.from.id
+        type: text
+        convert: number_to_text
+      conversation_reference:
+        from: message.chat.id
+        type: text
+        convert: number_to_text
+      provider_message_reference:
         from: message.message_id
-        type: integer
-      raw:
-        from: message
-        type: json
-        optional: true
+        type: text
+        convert: number_to_text
+    when:
+      absent: [callback_query]
+      equals:
+        message.chat.type: private
 ack:
   mode: durable_before_dispatch
 metadata:

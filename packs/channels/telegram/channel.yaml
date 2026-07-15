@@ -1,0 +1,84 @@
+provider: telegram
+opaque_types:
+  destination:
+    type: string
+    pattern: '^-?[0-9]+$'
+    minLength: 1
+    maxLength: 17
+  delivery_reference:
+    type: object
+    additionalProperties: false
+    required: [id]
+    properties:
+      id: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 10}
+  delivery_receipt:
+    type: object
+    additionalProperties: false
+    required: [id]
+    properties:
+      id: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 10}
+  interaction_reference:
+    type: string
+    minLength: 1
+  external_account_reference:
+    type: string
+    pattern: '^[0-9]+$'
+    minLength: 1
+    maxLength: 17
+  conversation_reference:
+    type: string
+    pattern: '^-?[0-9]+$'
+    minLength: 1
+    maxLength: 17
+operations:
+  deliver:
+    tool: telegram.send_interactive
+    input:
+      chat_id: context.destination
+      text: input.presentation.text
+      reply_markup.inline_keyboard:
+        each: input.actions
+        item:
+          - text: item.label
+            callback_data: item.token
+    output:
+      delivery_reference.id:
+        from: result.message_id
+        convert: number_to_text
+  edit:
+    tool: telegram.edit_message
+    input:
+      chat_id: context.destination
+      message_id:
+        from: input.delivery_reference.id
+        convert: decimal_text_to_int32
+      text: input.presentation.text
+      reply_markup.inline_keyboard:
+        each: input.actions
+        item:
+          - text: item.label
+            callback_data: item.token
+    output:
+      delivery_receipt.id:
+        from: result.message_id
+        convert: number_to_text
+  acknowledge_interaction:
+    tool: telegram.answer_callback
+    input:
+      callback_query_id: input.interaction_reference
+events:
+  action:
+    event: inbound.telegram.callback_action
+    fields:
+      token: event.token
+      interaction_reference: event.interaction_reference
+      external_account_reference: event.external_account_reference
+      conversation_reference: event.conversation_reference
+      provider_message_reference.id: event.provider_message_reference
+  text:
+    event: inbound.telegram.text_message
+    fields:
+      text: event.text
+      external_account_reference: event.external_account_reference
+      conversation_reference: event.conversation_reference
+      provider_message_reference.id: event.provider_message_reference
