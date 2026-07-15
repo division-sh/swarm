@@ -2321,6 +2321,7 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 		ParentEventID:    frame.req.Event.ParentEventID(),
 		ChainDepth:       frame.req.ChainDepth,
 		Attempt:          1,
+		ExecutionMode:    frame.req.Event.ExecutionMode(),
 	}.Normalized()
 	if activitySpec.Approval != nil {
 		intent.ApprovalDecision = strings.TrimSpace(activitySpec.Approval.Decision)

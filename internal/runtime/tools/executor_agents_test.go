@@ -10,6 +10,7 @@ import (
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -30,12 +31,14 @@ func (managerStub) ReconfigureAgent(string, models.AgentConfig) error    { retur
 
 type publishDirectBusStub struct {
 	recipients []string
+	event      events.Event
 }
 
 func (b *publishDirectBusStub) Publish(context.Context, events.Event) error { return nil }
 
-func (b *publishDirectBusStub) PublishDirect(_ context.Context, _ events.Event, recipients []string) error {
+func (b *publishDirectBusStub) PublishDirect(_ context.Context, event events.Event, recipients []string) error {
 	b.recipients = append([]string{}, recipients...)
+	b.event = event
 	return nil
 }
 
@@ -230,17 +233,17 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 		},
 	}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
-	ctx := WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ExecutionMode: "live",
+	ctx := runtimeeffects.WithExecutionMode(WithActor(unmanagedToolTestContext(), models.AgentConfig{
+		ExecutionMode: "mock",
 		ID:            "control",
 		Role:          "control",
 		Permissions:   []string{"message_flow"},
 		EntityID:      "entity-a",
 		FlowPath:      "review/inst-1",
-	})
+	}), runtimeeffects.ExecutionModeMock)
 
 	if _, err := exec.execAgentMessage(ctx, models.AgentConfig{
-		ExecutionMode: "live",
+		ExecutionMode: "mock",
 		ID:            "control",
 		Role:          "control",
 		Permissions:   []string{"message_flow"},
@@ -254,6 +257,9 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 	}
 	if len(bus.recipients) != 1 || bus.recipients[0] != "target-1" {
 		t.Fatalf("recipients = %#v, want [target-1]", bus.recipients)
+	}
+	if bus.event.ExecutionMode() != runtimeeffects.ExecutionModeMock {
+		t.Fatalf("agent_message event execution mode = %q, want mock", bus.event.ExecutionMode())
 	}
 }
 

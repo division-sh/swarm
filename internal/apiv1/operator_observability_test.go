@@ -24,12 +24,13 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 		},
 		events: map[string]store.OperatorEventFull{
 			"evt-1": {
-				EventID:   "evt-1",
-				EventName: "scan.requested",
-				RunID:     "run-1",
-				CreatedAt: now,
-				Source:    "runtime",
-				Payload:   map[string]any{"ok": true},
+				EventID:       "evt-1",
+				EventName:     "scan.requested",
+				ExecutionMode: "live",
+				RunID:         "run-1",
+				CreatedAt:     now,
+				Source:        "runtime",
+				Payload:       map[string]any{"ok": true},
 				Deliveries: []store.OperatorEventDelivery{{
 					DeliveryID:     "del-1",
 					SubscriberType: "agent",
@@ -183,14 +184,15 @@ func TestOperatorObservabilityHandlersKeepPayloadEntityOutOfTopLevelEventIdentit
 	observability := &fakeObservabilityReadStore{
 		events: map[string]store.OperatorEventFull{
 			"evt-payload-only": {
-				EventID:     "evt-payload-only",
-				EventName:   "task.payload_only",
-				RunID:       "run-1",
-				CreatedAt:   now,
-				Source:      "runtime",
-				Payload:     map[string]any{"entity_id": payloadEntityID, "marker": "payload-only"},
-				Deliveries:  []store.OperatorEventDelivery{},
-				DeadLetters: []store.OperatorDeadLetterRecord{},
+				EventID:       "evt-payload-only",
+				EventName:     "task.payload_only",
+				ExecutionMode: "live",
+				RunID:         "run-1",
+				CreatedAt:     now,
+				Source:        "runtime",
+				Payload:       map[string]any{"entity_id": payloadEntityID, "marker": "payload-only"},
+				Deliveries:    []store.OperatorEventDelivery{},
+				DeadLetters:   []store.OperatorDeadLetterRecord{},
 			},
 		},
 	}

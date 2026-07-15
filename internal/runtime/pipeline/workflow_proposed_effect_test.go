@@ -21,6 +21,7 @@ func TestProposedEffectOutcomeEventRoutesExactTypedVerdicts(t *testing.T) {
 		ActivityID: "send_support_reply", Tool: "telegram.send_message", EffectClass: runtimecontracts.ActivityEffectClassNonIdempotentWrite,
 		EffectContentHash: "sha256:effect", SourceTaskID: "task-1",
 		EntityID: parent.EntityID(), FlowInstance: "root",
+		ExecutionMode: parent.ExecutionMode(),
 		RevisionEvent: "send_support_reply.revision_requested", RejectedEvent: "send_support_reply.rejected",
 	}
 	for _, tc := range []struct {

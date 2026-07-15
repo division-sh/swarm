@@ -95,11 +95,12 @@ func TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency(t *t
 func TestReplayEventFromOriginalUsesCanonicalEventEntityOnly(t *testing.T) {
 	now := time.Unix(1700001200, 0).UTC()
 	original := store.OperatorEventFull{
-		EventID:   "evt-original",
-		EventName: "scan.requested",
-		RunID:     "run-1",
-		Source:    "origin-agent",
-		Payload:   map[string]any{"entity_id": "payload-entity", "topic": "medicine"},
+		EventID:       "evt-original",
+		EventName:     "scan.requested",
+		ExecutionMode: "mock",
+		RunID:         "run-1",
+		Source:        "origin-agent",
+		Payload:       map[string]any{"entity_id": "payload-entity", "topic": "medicine"},
 	}
 
 	replay, err := replayEventFromOriginal(original, "evt-replay", now)
@@ -108,6 +109,9 @@ func TestReplayEventFromOriginalUsesCanonicalEventEntityOnly(t *testing.T) {
 	}
 	if replay.EntityID() != "" {
 		t.Fatalf("replay event entity_id = %q, want empty", replay.EntityID())
+	}
+	if replay.ExecutionMode() != "mock" {
+		t.Fatalf("replay execution mode = %q, want mock", replay.ExecutionMode())
 	}
 	var replayPayload map[string]any
 	if err := json.Unmarshal(replay.Payload(), &replayPayload); err != nil {
@@ -137,6 +141,11 @@ func TestReplayEventFromOriginalUsesCanonicalEventEntityOnly(t *testing.T) {
 	}
 	if audit["entity_id"] != "" {
 		t.Fatalf("audit entity_id = %#v, want empty canonical identity", audit["entity_id"])
+	}
+
+	original.ExecutionMode = ""
+	if _, err := replayEventFromOriginal(original, "evt-invalid-replay", now); err == nil || !strings.Contains(err.Error(), "invalid execution mode") {
+		t.Fatalf("replayEventFromOriginal missing mode error = %v", err)
 	}
 }
 

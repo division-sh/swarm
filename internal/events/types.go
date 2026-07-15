@@ -275,6 +275,7 @@ type EventLineage struct {
 	RunID         string
 	ParentEventID string
 	TaskID        string
+	ExecutionMode executionmode.Mode
 }
 
 func NewRootIngressEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
@@ -294,7 +295,7 @@ func NewDiagnosticDirectEvent(id string, eventType EventType, sourceAgent, taskI
 }
 
 func NewChildEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, parent Event, envelope EventEnvelope, createdAt time.Time) Event {
-	return NewChildEventWithLineage(id, eventType, sourceAgent, taskID, payload, chainDepth, LineageFromEvent(parent), envelope, createdAt).WithExecutionMode(parent.ExecutionMode())
+	return NewChildEventWithLineage(id, eventType, sourceAgent, taskID, payload, chainDepth, LineageFromEvent(parent), envelope, createdAt)
 }
 
 func NewChildEventWithLineage(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, lineage EventLineage, envelope EventEnvelope, createdAt time.Time) Event {
@@ -302,7 +303,7 @@ func NewChildEventWithLineage(id string, eventType EventType, sourceAgent, taskI
 	if strings.TrimSpace(taskID) == "" {
 		taskID = lineage.TaskID
 	}
-	return newEvent(EventAdmissionChild, id, eventType, sourceAgent, taskID, payload, chainDepth, lineage.RunID, lineage.ParentEventID, envelope, createdAt)
+	return newEvent(EventAdmissionChild, id, eventType, sourceAgent, taskID, payload, chainDepth, lineage.RunID, lineage.ParentEventID, envelope, createdAt).withExecutionModeClaim(lineage.ExecutionMode)
 }
 
 func NewReplayEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, lineage EventLineage, envelope EventEnvelope, createdAt time.Time) Event {
@@ -310,7 +311,7 @@ func NewReplayEvent(id string, eventType EventType, sourceAgent, taskID string, 
 	if strings.TrimSpace(taskID) == "" {
 		taskID = lineage.TaskID
 	}
-	return newEvent(EventAdmissionReplay, id, eventType, sourceAgent, taskID, payload, chainDepth, lineage.RunID, lineage.ParentEventID, envelope, createdAt)
+	return newEvent(EventAdmissionReplay, id, eventType, sourceAgent, taskID, payload, chainDepth, lineage.RunID, lineage.ParentEventID, envelope, createdAt).withExecutionModeClaim(lineage.ExecutionMode)
 }
 
 // NewProjectionEvent reconstructs an event from already-authoritative facts.
@@ -335,6 +336,7 @@ func LineageFromEvent(parent Event) EventLineage {
 		RunID:         parent.RunID(),
 		ParentEventID: parent.ID(),
 		TaskID:        parent.TaskID(),
+		ExecutionMode: parent.ExecutionMode(),
 	}
 }
 
@@ -343,6 +345,7 @@ func (l EventLineage) Normalized() EventLineage {
 		RunID:         strings.TrimSpace(l.RunID),
 		ParentEventID: strings.TrimSpace(l.ParentEventID),
 		TaskID:        strings.TrimSpace(l.TaskID),
+		ExecutionMode: executionmode.Mode(strings.TrimSpace(string(l.ExecutionMode))),
 	}
 }
 
@@ -411,6 +414,11 @@ func (e Event) WithExecutionMode(mode executionmode.Mode) Event {
 	if mode.Valid() {
 		e.executionMode = mode
 	}
+	return e
+}
+
+func (e Event) withExecutionModeClaim(mode executionmode.Mode) Event {
+	e.executionMode = mode
 	return e
 }
 

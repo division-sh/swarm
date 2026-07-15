@@ -150,6 +150,16 @@ func (d pipelineActivityDispatcher) DispatchActivities(ctx context.Context, inte
 
 func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, intent runtimeengine.ActivityIntent) (decisioncard.Card, decisioncard.ProposedEffectContinuation, error) {
 	intent = intent.Normalized()
+	executionMode, err := decisioncard.CausalExecutionMode(ctx)
+	if err != nil {
+		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, err
+	}
+	if !intent.ExecutionMode.Valid() {
+		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, fmt.Errorf("approved activity %s requires typed causal execution mode", intent.ActivityID)
+	}
+	if executionMode != intent.ExecutionMode {
+		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, fmt.Errorf("approved activity %s execution mode conflicts with its source event", intent.ActivityID)
+	}
 	if intent.ApprovalDecision == "" {
 		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, fmt.Errorf("approved activity decision is required")
 	}
@@ -182,6 +192,7 @@ func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, inte
 		HandlerEventKey: intent.HandlerEventKey, SourceEventID: intent.SourceEventID, SourceRunID: intent.SourceRunID,
 		SourceTaskID: intent.SourceTaskID, ParentEventID: intent.ParentEventID, ChainDepth: intent.ChainDepth,
 		Attempt: intent.Attempt, Generation: intent.Generation, LoopStage: intent.LoopStage,
+		ExecutionMode:  intent.ExecutionMode,
 		ReplyContextID: intent.Context.ReplyContextID(), State: decisioncard.ProposedEffectPending,
 		CreatedAt: createdAt, UpdatedAt: createdAt,
 	}.Canonical()
@@ -218,10 +229,6 @@ func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, inte
 	if err != nil {
 		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, err
 	}
-	executionMode, err := decisioncard.CausalExecutionMode(ctx)
-	if err != nil {
-		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, err
-	}
 	provenance, err := canonicaljson.FromGo(map[string]any{
 		"source_event": intent.SourceEventID, "flow_id": intent.FlowID.String(), "flow_instance": flowInstance, "node_id": intent.NodeID.String(),
 		"execution_mode": executionMode,
@@ -246,6 +253,11 @@ func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, inte
 
 func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, intent runtimeengine.ActivityIntent) error {
 	intent = intent.Normalized()
+	var err error
+	ctx, err = activityExecutionContext(ctx, intent)
+	if err != nil {
+		return err
+	}
 	source := d.coordinator.SemanticSource()
 	if err := d.admitActivityContractPin(ctx, intent, source); err != nil {
 		return err
@@ -330,6 +342,19 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	failureIntent := intent
 	failureIntent.Attempt = maxAttempts
 	return d.publishActivityFailure(ctx, failureIntent, lastErr)
+}
+
+func activityExecutionContext(ctx context.Context, intent runtimeengine.ActivityIntent) (context.Context, error) {
+	if !intent.ExecutionMode.Valid() {
+		return nil, fmt.Errorf("activity %s requires typed causal execution mode", intent.ActivityID)
+	}
+	if active, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok && active != intent.ExecutionMode {
+		return nil, fmt.Errorf("activity %s execution mode conflicts with dispatch context", intent.ActivityID)
+	}
+	if authority, ok := runtimeeffects.AuthorityFromContext(ctx); ok && authority.ExecutionMode != intent.ExecutionMode {
+		return nil, fmt.Errorf("activity %s execution mode conflicts with completion authority", intent.ActivityID)
+	}
+	return runtimeeffects.WithExecutionMode(ctx, intent.ExecutionMode), nil
 }
 
 func (d pipelineActivityDispatcher) admitActivityContractPin(ctx context.Context, intent runtimeengine.ActivityIntent, source semanticview.Source) error {
@@ -621,6 +646,9 @@ func activityRequestEmitIntents(intents []runtimeengine.ActivityIntent) ([]runti
 
 func activityRequestEmitIntent(intent runtimeengine.ActivityIntent) (runtimeengine.EmitIntent, error) {
 	intent = intent.Normalized()
+	if !intent.ExecutionMode.Valid() {
+		return runtimeengine.EmitIntent{}, fmt.Errorf("activity %s requires typed causal execution mode", intent.ActivityID)
+	}
 	payload := activityRequestPayloadFromIntent(intent)
 	value, err := canonicaljson.FromGo(payload)
 	if err != nil {
@@ -645,6 +673,7 @@ func activityRequestEmitIntent(intent runtimeengine.ActivityIntent) (runtimeengi
 			RunID:         intent.SourceRunID,
 			ParentEventID: firstNonEmptyString(intent.SourceEventID, intent.ParentEventID),
 			TaskID:        intent.SourceTaskID,
+			ExecutionMode: intent.ExecutionMode,
 		},
 		events.EventEnvelope{
 			EntityID: intent.EntityID.String(),
@@ -756,6 +785,9 @@ func activityRequestPayloadFromIntent(intent runtimeengine.ActivityIntent) activ
 }
 
 func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityIntent, error) {
+	if !evt.ExecutionMode().Valid() {
+		return runtimeengine.ActivityIntent{}, fmt.Errorf("activity request %s carries invalid execution mode %q", evt.ID(), evt.ExecutionMode())
+	}
 	semanticPayload, err := canonicaljson.Decode(evt.Payload())
 	if err != nil {
 		return runtimeengine.ActivityIntent{}, fmt.Errorf("decode activity request %s: %w", evt.ID(), err)
@@ -796,6 +828,7 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 		Attempt:          payload.Attempt,
 		Generation:       payload.Generation,
 		LoopStage:        payload.LoopStage,
+		ExecutionMode:    evt.ExecutionMode(),
 	}.Normalized()
 	if intent.ActivityID == "" || intent.Tool == "" || intent.SuccessEvent == "" || intent.FailureEvent == "" {
 		return runtimeengine.ActivityIntent{}, fmt.Errorf("activity request %s is missing required activity identity", evt.ID())
@@ -1479,6 +1512,7 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 			RunID:         intent.SourceRunID,
 			ParentEventID: firstNonEmptyString(intent.SourceEventID, intent.ParentEventID),
 			TaskID:        intent.SourceTaskID,
+			ExecutionMode: intent.ExecutionMode,
 		},
 		events.EventEnvelope{
 			EntityID: intent.EntityID.String(),

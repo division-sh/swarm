@@ -1711,7 +1711,7 @@ func TestPostgresStore_AppendEvent_InheritsParentRunID(t *testing.T) {
 	}
 	if err := pg.AppendEvent(context.Background(), eventtest.ChildWithLineage(childID,
 		events.EventType("child.event"),
-		"child", "", []byte(`{}`), 0, events.EventLineage{ParentEventID: parentID}, events.EventEnvelope{}, time.Now().UTC()),
+		"child", "", []byte(`{}`), 0, events.EventLineage{ParentEventID: parentID, ExecutionMode: runtimeeffects.ExecutionModeLive}, events.EventEnvelope{}, time.Now().UTC()),
 	); err != nil {
 		t.Fatalf("AppendEvent(child): %v", err)
 	}

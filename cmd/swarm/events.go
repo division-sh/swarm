@@ -75,6 +75,7 @@ type eventListResult struct {
 type eventFull struct {
 	EventID       string            `json:"event_id"`
 	EventName     string            `json:"event_name"`
+	ExecutionMode string            `json:"execution_mode"`
 	CreatedAt     string            `json:"created_at"`
 	RunID         string            `json:"run_id,omitempty"`
 	EntityID      string            `json:"entity_id,omitempty"`
@@ -545,6 +546,7 @@ func validateEventFull(prefix string, event eventFull) error {
 	}{
 		{name: "event_id", value: event.EventID},
 		{name: "event_name", value: event.EventName},
+		{name: "execution_mode", value: event.ExecutionMode},
 		{name: "created_at", value: event.CreatedAt},
 		{name: "source", value: event.Source},
 	} {
@@ -554,6 +556,9 @@ func validateEventFull(prefix string, event eventFull) error {
 	}
 	if err := validateRequiredTimestamp(prefix+".created_at", event.CreatedAt); err != nil {
 		return err
+	}
+	if event.ExecutionMode != "live" && event.ExecutionMode != "mock" {
+		return fmt.Errorf("malformed %s: execution_mode must be live or mock", prefix)
 	}
 	if event.Payload == nil {
 		return fmt.Errorf("malformed %s: payload is required", prefix)
@@ -872,6 +877,7 @@ func writeEventListResult(out io.Writer, result eventListResult) {
 		rows = append(rows, []string{
 			event.CreatedAt,
 			event.EventName,
+			event.ExecutionMode,
 			event.EventID,
 			eventObservationDash(event.RunID),
 			eventObservationDash(event.EntityID),
@@ -887,6 +893,7 @@ func writeEventListResult(out io.Writer, result eventListResult) {
 		Columns: []cliTableColumn{
 			{Header: "EVENT AT"},
 			{Header: "EVENT"},
+			{Header: "MODE"},
 			{Header: "EVENT ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyEvent},
 			{Header: "RUN", IdentifierFamily: cliIdentifierFamilyRun},
 			{Header: "ENTITY", IdentifierFamily: cliIdentifierFamilyEntity},
@@ -906,6 +913,7 @@ func writeEventDetailResult(out io.Writer, event eventFull) {
 	writeCLITitle(out, fmt.Sprintf("Event %s", event.EventID))
 	writeCLIFieldLine(out,
 		cliDetailField{Key: "event_name", Value: event.EventName},
+		cliDetailField{Key: "execution_mode", Value: event.ExecutionMode},
 		cliDetailField{Key: "created_at", Value: event.CreatedAt},
 		cliDetailField{Key: "source", Value: event.Source},
 		cliDetailField{Key: "run_id", Value: eventObservationDash(event.RunID)},
@@ -970,6 +978,7 @@ func writeEventFollowEvent(out io.Writer, event eventFull) {
 	fields := []string{
 		"event_id=" + event.EventID,
 		"event_name=" + event.EventName,
+		"execution_mode=" + event.ExecutionMode,
 		"at=" + event.CreatedAt,
 		"source=" + event.Source,
 	}

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
 type eventConstructorCallsite struct {
@@ -84,6 +86,34 @@ func TestNewChildEventWithLineageOwnsRuntimeFields(t *testing.T) {
 	}
 	if child.EntityID() != "entity-1" || child.FlowInstance() != "flow/root" {
 		t.Fatalf("context = entity %q flow %q, want entity-1 flow/root", child.EntityID(), child.FlowInstance())
+	}
+}
+
+func TestLineageConstructorsPreserveMockExecutionMode(t *testing.T) {
+	parent := NewRootIngressEvent(
+		"parent-event",
+		EventType("root.started"),
+		"",
+		"task-1",
+		nil,
+		0,
+		"run-1",
+		"",
+		EventEnvelope{},
+		time.Now().UTC(),
+	).WithExecutionMode(executionmode.Mock)
+
+	lineage := LineageFromEvent(parent)
+	if lineage.ExecutionMode != executionmode.Mock {
+		t.Fatalf("lineage execution mode = %q, want mock", lineage.ExecutionMode)
+	}
+	child := NewChildEvent("child-event", EventType("child.done"), "", "", nil, 0, parent, EventEnvelope{}, time.Now().UTC())
+	if child.ExecutionMode() != executionmode.Mock {
+		t.Fatalf("child execution mode = %q, want mock", child.ExecutionMode())
+	}
+	replay := NewReplayEvent("replay-event", EventType("child.done"), "", "", nil, 0, lineage, EventEnvelope{}, time.Now().UTC())
+	if replay.ExecutionMode() != executionmode.Mock {
+		t.Fatalf("replay execution mode = %q, want mock", replay.ExecutionMode())
 	}
 }
 

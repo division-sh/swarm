@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -689,6 +690,7 @@ func activityBoringExpectedIntentForSourceEvent(evt events.Event, inputURL strin
 		ParentEventID:    evt.ParentEventID(),
 		ChainDepth:       evt.ChainDepth(),
 		Attempt:          1,
+		ExecutionMode:    evt.ExecutionMode(),
 	}.Normalized()
 }
 
@@ -715,6 +717,7 @@ func newActivityBoringIntent(inputURL, runID string) runtimeengine.ActivityInten
 		SourceTaskID:     "task-activity-boring-proof",
 		ChainDepth:       4,
 		Attempt:          1,
+		ExecutionMode:    executionmode.Live,
 	}.Normalized()
 }
 

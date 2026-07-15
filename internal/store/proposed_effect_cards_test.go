@@ -525,7 +525,7 @@ func newProposedEffectTestCard(t *testing.T, runID string, now time.Time, genera
 		RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
 		EntityID: entityID, NodeID: "support", FlowID: "", FlowInstance: "root",
 		HandlerEventKey: "support.drafted", SourceEventID: uuid.NewString(), SourceRunID: runID,
-		Generation: generation, ReplyContextID: "reply-context-source", State: decisioncard.ProposedEffectPending, CreatedAt: now, UpdatedAt: now,
+		Generation: generation, ExecutionMode: "live", ReplyContextID: "reply-context-source", State: decisioncard.ProposedEffectPending, CreatedAt: now, UpdatedAt: now,
 	}.Canonical()
 	effect, err := continuation.EffectValue()
 	if err != nil {

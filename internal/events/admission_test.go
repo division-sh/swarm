@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
 func TestAdmissionRootIngressAllocatesPersistedFacts(t *testing.T) {
@@ -186,7 +188,7 @@ func TestAdmissionRejectsMissingChildLineage(t *testing.T) {
 		"",
 		nil,
 		0,
-		EventLineage{},
+		EventLineage{ExecutionMode: executionmode.Live},
 		EventEnvelope{},
 		time.Time{},
 	), AdmissionOptions{})
@@ -198,6 +200,38 @@ func TestAdmissionRejectsMissingChildLineage(t *testing.T) {
 	}
 }
 
+func TestAdmissionRejectsMissingLineageExecutionModeInsteadOfDefaultingLive(t *testing.T) {
+	_, err := AdmitForPersistence(NewChildEventWithLineage(
+		"child-event",
+		EventType("task.completed"),
+		"agent-1",
+		"",
+		nil,
+		0,
+		EventLineage{RunID: "run-1", ParentEventID: "parent-1"},
+		EventEnvelope{},
+		time.Now().UTC(),
+	), AdmissionOptions{})
+	if err == nil || !strings.Contains(err.Error(), "execution_mode") {
+		t.Fatalf("missing child mode error = %v, want execution_mode failure", err)
+	}
+
+	_, err = AdmitForPublish(NewReplayEvent(
+		"replay-event",
+		EventType("task.completed"),
+		"agent-1",
+		"",
+		nil,
+		0,
+		EventLineage{RunID: "run-1", ParentEventID: "parent-1"},
+		EventEnvelope{},
+		time.Now().UTC(),
+	), AdmissionOptions{})
+	if err == nil || !strings.Contains(err.Error(), "execution_mode") {
+		t.Fatalf("missing replay mode error = %v, want execution_mode failure", err)
+	}
+}
+
 func TestAdmissionReplayAllowsSelectedForkTypedLineageOwner(t *testing.T) {
 	admitted, err := AdmitForPublish(NewReplayEvent(
 		"evt-fork",
@@ -206,7 +240,7 @@ func TestAdmissionReplayAllowsSelectedForkTypedLineageOwner(t *testing.T) {
 		"",
 		nil,
 		0,
-		EventLineage{RunID: "run-fork"},
+		EventLineage{RunID: "run-fork", ExecutionMode: executionmode.Live},
 		EventEnvelope{},
 		time.Time{},
 	), AdmissionOptions{
@@ -229,7 +263,7 @@ func TestAdmissionRejectsReplayWithoutParentOrSelectedForkLineage(t *testing.T) 
 		"",
 		nil,
 		0,
-		EventLineage{RunID: "run-fork"},
+		EventLineage{RunID: "run-fork", ExecutionMode: executionmode.Live},
 		EventEnvelope{},
 		time.Time{},
 	), AdmissionOptions{})

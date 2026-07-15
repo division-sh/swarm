@@ -1371,6 +1371,7 @@ func (s *mutatingRuntimeProbeState) storeEvent(evt events.Event, deliveries []st
 	s.observability.events[evt.ID()] = store.OperatorEventFull{
 		EventID:       evt.ID(),
 		EventName:     strings.TrimSpace(string(evt.Type())),
+		ExecutionMode: evt.ExecutionMode(),
 		EntityID:      evt.EntityID(),
 		RunID:         evt.RunID(),
 		SourceEventID: strings.TrimSpace(evt.ParentEventID()),
@@ -1393,14 +1394,15 @@ func mutatingProbeOriginalEvent(eventID string, subscribers []string, status str
 		})
 	}
 	return store.OperatorEventFull{
-		EventID:    eventID,
-		EventName:  "scan.requested",
-		EntityID:   "entity-1",
-		RunID:      "00000000-0000-0000-0000-000000000101",
-		CreatedAt:  time.Unix(1700000000, 0).UTC(),
-		Source:     "origin-agent",
-		Payload:    map[string]any{"topic": "medicine"},
-		Deliveries: deliveries,
+		EventID:       eventID,
+		EventName:     "scan.requested",
+		ExecutionMode: "live",
+		EntityID:      "entity-1",
+		RunID:         "00000000-0000-0000-0000-000000000101",
+		CreatedAt:     time.Unix(1700000000, 0).UTC(),
+		Source:        "origin-agent",
+		Payload:       map[string]any{"topic": "medicine"},
+		Deliveries:    deliveries,
 	}
 }
 

@@ -91,7 +91,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, classifier
 			}
 			if inserted {
 				envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, nullStringText(sourceEvent.EntityID)), nullStringText(sourceEvent.FlowInstance))
-				replayed := events.NewReplayEvent(forkEventID, events.EventType(sourceEvent.EventName), nullStringText(sourceEvent.ProducedBy), "", sourceEvent.Payload, 0, events.EventLineage{RunID: lineage.ForkRunID}, envelope, now).WithExecutionMode(sourceEvent.ExecutionMode)
+				replayed := events.NewReplayEvent(forkEventID, events.EventType(sourceEvent.EventName), nullStringText(sourceEvent.ProducedBy), "", sourceEvent.Payload, 0, events.EventLineage{RunID: lineage.ForkRunID, ExecutionMode: sourceEvent.ExecutionMode}, envelope, now)
 				if err := recordPersistedEventAuthorActivity(ctx, classifier, replayed, nullStringText(sourceEvent.ProducedBy), nullStringText(sourceEvent.ProducedByType)); err != nil {
 					return result, err
 				}

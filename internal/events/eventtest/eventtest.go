@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
 // RootIngress builds a test fixture for a root ingress event.
@@ -67,9 +68,9 @@ func TargetRouted(evt events.Event, target events.RouteIdentity) events.Event {
 	return evt.WithTargetRoute(target)
 }
 
-// MalformedChildWithoutLineage builds the explicit negative fixture for
-// admission tests that assert child events without lineage are rejected.
-func MalformedChildWithoutLineage(eventType events.EventType, sourceAgent string, payload json.RawMessage) events.Event {
+// MalformedChildWithoutRunLineage builds the explicit negative fixture for
+// admission tests that assert child events without run lineage are rejected.
+func MalformedChildWithoutRunLineage(eventType events.EventType, sourceAgent string, payload json.RawMessage) events.Event {
 	return events.NewChildEventWithLineage(
 		"",
 		eventType,
@@ -77,7 +78,7 @@ func MalformedChildWithoutLineage(eventType events.EventType, sourceAgent string
 		"",
 		payload,
 		0,
-		events.EventLineage{},
+		events.EventLineage{ExecutionMode: executionmode.Live},
 		events.EventEnvelope{},
 		time.Time{},
 	)

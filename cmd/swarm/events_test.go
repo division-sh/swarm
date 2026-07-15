@@ -77,7 +77,7 @@ func TestEventsListUsesEventListV1RPC(t *testing.T) {
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
-	for _, want := range []string{"EVENT AT", "scan.requested", "event-1", "run-1", "entity-1", "next_cursor=event-cursor-2"} {
+	for _, want := range []string{"EVENT AT", "MODE", "scan.requested", "live", "event-1", "run-1", "entity-1", "next_cursor=event-cursor-2"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -112,6 +112,7 @@ func TestEventViewUsesEventGetV1RPC(t *testing.T) {
 	for _, want := range []string{
 		"Event event-1",
 		"event_name=scan.requested",
+		"execution_mode=live",
 		"source_event_id=source-event-1",
 		"payload={\"priority\":\"high\"}",
 		"delivery_id=delivery-1",
@@ -279,7 +280,7 @@ func TestEventsFollowUsesEventSubscribeV1WS(t *testing.T) {
 	if !reflect.DeepEqual(req.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", req.Params, wantParams)
 	}
-	for _, want := range []string{"event event_id=event-live-1", "event_name=scan.requested", "run_id=run-1", "deliveries=1", "dead_letters=1"} {
+	for _, want := range []string{"event event_id=event-live-1", "event_name=scan.requested", "execution_mode=live", "run_id=run-1", "deliveries=1", "dead_letters=1"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -817,6 +818,7 @@ func validEventObservationEvent(eventID string) map[string]any {
 	return map[string]any{
 		"event_id":        eventID,
 		"event_name":      "scan.requested",
+		"execution_mode":  "live",
 		"created_at":      "2026-05-13T10:00:01Z",
 		"run_id":          "run-1",
 		"entity_id":       "entity-1",

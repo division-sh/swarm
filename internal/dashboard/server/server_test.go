@@ -765,13 +765,14 @@ func (s *stubBuilderRunStore) ListOperatorEvents(_ context.Context, opts store.O
 		payload := map[string]any{}
 		_ = json.Unmarshal(evt.Payload(), &payload)
 		eventsOut = append(eventsOut, store.OperatorEventFull{
-			EventID:   strings.TrimSpace(evt.ID()),
-			EventName: strings.TrimSpace(string(evt.Type())),
-			EntityID:  strings.TrimSpace(evt.EntityID()),
-			RunID:     strings.TrimSpace(evt.RunID()),
-			CreatedAt: evt.CreatedAt().UTC(),
-			Source:    strings.TrimSpace(firstNonEmpty(evt.SourceAgent(), "unknown")),
-			Payload:   payload,
+			EventID:       strings.TrimSpace(evt.ID()),
+			EventName:     strings.TrimSpace(string(evt.Type())),
+			ExecutionMode: evt.ExecutionMode(),
+			EntityID:      strings.TrimSpace(evt.EntityID()),
+			RunID:         strings.TrimSpace(evt.RunID()),
+			CreatedAt:     evt.CreatedAt().UTC(),
+			Source:        strings.TrimSpace(firstNonEmpty(evt.SourceAgent(), "unknown")),
+			Payload:       payload,
 		})
 	}
 	slices.SortFunc(eventsOut, func(a, b store.OperatorEventFull) int {

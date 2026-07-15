@@ -12,6 +12,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
@@ -219,6 +220,7 @@ type proposedEffectProjection struct {
 	Attempt          int                          `json:"attempt"`
 	Generation       attemptgeneration.Generation `json:"loop_generation"`
 	LoopStage        string                       `json:"loop_stage"`
+	ExecutionMode    executionmode.Mode           `json:"execution_mode"`
 	ReplyContextID   string                       `json:"reply_context_id"`
 }
 
@@ -261,6 +263,7 @@ func projectProposedEffect(value semanticvalue.Value, out *decisioncard.Proposed
 	out.Attempt = dto.Attempt
 	out.Generation = dto.Generation
 	out.LoopStage = dto.LoopStage
+	out.ExecutionMode = dto.ExecutionMode
 	out.ReplyContextID = dto.ReplyContextID
 	return nil
 }

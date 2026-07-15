@@ -378,13 +378,14 @@ func TestRunHubSubscribe_PrimesCanonicalReplayDedupeState(t *testing.T) {
 			StartedAt: now,
 		},
 		events: []store.OperatorEventFull{{
-			EventID:   "evt-1",
-			EventName: "scan.requested",
-			RunID:     "run-123",
-			EntityID:  "entity-1",
-			CreatedAt: now.Add(1 * time.Second),
-			Source:    "builder",
-			Payload:   map[string]any{"topic": "sample"},
+			EventID:       "evt-1",
+			EventName:     "scan.requested",
+			ExecutionMode: "live",
+			RunID:         "run-123",
+			EntityID:      "entity-1",
+			CreatedAt:     now.Add(1 * time.Second),
+			Source:        "builder",
+			Payload:       map[string]any{"topic": "sample"},
 		}},
 	}
 	hub := &runHub{
@@ -413,13 +414,14 @@ func TestRunHubSyncCanonical_UsesLatestCanonicalEventWindow(t *testing.T) {
 	events := make([]store.OperatorEventFull, 0, builderRunDebugReplayLimit+2)
 	for i := 0; i < builderRunDebugReplayLimit+2; i++ {
 		events = append(events, store.OperatorEventFull{
-			EventID:   fmt.Sprintf("evt-%03d", i),
-			EventName: "scan.requested",
-			RunID:     "run-123",
-			EntityID:  "entity-1",
-			CreatedAt: now.Add(time.Duration(i) * time.Second),
-			Source:    "builder",
-			Payload:   map[string]any{"index": i},
+			EventID:       fmt.Sprintf("evt-%03d", i),
+			EventName:     "scan.requested",
+			ExecutionMode: "live",
+			RunID:         "run-123",
+			EntityID:      "entity-1",
+			CreatedAt:     now.Add(time.Duration(i) * time.Second),
+			Source:        "builder",
+			Payload:       map[string]any{"index": i},
 		})
 	}
 	events[len(events)-1].EventID = "evt-latest"

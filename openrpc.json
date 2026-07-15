@@ -11548,6 +11548,9 @@
           "event_name": {
             "type": "string"
           },
+          "execution_mode": {
+            "$ref": "#/components/schemas/ExecutionMode"
+          },
           "payload": {
             "additionalProperties": true,
             "type": "object"
@@ -11567,6 +11570,7 @@
         "required": [
           "event_id",
           "event_name",
+          "execution_mode",
           "created_at",
           "source",
           "payload",
