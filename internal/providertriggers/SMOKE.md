@@ -19,7 +19,7 @@ Run:
 SWARM_SHOPIFY_LOCAL_SMOKE=1 \
 SHOPIFY_FLAG_CLIENT_ID='<client-id>' \
 SHOPIFY_FLAG_CLIENT_SECRET='<client-secret>' \
-go test ./cmd/swarm -run TestShopifyLocalProviderToolSmoke -count=1 -v
+go test ./internal/serveapp -run TestShopifyLocalProviderToolSmoke -count=1 -v
 ```
 
 Optional overrides:
@@ -50,7 +50,7 @@ Run:
 SWARM_TYPEFORM_LIVE_SMOKE=1 \
 SWARM_TYPEFORM_LIVE_SMOKE_WEBHOOK_URL='https://<public-host>/webhooks/customer-a/typeform' \
 TYPEFORM_WEBHOOK_SECRET='<typeform-webhook-secret>' \
-go test ./cmd/swarm -run TestTypeformManualLiveHTTPSWebhookSmoke -count=1 -v
+go test ./internal/serveapp -run TestTypeformManualLiveHTTPSWebhookSmoke -count=1 -v
 ```
 
 By default the smoke listens on `127.0.0.1:17470`, so configure the HTTPS tunnel to forward to `http://127.0.0.1:17470`. Override the listener only when your tunnel uses a different local address:
