@@ -99,10 +99,28 @@ func proveRuntimeEffectsNeutralSchemaRegisteredAdapterParity(t *testing.T, fixtu
 			requireExternalAttemptState(t, fixture.db, fixture.sqlite, authorized.Attempt().AttemptID, runtimeeffects.StateTerminalFailure)
 			requireExternalAttemptState(t, fixture.db, fixture.sqlite, launched.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
 			requireExternalAttemptState(t, fixture.db, fixture.sqlite, observed.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
+			requireRecoveredExternalEffectStory(t, fixture, authorized.Attempt().AttemptID, runtimeeffects.StateTerminalFailure)
+			requireRecoveredExternalEffectStory(t, fixture, launched.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
+			requireRecoveredExternalEffectStory(t, fixture, observed.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
 
 			proveCompletionOnlyAuthorityRejectsRegistration(t, fixture, controller, registration, runtimeeffects.AuthoritySelectedContractFork)
 			proveCompletionOnlyAuthorityRejectsRegistration(t, fixture, controller, registration, runtimeeffects.AuthorityConversationForkChat)
 		})
+	}
+}
+
+func requireRecoveredExternalEffectStory(t *testing.T, fixture neutralEffectParityFixture, attemptID string, state runtimeeffects.State) {
+	t.Helper()
+	query := `SELECT COUNT(*) FROM author_activity_occurrences WHERE source_owner = ? AND source_identity = ? AND transition = ?`
+	if !fixture.sqlite {
+		query = `SELECT COUNT(*) FROM author_activity_occurrences WHERE source_owner = $1 AND source_identity = $2 AND transition = $3`
+	}
+	var count int
+	if err := fixture.db.QueryRow(query, "runtime_external_effect_attempts", attemptID+":"+string(state), string(state)).Scan(&count); err != nil {
+		t.Fatalf("count recovered external effect story: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("recovered external effect story count=%d, want 1 for %s/%s", count, attemptID, state)
 	}
 }
 
