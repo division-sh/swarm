@@ -116,6 +116,7 @@ with 'swarm run trace', 'swarm event list', and 'swarm mailbox'.`,
 	)
 	addToGroup(commandGroupAuthor,
 		newVerifyCommand(ctx, repo, opts),
+		newMigrateConnectDeliveryOneCommand(repo),
 		newTestCommand(repo, opts),
 		newDescribeCommand(ctx, repo, opts),
 		newBundleCommand(repo, opts),

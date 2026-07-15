@@ -9651,7 +9651,10 @@ flow_model:
             derive from receiver input address/resolution. Runtime dispatch, persistence, replay, topology readback,
             and describe output consume only target/target_set and typed ReplyResolution facts.
           migration:
-            delivery_one: Delete the field; one connect row already declares one edge.
+            delivery_one: >
+              Delete the field; one connect row already declares one edge. The deterministic
+              `swarm migrate-connect-delivery-one --contracts <bundle-root>` codemod removes only
+              scalar `delivery: one` declarations and refuses every author-decision case.
             delivery_many_or_broadcast: Use multiple connect rows for static fan-out or an approved receiver-owned resolution surface; no authored connect fan-out compatibility path exists.
             delivery_reply_and_reply_map: >
               Use receiver `resolution.mode: reply` with `replies_to` and separate request/response connect edges.
@@ -18652,6 +18655,13 @@ cli_specification:
                 stderr: "analyzer diagnostics and advisory findings rendered as typed diagnostic lists with `[BLOCKER]`, `[WARN]`, or `[INFO]`; single command-outcome failures still use `ERROR:`/`WARNING:`"
               quiet_values:
               - ok
+            migrate_connect_delivery_one:
+              command: swarm migrate-connect-delivery-one
+              classification: shared_output
+              fact_owner: local deterministic connect.delivery one codemod
+              json_shape: object with package_file and removed
+              quiet_values:
+              - number of removed connect.delivery one declarations
             runs:
               command: swarm run list
               classification: shared_output
@@ -20771,6 +20781,15 @@ cli_specification:
       tier: must_have
       implementation_status: implemented
       behavior: local contract-file validation carve-out
+    migrate_connect_delivery_one:
+      command: swarm migrate-connect-delivery-one --contracts <bundle-root>
+      group: author_validate
+      tier: must_have
+      implementation_status: implemented
+      owner: platform-spec.yaml#flow_model.flow_package.composition_routing.route_plan_lowering.implementation_slice_1827_connect_delivery_reply_retirement
+      behavior: >
+        Deterministically remove only retired scalar `connect.delivery: one` declarations. Refuse every
+        author-decision form, including `many`, `broadcast`, `reply`, and `connect.reply`, without changing the file.
     runs:
       command: swarm run list [filters]
       group: run_operate

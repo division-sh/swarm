@@ -5,6 +5,44 @@ import (
 	"testing"
 )
 
+// ApplyRetiredConnectDeliveryOneMutation creates the single deterministic
+// retired spelling accepted by the migration command and rejected by loaders.
+func ApplyRetiredConnectDeliveryOneMutation(t testing.TB, root string) {
+	t.Helper()
+	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
+		"  - from: producer.work_ready\n    to: consumer.work_ready\n",
+		"  - from: producer.work_ready\n    to: consumer.work_ready\n    delivery: one\n")
+}
+
+type RetiredConnectMigrationBlocker uint8
+
+const (
+	RetiredConnectDeliveryMany RetiredConnectMigrationBlocker = iota + 1
+	RetiredConnectDeliveryBroadcast
+	RetiredConnectDeliveryReply
+	RetiredConnectReplyMap
+)
+
+func ApplyRetiredConnectMigrationBlocker(t testing.TB, root string, blocker RetiredConnectMigrationBlocker) {
+	t.Helper()
+	field := ""
+	switch blocker {
+	case RetiredConnectDeliveryMany:
+		field = "    delivery: many\n"
+	case RetiredConnectDeliveryBroadcast:
+		field = "    delivery: broadcast\n"
+	case RetiredConnectDeliveryReply:
+		field = "    delivery: reply\n"
+	case RetiredConnectReplyMap:
+		field = "    reply:\n      correlation_id: event.correlation_id\n"
+	default:
+		t.Fatalf("unsupported retired connect migration blocker %d", blocker)
+	}
+	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
+		"  - from: producer.work_ready\n    to: consumer.work_ready\n",
+		"  - from: producer.work_ready\n    to: consumer.work_ready\n"+field)
+}
+
 // TemplateSelectOrCreateNegativeMutation is the closed fail-closed matrix for
 // the canonical select-or-create route.
 type TemplateSelectOrCreateNegativeMutation uint8

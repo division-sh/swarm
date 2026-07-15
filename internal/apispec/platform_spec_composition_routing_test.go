@@ -112,7 +112,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	retirement := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1827_connect_delivery_reply_retirement")
 	assertScalarValue(t, mustMappingValue(t, retirement, "status"), "merge_bearing_aggressive_retirement")
 	assertScalarContains(t, mustMappingValue(t, retirement, "rule"), "ConnectRoutePlan expose no delivery or raw reply compatibility fields")
-	assertScalarContains(t, mustYAMLPath(t, retirement, "migration", "delivery_one"), "Delete the field")
+	assertScalarContains(t, mustYAMLPath(t, retirement, "migration", "delivery_one"), "swarm migrate-connect-delivery-one")
 	assertScalarContains(t, mustYAMLPath(t, retirement, "migration", "delivery_reply_and_reply_map"), "resolution.mode: reply")
 
 	slice1546 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1546")

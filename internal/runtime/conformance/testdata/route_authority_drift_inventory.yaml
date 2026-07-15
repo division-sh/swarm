@@ -371,6 +371,7 @@ seam_families:
       - internal/runtime/bus/eventbus_delivery_projection_test.go
       - internal/runtime/bus/final_flow_instance_authoring_route_test.go
       - internal/runtime/bus/route_plan.go
+      - cmd/swarm/connect_delivery_one_codemod_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
     search_dimensions: [connect_route_plan, route_plan, route_plan_source_reason]
     notes: >
