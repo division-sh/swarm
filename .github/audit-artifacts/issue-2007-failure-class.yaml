@@ -2904,6 +2904,7 @@ terminal_run_decision_card_supersession_reaudit:
   post_review_continuation_settlement_repair:
     status: implemented_and_proven_pending_review
     review_ref: https://github.com/division-sh/swarm/pull/2047#pullrequestreview-4700428459
+    exact_id_review_ref: https://github.com/division-sh/swarm/pull/2047#pullrequestreview-4701030083
     chosen_working_failure_class: decision_card_continuation_settlement_without_required_event_operation
     immediate_parent_failure_class: decision_card_lifecycle_state_and_outcome_atomicity
     parent_failure_class: durable_runtime_desired_state_and_status_specific_terminal_lifecycle_atomicity
@@ -2915,13 +2916,15 @@ terminal_run_decision_card_supersession_reaudit:
       proposed_effect_approve: persist_exact_activity_request_then_complete_with_decision_event_identity
       proposed_effect_revise_reject: publish_deterministic_typed_outcome_then_complete_with_decision_event_identity
       proposed_effect_completed_replay: revalidate_persisted_operation_and_exact_route_identity
-      normal_run_completion_postgres: requires_state_identity_and_persisted_operation
-      normal_run_completion_sqlite: requires_state_identity_and_persisted_operation
+      normal_run_completion_postgres: requires_state_identity_and_exact_deterministic_persisted_operation_ID
+      normal_run_completion_sqlite: requires_state_identity_and_exact_deterministic_persisted_operation_ID
     invalid_paths_removed:
       - standalone_CompleteHumanTaskOutcome_transaction
       - standalone_CompleteProposedEffectRoute_transaction
       - proposed_effect_route_event_identity_distinct_from_decision_event_identity
       - outcome_dispatched_or_request_released_without_required_event_row
+      - human_task_completion_authorized_by_same_run_source_and_name_with_wrong_event_ID
+      - proposed_effect_completion_authorized_by_same_run_source_and_name_with_wrong_event_ID
       - completed_route_replay_bypassing_store_consistency_validation
     manifestation_proof:
       human_task_standalone_completion: rejected_on_both_backends
@@ -2932,6 +2935,11 @@ terminal_run_decision_card_supersession_reaudit:
       proposed_effect_active_mutation_without_route_operation: rejected_on_both_backends
       proposed_effect_approve_revise_reject: event_and_state_commit_together_on_both_backends
       normal_completion_corrupt_or_missing_operation: remains_running_on_both_backends
+      human_task_approve_wrong_event_ID: same_run_source_and_name_remains_running_on_both_backends
+      human_task_reject_wrong_event_ID: same_run_source_and_name_remains_running_on_both_backends
+      human_task_expiry_wrong_event_ID: same_run_source_and_name_remains_running_on_both_backends
+      proposed_effect_revise_wrong_event_ID: same_run_source_and_name_remains_running_on_both_backends
+      proposed_effect_reject_wrong_event_ID: same_run_source_and_name_remains_running_on_both_backends
     tracker_state_decision: existing_issue_and_artifact_refined_no_new_issue
     watchlist_mapping_decision: existing_inbound_publication_operation_ownership_node_remains_correct
     intended_closure_level: absorbed_review_manifestation_eliminated
