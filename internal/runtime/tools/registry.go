@@ -18,6 +18,7 @@ const (
 	implementationPlatformBuiltin implementationClass = "platform_builtin"
 	implementationHTTP            implementationClass = "http"
 	implementationMCP             implementationClass = "mcp"
+	implementationChannel         implementationClass = "channel"
 )
 
 type RegisteredTool struct {
@@ -283,6 +284,8 @@ func normalizeImplementationClass(name string, entry runtimecontracts.ToolSchema
 		return implementationHTTP
 	case "mcp":
 		return implementationMCP
+	case "channel":
+		return implementationChannel
 	case "workflow_registered", "api_call":
 		if entry.HTTP != nil {
 			return implementationHTTP

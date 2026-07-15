@@ -8188,6 +8188,8 @@ tool_model:
       accepted_connector_inventory: internal/providerconnectors.PackRegistry
       structural_compiler: internal/packs.CompileChannelInventory
       outbound_binding: internal/packs.OutboundBindingPlan
+      runtime_adapter: internal/runtime/tools channel handler
+      private_activity_targets: internal/runtime/pipeline PipelineCoordinator.ChannelActivityTools
       durable_execution: internal/runtime/pipeline activity attempt owner
     contract: >
       A channel pack is a universal-envelope satisfier of one immutable provider-neutral interface. The interface owns
@@ -8196,6 +8198,11 @@ tool_model:
       operator binding, or provider-specific branches. One accepted trigger generation, one accepted connector generation,
       and one accepted channel generation compile into one immutable structural plan; verify, preflight, doctor, runtime
       construction and reload, human/JSON capability readback, selected constraints, and outbound status consume that plan.
+      A configured runtime exposes only channel.<binding>.<operation> with the provider-neutral input/output schemas. The
+      channel handler is the sole operation adapter: it validates that input, injects the immutable bound destination,
+      applies the exact recursive mapping, and lowers one private platform.channel_activity.<binding>.<operation> target
+      into the durable activity journal. Private targets carry connector HTTP, credential, response, and result-projection
+      details inside the coordinator and never enter an agent-visible or authored generic tool registry.
     opaque_reference_slots:
       exact:
       - destination
@@ -8227,7 +8234,7 @@ tool_model:
       - reject duplicate pack ids across trigger, connector, and channel roles
       - require exact operation and event key sets; missing, duplicate, or unknown rows fail admission
       - require exact non_idempotent_write effect equality between interface operation and connector tool
-      - require every interface input/context source to be consumed once and every required connector target to be assigned once
+      - recursively require every required interface input/context leaf to be consumed once and every required connector target leaf to be assigned once
       - permit only scalar identity, one ordered each-item object projection, number_to_text, and decimal_text_to_int32 mappings
       - reject caller-supplied provider context, ambient values, defaults, functions, concatenation, conditions, or partial mappings
       - validate connector output first, then apply the compiled channel output projection, then validate the satisfier-bound opaque result
@@ -8262,6 +8269,10 @@ tool_model:
         Platform pack directories and binding identities/destinations are elevated operator configuration. External pack
         directories are project-contained paths. Missing dependencies, malformed packs, duplicate inventory, invalid
         destinations, or unusable connector requirements fail closed before runtime construction.
+      credential_requirements: >
+        Requirement aggregation is deterministic across operation names. Requirements with one kind/key must be exactly
+        equal across grant type, scopes, grant model, token request profile, and installation input; incompatible same-key
+        descriptors reject the binding rather than selecting one by map iteration.
     status:
       structural:
         kind: channel_pack
@@ -8276,11 +8287,13 @@ tool_model:
         callback registration, or operator identity. Target-scoped ingress readiness remains #1944 and connected-channel
         composition remains #2079.
     durable_result_contract: >
-      Channel runtime tools lower through the existing activity-attempt owner. The provider response success policy and
-      connector response mapping run first; the connector result schema validates second; the compiled channel result and
-      opaque output schema validate third; only that semantic result is journaled. Restart/replay reuses the terminal attempt
-      without provider redispatch. A non-idempotent acknowledgment-loss outcome remains outcome_uncertain and must never
-      auto-retry.
+      The channel adapter persists a deterministic platform.activity_requested event before execution and invokes the same
+      activity handler used by recovery. The provider response success policy and connector response mapping run first; the
+      connector result schema validates second; the compiled channel result and opaque output schema validate third; only
+      that semantic result is journaled and returned. Same-key replay and recovery consume the terminal attempt without
+      provider redispatch. A started attempt after acknowledgment loss is outcome_uncertain and must never auto-retry.
+      Generic connector registration, caller-supplied connector destinations, and direct channel HTTP dispatch are not
+      channel execution authorities.
     retired_owners:
     - hard-coded required provider-trigger identity inventory and completeness checks
     - mailbox-owned direct Telegram HTTP notifier and retry loop

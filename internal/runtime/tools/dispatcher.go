@@ -13,6 +13,7 @@ type ToolHandler func(ctx context.Context, actor models.AgentConfig, input any) 
 type EmitToolHandler func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error)
 type HTTPToolHandler func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error)
 type MCPToolHandler func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error)
+type ChannelToolHandler func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error)
 type RoleScopedEntityToolHandler func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, bool, error)
 type ToolResolver func(actor models.AgentConfig, name string) (RegisteredTool, bool, error)
 
@@ -21,11 +22,12 @@ type ToolDispatcher struct {
 	resolver                ToolResolver
 	httpHandler             HTTPToolHandler
 	mcpHandler              MCPToolHandler
+	channelHandler          ChannelToolHandler
 	roleScopedEntityHandler RoleScopedEntityToolHandler
 	handlers                map[string]ToolHandler
 }
 
-func NewToolDispatcher(emitHandler EmitToolHandler, resolver ToolResolver, httpHandler HTTPToolHandler, mcpHandler MCPToolHandler, roleScopedEntityHandler RoleScopedEntityToolHandler, handlers map[string]ToolHandler) *ToolDispatcher {
+func NewToolDispatcher(emitHandler EmitToolHandler, resolver ToolResolver, httpHandler HTTPToolHandler, mcpHandler MCPToolHandler, channelHandler ChannelToolHandler, roleScopedEntityHandler RoleScopedEntityToolHandler, handlers map[string]ToolHandler) *ToolDispatcher {
 	copied := make(map[string]ToolHandler, len(handlers))
 	for name, handler := range handlers {
 		if strings.TrimSpace(name) == "" || handler == nil {
@@ -38,6 +40,7 @@ func NewToolDispatcher(emitHandler EmitToolHandler, resolver ToolResolver, httpH
 		resolver:                resolver,
 		httpHandler:             httpHandler,
 		mcpHandler:              mcpHandler,
+		channelHandler:          channelHandler,
 		roleScopedEntityHandler: roleScopedEntityHandler,
 		handlers:                copied,
 	}
@@ -87,6 +90,11 @@ func (d *ToolDispatcher) Dispatch(ctx context.Context, actor models.AgentConfig,
 			return nil, fmt.Errorf("mcp tool handler is not configured")
 		}
 		return d.mcpHandler(ctx, actor, tool, input)
+	case implementationChannel:
+		if d.channelHandler == nil {
+			return nil, fmt.Errorf("channel tool handler is not configured")
+		}
+		return d.channelHandler(ctx, actor, tool, input)
 	default:
 		return nil, fmt.Errorf("unsupported tool handler type for %s: %s", name, tool.HandlerType)
 	}

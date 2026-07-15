@@ -269,7 +269,10 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	if source == nil {
 		return runtimefailures.New(runtimefailures.ClassInternalFailure, "activity_semantic_source_missing", "activity-runtime", "execute_activity", nil)
 	}
-	tool, ok := source.ToolEntries()[intent.Tool]
+	tool, ok := d.coordinator.channelActivityTools[intent.Tool]
+	if !ok {
+		tool, ok = source.ToolEntries()[intent.Tool]
+	}
 	if !ok {
 		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassTargetUnreachable, "activity_tool_not_declared", "activity-runtime", "execute_activity", map[string]any{"tool": intent.Tool}))
 	}
@@ -699,6 +702,74 @@ func activityRequestEmitIntents(intents []runtimeengine.ActivityIntent) ([]runti
 		out = append(out, request)
 	}
 	return out, nil
+}
+
+// ExecuteDurableActivity admits one externally requested activity through the
+// same persisted request and attempt journal used by authored activity rows.
+// A terminal journal record is authoritative when publish acknowledgment is
+// lost, and replay never re-executes a completed non-idempotent activity.
+func (pc *PipelineCoordinator) ExecuteDurableActivity(ctx context.Context, intent runtimeengine.ActivityIntent) (ActivityAttemptRecord, error) {
+	if pc == nil || pc.bus == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+		return ActivityAttemptRecord{}, runtimefailures.New(
+			runtimefailures.ClassDependencyUnavailable,
+			"activity_journal_unavailable",
+			"activity-runtime",
+			"execute_durable_activity",
+			nil,
+		)
+	}
+	intent = intent.Normalized()
+	request, err := activityRequestEmitIntent(intent)
+	if err != nil {
+		return ActivityAttemptRecord{}, err
+	}
+	publishCtx := events.WithDeliveryContext(ctx, request.Context)
+	publishErr := pc.bus.Publish(publishCtx, request.Event)
+	var dispatchErr error
+	if publishErr == nil {
+		_, dispatchErr = pc.handleActivityRequestEvent(publishCtx, request.Event)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		record, ok, loadErr := pc.workflowStore.LoadActivityAttempt(ctx, activityRequestEventID(intent))
+		if loadErr != nil {
+			return ActivityAttemptRecord{}, activityDependencyFailure(loadErr, intent.Tool, "load_activity_attempt_after_publish")
+		}
+		if ok {
+			if identityErr := validateActivityAttemptClaimIdentity(record, activityAttemptStartRecord(intent, activityInputHash(intent.Input))); identityErr != nil {
+				return ActivityAttemptRecord{}, identityErr
+			}
+			if record.Status != ActivityAttemptStatusStarted || publishErr != nil {
+				// A started record after publish failure is the fail-closed
+				// acknowledgment-loss outcome; the adapter must not resend it.
+				return record, nil
+			}
+		}
+		if publishErr != nil {
+			return ActivityAttemptRecord{}, publishErr
+		}
+		if dispatchErr != nil {
+			return ActivityAttemptRecord{}, dispatchErr
+		}
+		select {
+		case <-waitCtx.Done():
+			if ok {
+				return record, nil
+			}
+			return ActivityAttemptRecord{}, runtimefailures.Wrap(
+				runtimefailures.ClassDependencyUnavailable,
+				"activity_attempt_missing_after_publish",
+				"activity-runtime",
+				"execute_durable_activity",
+				map[string]any{"request_event_id": activityRequestEventID(intent), "tool": intent.Tool},
+				waitCtx.Err(),
+			)
+		case <-ticker.C:
+		}
+	}
 }
 
 func activityRequestEmitIntent(intent runtimeengine.ActivityIntent) (runtimeengine.EmitIntent, error) {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -82,9 +83,10 @@ func compileChannelBindings(ctx context.Context, cfg *config.Config, plans []pac
 		if !ok {
 			return nil, fmt.Errorf("channels.bindings.%s references unavailable channel pack %q", id, declared.Pack)
 		}
-		requirements := []packs.Requirement{}
-		seen := map[string]struct{}{}
-		for _, operation := range plan.Operations {
+		requirementsByKey := map[string]packs.Requirement{}
+		requirementOwner := map[string]string{}
+		for _, operationName := range sortedChannelOperationNames(plan.Operations) {
+			operation := plan.Operations[operationName]
 			resolved, err := providerconnectors.RequirementsForTool(ctx, operation.Tool, operation.ToolSchema, providerconnectors.CapabilityOptions{
 				StaticCredentials: staticCredentials, ManagedCredentials: managedCredentials,
 			})
@@ -93,12 +95,24 @@ func compileChannelBindings(ctx context.Context, cfg *config.Config, plans []pac
 			}
 			for _, requirement := range resolved {
 				key := requirement.Kind + "\x00" + requirement.Name
-				if _, exists := seen[key]; exists {
+				if existing, exists := requirementsByKey[key]; exists {
+					if !reflect.DeepEqual(existing, requirement) {
+						return nil, fmt.Errorf("channels.bindings.%s operations %q and %q require incompatible %s %q descriptors", id, requirementOwner[key], operationName, requirement.Kind, requirement.Name)
+					}
 					continue
 				}
-				seen[key] = struct{}{}
-				requirements = append(requirements, requirement)
+				requirementsByKey[key] = requirement
+				requirementOwner[key] = operationName
 			}
+		}
+		requirementKeys := make([]string, 0, len(requirementsByKey))
+		for key := range requirementsByKey {
+			requirementKeys = append(requirementKeys, key)
+		}
+		sort.Strings(requirementKeys)
+		requirements := make([]packs.Requirement, 0, len(requirementKeys))
+		for _, key := range requirementKeys {
+			requirements = append(requirements, requirementsByKey[key])
 		}
 		binding, err := packs.NewOutboundBindingPlan(id, plan, declared.Destination, requirements)
 		if err != nil {
@@ -107,6 +121,15 @@ func compileChannelBindings(ctx context.Context, cfg *config.Config, plans []pac
 		bindings = append(bindings, binding)
 	}
 	return bindings, nil
+}
+
+func sortedChannelOperationNames(operations map[string]packs.CompiledChannelOperation) []string {
+	names := make([]string, 0, len(operations))
+	for name := range operations {
+		names = append(names, strings.TrimSpace(name))
+	}
+	sort.Strings(names)
+	return names
 }
 
 func appendChannelCapabilitySubjects(report *localPreflightReport, load channelPackLoad) {

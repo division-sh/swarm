@@ -212,6 +212,106 @@ func TestProductionCompilerFailsClosedAcrossChannelContractPhases(t *testing.T) 
 	}
 }
 
+func TestProductionCompilerRejectsPartialRequiredConnectorObject(t *testing.T) {
+	registry := loadChannelInterfaceRegistry(t)
+	channel, trigger, connector := mockChannelSatisfier()
+	tool := connector.Tools["mock.deliver"]
+	destination := tool.InputSchema.Properties["destination"]
+	destination.Properties = map[string]runtimecontracts.ToolInputSchema{"queue": destination.Properties["queue"]}
+	destination.Required = append([]string(nil), destination.Required...)
+	destination.Properties["region"] = mockStringSchema(1, 10, "")
+	destination.Required = append(destination.Required, "region")
+	tool.InputSchema.Properties["destination"] = destination
+	connector.Tools["mock.deliver"] = tool
+
+	_, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+	if err == nil || !strings.Contains(err.Error(), `does not map required connector input "destination.region"`) {
+		t.Fatalf("CompileChannel error = %v, want missing destination.region", err)
+	}
+}
+
+func TestProductionCompilerRejectsDroppedRequiredInterfaceArrayLeaf(t *testing.T) {
+	registry := loadChannelInterfaceRegistry(t)
+	channel, trigger, connector := mockChannelSatisfier()
+	tool := connector.Tools["mock.deliver"]
+	controls := tool.InputSchema.Properties["controls"]
+	controls.Items = pointerToChannelSchema(mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
+		"name": mockStringSchema(1, 24, ""),
+	}, "name"))
+	tool.InputSchema.Properties["controls"] = controls
+	connector.Tools["mock.deliver"] = tool
+	binding := channel.Manifest.Operations["deliver"]
+	binding.Input["controls"] = packs.ChannelMapping{
+		Each: "input.actions",
+		Item: []map[string]packs.ChannelMapping{{"name": {From: "item.label"}}},
+	}
+	channel.Manifest.Operations["deliver"] = binding
+
+	_, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+	if err == nil || !strings.Contains(err.Error(), "input.actions[].token") {
+		t.Fatalf("CompileChannel error = %v, want unconsumed actions token", err)
+	}
+}
+
+func TestChannelRuntimeToolsExposeOnlyProviderNeutralContract(t *testing.T) {
+	plan := loadTelegramChannelPlan(t)
+	binding, err := packs.NewOutboundBindingPlan("ops", plan, "42", nil)
+	if err != nil {
+		t.Fatalf("NewOutboundBindingPlan: %v", err)
+	}
+	tools, err := binding.RuntimeTools()
+	if err != nil {
+		t.Fatalf("RuntimeTools: %v", err)
+	}
+	tool := tools["channel.ops.deliver"]
+	if tool.Category != "channel_operation" || tool.HandlerType != "channel" || tool.HTTP != nil || len(tool.Credentials) != 0 || tool.ManagedCredential != nil {
+		t.Fatalf("public channel tool leaked connector execution details: %#v", tool)
+	}
+	if _, ok := tool.InputSchema.Properties["presentation"]; !ok {
+		t.Fatalf("public channel input = %#v, want presentation", tool.InputSchema)
+	}
+	if _, ok := tool.InputSchema.Properties["chat_id"]; ok {
+		t.Fatalf("public channel input exposed connector destination: %#v", tool.InputSchema)
+	}
+	activityTool, err := binding.Structural.OperationTool("deliver")
+	if err != nil {
+		t.Fatalf("OperationTool: %v", err)
+	}
+	if binding.RuntimeActivityToolID("deliver") == binding.RuntimeToolID("deliver") || activityTool.HTTP == nil || activityTool.CompiledResult == nil {
+		t.Fatalf("private channel activity target is not separated: id=%q tool=%#v", binding.RuntimeActivityToolID("deliver"), activityTool)
+	}
+}
+
+func TestSatisfactionPlanCloneDeeplyIsolatesRuntimeOperation(t *testing.T) {
+	original := loadTelegramChannelPlan(t)
+	cloned := original.Clone()
+	op := cloned.Operations["deliver"]
+	text := op.ToolSchema.InputSchema.Properties["text"]
+	if text.MaxLength == nil {
+		t.Fatal("Telegram text maxLength missing")
+	}
+	*text.MaxLength = 7
+	op.ToolSchema.InputSchema.Properties["text"] = text
+	httpSpec := *op.ToolSchema.HTTP
+	httpSpec.URL = "https://mutated.invalid"
+	op.ToolSchema.HTTP = &httpSpec
+	keyboard := op.Input["reply_markup.inline_keyboard"]
+	keyboard.Item[0]["text"] = packs.ChannelMapping{From: "item.token"}
+	op.Input["reply_markup.inline_keyboard"] = keyboard
+	cloned.Operations["deliver"] = op
+
+	originalOp := original.Operations["deliver"]
+	if got := *originalOp.ToolSchema.InputSchema.Properties["text"].MaxLength; got == 7 {
+		t.Fatalf("clone mutation changed original text maxLength to %d", got)
+	}
+	if originalOp.ToolSchema.HTTP.URL == "https://mutated.invalid" {
+		t.Fatal("clone mutation changed original HTTP URL")
+	}
+	if got := originalOp.Input["reply_markup.inline_keyboard"].Item[0]["text"].From; got != "item.label" {
+		t.Fatalf("clone mutation changed original item mapping to %q", got)
+	}
+}
+
 func TestChannelCompilerZoneHasNoProviderSpecificRuntimeBranch(t *testing.T) {
 	body, err := os.ReadFile("channel.go")
 	if err != nil {
@@ -367,6 +467,10 @@ func mockStringSchema(min, max int, pattern string) runtimecontracts.ToolInputSc
 
 func mockArraySchema(min, max int, items runtimecontracts.ToolInputSchema) runtimecontracts.ToolInputSchema {
 	return runtimecontracts.ToolInputSchema{Type: "array", MinItems: &min, MaxItems: &max, Items: &items}
+}
+
+func pointerToChannelSchema(schema runtimecontracts.ToolInputSchema) *runtimecontracts.ToolInputSchema {
+	return &schema
 }
 
 func mockObjectSchema(properties map[string]runtimecontracts.ToolInputSchema, required ...string) runtimecontracts.ToolInputSchema {

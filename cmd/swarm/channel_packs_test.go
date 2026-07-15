@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packs"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 )
 
@@ -63,6 +64,17 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 	appendChannelCapabilitySubjects(&report, ready)
 	if len(report.CapabilitySubjects) != 2 {
 		t.Fatalf("preflight channel subjects = %#v, want structural and outbound", report.CapabilitySubjects)
+	}
+
+	conflicting := ready.Plans[0].Clone()
+	for operationName, scope := range map[string]string{"deliver": "deliver", "edit": "edit"} {
+		operation := conflicting.Operations[operationName]
+		operation.ToolSchema.Credentials = nil
+		operation.ToolSchema.ManagedCredential = &runtimecontracts.ManagedCredentialRef{Key: "shared-channel-auth", Scopes: []string{scope}}
+		conflicting.Operations[operationName] = operation
+	}
+	if _, err := compileChannelBindings(context.Background(), cfg, []packs.SatisfactionPlan{conflicting}, nil, nil); err == nil {
+		t.Fatal("incompatible same-key channel credential requirements were accepted")
 	}
 }
 
