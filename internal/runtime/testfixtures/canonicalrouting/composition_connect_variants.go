@@ -22,9 +22,6 @@ const (
 	CompositionConnectIncompatibleKeyType
 	CompositionConnectUnindexedTarget
 	CompositionConnectNestedTarget
-	CompositionConnectDeliveryMany
-	CompositionConnectDeliveryBroadcast
-	CompositionConnectDeliveryReply
 	CompositionConnectTemplateMissingAddress
 	CompositionConnectTemplateLegacyMap
 	CompositionConnectMissingOutputKey
@@ -74,12 +71,6 @@ func CopyCompositionConnect(t testing.TB, variant CompositionConnectVariant) str
 		opts.consumerEntityUnindexed = true
 	case CompositionConnectNestedTarget:
 		opts.mapTarget = "entity.profile.vertical_id"
-	case CompositionConnectDeliveryMany:
-		opts.delivery = "many"
-	case CompositionConnectDeliveryBroadcast:
-		opts.delivery = "broadcast"
-	case CompositionConnectDeliveryReply:
-		opts.delivery = "reply"
 	case CompositionConnectTemplateMissingAddress:
 		opts.consumerMode, opts.consumerScalarInput = "template", true
 		opts.connectTo, opts.omitMap = "consumer.deploy.completed", true
@@ -197,7 +188,6 @@ func CopyCompositionConnectAmbiguity(t testing.TB) string {
 type compositionConnectFixtureOptions struct {
 	connectFrom                    string
 	connectTo                      string
-	delivery                       string
 	noAdapter                      bool
 	mapSource                      string
 	mapTarget                      string
@@ -254,7 +244,6 @@ func writeCompositionConnectBootverifyFixture(t testing.TB, opts compositionConn
 	root := CopyExample(t, ParentConnect)
 	connectFrom := firstTestValue(opts.connectFrom, "producer.deploy_done")
 	connectTo := firstTestValue(opts.connectTo, "consumer.deploy_completed")
-	delivery := firstTestValue(opts.delivery, "one")
 	adapter := "    adapter: deploy_done_to_completed\n"
 	if opts.noAdapter {
 		adapter = ""
@@ -299,8 +288,7 @@ flows:
 connect:
   - from: `+connectFrom+`
     to: `+connectTo+`
-`+adapter+`    delivery: `+delivery+`
-`+mapBlock+`
+`+adapter+mapBlock+`
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: composition-connect-bootverify\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
@@ -324,7 +312,6 @@ func writeCompositionConnectTopologyFixture(t testing.TB) string {
   - from: producer.deploy_done
     to: consumer.deploy_completed
     adapter: deploy_done_to_completed
-    delivery: one
     map:
       vertical_id:
         source: payload.vertical_id
@@ -355,7 +342,6 @@ flows:
 connect:
   - from: producer_a.ticket.ready
     to: consumer.ticket.ready
-    delivery: one
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: composition-connect-ambiguity\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
@@ -715,7 +701,7 @@ flows:
 connect:
   - from: producer.deploy_done
     to: consumer.deploy_completed
-    delivery: one`+usingBlock+legacyMapBlock+`
+`+usingBlock+legacyMapBlock+`
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: composition-connect-adapter-bootverify\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")

@@ -23,7 +23,6 @@ const (
 	SelectResolutionLegacyUsingInstance
 	SelectResolutionLegacyConnectMap
 	SelectResolutionStaticReceiver
-	SelectResolutionManyDelivery
 	SelectResolutionExtraAggregation
 	SelectResolutionEntityTypeMismatch
 )
@@ -144,8 +143,6 @@ func CopyTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOpt
 	case SelectResolutionStaticReceiver:
 		applyClosedReplacement(t, packageFile, "    mode: template\nconnect:\n", "    mode: static\nconnect:\n")
 		applyClosedReplacement(t, accountSchema, "mode: template\n", "mode: static\n")
-	case SelectResolutionManyDelivery:
-		applyClosedReplacement(t, packageFile, "    to: account.account_ready\n", "    to: account.account_ready\n    delivery: many\n")
 	case SelectResolutionExtraAggregation:
 		applyClosedReplacement(t, accountSchema, selectedPin,
 			"      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: "+mode+"\n          instance_key: account_id\n          aggregation: stream\n        carries:\n          account_id:\n            from: payload.account_id\n            type: string\n")

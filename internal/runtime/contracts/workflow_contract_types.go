@@ -1530,8 +1530,6 @@ type FlowPackageConnect struct {
 	Adapter    string                           `yaml:"adapter"`
 	Using      FlowPackageConnectUsing          `yaml:"using"`
 	Map        map[string]FlowPackageConnectMap `yaml:"map"`
-	Delivery   string                           `yaml:"delivery"`
-	Reply      map[string]string                `yaml:"reply"`
 }
 type FlowPackageConnectUsing struct {
 	Instance FlowPackageConnectInstanceAdapter `yaml:"instance"`

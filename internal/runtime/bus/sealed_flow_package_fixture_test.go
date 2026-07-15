@@ -144,9 +144,6 @@ func assertSealedFlowPackageConnectPlan(t *testing.T, source semanticview.Source
 	if got, want := plan.Receiver.ResolvedEvent, "consumer/work.ready"; got != want {
 		t.Fatalf("receiver resolved event = %q, want %q", got, want)
 	}
-	if got, want := plan.Delivery, runtimepinrouting.ConnectDeliveryOne; got != want {
-		t.Fatalf("delivery = %q, want %q", got, want)
-	}
 	if plan.Address != nil {
 		t.Fatalf("connect plan address = %#v, want canonical static target", plan.Address)
 	}

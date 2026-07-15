@@ -329,14 +329,14 @@ rows:
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlansAllowsFanInStreamEventIDDedup}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlansFailsClosedForInvalidFanInStream}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute}
-      - {kind: go_test, name: TestLowerCompositionConnectRoutePlansBroadcastBeatsInstanceKey}
+      - {kind: go_test, name: TestMaterializeConnectRoutePlanFanoutForTemplateDescriptors}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlansFailsClosedForInvalidRenamedInstanceKeyAdapter}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlanDoesNotDependOnRawPinNamesOrProducerTargets}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscriber}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarget}
-      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanBroadcastIgnoresInstanceKeyFiltering}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsTargetSetFanout}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKeySourceGap}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForUnsupportedBusinessFieldTarget}
@@ -417,9 +417,9 @@ rows:
       - {kind: issue, issue: 1545}
       - {kind: go_test, name: TestConnectRoutePlanDescriptorsLoadOnlyForRuntimeResolution}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute}
-      - {kind: go_test, name: TestLowerCompositionConnectRoutePlansBroadcastBeatsInstanceKey}
+      - {kind: go_test, name: TestMaterializeConnectRoutePlanFanoutForTemplateDescriptors}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget}
-      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanBroadcastIgnoresInstanceKeyFiltering}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsTargetSetFanout}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTarget}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTargetSet}

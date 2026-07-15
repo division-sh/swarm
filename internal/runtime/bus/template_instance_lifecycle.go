@@ -293,7 +293,7 @@ func templateInstanceLifecycleMaterialization(plan runtimepinrouting.ConnectRout
 		return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureTargetAmbiguous}
 	}
 	switch plan.TargetKind {
-	case runtimepinrouting.ConnectTargetKindTarget, runtimepinrouting.ConnectTargetKindReply:
+	case runtimepinrouting.ConnectTargetKindTarget:
 		return runtimepinrouting.ConnectRoutePlanMaterialization{Target: routes[0]}
 	case runtimepinrouting.ConnectTargetKindTargetSet:
 		return runtimepinrouting.ConnectRoutePlanMaterialization{TargetSet: routes}

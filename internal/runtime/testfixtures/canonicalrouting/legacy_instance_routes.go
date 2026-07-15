@@ -16,13 +16,6 @@ const (
 	LegacyInstancePolicyReuse
 )
 
-type LegacyInstanceDelivery uint8
-
-const (
-	LegacyInstanceDeliveryOne LegacyInstanceDelivery = iota + 1
-	LegacyInstanceDeliveryBroadcast
-)
-
 type LegacyInstanceAdapter uint8
 
 const (
@@ -32,7 +25,6 @@ const (
 )
 
 type LegacyInstanceRouteOptions struct {
-	Delivery LegacyInstanceDelivery
 	Missing  LegacyInstancePolicy
 	Conflict LegacyInstancePolicy
 	Adapter  LegacyInstanceAdapter
@@ -44,11 +36,7 @@ type LegacyInstanceRouteOptions struct {
 // they cannot supply route-bearing YAML.
 func CopyLegacyInstanceRoute(t testing.TB, opts LegacyInstanceRouteOptions) string {
 	t.Helper()
-	if opts.Delivery == 0 {
-		opts.Delivery = LegacyInstanceDeliveryOne
-	}
 	root := CopyExample(t, ParentConnect)
-	delivery := legacyInstanceDelivery(t, opts.Delivery)
 	missing := legacyInstancePolicy(t, opts.Missing)
 	conflict := legacyInstancePolicy(t, opts.Conflict)
 
@@ -68,7 +56,7 @@ func CopyLegacyInstanceRoute(t testing.TB, opts LegacyInstanceRouteOptions) stri
 	secondConnect := ""
 	secondPin := ""
 	if opts.MultiPin {
-		secondConnect = "  - from: producer.deploy_done\n    to: consumer.deploy_audited\n    delivery: one\n"
+		secondConnect = "  - from: producer.deploy_done\n    to: consumer.deploy_audited\n"
 		secondPin = "      - name: deploy_audited\n        event: deploy.done\n"
 	}
 
@@ -85,7 +73,6 @@ flows:
 connect:
   - from: producer.deploy_done
     to: consumer.deploy_completed
-    delivery: `+delivery+`
 `+using+secondConnect)
 	writeClosedVariantFile(t, root, "schema.yaml", "name: legacy-instance-route\n")
 	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "events.yaml", "nodes.yaml"} {
@@ -123,19 +110,6 @@ instance:
 		"deployment:\n  vertical_id:\n    type: string\n",
 		"consumer-node:\n  id: consumer-node-{instance_id}\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n")
 	return root
-}
-
-func legacyInstanceDelivery(t testing.TB, value LegacyInstanceDelivery) string {
-	t.Helper()
-	switch value {
-	case LegacyInstanceDeliveryOne:
-		return "one"
-	case LegacyInstanceDeliveryBroadcast:
-		return "broadcast"
-	default:
-		t.Fatalf("unsupported legacy instance delivery %d", value)
-		return ""
-	}
 }
 
 func legacyInstancePolicy(t testing.TB, value LegacyInstancePolicy) string {

@@ -63,7 +63,6 @@ packages:
 connect:
   - from: worker.work.completed
     to: worker.work.requested
-    delivery: one
     map:
       work_id:
         source: payload.work_id

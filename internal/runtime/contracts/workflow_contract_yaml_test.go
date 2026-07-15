@@ -964,6 +964,50 @@ pins:
 	}
 }
 
+func TestFlowPackageConnectDecodeRejectsRetiredDeliveryAndReplyOnPresence(t *testing.T) {
+	if _, ok := flowPackageConnectFieldOptions["delivery"]; ok {
+		t.Fatal("connect valid options retain retired delivery field")
+	}
+	if _, ok := flowPackageConnectFieldOptions["reply"]; ok {
+		t.Fatal("connect valid options retain retired reply field")
+	}
+	tests := []struct {
+		name        string
+		field       string
+		code        string
+		problem     string
+		remediation string
+	}{
+		{name: "delivery one", field: "delivery: one", code: "contract_loader.retired_connect_delivery", problem: "connect.delivery is retired.", remediation: "receiver input resolution"},
+		{name: "delivery many", field: "delivery: many", code: "contract_loader.retired_connect_delivery", problem: "connect.delivery is retired.", remediation: "multiple rows"},
+		{name: "delivery broadcast", field: "delivery: broadcast", code: "contract_loader.retired_connect_delivery", problem: "connect.delivery is retired.", remediation: "multiple rows"},
+		{name: "delivery reply", field: "delivery: reply", code: "contract_loader.retired_connect_delivery", problem: "connect.delivery is retired.", remediation: "receiver input resolution"},
+		{name: "delivery malformed", field: "delivery: [one]", code: "contract_loader.retired_connect_delivery", problem: "connect.delivery is retired.", remediation: "receiver input resolution"},
+		{name: "reply mapping", field: "reply: {source_event_id: event.source_event_id}", code: "contract_loader.retired_connect_reply", problem: "connect.reply is retired.", remediation: "resolution mode reply"},
+		{name: "reply empty", field: "reply: {}", code: "contract_loader.retired_connect_reply", problem: "connect.reply is retired.", remediation: "separate connect edges"},
+		{name: "reply malformed", field: "reply: [legacy]", code: "contract_loader.retired_connect_reply", problem: "connect.reply is retired.", remediation: "resolution mode reply"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var connect FlowPackageConnect
+			err := yaml.Unmarshal([]byte("from: producer.ready\nto: consumer.ready\n"+tc.field+"\n"), &connect)
+			if err == nil {
+				t.Fatal("yaml.Unmarshal succeeded, want retired connect field rejection")
+			}
+			diagnostic, ok := AsLoaderDiagnostic(err)
+			if !ok {
+				t.Fatalf("yaml.Unmarshal error = %T %v, want LoaderDiagnostic", err, err)
+			}
+			if diagnostic.Code != tc.code || diagnostic.Problem != tc.problem || !strings.Contains(diagnostic.Remediation, tc.remediation) {
+				t.Fatalf("diagnostic = %#v, want code %q problem %q remediation containing %q", diagnostic, tc.code, tc.problem, tc.remediation)
+			}
+			if diagnostic.Location.YAMLPath == "" {
+				t.Fatalf("diagnostic location = %#v, want retired field path", diagnostic.Location)
+			}
+		})
+	}
+}
+
 func TestFlowSchemaDocumentDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *testing.T) {
 	tests := []struct {
 		name         string
