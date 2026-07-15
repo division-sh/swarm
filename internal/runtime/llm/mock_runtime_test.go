@@ -47,7 +47,7 @@ func TestParseMockCompletionOutputFailsClosed(t *testing.T) {
 		raw  string
 		want string
 	}{
-		"empty":        {raw: `{}`, want: "produced no text or tool calls"},
+		"empty":         {raw: `{}`, want: "produced no text or tool calls"},
 		"unknown field": {raw: `{"text":"ok","fixture":"hidden"}`, want: "unknown field"},
 		"hidden tool":   {raw: `{"calls":[{"name":"network","arguments":{}}]}`, want: "not visible"},
 		"bad arguments": {raw: `{"calls":[{"name":"echo","arguments":{}}]}`, want: "is required"},

@@ -4,9 +4,38 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/config"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store"
 )
+
+func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
+	eventBus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	builder, err := buildSelectedContractAgentRuntimeFactory(publishSelectedContractForkEventsRequest{
+		Store:        &store.PostgresStore{},
+		LoadedSource: LoadedSelectedContractSource{},
+		AgentRuntime: selectedContractAgentRuntimePlan{
+			Proof: SelectedContractAgentRuntimeMaterialization{AgentRecipients: []string{"mock-agent"}},
+			Options: SelectedContractAgentRuntimeOptions{
+				Config: &config.Config{LLM: config.LLMConfig{Backend: "mock"}},
+			},
+		},
+	}, eventBus)
+	if err != nil {
+		t.Fatalf("build selected-contract mock runtime: %v", err)
+	}
+	if builder.factory == nil {
+		t.Fatal("selected-contract mock runtime returned no agent factory")
+	}
+	if builder.cleanup != nil {
+		builder.cleanup()
+	}
+}
 
 func TestSelectedContractStaticAgentRecordsIncludeInferredFlowRequiredAgents(t *testing.T) {
 	flow := runtimecontracts.FlowContractView{

@@ -25,6 +25,7 @@ func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
 	for _, rec := range []budgetspend.SpendRecord{
 		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 100, OutputTokens: 25, CostUSD: 0.000675, InvocationType: "anthropic", UsageAccounting: storepkg.AgentUsageAccountingExact, RecordedAt: since},
 		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", Model: "sonnet", ModelAlias: "regular", BackendProfile: "claude_cli", Provider: "claude", Transport: "cli", ResolvedModel: "sonnet", InputTokens: 50, OutputTokens: 10, CostUSD: 0.000300, InvocationType: "claude_cli", UsageAccounting: storepkg.AgentUsageAccountingEstimated, RecordedAt: since.Add(time.Minute)},
+		{ExecutionMode: "mock", FlowInstance: "flow/a", AgentID: "agent-1", Model: "mock-regular", ModelAlias: "regular", BackendProfile: "mock", Provider: "mock", Transport: "in_process", ResolvedModel: "mock-regular", InputTokens: 5, OutputTokens: 2, CostUSD: 0.000025, InvocationType: "mock_python", UsageAccounting: storepkg.AgentUsageAccountingEstimated, RecordedAt: since.Add(2 * time.Minute)},
 		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 7, OutputTokens: 3, CostUSD: 0.000010, InvocationType: "anthropic", UsageAccounting: storepkg.AgentUsageAccountingExact, RecordedAt: until},
 		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-2", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 999, OutputTokens: 999, CostUSD: 1.000000, InvocationType: "anthropic", UsageAccounting: storepkg.AgentUsageAccountingExact, RecordedAt: since.Add(time.Minute)},
 	} {
@@ -50,16 +51,20 @@ func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
 	usage := asMap(t, result["usage"])
 	exact := asMap(t, usage["exact"])
 	estimated := asMap(t, usage["estimated"])
-	if exact["ledger_entries"] != float64(1) || exact["input_tokens"] != float64(100) || estimated["ledger_entries"] != float64(1) || estimated["input_tokens"] != float64(50) {
+	if exact["ledger_entries"] != float64(1) || exact["input_tokens"] != float64(100) || estimated["ledger_entries"] != float64(2) || estimated["input_tokens"] != float64(55) {
 		t.Fatalf("usage totals = %#v", usage)
 	}
 	breakdown, _ := result["breakdown"].([]any)
-	if len(breakdown) != 2 {
-		t.Fatalf("breakdown = %#v, want two rows", result["breakdown"])
+	if len(breakdown) != 3 {
+		t.Fatalf("breakdown = %#v, want three rows", result["breakdown"])
 	}
 	first := asMap(t, breakdown[0])
 	if first["usage_accounting"] != storepkg.AgentUsageAccountingExact || first["model"] != "claude-3-5-sonnet" || first["provider"] != "anthropic" || first["transport"] != "api" || first["resolved_model"] != "claude-3-5-sonnet" {
 		t.Fatalf("first breakdown = %#v", first)
+	}
+	mock := asMap(t, breakdown[2])
+	if mock["execution_mode"] != "mock" || mock["provider"] != "mock" || mock["cost_display"] != "~$0.000025 (mock estimate)" {
+		t.Fatalf("mock breakdown = %#v", mock)
 	}
 	for _, forbidden := range []string{"prompt", "response", "raw_request", "raw_response"} {
 		if _, ok := result[forbidden]; ok {
