@@ -124,7 +124,7 @@ func requireExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx, autho
 }
 
 func requireExternalEffectRunActive(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, dialect storerunlifecycle.Dialect) error {
-	if authority.Kind == runtimeeffects.AuthorityConversationForkChat {
+	if authority.Kind == runtimeeffects.AuthorityConversationForkChat || authority.Kind == runtimeeffects.AuthorityStartupProbe {
 		return nil
 	}
 	runID := strings.TrimSpace(authority.SelectedFork.ForkRunID)
@@ -146,7 +146,7 @@ func requireExternalEffectRunActive(ctx context.Context, tx *sql.Tx, authority r
 }
 
 func externalEffectRunCurrent(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority, dialect storerunlifecycle.Dialect) (bool, error) {
-	if authority.Kind == runtimeeffects.AuthorityConversationForkChat {
+	if authority.Kind == runtimeeffects.AuthorityConversationForkChat || authority.Kind == runtimeeffects.AuthorityStartupProbe {
 		return true, nil
 	}
 	runID := strings.TrimSpace(authority.SelectedFork.ForkRunID)
