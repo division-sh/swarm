@@ -321,6 +321,7 @@ func TestForkedSourceSessionTurnAndConversationConsumersRefuse(t *testing.T) {
 				SessionID: uuid.NewString(), AgentID: identity.AgentID, RunID: identity.RunID, FlowInstance: identity.FlowInstance,
 				Memory: agentmemory.PlatformDefault(), RequestPayload: []byte(`{"request":true}`), ResponseRaw: []byte(`{"ok":true}`), ParseOK: true,
 			}
+			turn = managedAgentTurnRecordForTest(t, turn)
 			watchdog := runtimellm.ConversationWatchdogUpdate{
 				SessionID: lease.SessionID, AgentID: identity.AgentID, Identity: identity,
 				Watchdog: &runtimellm.ConversationWatchdog{State: "healthy_long_running", BlockingLayer: "session_execution", Action: "turn_long_running", Outcome: "observed", LastOutputAt: "2026-07-15T12:00:00Z", RecordedAt: "2026-07-15T12:00:30Z"},
