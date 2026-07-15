@@ -25,7 +25,7 @@ func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *provid
 	if source == nil {
 		return nil, fmt.Errorf("semantic source is required")
 	}
-	if marked, ok := source.(providerTriggerEventSourceMarker); ok && marked.ProviderTriggerEventsApplied() {
+	if marked, ok := semanticview.SourceCapability[providerTriggerEventSourceMarker](source); ok && marked.ProviderTriggerEventsApplied() {
 		if catalog != nil && marked.ProviderTriggerEventGeneration() == catalog.GenerationID() {
 			return source, nil
 		}

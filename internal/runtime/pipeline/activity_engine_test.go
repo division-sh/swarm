@@ -45,6 +45,7 @@ func TestPipelineActivityIntentWriterPersistsDurableActivityRequestEvent(t *test
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	intent := testActivityIntent("https://example.com/source")
+	intent.PlanGeneration = "sha256:" + strings.Repeat("a", 64)
 
 	writer := pipelineActivityIntentWriter{coordinator: pc}
 	if err := writer.WriteActivityIntents(testAuthorActivityContext(context.Background()), []runtimeengine.ActivityIntent{intent}); err != nil {
@@ -67,8 +68,15 @@ func TestPipelineActivityIntentWriterPersistsDurableActivityRequestEvent(t *test
 	if err := json.Unmarshal(request.Event.Payload(), &payload); err != nil {
 		t.Fatalf("payload unmarshal: %v", err)
 	}
-	if payload.Tool != "source_scrape" || payload.SuccessEvent != "research.scanner_source_scrape.succeeded" {
+	if payload.Tool != "source_scrape" || payload.PlanGeneration != intent.PlanGeneration || payload.SuccessEvent != "research.scanner_source_scrape.succeeded" {
 		t.Fatalf("request payload = %#v", payload)
+	}
+	recovered, err := activityIntentFromRequestEvent(request.Event)
+	if err != nil {
+		t.Fatalf("recover request intent: %v", err)
+	}
+	if recovered.PlanGeneration != intent.PlanGeneration {
+		t.Fatalf("recovered plan generation = %q, want %q", recovered.PlanGeneration, intent.PlanGeneration)
 	}
 	semanticPayload, err := canonicaljson.Decode(request.Event.Payload())
 	if err != nil {

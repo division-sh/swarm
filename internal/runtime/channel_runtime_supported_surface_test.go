@@ -119,11 +119,15 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			if err != nil {
 				t.Fatalf("OperationTool: %v", err)
 			}
+			privateToolID, planGeneration, err := binding.RuntimeActivityTarget("deliver")
+			if err != nil {
+				t.Fatalf("RuntimeActivityTarget: %v", err)
+			}
 			coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 				Module:               telegramConnectorSupportedSurfaceModule{source: source},
 				WorkflowStore:        workflowStore,
 				Credentials:          credentialStore,
-				ChannelActivityTools: map[string]runtimecontracts.ToolSchemaEntry{binding.RuntimeActivityToolID("deliver"): privateTool},
+				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{privateToolID: {Tool: privateTool, PlanGeneration: planGeneration}},
 			})
 			startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db, workflowStore)
 			executor := configuredChannelExecutor(source, binding, credentialStore, coordinator)
@@ -172,7 +176,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			if calls.Load() != 1 {
 				t.Fatalf("provider calls after replay = %d, want one", calls.Load())
 			}
-			assertConfiguredChannelJournal(t, ctx, db, selected, runID, binding.RuntimeActivityToolID("deliver"), 1)
+			assertConfiguredChannelJournal(t, ctx, db, selected, runID, privateToolID, 1)
 
 			if _, err := executor.Execute(callCtx, "channel.ops.deliver", map[string]any{
 				"presentation": map[string]any{"text": "Changed under same identity"}, "actions": []any{},
@@ -197,7 +201,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			if calls.Load() != 2 {
 				t.Fatalf("provider calls after ack-loss replay = %d, want two total distinct operations", calls.Load())
 			}
-			assertConfiguredChannelJournal(t, ctx, db, selected, runID, binding.RuntimeActivityToolID("deliver"), 2)
+			assertConfiguredChannelJournal(t, ctx, db, selected, runID, privateToolID, 2)
 
 			if err := credentialStore.Delete(ctx, "telegram_bot_token"); err != nil {
 				t.Fatalf("delete Telegram credential: %v", err)
@@ -208,6 +212,69 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			}
 			if calls.Load() != 2 {
 				t.Fatalf("missing credential reached provider: calls=%d", calls.Load())
+			}
+
+			if err := credentialStore.Set(ctx, "telegram_bot_token", "provider-secret"); err != nil {
+				t.Fatalf("restore Telegram credential: %v", err)
+			}
+			replacementPlan := binding.Structural.Clone()
+			replacementOperation := replacementPlan.Operations["deliver"]
+			replacementText := replacementOperation.ToolSchema.InputSchema.Properties["text"]
+			if replacementText.MaxLength == nil || *replacementText.MaxLength < 2 {
+				t.Fatalf("replacement fixture text schema = %#v", replacementText)
+			}
+			replacementMaximum := *replacementText.MaxLength - 1
+			replacementText.MaxLength = &replacementMaximum
+			replacementOperation.ToolSchema.InputSchema.Properties["text"] = replacementText
+			replacementPlan.Operations["deliver"] = replacementOperation
+			replacementBinding, err := packs.NewOutboundBindingPlan("ops", replacementPlan, "42", nil)
+			if err != nil {
+				t.Fatalf("replacement binding: %v", err)
+			}
+			replacementTool, err := replacementBinding.Structural.OperationTool("deliver")
+			if err != nil {
+				t.Fatalf("replacement OperationTool: %v", err)
+			}
+			replacementToolID, replacementGeneration, err := replacementBinding.RuntimeActivityTarget("deliver")
+			if err != nil {
+				t.Fatalf("replacement RuntimeActivityTarget: %v", err)
+			}
+			if replacementToolID == privateToolID || replacementGeneration == planGeneration {
+				t.Fatal("replacement plan reused the prior private target generation")
+			}
+			mismatchedCoordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+				Module:        telegramConnectorSupportedSurfaceModule{source: source},
+				WorkflowStore: workflowStore,
+				Credentials:   credentialStore,
+				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{
+					privateToolID: {Tool: replacementTool, PlanGeneration: replacementGeneration},
+				},
+			})
+			coordinator = mismatchedCoordinator
+			mismatchedExecutor := configuredChannelExecutor(source, binding, credentialStore, mismatchedCoordinator)
+			mismatchedCtx := configuredChannelCallContext(ctx, actor, runID, entityID, flowInstance, "mismatched-plan-generation")
+			if _, err := mismatchedExecutor.Execute(mismatchedCtx, "channel.ops.deliver", input); err == nil {
+				t.Fatal("request executed through a private target carrying a different generation")
+			}
+			if calls.Load() != 2 {
+				t.Fatalf("mismatched plan generation reached provider: calls=%d", calls.Load())
+			}
+			reloadedCoordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+				Module:        telegramConnectorSupportedSurfaceModule{source: source},
+				WorkflowStore: workflowStore,
+				Credentials:   credentialStore,
+				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{
+					replacementToolID: {Tool: replacementTool, PlanGeneration: replacementGeneration},
+				},
+			})
+			coordinator = reloadedCoordinator
+			staleExecutor := configuredChannelExecutor(source, binding, credentialStore, reloadedCoordinator)
+			staleCtx := configuredChannelCallContext(ctx, actor, runID, entityID, flowInstance, "stale-plan-generation")
+			if _, err := staleExecutor.Execute(staleCtx, "channel.ops.deliver", input); err == nil {
+				t.Fatal("persisted old-generation request executed through replacement plan")
+			}
+			if calls.Load() != 2 {
+				t.Fatalf("stale plan generation reached provider: calls=%d", calls.Load())
 			}
 		})
 	}

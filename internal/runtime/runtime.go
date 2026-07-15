@@ -606,8 +606,8 @@ func workflowModuleWithProviderPacks(module runtimepipeline.WorkflowModule, trig
 	return connectorPackWorkflowModule{WorkflowModule: module, source: source}, source, nil
 }
 
-func compiledChannelActivityTools(bindings []packs.OutboundBindingPlan) (map[string]runtimecontracts.ToolSchemaEntry, error) {
-	out := map[string]runtimecontracts.ToolSchemaEntry{}
+func compiledChannelActivityTools(bindings []packs.OutboundBindingPlan) (map[string]runtimepipeline.ChannelActivityTarget, error) {
+	out := map[string]runtimepipeline.ChannelActivityTarget{}
 	for _, binding := range bindings {
 		operations := make([]string, 0, len(binding.Structural.Operations))
 		for operation := range binding.Structural.Operations {
@@ -615,7 +615,10 @@ func compiledChannelActivityTools(bindings []packs.OutboundBindingPlan) (map[str
 		}
 		sort.Strings(operations)
 		for _, operation := range operations {
-			id := binding.RuntimeActivityToolID(operation)
+			id, generation, err := binding.RuntimeActivityTarget(operation)
+			if err != nil {
+				return nil, fmt.Errorf("channel binding %q operation %q private target: %w", binding.ID, operation, err)
+			}
 			if _, exists := out[id]; exists {
 				return nil, fmt.Errorf("duplicate private channel activity tool %q", id)
 			}
@@ -623,7 +626,7 @@ func compiledChannelActivityTools(bindings []packs.OutboundBindingPlan) (map[str
 			if err != nil {
 				return nil, fmt.Errorf("channel binding %q operation %q: %w", binding.ID, operation, err)
 			}
-			out[id] = tool
+			out[id] = runtimepipeline.ChannelActivityTarget{Tool: tool, PlanGeneration: generation}
 		}
 	}
 	return out, nil

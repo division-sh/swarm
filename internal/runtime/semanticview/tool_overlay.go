@@ -14,18 +14,6 @@ type toolOverlaySource struct {
 
 func (s toolOverlaySource) BaseSemanticSource() Source { return s.Source }
 
-func (s toolOverlaySource) ConnectorPackImportsApplied() bool {
-	type marker interface{ ConnectorPackImportsApplied() bool }
-	marked, ok := s.Source.(marker)
-	return ok && marked.ConnectorPackImportsApplied()
-}
-
-func (s toolOverlaySource) ProviderTriggerEventsApplied() bool {
-	type marker interface{ ProviderTriggerEventsApplied() bool }
-	marked, ok := s.Source.(marker)
-	return ok && marked.ProviderTriggerEventsApplied()
-}
-
 func (s toolOverlaySource) ToolEntries() map[string]runtimecontracts.ToolSchemaEntry {
 	out := s.Source.ToolEntries()
 	for id, tool := range s.tools {

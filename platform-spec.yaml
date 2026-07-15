@@ -8187,7 +8187,10 @@ tool_model:
       accepted_trigger_inventory: internal/providertriggers.CatalogSnapshot
       accepted_connector_inventory: internal/providerconnectors.PackRegistry
       structural_compiler: internal/packs.CompileChannelInventory
+      directional_assignability_and_cardinality: internal/packs channel relation owner
+      semantic_source_capabilities: internal/runtime/semanticview.SourceCapability
       outbound_binding: internal/packs.OutboundBindingPlan
+      compiled_plan_generation: internal/packs.SatisfactionPlan.GenerationID
       runtime_adapter: internal/runtime/tools channel handler
       private_activity_targets: internal/runtime/pipeline PipelineCoordinator.ChannelActivityTools
       durable_execution: internal/runtime/pipeline activity attempt owner
@@ -8200,9 +8203,13 @@ tool_model:
       construction and reload, human/JSON capability readback, selected constraints, and outbound status consume that plan.
       A configured runtime exposes only channel.<binding>.<operation> with the provider-neutral input/output schemas. The
       channel handler is the sole operation adapter: it validates that input, injects the immutable bound destination,
-      applies the exact recursive mapping, and lowers one private platform.channel_activity.<binding>.<operation> target
-      into the durable activity journal. Private targets carry connector HTTP, credential, response, and result-projection
-      details inside the coordinator and never enter an agent-visible or authored generic tool registry.
+      applies the exact recursive mapping, and lowers one private
+      platform.channel_activity.<binding>.<operation>.g<compiled-plan-digest> target into the durable activity journal.
+      Private targets carry connector HTTP, credential, response, result-projection, and exact compiled-plan-generation
+      details inside the coordinator and never enter an agent-visible or authored generic tool registry. Semantic-source
+      wrappers are capability-transparent: consumers recursively unwrap through one owner for trigger import generation,
+      target-free authority, connector import generation, and connector provenance instead of asserting only the outer
+      wrapper.
     opaque_reference_slots:
       exact:
       - destination
@@ -8235,6 +8242,9 @@ tool_model:
       - require exact operation and event key sets; missing, duplicate, or unknown rows fail admission
       - require exact non_idempotent_write effect equality between interface operation and connector tool
       - recursively require every required interface input/context leaf to be consumed once and every required connector target leaf to be assigned once
+      - reject duplicate or ancestor/descendant overlap in mapped targets and recursively consumed item sources; the compiler records one topology that runtime preparation consumes
+      - prove recursively that every admitted source value is assignable to its target, including object requiredness and additional-properties policy, array items and bounds, enums, patterns, and scalar bounds
+      - reject any directional relation the finite compiler cannot prove; constraint intersection is not assignability
       - permit only scalar identity, one ordered each-item object projection, number_to_text, and decimal_text_to_int32 mappings
       - reject caller-supplied provider context, ambient values, defaults, functions, concatenation, conditions, or partial mappings
       - validate connector output first, then apply the compiled channel output projection, then validate the satisfier-bound opaque result
@@ -8292,6 +8302,10 @@ tool_model:
       connector result schema validates second; the compiled channel result and opaque output schema validate third; only
       that semantic result is journaled and returned. Same-key replay and recovery consume the terminal attempt without
       provider redispatch. A started attempt after acknowledgment loss is outcome_uncertain and must never auto-retry.
+      Every private request persists the complete compiled-plan generation and names a target containing that digest.
+      Recovery resolves only that exact target and generation; a replacement or unavailable generation journals a typed
+      failure before provider dispatch, while an already-terminal attempt remains authoritative and is reused. Reload must
+      never reinterpret an old request through the current plan.
       Generic connector registration, caller-supplied connector destinations, and direct channel HTTP dispatch are not
       channel execution authorities.
     retired_owners:
