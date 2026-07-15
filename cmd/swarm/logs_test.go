@@ -552,9 +552,9 @@ func TestRuntimeLogRedundantMessageTuplesMatchSpec(t *testing.T) {
 	want := map[runtimeLogMessageTuple]struct{}{}
 	for _, row := range tuples.Content {
 		want[runtimeLogMessageTuple{
-			Component: yamlScalar(t, row, "component"),
-			Action:    yamlScalar(t, row, "action"),
-			Message:   yamlScalar(t, row, "message"),
+			Component: driftRequiredScalar(t, row, "component"),
+			Action:    driftRequiredScalar(t, row, "action"),
+			Message:   driftRequiredScalar(t, row, "message"),
 		}] = struct{}{}
 	}
 	if !reflect.DeepEqual(runtimeLogRedundantMessageTuples, want) {

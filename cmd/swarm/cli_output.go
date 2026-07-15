@@ -103,8 +103,6 @@ const (
 	cliHumanCodeRoutingTopology             = userfacing.HumanCodeRoutingTopology
 )
 
-var cliHumanCodePhrases = userfacing.HumanCodePhrases()
-
 func formatCLIHumanCode(family cliHumanCodeFamily, raw string) string {
 	return userfacing.ProjectHumanCode(family, raw)
 }

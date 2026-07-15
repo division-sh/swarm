@@ -1,4 +1,4 @@
-package main
+package userfacing_test
 
 import (
 	"fmt"
@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -24,28 +25,30 @@ import (
 
 func TestCLIHumanCodePhrasesMatchCurrentCanonicalValues(t *testing.T) {
 	want := cliHumanCodePhrasesFromSpec(t, loadCLIHumanCodeProjectionSpec(t))
-	if !reflect.DeepEqual(cliHumanCodePhrases, want) {
-		t.Fatalf("human code phrase registry differs from authoritative platform spec:\ngot:  %#v\nwant: %#v", cliHumanCodePhrases, want)
+	got := userfacing.HumanCodePhrases()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("human code phrase registry differs from authoritative platform spec:\ngot:  %#v\nwant: %#v", got, want)
 	}
 }
 
 func TestCLIHumanCodePhraseParityRejectsSpecOnlyDrift(t *testing.T) {
 	projection := loadCLIHumanCodeProjectionSpec(t)
-	families := driftMappingValue(projection, "families")
-	memorySource := driftMappingValue(families, "memory_source")
-	phrases := driftMappingValue(memorySource, "phrases")
-	driftMappingValue(phrases, "platform_default").Value = "platform supplied"
+	families := humanProjectionMappingValue(projection, "families")
+	memorySource := humanProjectionMappingValue(families, "memory_source")
+	phrases := humanProjectionMappingValue(memorySource, "phrases")
+	humanProjectionMappingValue(phrases, "platform_default").Value = "platform supplied"
 
-	if got := cliHumanCodePhrasesFromSpec(t, projection); reflect.DeepEqual(cliHumanCodePhrases, got) {
+	if got := cliHumanCodePhrasesFromSpec(t, projection); reflect.DeepEqual(userfacing.HumanCodePhrases(), got) {
 		t.Fatal("spec-only phrase drift did not break implementation parity")
 	}
 }
 
 func TestProviderHumanCodePhrasesMatchMachineOwnersAndCapabilitySpec(t *testing.T) {
 	machineValues := packs.ProviderHumanCodeValues()
+	phrases := userfacing.HumanCodePhrases()
 	for family, want := range machineValues {
-		got := make([]string, 0, len(cliHumanCodePhrases[family]))
-		for code := range cliHumanCodePhrases[family] {
+		got := make([]string, 0, len(phrases[family]))
+		for code := range phrases[family] {
 			got = append(got, code)
 		}
 		sort.Strings(got)
@@ -61,10 +64,10 @@ func TestProviderHumanCodePhrasesMatchMachineOwnersAndCapabilitySpec(t *testing.
 
 func TestProviderHumanCodeParityRejectsKnownCapabilitySpecDrift(t *testing.T) {
 	root := loadPlatformSpecRootForHumanProjection(t)
-	toolModel := driftMappingValue(root, "tool_model")
-	surface := driftMappingValue(toolModel, "provider_capability_surface")
-	facts := driftMappingValue(surface, "facts")
-	known := driftMappingValue(facts, "known_capability_codes")
+	toolModel := humanProjectionMappingValue(root, "tool_model")
+	surface := humanProjectionMappingValue(toolModel, "provider_capability_surface")
+	facts := humanProjectionMappingValue(surface, "facts")
+	known := humanProjectionMappingValue(facts, "known_capability_codes")
 	known.Content = append(known.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: "adversarial_current_capability"})
 
 	got := providerKnownCapabilityCodesFromSpec(t, root)
@@ -76,7 +79,7 @@ func TestProviderHumanCodeParityRejectsKnownCapabilitySpecDrift(t *testing.T) {
 
 func loadPlatformSpecRootForHumanProjection(t *testing.T) *yaml.Node {
 	t.Helper()
-	source, err := yamlsource.LoadFile(filepath.Join(driftTestRepoRoot(t), "platform-spec.yaml"))
+	source, err := yamlsource.LoadFile(filepath.Join(humanProjectionRepoRoot(t), "platform-spec.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,12 +90,33 @@ func loadPlatformSpecRootForHumanProjection(t *testing.T) *yaml.Node {
 	return doc.Content[0]
 }
 
+func humanProjectionRepoRoot(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve human-code projection test source")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+}
+
+func humanProjectionMappingValue(node *yaml.Node, key string) *yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
 func providerKnownCapabilityCodesFromSpec(t *testing.T, root *yaml.Node) []string {
 	t.Helper()
-	toolModel := driftMappingValue(root, "tool_model")
-	surface := driftMappingValue(toolModel, "provider_capability_surface")
-	facts := driftMappingValue(surface, "facts")
-	known := driftMappingValue(facts, "known_capability_codes")
+	toolModel := humanProjectionMappingValue(root, "tool_model")
+	surface := humanProjectionMappingValue(toolModel, "provider_capability_surface")
+	facts := humanProjectionMappingValue(surface, "facts")
+	known := humanProjectionMappingValue(facts, "known_capability_codes")
 	if known == nil || known.Kind != yaml.SequenceNode {
 		t.Fatal("provider_capability_surface.facts.known_capability_codes must be a sequence")
 	}
@@ -106,21 +130,22 @@ func providerKnownCapabilityCodesFromSpec(t *testing.T, root *yaml.Node) []strin
 
 func loadCLIHumanCodeProjectionSpec(t *testing.T) *yaml.Node {
 	t.Helper()
-	cli := loadCLISpecification(t)
-	foundations := driftMappingValue(cli, "foundations")
-	outputContract := driftMappingValue(foundations, "output_contract")
-	sharedRenderer := driftMappingValue(outputContract, "shared_renderer_contract")
-	projection := driftMappingValue(sharedRenderer, "human_code_projection")
+	root := loadPlatformSpecRootForHumanProjection(t)
+	cli := humanProjectionMappingValue(root, "cli_specification")
+	foundations := humanProjectionMappingValue(cli, "foundations")
+	outputContract := humanProjectionMappingValue(foundations, "output_contract")
+	sharedRenderer := humanProjectionMappingValue(outputContract, "shared_renderer_contract")
+	projection := humanProjectionMappingValue(sharedRenderer, "human_code_projection")
 	if projection == nil {
 		t.Fatal("platform spec is missing human_code_projection")
 	}
 	return projection
 }
 
-func cliHumanCodePhrasesFromSpec(t *testing.T, projection *yaml.Node) map[cliHumanCodeFamily]map[string]string {
+func cliHumanCodePhrasesFromSpec(t *testing.T, projection *yaml.Node) map[userfacing.HumanCodeFamily]map[string]string {
 	t.Helper()
-	out := map[cliHumanCodeFamily]map[string]string{}
-	families := driftMappingValue(projection, "families")
+	out := map[userfacing.HumanCodeFamily]map[string]string{}
+	families := humanProjectionMappingValue(projection, "families")
 	if families == nil {
 		t.Fatal("human_code_projection is missing families")
 	}
@@ -137,42 +162,42 @@ func cliHumanCodePhrasesFromSpec(t *testing.T, projection *yaml.Node) map[cliHum
 		}
 	})
 
-	for specName, family := range map[string]cliHumanCodeFamily{
-		"run_status":                  cliHumanCodeRunStatus,
-		"operational_state":           cliHumanCodeOperationalState,
-		"agent_status":                cliHumanCodeAgentStatus,
-		"memory_source":               cliHumanCodeMemorySource,
-		"delivery_status":             cliHumanCodeDeliveryStatus,
-		"provider_subject_kind":       cliHumanCodeProviderSubjectKind,
-		"provider_subject_status":     cliHumanCodeProviderSubjectStatus,
-		"provider_capability":         cliHumanCodeProviderCapability,
-		"provider_guarantee":          cliHumanCodeProviderGuarantee,
-		"provider_requirement_status": cliHumanCodeProviderRequirementStatus,
+	for specName, family := range map[string]userfacing.HumanCodeFamily{
+		"run_status":                  userfacing.HumanCodeRunStatus,
+		"operational_state":           userfacing.HumanCodeOperationalState,
+		"agent_status":                userfacing.HumanCodeAgentStatus,
+		"memory_source":               userfacing.HumanCodeMemorySource,
+		"delivery_status":             userfacing.HumanCodeDeliveryStatus,
+		"provider_subject_kind":       userfacing.HumanCodeProviderSubjectKind,
+		"provider_subject_status":     userfacing.HumanCodeProviderSubjectStatus,
+		"provider_capability":         userfacing.HumanCodeProviderCapability,
+		"provider_guarantee":          userfacing.HumanCodeProviderGuarantee,
+		"provider_requirement_status": userfacing.HumanCodeProviderRequirementStatus,
 	} {
-		phrases := driftMappingValue(driftMappingValue(families, specName), "phrases")
+		phrases := humanProjectionMappingValue(humanProjectionMappingValue(families, specName), "phrases")
 		forEachYAMLMapping(t, phrases, func(code, phrase string) {
 			addCLIHumanCodeSpecPhrase(t, out, family, code, phrase)
 		})
 	}
 
-	forEachYAMLSequence(t, driftMappingValue(driftMappingValue(families, "run_blocking_tuples"), "current_non_empty"), func(row *yaml.Node) {
-		addCLIHumanCodeSpecPhrase(t, out, cliHumanCodeRunBlockingLayer, yamlScalar(t, row, "blocking_layer"), yamlScalar(t, row, "layer_phrase"))
-		addCLIHumanCodeSpecPhrase(t, out, cliHumanCodeRunBlockingReason, yamlScalar(t, row, "blocking_reason"), yamlScalar(t, row, "reason_phrase"))
+	forEachYAMLSequence(t, humanProjectionMappingValue(humanProjectionMappingValue(families, "run_blocking_tuples"), "current_non_empty"), func(row *yaml.Node) {
+		addCLIHumanCodeSpecPhrase(t, out, userfacing.HumanCodeRunBlockingLayer, yamlScalar(t, row, "blocking_layer"), yamlScalar(t, row, "layer_phrase"))
+		addCLIHumanCodeSpecPhrase(t, out, userfacing.HumanCodeRunBlockingReason, yamlScalar(t, row, "blocking_reason"), yamlScalar(t, row, "reason_phrase"))
 	})
-	forEachYAMLSequence(t, driftMappingValue(driftMappingValue(families, "agent_lifecycle_tuples"), "current"), func(row *yaml.Node) {
-		addCLIHumanCodeSpecPhrase(t, out, cliHumanCodeAgentLifecycleState, yamlScalar(t, row, "state"), yamlScalar(t, row, "state_phrase"))
-		addCLIHumanCodeSpecPhrase(t, out, cliHumanCodeAgentLifecycleBlockingLayer, yamlScalar(t, row, "blocking_layer"), yamlScalar(t, row, "layer_phrase"))
+	forEachYAMLSequence(t, humanProjectionMappingValue(humanProjectionMappingValue(families, "agent_lifecycle_tuples"), "current"), func(row *yaml.Node) {
+		addCLIHumanCodeSpecPhrase(t, out, userfacing.HumanCodeAgentLifecycleState, yamlScalar(t, row, "state"), yamlScalar(t, row, "state_phrase"))
+		addCLIHumanCodeSpecPhrase(t, out, userfacing.HumanCodeAgentLifecycleBlockingLayer, yamlScalar(t, row, "blocking_layer"), yamlScalar(t, row, "layer_phrase"))
 	})
-	forEachYAMLSequence(t, driftMappingValue(driftMappingValue(families, "watchdog_tuples"), "current"), func(row *yaml.Node) {
-		addCLIHumanCodeSpecPhrase(t, out, cliHumanCodeWatchdogState, yamlScalar(t, row, "state"), yamlScalar(t, row, "state_phrase"))
-		addCLIHumanCodeSpecPhrase(t, out, cliHumanCodeWatchdogBlockingLayer, yamlScalar(t, row, "blocking_layer"), yamlScalar(t, row, "layer_phrase"))
-		addCLIHumanCodeSpecPhrase(t, out, cliHumanCodeWatchdogAction, yamlScalar(t, row, "action"), yamlScalar(t, row, "action_phrase"))
-		addCLIHumanCodeSpecPhrase(t, out, cliHumanCodeWatchdogOutcome, yamlScalar(t, row, "outcome"), yamlScalar(t, row, "outcome_phrase"))
+	forEachYAMLSequence(t, humanProjectionMappingValue(humanProjectionMappingValue(families, "watchdog_tuples"), "current"), func(row *yaml.Node) {
+		addCLIHumanCodeSpecPhrase(t, out, userfacing.HumanCodeWatchdogState, yamlScalar(t, row, "state"), yamlScalar(t, row, "state_phrase"))
+		addCLIHumanCodeSpecPhrase(t, out, userfacing.HumanCodeWatchdogBlockingLayer, yamlScalar(t, row, "blocking_layer"), yamlScalar(t, row, "layer_phrase"))
+		addCLIHumanCodeSpecPhrase(t, out, userfacing.HumanCodeWatchdogAction, yamlScalar(t, row, "action"), yamlScalar(t, row, "action_phrase"))
+		addCLIHumanCodeSpecPhrase(t, out, userfacing.HumanCodeWatchdogOutcome, yamlScalar(t, row, "outcome"), yamlScalar(t, row, "outcome_phrase"))
 	})
 	return out
 }
 
-func addCLIHumanCodeSpecPhrase(t *testing.T, target map[cliHumanCodeFamily]map[string]string, family cliHumanCodeFamily, code, phrase string) {
+func addCLIHumanCodeSpecPhrase(t *testing.T, target map[userfacing.HumanCodeFamily]map[string]string, family userfacing.HumanCodeFamily, code, phrase string) {
 	t.Helper()
 	if target[family] == nil {
 		target[family] = map[string]string{}
@@ -215,7 +240,7 @@ func forEachYAMLSequence(t *testing.T, node *yaml.Node, visit func(*yaml.Node)) 
 
 func yamlScalar(t *testing.T, node *yaml.Node, key string) string {
 	t.Helper()
-	value := driftMappingValue(node, key)
+	value := humanProjectionMappingValue(node, key)
 	if value == nil || value.Kind != yaml.ScalarNode || strings.TrimSpace(value.Value) == "" {
 		t.Fatalf("YAML mapping is missing non-empty scalar %q", key)
 	}
@@ -230,7 +255,7 @@ func yamlNodeKind(node *yaml.Node) yaml.Kind {
 }
 
 func TestCLIHumanCodePhrasesUseAuthorFacingVocabulary(t *testing.T) {
-	for family, phrases := range cliHumanCodePhrases {
+	for family, phrases := range userfacing.HumanCodePhrases() {
 		for code, phrase := range phrases {
 			if found := userfacing.FindForbidden(userfacing.ProfileStatusDetail, phrase); len(found) > 0 {
 				t.Errorf("family %s code %q phrase %q contains forbidden terms %v", family, code, phrase, found)
@@ -241,56 +266,56 @@ func TestCLIHumanCodePhrasesUseAuthorFacingVocabulary(t *testing.T) {
 
 func TestCLIHumanCodeUnknownValuesRemainVerbatim(t *testing.T) {
 	const raw = "  future_status_code  "
-	if got := formatCLIHumanCode(cliHumanCodeRunStatus, raw); got != raw {
+	if got := userfacing.ProjectHumanCode(userfacing.HumanCodeRunStatus, raw); got != raw {
 		t.Fatalf("unknown projection = %q, want exact raw value %q", got, raw)
 	}
 }
 
 func TestCLIHumanCodePublicConsumersUseSharedProjector(t *testing.T) {
 	required := map[string][]string{
-		"agents.go\x00writeAgentListResult":                            {string(cliHumanCodeAgentStatus), string(cliHumanCodeMemorySource)},
-		"agents.go\x00writeAgentDeliveryLifecycleListResult":           {string(cliHumanCodeDeliveryStatus)},
-		"agents.go\x00writeAgentDiagnosisResult":                       {string(cliHumanCodeAgentLifecycleBlockingLayer), string(cliHumanCodeAgentLifecycleState), string(cliHumanCodeAgentStatus), string(cliHumanCodeWatchdogAction), string(cliHumanCodeWatchdogBlockingLayer), string(cliHumanCodeWatchdogOutcome), string(cliHumanCodeWatchdogState)},
-		"agents.go\x00writeAgentDetailResult":                          {string(cliHumanCodeAgentStatus), string(cliHumanCodeMemorySource)},
-		"bundle.go\x00writeBundleAgentsHuman":                          {string(cliHumanCodeMemorySource)},
+		"agents.go\x00writeAgentListResult":                            {string(userfacing.HumanCodeAgentStatus), string(userfacing.HumanCodeMemorySource)},
+		"agents.go\x00writeAgentDeliveryLifecycleListResult":           {string(userfacing.HumanCodeDeliveryStatus)},
+		"agents.go\x00writeAgentDiagnosisResult":                       {string(userfacing.HumanCodeAgentLifecycleBlockingLayer), string(userfacing.HumanCodeAgentLifecycleState), string(userfacing.HumanCodeAgentStatus), string(userfacing.HumanCodeWatchdogAction), string(userfacing.HumanCodeWatchdogBlockingLayer), string(userfacing.HumanCodeWatchdogOutcome), string(userfacing.HumanCodeWatchdogState)},
+		"agents.go\x00writeAgentDetailResult":                          {string(userfacing.HumanCodeAgentStatus), string(userfacing.HumanCodeMemorySource)},
+		"bundle.go\x00writeBundleAgentsHuman":                          {string(userfacing.HumanCodeMemorySource)},
 		"cli_identifier_resolver.go\x00newCLIIdentifierAmbiguousError": {"<dynamic>"},
-		"diagnostics.go\x00writeDiagnosticRunList":                     {string(cliHumanCodeRunStatus)},
-		"diagnostics.go\x00writeDiagnosticRunHeader":                   {string(cliHumanCodeRunStatus)},
-		"diagnostics.go\x00writeDiagnosticRunDiagnosis":                {string(cliHumanCodeDeliveryStatus), string(cliHumanCodeOperationalState), string(cliHumanCodeRunBlockingLayer), string(cliHumanCodeRunBlockingReason), string(cliHumanCodeRunStatus)},
-		"diagnostics.go\x00writeDiagnosticRunTrace":                    {string(cliHumanCodeDeliveryStatus)},
-		"diagnostics.go\x00writeDiagnosticRunTraceDeliverySummary":     {string(cliHumanCodeDeliveryStatus)},
-		"diagnostics.go\x00writeDiagnosticRunTraceDeliveryDetail":      {string(cliHumanCodeDeliveryStatus)},
-		"describe.go\x00writeRoutingTopologyText":                      {string(cliHumanCodeRoutingTopology)},
-		"event_publish.go\x00writeEventPublishResult":                  {string(cliHumanCodeDeliveryStatus)},
-		"events.go\x00writeEventDetailResult":                          {string(cliHumanCodeDeliveryStatus)},
-		"events.go\x00writeEventReplayResult":                          {string(cliHumanCodeDeliveryStatus)},
-		"fork.go\x00writeRunForkHuman":                                 {string(cliHumanCodeRunStatus)},
-		"run_command.go\x00writeRunCommandStarted":                     {string(cliHumanCodeRunStatus)},
-		"run_command.go\x00writeRunCommandReattached":                  {string(cliHumanCodeRunStatus)},
-		"run_command.go\x00Write":                                      {string(cliHumanCodeDeliveryStatus)},
-		"run_command.go\x00writeRunCommandTerminalSummary":             {string(cliHumanCodeRunStatus)},
+		"diagnostics.go\x00writeDiagnosticRunList":                     {string(userfacing.HumanCodeRunStatus)},
+		"diagnostics.go\x00writeDiagnosticRunHeader":                   {string(userfacing.HumanCodeRunStatus)},
+		"diagnostics.go\x00writeDiagnosticRunDiagnosis":                {string(userfacing.HumanCodeDeliveryStatus), string(userfacing.HumanCodeOperationalState), string(userfacing.HumanCodeRunBlockingLayer), string(userfacing.HumanCodeRunBlockingReason), string(userfacing.HumanCodeRunStatus)},
+		"diagnostics.go\x00writeDiagnosticRunTrace":                    {string(userfacing.HumanCodeDeliveryStatus)},
+		"diagnostics.go\x00writeDiagnosticRunTraceDeliverySummary":     {string(userfacing.HumanCodeDeliveryStatus)},
+		"diagnostics.go\x00writeDiagnosticRunTraceDeliveryDetail":      {string(userfacing.HumanCodeDeliveryStatus)},
+		"describe.go\x00writeRoutingTopologyText":                      {string(userfacing.HumanCodeRoutingTopology)},
+		"event_publish.go\x00writeEventPublishResult":                  {string(userfacing.HumanCodeDeliveryStatus)},
+		"events.go\x00writeEventDetailResult":                          {string(userfacing.HumanCodeDeliveryStatus)},
+		"events.go\x00writeEventReplayResult":                          {string(userfacing.HumanCodeDeliveryStatus)},
+		"fork.go\x00writeRunForkHuman":                                 {string(userfacing.HumanCodeRunStatus)},
+		"run_command.go\x00writeRunCommandStarted":                     {string(userfacing.HumanCodeRunStatus)},
+		"run_command.go\x00writeRunCommandReattached":                  {string(userfacing.HumanCodeRunStatus)},
+		"run_command.go\x00Write":                                      {string(userfacing.HumanCodeDeliveryStatus)},
+		"run_command.go\x00writeRunCommandTerminalSummary":             {string(userfacing.HumanCodeRunStatus)},
 	}
 
 	familyValues := map[string]string{
-		"cliHumanCodeRunStatus":                   string(cliHumanCodeRunStatus),
-		"cliHumanCodeOperationalState":            string(cliHumanCodeOperationalState),
-		"cliHumanCodeRunBlockingLayer":            string(cliHumanCodeRunBlockingLayer),
-		"cliHumanCodeRunBlockingReason":           string(cliHumanCodeRunBlockingReason),
-		"cliHumanCodeAgentStatus":                 string(cliHumanCodeAgentStatus),
-		"cliHumanCodeMemorySource":                string(cliHumanCodeMemorySource),
-		"cliHumanCodeDeliveryStatus":              string(cliHumanCodeDeliveryStatus),
-		"cliHumanCodeAgentLifecycleState":         string(cliHumanCodeAgentLifecycleState),
-		"cliHumanCodeAgentLifecycleBlockingLayer": string(cliHumanCodeAgentLifecycleBlockingLayer),
-		"cliHumanCodeWatchdogState":               string(cliHumanCodeWatchdogState),
-		"cliHumanCodeWatchdogBlockingLayer":       string(cliHumanCodeWatchdogBlockingLayer),
-		"cliHumanCodeWatchdogAction":              string(cliHumanCodeWatchdogAction),
-		"cliHumanCodeWatchdogOutcome":             string(cliHumanCodeWatchdogOutcome),
-		"cliHumanCodeProviderSubjectKind":         string(cliHumanCodeProviderSubjectKind),
-		"cliHumanCodeProviderSubjectStatus":       string(cliHumanCodeProviderSubjectStatus),
-		"cliHumanCodeProviderCapability":          string(cliHumanCodeProviderCapability),
-		"cliHumanCodeProviderGuarantee":           string(cliHumanCodeProviderGuarantee),
-		"cliHumanCodeProviderRequirementStatus":   string(cliHumanCodeProviderRequirementStatus),
-		"cliHumanCodeRoutingTopology":             string(cliHumanCodeRoutingTopology),
+		"cliHumanCodeRunStatus":                   string(userfacing.HumanCodeRunStatus),
+		"cliHumanCodeOperationalState":            string(userfacing.HumanCodeOperationalState),
+		"cliHumanCodeRunBlockingLayer":            string(userfacing.HumanCodeRunBlockingLayer),
+		"cliHumanCodeRunBlockingReason":           string(userfacing.HumanCodeRunBlockingReason),
+		"cliHumanCodeAgentStatus":                 string(userfacing.HumanCodeAgentStatus),
+		"cliHumanCodeMemorySource":                string(userfacing.HumanCodeMemorySource),
+		"cliHumanCodeDeliveryStatus":              string(userfacing.HumanCodeDeliveryStatus),
+		"cliHumanCodeAgentLifecycleState":         string(userfacing.HumanCodeAgentLifecycleState),
+		"cliHumanCodeAgentLifecycleBlockingLayer": string(userfacing.HumanCodeAgentLifecycleBlockingLayer),
+		"cliHumanCodeWatchdogState":               string(userfacing.HumanCodeWatchdogState),
+		"cliHumanCodeWatchdogBlockingLayer":       string(userfacing.HumanCodeWatchdogBlockingLayer),
+		"cliHumanCodeWatchdogAction":              string(userfacing.HumanCodeWatchdogAction),
+		"cliHumanCodeWatchdogOutcome":             string(userfacing.HumanCodeWatchdogOutcome),
+		"cliHumanCodeProviderSubjectKind":         string(userfacing.HumanCodeProviderSubjectKind),
+		"cliHumanCodeProviderSubjectStatus":       string(userfacing.HumanCodeProviderSubjectStatus),
+		"cliHumanCodeProviderCapability":          string(userfacing.HumanCodeProviderCapability),
+		"cliHumanCodeProviderGuarantee":           string(userfacing.HumanCodeProviderGuarantee),
+		"cliHumanCodeProviderRequirementStatus":   string(userfacing.HumanCodeProviderRequirementStatus),
+		"cliHumanCodeRoutingTopology":             string(userfacing.HumanCodeRoutingTopology),
 	}
 	actual := map[string][]string{}
 	rawOutput := map[string][]string{}
@@ -596,7 +621,7 @@ func parseProductionCLIHumanCodeFiles(t *testing.T) (*token.FileSet, []cliHumanC
 	t.Helper()
 	fileSet := token.NewFileSet()
 	files := make([]cliHumanCodeSourceFile, 0)
-	for _, path := range productionCLIGoFiles(t) {
+	for _, path := range productionCLIHumanCodeFiles(t) {
 		file, err := parser.ParseFile(fileSet, path, nil, 0)
 		if err != nil {
 			t.Fatalf("parse %s: %v", path, err)
@@ -604,6 +629,21 @@ func parseProductionCLIHumanCodeFiles(t *testing.T) (*token.FileSet, []cliHumanC
 		files = append(files, cliHumanCodeSourceFile{base: filepath.Base(path), file: file})
 	}
 	return fileSet, files
+}
+
+func productionCLIHumanCodeFiles(t *testing.T) []string {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(humanProjectionRepoRoot(t), "cmd", "swarm", "*.go"))
+	if err != nil {
+		t.Fatalf("glob production CLI files: %v", err)
+	}
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if !strings.HasSuffix(path, "_test.go") {
+			out = append(out, path)
+		}
+	}
+	return out
 }
 
 func inspectCLIHumanCodeConsumers(
@@ -661,19 +701,20 @@ func cliHumanCodeTypeCheck(t *testing.T, fileSet *token.FileSet, files []cliHuma
 		Uses:       map[*ast.Ident]types.Object{},
 		Selections: map[*ast.SelectorExpr]*types.Selection{},
 	}
-	config := types.Config{Importer: importer.ForCompiler(fileSet, "gc", cliHumanCodeExportLookup())}
+	config := types.Config{Importer: importer.ForCompiler(fileSet, "gc", cliHumanCodeExportLookup(humanProjectionRepoRoot(t)))}
 	if _, err := config.Check("github.com/division-sh/swarm/cmd/swarm", fileSet, astFiles, info); err != nil {
 		t.Fatalf("type-check production CLI consumer audit: %v", err)
 	}
 	return info
 }
 
-func cliHumanCodeExportLookup() func(string) (io.ReadCloser, error) {
+func cliHumanCodeExportLookup(repoRoot string) func(string) (io.ReadCloser, error) {
 	exports := map[string]string{}
 	return func(path string) (io.ReadCloser, error) {
 		exportPath, ok := exports[path]
 		if !ok {
 			command := exec.Command("go", "list", "-export", "-f={{.Export}}", path)
+			command.Dir = repoRoot
 			output, err := command.CombinedOutput()
 			if err != nil {
 				return nil, fmt.Errorf("go list export for %s: %w: %s", path, err, strings.TrimSpace(string(output)))
