@@ -64,6 +64,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/pipeline/artifact_repo.go:writeArtifactRepoFiles:filesystem_write:1":                                ownerPipelineActivity,
 	"internal/runtime/pipeline/generic_test_module.go:init:http_do:1":                                                     ownerBuildTest,
 	"internal/runtime/pythonmodule/runtime.go:materializedArtifactDir:http_do:1":                                          ownerComputeSandbox,
+	"internal/runtime/pythonmodule/runtime.go:newInterpreterModule:http_do:1":                                             ownerComputeSandbox,
 	"internal/runtime/pythonmodule/runtime.go:runHarness:filesystem_write:1":                                              ownerComputeSandbox,
 	"internal/runtime/runtime.go:startSystemNodesAndWaitForSubscriptions:http_do:1":                                       ownerRuntimeDependency,
 	"internal/runtime/runtime_claude_startup.go:startupCallMCP:http_do:1":                                                 ownerRuntimeDependency,
