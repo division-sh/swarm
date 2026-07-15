@@ -14,6 +14,15 @@ func ApplyRetiredConnectDeliveryOneMutation(t testing.TB, root string) {
 		"  - from: producer.work_ready\n    to: consumer.work_ready\n    delivery: one\n")
 }
 
+// ApplyRetiredConnectDeliveryOnePairMutation creates two independently
+// removable rows without exposing raw positive bundle construction.
+func ApplyRetiredConnectDeliveryOnePairMutation(t testing.TB, root string) {
+	t.Helper()
+	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
+		"  - from: producer.work_ready\n    to: consumer.work_ready\n",
+		"  - from: producer.work_ready\n    to: consumer.work_ready\n    delivery: one\n  - from: producer.work_ready\n    to: consumer.work_ready\n    delivery: one\n")
+}
+
 type RetiredConnectMigrationBlocker uint8
 
 const (
@@ -25,22 +34,37 @@ const (
 
 func ApplyRetiredConnectMigrationBlocker(t testing.TB, root string, blocker RetiredConnectMigrationBlocker) {
 	t.Helper()
-	field := ""
-	switch blocker {
-	case RetiredConnectDeliveryMany:
-		field = "    delivery: many\n"
-	case RetiredConnectDeliveryBroadcast:
-		field = "    delivery: broadcast\n"
-	case RetiredConnectDeliveryReply:
-		field = "    delivery: reply\n"
-	case RetiredConnectReplyMap:
-		field = "    reply:\n      correlation_id: event.correlation_id\n"
-	default:
-		t.Fatalf("unsupported retired connect migration blocker %d", blocker)
-	}
+	field := retiredConnectMigrationBlockerField(t, blocker)
 	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
 		"  - from: producer.work_ready\n    to: consumer.work_ready\n",
 		"  - from: producer.work_ready\n    to: consumer.work_ready\n"+field)
+}
+
+// ApplyRetiredConnectDeliveryOneThenBlockerMutation proves that a later manual
+// decision prevents any earlier deterministic removal from reaching disk.
+func ApplyRetiredConnectDeliveryOneThenBlockerMutation(t testing.TB, root string, blocker RetiredConnectMigrationBlocker) {
+	t.Helper()
+	field := retiredConnectMigrationBlockerField(t, blocker)
+	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
+		"  - from: producer.work_ready\n    to: consumer.work_ready\n",
+		"  - from: producer.work_ready\n    to: consumer.work_ready\n    delivery: one\n  - from: producer.work_ready\n    to: consumer.work_ready\n"+field)
+}
+
+func retiredConnectMigrationBlockerField(t testing.TB, blocker RetiredConnectMigrationBlocker) string {
+	t.Helper()
+	switch blocker {
+	case RetiredConnectDeliveryMany:
+		return "    delivery: many\n"
+	case RetiredConnectDeliveryBroadcast:
+		return "    delivery: broadcast\n"
+	case RetiredConnectDeliveryReply:
+		return "    delivery: reply\n"
+	case RetiredConnectReplyMap:
+		return "    reply:\n      correlation_id: event.correlation_id\n"
+	default:
+		t.Fatalf("unsupported retired connect migration blocker %d", blocker)
+	}
+	return ""
 }
 
 // TemplateSelectOrCreateNegativeMutation is the closed fail-closed matrix for

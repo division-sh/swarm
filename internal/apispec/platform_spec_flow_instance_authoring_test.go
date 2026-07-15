@@ -133,7 +133,7 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, composition, "route_plan_owner"), "platform-spec.yaml#contract_formats.event_schema.routing_derivation.route_plan_authority")
 	assertScalarContains(t, mustMappingValue(t, composition, "rule"), "Parent `connect` routes across flow instances")
 	assertScalarValue(t, mustYAMLPath(t, composition, "public_target_revision", "revise"), "parent-owned correlate_by/cardinality as the main authoring syntax")
-	assertScalarValue(t, mustYAMLPath(t, composition, "public_target_revision", "prefer"), "connect + instance key mapping + explicit delivery")
+	assertScalarValue(t, mustYAMLPath(t, composition, "public_target_revision", "prefer"), "edge-only connect + receiver-owned address/resolution semantics")
 	assertScalarValue(t, mustYAMLPath(t, composition, "split_children", "output_pin_key_carries"), "#1544")
 	assertScalarValue(t, mustYAMLPath(t, composition, "split_children", "connect_to_instance_route_planning"), "#1545")
 	assertScalarValue(t, mustYAMLPath(t, composition, "split_children", "connect_key_adapters"), "#1546")
