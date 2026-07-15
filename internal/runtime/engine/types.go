@@ -334,6 +334,7 @@ type ActivityIntent struct {
 	Context          events.DeliveryContext
 	ActivityID       string
 	Tool             string
+	PlanGeneration   string
 	BundleHash       string
 	WorkflowVersion  string
 	Input            semanticvalue.Value
@@ -366,6 +367,7 @@ func (i ActivityIntent) Normalized() ActivityIntent {
 	i.Context = i.Context.Normalized()
 	i.ActivityID = strings.TrimSpace(i.ActivityID)
 	i.Tool = strings.TrimSpace(i.Tool)
+	i.PlanGeneration = strings.TrimSpace(i.PlanGeneration)
 	i.BundleHash = strings.TrimSpace(i.BundleHash)
 	i.WorkflowVersion = strings.TrimSpace(i.WorkflowVersion)
 	i.SuccessEvent = strings.TrimSpace(i.SuccessEvent)

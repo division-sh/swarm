@@ -163,7 +163,7 @@ func TestProductionCompilerFailsClosedAcrossChannelContractPhases(t *testing.T) 
 			mutate: func(channel *packs.LoadedChannelPack, _ *packs.TriggerPackDescriptor, _ *packs.ConnectorPackDescriptor) {
 				delete(channel.Manifest.Operations["deliver"].Input, "body")
 			},
-			want: "does not map required connector input",
+			want: `selected channel constraint "presentation.text" is not mapped`,
 		},
 		{
 			name: "incompatible selected patterns",
@@ -225,7 +225,7 @@ func TestProductionCompilerRejectsPartialRequiredConnectorObject(t *testing.T) {
 	connector.Tools["mock.deliver"] = tool
 
 	_, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
-	if err == nil || !strings.Contains(err.Error(), `does not map required connector input "destination.region"`) {
+	if err == nil || !strings.Contains(err.Error(), `required path "destination.region" is covered 0 times`) {
 		t.Fatalf("CompileChannel error = %v, want missing destination.region", err)
 	}
 }
@@ -248,8 +248,121 @@ func TestProductionCompilerRejectsDroppedRequiredInterfaceArrayLeaf(t *testing.T
 	channel.Manifest.Operations["deliver"] = binding
 
 	_, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
-	if err == nil || !strings.Contains(err.Error(), "input.actions[].token") {
+	if err == nil || !strings.Contains(err.Error(), `selected channel constraint "actions[].token" is not mapped`) {
 		t.Fatalf("CompileChannel error = %v, want unconsumed actions token", err)
+	}
+}
+
+func TestProductionCompilerRejectsRecursiveDirectionalAndCardinalityGaps(t *testing.T) {
+	registry := loadChannelInterfaceRegistry(t)
+	tests := []struct {
+		name   string
+		mutate func(*packs.LoadedChannelPack, *packs.ConnectorPackDescriptor)
+		want   string
+	}{
+		{
+			name: "input scalar source broader than target",
+			mutate: func(channel *packs.LoadedChannelPack, connector *packs.ConnectorPackDescriptor) {
+				destination := connector.Tools["mock.deliver"].InputSchema.Properties["destination"]
+				queue := destination.Properties["queue"]
+				max := 5
+				queue.MaxLength = &max
+				destination.Properties["queue"] = queue
+				tool := connector.Tools["mock.deliver"]
+				tool.InputSchema.Properties["destination"] = destination
+				connector.Tools["mock.deliver"] = tool
+				channel.Manifest.OpaqueTypes["destination"] = mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
+					"queue": mockStringSchema(1, 10, `^[a-z0-9-]+$`),
+				}, "queue")
+			},
+			want: "source maximum is broader than target maximum 5",
+		},
+		{
+			name: "whole input object misses required target child",
+			mutate: func(channel *packs.LoadedChannelPack, connector *packs.ConnectorPackDescriptor) {
+				tool := connector.Tools["mock.deliver"]
+				destination := tool.InputSchema.Properties["destination"]
+				destination.Properties["region"] = mockStringSchema(1, 10, "")
+				destination.Required = append(destination.Required, "region")
+				tool.InputSchema.Properties["destination"] = destination
+				connector.Tools["mock.deliver"] = tool
+				channel.Manifest.OpaqueTypes["destination"] = mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
+					"queue": mockStringSchema(1, 10, `^[a-z0-9-]+$`),
+				}, "queue")
+				binding := channel.Manifest.Operations["deliver"]
+				delete(binding.Input, "destination.queue")
+				binding.Input["destination"] = packs.ChannelMapping{From: "context.destination"}
+				channel.Manifest.Operations["deliver"] = binding
+			},
+			want: `target requires property "region" that source does not require`,
+		},
+		{
+			name: "output scalar source broader than target",
+			mutate: func(_ *packs.LoadedChannelPack, connector *packs.ConnectorPackDescriptor) {
+				tool := connector.Tools["mock.deliver"]
+				ref := tool.OutputSchema.Properties["ref"]
+				min, max := 1, 100
+				ref.MinLength, ref.MaxLength = &min, &max
+				tool.OutputSchema.Properties["ref"] = ref
+				connector.Tools["mock.deliver"] = tool
+			},
+			want: "source minimum is broader than target minimum 22",
+		},
+		{
+			name: "whole output object misses required target child",
+			mutate: func(channel *packs.LoadedChannelPack, connector *packs.ConnectorPackDescriptor) {
+				receipt := channel.Manifest.OpaqueTypes["delivery_receipt"]
+				receipt.Properties["status"] = mockStringSchema(1, 12, "")
+				receipt.Required = append(receipt.Required, "status")
+				channel.Manifest.OpaqueTypes["delivery_receipt"] = receipt
+				tool := connector.Tools["mock.edit"]
+				tool.OutputSchema = mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
+					"receipt": mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"revision": {Type: "integer"}}, "revision"),
+				}, "receipt")
+				connector.Tools["mock.edit"] = tool
+				binding := channel.Manifest.Operations["edit"]
+				delete(binding.Output, "delivery_receipt.revision")
+				binding.Output["delivery_receipt"] = packs.ChannelMapping{From: "result.receipt"}
+				channel.Manifest.Operations["edit"] = binding
+			},
+			want: `target requires property "status" that source does not require`,
+		},
+		{
+			name: "ancestor and descendant target overlap",
+			mutate: func(channel *packs.LoadedChannelPack, _ *packs.ConnectorPackDescriptor) {
+				binding := channel.Manifest.Operations["deliver"]
+				binding.Input["destination"] = packs.ChannelMapping{From: "context.destination"}
+				channel.Manifest.Operations["deliver"] = binding
+			},
+			want: `target path "destination.queue" overlaps "destination"`,
+		},
+		{
+			name: "duplicate recursive item source",
+			mutate: func(channel *packs.LoadedChannelPack, connector *packs.ConnectorPackDescriptor) {
+				tool := connector.Tools["mock.deliver"]
+				controls := tool.InputSchema.Properties["controls"]
+				controls.Items.Properties["alias"] = mockStringSchema(1, 24, "")
+				controls.Items.Required = append(controls.Items.Required, "alias")
+				tool.InputSchema.Properties["controls"] = controls
+				connector.Tools["mock.deliver"] = tool
+				binding := channel.Manifest.Operations["deliver"]
+				mapping := binding.Input["controls"]
+				mapping.Item[0]["alias"] = packs.ChannelMapping{From: "item.label"}
+				binding.Input["controls"] = mapping
+				channel.Manifest.Operations["deliver"] = binding
+			},
+			want: `item source path "label" overlaps "label"`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			channel, trigger, connector := mockChannelSatisfier()
+			tc.mutate(&channel, &connector)
+			_, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("CompileChannel error = %v, want containing %q", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -277,8 +390,12 @@ func TestChannelRuntimeToolsExposeOnlyProviderNeutralContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OperationTool: %v", err)
 	}
-	if binding.RuntimeActivityToolID("deliver") == binding.RuntimeToolID("deliver") || activityTool.HTTP == nil || activityTool.CompiledResult == nil {
-		t.Fatalf("private channel activity target is not separated: id=%q tool=%#v", binding.RuntimeActivityToolID("deliver"), activityTool)
+	activityToolID, generation, err := binding.RuntimeActivityTarget("deliver")
+	if err != nil {
+		t.Fatalf("RuntimeActivityTarget: %v", err)
+	}
+	if activityToolID == binding.RuntimeToolID("deliver") || generation == "" || activityTool.HTTP == nil || activityTool.CompiledResult == nil {
+		t.Fatalf("private channel activity target is not separated: id=%q generation=%q tool=%#v", activityToolID, generation, activityTool)
 	}
 }
 
@@ -309,6 +426,59 @@ func TestSatisfactionPlanCloneDeeplyIsolatesRuntimeOperation(t *testing.T) {
 	}
 	if got := originalOp.Input["reply_markup.inline_keyboard"].Item[0]["text"].From; got != "item.label" {
 		t.Fatalf("clone mutation changed original item mapping to %q", got)
+	}
+}
+
+func TestRuntimeActivityTargetPinsCompleteCompiledPlanGeneration(t *testing.T) {
+	original := loadTelegramChannelPlan(t)
+	cloned := original.Clone()
+	originalGeneration, err := original.GenerationID()
+	if err != nil {
+		t.Fatalf("original GenerationID: %v", err)
+	}
+	cloneGeneration, err := cloned.GenerationID()
+	if err != nil {
+		t.Fatalf("clone GenerationID: %v", err)
+	}
+	if cloneGeneration != originalGeneration {
+		t.Fatalf("clone generation = %q, want %q", cloneGeneration, originalGeneration)
+	}
+
+	operation := cloned.Operations["deliver"]
+	text := operation.ToolSchema.InputSchema.Properties["text"]
+	if text.MaxLength == nil || *text.MaxLength < 2 {
+		t.Fatalf("fixture text schema = %#v", text)
+	}
+	changedMaximum := *text.MaxLength - 1
+	text.MaxLength = &changedMaximum
+	operation.ToolSchema.InputSchema.Properties["text"] = text
+	cloned.Operations["deliver"] = operation
+	changedGeneration, err := cloned.GenerationID()
+	if err != nil {
+		t.Fatalf("changed GenerationID: %v", err)
+	}
+	if changedGeneration == originalGeneration {
+		t.Fatal("compiled schema change did not change the plan generation")
+	}
+
+	originalBinding, err := packs.NewOutboundBindingPlan("ops", original, "42", nil)
+	if err != nil {
+		t.Fatalf("original binding: %v", err)
+	}
+	changedBinding, err := packs.NewOutboundBindingPlan("ops", cloned, "42", nil)
+	if err != nil {
+		t.Fatalf("changed binding: %v", err)
+	}
+	originalTarget, originalPin, err := originalBinding.RuntimeActivityTarget("deliver")
+	if err != nil {
+		t.Fatalf("original target: %v", err)
+	}
+	changedTarget, changedPin, err := changedBinding.RuntimeActivityTarget("deliver")
+	if err != nil {
+		t.Fatalf("changed target: %v", err)
+	}
+	if originalTarget == changedTarget || originalPin == changedPin {
+		t.Fatalf("replacement plan reused private target: original=(%q,%q) changed=(%q,%q)", originalTarget, originalPin, changedTarget, changedPin)
 	}
 }
 

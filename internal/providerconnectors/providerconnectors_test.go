@@ -982,6 +982,45 @@ func TestConnectorPackImportApplicationSurvivesSemanticSourceWrappers(t *testing
 	}
 }
 
+func TestConnectorPackCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *testing.T) {
+	explicit := providerConnectorScopedSource{
+		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		projectScopes: []semanticview.ProjectScope{
+			projectScopeWithConnectorPackImport(".", "github", "github.create_issue"),
+		},
+	}
+	imported, err := SourceWithConnectorPackImports(explicit)
+	if err != nil {
+		t.Fatalf("SourceWithConnectorPackImports: %v", err)
+	}
+	overlaid, err := semanticview.WithRuntimeTools(imported, map[string]runtimecontracts.ToolSchemaEntry{
+		"channel.ops.deliver": {Category: "channel_operation", HandlerType: "channel"},
+	})
+	if err != nil {
+		t.Fatalf("WithRuntimeTools: %v", err)
+	}
+	revalidated, err := SourceWithConnectorPackImports(overlaid)
+	if err != nil {
+		t.Fatalf("same-generation connector import through overlay: %v", err)
+	}
+	subjects, err := CapabilitySubjects(context.Background(), revalidated, CapabilityOptions{})
+	if err != nil {
+		t.Fatalf("CapabilitySubjects: %v", err)
+	}
+	if len(subjects) != 1 || subjects[0].ID != "github.create_issue" || subjects[0].Source != "connector_pack_import" || subjects[0].SourcePath == "" {
+		t.Fatalf("connector import provenance hidden through overlay: %#v", subjects)
+	}
+	generationVisible := false
+	for _, evidence := range subjects[0].Evidence {
+		if evidence.Kind == "generation" && evidence.Fields["manifest_hash"] != "" {
+			generationVisible = true
+		}
+	}
+	if !generationVisible {
+		t.Fatalf("connector generation hidden through overlay: %#v", subjects[0].Evidence)
+	}
+}
+
 func TestSlackConnectorPackImportRequiresExplicitEnableAndReportsManagedSurface(t *testing.T) {
 	ambient := providerConnectorScopedSource{
 		Source:        semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),

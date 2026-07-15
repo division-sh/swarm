@@ -425,25 +425,28 @@ func validateChannelPath(raw string) error {
 }
 
 type SatisfactionPlan struct {
-	InterfaceRef string                                      `json:"interface"`
-	Channel      PackIdentity                                `json:"channel"`
-	Trigger      PackIdentity                                `json:"trigger"`
-	Connector    PackIdentity                                `json:"connector"`
-	Provider     string                                      `json:"provider"`
-	Schemas      map[string]runtimecontracts.ToolInputSchema `json:"-"`
-	OpaqueTypes  map[string]runtimecontracts.ToolInputSchema `json:"-"`
-	Operations   map[string]CompiledChannelOperation         `json:"operations"`
-	Events       map[string]CompiledChannelEvent             `json:"events"`
-	Constraints  map[string]runtimecontracts.ToolInputSchema `json:"-"`
+	InterfaceRef        string                                      `json:"interface"`
+	Channel             PackIdentity                                `json:"channel"`
+	Trigger             PackIdentity                                `json:"trigger"`
+	Connector           PackIdentity                                `json:"connector"`
+	Provider            string                                      `json:"provider"`
+	TriggerGenerationID string                                      `json:"trigger_generation_id"`
+	Schemas             map[string]runtimecontracts.ToolInputSchema `json:"-"`
+	OpaqueTypes         map[string]runtimecontracts.ToolInputSchema `json:"-"`
+	Operations          map[string]CompiledChannelOperation         `json:"operations"`
+	Events              map[string]CompiledChannelEvent             `json:"events"`
+	Constraints         map[string]runtimecontracts.ToolInputSchema `json:"-"`
 }
 
 type CompiledChannelOperation struct {
-	Name       string                                  `json:"name"`
-	Tool       string                                  `json:"tool"`
-	ToolSchema runtimecontracts.ToolSchemaEntry        `json:"-"`
-	Input      map[string]ChannelMapping               `json:"-"`
-	Output     map[string]ChannelMapping               `json:"-"`
-	Interface  runtimecontracts.PackInterfaceOperation `json:"-"`
+	Name           string                                  `json:"name"`
+	Tool           string                                  `json:"tool"`
+	ToolSchema     runtimecontracts.ToolSchemaEntry        `json:"-"`
+	Input          map[string]ChannelMapping               `json:"-"`
+	Output         map[string]ChannelMapping               `json:"-"`
+	Interface      runtimecontracts.PackInterfaceOperation `json:"-"`
+	InputTopology  compiledChannelMappingTopology          `json:"-"`
+	OutputTopology compiledChannelMappingTopology          `json:"-"`
 }
 
 type CompiledChannelEvent struct {
@@ -491,12 +494,6 @@ func (p OutboundBindingPlan) Clone() OutboundBindingPlan {
 
 func (p OutboundBindingPlan) RuntimeToolID(operation string) string {
 	return "channel." + strings.TrimSpace(p.ID) + "." + strings.TrimSpace(operation)
-}
-
-// RuntimeActivityToolID names the private compiled connector target used by
-// the channel adapter. It is intentionally absent from agent tool registries.
-func (p OutboundBindingPlan) RuntimeActivityToolID(operation string) string {
-	return "platform.channel_activity." + strings.TrimSpace(p.ID) + "." + strings.TrimSpace(operation)
 }
 
 func (p OutboundBindingPlan) RuntimeTools() (map[string]runtimecontracts.ToolSchemaEntry, error) {
@@ -604,8 +601,9 @@ func (p SatisfactionPlan) OperationTool(name string) (runtimecontracts.ToolSchem
 	if err != nil {
 		return runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("channel operation %q output schema: %w", name, err)
 	}
-	fields := make(map[string]runtimecontracts.CompiledResultField, len(operation.Output))
-	for target, mapping := range operation.Output {
+	fields := make(map[string]runtimecontracts.CompiledResultField, len(operation.OutputTopology.Targets))
+	for _, target := range operation.OutputTopology.Targets {
+		mapping := operation.Output[target]
 		fields[target] = runtimecontracts.CompiledResultField{From: mapping.From, Convert: mapping.Convert}
 	}
 	tool.CompiledResult = &runtimecontracts.CompiledResultProjection{Fields: fields, OutputSchema: outputSchema}
@@ -619,11 +617,19 @@ func (p SatisfactionPlan) OperationInputSchema(name string) (runtimecontracts.To
 	if !ok {
 		return runtimecontracts.ToolInputSchema{}, fmt.Errorf("channel operation %q is not compiled", name)
 	}
-	inputSchema, err := interfaceOperationSchema(operation.Interface.Input, p.Schemas, p.OpaqueTypes)
+	inputSchema, err := constrainedOperationInputSchema(operation, p.Schemas, p.OpaqueTypes, p.Constraints)
 	if err != nil {
 		return runtimecontracts.ToolInputSchema{}, err
 	}
-	for _, key := range sortedKeys(p.Constraints) {
+	return inputSchema, nil
+}
+
+func constrainedOperationInputSchema(operation CompiledChannelOperation, schemas, opaque, constraints map[string]runtimecontracts.ToolInputSchema) (runtimecontracts.ToolInputSchema, error) {
+	inputSchema, err := interfaceOperationSchema(operation.Interface.Input, schemas, opaque)
+	if err != nil {
+		return runtimecontracts.ToolInputSchema{}, err
+	}
+	for _, key := range sortedKeys(constraints) {
 		if !strings.HasPrefix(key, "presentation.") && key != "actions" && !strings.HasPrefix(key, "actions[].") {
 			continue
 		}
@@ -632,8 +638,8 @@ func (p SatisfactionPlan) OperationInputSchema(name string) (runtimecontracts.To
 		if _, ok := operation.Interface.Input[rootField]; !ok {
 			continue
 		}
-		if err := replaceChannelSchemaPath(&inputSchema, key, p.Constraints[key]); err != nil {
-			return runtimecontracts.ToolInputSchema{}, fmt.Errorf("channel operation %q selected constraint %q: %w", name, key, err)
+		if err := replaceChannelSchemaPath(&inputSchema, key, constraints[key]); err != nil {
+			return runtimecontracts.ToolInputSchema{}, fmt.Errorf("channel operation %q selected constraint %q: %w", operation.Name, key, err)
 		}
 	}
 	return inputSchema, nil
@@ -689,7 +695,7 @@ func (p SatisfactionPlan) PrepareOperationInput(name string, input, context any)
 	if !ok {
 		return nil, fmt.Errorf("channel operation %q is not compiled", name)
 	}
-	inputSchema, err := interfaceOperationSchema(operation.Interface.Input, p.Schemas, p.OpaqueTypes)
+	inputSchema, err := p.OperationInputSchema(name)
 	if err != nil {
 		return nil, err
 	}
@@ -705,7 +711,7 @@ func (p SatisfactionPlan) PrepareOperationInput(name string, input, context any)
 	}
 	environment := map[string]any{"input": input, "context": context}
 	out := map[string]any{}
-	for _, target := range sortedKeys(operation.Input) {
+	for _, target := range operation.InputTopology.Targets {
 		mapping := operation.Input[target]
 		if mapping.Each != "" {
 			itemsValue, ok := channelValueAtPath(environment, mapping.Each)
@@ -719,16 +725,14 @@ func (p SatisfactionPlan) PrepareOperationInput(name string, input, context any)
 			projected := make([]any, 0, len(items))
 			for _, item := range items {
 				object := map[string]any{}
-				for _, itemTargets := range mapping.Item {
-					for _, itemTarget := range sortedKeys(itemTargets) {
-						itemMapping := itemTargets[itemTarget]
-						value, ok := channelValueAtPath(map[string]any{"item": item}, itemMapping.From)
-						if !ok {
-							return nil, fmt.Errorf("channel operation %q item source %q is missing", name, itemMapping.From)
-						}
-						if err := setChannelValueAtPath(object, itemTarget, value); err != nil {
-							return nil, err
-						}
+				for _, itemTarget := range operation.InputTopology.ItemTargets[target] {
+					itemMapping := mapping.Item[0][itemTarget]
+					value, ok := channelValueAtPath(map[string]any{"item": item}, itemMapping.From)
+					if !ok {
+						return nil, fmt.Errorf("channel operation %q item source %q is missing", name, itemMapping.From)
+					}
+					if err := setChannelValueAtPath(object, itemTarget, value); err != nil {
+						return nil, err
 					}
 				}
 				targetSchema, _ := schemaAt(operation.ToolSchema.InputSchema, strings.Split(target, "."))
@@ -903,7 +907,7 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 	plan := SatisfactionPlan{
 		InterfaceRef: interfaceRef,
 		Channel:      identityFromEnvelope(channel.Envelope, channel.Source), Trigger: trigger.Identity, Connector: connector.Identity,
-		Provider: provider, OpaqueTypes: cloneSchemaMap(channel.Manifest.OpaqueTypes),
+		Provider: provider, TriggerGenerationID: strings.TrimSpace(trigger.GenerationID), OpaqueTypes: cloneSchemaMap(channel.Manifest.OpaqueTypes),
 		Schemas:    cloneSchemaMap(definition.Schemas),
 		Operations: map[string]CompiledChannelOperation{}, Events: map[string]CompiledChannelEvent{}, Constraints: map[string]runtimecontracts.ToolInputSchema{},
 	}
@@ -917,14 +921,21 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 		if runtimecontracts.NormalizeActivityEffectClass(tool.EffectClass) != runtimecontracts.NormalizeActivityEffectClass(operation.EffectClass) {
 			return SatisfactionPlan{}, fmt.Errorf("channel operation %q effect class does not match connector tool %q", name, binding.Tool)
 		}
-		if err := validateOperationBinding(name, operation, binding, definition.Schemas, channel.Manifest.OpaqueTypes, tool); err != nil {
-			return SatisfactionPlan{}, err
-		}
 		plan.Operations[name] = CompiledChannelOperation{Name: name, Tool: strings.TrimSpace(binding.Tool), ToolSchema: tool, Input: cloneMappingMap(binding.Input), Output: cloneMappingMap(binding.Output), Interface: operation}
 	}
 	plan.Constraints, err = compileSelectedChannelConstraints(plan)
 	if err != nil {
 		return SatisfactionPlan{}, err
+	}
+	for _, name := range sortedKeys(plan.Operations) {
+		compiled := plan.Operations[name]
+		inputTopology, outputTopology, err := validateOperationBinding(name, compiled.Interface, channel.Manifest.Operations[name], definition.Schemas, channel.Manifest.OpaqueTypes, plan.Constraints, compiled.ToolSchema)
+		if err != nil {
+			return SatisfactionPlan{}, err
+		}
+		compiled.InputTopology = inputTopology
+		compiled.OutputTopology = outputTopology
+		plan.Operations[name] = compiled
 	}
 	for _, name := range sortedKeys(definition.Events) {
 		binding := channel.Manifest.Events[name]
@@ -1156,78 +1167,98 @@ func resolveConnectorDependency(channel LoadedChannelPack, descriptors []Connect
 	return matches[0], nil
 }
 
-func validateOperationBinding(name string, operation runtimecontracts.PackInterfaceOperation, binding ChannelOperationBinding, schemas, opaque map[string]runtimecontracts.ToolInputSchema, tool runtimecontracts.ToolSchemaEntry) error {
-	usedSources := map[string]struct{}{}
-	for target, mapping := range binding.Input {
+func validateOperationBinding(name string, operation runtimecontracts.PackInterfaceOperation, binding ChannelOperationBinding, schemas, opaque, constraints map[string]runtimecontracts.ToolInputSchema, tool runtimecontracts.ToolSchemaEntry) (compiledChannelMappingTopology, compiledChannelMappingTopology, error) {
+	inputTopology, err := compileChannelMappingTopology("channel operation "+name+" input", binding.Input)
+	if err != nil {
+		return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, err
+	}
+	outputTopology, err := compileChannelMappingTopology("channel operation "+name+" output", binding.Output)
+	if err != nil {
+		return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, err
+	}
+	compiledOperation := CompiledChannelOperation{Name: name, Interface: operation}
+	usedSources := newChannelPathCardinality("channel operation " + name + " source")
+	usedCollections := newChannelPathCardinality("channel operation " + name + " each source")
+	for _, target := range inputTopology.Targets {
+		mapping := binding.Input[target]
 		targetSchema, ok := schemaAt(tool.InputSchema, strings.Split(target, "."))
 		if !ok {
-			return fmt.Errorf("channel operation %q input target %q is absent from connector schema", name, target)
+			return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, fmt.Errorf("channel operation %q input target %q is absent from connector schema", name, target)
 		}
 		if mapping.Each != "" {
-			sourceSchema, err := operationSourceSchema(operation, mapping.Each, schemas, opaque)
+			sourceSchema, err := operationEffectiveSourceSchema(compiledOperation, mapping.Each, schemas, opaque, constraints)
 			if err != nil {
-				return fmt.Errorf("channel operation %q: %w", name, err)
+				return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, fmt.Errorf("channel operation %q: %w", name, err)
 			}
-			if sourceSchema.Type != "array" || targetSchema.Type != "array" || sourceSchema.Items == nil || targetSchema.Items == nil {
-				return fmt.Errorf("channel operation %q each mapping %q -> %q requires array schemas", name, mapping.Each, target)
+			if channelSchemaType(*sourceSchema) != "array" || channelSchemaType(*targetSchema) != "array" || sourceSchema.Items == nil || targetSchema.Items == nil {
+				return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, fmt.Errorf("channel operation %q each mapping %q -> %q requires array schemas", name, mapping.Each, target)
 			}
-			itemSources, err := validateEachItem(name, mapping, *sourceSchema.Items, *targetSchema.Items)
+			itemSources, err := validateEachItem(name, mapping, inputTopology.ItemTargets[target], *sourceSchema.Items, *targetSchema.Items)
 			if err != nil {
-				return err
+				return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, err
 			}
-			if _, exists := usedSources[mapping.Each]; exists {
-				return fmt.Errorf("channel operation %q reuses source %q", name, mapping.Each)
+			if err := usedCollections.add(mapping.Each); err != nil {
+				return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, err
 			}
 			for _, source := range itemSources {
-				usedSources[mapping.Each+"[]."+source] = struct{}{}
+				if err := usedSources.add(mapping.Each + "[]." + source); err != nil {
+					return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, err
+				}
 			}
 			continue
 		}
-		sourceSchema, err := operationSourceSchema(operation, mapping.From, schemas, opaque)
+		sourceSchema, err := operationEffectiveSourceSchema(compiledOperation, mapping.From, schemas, opaque, constraints)
 		if err != nil {
-			return fmt.Errorf("channel operation %q: %w", name, err)
+			return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, fmt.Errorf("channel operation %q: %w", name, err)
 		}
 		if err := validateDirectionalRelation(name+" input "+mapping.From+" -> "+target, sourceSchema, targetSchema, mapping.Convert); err != nil {
-			return err
+			return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, err
 		}
-		if _, exists := usedSources[mapping.From]; exists {
-			return fmt.Errorf("channel operation %q reuses source %q", name, mapping.From)
+		if err := usedSources.add(mapping.From); err != nil {
+			return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, err
 		}
-		usedSources[mapping.From] = struct{}{}
 	}
-	if err := requiredConnectorInputsMapped(name, tool.InputSchema, binding.Input); err != nil {
-		return err
+	if err := requiredConnectorInputsMapped(name, tool.InputSchema, inputTopology.Targets); err != nil {
+		return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, err
 	}
-	if err := interfaceInputsConsumed(name, operation, schemas, opaque, usedSources); err != nil {
-		return err
+	if err := interfaceInputsConsumed(name, operation, schemas, opaque, usedSources.values()); err != nil {
+		return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, err
 	}
 	if len(operation.Output) == 0 {
 		if len(binding.Output) != 0 {
-			return fmt.Errorf("channel operation %q has no interface output and must not map connector output", name)
+			return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, fmt.Errorf("channel operation %q has no interface output and must not map connector output", name)
 		}
-		return nil
+		return inputTopology, outputTopology, nil
 	}
-	for target, mapping := range binding.Output {
+	outputSources := newChannelPathCardinality("channel operation " + name + " output source")
+	for _, target := range outputTopology.Targets {
+		mapping := binding.Output[target]
 		targetSchema, err := operationOutputSchema(operation, target, schemas, opaque)
 		if err != nil {
-			return fmt.Errorf("channel operation %q: %w", name, err)
+			return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, fmt.Errorf("channel operation %q: %w", name, err)
 		}
 		sourcePath := strings.TrimPrefix(mapping.From, "result.")
 		if sourcePath == mapping.From {
-			return fmt.Errorf("channel operation %q output source %q must start with result.", name, mapping.From)
+			return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, fmt.Errorf("channel operation %q output source %q must start with result.", name, mapping.From)
 		}
 		sourceSchema, ok := schemaAt(tool.OutputSchema, strings.Split(sourcePath, "."))
 		if !ok {
-			return fmt.Errorf("channel operation %q output source %q is absent from connector schema", name, mapping.From)
+			return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, fmt.Errorf("channel operation %q output source %q is absent from connector schema", name, mapping.From)
 		}
 		if err := validateDirectionalRelation(name+" output "+mapping.From+" -> "+target, sourceSchema, targetSchema, mapping.Convert); err != nil {
-			return err
+			return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, err
+		}
+		if err := outputSources.add(mapping.From); err != nil {
+			return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, err
 		}
 	}
-	return requiredInterfaceOutputsMapped(name, operation, binding.Output, opaque)
+	if err := requiredInterfaceOutputsMapped(name, operation, outputTopology.Targets, opaque); err != nil {
+		return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, err
+	}
+	return inputTopology, outputTopology, nil
 }
 
-func validateEachItem(name string, mapping ChannelMapping, sourceItem, targetItem runtimecontracts.ToolInputSchema) ([]string, error) {
+func validateEachItem(name string, mapping ChannelMapping, itemTargets []string, sourceItem, targetItem runtimecontracts.ToolInputSchema) ([]string, error) {
 	if len(mapping.Item) != 1 || len(mapping.Item[0]) == 0 {
 		return nil, fmt.Errorf("channel operation %q each mapping must construct exactly one object per source item", name)
 	}
@@ -1240,8 +1271,9 @@ func validateEachItem(name string, mapping ChannelMapping, sourceItem, targetIte
 	if sourceItem.Type != "object" || targetItem.Type != "object" {
 		return nil, fmt.Errorf("channel operation %q each item source and target must be objects", name)
 	}
-	used := map[string]struct{}{}
-	for target, itemMapping := range mapping.Item[0] {
+	used := newChannelPathCardinality("channel operation " + name + " each item source")
+	for _, target := range itemTargets {
+		itemMapping := mapping.Item[0][target]
 		targetSchema, ok := schemaAt(targetItem, strings.Split(target, "."))
 		if !ok {
 			return nil, fmt.Errorf("channel operation %q each item target %q is absent", name, target)
@@ -1257,26 +1289,30 @@ func validateEachItem(name string, mapping ChannelMapping, sourceItem, targetIte
 		if err := validateDirectionalRelation(name+" each item "+itemMapping.From+" -> "+target, sourceSchema, targetSchema, ""); err != nil {
 			return nil, err
 		}
-		for _, path := range schemaRequiredLeafPaths(source, *sourceSchema) {
-			used[path] = struct{}{}
+		if err := used.add(source); err != nil {
+			return nil, err
 		}
 	}
-	if err := requiredSchemaPathsMapped(name+" each item", targetItem, mapping.Item[0]); err != nil {
+	if err := requiredSchemaPathsMapped(name+" each item", targetItem, itemTargets); err != nil {
 		return nil, err
 	}
-	paths := make([]string, 0, len(used))
-	for path := range used {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	return paths, nil
+	return used.values(), nil
 }
 
 func validateEventBinding(name string, event runtimecontracts.PackInterfaceEvent, binding ChannelEventBinding, schemas, opaque map[string]runtimecontracts.ToolInputSchema, descriptor TriggerEvent) error {
 	if err := exactKeySet("channel event "+name+" fields", binding.Fields, requiredInterfaceFieldPaths(event.RequiredFields, opaque)); err != nil {
 		return err
 	}
-	for target, source := range binding.Fields {
+	targets := newChannelPathCardinality("channel event " + name + " target")
+	sources := newChannelPathCardinality("channel event " + name + " source")
+	for _, target := range sortedKeys(binding.Fields) {
+		source := binding.Fields[target]
+		if err := targets.add(target); err != nil {
+			return err
+		}
+		if err := sources.add(source); err != nil {
+			return err
+		}
 		targetSchema, err := interfaceFieldPathSchema(event.RequiredFields, target, schemas, opaque)
 		if err != nil {
 			return fmt.Errorf("channel event %q: %w", name, err)
@@ -1289,42 +1325,21 @@ func validateEventBinding(name string, event runtimecontracts.PackInterfaceEvent
 		if !ok || !field.Required {
 			return fmt.Errorf("channel event %q source %q is not a required accepted trigger field", name, source)
 		}
-		if err := validateDirectionalRelation(name+" event "+source+" -> "+target, &runtimecontracts.ToolInputSchema{Type: normalizeSchemaType(field.Type)}, targetSchema, ""); err != nil {
+		if err := validateEventFieldTypeRelation(name+" event "+source+" -> "+target, field.Type, targetSchema); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateDirectionalRelation(subject string, source, target *runtimecontracts.ToolInputSchema, conversion string) error {
-	if source == nil || target == nil {
-		return fmt.Errorf("%s has no source or target schema", subject)
+func validateEventFieldTypeRelation(subject, sourceType string, target *runtimecontracts.ToolInputSchema) error {
+	if target == nil {
+		return fmt.Errorf("%s has no target schema", subject)
 	}
-	sourceType := normalizeSchemaType(source.Type)
-	targetType := normalizeSchemaType(target.Type)
-	switch conversion {
-	case runtimecontracts.FieldProjectionConvertNumberToText:
-		if sourceType != "integer" && sourceType != "number" || targetType != "string" {
-			return fmt.Errorf("%s number_to_text requires numeric source and string target", subject)
-		}
-		return nil
-	case "decimal_text_to_int32":
-		if sourceType != "string" || targetType != "integer" {
-			return fmt.Errorf("%s decimal_text_to_int32 requires string source and integer target", subject)
-		}
-		return nil
-	case "":
-	default:
-		return fmt.Errorf("%s uses unsupported conversion %q", subject, conversion)
-	}
-	if sourceType != targetType {
+	sourceType = normalizeSchemaType(sourceType)
+	targetType := channelSchemaType(*target)
+	if sourceType != targetType && !(sourceType == "integer" && targetType == "number") {
 		return fmt.Errorf("%s has incompatible types %s and %s", subject, sourceType, targetType)
-	}
-	if source.Pattern != "" && target.Pattern != "" && source.Pattern != target.Pattern {
-		return fmt.Errorf("%s has disjoint pattern constraints", subject)
-	}
-	if !boundsIntersect(source.MinLength, source.MaxLength, target.MinLength, target.MaxLength) || !boundsIntersect(source.MinItems, source.MaxItems, target.MinItems, target.MaxItems) {
-		return fmt.Errorf("%s has disjoint bounds", subject)
 	}
 	return nil
 }
@@ -1413,6 +1428,25 @@ func operationSourceSchema(operation runtimecontracts.PackInterfaceOperation, pa
 	return resolved, nil
 }
 
+func operationEffectiveSourceSchema(operation CompiledChannelOperation, path string, schemas, opaque, constraints map[string]runtimecontracts.ToolInputSchema) (*runtimecontracts.ToolInputSchema, error) {
+	parts := strings.Split(path, ".")
+	if len(parts) < 2 || (parts[0] != "input" && parts[0] != "context") {
+		return nil, fmt.Errorf("source %q must start with input. or context.", path)
+	}
+	if parts[0] == "context" {
+		return operationSourceSchema(operation.Interface, path, schemas, opaque)
+	}
+	root, err := constrainedOperationInputSchema(operation, schemas, opaque, constraints)
+	if err != nil {
+		return nil, err
+	}
+	resolved, ok := schemaAt(root, parts[1:])
+	if !ok {
+		return nil, fmt.Errorf("source %q is absent from its effective interface schema", path)
+	}
+	return resolved, nil
+}
+
 func operationOutputSchema(operation runtimecontracts.PackInterfaceOperation, path string, schemas, opaque map[string]runtimecontracts.ToolInputSchema) (*runtimecontracts.ToolInputSchema, error) {
 	parts := strings.Split(path, ".")
 	if len(parts) == 0 {
@@ -1489,24 +1523,16 @@ func schemaAt(schema runtimecontracts.ToolInputSchema, path []string) (*runtimec
 	return &current, true
 }
 
-func requiredConnectorInputsMapped(name string, schema runtimecontracts.ToolInputSchema, mappings map[string]ChannelMapping) error {
-	for _, required := range schemaRequiredLeafPaths("", schema) {
-		required = strings.TrimPrefix(required, ".")
-		found := false
-		for target := range mappings {
-			if channelPathCovers(target, required) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("channel operation %q does not map required connector input %q", name, required)
-		}
+func requiredConnectorInputsMapped(name string, schema runtimecontracts.ToolInputSchema, mapped []string) error {
+	required := schemaRequiredLeafPaths("", schema)
+	for index := range required {
+		required[index] = strings.TrimPrefix(required[index], ".")
 	}
-	return nil
+	return validateRequiredPathCardinality("channel operation "+name+" connector input", required, mapped)
 }
 
-func interfaceInputsConsumed(name string, operation runtimecontracts.PackInterfaceOperation, schemas, opaque map[string]runtimecontracts.ToolInputSchema, used map[string]struct{}) error {
+func interfaceInputsConsumed(name string, operation runtimecontracts.PackInterfaceOperation, schemas, opaque map[string]runtimecontracts.ToolInputSchema, used []string) error {
+	var required []string
 	for group, fields := range map[string]map[string]runtimecontracts.PackInterfaceField{"input": operation.Input, "context": operation.Context} {
 		for fieldName, field := range fields {
 			prefix := group + "." + fieldName
@@ -1514,60 +1540,30 @@ func interfaceInputsConsumed(name string, operation runtimecontracts.PackInterfa
 			if err != nil {
 				return err
 			}
-			for _, leaf := range schemaRequiredLeafPaths(prefix, *resolved) {
-				found := false
-				for source := range used {
-					if channelPathCovers(source, leaf) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					return fmt.Errorf("channel operation %q does not consume interface %s", name, leaf)
-				}
-			}
+			required = append(required, schemaRequiredLeafPaths(prefix, *resolved)...)
 		}
 	}
-	return nil
+	return validateRequiredPathCardinality("channel operation "+name+" interface input/context", required, used)
 }
 
-func requiredInterfaceOutputsMapped(name string, operation runtimecontracts.PackInterfaceOperation, mappings map[string]ChannelMapping, opaque map[string]runtimecontracts.ToolInputSchema) error {
+func requiredInterfaceOutputsMapped(name string, operation runtimecontracts.PackInterfaceOperation, mapped []string, opaque map[string]runtimecontracts.ToolInputSchema) error {
+	var required []string
 	for fieldName, field := range operation.Output {
 		paths := []string{fieldName}
 		if field.Opaque != "" {
 			paths = schemaRequiredLeafPaths(fieldName, opaque[field.Opaque])
 		}
-		for _, path := range paths {
-			found := false
-			for target := range mappings {
-				if channelPathCovers(target, path) {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return fmt.Errorf("channel operation %q does not map required interface output %q", name, path)
-			}
-		}
+		required = append(required, paths...)
 	}
-	return nil
+	return validateRequiredPathCardinality("channel operation "+name+" interface output", required, mapped)
 }
 
-func requiredSchemaPathsMapped(subject string, schema runtimecontracts.ToolInputSchema, mappings map[string]ChannelMapping) error {
-	for _, path := range schemaRequiredLeafPaths("", schema) {
-		path = strings.TrimPrefix(path, ".")
-		found := false
-		for target := range mappings {
-			if channelPathCovers(target, path) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("%s does not map required target %q", subject, path)
-		}
+func requiredSchemaPathsMapped(subject string, schema runtimecontracts.ToolInputSchema, mapped []string) error {
+	required := schemaRequiredLeafPaths("", schema)
+	for index := range required {
+		required[index] = strings.TrimPrefix(required[index], ".")
 	}
-	return nil
+	return validateRequiredPathCardinality(subject, required, mapped)
 }
 
 func requiredInterfaceFieldPaths(fields map[string]runtimecontracts.PackInterfaceField, opaque map[string]runtimecontracts.ToolInputSchema) []string {
@@ -1607,15 +1603,6 @@ func schemaRequiredLeafPaths(prefix string, schema runtimecontracts.ToolInputSch
 		out = append(out, schemaRequiredLeafPaths(child, property)...)
 	}
 	return out
-}
-
-func channelPathCovers(mapped, required string) bool {
-	mapped = strings.TrimSpace(mapped)
-	required = strings.TrimSpace(required)
-	if mapped == "" || required == "" {
-		return mapped == required
-	}
-	return mapped == required || strings.HasPrefix(required, mapped+".") || strings.HasPrefix(required, mapped+"[")
 }
 
 func interfaceOpaqueSlots(definition runtimecontracts.PackInterfaceDefinition) []string {
@@ -1891,6 +1878,8 @@ func (p SatisfactionPlan) Clone() SatisfactionPlan {
 		operation.Input = cloneMappingMap(operation.Input)
 		operation.Output = cloneMappingMap(operation.Output)
 		operation.Interface = cloneInterfaceDefinition(runtimecontracts.PackInterfaceDefinition{Operations: map[string]runtimecontracts.PackInterfaceOperation{name: operation.Interface}}).Operations[name]
+		operation.InputTopology = operation.InputTopology.clone()
+		operation.OutputTopology = operation.OutputTopology.clone()
 		out.Operations[name] = operation
 	}
 	out.Events = make(map[string]CompiledChannelEvent, len(p.Events))

@@ -269,8 +269,20 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	if source == nil {
 		return runtimefailures.New(runtimefailures.ClassInternalFailure, "activity_semantic_source_missing", "activity-runtime", "execute_activity", nil)
 	}
-	tool, ok := d.coordinator.channelActivityTools[intent.Tool]
-	if !ok {
+	target, privateTarget := d.coordinator.channelActivityTools[intent.Tool]
+	tool := target.Tool
+	ok := privateTarget
+	if privateTarget {
+		if intent.PlanGeneration == "" || intent.PlanGeneration != strings.TrimSpace(target.PlanGeneration) {
+			return d.rejectChannelActivityTarget(ctx, intent, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "channel_activity_plan_generation_changed", "activity-runtime", "execute_activity", map[string]any{
+				"tool": intent.Tool, "requested_generation": intent.PlanGeneration, "available_generation": strings.TrimSpace(target.PlanGeneration),
+			}))
+		}
+	} else if strings.HasPrefix(intent.Tool, "platform.channel_activity.") {
+		return d.rejectChannelActivityTarget(ctx, intent, runtimefailures.New(runtimefailures.ClassTargetUnreachable, "channel_activity_plan_generation_unavailable", "activity-runtime", "execute_activity", map[string]any{
+			"tool": intent.Tool, "requested_generation": intent.PlanGeneration,
+		}))
+	} else {
 		tool, ok = source.ToolEntries()[intent.Tool]
 	}
 	if !ok {
@@ -551,6 +563,45 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 	return d.publishJournaledActivityResult(ctx, intent, stored)
 }
 
+func (d pipelineActivityDispatcher) rejectChannelActivityTarget(ctx context.Context, intent runtimeengine.ActivityIntent, cause error) error {
+	if intent.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		return d.publishActivityFailure(ctx, intent, cause)
+	}
+	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.Enabled() {
+		return d.publishActivityFailure(ctx, intent, cause)
+	}
+	intent.Attempt = 1
+	startRecord := activityAttemptStartRecord(intent, activityInputHash(intent.Input))
+	unlock := d.coordinator.lockWorkflowEntity(intent.EntityID.String())
+	started, inserted, err := d.coordinator.workflowStore.ClaimActivityAttemptForLoopGeneration(ctx, startRecord)
+	unlock()
+	if err != nil {
+		if reconciled, ok, loadErr := d.coordinator.workflowStore.LoadActivityAttempt(ctx, startRecord.RequestEventID); loadErr == nil && ok {
+			if claimErr := validateActivityAttemptClaimIdentity(reconciled, startRecord); claimErr != nil {
+				return claimErr
+			}
+			return d.publishExistingActivityAttempt(ctx, intent, reconciled)
+		}
+		return d.publishActivityFailure(ctx, intent, activityDependencyFailure(err, intent.Tool, "reject_channel_activity_target"))
+	}
+	if !inserted {
+		return d.publishExistingActivityAttempt(ctx, intent, started)
+	}
+	failure := runtimefailures.FromError(cause, "activity-runtime", "reject_channel_activity_target")
+	terminal := started.withTerminal(
+		ActivityAttemptStatusFailed,
+		activityResultEventID(intent, intent.FailureEvent),
+		intent.FailureEvent,
+		activityFailurePayload(intent, failure),
+		&failure.Failure,
+	)
+	stored, err := d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
+	if err != nil {
+		return activityDependencyFailure(err, intent.Tool, "complete_rejected_channel_activity_target")
+	}
+	return d.publishJournaledActivityResult(ctx, intent, stored)
+}
+
 func activityDependencyFailure(err error, tool, operation string) error {
 	if _, ok := runtimefailures.As(err); ok {
 		return err
@@ -664,6 +715,7 @@ func (pc *PipelineCoordinator) handleActivityRequestEvent(ctx context.Context, e
 type activityRequestPayload struct {
 	ActivityID       string                       `json:"activity_id"`
 	Tool             string                       `json:"tool"`
+	PlanGeneration   string                       `json:"plan_generation,omitempty"`
 	BundleHash       string                       `json:"bundle_hash,omitempty"`
 	WorkflowVersion  string                       `json:"workflow_version,omitempty"`
 	EffectClass      string                       `json:"effect_class"`
@@ -886,6 +938,7 @@ func activityRequestPayloadFromIntent(intent runtimeengine.ActivityIntent) activ
 	return activityRequestPayload{
 		ActivityID:       intent.ActivityID,
 		Tool:             intent.Tool,
+		PlanGeneration:   intent.PlanGeneration,
 		BundleHash:       intent.BundleHash,
 		WorkflowVersion:  intent.WorkflowVersion,
 		EffectClass:      string(intent.EffectClass),
@@ -932,6 +985,7 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 		Context:          evt.DeliveryContext(),
 		ActivityID:       payload.ActivityID,
 		Tool:             payload.Tool,
+		PlanGeneration:   payload.PlanGeneration,
 		BundleHash:       payload.BundleHash,
 		WorkflowVersion:  payload.WorkflowVersion,
 		Input:            input,

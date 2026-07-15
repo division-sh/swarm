@@ -99,12 +99,17 @@ func (e *Executor) execChannelOperation(ctx context.Context, actor models.AgentC
 	flowInstance := firstChannelString(target.FlowInstance, inbound.FlowInstance(), actor.CanonicalFlowPath(), flowID)
 	activityCoordinate := strings.Join([]string{strings.TrimSpace(toolID), logicalOperationID}, "\x00")
 	activityID := "channel_" + strings.ReplaceAll(strings.TrimPrefix(strings.TrimSpace(toolID), "channel."), ".", "_") + "_" + uuid.NewSHA1(uuid.NameSpaceURL, []byte(activityCoordinate)).String()
+	activityToolID, planGeneration, err := operation.binding.RuntimeActivityTarget(operation.operation)
+	if err != nil {
+		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "channel_activity_plan_generation_invalid", "channel-runtime", "build_activity", map[string]any{"tool": strings.TrimSpace(toolID)}, err)
+	}
 	effectClass := runtimecontracts.NormalizeActivityEffectClass(compiled.Interface.EffectClass)
 	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(effectClass)
 	intent := runtimeengine.ActivityIntent{
 		Context:          events.DeliveryContextFromContext(ctx),
 		ActivityID:       activityID,
-		Tool:             operation.binding.RuntimeActivityToolID(operation.operation),
+		Tool:             activityToolID,
+		PlanGeneration:   planGeneration,
 		BundleHash:       bundleHash,
 		WorkflowVersion:  workflowVersion,
 		Input:            semanticInput,

@@ -366,7 +366,7 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 	type generationSource interface {
 		ConnectorGenerationSurface(string) (GenerationSurface, bool)
 	}
-	if generated, ok := source.(generationSource); ok {
+	if generated, ok := semanticview.SourceCapability[generationSource](source); ok {
 		if evidence, exists := generated.ConnectorGenerationSurface(toolID); exists {
 			copy := evidence
 			generation = &copy
@@ -378,7 +378,7 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 	type importedSource interface {
 		ConnectorPackImportSource(string) (string, bool)
 	}
-	if imported, ok := source.(importedSource); ok {
+	if imported, ok := semanticview.SourceCapability[importedSource](source); ok {
 		if importSource, exists := imported.ConnectorPackImportSource(toolID); exists {
 			sourceKind = "connector_pack_import"
 			sourcePath = strings.TrimSpace(importSource)

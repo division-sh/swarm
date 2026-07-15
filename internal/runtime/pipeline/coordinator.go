@@ -48,7 +48,7 @@ type PipelineCoordinator struct {
 	credentials             runtimecredentials.Store
 	managedCredentials      runtimemanagedcredentials.Store
 	mockConnectorResponses  *providerconnectors.MockResponsePlan
-	channelActivityTools    map[string]runtimecontracts.ToolSchemaEntry
+	channelActivityTools    map[string]ChannelActivityTarget
 	artifactRoot            string
 	bundleHash              string
 	decisionCardCadence     decisioncard.CadencePolicy
@@ -76,7 +76,7 @@ type PipelineCoordinatorOptions struct {
 	Credentials                      runtimecredentials.Store
 	ManagedCredentials               runtimemanagedcredentials.Store
 	MockConnectorResponses           *providerconnectors.MockResponsePlan
-	ChannelActivityTools             map[string]runtimecontracts.ToolSchemaEntry
+	ChannelActivityTools             map[string]ChannelActivityTarget
 	ArtifactRoot                     string
 	BundleHash                       string
 	DecisionCardCadence              decisioncard.CadencePolicy
@@ -86,10 +86,17 @@ type PipelineCoordinatorOptions struct {
 	TestEngineEmitNow                func() time.Time
 }
 
-func copyActivityToolEntries(in map[string]runtimecontracts.ToolSchemaEntry) map[string]runtimecontracts.ToolSchemaEntry {
-	out := make(map[string]runtimecontracts.ToolSchemaEntry, len(in))
-	for name, tool := range in {
-		out[name] = tool
+// ChannelActivityTarget is a private compiled connector target. Generation is
+// persisted with every request and must match before any provider call.
+type ChannelActivityTarget struct {
+	Tool           runtimecontracts.ToolSchemaEntry
+	PlanGeneration string
+}
+
+func copyActivityToolEntries(in map[string]ChannelActivityTarget) map[string]ChannelActivityTarget {
+	out := make(map[string]ChannelActivityTarget, len(in))
+	for name, target := range in {
+		out[name] = target
 	}
 	return out
 }

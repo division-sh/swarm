@@ -167,3 +167,31 @@ func TestSourceWithProviderTriggerEventsRebuildsOnCatalogGenerationChange(t *tes
 		t.Fatalf("reloaded normalized event entry = (%#v, %v)", entry, ok)
 	}
 }
+
+func TestProviderTriggerCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *testing.T) {
+	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram.text_message")
+	imported, err := SourceWithProviderTriggerEvents(source, catalog)
+	if err != nil {
+		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
+	}
+	overlaid, err := semanticview.WithRuntimeTools(imported, map[string]runtimecontracts.ToolSchemaEntry{
+		"channel.ops.deliver": {Category: "channel_operation", HandlerType: "channel"},
+	})
+	if err != nil {
+		t.Fatalf("WithRuntimeTools: %v", err)
+	}
+	revalidated, err := SourceWithProviderTriggerEvents(overlaid, catalog)
+	if err != nil {
+		t.Fatalf("same-generation revalidation through overlay: %v", err)
+	}
+	generation, ok := semanticview.SourceCapability[interface{ ProviderTriggerEventGeneration() string }](revalidated)
+	if !ok || generation.ProviderTriggerEventGeneration() != catalog.GenerationID() {
+		t.Fatalf("provider trigger generation hidden through overlay: capability=%v generation=%v", ok, generation)
+	}
+	authorized, ok := semanticview.SourceCapability[interface {
+		ProviderTriggerTargetFreeAuthorizations() []runtimeprovideroutput.Authorization
+	}](revalidated)
+	if !ok || len(authorized.ProviderTriggerTargetFreeAuthorizations()) == 0 {
+		t.Fatal("target-free provider authority hidden through overlay")
+	}
+}
