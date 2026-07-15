@@ -376,9 +376,9 @@ func loadExternalEffectStorySettlement(ctx context.Context, tx *sql.Tx, attemptI
 }
 
 func loadExternalEffectRecoveryCandidates(ctx context.Context, tx *sql.Tx, postgres bool) ([]string, error) {
-	query := `SELECT CAST(a.attempt_id AS TEXT) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE a.state IN ('authorized','launched','response_observed') AND (o.authority_kind='conversation_fork_chat' OR EXISTS (SELECT 1 FROM runs run WHERE run.run_id=COALESCE(NULLIF(json_extract(o.lineage, '$.run_id'), ''), NULLIF(json_extract(o.authority_evidence, '$.usage_target.run_id'), '')) AND run.status IN ('running','paused'))) ORDER BY a.attempt_id`
+	query := `SELECT CAST(a.attempt_id AS TEXT) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE a.state IN ('authorized','launched','response_observed') AND ` + sqliteExternalEffectActiveOwnerPredicate + ` ORDER BY a.attempt_id`
 	if postgres {
-		query = `SELECT a.attempt_id::text FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE a.state IN ('authorized','launched','response_observed') AND (o.authority_kind='conversation_fork_chat' OR EXISTS (SELECT 1 FROM runs run WHERE run.run_id=COALESCE(NULLIF(o.lineage->>'run_id',''), NULLIF(o.authority_evidence #>> '{usage_target,run_id}',''))::uuid AND run.status IN ('running','paused'))) ORDER BY a.attempt_id`
+		query = `SELECT a.attempt_id::text FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE a.state IN ('authorized','launched','response_observed') AND ` + postgresExternalEffectActiveOwnerPredicate + ` ORDER BY a.attempt_id`
 	}
 	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
