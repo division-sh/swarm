@@ -271,7 +271,6 @@ func (r *TurnContextRegistry) ObserveMCPProviderCall(token, toolName, occurrence
 	updated, err := surface.Observe(managedcapabilities.DeliveryEvidence{
 		BindingKind: managedcapabilities.BindingMCPProvider, ExactName: exactName,
 		Kind: "mcp_visible", Status: managedcapabilities.EvidenceConfirmed,
-		Detail: "exact provider-owned tools/call occurrence",
 	})
 	if err != nil {
 		return managedcapabilities.Surface{}, err
