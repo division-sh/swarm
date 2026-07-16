@@ -29,16 +29,15 @@ type RunForkDeliveryEventReplayResult struct {
 }
 
 type runForkReplaySourceEvent struct {
-	EventID        string
-	EventName      string
-	EntityID       sql.NullString
-	FlowInstance   sql.NullString
-	Scope          string
-	Payload        json.RawMessage
-	ExecutionMode  executionmode.Mode
-	ProducedBy     sql.NullString
-	ProducedByType sql.NullString
-	HandlerNode    sql.NullString
+	EventID       string
+	EventName     string
+	EntityID      sql.NullString
+	FlowInstance  sql.NullString
+	Scope         string
+	Payload       json.RawMessage
+	ExecutionMode executionmode.Mode
+	Producer      events.ProducerIdentity
+	HandlerNode   sql.NullString
 }
 
 func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, classifier authoredEventDescriptorResolver, lineage runForkActivationLineage, execution RunForkHistoricalReplayExecution, now time.Time) (RunForkDeliveryEventReplayResult, error) {
@@ -91,8 +90,8 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, classifier
 			}
 			if inserted {
 				envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, nullStringText(sourceEvent.EntityID)), nullStringText(sourceEvent.FlowInstance))
-				replayed := events.NewReplayEvent(forkEventID, events.EventType(sourceEvent.EventName), nullStringText(sourceEvent.ProducedBy), "", sourceEvent.Payload, 0, events.EventLineage{RunID: lineage.ForkRunID, ExecutionMode: sourceEvent.ExecutionMode}, envelope, now)
-				if err := recordPersistedEventAuthorActivity(ctx, classifier, replayed, nullStringText(sourceEvent.ProducedBy), nullStringText(sourceEvent.ProducedByType)); err != nil {
+				replayed := events.NewReplayEvent(forkEventID, events.EventType(sourceEvent.EventName), sourceEvent.Producer, "", sourceEvent.Payload, 0, events.EventLineage{RunID: lineage.ForkRunID, ExecutionMode: sourceEvent.ExecutionMode}, envelope, now)
+				if err := recordPersistedEventAuthorActivity(ctx, classifier, replayed, sourceEvent.Producer.ID(), string(sourceEvent.Producer.Type())); err != nil {
 					return result, err
 				}
 				result.ReplayedEventCount++
@@ -161,6 +160,7 @@ func validateRunForkDeliveryEventReplayWorkAgainstPlan(pending []RunForkPendingW
 
 func loadRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceRunID, sourceEventID string) (runForkReplaySourceEvent, error) {
 	var event runForkReplaySourceEvent
+	var producedBy, producedByType string
 	err := tx.QueryRowContext(ctx, `
 		SELECT
 			event_id::text,
@@ -170,8 +170,8 @@ func loadRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceRunID, 
 			scope,
 			COALESCE(payload, '{}'::jsonb),
 			execution_mode,
-			produced_by,
-			produced_by_type,
+			COALESCE(produced_by, ''),
+			COALESCE(produced_by_type, ''),
 			handler_node
 		FROM events
 		WHERE run_id = $1::uuid
@@ -184,8 +184,8 @@ func loadRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceRunID, 
 		&event.Scope,
 		&event.Payload,
 		&event.ExecutionMode,
-		&event.ProducedBy,
-		&event.ProducedByType,
+		&producedBy,
+		&producedByType,
 		&event.HandlerNode,
 	)
 	if err == sql.ErrNoRows {
@@ -200,6 +200,11 @@ func loadRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceRunID, 
 	if !event.ExecutionMode.Valid() {
 		return runForkReplaySourceEvent{}, fmt.Errorf("source event %s has invalid execution_mode %q", sourceEventID, event.ExecutionMode)
 	}
+	producer, err := events.NewProducerIdentity(events.EventProducerType(producedByType), producedBy)
+	if err != nil {
+		return runForkReplaySourceEvent{}, fmt.Errorf("source event %s producer identity: %w", sourceEventID, err)
+	}
+	event.Producer = producer
 	return event, nil
 }
 
@@ -214,7 +219,7 @@ func insertRunForkReplayEvent(ctx context.Context, tx *sql.Tx, forkRunID, forkEv
 			$8, 0, NULLIF($9, ''), NULLIF($10, ''), NULLIF($11, ''), NULL, $12
 		)
 		ON CONFLICT (event_id) DO NOTHING
-	`, forkEventID, forkRunID, event.EventName, nullStringText(event.EntityID), nullStringText(event.FlowInstance), event.Scope, string(event.Payload), event.ExecutionMode, nullStringText(event.ProducedBy), nullStringText(event.ProducedByType), nullStringText(event.HandlerNode), now)
+	`, forkEventID, forkRunID, event.EventName, nullStringText(event.EntityID), nullStringText(event.FlowInstance), event.Scope, string(event.Payload), event.ExecutionMode, event.Producer.ID(), string(event.Producer.Type()), nullStringText(event.HandlerNode), now)
 	if err != nil {
 		return false, fmt.Errorf("insert fork replay event %s from source event %s: %w", forkEventID, event.EventID, err)
 	}

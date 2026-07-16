@@ -13,7 +13,7 @@ func TestAdmissionRootIngressAllocatesPersistedFacts(t *testing.T) {
 	admitted, err := AdmitForPublish(NewRootIngressEvent(
 		"",
 		EventType("operator.started"),
-		"operator",
+		ExternalProducer("operator"),
 		"",
 		nil,
 		0,
@@ -41,7 +41,7 @@ func TestAdmissionPreservesPlatformDeliveryContext(t *testing.T) {
 	admitted, err := AdmitForPublish(NewProjectionEvent(
 		"event-1",
 		EventType("provider.replied"),
-		"provider-node",
+		NodeProducer("provider-node"),
 		"",
 		nil,
 		0,
@@ -49,7 +49,7 @@ func TestAdmissionPreservesPlatformDeliveryContext(t *testing.T) {
 		"request-1",
 		EventEnvelope{},
 		time.Now().UTC(),
-	).WithProducerType(EventProducerNode).WithDeliveryContext(want), AdmissionOptions{})
+	).WithDeliveryContext(want), AdmissionOptions{})
 	if err != nil {
 		t.Fatalf("AdmitForPublish: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestAdmissionRuntimePlatformEventAllocatesStandaloneRun(t *testing.T) {
 	admitted, err := AdmitForPublish(NewRuntimeControlEvent(
 		"",
 		EventType("platform.boot"),
-		"runtime",
+		PlatformProducer("runtime"),
 		"",
 		nil,
 		0,
@@ -89,7 +89,7 @@ func TestAdmissionDiagnosticDirectAllowsGlobalNoRun(t *testing.T) {
 	admitted, err := AdmitForPersistence(NewDiagnosticDirectEvent(
 		"",
 		EventType("platform.runtime_log"),
-		"runtime",
+		PlatformProducer("runtime"),
 		"",
 		nil,
 		0,
@@ -116,7 +116,7 @@ func TestAdmissionRejectsProjectionPersistenceWithoutAuthoritativeFacts(t *testi
 	_, err := AdmitForPersistence(NewProjectionEvent(
 		"",
 		EventType("task.completed"),
-		"agent-1",
+		AgentProducer("agent-1"),
 		"",
 		nil,
 		0,
@@ -135,7 +135,7 @@ func TestAdmissionRejectsProjectionPersistenceWithoutAuthoritativeFacts(t *testi
 	_, err = AdmitForPersistence(NewProjectionEvent(
 		"evt-projection",
 		EventType("task.completed"),
-		"agent-1",
+		AgentProducer("agent-1"),
 		"",
 		nil,
 		0,
@@ -157,7 +157,7 @@ func TestAdmissionPublishStillDefaultsProjectionShell(t *testing.T) {
 	admitted, err := AdmitForPublish(NewProjectionEvent(
 		"",
 		EventType("task.completed"),
-		"agent-1",
+		AgentProducer("agent-1"),
 		"",
 		nil,
 		0,
@@ -187,7 +187,7 @@ func TestAdmissionRejectsMissingChildLineage(t *testing.T) {
 	_, err := AdmitForPersistence(NewChildEventWithLineage(
 		"",
 		EventType("task.completed"),
-		"agent-1",
+		AgentProducer("agent-1"),
 		"",
 		nil,
 		0,
@@ -207,7 +207,7 @@ func TestAdmissionRejectsMissingLineageExecutionModeInsteadOfDefaultingLive(t *t
 	_, err := AdmitForPersistence(NewChildEventWithLineage(
 		"child-event",
 		EventType("task.completed"),
-		"agent-1",
+		AgentProducer("agent-1"),
 		"",
 		nil,
 		0,
@@ -222,7 +222,7 @@ func TestAdmissionRejectsMissingLineageExecutionModeInsteadOfDefaultingLive(t *t
 	_, err = AdmitForPublish(NewReplayEvent(
 		"replay-event",
 		EventType("task.completed"),
-		"agent-1",
+		AgentProducer("agent-1"),
 		"",
 		nil,
 		0,
@@ -239,7 +239,7 @@ func TestAdmissionReplayAllowsSelectedForkTypedLineageOwner(t *testing.T) {
 	admitted, err := AdmitForPublish(NewReplayEvent(
 		"evt-fork",
 		EventType("task.completed"),
-		"runtime.run_fork.selected_contract_execution",
+		PlatformProducer("runtime.run_fork.selected_contract_execution"),
 		"",
 		nil,
 		0,
@@ -262,7 +262,7 @@ func TestAdmissionRejectsReplayWithoutParentOrSelectedForkLineage(t *testing.T) 
 	_, err := AdmitForPublish(NewReplayEvent(
 		"evt-fork",
 		EventType("task.completed"),
-		"runtime.run_fork.selected_contract_execution",
+		PlatformProducer("runtime.run_fork.selected_contract_execution"),
 		"",
 		nil,
 		0,

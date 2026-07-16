@@ -252,10 +252,6 @@ func (pc *PipelineCoordinator) queueArtifactRepoResultEvent(ctx context.Context,
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	sourceAgent := pipelineSourceAgent(ctx)
-	if sourceAgent == "" {
-		sourceAgent = runtimeWorkflowID
-	}
 	chainDepth := execCtx.Request.ChainDepth + 1
 	if chainDepth <= 0 {
 		chainDepth = execCtx.Request.Event.ChainDepth() + 1
@@ -277,7 +273,7 @@ func (pc *PipelineCoordinator) queueArtifactRepoResultEvent(ctx context.Context,
 	evt := events.NewChildEvent(
 		uuid.NewString(),
 		events.EventType(eventType),
-		sourceAgent,
+		events.PlatformProducer(runtimeWorkflowID),
 		"",
 		mustJSON(payload),
 		chainDepth,

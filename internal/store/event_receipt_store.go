@@ -597,11 +597,13 @@ func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, age
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT
 			$1,
-			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
+			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name,
 			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
-			e.payload, e.created_at,
+			e.payload, COALESCE(e.chain_depth, 0), COALESCE(e.produced_by, ''), COALESCE(e.produced_by_type, ''),
 			COALESCE(e.source_event_id::text, ''),
-			e.execution_mode,
+			e.created_at, e.execution_mode,
+			COALESCE(e.source_route, '{}'::jsonb), COALESCE(e.target_route, '{}'::jsonb),
+			COALESCE(e.target_set, '[]'::jsonb),
 			CASE WHEN d.delivery_id IS NULL THEN FALSE ELSE TRUE END,
 			COALESCE(d.status, ''),
 			COALESCE(d.retry_count, 0),

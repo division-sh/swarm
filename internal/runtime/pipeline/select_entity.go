@@ -130,18 +130,7 @@ func (pc *PipelineCoordinator) selectedHandlerEntityFromInstance(ctx context.Con
 	if storageRef := strings.TrimSpace(selected.StorageRef); storageRef != "" {
 		envelope = events.EnvelopeForFlowInstance(envelope, storageRef)
 	}
-	selectedEvent := events.NewProjectionEvent(
-		evt.ID(),
-		evt.Type(),
-		evt.SourceAgent(),
-		evt.TaskID(),
-		evt.Payload(),
-		evt.ChainDepth(),
-		evt.RunID(),
-		evt.ParentEventID(),
-		envelope,
-		evt.CreatedAt(),
-	).WithProducerType(evt.ProducerType()).WithExecutionMode(evt.ExecutionMode())
+	selectedEvent := events.Project(evt, events.ProjectEnvelope(envelope))
 	return selectedHandlerEntity{
 		EntityID: entityID,
 		State:    state,
@@ -213,18 +202,7 @@ func (pc *PipelineCoordinator) createdHandlerEntityForDeclaredKey(ctx context.Co
 	}
 	envelope := events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID)
 	envelope = events.EnvelopeForFlowInstance(envelope, instance.InstancePath)
-	selectedEvent := events.NewProjectionEvent(
-		evt.ID(),
-		evt.Type(),
-		evt.SourceAgent(),
-		evt.TaskID(),
-		evt.Payload(),
-		evt.ChainDepth(),
-		evt.RunID(),
-		evt.ParentEventID(),
-		envelope,
-		evt.CreatedAt(),
-	).WithProducerType(evt.ProducerType()).WithExecutionMode(evt.ExecutionMode())
+	selectedEvent := events.Project(evt, events.ProjectEnvelope(envelope))
 	return selectedHandlerEntity{
 		EntityID: entityID,
 		State:    state,

@@ -88,7 +88,7 @@ func (h *runHub) startRun(ctx context.Context, runID string, inputs map[string]a
 			h.deleteRun(runID)
 			return err
 		}
-		evt := events.NewRootIngressEvent(uuid.NewString(), events.EventType(eventName), "builder", "", encoded, 0, runID, "", events.EventEnvelope{EntityID: entityID}, time.Now().UTC())
+		evt := events.NewRootIngressEvent(uuid.NewString(), events.EventType(eventName), events.ExternalProducer("builder"), "", encoded, 0, runID, "", events.EventEnvelope{EntityID: entityID}, time.Now().UTC())
 		if err := rt.Bus.Publish(ctx, evt); err != nil {
 			failure := runtimefailures.Normalize(err, "builder.run_hub", "publish_run_input")
 			h.emitControl(runID, map[string]any{

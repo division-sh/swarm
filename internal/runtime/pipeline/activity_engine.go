@@ -719,7 +719,7 @@ func activityRequestEmitIntent(intent runtimeengine.ActivityIntent) (runtimeengi
 	evt := events.NewChildEventWithLineage(
 		activityRequestEventID(intent),
 		activityRequestEventType,
-		runtimeWorkflowID,
+		events.PlatformProducer(runtimeWorkflowID),
 		intent.SourceTaskID,
 		raw,
 		intent.ChainDepth+1,
@@ -1558,7 +1558,7 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 	evt := events.NewChildEventWithLineage(
 		eventID,
 		events.EventType(eventType),
-		intent.NodeID.String(),
+		events.NodeProducer(intent.NodeID.String()),
 		intent.SourceTaskID,
 		raw,
 		intent.ChainDepth+1,

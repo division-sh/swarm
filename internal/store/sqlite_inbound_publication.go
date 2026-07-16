@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -407,16 +406,17 @@ func loadSQLiteInboundPublicationRoutes(ctx context.Context, db inboundPublicati
 }
 
 func loadSQLiteInboundPublicationEvent(ctx context.Context, db inboundPublicationQueryer, eventID string) (events.Event, error) {
-	var eventType, sourceAgent, payload, runID, parentID, entityID, flowInstance, scope string
-	var sourceRouteRaw, targetRouteRaw, targetSetRaw []byte
-	var chainDepth int
+	var row persistedEventIdentity
+	var executionMode string
 	var createdAtValue any
 	err := db.QueryRowContext(ctx, `
-		SELECT event_name, COALESCE(produced_by, ''), payload, COALESCE(run_id, ''),
-		       COALESCE(source_event_id, ''), COALESCE(entity_id, ''), COALESCE(flow_instance, ''),
-		       scope, source_route, target_route, target_set, chain_depth, created_at
+		SELECT COALESCE(run_id, ''), event_name, COALESCE(entity_id, ''), COALESCE(flow_instance, ''),
+		       scope, payload, COALESCE(chain_depth, 0), COALESCE(produced_by, ''), COALESCE(produced_by_type, ''),
+		       COALESCE(source_event_id, ''), created_at, execution_mode, source_route, target_route, target_set
 		FROM events WHERE event_id = ?
-	`, eventID).Scan(&eventType, &sourceAgent, &payload, &runID, &parentID, &entityID, &flowInstance, &scope, &sourceRouteRaw, &targetRouteRaw, &targetSetRaw, &chainDepth, &createdAtValue)
+	`, eventID).Scan(&row.RunID, &row.EventName, &row.EntityID, &row.FlowInstance, &row.Scope, &row.Payload,
+		&row.ChainDepth, &row.ProducedBy, &row.ProducedByType, &row.SourceEventID, &createdAtValue, &executionMode,
+		&row.SourceRoute, &row.TargetRoute, &row.TargetSet)
 	if err != nil {
 		return events.EmptyEvent(), fmt.Errorf("load sqlite inbound publication event: %w", err)
 	}
@@ -427,11 +427,8 @@ func loadSQLiteInboundPublicationEvent(ctx context.Context, db inboundPublicatio
 	if !ok {
 		return events.EmptyEvent(), fmt.Errorf("load sqlite inbound publication event created_at is missing")
 	}
-	envelope, err := decodeInboundEventEnvelope(entityID, flowInstance, scope, sourceRouteRaw, targetRouteRaw, targetSetRaw)
-	if err != nil {
-		return events.EmptyEvent(), err
-	}
-	return events.NewProjectionEvent(eventID, events.EventType(eventType), sourceAgent, "", json.RawMessage(payload), chainDepth, runID, parentID, envelope, createdAt), nil
+	row.CreatedAt = createdAt
+	return eventFromPersistedIdentity(eventID, executionMode, row)
 }
 
 var _ runtimeinbound.Runner = (*SQLiteRuntimeStore)(nil)

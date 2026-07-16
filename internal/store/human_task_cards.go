@@ -287,7 +287,7 @@ func expireHumanTaskCards(ctx context.Context, tx *sql.Tx, now time.Time, limit 
 		if err != nil {
 			return nil, err
 		}
-		evt := events.NewRuntimeControlEvent(eventID, events.EventType("mailbox.card_expired"), "platform", "", payload, 0, card.RunID, "",
+		evt := events.NewRuntimeControlEvent(eventID, events.EventType("mailbox.card_expired"), events.PlatformProducer("platform"), "", payload, 0, card.RunID, "",
 			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance), now)
 		expiredEvents = append(expiredEvents, evt)
 	}

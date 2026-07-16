@@ -121,7 +121,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	emitted := events.NewChildEventWithLineage(
 		uuid.NewString(),
 		events.EventType(eventType),
-		actor.ID,
+		events.AgentProducer(actor.ID),
 		taskID,
 		mustJSON(payloadMap),
 		0,
@@ -192,16 +192,11 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "pin_target_resolution_failed", "publish", "pin_target_resolution", wrapped)
 				return nil, wrapped
 			}
-			emitted = events.NewChildEventWithLineage(
-				emitted.ID(),
-				emitted.Type(),
-				emitted.SourceAgent(),
-				emitted.TaskID(),
-				emitted.Payload(),
-				emitted.ChainDepth(),
-				emitLineage,
-				resolution.Envelope,
-				emitted.CreatedAt(),
+			emitted = events.Project(
+				emitted,
+				events.ProjectLineage(emitLineage.RunID, emitLineage.ParentEventID),
+				events.ProjectTaskID(emitLineage.TaskID),
+				events.ProjectEnvelope(resolution.Envelope),
 			)
 		}
 	}

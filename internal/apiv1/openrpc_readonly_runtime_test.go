@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apispec"
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/store"
 )
@@ -551,6 +552,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					RunID:         runID,
 					CreatedAt:     now,
 					Source:        "runtime",
+					ProducerType:  events.EventProducerPlatform,
 					Payload:       map[string]any{"ok": true},
 					Deliveries:    []store.OperatorEventDelivery{},
 					DeadLetters:   []store.OperatorDeadLetterRecord{},

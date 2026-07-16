@@ -484,7 +484,7 @@ func projectInboundPublication(target InboundTarget, admitted providertriggers.A
 			envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{EntityID: request.EntityID, FlowInstance: target.FlowInstance})
 		}
 		event := events.NewRootIngressEvent(
-			eventID, output.Name, "inbound-gateway", "", mustJSON(output.Payload), 0,
+			eventID, output.Name, events.ExternalProducer("inbound-gateway"), "", mustJSON(output.Payload), 0,
 			request.ResolvedRunID, "", envelope, now,
 		)
 		published = append(published, runtimebus.InboundDeliveryEvent{
@@ -505,7 +505,7 @@ func projectInboundPublication(target InboundTarget, admitted providertriggers.A
 		return nil, events.EmptyEvent(), runtimeauthoractivity.InboundProjection{}, err
 	}
 	evidence := events.NewDiagnosticDirectEvent(
-		request.MarkerEventID, events.EventTypePlatformInboundRecord, "runtime", "", evidencePayload,
+		request.MarkerEventID, events.EventTypePlatformInboundRecord, events.PlatformProducer("runtime"), "", evidencePayload,
 		0, request.ResolvedRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), now,
 	)
 	return published, evidence, authorProjection, nil

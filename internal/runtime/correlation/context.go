@@ -328,16 +328,5 @@ func CorrelateEvent(ctx context.Context, evt events.Event) (context.Context, eve
 			}
 		}
 	}
-	return ctx, events.NewProjectionEvent(
-		evt.ID(),
-		evt.Type(),
-		evt.SourceAgent(),
-		evt.TaskID(),
-		evt.Payload(),
-		evt.ChainDepth(),
-		runID,
-		parentEventID,
-		evt.NormalizedEnvelope(),
-		evt.CreatedAt(),
-	).WithProducerType(evt.ProducerType()).WithExecutionMode(evt.ExecutionMode())
+	return ctx, events.Project(evt, events.ProjectLineage(runID, parentEventID))
 }

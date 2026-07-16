@@ -302,7 +302,7 @@ func buildAutoEmitOnCreateEvent(source semanticview.Source, schema runtimecontra
 		FlowInstance: flowPath,
 		EntityID:     flowEntityID,
 	})
-	return events.NewChildEventWithLineage(uuid.NewString(), events.EventType(eventType), "flow-instance-activator", "", encoded, 0, lineage, envelope, time.Now().UTC()), autoEmit, nil
+	return events.NewChildEventWithLineage(uuid.NewString(), events.EventType(eventType), events.PlatformProducer("flow-instance-activator"), "", encoded, 0, lineage, envelope, time.Now().UTC()), autoEmit, nil
 }
 
 func validateAutoEmitPayload(source semanticview.Source, flowID, eventType string, payload map[string]any) error {

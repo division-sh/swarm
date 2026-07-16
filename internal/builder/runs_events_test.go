@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
@@ -25,6 +26,7 @@ func TestProjectCanonicalRunDebugReplay_UsesCanonicalEventOwnerPayload(t *testin
 		EntityID:      "entity-1",
 		CreatedAt:     now,
 		Source:        "builder",
+		ProducerType:  events.EventProducerExternal,
 		Payload:       map[string]any{"topic": "sample"},
 	}}
 
@@ -63,6 +65,7 @@ func TestProjectCanonicalRunDebugReplay_DoesNotPromotePayloadEntityToInstanceID(
 		RunID:         "run-123",
 		CreatedAt:     now,
 		Source:        "builder",
+		ProducerType:  events.EventProducerExternal,
 		Payload:       map[string]any{"entity_id": "payload-entity", "topic": "sample"},
 	}}
 

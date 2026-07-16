@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -572,24 +571,20 @@ func loadPostgresInboundPublicationRoutes(ctx context.Context, db inboundPublica
 }
 
 func loadPostgresInboundPublicationEvent(ctx context.Context, db inboundPublicationQueryer, eventID string) (events.Event, error) {
-	var eventType, sourceAgent, taskID, payload, runID, parentID, entityID, flowInstance, scope string
-	var sourceRouteRaw, targetRouteRaw, targetSetRaw []byte
-	var chainDepth int
-	var createdAt time.Time
+	var row persistedEventIdentity
+	var executionMode string
 	err := db.QueryRowContext(ctx, `
-		SELECT event_name, COALESCE(produced_by, ''), '', payload::text, COALESCE(run_id::text, ''),
-		       COALESCE(source_event_id::text, ''), COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''),
-		       scope, source_route, target_route, target_set, chain_depth, created_at
+		SELECT COALESCE(run_id::text, ''), event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''),
+		       scope, payload, COALESCE(chain_depth, 0), COALESCE(produced_by, ''), COALESCE(produced_by_type, ''),
+		       COALESCE(source_event_id::text, ''), created_at, execution_mode, source_route, target_route, target_set
 		FROM events WHERE event_id = $1::uuid
-	`, eventID).Scan(&eventType, &sourceAgent, &taskID, &payload, &runID, &parentID, &entityID, &flowInstance, &scope, &sourceRouteRaw, &targetRouteRaw, &targetSetRaw, &chainDepth, &createdAt)
+	`, eventID).Scan(&row.RunID, &row.EventName, &row.EntityID, &row.FlowInstance, &row.Scope, &row.Payload,
+		&row.ChainDepth, &row.ProducedBy, &row.ProducedByType, &row.SourceEventID, &row.CreatedAt, &executionMode,
+		&row.SourceRoute, &row.TargetRoute, &row.TargetSet)
 	if err != nil {
 		return events.EmptyEvent(), fmt.Errorf("load inbound publication event: %w", err)
 	}
-	envelope, err := decodeInboundEventEnvelope(entityID, flowInstance, scope, sourceRouteRaw, targetRouteRaw, targetSetRaw)
-	if err != nil {
-		return events.EmptyEvent(), err
-	}
-	return events.NewProjectionEvent(eventID, events.EventType(eventType), sourceAgent, taskID, json.RawMessage(payload), chainDepth, runID, parentID, envelope, createdAt), nil
+	return eventFromPersistedIdentity(eventID, executionMode, row)
 }
 
 func canonicalInboundRecipientManifest(raw json.RawMessage) (json.RawMessage, string, int, error) {

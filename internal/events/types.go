@@ -77,6 +77,66 @@ func (t EventProducerType) Valid() bool {
 	}
 }
 
+// ProducerIdentity is the exact semantic identity of an event producer.
+// Its fields are private so producer type and ID cannot drift independently.
+type ProducerIdentity struct {
+	producerType EventProducerType
+	id           string
+}
+
+func NewProducerIdentity(producerType EventProducerType, id string) (ProducerIdentity, error) {
+	producer := normalizedProducerIdentity(producerType, id)
+	if err := producer.Validate(); err != nil {
+		return ProducerIdentity{}, err
+	}
+	return producer, nil
+}
+
+func NodeProducer(id string) ProducerIdentity {
+	return normalizedProducerIdentity(EventProducerNode, id)
+}
+
+func AgentProducer(id string) ProducerIdentity {
+	return normalizedProducerIdentity(EventProducerAgent, id)
+}
+
+func PlatformProducer(id string) ProducerIdentity {
+	return normalizedProducerIdentity(EventProducerPlatform, id)
+}
+
+func ExternalProducer(id string) ProducerIdentity {
+	return normalizedProducerIdentity(EventProducerExternal, id)
+}
+
+func normalizedProducerIdentity(producerType EventProducerType, id string) ProducerIdentity {
+	return ProducerIdentity{
+		producerType: EventProducerType(strings.TrimSpace(string(producerType))),
+		id:           strings.TrimSpace(id),
+	}
+}
+
+func (p ProducerIdentity) Type() EventProducerType {
+	return EventProducerType(strings.TrimSpace(string(p.producerType)))
+}
+
+func (p ProducerIdentity) ID() string {
+	return strings.TrimSpace(p.id)
+}
+
+func (p ProducerIdentity) Validate() error {
+	if !p.Type().Valid() {
+		return fmt.Errorf("event producer_type %q is invalid", p.Type())
+	}
+	if p.ID() == "" {
+		return fmt.Errorf("event producer_id is required")
+	}
+	return nil
+}
+
+func (p ProducerIdentity) Equal(other ProducerIdentity) bool {
+	return p.Type() == other.Type() && p.ID() == other.ID()
+}
+
 type EventEnvelope struct {
 	EntityID     string          `json:"-"`
 	FlowInstance string          `json:"-"`
@@ -241,8 +301,7 @@ type Event struct {
 	admissionClass  EventAdmissionClass
 	id              string
 	eventType       EventType
-	sourceAgent     string
-	producerType    EventProducerType
+	producer        ProducerIdentity
 	taskID          string
 	payload         json.RawMessage
 	chainDepth      int
@@ -298,53 +357,114 @@ type EventLineage struct {
 	ExecutionMode executionmode.Mode
 }
 
-func NewRootIngressEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
-	return newEvent(EventAdmissionRootIngress, id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+// ProjectionChange describes one intentional change to an existing event.
+// Project applies these changes to a lossless clone so newly added event-owned
+// facts cannot be dropped by open-coded reconstruction.
+type ProjectionChange func(*Event)
+
+func Project(evt Event, changes ...ProjectionChange) Event {
+	projected := evt.Clone()
+	for _, change := range changes {
+		if change != nil {
+			change(&projected)
+		}
+	}
+	return projected
 }
 
-func NewRuntimeControlEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
-	return newEvent(EventAdmissionRuntimeControl, id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+func ProjectLineage(runID, parentEventID string) ProjectionChange {
+	return func(evt *Event) {
+		evt.runID = strings.TrimSpace(runID)
+		evt.parentEventID = strings.TrimSpace(parentEventID)
+	}
 }
 
-func NewRuntimeDiagnosticEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
-	return newEvent(EventAdmissionRuntimeDiagnostic, id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+func ProjectID(id string) ProjectionChange {
+	return func(evt *Event) {
+		evt.id = strings.TrimSpace(id)
+	}
 }
 
-func NewDiagnosticDirectEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
-	return newEvent(EventAdmissionDiagnosticDirect, id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+func ProjectCreatedAt(createdAt time.Time) ProjectionChange {
+	return func(evt *Event) {
+		evt.createdAt = createdAt
+		if !createdAt.IsZero() {
+			evt.createdAt = createdAt.UTC()
+		}
+	}
 }
 
-func NewChildEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, parent Event, envelope EventEnvelope, createdAt time.Time) Event {
-	return NewChildEventWithLineage(id, eventType, sourceAgent, taskID, payload, chainDepth, LineageFromEvent(parent), envelope, createdAt)
+func ProjectTaskID(taskID string) ProjectionChange {
+	return func(evt *Event) {
+		evt.taskID = strings.TrimSpace(taskID)
+	}
 }
 
-func NewChildEventWithLineage(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, lineage EventLineage, envelope EventEnvelope, createdAt time.Time) Event {
+func ProjectPayload(payload json.RawMessage) ProjectionChange {
+	return func(evt *Event) {
+		evt.payload = clonePayload(payload)
+	}
+}
+
+func ProjectEnvelope(envelope EventEnvelope) ProjectionChange {
+	return func(evt *Event) {
+		evt.envelope = envelope.Normalized()
+	}
+}
+
+func ProjectDeliveryContext(deliveryContext DeliveryContext) ProjectionChange {
+	return func(evt *Event) {
+		evt.deliveryContext = deliveryContext.Normalized()
+	}
+}
+
+func NewRootIngressEvent(id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
+	return newEvent(EventAdmissionRootIngress, id, eventType, producer, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+}
+
+func NewRuntimeControlEvent(id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
+	return newEvent(EventAdmissionRuntimeControl, id, eventType, producer, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+}
+
+func NewRuntimeDiagnosticEvent(id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
+	return newEvent(EventAdmissionRuntimeDiagnostic, id, eventType, producer, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+}
+
+func NewDiagnosticDirectEvent(id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
+	return newEvent(EventAdmissionDiagnosticDirect, id, eventType, producer, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+}
+
+func NewChildEvent(id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, parent Event, envelope EventEnvelope, createdAt time.Time) Event {
+	return NewChildEventWithLineage(id, eventType, producer, taskID, payload, chainDepth, LineageFromEvent(parent), envelope, createdAt)
+}
+
+func NewChildEventWithLineage(id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, lineage EventLineage, envelope EventEnvelope, createdAt time.Time) Event {
 	lineage = lineage.Normalized()
 	if strings.TrimSpace(taskID) == "" {
 		taskID = lineage.TaskID
 	}
-	return newEvent(EventAdmissionChild, id, eventType, sourceAgent, taskID, payload, chainDepth, lineage.RunID, lineage.ParentEventID, envelope, createdAt).withExecutionModeClaim(lineage.ExecutionMode)
+	return newEvent(EventAdmissionChild, id, eventType, producer, taskID, payload, chainDepth, lineage.RunID, lineage.ParentEventID, envelope, createdAt).withExecutionModeClaim(lineage.ExecutionMode)
 }
 
-func NewReplayEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, lineage EventLineage, envelope EventEnvelope, createdAt time.Time) Event {
+func NewReplayEvent(id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, lineage EventLineage, envelope EventEnvelope, createdAt time.Time) Event {
 	lineage = lineage.Normalized()
 	if strings.TrimSpace(taskID) == "" {
 		taskID = lineage.TaskID
 	}
-	return newEvent(EventAdmissionReplay, id, eventType, sourceAgent, taskID, payload, chainDepth, lineage.RunID, lineage.ParentEventID, envelope, createdAt).withExecutionModeClaim(lineage.ExecutionMode)
+	return newEvent(EventAdmissionReplay, id, eventType, producer, taskID, payload, chainDepth, lineage.RunID, lineage.ParentEventID, envelope, createdAt).withExecutionModeClaim(lineage.ExecutionMode)
 }
 
 // NewProjectionEvent reconstructs an event from already-authoritative facts.
 // Production call sites are restricted by TestProductionEventConstructionUsesPublicAPI;
 // new runtime producers must use the semantic constructors above.
-func NewProjectionEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
-	return newEvent(EventAdmissionProjection, id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+func NewProjectionEvent(id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
+	return newEvent(EventAdmissionProjection, id, eventType, producer, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
 }
 
 // NewRouteProbeEvent constructs a non-persisted route-query/sentinel event.
 // Production call sites are restricted by TestProductionEventConstructionUsesPublicAPI.
 func NewRouteProbeEvent(eventType EventType) Event {
-	return newEvent(EventAdmissionRouteProbe, "", eventType, "", "", nil, 0, "", "", EventEnvelope{}, time.Time{})
+	return newEvent(EventAdmissionRouteProbe, "", eventType, ProducerIdentity{}, "", nil, 0, "", "", EventEnvelope{}, time.Time{})
 }
 
 func EmptyEvent() Event {
@@ -369,12 +489,12 @@ func (l EventLineage) Normalized() EventLineage {
 	}
 }
 
-func newEvent(class EventAdmissionClass, id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
+func newEvent(class EventAdmissionClass, id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
 	evt := Event{
 		admissionClass: EventAdmissionClass(strings.TrimSpace(string(class))),
 		id:             strings.TrimSpace(id),
 		eventType:      EventType(strings.TrimSpace(string(eventType))),
-		sourceAgent:    strings.TrimSpace(sourceAgent),
+		producer:       normalizedProducerIdentity(producer.Type(), producer.ID()),
 		taskID:         strings.TrimSpace(taskID),
 		payload:        clonePayload(payload),
 		chainDepth:     chainDepth,
@@ -408,10 +528,14 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
+	producer, err := NewProducerIdentity(raw.ProducerType, raw.SourceAgent)
+	if err != nil {
+		return err
+	}
 	*e = NewProjectionEvent(
 		raw.ID,
 		raw.Type,
-		raw.SourceAgent,
+		producer,
 		raw.TaskID,
 		raw.Payload,
 		0,
@@ -419,7 +543,7 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 		"",
 		EventEnvelope{},
 		raw.CreatedAt,
-	).WithProducerType(raw.ProducerType)
+	)
 	if !raw.ExecutionMode.Valid() {
 		return fmt.Errorf("event execution_mode must be live or mock")
 	}
@@ -463,16 +587,24 @@ func (e Event) Type() EventType {
 }
 
 func (e Event) SourceAgent() string {
-	return strings.TrimSpace(e.sourceAgent)
+	return e.producer.ID()
 }
 
 func (e Event) ProducerType() EventProducerType {
-	return EventProducerType(strings.TrimSpace(string(e.producerType)))
+	return e.producer.Type()
 }
 
-func (e Event) WithProducerType(producerType EventProducerType) Event {
-	e.producerType = EventProducerType(strings.TrimSpace(string(producerType)))
-	return e
+func (e Event) Producer() ProducerIdentity {
+	return normalizedProducerIdentity(e.producer.Type(), e.producer.ID())
+}
+
+func (e Event) Clone() Event {
+	cloned := e
+	cloned.producer = e.Producer()
+	cloned.payload = e.Payload()
+	cloned.envelope = e.NormalizedEnvelope()
+	cloned.deliveryContext = e.DeliveryContext()
+	return cloned
 }
 
 func (e Event) TaskID() string {

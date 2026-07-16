@@ -5,13 +5,107 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
+
+func TestProducerIdentityRequiresExactValidatedPair(t *testing.T) {
+	producer, err := NewProducerIdentity(EventProducerType(" node "), " declarative-node ")
+	if err != nil {
+		t.Fatalf("NewProducerIdentity: %v", err)
+	}
+	if producer.Type() != EventProducerNode || producer.ID() != "declarative-node" {
+		t.Fatalf("producer = %q/%q, want node/declarative-node", producer.Type(), producer.ID())
+	}
+
+	for _, test := range []struct {
+		name         string
+		producerType EventProducerType
+		producerID   string
+	}{
+		{name: "missing type", producerID: "node-a"},
+		{name: "unknown type", producerType: "worker", producerID: "node-a"},
+		{name: "missing id", producerType: EventProducerNode},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := NewProducerIdentity(test.producerType, test.producerID); err == nil {
+				t.Fatalf("NewProducerIdentity(%q, %q) succeeded, want fail-closed validation", test.producerType, test.producerID)
+			}
+		})
+	}
+}
+
+func TestProjectAndClonePreserveAllEventOwnedFacts(t *testing.T) {
+	createdAt := time.Date(2026, 7, 16, 5, 4, 3, 2, time.UTC)
+	envelope := EnvelopeForSourceRoute(EventEnvelope{}, RouteIdentity{FlowID: "source", FlowInstance: "source/one", EntityID: "entity-source"})
+	envelope = EnvelopeForTargetSet(envelope, []RouteIdentity{
+		{FlowID: "target", FlowInstance: "target/one", EntityID: "entity-one"},
+		{FlowID: "target", FlowInstance: "target/two", EntityID: "entity-two"},
+	})
+	original := NewChildEventWithLineage(
+		"event-1",
+		EventType("phrase.completed"),
+		NodeProducer("declarative-node"),
+		"task-1",
+		json.RawMessage(`{"text":"how are you"}`),
+		3,
+		EventLineage{RunID: "run-1", ParentEventID: "parent-1", ExecutionMode: executionmode.Mock},
+		envelope,
+		createdAt,
+	).WithDeliveryContext(DeliveryContext{Reply: &ReplyContextRef{ID: "reply-1"}})
+
+	cloned := original.Clone()
+	projected := Project(original)
+	for name, candidate := range map[string]Event{"clone": cloned, "projection": projected} {
+		t.Run(name, func(t *testing.T) {
+			if candidate.AdmissionClass() != EventAdmissionChild {
+				t.Fatalf("admission class = %q, want preserved child", candidate.AdmissionClass())
+			}
+			if !candidate.Producer().Equal(original.Producer()) || candidate.SourceAgent() != "declarative-node" || candidate.ProducerType() != EventProducerNode {
+				t.Fatalf("producer = %q/%q, want preserved node/declarative-node", candidate.ProducerType(), candidate.SourceAgent())
+			}
+			if candidate.ID() != original.ID() || candidate.Type() != original.Type() || candidate.TaskID() != original.TaskID() {
+				t.Fatalf("event identity changed: got %q/%q/%q want %q/%q/%q", candidate.ID(), candidate.Type(), candidate.TaskID(), original.ID(), original.Type(), original.TaskID())
+			}
+			if candidate.ChainDepth() != 3 || candidate.RunID() != "run-1" || candidate.ParentEventID() != "parent-1" {
+				t.Fatalf("lineage changed: depth=%d run=%q parent=%q", candidate.ChainDepth(), candidate.RunID(), candidate.ParentEventID())
+			}
+			if candidate.ExecutionMode() != executionmode.Mock || !candidate.CreatedAt().Equal(createdAt) {
+				t.Fatalf("runtime facts changed: mode=%q created_at=%s", candidate.ExecutionMode(), candidate.CreatedAt())
+			}
+			if string(candidate.Payload()) != `{"text":"how are you"}` || candidate.DeliveryContext().ReplyContextID() != "reply-1" {
+				t.Fatalf("payload/context changed: payload=%s reply=%q", candidate.Payload(), candidate.DeliveryContext().ReplyContextID())
+			}
+			if candidate.SourceRoute() != original.SourceRoute() || len(candidate.TargetRoutes()) != 2 {
+				t.Fatalf("envelope changed: source=%#v targets=%#v", candidate.SourceRoute(), candidate.TargetRoutes())
+			}
+		})
+	}
+
+	payload := projected.Payload()
+	payload[2] = 'X'
+	targets := projected.TargetRoutes()
+	targets[0].EntityID = "mutated"
+	deliveryContext := projected.DeliveryContext()
+	deliveryContext.Reply.ID = "mutated"
+	if string(original.Payload()) != `{"text":"how are you"}` || original.TargetRoutes()[0].EntityID != "entity-one" || original.DeliveryContext().ReplyContextID() != "reply-1" {
+		t.Fatalf("projection aliases original event-owned facts")
+	}
+
+	changed := Project(original, ProjectID("event-2"), ProjectEnvelope(EnvelopeForEntityID(EventEnvelope{}, "entity-new")))
+	if changed.ID() != "event-2" || changed.EntityID() != "entity-new" {
+		t.Fatalf("explicit projection changes not applied: id=%q entity=%q", changed.ID(), changed.EntityID())
+	}
+	if !changed.Producer().Equal(original.Producer()) || changed.RunID() != original.RunID() || changed.ExecutionMode() != original.ExecutionMode() {
+		t.Fatalf("explicit projection dropped unrelated event-owned facts")
+	}
+}
 
 func TestEventEnvelopeOwnsCanonicalIdentity(t *testing.T) {
 	evt := NewProjectionEvent(
 		"",
 		"",
-		"",
+		PlatformProducer("runtime"),
 		"",
 		json.RawMessage(`{"entity_id":"payload-ent","flow_instance":"payload-flow"}`),
 		0,
@@ -36,7 +130,7 @@ func TestEventEnvelopeOwnsCanonicalIdentity(t *testing.T) {
 }
 
 func TestEventWithoutEnvelopeFailsClosedToGlobalScope(t *testing.T) {
-	evt := NewProjectionEvent("", "", "", "", json.RawMessage(`{"entity_id":"payload-ent","flow_instance":"payload-flow"}`), 0, "", "", EventEnvelope{}, time.Time{})
+	evt := NewProjectionEvent("", "", PlatformProducer("runtime"), "", json.RawMessage(`{"entity_id":"payload-ent","flow_instance":"payload-flow"}`), 0, "", "", EventEnvelope{}, time.Time{})
 
 	if got := evt.EntityID(); got != "" {
 		t.Fatalf("EntityID() = %q, want empty without envelope metadata", got)
@@ -58,7 +152,7 @@ func TestEventTargetSetDoesNotMaterializeFirstTargetProjection(t *testing.T) {
 		{EntityID: "target-ent-1", FlowInstance: "target-flow-1"},
 		{EntityID: "target-ent-2", FlowInstance: "target-flow-2"},
 	})
-	evt := NewProjectionEvent("", "", "", "", nil, 0, "", "", envelope, time.Time{})
+	evt := NewProjectionEvent("", "", PlatformProducer("runtime"), "", nil, 0, "", "", envelope, time.Time{})
 
 	if got := evt.EntityID(); got != "" {
 		t.Fatalf("EntityID() = %q, want empty before per-recipient delivery target", got)
@@ -76,7 +170,7 @@ func TestEventTargetSetDoesNotMaterializeFirstTargetProjection(t *testing.T) {
 		t.Fatalf("TargetRoutes() count = %d, want 2", len(got))
 	}
 
-	delivered := NewProjectionEvent("", "", "", "", nil, 0, "", "", EnvelopeForTargetRoute(evt.NormalizedEnvelope(), RouteIdentity{EntityID: "target-ent-2", FlowInstance: "target-flow-2"}), time.Time{})
+	delivered := NewProjectionEvent("", "", PlatformProducer("runtime"), "", nil, 0, "", "", EnvelopeForTargetRoute(evt.NormalizedEnvelope(), RouteIdentity{EntityID: "target-ent-2", FlowInstance: "target-flow-2"}), time.Time{})
 	if got := delivered.EntityID(); got != "target-ent-2" {
 		t.Fatalf("delivered EntityID() = %q, want target-ent-2", got)
 	}
@@ -98,7 +192,7 @@ func TestEventContextMapOmitsLegacyReceiverProjectionFields(t *testing.T) {
 	evt := NewProjectionEvent(
 		"evt-1",
 		EventType("custom.triggered"),
-		"runtime",
+		PlatformProducer("runtime"),
 		"task-1",
 		nil,
 		0,
@@ -167,7 +261,7 @@ func TestEventPayloadIsImmutableThroughConstructorAndAccessor(t *testing.T) {
 	evt := NewProjectionEvent(
 		"evt-1",
 		EventType("diagnostic.emitted"),
-		"runtime",
+		PlatformProducer("runtime"),
 		"task-1",
 		payload,
 		0,
@@ -193,7 +287,7 @@ func TestEventProjectionMethodsReturnCopies(t *testing.T) {
 	evt := NewProjectionEvent(
 		"evt-1",
 		EventType("root.started"),
-		"runtime",
+		PlatformProducer("runtime"),
 		"task-1",
 		nil,
 		0,

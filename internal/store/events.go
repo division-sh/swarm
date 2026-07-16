@@ -1599,9 +1599,10 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 	args = append(args, limit)
 	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
-			e.event_id::text, %s, e.event_name, COALESCE(e.produced_by, ''),
+			e.event_id::text, %s, e.event_name,
 			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
-			e.payload, e.created_at, COALESCE(e.source_event_id::text, ''), e.execution_mode,
+			e.payload, COALESCE(e.chain_depth, 0), COALESCE(e.produced_by, ''), COALESCE(e.produced_by_type, ''),
+			COALESCE(e.source_event_id::text, ''), e.created_at, e.execution_mode,
 			%s
 		FROM events e
 		%s
@@ -1627,42 +1628,29 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 
 	out := make([]events.PersistedReplayEvent, 0, limit)
 	for rows.Next() {
-		var eventID, runID, eventName, producedBy, sourceEventID, executionMode string
-		var payload json.RawMessage
-		var createdAt time.Time
-		var entityID, flowInstance, scope string
-		var sourceRoute, targetRoute, targetSet json.RawMessage
+		var eventID, executionMode string
+		var row persistedEventIdentity
 		if err := rows.Scan(
 			&eventID,
-			&runID,
-			&eventName,
-			&producedBy,
-			&entityID,
-			&flowInstance,
-			&scope,
-			&payload,
-			&createdAt,
-			&sourceEventID,
+			&row.RunID,
+			&row.EventName,
+			&row.EntityID,
+			&row.FlowInstance,
+			&row.Scope,
+			&row.Payload,
+			&row.ChainDepth,
+			&row.ProducedBy,
+			&row.ProducedByType,
+			&row.SourceEventID,
+			&row.CreatedAt,
 			&executionMode,
-			&sourceRoute,
-			&targetRoute,
-			&targetSet,
+			&row.SourceRoute,
+			&row.TargetRoute,
+			&row.TargetSet,
 		); err != nil {
 			return nil, fmt.Errorf("scan missing pipeline receipt event: %w", err)
 		}
-		evt := events.NewProjectionEvent(
-			eventID,
-			events.EventType(eventName),
-			producedBy,
-			"",
-			payload,
-			0,
-			runID,
-			sourceEventID,
-			eventEnvelopeFromStorage(entityID, flowInstance, scope, sourceRoute, targetRoute, targetSet),
-			createdAt,
-		)
-		evt, err = eventWithStoredExecutionMode(evt, executionMode)
+		evt, err := eventFromPersistedIdentity(eventID, executionMode, row)
 		if err != nil {
 			return nil, err
 		}
@@ -1691,9 +1679,10 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 	args = append(args, limit)
 	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
-			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
+			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name,
 			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
-			e.payload, e.created_at, COALESCE(e.source_event_id::text, ''), e.execution_mode,
+			e.payload, COALESCE(e.chain_depth, 0), COALESCE(e.produced_by, ''), COALESCE(e.produced_by_type, ''),
+			COALESCE(e.source_event_id::text, ''), e.created_at, e.execution_mode,
 			%s
 		FROM events e
 		JOIN runs run ON run.run_id = e.run_id
@@ -1720,42 +1709,29 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 
 	out := make([]events.PersistedReplayEvent, 0, limit)
 	for rows.Next() {
-		var eventID, eventRunID, eventName, producedBy, sourceEventID, executionMode string
-		var payload json.RawMessage
-		var createdAt time.Time
-		var entityID, flowInstance, scope string
-		var sourceRoute, targetRoute, targetSet json.RawMessage
+		var eventID, executionMode string
+		var row persistedEventIdentity
 		if err := rows.Scan(
 			&eventID,
-			&eventRunID,
-			&eventName,
-			&producedBy,
-			&entityID,
-			&flowInstance,
-			&scope,
-			&payload,
-			&createdAt,
-			&sourceEventID,
+			&row.RunID,
+			&row.EventName,
+			&row.EntityID,
+			&row.FlowInstance,
+			&row.Scope,
+			&row.Payload,
+			&row.ChainDepth,
+			&row.ProducedBy,
+			&row.ProducedByType,
+			&row.SourceEventID,
+			&row.CreatedAt,
 			&executionMode,
-			&sourceRoute,
-			&targetRoute,
-			&targetSet,
+			&row.SourceRoute,
+			&row.TargetRoute,
+			&row.TargetSet,
 		); err != nil {
 			return nil, fmt.Errorf("scan run missing pipeline receipt event: %w", err)
 		}
-		evt := events.NewProjectionEvent(
-			eventID,
-			events.EventType(eventName),
-			producedBy,
-			"",
-			payload,
-			0,
-			eventRunID,
-			sourceEventID,
-			eventEnvelopeFromStorage(entityID, flowInstance, scope, sourceRoute, targetRoute, targetSet),
-			createdAt,
-		)
-		evt, err = eventWithStoredExecutionMode(evt, executionMode)
+		evt, err := eventFromPersistedIdentity(eventID, executionMode, row)
 		if err != nil {
 			return nil, err
 		}
@@ -1782,9 +1758,10 @@ func (s *PostgresStore) listEventsWithPendingDeliveriesForRunSpec(ctx context.Co
 	args = append(args, limit)
 	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
-			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
+			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name,
 			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
-			e.payload, e.created_at, COALESCE(e.source_event_id::text, ''), e.execution_mode,
+			e.payload, COALESCE(e.chain_depth, 0), COALESCE(e.produced_by, ''), COALESCE(e.produced_by_type, ''),
+			COALESCE(e.source_event_id::text, ''), e.created_at, e.execution_mode,
 			%s
 		FROM events e
 		JOIN runs run ON run.run_id = e.run_id
@@ -1809,42 +1786,29 @@ func (s *PostgresStore) listEventsWithPendingDeliveriesForRunSpec(ctx context.Co
 
 	out := make([]events.PersistedReplayEvent, 0, limit)
 	for rows.Next() {
-		var eventID, eventRunID, eventName, producedBy, sourceEventID, executionMode string
-		var payload json.RawMessage
-		var createdAt time.Time
-		var entityID, flowInstance, scope string
-		var sourceRoute, targetRoute, targetSet json.RawMessage
+		var eventID, executionMode string
+		var row persistedEventIdentity
 		if err := rows.Scan(
 			&eventID,
-			&eventRunID,
-			&eventName,
-			&producedBy,
-			&entityID,
-			&flowInstance,
-			&scope,
-			&payload,
-			&createdAt,
-			&sourceEventID,
+			&row.RunID,
+			&row.EventName,
+			&row.EntityID,
+			&row.FlowInstance,
+			&row.Scope,
+			&row.Payload,
+			&row.ChainDepth,
+			&row.ProducedBy,
+			&row.ProducedByType,
+			&row.SourceEventID,
+			&row.CreatedAt,
 			&executionMode,
-			&sourceRoute,
-			&targetRoute,
-			&targetSet,
+			&row.SourceRoute,
+			&row.TargetRoute,
+			&row.TargetSet,
 		); err != nil {
 			return nil, fmt.Errorf("scan run event with pending deliveries: %w", err)
 		}
-		evt := events.NewProjectionEvent(
-			eventID,
-			events.EventType(eventName),
-			producedBy,
-			"",
-			payload,
-			0,
-			eventRunID,
-			sourceEventID,
-			eventEnvelopeFromStorage(entityID, flowInstance, scope, sourceRoute, targetRoute, targetSet),
-			createdAt,
-		)
-		evt, err = eventWithStoredExecutionMode(evt, executionMode)
+		evt, err := eventFromPersistedIdentity(eventID, executionMode, row)
 		if err != nil {
 			return nil, err
 		}
@@ -2182,18 +2146,12 @@ func eventStorageEnvelope(evt events.Event) (id string, runID string, eventName 
 	if chainDepth < 0 {
 		chainDepth = 0
 	}
-	producedBy = strings.TrimSpace(evt.SourceAgent())
-	if producerType := evt.ProducerType(); producerType != "" {
-		if !producerType.Valid() {
-			return "", "", "", "", "", "", nil, 0, "", "", "", time.Time{}, fmt.Errorf("event producer_type %q is invalid", producerType)
-		}
-		producedByType = string(producerType)
-	} else {
-		producedByType = "agent"
-		if evt.AdmissionClass() == events.EventAdmissionDiagnosticDirect || producedBy == "" || producedBy == "runtime" {
-			producedByType = "platform"
-		}
+	producer := evt.Producer()
+	if err := producer.Validate(); err != nil {
+		return "", "", "", "", "", "", nil, 0, "", "", "", time.Time{}, fmt.Errorf("event producer identity is required after admission: %w", err)
 	}
+	producedBy = producer.ID()
+	producedByType = string(producer.Type())
 	sourceEventID = sanitizeOptionalUUID(evt.ParentEventID())
 	createdAt = evt.CreatedAt()
 	if createdAt.IsZero() {

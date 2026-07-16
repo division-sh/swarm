@@ -359,7 +359,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 	evt := events.NewRuntimeDiagnosticEvent(
 		evtID,
 		events.EventType("platform.budget_threshold_crossed"),
-		"runtime",
+		events.PlatformProducer("runtime"),
 		"",
 		mustJSON(payload),
 		0,

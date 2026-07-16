@@ -97,10 +97,10 @@ func TestAuthoredNodeEventProducerTypeParity(t *testing.T) {
 			fixture := tt.open(t)
 			ctx := testAuthorActivityContext()
 			eventID := uuid.NewString()
-			event := eventtest.PersistedProjection(
-				eventID, events.EventType("test.node_emitted"), "declarative-node", "", []byte(`{}`), 0,
+			event := eventtest.PersistedProjectionForProducer(
+				eventID, events.EventType("test.node_emitted"), events.NodeProducer("declarative-node"), "", []byte(`{}`), 0,
 				"", "", events.EventEnvelope{}, time.Date(2026, 7, 16, 3, 0, 0, 0, time.UTC),
-			).WithProducerType(events.EventProducerNode)
+			)
 
 			if err := fixture.store.PersistEventWithDeliveries(ctx, event, nil); err != nil {
 				t.Fatalf("PersistEventWithDeliveries: %v", err)

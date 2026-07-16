@@ -201,7 +201,7 @@ func proposedEffectOutcomeEvent(card decisioncard.Card, parent events.Event, con
 	}
 	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, continuation.EntityID), continuation.FlowInstance)
 	eventID := decisioncard.ProposedEffectOutcomeEventID(card.CardID, parent.ID(), card.Verdict)
-	return events.NewChildEvent(eventID, events.EventType(eventType), runtimeWorkflowID, continuation.SourceTaskID, raw,
+	return events.NewChildEvent(eventID, events.EventType(eventType), events.PlatformProducer(runtimeWorkflowID), continuation.SourceTaskID, raw,
 		parent.ChainDepth()+1, parent, envelope, card.DecidedAt.UTC()), nil
 }
 
@@ -246,7 +246,7 @@ func (pc *PipelineCoordinator) handleDecisionCardDeferredEvent(ctx context.Conte
 		return nil, err
 	}
 	productID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.human-task.deferred.v1\x00"+card.CardID+"\x00"+evt.ID())).String()
-	product := events.NewChildEvent(productID, "human_task.deferred", runtimeWorkflowID, "", payload, evt.ChainDepth()+1, evt,
+	product := events.NewChildEvent(productID, "human_task.deferred", events.PlatformProducer(runtimeWorkflowID), "", payload, evt.ChainDepth()+1, evt,
 		humanTaskRequesterOutcomeEnvelope(continuation), evt.CreatedAt().UTC())
 	return nil, pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
 		if continuation.ReplyContextID != "" {
@@ -300,7 +300,7 @@ func (pc *PipelineCoordinator) handleDecisionCardExpiredEvent(ctx context.Contex
 		return nil, err
 	}
 	productID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.human-task.expiry-outcome.v1\x00"+card.CardID+"\x00"+evt.ID())).String()
-	product := events.NewChildEvent(productID, "human_task.expired", runtimeWorkflowID, "", payload, evt.ChainDepth()+1, evt,
+	product := events.NewChildEvent(productID, "human_task.expired", events.PlatformProducer(runtimeWorkflowID), "", payload, evt.ChainDepth()+1, evt,
 		humanTaskRequesterOutcomeEnvelope(continuation), card.DecidedAt.UTC())
 	return nil, pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
 		if continuation.ReplyContextID != "" {
@@ -426,7 +426,7 @@ func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, 
 			return err
 		}
 		productEventID := decisioncard.HumanTaskOutcomeEventID(card.CardID, evt.ID())
-		product := events.NewChildEvent(productEventID, eventType, runtimeWorkflowID, "", payload, evt.ChainDepth()+1, evt,
+		product := events.NewChildEvent(productEventID, eventType, events.PlatformProducer(runtimeWorkflowID), "", payload, evt.ChainDepth()+1, evt,
 			humanTaskRequesterOutcomeEnvelope(continuation), card.DecidedAt.UTC())
 		if continuation.ReplyContextID != "" {
 			delivery := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: continuation.ReplyContextID}}
@@ -543,6 +543,6 @@ func workflowGateOutcomeEvent(card decisioncard.Card, parent events.Event, route
 	if createdAt.IsZero() {
 		createdAt = parent.CreatedAt()
 	}
-	produced := events.NewChildEvent(uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.gate.outcome.v1\x00"+identity)).String(), events.EventType(eventType), runtimeWorkflowID, "", raw, parent.ChainDepth()+1, parent, envelope, createdAt.UTC())
+	produced := events.NewChildEvent(uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.gate.outcome.v1\x00"+identity)).String(), events.EventType(eventType), events.PlatformProducer(runtimeWorkflowID), "", raw, parent.ChainDepth()+1, parent, envelope, createdAt.UTC())
 	return &produced, nil
 }

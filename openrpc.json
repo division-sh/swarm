@@ -11564,11 +11564,15 @@
             "additionalProperties": true,
             "type": "object"
           },
+          "producer_type": {
+            "$ref": "#/components/schemas/EventProducerType",
+            "description": "Exact producer discriminator paired with source."
+          },
           "run_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
           "source": {
-            "description": "Producer identifier (node_id, agent_id, or \"external\").",
+            "description": "Exact producer identifier paired with producer_type.",
             "type": "string"
           },
           "source_event_id": {
@@ -11581,6 +11585,7 @@
           "event_name",
           "execution_mode",
           "created_at",
+          "producer_type",
           "source",
           "payload",
           "deliveries",
@@ -11620,6 +11625,16 @@
           "run_id"
         ],
         "type": "object"
+      },
+      "EventProducerType": {
+        "description": "Canonical discriminator for the mandatory event producer identity.",
+        "enum": [
+          "node",
+          "agent",
+          "platform",
+          "external"
+        ],
+        "type": "string"
       },
       "EventPublishDelivery": {
         "additionalProperties": false,

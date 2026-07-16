@@ -312,7 +312,7 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 	if err := n.bus.Publish(ctx, events.NewRuntimeDiagnosticEvent(
 		uuid.NewString(),
 		events.EventType("platform.dead_letter"),
-		n.nodeID,
+		events.NodeProducer(n.nodeID),
 		"",
 		mustJSON(payload),
 		0,

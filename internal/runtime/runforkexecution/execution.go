@@ -309,7 +309,7 @@ type publishSelectedContractForkEventsRequest struct {
 	ExecutionOwner    string
 }
 
-func selectedContractForkEvent(forkRunID, forkEventID string, sourceEvent store.RunForkSelectedContractSourceEvent, sourceAgent string) events.Event {
+func selectedContractForkEvent(forkRunID, forkEventID string, sourceEvent store.RunForkSelectedContractSourceEvent, producerID string) events.Event {
 	payload := json.RawMessage("{}")
 	if len(sourceEvent.Payload) > 0 && json.Valid(sourceEvent.Payload) {
 		payload = append(json.RawMessage(nil), sourceEvent.Payload...)
@@ -322,7 +322,7 @@ func selectedContractForkEvent(forkRunID, forkEventID string, sourceEvent store.
 	return events.NewReplayEvent(
 		strings.TrimSpace(forkEventID),
 		events.EventType(strings.TrimSpace(sourceEvent.EventName)),
-		strings.TrimSpace(sourceAgent),
+		events.PlatformProducer(producerID),
 		"",
 		payload,
 		0,
