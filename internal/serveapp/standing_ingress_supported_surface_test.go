@@ -432,7 +432,11 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	if err != nil {
 		t.Fatalf("open SQLite runtime store: %v", err)
 	}
-	defer sqliteStore.Close()
+	defer func() {
+		if sqliteStore != nil {
+			_ = sqliteStore.Close()
+		}
+	}()
 	var runs, instances, entities int
 	var standingRunID string
 	if err := sqliteStore.DB.QueryRow(`
@@ -488,6 +492,10 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	if entityEvents == 0 || wrongRunEvents != 0 {
 		t.Fatalf("standing entity event lineage = events:%d wrong_run:%d, want events>0/wrong_run:0", entityEvents, wrongRunEvents)
 	}
+	if err := sqliteStore.Close(); err != nil {
+		t.Fatalf("close SQLite inspection store before restart matrix: %v", err)
+	}
+	sqliteStore = nil
 	requireChangedStandingColdStartMatrix(t, opts, contractsRoot, standingRunID, nil)
 }
 

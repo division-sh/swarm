@@ -70,6 +70,7 @@ search_dimensions:
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/routing_derivation_test.go
       - internal/runtime/bus/route_plan.go
+      - internal/runtime/runforkadmission/selected_route_history.go
       - internal/apispec/platform_spec_composition_routing_test.go
     canonical_layer: route_plan_authority
     classified_paths_required: true
@@ -142,7 +143,6 @@ search_dimensions:
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/runforkadmission/contract_frontier.go
-      - internal/runtime/runforkadmission/selected_route_history.go
       - internal/runtime/runstart/root_inputs.go
     canonical_layer: route_topology
     classified_paths_required: true
@@ -670,7 +670,6 @@ seam_families:
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/runforkadmission/contract_frontier.go
-      - internal/runtime/runforkadmission/selected_route_history.go
       - internal/runtime/runstart/root_inputs.go
     search_dimensions: [route_table_resolve, route_event_key_derivation, connect_route_plan, receiver_carrier]
     notes: >
@@ -898,7 +897,7 @@ seam_families:
       - internal/store/run_fork_delivery_event_replay.go
       - internal/store/run_fork_selected_contract_execution.go
       - internal/store/run_fork_replay_resume_admission.go
-    search_dimensions: [event_deliveries, replay_scope]
+    search_dimensions: [event_deliveries, replay_scope, connect_route_plan]
     invalid_authority:
       - replay markers alone
       - source event_deliveries as fresh fork truth
