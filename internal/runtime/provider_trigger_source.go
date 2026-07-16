@@ -148,7 +148,7 @@ func (s providerTriggerEventSource) ProviderTriggerTargetFreeAuthorizations() []
 func (s providerTriggerEventSource) ResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry {
 	out := cloneEventCatalog(s.Source.ResolvedEventCatalog())
 	for name, entry := range s.imported {
-		out[name] = entry
+		out[name] = runtimecontracts.CloneEventCatalogEntry(entry)
 	}
 	return out
 }
@@ -159,13 +159,13 @@ func (s providerTriggerEventSource) ResolveFlowEventCatalogEntry(flowID, eventTy
 	}
 	eventType = strings.TrimSpace(eventType)
 	entry, ok := s.imported[eventType]
-	return entry, eventType, ok
+	return runtimecontracts.CloneEventCatalogEntry(entry), eventType, ok
 }
 
 func (s providerTriggerEventSource) EventEntries() map[string]runtimecontracts.EventCatalogEntry {
 	out := cloneEventCatalog(s.Source.EventEntries())
 	for name, entry := range s.imported {
-		out[name] = entry
+		out[name] = runtimecontracts.CloneEventCatalogEntry(entry)
 	}
 	return out
 }
@@ -175,7 +175,7 @@ func (s providerTriggerEventSource) EventEntry(eventType string) (runtimecontrac
 		return entry, true
 	}
 	entry, ok := s.imported[strings.TrimSpace(eventType)]
-	return entry, ok
+	return runtimecontracts.CloneEventCatalogEntry(entry), ok
 }
 
 func (s providerTriggerEventSource) ProjectScopes() []semanticview.ProjectScope {
@@ -184,7 +184,7 @@ func (s providerTriggerEventSource) ProjectScopes() []semanticview.ProjectScope 
 	for _, scope := range scopes {
 		scope.Events = cloneEventCatalog(scope.Events)
 		for name, entry := range s.byProject[strings.TrimSpace(scope.Key)] {
-			scope.Events[name] = entry
+			scope.Events[name] = runtimecontracts.CloneEventCatalogEntry(entry)
 		}
 		out = append(out, scope)
 	}

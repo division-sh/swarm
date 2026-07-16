@@ -305,65 +305,10 @@ func toolRequiredPermission(toolID string, entry runtimecontracts.ToolSchemaEntr
 }
 
 func schemaToMap(schema runtimecontracts.ToolInputSchema) (map[string]any, error) {
-	if schema.Type == "" && len(schema.Properties) == 0 && len(schema.Required) == 0 && schema.Items == nil && schema.Enum == nil {
+	if runtimecontracts.ToolInputSchemaIsZero(schema) {
 		return nil, nil
 	}
-	return toolSchemaToMap(schema), nil
-}
-
-func toolSchemaToMap(schema runtimecontracts.ToolInputSchema) map[string]any {
-	out := map[string]any{}
-	if value := strings.TrimSpace(schema.Type); value != "" {
-		out["type"] = value
-	}
-	if value := strings.TrimSpace(schema.Description); value != "" {
-		out["description"] = value
-	}
-	if len(schema.Properties) > 0 {
-		props := make(map[string]any, len(schema.Properties))
-		for name, prop := range schema.Properties {
-			props[name] = toolSchemaToMap(prop)
-		}
-		out["properties"] = props
-	}
-	if len(schema.Required) > 0 {
-		out["required"] = append([]string{}, schema.Required...)
-	}
-	if schema.Items != nil {
-		out["items"] = toolSchemaToMap(*schema.Items)
-	}
-	if enum, present, err := runtimecontracts.ToolInputSchemaEnumProjection(schema); err != nil {
-		out["enum"] = []any{}
-	} else if present {
-		out["enum"] = enum
-	}
-	if schema.AdditionalProperties.Allowed != nil {
-		out["additionalProperties"] = *schema.AdditionalProperties.Allowed
-	} else if schema.AdditionalProperties.Schema != nil {
-		out["additionalProperties"] = toolSchemaToMap(*schema.AdditionalProperties.Schema)
-	}
-	if schema.Minimum != nil {
-		out["minimum"] = *schema.Minimum
-	}
-	if schema.Maximum != nil {
-		out["maximum"] = *schema.Maximum
-	}
-	if value := strings.TrimSpace(schema.Pattern); value != "" {
-		out["pattern"] = value
-	}
-	if schema.MinLength != nil {
-		out["minLength"] = *schema.MinLength
-	}
-	if schema.MaxLength != nil {
-		out["maxLength"] = *schema.MaxLength
-	}
-	if schema.MinItems != nil {
-		out["minItems"] = *schema.MinItems
-	}
-	if schema.MaxItems != nil {
-		out["maxItems"] = *schema.MaxItems
-	}
-	return out
+	return runtimecontracts.ProjectToolInputSchema(schema)
 }
 
 func deepCloneMap(in map[string]any) map[string]any {

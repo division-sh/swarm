@@ -193,10 +193,8 @@ func validateFiniteSourceEnum(subject string, source, target runtimecontracts.To
 	if err != nil {
 		return false, fmt.Errorf("%s target enum: %w", subject, err)
 	}
-	sourceConstraint := cloneSchema(source)
-	sourceConstraint.Enum = nil
-	targetConstraint := cloneSchema(target)
-	targetConstraint.Enum = nil
+	sourceConstraint := runtimecontracts.ToolInputSchemaWithoutEnum(source)
+	targetConstraint := runtimecontracts.ToolInputSchemaWithoutEnum(target)
 	for _, literal := range source.Enum {
 		value, key, err := channelEnumLiteral(literal)
 		if err != nil {

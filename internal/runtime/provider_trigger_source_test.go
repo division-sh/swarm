@@ -47,6 +47,62 @@ func TestSourceWithProviderTriggerEventsImportsEffectivePackSchemasWithoutAuthor
 	}
 }
 
+func TestImportedProviderEventReadbacksUseCanonicalDeepClone(t *testing.T) {
+	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram.text_message")
+	wrapped, err := SourceWithProviderTriggerEvents(source, catalog)
+	if err != nil {
+		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
+	}
+	const eventName = "inbound.telegram.text_message"
+	const fieldName = "conversation_reference"
+	mutate := func(entry runtimecontracts.EventCatalogEntry) {
+		field := entry.Payload.Properties[fieldName]
+		if field.ExactSchema == nil {
+			t.Fatalf("%s exact schema is missing", fieldName)
+		}
+		field.ExactSchema.Type = "boolean"
+		field.ExactSchema.Pattern = "changed"
+		entry.Payload.Properties[fieldName] = field
+	}
+	assertFresh := func(label string) {
+		entry, ok := wrapped.EventEntry(eventName)
+		if !ok {
+			t.Fatalf("%s: imported event missing", label)
+		}
+		field := entry.Payload.Properties[fieldName]
+		if field.ExactSchema == nil || field.ExactSchema.Type != "string" || field.ExactSchema.Pattern == "changed" {
+			t.Fatalf("%s: imported event mutation leaked: %#v", label, field.ExactSchema)
+		}
+	}
+
+	entry, _ := wrapped.EventEntry(eventName)
+	mutate(entry)
+	assertFresh("EventEntry")
+	entries := wrapped.EventEntries()
+	mutate(entries[eventName])
+	assertFresh("EventEntries")
+	resolvedCatalog := wrapped.ResolvedEventCatalog()
+	mutate(resolvedCatalog[eventName])
+	assertFresh("ResolvedEventCatalog")
+	resolved, _, ok := wrapped.ResolveFlowEventCatalogEntry("coordinator", eventName)
+	if !ok {
+		t.Fatal("ResolveFlowEventCatalogEntry: imported event missing")
+	}
+	mutate(resolved)
+	assertFresh("ResolveFlowEventCatalogEntry")
+	mutatedScope := false
+	for _, scope := range wrapped.ProjectScopes() {
+		if scoped, exists := scope.Events[eventName]; exists {
+			mutate(scoped)
+			mutatedScope = true
+		}
+	}
+	if !mutatedScope {
+		t.Fatal("ProjectScopes: imported event missing")
+	}
+	assertFresh("ProjectScopes")
+}
+
 func TestSourceWithProviderTriggerEventsRejectsLocalPackEventRedeclaration(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
 	bundle, ok := semanticview.Bundle(source)

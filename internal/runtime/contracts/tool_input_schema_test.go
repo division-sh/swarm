@@ -50,6 +50,43 @@ func TestValidateToolInputSchemaRejectsMalformedRecursiveSchemas(t *testing.T) {
 	}
 }
 
+func TestValidateToolInputSchemaRejectsCyclesAndExcessiveDepthBeforeProjectionOrClone(t *testing.T) {
+	cyclic := ToolInputSchema{Type: "array"}
+	cyclic.Items = &cyclic
+	if err := ValidateToolInputSchema(cyclic); err == nil || !strings.Contains(err.Error(), "schema cycle") {
+		t.Fatalf("cyclic schema error = %v", err)
+	}
+	if _, err := ProjectToolInputSchema(cyclic); err == nil || !strings.Contains(err.Error(), "schema cycle") {
+		t.Fatalf("cyclic projection error = %v", err)
+	}
+	if cloned := CloneToolInputSchema(cyclic); ToolInputSchemaIsZero(cloned) || ValidateToolInputSchema(cloned) == nil {
+		t.Fatalf("cyclic clone = %#v, want fail-closed invalid schema", cloned)
+	}
+
+	deep := ToolInputSchema{Type: "string"}
+	for depth := 0; depth <= MaxToolInputSchemaDepth; depth++ {
+		item := deep
+		deep = ToolInputSchema{Type: "array", Items: &item}
+	}
+	if err := ValidateToolInputSchema(deep); err == nil || !strings.Contains(err.Error(), "exceeds maximum schema depth") {
+		t.Fatalf("deep schema error = %v", err)
+	}
+	if _, err := ProjectToolInputSchema(deep); err == nil || !strings.Contains(err.Error(), "exceeds maximum schema depth") {
+		t.Fatalf("deep projection error = %v", err)
+	}
+	if cloned := CloneToolInputSchema(deep); ToolInputSchemaIsZero(cloned) || ValidateToolInputSchema(cloned) == nil {
+		t.Fatalf("deep clone = %#v, want fail-closed invalid schema", cloned)
+	}
+}
+
+func TestToolInputSchemaRejectsExplicitEmptyEnum(t *testing.T) {
+	var schema ToolInputSchema
+	err := yaml.Unmarshal([]byte("type: string\nenum: []\n"), &schema)
+	if err == nil || !strings.Contains(err.Error(), "enum must contain at least one value") {
+		t.Fatalf("empty enum error = %v", err)
+	}
+}
+
 func TestToolInputSchemaProjectionPreservesExactSemanticConstraints(t *testing.T) {
 	schema := schemaWithEnum(t, `
 type: object
@@ -122,6 +159,41 @@ properties:
 	entryClone.Payload.Properties["value"] = entryField
 	if entry.Payload.Properties["value"].Citation.AllowedClasses[0] != "source" || entry.Payload.Properties["value"].ExactSchema.Properties["state"].Type != "object" {
 		t.Fatal("event catalog clone shared nested schema state")
+	}
+}
+
+func TestCloneToolSchemaEntryOwnsEveryMutableSchemaCarrier(t *testing.T) {
+	schema := schemaWithEnum(t, "type: string\nenum: [approved]\n")
+	entry := ToolSchemaEntry{
+		InputSchema:  schema,
+		OutputSchema: ToolInputSchema{Type: "object", Properties: map[string]ToolInputSchema{"state": schema}},
+		HTTP:         &HTTPToolSpec{Headers: map[string]string{"X-Test": "one"}, Body: map[string]any{"nested": []any{"one"}}},
+		ResponseMapping: map[string]any{
+			"state": map[string]any{"from": "result.state"},
+		},
+		ResponseSuccess: &HTTPResponseSuccess{Kind: "field_equals", Equals: map[string]any{"ok": true}},
+		Credentials:     []string{"token"},
+		CompiledResult: &CompiledResultProjection{
+			Fields: map[string]CompiledResultField{"state": {From: "result.state"}}, OutputSchema: schema,
+		},
+	}
+	cloned := CloneToolSchemaEntry(entry)
+	cloned.InputSchema.Enum[0].Node.Value = "changed"
+	cloned.OutputSchema.Properties["state"] = ToolInputSchema{Type: "boolean"}
+	cloned.HTTP.Headers["X-Test"] = "changed"
+	cloned.HTTP.Body.(map[string]any)["nested"].([]any)[0] = "changed"
+	cloned.ResponseMapping["state"].(map[string]any)["from"] = "changed"
+	cloned.ResponseSuccess.Equals.(map[string]any)["ok"] = false
+	cloned.Credentials[0] = "changed"
+	cloned.CompiledResult.Fields["state"] = CompiledResultField{From: "changed"}
+	cloned.CompiledResult.OutputSchema.Enum[0].Node.Value = "changed"
+
+	if entry.InputSchema.Enum[0].Node.Value != "approved" || entry.OutputSchema.Properties["state"].Type != "string" ||
+		entry.HTTP.Headers["X-Test"] != "one" || entry.HTTP.Body.(map[string]any)["nested"].([]any)[0] != "one" ||
+		entry.ResponseMapping["state"].(map[string]any)["from"] != "result.state" || entry.ResponseSuccess.Equals.(map[string]any)["ok"] != true ||
+		entry.Credentials[0] != "token" || entry.CompiledResult.Fields["state"].From != "result.state" ||
+		entry.CompiledResult.OutputSchema.Enum[0].Node.Value != "approved" {
+		t.Fatal("tool schema clone leaked a mutable carrier")
 	}
 }
 

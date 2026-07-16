@@ -8188,8 +8188,9 @@ tool_model:
       normalized_trigger_field_schema: internal/providertriggers.NormalizedEventFieldProjection.Schema
       accepted_connector_inventory: internal/providerconnectors.PackRegistry
       semantic_schema_admission: internal/runtime/contracts.ValidateToolInputSchema
-      semantic_schema_projection: internal/runtime/contracts.ToolInputSchemaJSONSchema
+      semantic_schema_projection: internal/runtime/contracts.ProjectToolInputSchema
       semantic_schema_clone: internal/runtime/contracts.CloneToolInputSchema
+      tool_schema_entry_clone: internal/runtime/contracts.CloneToolSchemaEntry
       normalized_event_exact_schema_carrier: internal/runtime/contracts.EventFieldSpec.ExactSchema
       runtime_schema_acceptance: internal/runtime/eventschema
       structural_compiler: internal/packs.CompileChannelInventory
@@ -8219,12 +8220,15 @@ tool_model:
       and at typed interface, trigger, channel, and connector acceptance before any descriptor becomes available. It rejects
       missing or unsupported types, malformed or inapplicable constraints, invalid regular expressions, non-finite,
       negative-zero, unsafe, or impossible numeric bounds, malformed arrays and objects, invalid required/property keys,
-      malformed schema-valued additionalProperties, and enum values that do not satisfy their recursively declared schema.
+      malformed schema-valued additionalProperties, explicit empty enums, schema cycles, schemas deeper than 64 recursive
+      levels, and enum values that do not satisfy their recursively declared schema.
       Projection to runtime JSON Schema preserves exact property names, required names, patterns, typed enum values, and
       schema-valued additionalProperties; it never trims, stringifies, or widens them. Normalized trigger catalogs retain the
-      complete exact ToolInputSchema through imported event catalogs and runtime registry construction. All descriptor,
-      admission-plan, compiled-plan, and event-catalog copies consume the one recursive schema clone owner, including YAML
-      enum node content and aliases.
+      complete exact ToolInputSchema through imported event catalogs and runtime registry construction. Accepted connector
+      registries re-run the same admission for programmatic packs before indexing them. Runtime registered tools consume the
+      same exact projector rather than a local JSON-schema interpreter. All descriptor, admission-plan, compiled-plan,
+      tool-entry, and event-catalog readbacks consume the canonical recursive clone owners, including YAML enum node content
+      and aliases.
     opaque_reference_slots:
       exact:
       - destination
@@ -8265,7 +8269,9 @@ tool_model:
       - validate connector output first, then apply the compiled channel output projection, then validate the satisfier-bound opaque result
       - require every normalized trigger field to declare one post-conversion schema; normalization admits against that schema and the accepted trigger owner exports the same schema to the recursive event-mapping relation
       - recursively admit every interface, trigger, channel, and connector ToolInputSchema through one shared owner at YAML and typed boundaries; no accepted descriptor may bypass it
+      - reject explicit empty enums, cycles, and schemas deeper than 64 levels before cloning, projection, registry acceptance, or runtime registration
       - preserve exact typed enum, pattern, property, required, array/object, and schema-valued additionalProperties semantics through trigger catalog, runtime registry, directional compilation, generation hashing, validation, and readback
+      - return mutation-isolated connector ToolSchemaEntry and imported EventCatalogEntry readbacks through their canonical deep-clone owners
       - reserve platform.channel_activity.* for generation-pinned private targets and reject any authored or imported tool in that namespace during load/boot validation
       selected_constraints: >
         Runtime authoring limits are the intersection of interface invariants and the selected connector schemas for deliver

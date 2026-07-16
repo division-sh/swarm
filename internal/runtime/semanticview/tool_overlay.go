@@ -17,17 +17,17 @@ func (s toolOverlaySource) BaseSemanticSource() Source { return s.Source }
 func (s toolOverlaySource) ToolEntries() map[string]runtimecontracts.ToolSchemaEntry {
 	out := s.Source.ToolEntries()
 	for id, tool := range s.tools {
-		out[id] = tool
+		out[id] = runtimecontracts.CloneToolSchemaEntry(tool)
 	}
 	return out
 }
 
 func (s toolOverlaySource) ToolEntryForAgent(agentID, toolID string) (runtimecontracts.ToolSchemaEntry, bool) {
 	if tool, ok := s.Source.ToolEntryForAgent(agentID, toolID); ok {
-		return tool, true
+		return runtimecontracts.CloneToolSchemaEntry(tool), true
 	}
 	tool, ok := s.tools[strings.TrimSpace(toolID)]
-	return tool, ok
+	return runtimecontracts.CloneToolSchemaEntry(tool), ok
 }
 
 // WithRuntimeTools adds platform-compiled tools without mutating the authored
@@ -52,7 +52,7 @@ func WithRuntimeTools(source Source, tools map[string]runtimecontracts.ToolSchem
 		if _, exists := cloned[id]; exists {
 			return nil, fmt.Errorf("duplicate runtime tool %q", id)
 		}
-		cloned[id] = tool
+		cloned[id] = runtimecontracts.CloneToolSchemaEntry(tool)
 	}
 	return toolOverlaySource{Source: source, tools: cloned}, nil
 }

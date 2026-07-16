@@ -55,11 +55,8 @@ func (r *PackRegistry) PackDescriptors() []packs.ConnectorPackDescriptor {
 	sort.Strings(ids)
 	out := make([]packs.ConnectorPackDescriptor, 0, len(ids))
 	for _, id := range ids {
-		pack := byID[id]
-		tools := make(map[string]runtimecontracts.ToolSchemaEntry, len(pack.Manifest.Tools))
-		for name, tool := range pack.Manifest.Tools {
-			tools[name] = tool
-		}
+		pack := cloneLoadedPack(byID[id])
+		tools := runtimecontracts.CloneToolSchemaEntries(pack.Manifest.Tools)
 		out = append(out, packs.ConnectorPackDescriptor{
 			Identity: packs.PackIdentity{
 				ID: pack.Envelope.ID, Version: pack.Envelope.Version, ManifestHash: pack.Envelope.ManifestHash,
@@ -96,7 +93,7 @@ func BuiltinTool(provider, toolID string) (runtimecontracts.ToolSchemaEntry, boo
 		return runtimecontracts.ToolSchemaEntry{}, false
 	}
 	tool, ok := pack.Manifest.Tools[strings.TrimSpace(toolID)]
-	return tool, ok
+	return runtimecontracts.CloneToolSchemaEntry(tool), ok
 }
 
 func mustDefaultPackRegistry() *PackRegistry {
@@ -162,6 +159,15 @@ func loadBuiltinPackRegistryFS(fsys fs.FS, runningPlatformVersion string) (*Pack
 func NewPackRegistry(loaded ...LoadedPack) (*PackRegistry, error) {
 	registry := &PackRegistry{byProvider: map[string]map[string]LoadedPack{}}
 	for _, pack := range loaded {
+		if err := pack.Manifest.Validate(); err != nil {
+			return nil, fmt.Errorf("validate connector manifest for pack %q: %w", pack.Envelope.ID, err)
+		}
+		if pack.Manifest.Generation != nil {
+			if err := pack.Manifest.Generation.Validate(pack.Manifest.Provider, pack.Manifest.Tools); err != nil {
+				return nil, fmt.Errorf("validate generation evidence for pack %q: %w", pack.Envelope.ID, err)
+			}
+		}
+		pack = cloneLoadedPack(pack)
 		provider := normalizeToken(pack.Manifest.Provider)
 		if provider == "" {
 			return nil, fmt.Errorf("provider connector pack %q has empty provider", pack.Envelope.ID)
@@ -197,7 +203,7 @@ func (r *PackRegistry) Lookup(provider, toolID string) (LoadedPack, bool) {
 		return LoadedPack{}, false
 	}
 	pack, ok := byTool[toolID]
-	return pack, ok
+	return cloneLoadedPack(pack), ok
 }
 
 func (r *PackRegistry) Inventory() []InstalledTool {
@@ -217,11 +223,11 @@ func (r *PackRegistry) Inventory() []InstalledTool {
 		}
 		sort.Strings(toolIDs)
 		for _, toolID := range toolIDs {
-			pack := r.byProvider[provider][toolID]
+			pack := cloneLoadedPack(r.byProvider[provider][toolID])
 			out = append(out, InstalledTool{
 				Provider: provider,
 				ToolID:   toolID,
-				Tool:     pack.Manifest.Tools[toolID],
+				Tool:     runtimecontracts.CloneToolSchemaEntry(pack.Manifest.Tools[toolID]),
 				Pack:     pack,
 			})
 		}
@@ -421,7 +427,7 @@ func SourceWithConnectorPackImportsFromRegistry(source semanticview.Source, regi
 		if prior, exists := importSources[item.toolID]; exists {
 			return nil, fmt.Errorf("provider connector tool %q collision between connector pack imports %s and %s; remove one import", item.toolID, prior, item.source)
 		}
-		tool := pack.Manifest.Tools[item.toolID]
+		tool := runtimecontracts.CloneToolSchemaEntry(pack.Manifest.Tools[item.toolID])
 		importedTools[item.toolID] = tool
 		if generation, exists := GenerationSurfaceForPackTool(pack, item.toolID); exists {
 			importedGeneration[item.toolID] = generation
@@ -519,10 +525,10 @@ func (s connectorPackSource) ConnectorPackImportSource(toolID string) (string, b
 func (s connectorPackSource) ToolEntries() map[string]runtimecontracts.ToolSchemaEntry {
 	out := map[string]runtimecontracts.ToolSchemaEntry{}
 	for key, value := range s.Source.ToolEntries() {
-		out[key] = value
+		out[key] = runtimecontracts.CloneToolSchemaEntry(value)
 	}
 	for key, value := range s.importedTools {
-		out[key] = value
+		out[key] = runtimecontracts.CloneToolSchemaEntry(value)
 	}
 	return out
 }
@@ -533,7 +539,7 @@ func (s connectorPackSource) ProjectScopes() []semanticview.ProjectScope {
 	for _, scope := range scopes {
 		scope.Tools = cloneToolMap(scope.Tools)
 		for toolID, tool := range s.importedByProjectScope[strings.TrimSpace(scope.Key)] {
-			scope.Tools[toolID] = tool
+			scope.Tools[toolID] = runtimecontracts.CloneToolSchemaEntry(tool)
 		}
 		out = append(out, scope)
 	}
@@ -542,10 +548,10 @@ func (s connectorPackSource) ProjectScopes() []semanticview.ProjectScope {
 
 func (s connectorPackSource) ToolEntryForAgent(agentID, toolID string) (runtimecontracts.ToolSchemaEntry, bool) {
 	if tool, ok := s.Source.ToolEntryForAgent(agentID, toolID); ok {
-		return tool, true
+		return runtimecontracts.CloneToolSchemaEntry(tool), true
 	}
 	tool, ok := s.importedTools[strings.TrimSpace(toolID)]
-	return tool, ok
+	return runtimecontracts.CloneToolSchemaEntry(tool), ok
 }
 
 func (s connectorPackSource) ResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry {
@@ -663,10 +669,37 @@ func manifestToolNames(manifest ConnectorManifest) []string {
 }
 
 func cloneToolMap(in map[string]runtimecontracts.ToolSchemaEntry) map[string]runtimecontracts.ToolSchemaEntry {
-	out := map[string]runtimecontracts.ToolSchemaEntry{}
-	for key, value := range in {
-		out[key] = value
+	return runtimecontracts.CloneToolSchemaEntries(in)
+}
+
+func cloneLoadedPack(in LoadedPack) LoadedPack {
+	out := in
+	out.Envelope.Implements = append([]string(nil), in.Envelope.Implements...)
+	out.Envelope.Tests = append([]string(nil), in.Envelope.Tests...)
+	out.Envelope.Capabilities.Cannot = append([]string(nil), in.Envelope.Capabilities.Cannot...)
+	out.Envelope.Capabilities.Can.EmitEvents = append([]string(nil), in.Envelope.Capabilities.Can.EmitEvents...)
+	out.Envelope.Capabilities.Can.CallProviderActions = append([]string(nil), in.Envelope.Capabilities.Can.CallProviderActions...)
+	out.Envelope.Requires.Secrets = append([]string(nil), in.Envelope.Requires.Secrets...)
+	out.Envelope.Requires.ManagedCredentials = append([]string(nil), in.Envelope.Requires.ManagedCredentials...)
+	if in.Envelope.Requires.Packs != nil {
+		out.Envelope.Requires.Packs = make(map[string]string, len(in.Envelope.Requires.Packs))
+		for name, version := range in.Envelope.Requires.Packs {
+			out.Envelope.Requires.Packs[name] = version
+		}
 	}
+	out.Manifest.Tools = runtimecontracts.CloneToolSchemaEntries(in.Manifest.Tools)
+	if in.Manifest.Generation != nil {
+		generation := *in.Manifest.Generation
+		if in.Manifest.Generation.Operations != nil {
+			generation.Operations = make([]GenerationOperationEvidence, len(in.Manifest.Generation.Operations))
+			for index, operation := range in.Manifest.Generation.Operations {
+				generation.Operations[index] = operation
+				generation.Operations[index].Permissions = append([]GenerationPermission(nil), operation.Permissions...)
+			}
+		}
+		out.Manifest.Generation = &generation
+	}
+	out.ManifestBody = append([]byte(nil), in.ManifestBody...)
 	return out
 }
 
