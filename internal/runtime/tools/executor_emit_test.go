@@ -1046,6 +1046,9 @@ func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflig
 	}
 	eventID := emitToolResultString(t, out, "event_id")
 	persisted := store.events[eventID]
+	if got, want := string(persisted.Type()), "producer/inst-1/deploy.done"; got != want {
+		t.Fatalf("persisted event type = %q, want concrete template event %q", got, want)
+	}
 	if got := persisted.TargetRoute(); got != parentRoute {
 		t.Fatalf("persisted target route = %#v, want parent route %#v", got, parentRoute)
 	}
