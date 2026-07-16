@@ -155,18 +155,18 @@ func TestTurnContextRegistryPreservesManagedEffectAuthority(t *testing.T) {
 
 func TestTurnContextRegistryPreservesAuthorActivityScopeAndRequiredSourceIdentity(t *testing.T) {
 	registry := NewTurnContextRegistry(models.ActorFromContext)
+	ctx, surface, _ := managedClaudeProviderTurnTestContext(t, managedcapabilities.ExecutionNormalAgent)
 	scope := runtimeauthoractivity.BundleScope("runtime-instance", "bundle-hash")
 	source := runtimecorrelation.BundleSourceFact{
 		BundleHash:        "bundle-hash",
 		BundleSource:      "test-bundle",
 		BundleFingerprint: "bundle-fingerprint",
 	}
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "selected-agent"})
 	ctx = runtimeauthoractivity.WithScope(ctx, scope)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, source)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 
-	token := registry.RegisterTurnContext(ctx)
+	token := registry.RegisterTurnContextWithCapabilitySurface(ctx, time.Hour, surface)
 	turn, ok := registry.ResolveTurnContext(token)
 	if !ok {
 		t.Fatal("ResolveTurnContext returned false")

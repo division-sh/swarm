@@ -15,12 +15,17 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -103,15 +108,19 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 
 			registry := runtimemcp.NewTurnContextRegistry(models.ActorFromContext)
 			gateway := runtimemcp.NewGateway(executor, gatewayStoryAuthToken, runtimemcp.GatewayHooks{
-				WithActor:          models.WithActor,
-				WithInboundEvent:   runtimebus.WithInboundEvent,
-				ActorFromContext:   models.ActorFromContext,
-				ResolveTurnContext: registry.ResolveTurnContext,
-				MarkEmitKeyUsed:    registry.MarkEmitKeyUsed,
+				WithActor:                 models.WithActor,
+				WithInboundEvent:          runtimebus.WithInboundEvent,
+				ActorFromContext:          models.ActorFromContext,
+				ResolveTurnContext:        registry.ResolveTurnContext,
+				ObserveCapabilityEvidence: registry.ObserveCapabilityEvidence,
+				ObserveCapabilityMismatch: registry.ObserveCapabilityMismatch,
+				ObserveMCPProviderCall:    registry.ObserveMCPProviderCall,
+				MarkEmitKeyUsed:           registry.MarkEmitKeyUsed,
 			})
+			surface, authority, admission := gatewayStoryCapabilitySurface(t, gateway, actor, runID)
 
-			successCtx := gatewayStoryManagedTurnContext(context.Background(), selected, actor, runID, scope, sourceFact, "gateway-http-success")
-			successToken := registry.RegisterTurnContextWithAllowedTools(successCtx, time.Hour, actor.Tools)
+			successCtx := gatewayStoryManagedTurnContext(context.Background(), selected, actor, runID, scope, sourceFact, authority, admission, "gateway-http-success")
+			successToken := registry.RegisterTurnContextWithCapabilitySurface(successCtx, time.Hour, surface)
 			response := callGatewayStoryTool(t, gateway, successToken, "send_story", map[string]any{})
 			if gatewayStoryResponseIsError(response) {
 				t.Fatalf("send_story response = %#v", response)
@@ -121,8 +130,8 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 				t.Fatalf("HTTP dispatches = %d, want 1", got)
 			}
 
-			missingScopeCtx := gatewayStoryManagedTurnContext(context.Background(), selected, actor, runID, runtimeauthoractivity.Scope{}, sourceFact, "gateway-http-missing-scope")
-			missingScopeToken := registry.RegisterTurnContextWithAllowedTools(missingScopeCtx, time.Hour, actor.Tools)
+			missingScopeCtx := gatewayStoryManagedTurnContext(context.Background(), selected, actor, runID, runtimeauthoractivity.Scope{}, sourceFact, authority, admission, "gateway-http-missing-scope")
+			missingScopeToken := registry.RegisterTurnContextWithCapabilitySurface(missingScopeCtx, time.Hour, surface)
 			failed := callGatewayStoryTool(t, gateway, missingScopeToken, "send_story", map[string]any{})
 			if !gatewayStoryResponseIsError(failed) {
 				t.Fatalf("scope-less send_story response = %#v, want error", failed)
@@ -135,7 +144,7 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 	}
 }
 
-func gatewayStoryManagedTurnContext(ctx context.Context, selected gatewayStorySelectedStore, actor models.AgentConfig, runID string, scope runtimeauthoractivity.Scope, sourceFact runtimecorrelation.BundleSourceFact, identity string) context.Context {
+func gatewayStoryManagedTurnContext(ctx context.Context, selected gatewayStorySelectedStore, actor models.AgentConfig, runID string, scope runtimeauthoractivity.Scope, sourceFact runtimecorrelation.BundleSourceFact, authority runtimeeffects.Authority, admission managedexecution.Admission, identity string) context.Context {
 	ctx = models.WithActor(ctx, actor)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
@@ -144,8 +153,73 @@ func gatewayStoryManagedTurnContext(ctx context.Context, selected gatewayStorySe
 	}
 	ctx = runtimebus.WithInboundEvent(ctx, gatewayStoryInboundEvent(runID, actor))
 	ctx = runtimeeffects.WithLifecycleToken(ctx, runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: actor.ID, Generation: 3})
+	ctx = runtimeeffects.WithAuthority(ctx, authority)
+	ctx = managedexecution.WithAdmission(ctx, admission)
 	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(selected.backend))
 	return runtimeeffects.WithLogicalOperationIdentity(ctx, identity)
+}
+
+func gatewayStoryCapabilitySurface(t *testing.T, gateway *runtimemcp.Gateway, actor models.AgentConfig, runID string) (managedcapabilities.Surface, runtimeeffects.Authority, managedexecution.Admission) {
+	t.Helper()
+	var definition *runtimemcp.ToolDef
+	for _, candidate := range gateway.MCPToolsForActor(actor) {
+		if candidate.Name == "send_story" {
+			copy := candidate
+			definition = &copy
+			break
+		}
+	}
+	if definition == nil {
+		t.Fatal("send_story is absent from the live MCP catalog")
+	}
+	turnID := uuid.NewString()
+	sessionID := uuid.NewString()
+	token := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: actor.ID, Generation: 3}
+	authority := runtimeeffects.NormalAgentAuthority(token, "gateway-story-owner", time.Now().UTC().Add(time.Hour))
+	authority.Target = runtimeeffects.UsageTarget{
+		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: runID, AgentID: actor.ID,
+		SessionID: sessionID, Memory: agentmemory.PlatformDefault(), FlowInstance: actor.CanonicalFlowPath(),
+	}
+	binding := managedcapabilities.DeliveryBinding{
+		Kind: managedcapabilities.BindingMCPTool, ExactName: "mcp__runtime-tools__send_story", RequiredEvidenceKind: "mcp_listed",
+	}
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{
+		ActorID: actor.ID, RuntimeMode: "task", Provider: "test", Transport: "cli", ProviderContract: "gateway-story-test",
+		Authority: managedcapabilities.Authority{
+			Kind: managedcapabilities.AuthorityProviderTurn, ID: turnID, ExecutionKind: managedcapabilities.ExecutionNormalAgent,
+			ExecutionAuthorityID: actor.ID, RunID: runID, SessionID: sessionID, TurnOrdinal: 1,
+		},
+		Tools: []managedcapabilities.PlannedTool{{
+			Name: "send_story",
+			DefinitionHash: runtimellm.ToolDefinitionIdentity(runtimellm.ToolDefinition{
+				Name: definition.Name, Description: definition.Description, Schema: definition.InputSchema,
+			}),
+			Capability: toolcapabilities.Capability{Name: "send_story", Kind: toolcapabilities.KindStandard, Visible: true, Callable: true},
+			Bindings:   []managedcapabilities.DeliveryBinding{binding},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("build gateway story capability surface: %v", err)
+	}
+	surface, err = surface.Observe(managedcapabilities.DeliveryEvidence{
+		BindingKind: binding.Kind, ExactName: binding.ExactName, Kind: binding.RequiredEvidenceKind, Status: managedcapabilities.EvidenceConfirmed,
+	})
+	if err != nil {
+		t.Fatalf("confirm gateway story MCP delivery: %v", err)
+	}
+	admission, err := managedexecution.New(
+		managedexecution.KindNormalRuntime,
+		actor.ID,
+		uint64(token.Generation),
+		"",
+		"gateway-story-actors",
+		"gateway-story-bundle",
+		[]string{surface.ID},
+	)
+	if err != nil {
+		t.Fatalf("build gateway story managed execution admission: %v", err)
+	}
+	return surface, authority, admission
 }
 
 func gatewayStoryToolOffered(executor *runtimetools.Executor, actor models.AgentConfig, name string) bool {
