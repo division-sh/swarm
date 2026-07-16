@@ -288,6 +288,9 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 				"tool": intent.Tool, "effect_class": string(toolEffectClass), "required_effect_class": string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 			}))
 		}
+		if reused, err := d.reuseExistingNonIdempotentActivityAttempt(ctx, intent); err != nil || reused {
+			return err
+		}
 		admitted, err := d.coordinator.mockConnectorResponses.Admit(intent.Tool, tool)
 		if err != nil {
 			return d.publishActivityFailure(ctx, intent, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "mock_connector_response_not_admitted", "activity-runtime", "admit_mock_activity", map[string]any{"tool": intent.Tool}, err))
@@ -356,6 +359,25 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	failureIntent := intent
 	failureIntent.Attempt = maxAttempts
 	return d.publishActivityFailure(ctx, failureIntent, lastErr)
+}
+
+func (d pipelineActivityDispatcher) reuseExistingNonIdempotentActivityAttempt(ctx context.Context, intent runtimeengine.ActivityIntent) (bool, error) {
+	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.Enabled() {
+		return false, nil
+	}
+	intent.Attempt = 1
+	expected := activityAttemptStartRecord(intent, activityInputHash(intent.Input))
+	existing, ok, err := d.coordinator.workflowStore.LoadActivityAttempt(ctx, expected.RequestEventID)
+	if err != nil {
+		return true, d.publishActivityFailure(ctx, intent, activityDependencyFailure(err, intent.Tool, "load_activity_attempt"))
+	}
+	if !ok {
+		return false, nil
+	}
+	if err := validateActivityAttemptClaimIdentity(existing, expected); err != nil {
+		return true, err
+	}
+	return true, d.publishExistingActivityAttempt(ctx, intent, existing)
 }
 
 func activityExecutionContext(ctx context.Context, intent runtimeengine.ActivityIntent) (context.Context, error) {
