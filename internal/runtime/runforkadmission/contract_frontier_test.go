@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -83,7 +84,7 @@ func TestAdmitContractFrontier_SelectedContractChangesRecipients(t *testing.T) {
 
 func TestAdmitContractFrontier_ConnectMatchesConcreteTemplateSourceEndpoint(t *testing.T) {
 	plan := testRunForkPlan("producer/inst-1/scan.requested", store.RunForkPendingClassificationPending, "node", "source-node")
-	plan.PendingWork[0].FlowInstance = "producer/inst-1"
+	plan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}
 	source := testContractFrontierTemplateConnectSource()
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -103,7 +104,7 @@ func TestAdmitContractFrontier_ConnectMatchesConcreteTemplateSourceEndpoint(t *t
 	}
 }
 
-func TestAdmitContractFrontier_ConnectInfersTemplateIdentityWhenPersistedIdentityIsAbsent(t *testing.T) {
+func TestAdmitContractFrontier_ConnectRejectsConcreteTemplateIdentityWhenSourceRouteIsAbsent(t *testing.T) {
 	plan := testRunForkPlan("producer/inst-1/scan.requested", store.RunForkPendingClassificationPending, "node", "source-node")
 	source := testContractFrontierTemplateConnectSource()
 
@@ -116,17 +117,17 @@ func TestAdmitContractFrontier_ConnectInfersTemplateIdentityWhenPersistedIdentit
 		t.Fatalf("AdmitContractFrontier: %v", err)
 	}
 	event := admission.FrontierEvents[0]
-	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].SubscriberID != "consumer-node" {
-		t.Fatalf("derived recipients = %#v, want consumer-node through inferred producer identity", event.DerivedRecipients)
+	if len(event.DerivedRecipients) != 0 {
+		t.Fatalf("derived recipients = %#v, want concrete template source without route rejected", event.DerivedRecipients)
 	}
-	if hasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved) {
-		t.Fatalf("blockers = %#v, want inferred template source connect to resolve", admission.UnsupportedBlockers)
+	if !hasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved) {
+		t.Fatalf("blockers = %#v, want concrete template source without route unresolved", admission.UnsupportedBlockers)
 	}
 }
 
 func TestAdmitContractFrontier_ConnectRejectsUnrelatedTemplateSameLeaf(t *testing.T) {
 	plan := testRunForkPlan("unrelated/inst-1/scan.requested", store.RunForkPendingClassificationPending, "node", "source-node")
-	plan.PendingWork[0].FlowInstance = "unrelated/inst-1"
+	plan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "unrelated", FlowInstance: "unrelated/inst-1"}
 	source := testContractFrontierTemplateConnectSource()
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -277,7 +278,7 @@ func TestAdmitContractFrontier_SelectedDeadLetterRemainsExecutableFrontier(t *te
 
 func TestAdmitContractFrontier_MaterializesSourceFlowInstanceRoutes(t *testing.T) {
 	plan := testRunForkPlan("review/inst-1/task.started", store.RunForkPendingClassificationPending, "node", "source-node")
-	plan.PendingWork[0].FlowInstance = "review/inst-1"
+	plan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "review", FlowInstance: "review/inst-1"}
 	source := testContractFrontierTemplateSource()
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -315,7 +316,7 @@ func TestAdmitContractFrontier_FailsClosedWithoutSelectedSource(t *testing.T) {
 	}
 }
 
-func TestAdmitContractFrontier_InfersFlowInstanceRouteFromEventName(t *testing.T) {
+func TestAdmitContractFrontier_DoesNotInferFlowInstanceRouteFromEventName(t *testing.T) {
 	plan := testRunForkPlan("review/inst-1/task.started", store.RunForkPendingClassificationPending, "node", "source-node")
 	source := testContractFrontierTemplateSource()
 
@@ -328,8 +329,8 @@ func TestAdmitContractFrontier_InfersFlowInstanceRouteFromEventName(t *testing.T
 		t.Fatalf("AdmitContractFrontier: %v", err)
 	}
 	event := admission.FrontierEvents[0]
-	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].SubscriberID != "reviewer-inst-1" {
-		t.Fatalf("derived recipients = %#v, want inferred materialized reviewer-inst-1", event.DerivedRecipients)
+	if len(event.DerivedRecipients) != 0 {
+		t.Fatalf("derived recipients = %#v, want no inferred materialized route", event.DerivedRecipients)
 	}
 }
 

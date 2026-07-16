@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/google/uuid"
@@ -81,22 +82,23 @@ type RunForkEntityState struct {
 }
 
 type RunForkPendingWork struct {
-	EventID         string     `json:"event_id"`
-	EventName       string     `json:"event_name"`
-	FlowInstance    string     `json:"flow_instance,omitempty"`
-	DeliveryID      string     `json:"delivery_id,omitempty"`
-	SubscriberType  string     `json:"subscriber_type,omitempty"`
-	SubscriberID    string     `json:"subscriber_id,omitempty"`
-	Classification  string     `json:"classification"`
-	Status          string     `json:"status,omitempty"`
-	RetryCount      int        `json:"retry_count,omitempty"`
-	ReasonCode      string     `json:"reason_code,omitempty"`
-	ActiveSessionID string     `json:"active_session_id,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	StartedAt       *time.Time `json:"started_at,omitempty"`
-	DeliveredAt     *time.Time `json:"delivered_at,omitempty"`
-	ReceiptOutcome  string     `json:"receipt_outcome,omitempty"`
-	ReceiptAt       *time.Time `json:"receipt_at,omitempty"`
+	EventID         string               `json:"event_id"`
+	EventName       string               `json:"event_name"`
+	FlowInstance    string               `json:"flow_instance,omitempty"`
+	SourceRoute     events.RouteIdentity `json:"source_route,omitempty"`
+	DeliveryID      string               `json:"delivery_id,omitempty"`
+	SubscriberType  string               `json:"subscriber_type,omitempty"`
+	SubscriberID    string               `json:"subscriber_id,omitempty"`
+	Classification  string               `json:"classification"`
+	Status          string               `json:"status,omitempty"`
+	RetryCount      int                  `json:"retry_count,omitempty"`
+	ReasonCode      string               `json:"reason_code,omitempty"`
+	ActiveSessionID string               `json:"active_session_id,omitempty"`
+	CreatedAt       time.Time            `json:"created_at"`
+	StartedAt       *time.Time           `json:"started_at,omitempty"`
+	DeliveredAt     *time.Time           `json:"delivered_at,omitempty"`
+	ReceiptOutcome  string               `json:"receipt_outcome,omitempty"`
+	ReceiptAt       *time.Time           `json:"receipt_at,omitempty"`
 }
 
 type RunForkUnsupportedBlocker struct {

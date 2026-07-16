@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/google/uuid"
 )
@@ -20,22 +21,22 @@ type runForkRevisionedFact struct {
 
 type runForkRevisionEvent struct {
 	runForkRevisionedFact
-	EventID        string          `json:"event_id"`
-	EventName      string          `json:"event_name"`
-	EntityID       string          `json:"entity_id"`
-	FlowInstance   string          `json:"flow_instance"`
-	SourceRoute    json.RawMessage `json:"source_route"`
-	TargetRoute    json.RawMessage `json:"target_route"`
-	TargetSet      json.RawMessage `json:"target_set"`
-	Scope          string          `json:"scope"`
-	Payload        json.RawMessage `json:"payload"`
-	ChainDepth     int             `json:"chain_depth"`
-	ProducedBy     string          `json:"produced_by"`
-	ProducedByType string          `json:"produced_by_type"`
-	HandlerNode    string          `json:"handler_node"`
-	IdempotencyKey string          `json:"idempotency_key"`
-	SourceEventID  string          `json:"source_event_id"`
-	CreatedAt      time.Time       `json:"created_at"`
+	EventID        string               `json:"event_id"`
+	EventName      string               `json:"event_name"`
+	EntityID       string               `json:"entity_id"`
+	FlowInstance   string               `json:"flow_instance"`
+	SourceRoute    events.RouteIdentity `json:"source_route"`
+	TargetRoute    json.RawMessage      `json:"target_route"`
+	TargetSet      json.RawMessage      `json:"target_set"`
+	Scope          string               `json:"scope"`
+	Payload        json.RawMessage      `json:"payload"`
+	ChainDepth     int                  `json:"chain_depth"`
+	ProducedBy     string               `json:"produced_by"`
+	ProducedByType string               `json:"produced_by_type"`
+	HandlerNode    string               `json:"handler_node"`
+	IdempotencyKey string               `json:"idempotency_key"`
+	SourceEventID  string               `json:"source_event_id"`
+	CreatedAt      time.Time            `json:"created_at"`
 }
 
 type runForkRevisionEntityMutation struct {

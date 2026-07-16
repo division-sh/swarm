@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -64,8 +65,8 @@ func AdmitContractFrontier(req ContractFrontierRequest) (store.RunForkContractFr
 	frontier, lineageOnly := runForkFrontierEvents(req.Plan.PendingWork)
 	for i := range frontier {
 		eventName := frontier[i].EventName
-		effectiveFlowInstances := contractFrontierEffectiveFlowInstances(req.Source, eventName, frontier[i].SourceFlowInstances)
-		routeKeys, connectOwned := contractFrontierRouteKeys(eventName, effectiveFlowInstances, connectPlans)
+		sourceRoute := contractFrontierSourceRoute(req.Plan.PendingWork, frontier[i].SourceEventID)
+		routeKeys, connectOwned := contractFrontierRouteKeys(eventName, sourceRoute, connectPlans)
 		frontier[i].RuntimeEventOwners = sortedUnique(req.Source.RuntimeEventOwners(eventName))
 		frontier[i].WorkflowNodeSubscribers = workflowNodeSubscribers(workflowNodes, routeKeys...)
 		frontier[i].DerivedRecipients = contractFrontierRecipients(resolveContractFrontierRoutes(routeTable, routeKeys, connectOwned))
@@ -151,7 +152,7 @@ func runForkFrontierEvents(pending []store.RunForkPendingWork) ([]store.RunForkC
 				lineageByEvent[eventID] = agg
 			}
 			addString(agg.classifications, item.Classification)
-			addString(agg.flowInstances, item.FlowInstance)
+			addString(agg.flowInstances, item.SourceRoute.Normalized().FlowInstance)
 			addString(agg.subscriberTypes, item.SubscriberType)
 			addString(agg.subscriberIDs, item.SubscriberID)
 			continue
@@ -171,7 +172,7 @@ func runForkFrontierEvents(pending []store.RunForkPendingWork) ([]store.RunForkC
 			byEvent[eventID] = agg
 		}
 		addString(agg.classifications, item.Classification)
-		addString(agg.flowInstances, item.FlowInstance)
+		addString(agg.flowInstances, item.SourceRoute.Normalized().FlowInstance)
 		addString(agg.subscriberTypes, item.SubscriberType)
 		addString(agg.subscriberIDs, item.SubscriberID)
 	}
@@ -234,25 +235,9 @@ func contractFrontierFlowInstanceRoutes(source semanticview.Source, pending []st
 }
 
 func contractFrontierFlowInstances(source semanticview.Source, item store.RunForkPendingWork) []string {
-	out := make([]string, 0, 1)
-	for _, instancePath := range contractFrontierEffectiveFlowInstances(source, item.EventName, []string{item.FlowInstance}) {
-		if isContractFrontierTemplateInstancePath(source, instancePath) {
-			out = append(out, instancePath)
-		}
-	}
-	return out
-}
-
-func contractFrontierEffectiveFlowInstances(source semanticview.Source, eventName string, persisted []string) []string {
-	explicit := map[string]struct{}{}
-	for _, instancePath := range persisted {
-		addString(explicit, strings.Trim(strings.TrimSpace(instancePath), "/"))
-	}
-	if len(explicit) > 0 {
-		return sortedSet(explicit)
-	}
-	if inferred := inferContractFrontierFlowInstanceFromEvent(source, eventName); inferred != "" {
-		return []string{inferred}
+	instancePath := item.SourceRoute.Normalized().FlowInstance
+	if isContractFrontierTemplateInstancePath(source, instancePath) {
+		return []string{instancePath}
 	}
 	return nil
 }
@@ -277,74 +262,23 @@ func isContractFrontierTemplateInstancePath(source semanticview.Source, instance
 	return false
 }
 
-func inferContractFrontierFlowInstanceFromEvent(source semanticview.Source, eventName string) string {
-	eventName = strings.Trim(strings.TrimSpace(eventName), "/")
-	if source == nil || eventName == "" {
-		return ""
-	}
-	type templateScope struct {
-		path        string
-		localEvents []string
-	}
-	templates := make([]templateScope, 0)
-	for _, scope := range source.FlowScopes() {
-		if !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
-			continue
-		}
-		path := strings.Trim(strings.TrimSpace(scope.Path), "/")
-		if path == "" {
-			continue
-		}
-		localEvents := map[string]struct{}{}
-		for eventType := range scope.Events {
-			addString(localEvents, eventType)
-		}
-		for _, eventType := range scope.InputEvents {
-			addString(localEvents, eventType)
-		}
-		for _, eventType := range scope.OutputEvents {
-			addString(localEvents, eventType)
-		}
-		addString(localEvents, scope.AutoEmitEvent)
-		templates = append(templates, templateScope{path: path, localEvents: sortedSet(localEvents)})
-	}
-	sort.Slice(templates, func(i, j int) bool {
-		return len(templates[i].path) > len(templates[j].path)
-	})
-	for _, template := range templates {
-		if !strings.HasPrefix(eventName, template.path+"/") {
-			continue
-		}
-		for _, localEvent := range template.localEvents {
-			suffix := "/" + strings.Trim(strings.TrimSpace(localEvent), "/")
-			if suffix == "/" || !strings.HasSuffix(eventName, suffix) {
-				continue
-			}
-			instancePath := strings.Trim(strings.TrimSuffix(eventName, suffix), "/")
-			if instancePath == template.path || !strings.HasPrefix(instancePath, template.path+"/") {
-				continue
-			}
-			return instancePath
+func contractFrontierSourceRoute(pending []store.RunForkPendingWork, eventID string) events.RouteIdentity {
+	eventID = strings.TrimSpace(eventID)
+	for _, item := range pending {
+		if strings.TrimSpace(item.EventID) == eventID {
+			return item.SourceRoute.Normalized()
 		}
 	}
-	return ""
+	return events.RouteIdentity{}
 }
 
-func contractFrontierRouteKeys(eventName string, flowInstances []string, plans []runtimepinrouting.ConnectRoutePlan) ([]string, bool) {
+func contractFrontierRouteKeys(eventName string, sourceRoute events.RouteIdentity, plans []runtimepinrouting.ConnectRoutePlan) ([]string, bool) {
 	eventName = strings.Trim(strings.TrimSpace(eventName), "/")
 	if eventName == "" {
 		return nil, false
 	}
 	matchesSource := func(endpoint runtimepinrouting.ConnectRoutePlanEndpoint) bool {
-		if len(flowInstances) == 0 {
-			return runtimepinrouting.ConnectSourceEndpointMatches(endpoint, eventName, "")
-		}
-		for _, flowInstance := range flowInstances {
-			if runtimepinrouting.ConnectSourceEndpointMatches(endpoint, eventName, flowInstance) {
-				return true
-			}
-		}
-		return false
+		return runtimepinrouting.ConnectSourceEndpointMatches(endpoint, eventName, sourceRoute)
 	}
 	matched := false
 	receiverEvents := map[string]struct{}{}

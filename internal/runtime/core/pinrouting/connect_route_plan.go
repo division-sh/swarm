@@ -69,13 +69,13 @@ type ConnectRoutePlanEndpoint struct {
 
 // ConnectSourceEndpointMatches is the canonical source-side identity matcher
 // for lowered connect plans.
-func ConnectSourceEndpointMatches(endpoint ConnectRoutePlanEndpoint, eventType, flowInstance string) bool {
+func ConnectSourceEndpointMatches(endpoint ConnectRoutePlanEndpoint, eventType string, source events.RouteIdentity) bool {
 	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
-	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
 	if eventType == "" {
 		return false
 	}
-	if endpoint.Root && !connectSourceFlowInstanceMatchesPath(flowInstance, "") {
+	source = source.Normalized()
+	if !source.Empty() && !connectSourceRouteMatchesEndpoint(endpoint, source) {
 		return false
 	}
 	sourceLocal := strings.Trim(strings.TrimSpace(endpoint.Event), "/")
@@ -94,30 +94,47 @@ func ConnectSourceEndpointMatches(endpoint ConnectRoutePlanEndpoint, eventType, 
 		}
 	}
 	if sourceLocal != "" && eventType == sourceLocal {
-		return connectSourceFlowInstanceMatchesPath(flowInstance, sourcePath)
+		return !source.Empty()
 	}
-	if flowInstance != "" && sourceLocal != "" && eventType == flowInstance+"/"+sourceLocal {
-		return connectSourceFlowInstanceMatchesPath(flowInstance, sourcePath)
+	if source.FlowInstance != "" && sourceLocal != "" && eventType == source.FlowInstance+"/"+sourceLocal {
+		return true
 	}
 	return false
 }
 
 func ConnectSourceEndpointMatchesEvent(endpoint ConnectRoutePlanEndpoint, evt events.Event) bool {
-	source := evt.SourceRoute().Normalized()
-	sourcePath := source.FlowInstance
-	if sourcePath == "" {
-		sourcePath = source.FlowID
+	return ConnectSourceEndpointMatches(endpoint, string(evt.Type()), evt.SourceRoute())
+}
+
+func connectSourceRouteMatchesEndpoint(endpoint ConnectRoutePlanEndpoint, source events.RouteIdentity) bool {
+	source = source.Normalized()
+	if source.Empty() {
+		return true
 	}
+	if endpoint.Root {
+		// Root ownership has no child flow identity to agree with. Entity-only
+		// lineage is compatible, but any flow evidence names a non-root source.
+		return source.FlowID == "" && source.FlowInstance == ""
+	}
+
+	sourcePath := strings.Trim(strings.TrimSpace(endpoint.FlowPath), "/")
+	endpointFlowID := strings.Trim(strings.TrimSpace(endpoint.FlowID), "/")
 	if sourcePath == "" {
-		if endpoint.Root {
-			// Root ingress predates source-route stamping. Its envelope instance is
-			// used only to reject child scope, never as a producer identity.
-			sourcePath = evt.FlowInstance()
+		sourcePath = endpointFlowID
+	}
+	if source.FlowID == "" && source.FlowInstance == "" {
+		return false
+	}
+	if source.FlowID != "" {
+		sourceFlowID := strings.Trim(strings.TrimSpace(source.FlowID), "/")
+		if sourceFlowID != endpointFlowID && sourceFlowID != sourcePath {
+			return false
 		}
-		// A fully scoped static event name is sufficient without an instance.
-		// Concrete template matching still fails closed without SourceRoute.
 	}
-	return ConnectSourceEndpointMatches(endpoint, string(evt.Type()), sourcePath)
+	if source.FlowInstance != "" && !connectSourceFlowInstanceMatchesPath(source.FlowInstance, sourcePath) {
+		return false
+	}
+	return true
 }
 
 func connectSourceFlowInstanceMatchesPath(flowInstance, sourcePath string) bool {

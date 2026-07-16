@@ -77,6 +77,44 @@ func TestConnectSourceEndpointMatchesEventRejectsConcreteInstanceWithoutSourceRo
 	}
 }
 
+func TestConnectSourceEndpointMatchesRejectsStaticEventWhenSourceRouteContradicts(t *testing.T) {
+	endpoint := ConnectRoutePlanEndpoint{
+		FlowID:        "producer",
+		FlowPath:      "producer",
+		Event:         "deploy.done",
+		ResolvedEvent: "producer/deploy.done",
+	}
+	if ConnectSourceEndpointMatches(endpoint, "producer/deploy.done", events.RouteIdentity{
+		FlowID:       "unrelated",
+		FlowInstance: "unrelated/inst-1",
+	}) {
+		t.Fatal("static producer event matched contradictory source route")
+	}
+}
+
+func TestConnectSourceEndpointMatchesAllowsStaticEventWithoutSourceRoute(t *testing.T) {
+	endpoint := ConnectRoutePlanEndpoint{
+		FlowID:        "producer",
+		FlowPath:      "producer",
+		Event:         "deploy.done",
+		ResolvedEvent: "producer/deploy.done",
+	}
+	if !ConnectSourceEndpointMatches(endpoint, "producer/deploy.done", events.RouteIdentity{}) {
+		t.Fatal("fully scoped static producer event did not match without source route")
+	}
+}
+
+func TestConnectSourceEndpointMatchesRejectsRootEventWithChildFlowEvidence(t *testing.T) {
+	endpoint := ConnectRoutePlanEndpoint{
+		Root:          true,
+		Event:         "deploy.done",
+		ResolvedEvent: "deploy.done",
+	}
+	if ConnectSourceEndpointMatches(endpoint, "deploy.done", events.RouteIdentity{FlowID: "child"}) {
+		t.Fatal("root endpoint matched child/static FlowID evidence")
+	}
+}
+
 func TestLowerTargetFreeInputRoutePlans_RejectsHarnessSource(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(

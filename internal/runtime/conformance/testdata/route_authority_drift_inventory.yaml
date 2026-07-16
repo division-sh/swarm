@@ -895,6 +895,7 @@ seam_families:
       - internal/runtime/runforkadmission/selected_route_history.go
       - internal/runtime/runforkexecution/recipient_planning.go
       - internal/store/run_fork_delivery_event_replay.go
+      - internal/store/run_fork_revision_projection.go
       - internal/store/run_fork_selected_contract_execution.go
       - internal/store/run_fork_replay_resume_admission.go
     search_dimensions: [event_deliveries, replay_scope, connect_route_plan]
@@ -905,7 +906,10 @@ seam_families:
     notes: >
       Replay, recovery, and fork paths consume persisted RoutePlan output or an
       explicitly gated replay/fork owner. Source rows are lineage or blockers
-      unless their owner produces fresh authority.
+      unless their owner produces fresh authority. Revision projection decodes
+      event source_route once into typed emitter identity; top-level event
+      flow_instance remains receiver or timer context and cannot supply source
+      connect authority.
   - id: public_operator_readback_projection
     layer: public_projection_non_authority
     classification: non_authoritative_observer_projection
