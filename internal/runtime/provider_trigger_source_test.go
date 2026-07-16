@@ -31,8 +31,12 @@ func TestSourceWithProviderTriggerEventsImportsEffectivePackSchemasWithoutAuthor
 	}
 	for _, field := range wantFields {
 		spec, exists := resolved.Payload.Properties[field]
-		if !exists || spec.Type != "text" {
-			t.Fatalf("flow catalog field %q = (%#v, %v), want text", field, spec, exists)
+		wantType := "text"
+		if field == "provider_message_reference" {
+			wantType = "integer"
+		}
+		if !exists || spec.Type != wantType {
+			t.Fatalf("flow catalog field %q = (%#v, %v), want %s", field, spec, exists, wantType)
 		}
 	}
 	if strings.Join(resolved.Payload.Required, ",") != strings.Join(wantFields, ",") {

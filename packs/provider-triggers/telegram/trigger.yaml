@@ -39,8 +39,7 @@ normalized_events:
         convert: number_to_text
       provider_message_reference:
         from: callback_query.message.message_id
-        type: text
-        convert: number_to_text
+        type: integer
     when:
       absent: [message]
       equals:
@@ -64,8 +63,7 @@ normalized_events:
         convert: number_to_text
       provider_message_reference:
         from: message.message_id
-        type: text
-        convert: number_to_text
+        type: integer
     when:
       absent: [callback_query]
       equals:

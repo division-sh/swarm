@@ -278,7 +278,7 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 				"tool": intent.Tool, "requested_generation": intent.PlanGeneration, "available_generation": strings.TrimSpace(target.PlanGeneration),
 			}))
 		}
-	} else if strings.HasPrefix(intent.Tool, "platform.channel_activity.") {
+	} else if strings.HasPrefix(intent.Tool, runtimecontracts.PrivateChannelActivityPrefix) {
 		return d.rejectChannelActivityTarget(ctx, intent, runtimefailures.New(runtimefailures.ClassTargetUnreachable, "channel_activity_plan_generation_unavailable", "activity-runtime", "execute_activity", map[string]any{
 			"tool": intent.Tool, "requested_generation": intent.PlanGeneration,
 		}))

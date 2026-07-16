@@ -53,7 +53,7 @@ func TestTelegramChannelPackCompilesThroughAcceptedProductionInventories(t *test
 	}
 
 	cleared, err := plan.PrepareOperationInput("edit", map[string]any{
-		"delivery_reference": map[string]any{"id": "42"},
+		"delivery_reference": map[string]any{"id": float64(42)},
 		"presentation":       map[string]any{"text": "Already decided"},
 		"actions":            []any{},
 	}, map[string]any{"destination": "-100123"})
@@ -63,6 +63,9 @@ func TestTelegramChannelPackCompilesThroughAcceptedProductionInventories(t *test
 	clearedKeyboard := cleared["reply_markup"].(map[string]any)["inline_keyboard"].([]any)
 	if len(clearedKeyboard) != 0 {
 		t.Fatalf("cleared inline keyboard = %#v, want empty", clearedKeyboard)
+	}
+	if got := cleared["message_id"]; got != float64(42) {
+		t.Fatalf("projected message id = %#v, want bounded integer identity", got)
 	}
 
 	if _, err := packs.NewOutboundBindingPlan("telegram_ops", plan, "not-a-chat", nil); err == nil {
@@ -77,6 +80,37 @@ func TestTelegramChannelPackCompilesThroughAcceptedProductionInventories(t *test
 	}
 	if subject, err := binding.CapabilitySubject(); err != nil || subject.Kind != packs.SubjectChannelOutbound || subject.Status != packs.StatusReady {
 		t.Fatalf("channel outbound subject = %#v, err=%v", subject, err)
+	}
+}
+
+func TestTelegramChannelRejectsOutOfRangeDeliveryReferenceBeforeConnectorProjection(t *testing.T) {
+	plan := loadTelegramChannelPlan(t)
+	if _, err := plan.PrepareOperationInput("edit", map[string]any{
+		"delivery_reference": map[string]any{"id": float64(2147483648)},
+		"presentation":       map[string]any{"text": "Outside Telegram message id range"},
+		"actions":            []any{},
+	}, map[string]any{"destination": "-100123"}); err == nil || !strings.Contains(err.Error(), "must be <=") {
+		t.Fatalf("PrepareOperationInput accepted out-of-range delivery reference: %v", err)
+	}
+}
+
+func TestTelegramChannelCompilerRejectsUnboundedMessageIDOutput(t *testing.T) {
+	registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
+	tool := connector.Tools["telegram.send_interactive"]
+	allow := false
+	minimum := float64(1)
+	tool.OutputSchema = runtimecontracts.ToolInputSchema{
+		Type: "object", Required: []string{"message_id"},
+		AdditionalProperties: runtimecontracts.ToolAdditionalProperties{Allowed: &allow},
+		Properties: map[string]runtimecontracts.ToolInputSchema{
+			"message_id": {Type: "integer", Minimum: &minimum},
+		},
+	}
+	connector.Tools["telegram.send_interactive"] = tool
+
+	_, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+	if err == nil || !strings.Contains(err.Error(), "source maximum is broader than target maximum") {
+		t.Fatalf("CompileChannel error = %v, want unbounded provider result rejection", err)
 	}
 }
 
@@ -497,6 +531,16 @@ func TestChannelCompilerZoneHasNoProviderSpecificRuntimeBranch(t *testing.T) {
 
 func loadTelegramChannelPlan(t *testing.T) packs.SatisfactionPlan {
 	t.Helper()
+	registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
+	plan, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+	if err != nil {
+		t.Fatalf("CompileChannel(Telegram): %v", err)
+	}
+	return plan
+}
+
+func loadTelegramChannelCompilerInputs(t *testing.T) (*packs.InterfaceRegistry, packs.LoadedChannelPack, packs.TriggerPackDescriptor, packs.ConnectorPackDescriptor) {
+	t.Helper()
 	repo := filepath.Clean(filepath.Join("..", ".."))
 	registry := loadChannelInterfaceRegistry(t)
 	version, err := platform.PlatformVersion()
@@ -511,14 +555,25 @@ func loadTelegramChannelPlan(t *testing.T) packs.SatisfactionPlan {
 	if err != nil {
 		t.Fatalf("load Telegram channel: %v", err)
 	}
-	plans, err := packs.CompileChannelInventory(registry, channels, triggerCatalog.PackDescriptors(), providerconnectors.DefaultPackRegistry().PackDescriptors())
-	if err != nil {
-		t.Fatalf("CompileChannelInventory: %v", err)
+	if len(channels) != 1 {
+		t.Fatalf("Telegram channel packs = %#v, want one", channels)
 	}
-	if len(plans) != 1 {
-		t.Fatalf("plans = %#v, want one", plans)
+	triggerDescriptors := triggerCatalog.PackDescriptors()
+	if len(triggerDescriptors) != 1 {
+		t.Fatalf("Telegram trigger descriptors = %#v, want one", triggerDescriptors)
 	}
-	return plans[0]
+	connectorID := channels[0].Envelope.Requires.Packs[packs.TypeConnector]
+	var connector packs.ConnectorPackDescriptor
+	for _, candidate := range providerconnectors.DefaultPackRegistry().PackDescriptors() {
+		if candidate.Identity.ID == connectorID {
+			connector = candidate
+			break
+		}
+	}
+	if connector.Identity.ID == "" {
+		t.Fatalf("Telegram connector descriptor %q is missing", connectorID)
+	}
+	return registry, channels[0], triggerDescriptors[0], connector
 }
 
 func loadChannelInterfaceRegistry(t *testing.T) *packs.InterfaceRegistry {

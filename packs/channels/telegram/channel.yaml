@@ -10,13 +10,13 @@ opaque_types:
     additionalProperties: false
     required: [id]
     properties:
-      id: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 10}
+      id: {type: integer, minimum: 1, maximum: 2147483647}
   delivery_receipt:
     type: object
     additionalProperties: false
     required: [id]
     properties:
-      id: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 10}
+      id: {type: integer, minimum: 1, maximum: 2147483647}
   interaction_reference:
     type: string
     minLength: 1
@@ -42,16 +42,12 @@ operations:
           - text: item.label
             callback_data: item.token
     output:
-      delivery_reference.id:
-        from: result.message_id
-        convert: number_to_text
+      delivery_reference.id: result.message_id
   edit:
     tool: telegram.edit_message
     input:
       chat_id: context.destination
-      message_id:
-        from: input.delivery_reference.id
-        convert: decimal_text_to_int32
+      message_id: input.delivery_reference.id
       text: input.presentation.text
       reply_markup.inline_keyboard:
         each: input.actions
@@ -59,9 +55,7 @@ operations:
           - text: item.label
             callback_data: item.token
     output:
-      delivery_receipt.id:
-        from: result.message_id
-        convert: number_to_text
+      delivery_receipt.id: result.message_id
   acknowledge_interaction:
     tool: telegram.answer_callback
     input:

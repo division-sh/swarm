@@ -316,7 +316,7 @@ func TestActivityHTTPAppliesConnectorThenChannelResultProjection(t *testing.T) {
 	}))
 	defer server.Close()
 	allow := false
-	minLength := 1
+	minimum, maximum := float64(1), float64(2147483647)
 	result, err := executePreparedActivityHTTPTool(context.Background(), preparedActivityHTTPTool{
 		toolName: "telegram.send_interactive",
 		method:   http.MethodPost,
@@ -330,11 +330,11 @@ func TestActivityHTTPAppliesConnectorThenChannelResultProjection(t *testing.T) {
 		outputSchema: runtimecontracts.ToolInputSchema{
 			Type: "object", Required: []string{"message_id"},
 			AdditionalProperties: runtimecontracts.ToolAdditionalProperties{Allowed: &allow},
-			Properties:           map[string]runtimecontracts.ToolInputSchema{"message_id": {Type: "integer"}},
+			Properties:           map[string]runtimecontracts.ToolInputSchema{"message_id": {Type: "integer", Minimum: &minimum, Maximum: &maximum}},
 		},
 		compiledResult: &runtimecontracts.CompiledResultProjection{
 			Fields: map[string]runtimecontracts.CompiledResultField{
-				"delivery_reference.id": {From: "result.message_id", Convert: runtimecontracts.FieldProjectionConvertNumberToText},
+				"delivery_reference.id": {From: "result.message_id"},
 			},
 			OutputSchema: runtimecontracts.ToolInputSchema{
 				Type: "object", Required: []string{"delivery_reference"},
@@ -342,7 +342,7 @@ func TestActivityHTTPAppliesConnectorThenChannelResultProjection(t *testing.T) {
 				Properties: map[string]runtimecontracts.ToolInputSchema{
 					"delivery_reference": {
 						Type: "object", Required: []string{"id"}, AdditionalProperties: runtimecontracts.ToolAdditionalProperties{Allowed: &allow},
-						Properties: map[string]runtimecontracts.ToolInputSchema{"id": {Type: "string", MinLength: &minLength}},
+						Properties: map[string]runtimecontracts.ToolInputSchema{"id": {Type: "integer", Minimum: &minimum, Maximum: &maximum}},
 					},
 				},
 			},
@@ -351,7 +351,7 @@ func TestActivityHTTPAppliesConnectorThenChannelResultProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("executePreparedActivityHTTPTool: %v", err)
 	}
-	want := map[string]any{"delivery_reference": map[string]any{"id": "42"}}
+	want := map[string]any{"delivery_reference": map[string]any{"id": float64(42)}}
 	if !reflect.DeepEqual(result, want) {
 		t.Fatalf("result = %#v, want %#v", result, want)
 	}
@@ -402,7 +402,7 @@ func TestChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStores(t 
 			if err := json.Unmarshal(bus.publishes[1].Payload(), &payload); err != nil {
 				t.Fatalf("decode replay payload: %v", err)
 			}
-			want := map[string]any{"delivery_reference": map[string]any{"id": "42"}}
+			want := map[string]any{"delivery_reference": map[string]any{"id": float64(42)}}
 			if !reflect.DeepEqual(payload["result"], want) {
 				t.Fatalf("journaled channel result = %#v, want %#v", payload["result"], want)
 			}
@@ -463,7 +463,7 @@ func newActivityJournalStoreForCase(t *testing.T, ctx context.Context, kind acti
 
 func testCompiledChannelActivityTool(url string) runtimecontracts.ToolSchemaEntry {
 	allow := false
-	minLength := 1
+	minimum, maximum := float64(1), float64(2147483647)
 	return runtimecontracts.ToolSchemaEntry{
 		HandlerType: "http", EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 		HTTP:            &runtimecontracts.HTTPToolSpec{Method: http.MethodPost, URL: url},
@@ -471,16 +471,16 @@ func testCompiledChannelActivityTool(url string) runtimecontracts.ToolSchemaEntr
 		ResponseMapping: map[string]any{"message_id": "{{response.body.result.message_id}}"},
 		OutputSchema: runtimecontracts.ToolInputSchema{
 			Type: "object", Required: []string{"message_id"}, AdditionalProperties: runtimecontracts.ToolAdditionalProperties{Allowed: &allow},
-			Properties: map[string]runtimecontracts.ToolInputSchema{"message_id": {Type: "integer"}},
+			Properties: map[string]runtimecontracts.ToolInputSchema{"message_id": {Type: "integer", Minimum: &minimum, Maximum: &maximum}},
 		},
 		CompiledResult: &runtimecontracts.CompiledResultProjection{
-			Fields: map[string]runtimecontracts.CompiledResultField{"delivery_reference.id": {From: "result.message_id", Convert: runtimecontracts.FieldProjectionConvertNumberToText}},
+			Fields: map[string]runtimecontracts.CompiledResultField{"delivery_reference.id": {From: "result.message_id"}},
 			OutputSchema: runtimecontracts.ToolInputSchema{
 				Type: "object", Required: []string{"delivery_reference"}, AdditionalProperties: runtimecontracts.ToolAdditionalProperties{Allowed: &allow},
 				Properties: map[string]runtimecontracts.ToolInputSchema{
 					"delivery_reference": {
 						Type: "object", Required: []string{"id"}, AdditionalProperties: runtimecontracts.ToolAdditionalProperties{Allowed: &allow},
-						Properties: map[string]runtimecontracts.ToolInputSchema{"id": {Type: "string", MinLength: &minLength}},
+						Properties: map[string]runtimecontracts.ToolInputSchema{"id": {Type: "integer", Minimum: &minimum, Maximum: &maximum}},
 					},
 				},
 			},
