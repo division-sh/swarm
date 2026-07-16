@@ -104,9 +104,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	}
 	storeFacade := stores.facade()
 	defer storeFacade.close()
-	runtimeInstanceID := uuid.NewString()
-	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
-	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.RuntimeScope(runtimeInstanceID))
+	ctx = runForkRuntimeOwnerContext(ctx)
 	runForkOwner, ok := storeFacade.runForkRuntimeOwner()
 	if !ok {
 		if out != nil {
@@ -425,6 +423,12 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	}
 	printRunForkPlan(out, plan)
 	return 0
+}
+
+func runForkRuntimeOwnerContext(ctx context.Context) context.Context {
+	runtimeInstanceID := uuid.NewString()
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
+	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.RuntimeScope(runtimeInstanceID))
 }
 
 func writeForkContractLoadError(out io.Writer, prefix string, err error) {

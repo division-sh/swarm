@@ -16,6 +16,7 @@ import (
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/store"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -629,7 +630,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON(t *testi
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000320, 0).UTC()
-	ctx := context.Background()
+	ctx := runForkRuntimeOwnerContext(context.Background())
 	seedRunForkCLIActivationSource(t, db, runID, entityID, eventID, at)
 	materialized, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
@@ -680,7 +681,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateNonSelectedWithEmptySelectedAuthorit
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000325, 0).UTC()
-	ctx := context.Background()
+	ctx := runForkRuntimeOwnerContext(context.Background())
 	seedRunForkCLIActivationSource(t, db, runID, entityID, eventID, at)
 	materialized, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
@@ -868,9 +869,9 @@ func seedRunForkCLIActivationSourceWithoutRevision(t *testing.T, db *sql.DB, run
 	t.Helper()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
-	`, runID, at.Add(-time.Minute)); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'running', $2, $3, $4)
+	`, runID, "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
