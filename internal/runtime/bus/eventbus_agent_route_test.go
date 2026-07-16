@@ -27,6 +27,9 @@ func TestEventBusAgentRouteReplacementIsExactFreshAndTokenFenced(t *testing.T) {
 	if oldCh == newCh {
 		t.Fatal("replacement reused predecessor channel")
 	}
+	if got := eb.PendingAgentRouteDeliveries(); got != 0 {
+		t.Fatalf("pending predecessor deliveries after replacement = %d, want 0", got)
+	}
 	if _, ok := eb.channels[events.EventType("test.old")]["agent-a"]; ok {
 		t.Fatal("removed predecessor subscription remains routed")
 	}
@@ -64,6 +67,17 @@ func TestEventBusAgentRouteReplacementIsExactFreshAndTokenFenced(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("stale predecessor cleanup removed successor route")
 	}
+	if got := eb.PendingAgentRouteDeliveries(); got != 1 {
+		t.Fatalf("pending successor deliveries = %d, want 1", got)
+	}
+	eb.CompleteAgentRouteDelivery(oldToken)
+	if got := eb.PendingAgentRouteDeliveries(); got != 1 {
+		t.Fatalf("late predecessor completion changed successor count to %d", got)
+	}
+	eb.CompleteAgentRouteDelivery(newToken)
+	if got := eb.PendingAgentRouteDeliveries(); got != 0 {
+		t.Fatalf("pending deliveries after successor completion = %d, want 0", got)
+	}
 
 	eb.RemoveAgentRoute(newToken)
 	if _, ok := eb.agentChans["agent-a"]; ok {
@@ -75,6 +89,50 @@ func TestEventBusAgentRouteReplacementIsExactFreshAndTokenFenced(t *testing.T) {
 			t.Fatal("detached predecessor channel was closed")
 		}
 	default:
+	}
+}
+
+func TestEventBusAgentRouteRemovalRetiresOnlyExactGenerationDeliveries(t *testing.T) {
+	eb, err := NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 1}
+	newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 2}
+	eb.ReplaceAgentRoute(oldToken, events.EventType("test.work"))
+	oldEvent := eventtest.RuntimeControl("work-old", events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
+	if err := eb.deliverToAgents(context.Background(), oldEvent, []string{"agent-a"}); err != nil {
+		t.Fatalf("deliver predecessor event: %v", err)
+	}
+	if got := eb.PendingAgentRouteDeliveries(); got != 1 {
+		t.Fatalf("pending predecessor deliveries = %d, want 1", got)
+	}
+
+	eb.RemoveAgentRoute(oldToken)
+	if got := eb.PendingAgentRouteDeliveries(); got != 0 {
+		t.Fatalf("pending predecessor deliveries after removal = %d, want 0", got)
+	}
+
+	newCh := eb.ReplaceAgentRoute(newToken, events.EventType("test.work"))
+	newEvent := eventtest.RuntimeControl("work-new", events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
+	if err := eb.deliverToAgents(context.Background(), newEvent, []string{"agent-a"}); err != nil {
+		t.Fatalf("deliver successor event: %v", err)
+	}
+	select {
+	case <-newCh:
+	case <-time.After(time.Second):
+		t.Fatal("successor route delivery was not dequeued")
+	}
+	if got := eb.PendingAgentRouteDeliveries(); got != 1 {
+		t.Fatalf("pending successor deliveries = %d, want 1", got)
+	}
+	eb.CompleteAgentRouteDelivery(oldToken)
+	if got := eb.PendingAgentRouteDeliveries(); got != 1 {
+		t.Fatalf("late predecessor completion changed successor count to %d", got)
+	}
+	eb.CompleteAgentRouteDelivery(newToken)
+	if got := eb.PendingAgentRouteDeliveries(); got != 0 {
+		t.Fatalf("pending deliveries after successor completion = %d, want 0", got)
 	}
 }
 

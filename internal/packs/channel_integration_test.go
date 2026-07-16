@@ -161,12 +161,18 @@ func TestChannelSchemaYAMLAdmissionRejectsExplicitNullAtEveryBoundary(t *testing
 		},
 	}
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tc.admit(t, []byte(tc.body))
-			if err == nil || !strings.Contains(err.Error(), `tool schema field "enum" must not be null`) {
-				t.Fatalf("YAML admission error = %v, want explicit null schema rejection", err)
-			}
-		})
+		for _, form := range []string{"direct", "alias"} {
+			t.Run(tc.name+"/"+form, func(t *testing.T) {
+				body := tc.body
+				if form == "alias" {
+					body = "null_anchor: &nil null\n" + strings.Replace(body, "enum: null", "enum: *nil", 1)
+				}
+				err := tc.admit(t, []byte(body))
+				if err == nil || !strings.Contains(err.Error(), `tool schema field "enum" must not be null`) {
+					t.Fatalf("YAML admission error = %v, want explicit null schema rejection", err)
+				}
+			})
+		}
 	}
 }
 

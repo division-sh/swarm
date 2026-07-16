@@ -679,7 +679,9 @@ func (eb *EventBus) Unsubscribe(agentID string) {
 
 func (eb *EventBus) detachSubscriberLocked(agentID string) {
 	if route := eb.agentRouteHandles[agentID]; route != nil {
+		token := route.lifecycleToken()
 		route.deactivate()
+		eb.retireAgentRouteDeliveries(token)
 	}
 	delete(eb.agentChans, agentID)
 	delete(eb.agentRouteHandles, agentID)
