@@ -13,9 +13,15 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
-const artifactCacheHelperEnv = "SWARM_TEST_PYTHON_ARTIFACT_CACHE_HELPER"
+const (
+	artifactCacheHelperEnv    = "SWARM_TEST_PYTHON_ARTIFACT_CACHE_HELPER"
+	artifactCacheRootEnv      = "SWARM_TEST_PYTHON_ARTIFACT_CACHE_ROOT"
+	artifactCacheStartGateEnv = "SWARM_TEST_PYTHON_ARTIFACT_CACHE_START_GATE"
+	artifactCacheResultPrefix = "SWARM_ARTIFACT_DIR="
+)
 
 var testArtifactCacheRoot string
 
@@ -105,38 +111,24 @@ func TestDefaultArtifactCacheBaseDirIsProcessStable(t *testing.T) {
 
 func TestArtifactCacheConcurrentProcessesConvergeOnEmbeddedArtifact(t *testing.T) {
 	if os.Getenv(artifactCacheHelperEnv) != "" {
-		cacheRoot := os.Getenv("SWARM_TEST_PYTHON_ARTIFACT_CACHE_ROOT")
+		waitForArtifactCacheStartGate(t)
+		cacheRoot := os.Getenv(artifactCacheRootEnv)
 		dir, err := materializeEmbeddedArtifact(cacheRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
-		fmt.Fprintln(os.Stdout, dir)
+		fmt.Fprintln(os.Stdout, artifactCacheResultPrefix+dir)
 		return
 	}
 
-	const processCount = 2
-	commands := make([]*exec.Cmd, 0, processCount)
-	outputs := make([]bytes.Buffer, processCount)
-	for index := 0; index < processCount; index++ {
-		command := exec.Command(os.Args[0], "-test.run=^TestArtifactCacheConcurrentProcessesConvergeOnEmbeddedArtifact$", "-test.count=1")
-		command.Env = append(os.Environ(),
-			artifactCacheHelperEnv+"=1",
-			"SWARM_TEST_PYTHON_ARTIFACT_CACHE_ROOT="+testArtifactCacheRoot,
-		)
-		command.Stdout = &outputs[index]
-		command.Stderr = &outputs[index]
-		if err := command.Start(); err != nil {
-			t.Fatal(err)
-		}
-		commands = append(commands, command)
-	}
-	for index, command := range commands {
-		if err := command.Wait(); err != nil {
-			t.Fatalf("helper %d: %v\n%s", index, err, outputs[index].String())
-		}
-	}
+	results := runArtifactCacheHelpers(t, "TestArtifactCacheConcurrentProcessesConvergeOnEmbeddedArtifact", testArtifactCacheRoot, 2)
 	digestHex := strings.TrimPrefix(InterpreterDigest, "sha256:")
 	finalDir := filepath.Join(testArtifactCacheRoot, "sha256", digestHex)
+	for index, result := range results {
+		if result != finalDir {
+			t.Fatalf("helper %d returned %q, want %q", index, result, finalDir)
+		}
+	}
 	if err := validateMaterializedArtifact(finalDir, embeddedArtifactManifest); err != nil {
 		t.Fatalf("converged artifact: %v", err)
 	}
@@ -146,6 +138,126 @@ func TestArtifactCacheConcurrentProcessesConvergeOnEmbeddedArtifact(t *testing.T
 	}
 	if len(entries) != 1 || entries[0].Name() != digestHex {
 		t.Fatalf("concurrent publication entries = %v, want one final tree", entryNames(entries))
+	}
+}
+
+func TestArtifactCacheConcurrentProcessesRepairPoisonedArtifact(t *testing.T) {
+	if os.Getenv(artifactCacheHelperEnv) != "" {
+		waitForArtifactCacheStartGate(t)
+		raw := syntheticArtifactArchive(t)
+		dir, err := materializeArtifact(os.Getenv(artifactCacheRootEnv), raw, digestBytes(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintln(os.Stdout, artifactCacheResultPrefix+dir)
+		return
+	}
+
+	raw := syntheticArtifactArchive(t)
+	manifest, digestHex, err := manifestFromArchive(raw, digestBytes(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheRoot := t.TempDir()
+	parent := filepath.Join(cacheRoot, "sha256")
+	finalDir := filepath.Join(parent, digestHex)
+	if err := os.MkdirAll(finalDir, artifactTreeDirPerm); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(finalDir, pythonWasmPath), []byte("poisoned"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"." + digestHex + ".staging-interrupted", "." + digestHex + ".invalid-interrupted"} {
+		workTree := filepath.Join(parent, name)
+		if err := os.Mkdir(workTree, artifactCacheDirPerm); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(workTree, "partial"), []byte("partial"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	results := runArtifactCacheHelpers(t, "TestArtifactCacheConcurrentProcessesRepairPoisonedArtifact", cacheRoot, 8)
+	for index, result := range results {
+		if result != finalDir {
+			t.Fatalf("helper %d returned %q, want %q", index, result, finalDir)
+		}
+	}
+	if err := validateMaterializedArtifact(finalDir, manifest); err != nil {
+		t.Fatalf("repaired artifact: %v", err)
+	}
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != digestHex || !entries[0].IsDir() {
+		t.Fatalf("concurrent repair entries = %v, want one final tree", entryNames(entries))
+	}
+}
+
+func runArtifactCacheHelpers(t *testing.T, testName, cacheRoot string, processCount int) []string {
+	t.Helper()
+	gate := filepath.Join(t.TempDir(), "start")
+	commands := make([]*exec.Cmd, 0, processCount)
+	outputs := make([]bytes.Buffer, processCount)
+	for index := 0; index < processCount; index++ {
+		command := exec.Command(os.Args[0], "-test.run=^"+testName+"$", "-test.count=1")
+		command.Env = append(os.Environ(),
+			artifactCacheHelperEnv+"=1",
+			artifactCacheRootEnv+"="+cacheRoot,
+			artifactCacheStartGateEnv+"="+gate,
+		)
+		command.Stdout = &outputs[index]
+		command.Stderr = &outputs[index]
+		if err := command.Start(); err != nil {
+			for _, started := range commands {
+				_ = started.Process.Kill()
+				_ = started.Wait()
+			}
+			t.Fatal(err)
+		}
+		commands = append(commands, command)
+	}
+	if err := os.WriteFile(gate, []byte("start\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for index, command := range commands {
+		if err := command.Wait(); err != nil {
+			t.Errorf("helper %d: %v\n%s", index, err, outputs[index].String())
+		}
+	}
+	if t.Failed() {
+		t.FailNow()
+	}
+	results := make([]string, processCount)
+	for index := range outputs {
+		for _, line := range strings.Split(outputs[index].String(), "\n") {
+			if strings.HasPrefix(line, artifactCacheResultPrefix) {
+				results[index] = strings.TrimPrefix(line, artifactCacheResultPrefix)
+				break
+			}
+		}
+		if results[index] == "" {
+			t.Fatalf("helper %d did not report artifact path:\n%s", index, outputs[index].String())
+		}
+	}
+	return results
+}
+
+func waitForArtifactCacheStartGate(t *testing.T) {
+	t.Helper()
+	gate := os.Getenv(artifactCacheStartGateEnv)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(gate); err == nil {
+			return
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("inspect artifact cache start gate: %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for artifact cache start gate %s", gate)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

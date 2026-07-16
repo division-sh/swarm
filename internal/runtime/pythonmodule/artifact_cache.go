@@ -106,6 +106,26 @@ func materializeVerifiedArtifact(cacheRoot string, raw []byte, digestHex string,
 	}
 	finalDir := filepath.Join(parent, digestHex)
 	if err := validateMaterializedArtifact(finalDir, manifest); err == nil {
+		hasSuperseded, err := hasSupersededArtifactTrees(parent, digestHex)
+		if err != nil {
+			return "", fmt.Errorf("inspect superseded CPython-WASI artifact trees: %w", err)
+		}
+		if !hasSuperseded {
+			return finalDir, nil
+		}
+	}
+
+	lockParent := filepath.Join(cacheRoot, "locks", "sha256")
+	if err := os.MkdirAll(lockParent, artifactCacheDirPerm); err != nil {
+		return "", fmt.Errorf("create artifact lock root: %w", err)
+	}
+	unlock, err := lockArtifactMutation(filepath.Join(lockParent, digestHex+".lock"))
+	if err != nil {
+		return "", fmt.Errorf("lock CPython-WASI artifact sha256:%s: %w", digestHex, err)
+	}
+	defer unlock()
+
+	if err := validateMaterializedArtifact(finalDir, manifest); err == nil {
 		return acceptMaterializedArtifact(parent, digestHex, finalDir)
 	}
 
@@ -120,35 +140,24 @@ func materializeVerifiedArtifact(cacheRoot string, raw []byte, digestHex string,
 		}
 	}()
 	if err := extractArchive(stagingDir, raw, manifest); err != nil {
-		if finalErr := validateMaterializedArtifact(finalDir, manifest); finalErr == nil {
-			return acceptMaterializedArtifact(parent, digestHex, finalDir)
-		}
 		return "", err
 	}
 	if err := validateMaterializedArtifactShape(stagingDir, manifest); err != nil {
-		if finalErr := validateMaterializedArtifact(finalDir, manifest); finalErr == nil {
-			return acceptMaterializedArtifact(parent, digestHex, finalDir)
-		}
 		return "", fmt.Errorf("validate staged CPython-WASI artifact: %w", err)
 	}
 
-	for attempt := 0; attempt < 4; attempt++ {
-		if err := validateMaterializedArtifact(finalDir, manifest); err == nil {
-			return acceptMaterializedArtifact(parent, digestHex, finalDir)
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			if err := quarantineInvalidArtifact(finalDir); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return "", err
-			}
-		}
-		if err := os.Rename(stagingDir, finalDir); err == nil {
-			stagingOwned = false
-			return acceptMaterializedArtifact(parent, digestHex, finalDir)
-		}
-		if err := validateMaterializedArtifact(finalDir, manifest); err == nil {
-			return acceptMaterializedArtifact(parent, digestHex, finalDir)
+	if err := validateMaterializedArtifact(finalDir, manifest); err == nil {
+		return acceptMaterializedArtifact(parent, digestHex, finalDir)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		if err := quarantineInvalidArtifact(finalDir); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return "", err
 		}
 	}
-	return "", fmt.Errorf("publish CPython-WASI artifact sha256:%s: concurrent cache entry did not converge", digestHex)
+	if err := os.Rename(stagingDir, finalDir); err != nil {
+		return "", fmt.Errorf("publish CPython-WASI artifact sha256:%s: %w", digestHex, err)
+	}
+	stagingOwned = false
+	return acceptMaterializedArtifact(parent, digestHex, finalDir)
 }
 
 func acceptMaterializedArtifact(parent, digestHex, finalDir string) (string, error) {
@@ -163,7 +172,7 @@ func removeSupersededArtifactTrees(parent, digestHex string) error {
 	if err != nil {
 		return err
 	}
-	prefixes := []string{"." + digestHex + ".staging-", "." + digestHex + ".invalid-"}
+	prefixes := supersededArtifactTreePrefixes(digestHex)
 	for _, entry := range entries {
 		for _, prefix := range prefixes {
 			if strings.HasPrefix(entry.Name(), prefix) {
@@ -175,6 +184,26 @@ func removeSupersededArtifactTrees(parent, digestHex string) error {
 		}
 	}
 	return nil
+}
+
+func hasSupersededArtifactTrees(parent, digestHex string) (bool, error) {
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return false, err
+	}
+	prefixes := supersededArtifactTreePrefixes(digestHex)
+	for _, entry := range entries {
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(entry.Name(), prefix) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func supersededArtifactTreePrefixes(digestHex string) []string {
+	return []string{"." + digestHex + ".staging-", "." + digestHex + ".invalid-"}
 }
 
 func manifestFromArchive(raw []byte, declaredDigest string) (artifactManifest, string, error) {
