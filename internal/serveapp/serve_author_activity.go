@@ -1,4 +1,4 @@
-package main
+package serveapp
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"golang.org/x/term"
 )
 
 const serveAuthorActivityPageSize = 100
@@ -163,7 +164,8 @@ func serveAuthorActivityReaderFromStores(stores storeBundle) serveAuthorActivity
 func serveAuthorActivityRenderOptions(out io.Writer, noColor bool) runtimeauthoractivity.RenderOptions {
 	mode := runtimeauthoractivity.RenderPlain
 	noColorEnvironment := strings.TrimSpace(os.Getenv("NO_COLOR")) != ""
-	if !noColor && !noColorEnvironment && cliOutputIsTerminal(out) {
+	file, isFile := out.(*os.File)
+	if !noColor && !noColorEnvironment && isFile && file != nil && term.IsTerminal(int(file.Fd())) {
 		mode = runtimeauthoractivity.RenderTTY
 	}
 	return runtimeauthoractivity.RenderOptions{Mode: mode, Width: 120, Palette: serveAuthorActivityPalette(mode)}

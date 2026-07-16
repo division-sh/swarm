@@ -513,7 +513,7 @@ func TestServeAuthorActivityAttachmentFailureKeepsRuntimeHealthy(t *testing.T) {
 		}
 	}
 
-	process := startServeRuntimeTestProcess(t, serveOptions{
+	process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath:    writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
 		ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",

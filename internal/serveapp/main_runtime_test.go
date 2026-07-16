@@ -30,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -757,7 +758,7 @@ func TestRunServeRuntimeDBLoadedExecutesDockerManagerRecovery(t *testing.T) {
 }
 
 func TestRunServeRuntimeDiskLoadedRunForkSupportedSurfaceExecutesAndStampsEphemeralIdentity(t *testing.T) {
-	_, db, _ := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
+	_, db, _ := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
 	ctx := context.Background()
@@ -772,7 +773,7 @@ func TestRunServeRuntimeDiskLoadedRunForkSupportedSurfaceExecutesAndStampsEpheme
 		t.Fatalf("BootBundleIdentity: %v", err)
 	}
 
-	serve := startServeRuntimeTestProcess(t, serveOptions{
+	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath:         writeServeRuntimeTestConfig(t),
 		ContractsPath:      contractsPath,
 		PlatformSpecPath:   defaultPlatformSpecPath,
@@ -1869,6 +1870,21 @@ type servedControlProofRuntime struct {
 	BundleHash string
 	Probe      *lifecycletest.Probe
 	Runtime    *runtimepkg.Runtime
+}
+
+func servedControlProofAuthorActivityContext(t *testing.T, rt servedControlProofRuntime) context.Context {
+	t.Helper()
+	if rt.Runtime == nil {
+		t.Fatal("served control proof runtime is required for exact author activity scope")
+	}
+	runtimeInstanceID := strings.TrimSpace(rt.Runtime.Options.RuntimeInstanceID)
+	fact := rt.Runtime.Options.BundleSourceFact.Normalized()
+	if runtimeInstanceID == "" || fact.BundleHash == "" || fact.BundleHash != strings.TrimSpace(rt.BundleHash) {
+		t.Fatalf("served control proof scope = runtime %q fact %#v bundle %q", runtimeInstanceID, fact, rt.BundleHash)
+	}
+	ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeInstanceID)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash))
 }
 
 type servedConversationForkProofRuntime struct {

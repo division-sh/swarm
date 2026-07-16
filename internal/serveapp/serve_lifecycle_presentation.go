@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -64,6 +65,7 @@ type serveLifecyclePresenter struct {
 	errOut  io.Writer
 	dev     bool
 	verbose bool
+	waiting func(string) string
 
 	bootEvents       map[int]runtime.BootProgressEvent
 	store            *storebackend.Selection
@@ -94,11 +96,13 @@ func newServeLifecyclePresenter(opts cliapp.ServeOptions) *serveLifecyclePresent
 	if errOut == nil {
 		errOut = out
 	}
+	renderOptions := serveAuthorActivityRenderOptions(out, opts.NoColor)
 	return &serveLifecyclePresenter{
 		out:        out,
 		errOut:     errOut,
 		dev:        opts.Dev,
 		verbose:    opts.Verbose,
+		waiting:    renderOptions.Palette.Warning,
 		bootEvents: map[int]runtime.BootProgressEvent{},
 	}
 }
@@ -299,6 +303,9 @@ func (p *serveLifecyclePresenter) commitReady(facts serveLifecycleReadyFacts, pu
 		return false
 	}
 	p.ready = true
+	if publish != nil {
+		publish()
+	}
 	if !p.verbose {
 		p.writeConciseReadyLocked(facts)
 	} else {
@@ -306,9 +313,6 @@ func (p *serveLifecyclePresenter) commitReady(facts serveLifecycleReadyFacts, pu
 		p.writeResolvedFactsLocked(facts)
 	}
 	p.writeWarningsLocked()
-	if publish != nil {
-		publish()
-	}
 	return true
 }
 
@@ -335,6 +339,42 @@ func (p *serveLifecyclePresenter) runtimeFailure(subject string, err error) {
 		copy := event
 		p.failure = &copy
 	}
+}
+
+func (p *serveLifecyclePresenter) writeFeedReady() error {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	waiting := "waiting"
+	if p.waiting != nil {
+		waiting = p.waiting(waiting)
+	}
+	_, err := fmt.Fprintln(p.out, "ready — "+waiting+" for events")
+	return err
+}
+
+func (p *serveLifecyclePresenter) writeStory(rendered []byte) error {
+	if p == nil || len(rendered) == 0 {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	written, err := p.out.Write(rendered)
+	if err == nil && written != len(rendered) {
+		return io.ErrShortWrite
+	}
+	return err
+}
+
+func (p *serveLifecyclePresenter) storyWarning(err error) {
+	if p == nil || err == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	fmt.Fprintf(p.errOut, "WARNING: author story feed unavailable · %s · inspect with swarm logs --follow\n", strings.TrimSpace(err.Error()))
 }
 
 func (p *serveLifecyclePresenter) cleanupFailure(subject string, err error) {
@@ -493,27 +533,32 @@ func (p *serveLifecyclePresenter) writeConciseReadyLocked(facts serveLifecycleRe
 func (p *serveLifecyclePresenter) writeResolvedFactsLocked(facts serveLifecycleReadyFacts) {
 	if p.store != nil {
 		if p.store.Backend == storebackend.BackendSQLite {
-			fmt.Fprintf(p.out, "  store                      sqlite · %s\n", strings.TrimSpace(p.store.SQLitePath))
+			p.writeResolvedFactLocked("store", "sqlite · "+strings.TrimSpace(p.store.SQLitePath))
 		} else {
-			fmt.Fprintf(p.out, "  store                      %s · path not applicable\n", p.store.Backend.String())
+			p.writeResolvedFactLocked("store", p.store.Backend.String()+" · path not applicable")
 		}
 	}
 	for _, detail := range p.workspaceDetailsLocked() {
-		fmt.Fprintf(p.out, "  workspace                  %s\n", detail)
+		p.writeResolvedFactLocked("workspace", detail)
 	}
 	status, detail := p.recoveryDetailLocked()
-	fmt.Fprintf(p.out, "  recovery                   %s", status)
+	recovery := status
 	if detail != "" {
-		fmt.Fprintf(p.out, " · %s", detail)
+		recovery += " · " + detail
 	}
-	fmt.Fprintln(p.out)
-	fmt.Fprintf(p.out, "  listeners                  api %s · mcp %s\n", strings.TrimSpace(facts.APIListener), strings.TrimSpace(facts.MCPListener))
+	p.writeResolvedFactLocked("recovery", recovery)
+	p.writeResolvedFactLocked("listeners", "api "+strings.TrimSpace(facts.APIListener)+" · mcp "+strings.TrimSpace(facts.MCPListener))
 	for _, notice := range p.notices {
-		fmt.Fprintf(p.out, "  recovery action            %s\n", serveLifecycleNoticeDetail(notice))
+		p.writeResolvedFactLocked("recovery action", serveLifecycleNoticeDetail(notice))
 	}
 	if p.verbose {
 		p.writeStandingIngressLocked(facts.Standing)
 	}
+}
+
+func (p *serveLifecyclePresenter) writeResolvedFactLocked(label, value string) {
+	left := lipgloss.NewStyle().Width(28).Render("  " + strings.TrimSpace(label))
+	fmt.Fprintf(p.out, "%s %s\n", left, strings.TrimSpace(value))
 }
 
 func (p *serveLifecyclePresenter) workspaceDetailsLocked() []string {

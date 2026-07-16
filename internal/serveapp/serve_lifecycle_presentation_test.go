@@ -79,7 +79,7 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 
 func TestServeLifecyclePresenterStylesOnlyWaitingToken(t *testing.T) {
 	var out bytes.Buffer
-	presenter := newServeLifecyclePresenter(serveOptions{Dev: true, Output: &out})
+	presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Dev: true, Output: &out})
 	presenter.waiting = func(value string) string { return "\x1b[33m" + value + "\x1b[0m" }
 	if err := presenter.writeFeedReady(); err != nil {
 		t.Fatal(err)
@@ -228,7 +228,7 @@ func TestServeLifecyclePresenterPreReadyRuntimeFailureSuppressesCommit(t *testin
 
 func TestServeLifecyclePresenterPublishesAdmissionBeforeVisibleReadiness(t *testing.T) {
 	var out bytes.Buffer
-	presenter := newServeLifecyclePresenter(serveOptions{Verbose: true, Output: &out})
+	presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Verbose: true, Output: &out})
 	presenter.boot(runtime.BootProgressTotalSteps, "ready", "ok", "")
 	published := false
 	if !presenter.commitReady(serveLifecycleReadyFacts{ProjectName: "project"}, func() {

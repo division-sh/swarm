@@ -39,6 +39,8 @@ type ServeOptions struct {
 	NoRequireBundleMatch             bool
 	AbandonActiveRuns                bool
 	Verbose                          bool
+	NoFeed                           bool
+	NoColor                          bool
 	Output                           io.Writer
 	ErrorOutput                      io.Writer
 	LocalRun                         bool
@@ -50,6 +52,7 @@ type ServeOptions struct {
 	TestRuntimeReadyHook             func(*runtime.Runtime)
 	TestRuntimeContextsReadyHook     func(*runtime.RuntimeContextManager)
 	TestBeforeReadinessCommit        func() error
+	TestAfterAuthorActivityHead      func() error
 }
 
 func DefaultServeOptions() ServeOptions {

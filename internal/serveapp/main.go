@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -365,6 +366,7 @@ type serveRuntimeBundleContextRequest struct {
 	UseStartupOwnership    bool
 	UseStartupRecovery     bool
 	RequireBundleScopeName bool
+	RuntimeInstanceID      string
 }
 
 func (b serveRuntimeBundle) serveIdentityDetail() string {
@@ -675,6 +677,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			ToolGatewayBinding:               req.ToolGatewayBinding,
 			BundleFingerprint:                bootIdentity.Fingerprint,
 			BundleSourceFact:                 bundleSourceFact,
+			RuntimeInstanceID:                strings.TrimSpace(req.RuntimeInstanceID),
 			Credentials:                      req.Credentials,
 			ManagedCredentials:               req.ManagedCredentials,
 			ProviderCredentials:              req.ProviderCredentials,
@@ -725,8 +728,14 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	defer cancelServe()
 	bootStartedAt := time.Now().UTC()
 	runtimeInstanceID := uuid.NewString()
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.RuntimeScope(runtimeInstanceID))
 	presenter := newServeLifecyclePresenter(opts)
 	defer presenter.finish()
+	if opts.NoFeed && !opts.Dev {
+		presenter.fail(1, "serve_admission", fmt.Errorf("--no-feed requires --dev"))
+		return 2
+	}
 	presenter.boot(1, "process_start", "ok", "")
 	apiAuth, err := cliapp.ResolveServeAPIAuth(repo, opts)
 	if err != nil {
@@ -986,6 +995,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			UseStartupOwnership:    i == 0,
 			UseStartupRecovery:     len(loadedBundles) == 1,
 			RequireBundleScopeName: len(loadedBundles) > 1,
+			RuntimeInstanceID:      runtimeInstanceID,
 		})
 		if err != nil {
 			presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) bool {
@@ -1081,7 +1091,9 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins persisted bundle contexts for the process; dynamic project reload is not supported in this mode")
 	}
 	var apiServer, mcpServer *http.Server
+	var storyFollower *serveAuthorActivityFollower
 	defer func() {
+		storyFollower.StopAndWait()
 		shutdownErr := shutdownHTTPServer("api", apiServer)
 		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer("mcp", mcpServer))
 		shutdownErr = errors.Join(shutdownErr, closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[1:], runtimeContextManager, opts))
@@ -1170,7 +1182,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	if rt.InboundGateway != nil {
 		inboundHandler = runtimeProcessInboundHandler{contexts: runtimeContextManager}
 	}
-	apiServer = newAPIServer(&ready, apiV1Handler, inboundHandler)
+	apiServer = newAPIServer(&ready, apiV1Handler, inboundHandler, ctx)
 	mcpServer = newMCPServer(rt.ToolGateway)
 	if err := projectContextRegistration.WriteFinal(runtimeInstanceID, apiListener.Addr(), apiAuth, resolvedPaths, storeSelection, mountSources); err != nil {
 		presenter.fail(20, "context_registry", err)
@@ -1219,6 +1231,24 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	readyAfter := time.Since(bootStartedAt)
 	presenter.boot(22, "ready", "ok", fmt.Sprintf("total=%s state_stores=%s", readyAfter.Round(time.Millisecond), strings.TrimSpace(stateStoreSummary)))
 	flowCount, agentCount, toolCount := serveLifecycleSourceCounts(runtimeContexts)
+	feedEnabled := opts.Dev && !opts.NoFeed
+	storyReader := serveAuthorActivityReaderFromStores(stores)
+	storyHead := int64(0)
+	if feedEnabled {
+		if storyReader == nil {
+			presenter.storyWarning(fmt.Errorf("selected store does not expose author activity reads"))
+			feedEnabled = false
+		} else if storyHead, err = storyReader.HeadAuthorActivity(ctx); err != nil {
+			presenter.storyWarning(err)
+			feedEnabled = false
+		}
+	}
+	if feedEnabled && opts.TestAfterAuthorActivityHead != nil {
+		if err := opts.TestAfterAuthorActivityHead(); err != nil {
+			presenter.storyWarning(err)
+			feedEnabled = false
+		}
+	}
 	if !presenter.commitReady(serveLifecycleReadyFacts{
 		ProjectName: serveLifecycleProjectName(localState, loadedBundles),
 		BundleCount: len(loadedBundles),
@@ -1231,6 +1261,13 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		Standing:    standing,
 	}, func() { ready.Store(true) }) {
 		return 1
+	}
+	if feedEnabled {
+		if err := presenter.writeFeedReady(); err != nil {
+			presenter.storyWarning(err)
+		} else {
+			storyFollower = newServeAuthorActivityFollower(ctx, storyReader, presenter, runtimeInstanceID, runtimeContextManager, storyHead, runtimeauthoractivity.NewHumanRenderer(serveAuthorActivityRenderOptions(opts.Output, opts.NoColor)))
+		}
 	}
 
 	<-ctx.Done()
@@ -1701,28 +1738,37 @@ func runServeUnavailableBundleStartupRecovery(
 }
 
 func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager) error {
-	started := make([]*runtime.Runtime, 0, len(contexts))
-	registered := make([]string, 0, len(contexts))
+	prepared := make([]*runtime.Runtime, 0, len(contexts))
+	for _, contextDef := range contexts {
+		if contextDef.runtime == nil {
+			continue
+		}
+		if err := contextDef.runtime.PrepareAuthorActivityCatalog(); err != nil {
+			for _, rt := range prepared {
+				_ = rt.Shutdown()
+			}
+			return fmt.Errorf("prepare author activity catalog: %w", err)
+		}
+		prepared = append(prepared, contextDef.runtime)
+	}
+	registered := make([]struct {
+		hash    string
+		runtime *runtime.Runtime
+	}, 0, len(contexts))
 	rollback := func() {
-		registeredSet := make(map[string]struct{}, len(registered))
+		closedByManager := make(map[*runtime.Runtime]struct{}, len(registered))
 		for i := len(registered) - 1; i >= 0; i-- {
-			hash := registered[i]
-			registeredSet[hash] = struct{}{}
+			entry := registered[i]
 			if manager != nil {
-				manager.DeactivateBundleHash(hash, runtime.RuntimeContextCauseUnavailable)
+				result := manager.DeactivateBundleHash(entry.hash, runtime.RuntimeContextCauseUnavailable)
+				if result.Found && result.ShutdownErr == nil {
+					closedByManager[entry.runtime] = struct{}{}
+				}
 			}
 		}
-		for i := len(started) - 1; i >= 0; i-- {
-			rt := started[i]
-			registeredRuntime := false
-			for _, contextDef := range contexts {
-				if contextDef.runtime != rt {
-					continue
-				}
-				_, registeredRuntime = registeredSet[strings.TrimSpace(contextDef.bundleSourceFact.BundleHash)]
-				break
-			}
-			if !registeredRuntime {
+		for i := len(prepared) - 1; i >= 0; i-- {
+			rt := prepared[i]
+			if _, closed := closedByManager[rt]; !closed {
 				_ = rt.Shutdown()
 			}
 		}
@@ -1732,11 +1778,9 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 			continue
 		}
 		if err := contextDef.runtime.Start(ctx); err != nil {
-			_ = contextDef.runtime.Shutdown()
 			rollback()
 			return err
 		}
-		started = append(started, contextDef.runtime)
 		targets, activations, err := contextDef.runtime.EnsureStandingTargets(ctx)
 		if err != nil {
 			rollback()
@@ -1765,7 +1809,13 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 				rollback()
 				return err
 			}
-			registered = append(registered, strings.TrimSpace(contextDef.bundleSourceFact.BundleHash))
+			registered = append(registered, struct {
+				hash    string
+				runtime *runtime.Runtime
+			}{
+				hash:    strings.TrimSpace(contextDef.bundleSourceFact.BundleHash),
+				runtime: contextDef.runtime,
+			})
 		}
 	}
 	return nil
@@ -2141,7 +2191,7 @@ func systemWorkspaceContainers(lifecycle workspace.Lifecycle) []string {
 	return lister.SystemWorkspaceContainers()
 }
 
-func newAPIServer(ready *atomic.Bool, apiV1Handler http.Handler, inboundHandler http.Handler) *http.Server {
+func newAPIServer(ready *atomic.Bool, apiV1Handler http.Handler, inboundHandler http.Handler, baseContexts ...context.Context) *http.Server {
 	mux := http.NewServeMux()
 	gateReady := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2171,10 +2221,15 @@ func newAPIServer(ready *atomic.Bool, apiV1Handler http.Handler, inboundHandler 
 	if inboundHandler != nil {
 		mux.Handle("/webhooks/", gateReady(inboundHandler))
 	}
-	return &http.Server{
+	server := &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+	if len(baseContexts) > 0 && baseContexts[0] != nil {
+		base := baseContexts[0]
+		server.BaseContext = func(net.Listener) context.Context { return base }
+	}
+	return server
 }
 
 func newMCPServer(toolGateway *runtimemcp.Gateway) *http.Server {

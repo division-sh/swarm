@@ -10,12 +10,16 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/google/uuid"
 )
 
 // runForkRuntimeOwnerHarness preserves internal runtime/store fork owner coverage for targeted tests.
@@ -100,6 +104,9 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	}
 	storeFacade := stores.facade()
 	defer storeFacade.close()
+	runtimeInstanceID := uuid.NewString()
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.RuntimeScope(runtimeInstanceID))
 	runForkOwner, ok := storeFacade.runForkRuntimeOwner()
 	if !ok {
 		if out != nil {
@@ -150,6 +157,35 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			source := semanticview.Wrap(bundle)
 			selection := runtimerunforkadmission.SelectedContractSelection(source, contractsRoot)
 			contractSelection = &selection
+			bundleHash, err := runtimecontracts.BundleHash(bundle)
+			if err != nil {
+				writeForkContractLoadError(out, "fork failed: hash selected contracts", err)
+				return cliapp.CLIExitValidation
+			}
+			result, err := runForkOwner.materialize(ctx, store.RunForkMaterializeRequest{
+				SourceRunID:       strings.TrimSpace(*runID),
+				At:                strings.TrimSpace(*at),
+				ContractSelection: contractSelection,
+				BundleHash:        bundleHash,
+				BundleSource:      storerunlifecycle.BundleSourceEphemeral,
+			})
+			if err != nil {
+				if out != nil {
+					fmt.Fprintf(out, "fork failed: %v\n", err)
+				}
+				return 1
+			}
+			if *asJSON {
+				enc := json.NewEncoder(out)
+				enc.SetIndent("", "  ")
+				if err := enc.Encode(result); err != nil {
+					fmt.Fprintf(out, "fork failed: encode json: %v\n", err)
+					return 1
+				}
+				return 0
+			}
+			printRunForkMaterialization(out, result)
+			return 0
 		}
 		result, err := runForkOwner.materialize(ctx, store.RunForkMaterializeRequest{
 			SourceRunID:       strings.TrimSpace(*runID),
