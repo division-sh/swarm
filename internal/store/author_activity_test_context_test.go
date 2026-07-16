@@ -57,10 +57,11 @@ func registerTestAuthorActivityCatalogForContext(t *testing.T, target testAuthor
 	eventTypes := []string{
 		"child.event", "child/output.done", "company.scanned", "example.started", "fork.ready",
 		"deadletter.test", "inbound.alert", "inbound.child", "inbound.root", "inbound.test", "item.failed", "item.received",
+		"foreign/task.ready",
 		"github.push.normalized", "inbound.github.push",
 		"human_task.approved", "human_task.expired", "human_task.rejected",
 		"launch.completed", "legacy.filled", "legacy.followup", "legacy.requested", "mailbox.card_superseded", "mailbox.review_requested", "parent.event", "pin.output",
-		"phrase.completed", "review.requested", "scan.completed", "scan.dev", "scan.followup", "scan.requested", "scoring.requested",
+		"phrase.completed", "review.requested", "review/inst-1/task.ready", "scan.completed", "scan.dev", "scan.followup", "scan.requested", "scoring.requested",
 		"subscription.visible", "support_reply.rejected", "support_reply.revision_requested", "system.directive", "system.parent", "system.started", "task.completed",
 		"test.delivery_receipt", "test.delivery_requested", "test.direct_dead_letter", "test.event", "test.started", "test.terminal_admission", "test.terminal_delivery",
 		"test.node_emitted",

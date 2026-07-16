@@ -3497,8 +3497,8 @@ func TestListPendingSubscribedEvents_RespectsDirectDeliveryScope(t *testing.T) {
 
 func TestPendingSubscribedRecoveryUsesAdmittedSameScopeSubscriptionsPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
 		AgentID:       "reviewer",
 		FlowPath:      "review/inst-1",

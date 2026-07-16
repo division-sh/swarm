@@ -958,10 +958,10 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	at := time.Unix(1700000850, 0).UTC()
 	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 	sourceParentID := uuid.NewString()
+	// Route-bearing replay is gated by historical route proof; this fixture isolates direct pending-delivery replay.
 	sourceEnvelope := events.EventEnvelope{
 		EntityID: entityID,
 		Scope:    events.EventScopeEntity,
-		Source:   events.RouteIdentity{FlowID: "source-flow", FlowInstance: "source-flow/instance", EntityID: uuid.NewString()},
 		Target:   events.RouteIdentity{EntityID: entityID},
 	}
 	sourceRoute, _ := json.Marshal(sourceEnvelope.Source)

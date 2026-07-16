@@ -1438,7 +1438,7 @@ func TestSQLiteRuntimeStoreImmediateTerminalReceiptPreservesOriginalFailure(t *t
 }
 
 func TestPendingSubscribedRecoveryUsesAdmittedSameScopeSubscriptionsSQLite(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
 		AgentID:       "reviewer",
