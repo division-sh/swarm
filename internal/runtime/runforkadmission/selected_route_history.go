@@ -49,7 +49,7 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if len(connectIssues) != 0 {
 		return store.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission connect routes: %#v", connectIssues)
 	}
-	routeEvents := selectedRouteHistoryEvents(routeTable, connectPlans, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
+	routeEvents := selectedRouteHistoryEvents(routeTable, connectPlans, selectedRouteHistoryEventEvidence(req.Source, req.Plan, req.FrontierAdmission))
 	dynamicFlowInstances := selectedRouteHistoryDynamicFlowInstances(req.Source, req.Plan, req.FrontierAdmission)
 	blockers := []store.RunForkUnsupportedBlocker{{
 		Code:    store.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
@@ -107,7 +107,7 @@ type selectedRouteHistoryEvent struct {
 	flowInstance  string
 }
 
-func selectedRouteHistoryEventEvidence(plan store.RunForkPlan, frontier store.RunForkContractFrontierAdmission) []selectedRouteHistoryEvent {
+func selectedRouteHistoryEventEvidence(source semanticview.Source, plan store.RunForkPlan, frontier store.RunForkContractFrontierAdmission) []selectedRouteHistoryEvent {
 	frontierEventIDs := map[string]struct{}{}
 	for _, event := range frontier.FrontierEvents {
 		if sourceEventID := strings.TrimSpace(event.SourceEventID); sourceEventID != "" {
@@ -118,7 +118,11 @@ func selectedRouteHistoryEventEvidence(plan store.RunForkPlan, frontier store.Ru
 	add := func(sourceEventID, eventName, flowInstance string) {
 		sourceEventID = strings.TrimSpace(sourceEventID)
 		eventName = strings.TrimSpace(eventName)
-		flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
+		effectiveFlowInstances := contractFrontierEffectiveFlowInstances(source, eventName, []string{flowInstance})
+		flowInstance = ""
+		if len(effectiveFlowInstances) > 0 {
+			flowInstance = effectiveFlowInstances[0]
+		}
 		if eventName == "" {
 			return
 		}

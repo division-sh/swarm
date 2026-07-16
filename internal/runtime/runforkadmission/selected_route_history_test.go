@@ -93,6 +93,75 @@ func TestAdmitSelectedContractRouteHistoryConnectMatchesConcreteTemplateSourceEn
 	}
 }
 
+func TestAdmitSelectedContractRouteHistoryConnectInfersTemplateIdentityWhenPersistedIdentityIsAbsent(t *testing.T) {
+	plan := testRunForkPlan("producer/inst-1/scan.requested", store.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
+	source := testContractFrontierTemplateConnectSource()
+	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
+		Plan:              plan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+	})
+	if err != nil {
+		t.Fatalf("AdmitContractFrontier: %v", err)
+	}
+
+	admission, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{
+		Plan:              plan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		FrontierAdmission: frontier,
+	})
+	if err != nil {
+		t.Fatalf("AdmitSelectedContractRouteHistory: %v", err)
+	}
+	if len(admission.SelectedRouteEvents) != 1 || len(admission.SelectedRouteEvents[0].DerivedRecipients) != 1 || admission.SelectedRouteEvents[0].DerivedRecipients[0].SubscriberID != "consumer-node" {
+		t.Fatalf("selected route events = %#v, want consumer-node through inferred producer identity", admission.SelectedRouteEvents)
+	}
+}
+
+func TestSelectedContractAdmissionsRejectConflictingExplicitTemplateIdentity(t *testing.T) {
+	source := testContractFrontierTemplateConnectSource()
+	frontierPlan := testRunForkPlan("producer/inst-1/scan.requested", store.RunForkPendingClassificationPending, "node", "source-node")
+	frontierPlan.PendingWork[0].FlowInstance = "unrelated/inst-1"
+	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
+		Plan:              frontierPlan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+	})
+	if err != nil {
+		t.Fatalf("AdmitContractFrontier: %v", err)
+	}
+	if len(frontier.FrontierEvents) != 1 || len(frontier.FrontierEvents[0].DerivedRecipients) != 0 {
+		t.Fatalf("frontier events = %#v, want conflicting explicit identity rejected", frontier.FrontierEvents)
+	}
+	if !hasBlocker(frontier.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved) {
+		t.Fatalf("frontier blockers = %#v, want conflicting explicit identity unresolved", frontier.UnsupportedBlockers)
+	}
+
+	historyPlan := testRunForkPlan("producer/inst-1/scan.requested", store.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
+	historyPlan.PendingWork[0].FlowInstance = "unrelated/inst-1"
+	historyFrontier, err := AdmitContractFrontier(ContractFrontierRequest{
+		Plan:              historyPlan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+	})
+	if err != nil {
+		t.Fatalf("AdmitContractFrontier history: %v", err)
+	}
+	history, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{
+		Plan:              historyPlan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		FrontierAdmission: historyFrontier,
+	})
+	if err != nil {
+		t.Fatalf("AdmitSelectedContractRouteHistory: %v", err)
+	}
+	if len(history.SelectedRouteEvents) != 1 || len(history.SelectedRouteEvents[0].DerivedRecipients) != 0 {
+		t.Fatalf("selected route events = %#v, want conflicting explicit identity rejected", history.SelectedRouteEvents)
+	}
+}
+
 func TestAdmitSelectedContractRouteHistoryConnectRejectsUnrelatedTemplateSameLeaf(t *testing.T) {
 	plan := testRunForkPlan("unrelated/inst-1/scan.requested", store.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
 	plan.PendingWork[0].FlowInstance = "unrelated/inst-1"

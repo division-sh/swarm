@@ -70,14 +70,6 @@ type ConnectRoutePlanEndpoint struct {
 // ConnectSourceEndpointMatches is the canonical source-side identity matcher
 // for lowered connect plans.
 func ConnectSourceEndpointMatches(endpoint ConnectRoutePlanEndpoint, eventType, flowInstance string) bool {
-	return connectSourceEndpointMatches(endpoint, eventType, flowInstance, nil)
-}
-
-func ConnectSourceEndpointMatchesEvent(endpoint ConnectRoutePlanEndpoint, evt events.Event) bool {
-	return connectSourceEndpointMatches(endpoint, string(evt.Type()), evt.FlowInstance(), connectSourceEventRouteKeys(evt))
-}
-
-func connectSourceEndpointMatches(endpoint ConnectRoutePlanEndpoint, eventType, flowInstance string, routeKeys []string) bool {
 	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
 	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
 	if eventType == "" {
@@ -107,13 +99,19 @@ func connectSourceEndpointMatches(endpoint ConnectRoutePlanEndpoint, eventType, 
 	if flowInstance != "" && sourceLocal != "" && eventType == flowInstance+"/"+sourceLocal {
 		return connectSourceFlowInstanceMatchesPath(flowInstance, sourcePath)
 	}
-	for _, key := range routeKeys {
-		key = strings.Trim(strings.TrimSpace(key), "/")
-		if key != "" && (key == sourceResolved || key == sourceScoped) {
-			return true
-		}
-	}
 	return false
+}
+
+func ConnectSourceEndpointMatchesEvent(endpoint ConnectRoutePlanEndpoint, evt events.Event) bool {
+	source := evt.SourceRoute().Normalized()
+	sourcePath := source.FlowInstance
+	if sourcePath == "" {
+		sourcePath = source.FlowID
+	}
+	if sourcePath == "" && strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != "" {
+		return false
+	}
+	return ConnectSourceEndpointMatches(endpoint, string(evt.Type()), sourcePath)
 }
 
 func connectSourceFlowInstanceMatchesPath(flowInstance, sourcePath string) bool {
@@ -126,60 +124,6 @@ func connectSourceFlowInstanceMatchesPath(flowInstance, sourcePath string) bool 
 		return true
 	}
 	return runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance) == sourcePath
-}
-
-func connectSourceEventRouteKeys(evt events.Event) []string {
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
-	if eventType == "" {
-		return nil
-	}
-	out := []string{eventType}
-	if concrete := connectSourceConcreteEventKey(eventType, evt.FlowInstance()); concrete != "" {
-		out = append(out, concrete)
-	}
-	targets := evt.TargetRoutes()
-	if target := evt.TargetRoute(); !target.Empty() {
-		targets = []events.RouteIdentity{target}
-	}
-	for _, target := range targets {
-		flowInstance := strings.Trim(strings.TrimSpace(target.Normalized().FlowInstance), "/")
-		staticScope := runtimeflowidentity.SemanticScopeFromFlowInstanceRef(flowInstance)
-		localEvent := connectSourceLocalEvent(eventType, staticScope)
-		if flowInstance == "" || localEvent == "" {
-			continue
-		}
-		out = append(out, flowInstance+"/"+localEvent, localEvent)
-	}
-	return out
-}
-
-func connectSourceConcreteEventKey(eventType, flowInstance string) string {
-	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
-	staticScope := runtimeflowidentity.SemanticScopeFromFlowInstanceRef(flowInstance)
-	localEvent := connectSourceLocalEvent(eventType, staticScope)
-	if flowInstance == "" || localEvent == "" {
-		return ""
-	}
-	return flowInstance + "/" + localEvent
-}
-
-func connectSourceLocalEvent(eventType, staticScope string) string {
-	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
-	staticScope = strings.Trim(strings.TrimSpace(staticScope), "/")
-	if eventType == "" || staticScope == "" {
-		return ""
-	}
-	if strings.HasPrefix(eventType, staticScope+"/") {
-		localEvent := strings.TrimPrefix(eventType, staticScope+"/")
-		if localEvent == "" || strings.Contains(localEvent, "/") {
-			return ""
-		}
-		return localEvent
-	}
-	if strings.Contains(eventType, "/") {
-		return ""
-	}
-	return eventType
 }
 
 type ConnectRoutePlanAddress struct {
