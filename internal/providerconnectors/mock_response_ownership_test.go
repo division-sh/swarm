@@ -23,7 +23,7 @@ func TestMockResponsePlanHasOneProductionProducer(t *testing.T) {
 		"WorkflowContractValidationOptions":   "MockConnectorResponses",
 		"SelectedContractAgentRuntimeOptions": "MockConnectorResponses",
 		"selectedAPICapabilityRequest":        "MockConnectorResponses",
-		"serveOptions":                        "TestMockConnectorResponses",
+		"ServeOptions":                        "TestMockConnectorResponses",
 	}
 
 	for _, root := range []string{filepath.Join(repo, "cmd"), filepath.Join(repo, "internal")} {
