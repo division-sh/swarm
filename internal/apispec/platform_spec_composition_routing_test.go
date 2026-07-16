@@ -148,6 +148,10 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	if !sequenceContainsScalar(mustMappingValue(t, slice1475, "produces"), "producer_broadcast_common_path_forbidden for loaded flow-scope broadcast:true common-path composition") {
 		t.Fatal("implementation_slice_1475 missing producer_broadcast_common_path_forbidden proof surface")
 	}
+	slice1508 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1508")
+	if !sequenceContainsScalar(mustMappingValue(t, slice1508, "proof_obligations"), "semanticview exposes package-aware root connect facts through ResolvedCompositionConnectsFrom, and runtime delivery consumes the same endpoints through lowered ConnectRoutePlan authority") {
+		t.Fatal("implementation_slice_1508 must name the package-aware resolved relation and lowered route-plan owner")
+	}
 
 	entityContracts := mustYAMLPath(t, root, "entity_contracts")
 	assertScalarContains(t, mustYAMLPath(t, entityContracts, "routing_indexes", "rule"), "indexed: true")

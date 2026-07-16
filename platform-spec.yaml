@@ -10731,7 +10731,7 @@ flow_model:
           - producer_broadcast_common_path_forbidden for root broadcast:true common-path composition where root connect authority applies
           - typed root ConnectRoutePlan receiver endpoints
           proof_obligations:
-          - semanticview exposes root connect facts through CompositionConnectsFrom("", pin)
+          - semanticview exposes package-aware root connect facts through ResolvedCompositionConnectsFrom, and runtime delivery consumes the same endpoints through lowered ConnectRoutePlan authority
           - bootverify accepts root outputs with root connect and no producer target/broadcast
           - bootverify rejects root producer target.flow/match and broadcast:true when root connect authority applies
           - EventBus persists delivery rows and subscribed replay scope from lowered root ConnectRoutePlan authority

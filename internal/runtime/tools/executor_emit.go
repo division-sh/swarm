@@ -130,6 +130,63 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		time.Now(),
 	)
 	if runtimepinrouting.PinDeclaredOutput(e.workflowSource, flowID, eventType) {
+		spec := runtimecontracts.EmitSpec{Event: eventType}
+		resolvedBeforePreflight := false
+		rootResolution := runtimepinrouting.ResolveEnvelope(runtimepinrouting.ResolutionInput{
+			Source:      e.workflowSource,
+			FlowID:      flowID,
+			EventType:   eventType,
+			Emit:        spec,
+			SourceRoute: sourceRoute,
+			Inbound:     inbound,
+		}, envelope)
+		if rootResolution.Failure == runtimepinrouting.FailureParentRouteIncomplete {
+			parentRoute, allowEntityOnlyParentRoute, err := e.emitParentRouteForActor(ctx, actor, flowID, flowInstance, inbound)
+			if err != nil {
+				wrapped := failures.WrapDetail(
+					"parent_route_lookup_failed",
+					"tool-executor",
+					"handle_emit_tool.parent_route",
+					map[string]any{"event": eventType},
+					err,
+				)
+				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "parent_route_lookup_failed", "publish", "parent_route", wrapped)
+				return nil, wrapped
+			}
+			rootResolution = runtimepinrouting.ResolveEnvelope(runtimepinrouting.ResolutionInput{
+				Source:                     e.workflowSource,
+				FlowID:                     flowID,
+				EventType:                  eventType,
+				Emit:                       spec,
+				SourceRoute:                sourceRoute,
+				Inbound:                    inbound,
+				ParentRoute:                parentRoute,
+				AllowEntityOnlyParentRoute: allowEntityOnlyParentRoute,
+			}, envelope)
+			if rootResolution.Failure != "" {
+				wrapped := failures.NewTarget(
+					string(rootResolution.Failure),
+					"tool-executor",
+					"handle_emit_tool.pin_target_resolution",
+					map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType},
+				)
+				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "pin_target_resolution_failed", "publish", "pin_target_resolution", wrapped)
+				return nil, wrapped
+			}
+			envelope = rootResolution.Envelope
+			emitted = events.NewChildEventWithLineage(
+				emitted.ID(),
+				emitted.Type(),
+				emitted.SourceAgent(),
+				emitted.TaskID(),
+				emitted.Payload(),
+				emitted.ChainDepth(),
+				emitLineage,
+				envelope,
+				emitted.CreatedAt(),
+			)
+			resolvedBeforePreflight = true
+		}
 		usePublishAuthority := false
 		if planner, ok := e.bus.(publishRecipientPlanner); ok && planner != nil {
 			plan, err := planner.CheckPublishRecipientPlan(ctx, emitted)
@@ -158,8 +215,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 				usePublishAuthority = true
 			}
 		}
-		if !usePublishAuthority {
-			spec := runtimecontracts.EmitSpec{Event: eventType}
+		if !usePublishAuthority && !resolvedBeforePreflight {
 			parentRoute, allowEntityOnlyParentRoute, err := e.emitParentRouteForActor(ctx, actor, flowID, flowInstance, inbound)
 			if err != nil {
 				wrapped := failures.WrapDetail(
