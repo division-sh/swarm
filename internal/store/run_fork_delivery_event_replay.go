@@ -3,14 +3,13 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/google/uuid"
 )
 
@@ -28,19 +27,7 @@ type RunForkDeliveryEventReplayResult struct {
 	ReplayedDeliveryCount int    `json:"replayed_delivery_count"`
 }
 
-type runForkReplaySourceEvent struct {
-	EventID       string
-	EventName     string
-	EntityID      sql.NullString
-	FlowInstance  sql.NullString
-	Scope         string
-	Payload       json.RawMessage
-	ExecutionMode executionmode.Mode
-	Producer      events.ProducerIdentity
-	HandlerNode   sql.NullString
-}
-
-func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, classifier authoredEventDescriptorResolver, lineage runForkActivationLineage, execution RunForkHistoricalReplayExecution, now time.Time) (RunForkDeliveryEventReplayResult, error) {
+func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, store *PostgresStore, lineage runForkActivationLineage, execution RunForkHistoricalReplayExecution, now time.Time) (RunForkDeliveryEventReplayResult, error) {
 	result := RunForkDeliveryEventReplayResult{
 		Owner:       RunForkDeliveryEventReplayOwner,
 		SourceRunID: lineage.SourceRunID,
@@ -61,7 +48,11 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, classifier
 		return result, nil
 	}
 
-	sourceEvents := map[string]runForkReplaySourceEvent{}
+	caps, err := store.schemaCapabilities(ctx)
+	if err != nil {
+		return result, err
+	}
+	sourceEvents := map[string]events.Event{}
 	insertedEvents := map[string]string{}
 	for _, item := range replayable {
 		sourceEventID := strings.TrimSpace(item.SourceEventID)
@@ -81,19 +72,18 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, classifier
 		forkEventID, ok := insertedEvents[sourceEventID]
 		if !ok {
 			forkEventID = deterministicRunForkReplayEventID(lineage.ForkRunID, sourceEventID)
-			inserted, err := insertRunForkReplayEvent(ctx, tx, lineage.ForkRunID, forkEventID, sourceEvent, now)
+			replayed, err := projectRunForkReplayEvent(sourceEvent, lineage.ForkRunID, forkEventID, now)
+			if err != nil {
+				return result, err
+			}
+			outcome, err := store.appendEventSpec(ctx, caps, tx, replayed)
 			if err != nil {
 				return result, err
 			}
 			if err := insertRunForkReplayScopeMarker(ctx, tx, lineage.ForkRunID, forkEventID, now); err != nil {
 				return result, err
 			}
-			if inserted {
-				envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, nullStringText(sourceEvent.EntityID)), nullStringText(sourceEvent.FlowInstance))
-				replayed := events.NewReplayEvent(forkEventID, events.EventType(sourceEvent.EventName), sourceEvent.Producer, "", sourceEvent.Payload, 0, events.EventLineage{RunID: lineage.ForkRunID, ExecutionMode: sourceEvent.ExecutionMode}, envelope, now)
-				if err := recordPersistedEventAuthorActivity(ctx, classifier, replayed, sourceEvent.Producer.ID(), string(sourceEvent.Producer.Type())); err != nil {
-					return result, err
-				}
+			if outcome == runtimebus.EventAppendInserted {
 				result.ReplayedEventCount++
 			}
 			insertedEvents[sourceEventID] = forkEventID
@@ -158,72 +148,42 @@ func validateRunForkDeliveryEventReplayWorkAgainstPlan(pending []RunForkPendingW
 	return nil
 }
 
-func loadRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceRunID, sourceEventID string) (runForkReplaySourceEvent, error) {
-	var event runForkReplaySourceEvent
-	var producedBy, producedByType string
-	err := tx.QueryRowContext(ctx, `
-		SELECT
-			event_id::text,
-			event_name,
-			entity_id::text,
-			flow_instance,
-			scope,
-			COALESCE(payload, '{}'::jsonb),
-			execution_mode,
-			COALESCE(produced_by, ''),
-			COALESCE(produced_by_type, ''),
-			handler_node
-		FROM events
-		WHERE run_id = $1::uuid
-		  AND event_id = $2::uuid
-	`, sourceRunID, sourceEventID).Scan(
-		&event.EventID,
-		&event.EventName,
-		&event.EntityID,
-		&event.FlowInstance,
-		&event.Scope,
-		&event.Payload,
-		&event.ExecutionMode,
-		&producedBy,
-		&producedByType,
-		&event.HandlerNode,
-	)
-	if err == sql.ErrNoRows {
-		return runForkReplaySourceEvent{}, fmt.Errorf("fork delivery/event replay source event %s not found in run %s", sourceEventID, sourceRunID)
-	}
+func loadRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceRunID, sourceEventID string) (events.Event, error) {
+	row, found, err := loadPostgresEventIdentity(ctx, tx, sourceEventID)
 	if err != nil {
-		return runForkReplaySourceEvent{}, fmt.Errorf("load fork delivery/event replay source event: %w", err)
+		return events.EmptyEvent(), fmt.Errorf("load fork delivery/event replay source event: %w", err)
 	}
-	if !json.Valid(event.Payload) {
-		return runForkReplaySourceEvent{}, fmt.Errorf("source event %s payload is not valid json", sourceEventID)
+	if !found || row.RunID != strings.TrimSpace(sourceRunID) {
+		return events.EmptyEvent(), fmt.Errorf("fork delivery/event replay source event %s not found in run %s", sourceEventID, sourceRunID)
 	}
-	if !event.ExecutionMode.Valid() {
-		return runForkReplaySourceEvent{}, fmt.Errorf("source event %s has invalid execution_mode %q", sourceEventID, event.ExecutionMode)
-	}
-	producer, err := events.NewProducerIdentity(events.EventProducerType(producedByType), producedBy)
+	event, err := eventFromPersistedIdentity(row)
 	if err != nil {
-		return runForkReplaySourceEvent{}, fmt.Errorf("source event %s producer identity: %w", sourceEventID, err)
+		return events.EmptyEvent(), fmt.Errorf("load fork delivery/event replay source event: %w", err)
 	}
-	event.Producer = producer
 	return event, nil
 }
 
-func insertRunForkReplayEvent(ctx context.Context, tx *sql.Tx, forkRunID, forkEventID string, event runForkReplaySourceEvent, now time.Time) (bool, error) {
-	res, err := tx.ExecContext(ctx, `
-		INSERT INTO events (
-			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
-			execution_mode, chain_depth, produced_by, produced_by_type, handler_node, source_event_id, created_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, $3, NULLIF($4, '')::uuid, NULLIF($5, ''), $6, $7::jsonb,
-			$8, 0, NULLIF($9, ''), NULLIF($10, ''), NULLIF($11, ''), NULL, $12
-		)
-		ON CONFLICT (event_id) DO NOTHING
-	`, forkEventID, forkRunID, event.EventName, nullStringText(event.EntityID), nullStringText(event.FlowInstance), event.Scope, string(event.Payload), event.ExecutionMode, event.Producer.ID(), string(event.Producer.Type()), nullStringText(event.HandlerNode), now)
+func projectRunForkReplayEvent(source events.Event, forkRunID, forkEventID string, now time.Time) (events.Event, error) {
+	replayed := events.NewReplayEvent(
+		forkEventID,
+		source.Type(),
+		source.Producer(),
+		source.TaskID(),
+		source.Payload(),
+		0,
+		events.EventLineage{RunID: forkRunID, ExecutionMode: source.ExecutionMode()},
+		source.Envelope(),
+		now,
+	)
+	admitted, err := events.AdmitForPersistence(replayed, events.AdmissionOptions{
+		Class:                         events.EventAdmissionReplay,
+		SelectedForkLineageOwner:      RunForkDeliveryEventReplayOwner,
+		RequirePersistentUUIDIdentity: true,
+	})
 	if err != nil {
-		return false, fmt.Errorf("insert fork replay event %s from source event %s: %w", forkEventID, event.EventID, err)
+		return events.EmptyEvent(), fmt.Errorf("project fork replay event %s from source event %s: %w", forkEventID, source.ID(), err)
 	}
-	return rowsAffected(res)
+	return admitted, nil
 }
 
 func insertRunForkReplayScopeMarker(ctx context.Context, tx *sql.Tx, forkRunID, forkEventID string, now time.Time) error {

@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -11,6 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
 )
 
@@ -54,8 +55,8 @@ func TestEventProducerIdentityPersistenceToReadbackParity(t *testing.T) {
 				eventID,
 				events.EventType("test.node_emitted"),
 				producer,
-				"task-1",
-				[]byte(`{"task_id":"task-1","text":"how are you"}`),
+				"event-owned-task",
+				[]byte(`{"task_id":"payload-owned-task","text":"how are you"}`),
 				3,
 				runID,
 				"",
@@ -194,21 +195,14 @@ func eventProducerIdentityReadbacks(surface eventProducerIdentityLifecycleStore,
 			},
 		},
 		{
-			name: "operator_readback",
+			name:         "operator_readback",
+			runtimeEvent: true,
 			load: func() (events.Event, error) {
 				view, err := surface.LoadOperatorEvent(ctx, eventID)
 				if err != nil {
 					return events.EmptyEvent(), err
 				}
-				producer, err := events.NewProducerIdentity(view.ProducerType, view.Source)
-				if err != nil {
-					return events.EmptyEvent(), err
-				}
-				payload, err := json.Marshal(view.Payload)
-				if err != nil {
-					return events.EmptyEvent(), err
-				}
-				return eventtest.PersistedProjectionForProducer(view.EventID, events.EventType(view.EventName), producer, "", payload, 0, view.RunID, view.SourceEventID, events.EventEnvelope{}, view.CreatedAt), nil
+				return view.EventSnapshot()
 			},
 		},
 	}
@@ -225,7 +219,9 @@ func assertPersistedNodeProducerEvent(t *testing.T, event events.Event, eventID,
 	if !requireRuntimeFacts {
 		return
 	}
-	if event.TaskID() != "task-1" || event.ChainDepth() != 3 || !strings.Contains(string(event.Payload()), "how are you") || event.SourceRoute().FlowInstance != "source-flow/one" {
+	if event.TaskID() != "event-owned-task" || event.ChainDepth() != 3 ||
+		!jsonSemanticallyEqual(event.Payload(), []byte(`{"task_id":"payload-owned-task","text":"how are you"}`)) ||
+		event.SourceRoute().FlowInstance != "source-flow/one" {
 		t.Fatalf("event-owned facts changed: task=%q depth=%d payload=%s", event.TaskID(), event.ChainDepth(), event.Payload())
 	}
 }
@@ -309,10 +305,11 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 	sourceRunID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	producer := events.NodeProducer("declarative-node")
-	sourceEvent := eventtest.PersistedProjectionForProducer(
-		sourceEventID, events.EventType("test.node_emitted"), producer, "task-1",
-		[]byte(`{"task_id":"task-1"}`), 2, sourceRunID, "", events.EventEnvelope{}, createdAt,
-	)
+	sourceEnvelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "source-flow", FlowInstance: "source-flow/one", EntityID: uuid.NewString()})
+	sourceEvent := events.Project(eventtest.PersistedProjectionForProducer(
+		sourceEventID, events.EventType("test.node_emitted"), producer, "event-owned-task",
+		[]byte(`{"task_id":"payload-owned-task"}`), 2, sourceRunID, "", sourceEnvelope, createdAt,
+	), events.ProjectExecutionMode(executionmode.Mock))
 	if err := surface.PersistEventWithDeliveries(ctx, sourceEvent, nil); err != nil {
 		t.Fatalf("persist source event: %v", err)
 	}
@@ -330,20 +327,33 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 		t.Fatalf("begin historical replay transaction: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	loaded, err := loadRunForkReplaySourceEvent(ctx, tx, sourceRunID, sourceEventID)
+	txctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	if err != nil {
+		t.Fatalf("begin author activity transaction: %v", err)
+	}
+	loaded, err := loadRunForkReplaySourceEvent(txctx, tx, sourceRunID, sourceEventID)
 	if err != nil {
 		t.Fatalf("loadRunForkReplaySourceEvent: %v", err)
 	}
-	if !loaded.Producer.Equal(producer) {
-		t.Fatalf("historical replay source producer = %q/%q, want %q/%q", loaded.Producer.Type(), loaded.Producer.ID(), producer.Type(), producer.ID())
+	if !loaded.Producer().Equal(producer) {
+		t.Fatalf("historical replay source producer = %q/%q, want %q/%q", loaded.ProducerType(), loaded.SourceAgent(), producer.Type(), producer.ID())
 	}
 	replayedEventID := uuid.NewString()
-	inserted, err := insertRunForkReplayEvent(ctx, tx, forkRunID, replayedEventID, loaded, createdAt.Add(2*time.Minute))
+	replayedProjection, err := projectRunForkReplayEvent(loaded, forkRunID, replayedEventID, createdAt.Add(2*time.Minute))
 	if err != nil {
-		t.Fatalf("insertRunForkReplayEvent: %v", err)
+		t.Fatalf("projectRunForkReplayEvent: %v", err)
 	}
-	if !inserted {
-		t.Fatal("insertRunForkReplayEvent inserted=false, want true")
+	pg := fixture.store.(*PostgresStore)
+	caps, err := pg.schemaCapabilities(txctx)
+	if err != nil {
+		t.Fatalf("schemaCapabilities: %v", err)
+	}
+	outcome, err := pg.appendEventSpec(txctx, caps, tx, replayedProjection)
+	if err != nil {
+		t.Fatalf("append replay event: %v", err)
+	}
+	if outcome != runtimebus.EventAppendInserted {
+		t.Fatalf("append replay event outcome = %d, want inserted", outcome)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit historical replay transaction: %v", err)
@@ -355,6 +365,10 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 	}
 	if !replayed.Producer().Equal(producer) {
 		t.Fatalf("replayed producer = %q/%q, want %q/%q", replayed.ProducerType(), replayed.SourceAgent(), producer.Type(), producer.ID())
+	}
+	if replayed.TaskID() != "event-owned-task" || replayed.ExecutionMode() != executionmode.Mock || replayed.ChainDepth() != 0 || replayed.ParentEventID() != "" ||
+		!jsonSemanticallyEqual(replayed.Payload(), []byte(`{"task_id":"payload-owned-task"}`)) || replayed.Envelope().Source != sourceEnvelope.Source {
+		t.Fatalf("replayed complete snapshot changed: task=%q mode=%q depth=%d parent=%q payload=%s envelope=%#v", replayed.TaskID(), replayed.ExecutionMode(), replayed.ChainDepth(), replayed.ParentEventID(), replayed.Payload(), replayed.Envelope())
 	}
 }
 

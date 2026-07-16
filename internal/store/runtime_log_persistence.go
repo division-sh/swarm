@@ -30,7 +30,7 @@ func runtimeLogEvent(ctx context.Context, record runtimepkg.RuntimeLogPersistenc
 		time.Time{},
 	)
 	if mode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
-		evt = evt.WithExecutionMode(mode)
+		evt = events.Project(evt, events.ProjectExecutionMode(mode))
 	}
 	return evt
 }
@@ -86,7 +86,7 @@ func (s *PostgresStore) PersistRuntimeLog(ctx context.Context, record runtimepkg
 	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
 		return err
 	}
-	evt, err := events.AdmitForPersistence(runtimeLogEvent(ctx, record), events.AdmissionOptions{})
+	evt, err := events.AdmitForPersistence(runtimeLogEvent(ctx, record), events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return err
 	}
@@ -147,7 +147,7 @@ func (s *SQLiteRuntimeStore) PersistRuntimeLog(ctx context.Context, record runti
 	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
 		return err
 	}
-	evt, err := events.AdmitForPersistence(runtimeLogEvent(ctx, record), events.AdmissionOptions{})
+	evt, err := events.AdmitForPersistence(runtimeLogEvent(ctx, record), events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return err
 	}

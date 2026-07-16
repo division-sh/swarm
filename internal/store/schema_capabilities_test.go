@@ -29,8 +29,9 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 		"lifecycle_last_transition_id", "status", "turn_count", "last_active_at", "created_at",
 	)
 	addColumns("events",
-		"event_id", "run_id", "event_name", "entity_id", "flow_instance", "scope", "payload",
+		"event_id", "run_id", "event_name", "task_id", "entity_id", "flow_instance", "scope", "payload",
 		"execution_mode", "chain_depth", "produced_by", "produced_by_type", "source_event_id", "idempotency_key", "created_at",
+		"source_route", "target_route", "target_set",
 	)
 	addColumns("event_deliveries",
 		"run_id", "event_id", "subscriber_type", "subscriber_id", "status", "retry_count",
@@ -98,7 +99,7 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 	if caps.Agents != SchemaFlavorCanonical {
 		t.Fatalf("agents flavor = %s", caps.Agents)
 	}
-	if caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogRunID || !caps.Events.LogIdempotencyKey || !caps.Events.RunBundleHash || !caps.Events.RunBundleSource || !caps.Events.RunBundleFingerprint {
+	if caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogRunID || !caps.Events.LogTaskID || !caps.Events.LogIdempotencyKey || !caps.Events.LogRouteIdentity || !caps.Events.RunBundleHash || !caps.Events.RunBundleSource || !caps.Events.RunBundleFingerprint {
 		t.Fatalf("events caps = %+v", caps.Events)
 	}
 	if caps.Events.Deliveries != SchemaFlavorCanonical ||
@@ -267,6 +268,7 @@ func TestPostgresStore_CanonicalCapabilityReaders(t *testing.T) {
 		AddRow("events", "event_id").
 		AddRow("events", "run_id").
 		AddRow("events", "event_name").
+		AddRow("events", "task_id").
 		AddRow("events", "entity_id").
 		AddRow("events", "flow_instance").
 		AddRow("events", "scope").
@@ -277,6 +279,9 @@ func TestPostgresStore_CanonicalCapabilityReaders(t *testing.T) {
 		AddRow("events", "produced_by_type").
 		AddRow("events", "source_event_id").
 		AddRow("events", "created_at").
+		AddRow("events", "source_route").
+		AddRow("events", "target_route").
+		AddRow("events", "target_set").
 		AddRow("event_receipts", "receipt_id").
 		AddRow("event_receipts", "event_id").
 		AddRow("event_receipts", "subscriber_type").

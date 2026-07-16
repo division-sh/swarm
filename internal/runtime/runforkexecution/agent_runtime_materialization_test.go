@@ -26,6 +26,9 @@ type selectedContractSelfReleaseScopeProbe struct {
 
 func (p *selectedContractSelfReleaseScopeProbe) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	if req.OperationKind == "self_release" {
+		if err := ctx.Err(); err != nil {
+			return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("self-release context is canceled: %w", err)
+		}
 		scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
 		if !ok {
 			return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("self-release author activity scope is required")
@@ -89,7 +92,7 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 	}
 }
 
-func TestStartSelectedContractAgentRuntimePreservesForkScopeForSelfRelease(t *testing.T) {
+func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkScopeForSelfRelease(t *testing.T) {
 	eventBus, err := runtimebus.NewEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -107,7 +110,8 @@ func TestStartSelectedContractAgentRuntimePreservesForkScopeForSelfRelease(t *te
 		"00000000-0000-0000-0000-000000000313",
 		"bundle-v1:sha256:3131313131313131313131313131313131313131313131313131313131313131",
 	)
-	ctx := selectedForkExecutionTestContext(t, context.Background(), authority)
+	initiatingCtx, cancel := context.WithCancel(context.Background())
+	ctx := selectedForkExecutionTestContext(t, initiatingCtx, authority)
 	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)
 	probe := &selectedContractSelfReleaseScopeProbe{want: wantScope, seen: make(chan runtimeauthoractivity.Scope, 1)}
 
@@ -128,6 +132,7 @@ func TestStartSelectedContractAgentRuntimePreservesForkScopeForSelfRelease(t *te
 	if err != nil {
 		t.Fatalf("startSelectedContractAgentRuntime: %v", err)
 	}
+	cancel()
 	if err := runtime.Shutdown(); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}

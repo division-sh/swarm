@@ -15,6 +15,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -47,6 +48,100 @@ func TestPostgresEventAdmissionRejectsMalformedChildDirectAppend(t *testing.T) {
 	if count != 0 {
 		t.Fatalf("persisted malformed child rows = %d, want 0", count)
 	}
+}
+
+func TestEventAdmissionRejectsMalformedCompleteFactsBeforeEveryMutationParity(t *testing.T) {
+	type malformedCase struct {
+		name string
+		want string
+		make func(eventID, runID string, createdAt time.Time) events.Event
+	}
+	cases := []malformedCase{
+		{
+			name: "event_id",
+			want: "event_id",
+			make: func(_ string, runID string, createdAt time.Time) events.Event {
+				return eventtest.PersistedProjection("not-an-event-uuid", "test.invalid", "agent-1", "task", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, createdAt)
+			},
+		},
+		{
+			name: "run_id",
+			want: "run_id",
+			make: func(eventID, _ string, createdAt time.Time) events.Event {
+				return eventtest.PersistedProjection(eventID, "test.invalid", "agent-1", "task", json.RawMessage(`{}`), 0, "not-a-run-uuid", "", events.EventEnvelope{}, createdAt)
+			},
+		},
+		{
+			name: "parent_event_id",
+			want: "parent_event_id",
+			make: func(eventID, runID string, createdAt time.Time) events.Event {
+				return eventtest.PersistedProjection(eventID, "test.invalid", "agent-1", "task", json.RawMessage(`{}`), 1, runID, "not-a-parent-uuid", events.EventEnvelope{}, createdAt)
+			},
+		},
+		{
+			name: "negative_chain_depth",
+			want: "chain_depth",
+			make: func(eventID, runID string, createdAt time.Time) events.Event {
+				return eventtest.PersistedProjection(eventID, "test.invalid", "agent-1", "task", json.RawMessage(`{}`), -1, runID, "", events.EventEnvelope{}, createdAt)
+			},
+		},
+		{
+			name: "invalid_payload",
+			want: "valid JSON",
+			make: func(eventID, runID string, createdAt time.Time) events.Event {
+				return eventtest.PersistedProjection(eventID, "test.invalid", "agent-1", "task", json.RawMessage(`{"unterminated":`), 0, runID, "", events.EventEnvelope{}, createdAt)
+			},
+		},
+		{
+			name: "invalid_envelope_entity",
+			want: "entity_id",
+			make: func(eventID, runID string, createdAt time.Time) events.Event {
+				return eventtest.PersistedProjection(eventID, "test.invalid", "agent-1", "task", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{EntityID: "not-an-entity-uuid", Scope: events.EventScopeEntity}, createdAt)
+			},
+		},
+	}
+
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) authorActivityReceiptFixture
+	}{
+		{name: "sqlite", open: openSQLiteAuthorActivityReceiptFixture},
+		{name: "postgres", open: openPostgresAuthorActivityReceiptFixture},
+	} {
+		for _, test := range cases {
+			backend, test := backend, test
+			t.Run(backend.name+"/"+test.name, func(t *testing.T) {
+				fixture := backend.open(t)
+				ctx := testAuthorActivityContext()
+				before := eventMutationSurfaceCounts(t, fixture.db, ctx)
+				eventID := uuid.NewString()
+				candidate := test.make(eventID, uuid.NewString(), time.Now().UTC().Truncate(time.Microsecond))
+				err := fixture.store.PersistEventWithDeliveries(ctx, candidate, []string{"agent-1"})
+				if err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("malformed event error = %v, want %q", err, test.want)
+				}
+				after := eventMutationSurfaceCounts(t, fixture.db, ctx)
+				for table, count := range before {
+					if after[table] != count {
+						t.Fatalf("%s rows changed from %d to %d after rejected admission", table, count, after[table])
+					}
+				}
+			})
+		}
+	}
+}
+
+func eventMutationSurfaceCounts(t *testing.T, db *sql.DB, ctx context.Context) map[string]int {
+	t.Helper()
+	out := make(map[string]int)
+	for _, table := range []string{"runs", "events", "event_deliveries", "event_receipts", "author_activity_occurrences", "decision_card_route_obligations"} {
+		var count int
+		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		out[table] = count
+	}
+	return out
 }
 
 type terminalEventAdmissionState struct {
@@ -533,6 +628,14 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 			}
 			if err := harness.appendTx(ctx, conflicting); !errors.Is(err, ErrEventIdentityConflict) {
 				t.Fatalf("conflicting transactional duplicate error = %v, want event identity conflict", err)
+			}
+			taskConflict := events.Project(original, events.ProjectTaskID("different-task"))
+			if err := harness.append(ctx, taskConflict); !errors.Is(err, ErrEventIdentityConflict) {
+				t.Fatalf("different-task duplicate error = %v, want event identity conflict", err)
+			}
+			modeConflict := events.Project(original, events.ProjectExecutionMode(executionmode.Mock))
+			if err := harness.appendTx(ctx, modeConflict); !errors.Is(err, ErrEventIdentityConflict) {
+				t.Fatalf("different-mode duplicate error = %v, want event identity conflict", err)
 			}
 
 			newEvent := terminalEventAdmissionEvent(uuid.NewString(), runID, `{"value":"new"}`, createdAt.Add(time.Second))

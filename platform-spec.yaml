@@ -744,6 +744,12 @@ contract_formats:
         event-owned fields after construction and MUST NOT construct events through
         direct carrier literals.
 
+        task_id is an independent event-owned fact persisted in events.task_id.
+        Payload is a separate immutable authored fact: admission, writers, duplicate
+        comparison, and readback MUST NOT derive task_id from payload, inject task_id
+        into payload, remove a payload field after extracting it, or use either fact
+        as a fallback for the other.
+
         The constructor class is part of the semantic claim. A runtime producer
         MUST use the constructor class that matches the producer role rather
         than a generic all-fields constructor. Constructor APIs MUST clone
@@ -762,7 +768,10 @@ contract_formats:
         Persisted event admission is the canonical boundary between constructed
         event shells, context/correlation candidates, and storage. The admission
         owner MUST classify or consume the constructor class and validate the
-        complete producer identity before any event row is written. Missing,
+        complete producer identity, nonnegative chain depth, valid payload JSON,
+        execution mode, and envelope before any event row is written. At the
+        selected-store boundary it MUST additionally validate the UUID shape of
+        every persisted event/run/parent and envelope entity identity. Missing,
         partial, or invalid producer identity fails admission. It may materialize
         explicitly admitted event_id and created_at defaults, and may allocate
         root-ingress run_id when the ingress class permits server allocation.
@@ -778,15 +787,20 @@ contract_formats:
         schema fallbacks only; they MUST NOT silently invent event_id, run_id,
         created_at, source_event_id, target, target_set, or other class-required
         facts after admission. The selected-store writer MUST persist the exact
-        admitted producer pair without classification or defaults.
+        admitted event record without classification, normalization, repair, or
+        defaults. Event-id duplicate admission MUST compare every persisted
+        event-owned fact, including the producer pair, task_id, payload,
+        execution_mode, lineage, timestamp, and complete envelope; only an exact
+        match is idempotent.
 
         PostgreSQL and SQLite runtime readback share one canonical persisted-event
         decoder. Every readback family that can return an executable, recoverable,
         or replayable event MUST select the complete produced_by/produced_by_type
         pair and all event-owned facts consumed by that decoder. Missing, partial,
-        or invalid producer identity fails before dispatch, recovery, or replay;
-        readers MUST NOT infer or repair it. Historical replay must carry the same
-        validated pair into the replayed event.
+        or invalid event identity fails before dispatch, recovery, or replay;
+        readers MUST NOT infer or repair it. Historical and operator replay consume
+        the canonical decoded event and preserve every fact not explicitly changed
+        by their typed replay-lineage rule.
       terminal_run_admission:
         owner: internal/store/runlifecycle plus the selected-store event mutation boundary
         rule: >
@@ -11158,7 +11172,7 @@ platform_tables:
         dedup. source_event_id for causal chain tracing. run_id links every event to its execution context for observability
         and fork/replay. execution_mode is the causal live/mock fact copied from execution authority; downstream cards and readbacks never reconstruct it from provider or backend names.'
       ddl: "CREATE TABLE events (\n    event_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id            UUID\
-        \ REFERENCES runs(run_id),\n    event_name        TEXT NOT NULL,\n    entity_id         UUID,\n    flow_instance\
+        \ REFERENCES runs(run_id),\n    event_name        TEXT NOT NULL,\n    task_id          TEXT,\n    entity_id         UUID,\n    flow_instance\
         \     TEXT,\n    source_route      JSONB NOT NULL DEFAULT '{}',\n    target_route      JSONB NOT NULL DEFAULT '{}',\n\
         \    target_set        JSONB NOT NULL DEFAULT '[]',\n    scope             TEXT NOT NULL DEFAULT 'entity' CHECK (scope IN ('entity', 'flow', 'global')),\n\
         \    payload           JSONB NOT NULL DEFAULT '{}',\n    execution_mode    TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),\n    chain_depth       INTEGER NOT NULL DEFAULT 0,\n\

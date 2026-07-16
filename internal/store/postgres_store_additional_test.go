@@ -473,12 +473,16 @@ func TestPostgresStore_AppendEvent_AllowsRunsWithoutTriggerColumns(t *testing.T)
 			event_id UUID PRIMARY KEY,
 			run_id UUID REFERENCES runs(run_id),
 			event_name TEXT NOT NULL,
+			task_id TEXT,
 			entity_id UUID,
-				flow_instance TEXT,
-				scope TEXT NOT NULL,
-				payload JSONB NOT NULL,
-				execution_mode TEXT NOT NULL,
-				chain_depth INTEGER NOT NULL DEFAULT 0,
+			flow_instance TEXT,
+			source_route JSONB NOT NULL DEFAULT '{}',
+			target_route JSONB NOT NULL DEFAULT '{}',
+			target_set JSONB NOT NULL DEFAULT '[]',
+			scope TEXT NOT NULL,
+			payload JSONB NOT NULL,
+			execution_mode TEXT NOT NULL,
+			chain_depth INTEGER NOT NULL DEFAULT 0,
 			produced_by TEXT,
 			produced_by_type TEXT NOT NULL,
 			source_event_id UUID,
@@ -1425,7 +1429,7 @@ func TestPostgresStore_AppendEvent_EntityIDBoundaryContract(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected AppendEvent to fail on non-UUID entity_id")
 	}
-	if !strings.Contains(err.Error(), "invalid entity_id") {
+	if !strings.Contains(err.Error(), "must be a UUID") {
 		t.Fatalf("AppendEvent invalid entity_id error = %v", err)
 	}
 
@@ -1465,7 +1469,7 @@ func TestPostgresStore_PersistEventWithDeliveries_RejectsInvalidEntityID(t *test
 	if err == nil {
 		t.Fatal("expected PersistEventWithDeliveries to fail on non-UUID entity_id")
 	}
-	if !strings.Contains(err.Error(), "invalid entity_id") {
+	if !strings.Contains(err.Error(), "must be a UUID") {
 		t.Fatalf("PersistEventWithDeliveries invalid entity_id error = %v", err)
 	}
 
@@ -2327,7 +2331,7 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	}
 }
 
-func TestPostgresStore_PipelineReceipts_MissingEventsQuery_QuarantinesNoRunIDCapability(t *testing.T) {
+func TestPostgresStore_PipelineReceipts_MissingEventsQueryFailsClosedOnNoRunIDCapability(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testAuthorActivityContext()
 
@@ -2338,32 +2342,28 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery_QuarantinesNoRunIDCap
 	pg := newTestPostgresStore(t, db)
 	eventID := uuid.NewString()
 	parentID := uuid.NewString()
-	evt := eventtest.PersistedProjection(eventID,
-		events.EventType("system.directive"),
-		"runtime", "", []byte(`{"directive":"x"}`), 0, "", parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC())
-
-	if err := pg.AppendEvent(ctx, evt); err != nil {
-		t.Fatalf("AppendEvent: %v", err)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, event_name, task_id, entity_id, flow_instance,
+			source_route, target_route, target_set, scope, payload,
+			execution_mode, chain_depth, produced_by, produced_by_type,
+			source_event_id, created_at
+		)
+		VALUES (
+			$1::uuid, 'system.directive', '', NULL, '',
+			'{}'::jsonb, '{}'::jsonb, '[]'::jsonb, 'global', '{"directive":"x"}'::jsonb,
+			'live', 0, 'runtime', 'platform', $2::uuid, $3
+		)
+	`, eventID, parentID, time.Now().Add(-time.Minute).UTC()); err != nil {
+		t.Fatalf("seed event without run_id schema capability: %v", err)
 	}
 
 	missing, err := pg.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-time.Hour), 20)
-	if err != nil {
-		t.Fatalf("ListEventsMissingPipelineReceipt: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "events schema is unsupported") {
+		t.Fatalf("ListEventsMissingPipelineReceipt error = %v, want unsupported events schema", err)
 	}
-	if len(missing) != 1 {
-		t.Fatalf("missing events = %d, want 1", len(missing))
-	}
-	if missing[0].Event.ID() != eventID {
-		t.Fatalf("missing event id = %q, want %q", missing[0].Event.ID(), eventID)
-	}
-	if missing[0].Event.ParentEventID() != parentID {
-		t.Fatalf("missing event parent_event_id = %q, want %q", missing[0].Event.ParentEventID(), parentID)
-	}
-	if missing[0].Event.RunID() != "" {
-		t.Fatalf("missing event run_id = %q, want empty", missing[0].Event.RunID())
-	}
-	if missing[0].ReplayFailure == nil || missing[0].ReplayFailure.Detail.Code != "persisted_replay_run_identity_invalid" || missing[0].ReplayFailure.Detail.Attributes["reason_code"] != "missing_run_id_schema_capability" {
-		t.Fatalf("missing event replay_failure = %#v, want persisted_replay_run_identity_invalid/missing_run_id_schema_capability", missing[0].ReplayFailure)
+	if len(missing) != 0 {
+		t.Fatalf("missing events = %#v, want none on unsupported schema", missing)
 	}
 }
 

@@ -58,6 +58,36 @@ type OperatorEventFull struct {
 	Payload       map[string]any             `json:"payload"`
 	Deliveries    []OperatorEventDelivery    `json:"deliveries"`
 	DeadLetters   []OperatorDeadLetterRecord `json:"dead_letters"`
+	event         events.Event
+}
+
+func NewOperatorEventFull(event events.Event) (OperatorEventFull, error) {
+	payload, err := decodeStoreJSONMap(event.Payload())
+	if err != nil {
+		return OperatorEventFull{}, fmt.Errorf("decode operator event payload: %w", err)
+	}
+	return OperatorEventFull{
+		EventID:       event.ID(),
+		EventName:     strings.TrimSpace(string(event.Type())),
+		ExecutionMode: event.ExecutionMode(),
+		EntityID:      event.EntityID(),
+		RunID:         event.RunID(),
+		SourceEventID: event.ParentEventID(),
+		CreatedAt:     event.CreatedAt(),
+		Source:        event.SourceAgent(),
+		ProducerType:  event.ProducerType(),
+		Payload:       payload,
+		Deliveries:    []OperatorEventDelivery{},
+		DeadLetters:   []OperatorDeadLetterRecord{},
+		event:         event.Clone(),
+	}, nil
+}
+
+func (e OperatorEventFull) EventSnapshot() (events.Event, error) {
+	if strings.TrimSpace(e.event.ID()) == "" {
+		return events.EmptyEvent(), fmt.Errorf("operator event %s has no canonical event snapshot", strings.TrimSpace(e.EventID))
+	}
+	return e.event.Clone(), nil
 }
 
 type OperatorEventDelivery struct {
@@ -403,43 +433,21 @@ func (r *OperatorObservabilityReadSurface) LoadOperatorEvent(ctx context.Context
 	if eventID == "" {
 		return OperatorEventFull{}, ErrEventNotFound
 	}
-	row := r.db.QueryRowContext(ctx, `
-		SELECT
-			e.event_id::text,
-			COALESCE(e.event_name, ''),
-			COALESCE(e.entity_id::text, ''),
-			COALESCE(e.run_id::text, ''),
-			COALESCE(e.source_event_id::text, ''),
-			e.execution_mode,
-			e.created_at,
-			COALESCE(e.produced_by, ''),
-			COALESCE(e.produced_by_type, ''),
-			COALESCE(e.payload, '{}'::jsonb)
-		FROM events e
-		WHERE e.event_id::text = $1
-	`, eventID)
-	var (
-		event          OperatorEventFull
-		producedBy     string
-		producedByType string
-		payloadRaw     []byte
-	)
-	if err := row.Scan(&event.EventID, &event.EventName, &event.EntityID, &event.RunID, &event.SourceEventID, &event.ExecutionMode, &event.CreatedAt, &producedBy, &producedByType, &payloadRaw); err == sql.ErrNoRows {
-		return OperatorEventFull{}, ErrEventNotFound
-	} else if err != nil {
+	row, found, err := loadPostgresEventIdentity(ctx, r.db, eventID)
+	if err != nil {
 		return OperatorEventFull{}, fmt.Errorf("load operator event: %w", err)
 	}
-	producer, err := events.NewProducerIdentity(events.EventProducerType(producedByType), producedBy)
-	if err != nil {
-		return OperatorEventFull{}, fmt.Errorf("load operator event producer identity: %w", err)
+	if !found {
+		return OperatorEventFull{}, ErrEventNotFound
 	}
-	event.Source = producer.ID()
-	event.ProducerType = producer.Type()
-	payload, err := decodeStoreJSONMap(payloadRaw)
+	decoded, err := eventFromPersistedIdentity(row)
 	if err != nil {
-		return OperatorEventFull{}, fmt.Errorf("decode operator event payload: %w", err)
+		return OperatorEventFull{}, fmt.Errorf("load operator event: %w", err)
 	}
-	event.Payload = payload
+	event, err := NewOperatorEventFull(decoded)
+	if err != nil {
+		return OperatorEventFull{}, err
+	}
 	deadLetters, err := r.loadOperatorEventDeadLetters(ctx, event.EventID)
 	if err != nil {
 		return OperatorEventFull{}, err

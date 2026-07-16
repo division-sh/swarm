@@ -1293,7 +1293,7 @@ func TestPipelineEngineActionRunner_MockArtifactRepoCommitStopsBeforeActionLaunc
 				"44444444-4444-4444-4444-444444444444",
 				"name: Demo\n",
 			)
-			execCtx.Request.Event = execCtx.Request.Event.WithExecutionMode(executionmode.Mock)
+			execCtx.Request.Event = eventtest.InExecutionMode(execCtx.Request.Event, executionmode.Mock)
 			launches := 0
 			runner := pipelineEngineActionRunner{
 				coordinator: pc,

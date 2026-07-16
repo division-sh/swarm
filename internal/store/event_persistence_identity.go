@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
 var ErrEventIdentityConflict = errors.New("event identity conflict")
@@ -34,12 +35,15 @@ func (e *eventIdentityConflictError) Unwrap() error {
 }
 
 type persistedEventIdentity struct {
+	EventID        string
 	RunID          string
 	EventName      string
+	TaskID         string
 	EntityID       string
 	FlowInstance   string
 	Scope          string
 	Payload        []byte
+	ExecutionMode  executionmode.Mode
 	ChainDepth     int
 	ProducedBy     string
 	ProducedByType string
@@ -51,12 +55,15 @@ type persistedEventIdentity struct {
 }
 
 func newPersistedEventIdentity(
+	eventID string,
 	runID string,
 	eventName string,
+	taskID string,
 	entityID string,
 	flowInstance string,
 	scope string,
 	payload []byte,
+	executionMode executionmode.Mode,
 	chainDepth int,
 	producedBy string,
 	producedByType string,
@@ -67,12 +74,15 @@ func newPersistedEventIdentity(
 	targetSet []byte,
 ) persistedEventIdentity {
 	return persistedEventIdentity{
+		EventID:        strings.TrimSpace(eventID),
 		RunID:          strings.TrimSpace(runID),
 		EventName:      strings.TrimSpace(eventName),
+		TaskID:         strings.TrimSpace(taskID),
 		EntityID:       strings.TrimSpace(entityID),
 		FlowInstance:   strings.TrimSpace(flowInstance),
 		Scope:          strings.TrimSpace(scope),
 		Payload:        bytes.Clone(payload),
+		ExecutionMode:  executionmode.Mode(strings.TrimSpace(string(executionMode))),
 		ChainDepth:     chainDepth,
 		ProducedBy:     strings.TrimSpace(producedBy),
 		ProducedByType: strings.TrimSpace(producedByType),
@@ -85,12 +95,15 @@ func newPersistedEventIdentity(
 }
 
 func (i persistedEventIdentity) equal(other persistedEventIdentity) bool {
-	return i.RunID == other.RunID &&
+	return i.EventID == other.EventID &&
+		i.RunID == other.RunID &&
 		i.EventName == other.EventName &&
+		i.TaskID == other.TaskID &&
 		i.EntityID == other.EntityID &&
 		i.FlowInstance == other.FlowInstance &&
 		i.Scope == other.Scope &&
 		jsonSemanticallyEqual(i.Payload, other.Payload) &&
+		i.ExecutionMode == other.ExecutionMode &&
 		i.ChainDepth == other.ChainDepth &&
 		i.ProducedBy == other.ProducedBy &&
 		i.ProducedByType == other.ProducedByType &&
@@ -105,8 +118,8 @@ func (i persistedEventIdentity) equal(other persistedEventIdentity) bool {
 // event row into runtime event semantics. Every PostgreSQL and SQLite runtime
 // readback must supply the complete identity; missing producer facts fail
 // before recovery, replay, or dispatch can observe the event.
-func eventFromPersistedIdentity(eventID, executionMode string, row persistedEventIdentity) (events.Event, error) {
-	eventID = strings.TrimSpace(eventID)
+func eventFromPersistedIdentity(row persistedEventIdentity) (events.Event, error) {
+	eventID := strings.TrimSpace(row.EventID)
 	if eventID == "" {
 		return events.EmptyEvent(), fmt.Errorf("persisted event_id is required")
 	}
@@ -121,31 +134,66 @@ func eventFromPersistedIdentity(eventID, executionMode string, row persistedEven
 	if row.CreatedAt.IsZero() {
 		return events.EmptyEvent(), fmt.Errorf("persisted event %s requires created_at", eventID)
 	}
-	evt := events.NewProjectionEvent(
+	envelope, err := persistedEventEnvelope(row)
+	if err != nil {
+		return events.EmptyEvent(), fmt.Errorf("persisted event %s envelope: %w", eventID, err)
+	}
+	evt := events.Project(events.NewProjectionEvent(
 		eventID,
 		events.EventType(eventName),
 		producer,
-		eventTaskIDFromPayload(row.Payload),
+		row.TaskID,
 		row.Payload,
 		row.ChainDepth,
 		row.RunID,
 		row.SourceEventID,
-		eventEnvelopeFromStorage(row.EntityID, row.FlowInstance, row.Scope, row.SourceRoute, row.TargetRoute, row.TargetSet),
+		envelope,
 		row.CreatedAt,
-	)
-	return eventWithStoredExecutionMode(evt, executionMode)
+	), events.ProjectExecutionMode(row.ExecutionMode))
+	admitted, err := events.AdmitForPersistence(evt, events.AdmissionOptions{
+		Class:                         events.EventAdmissionProjection,
+		RequirePersistentUUIDIdentity: true,
+	})
+	if err != nil {
+		return events.EmptyEvent(), fmt.Errorf("persisted event %s admission: %w", eventID, err)
+	}
+	return admitted, nil
 }
 
-func eventTaskIDFromPayload(payload []byte) string {
-	var object map[string]json.RawMessage
-	if len(payload) == 0 || json.Unmarshal(payload, &object) != nil {
-		return ""
+func persistedEventEnvelope(row persistedEventIdentity) (events.EventEnvelope, error) {
+	decodeRoute := func(label string, raw []byte) (events.RouteIdentity, error) {
+		var route events.RouteIdentity
+		if len(raw) == 0 {
+			return route, fmt.Errorf("%s is required", label)
+		}
+		if err := json.Unmarshal(raw, &route); err != nil {
+			return events.RouteIdentity{}, fmt.Errorf("decode %s: %w", label, err)
+		}
+		return route, nil
 	}
-	var taskID string
-	if raw, ok := object["task_id"]; ok && json.Unmarshal(raw, &taskID) == nil {
-		return strings.TrimSpace(taskID)
+	source, err := decodeRoute("source_route", row.SourceRoute)
+	if err != nil {
+		return events.EventEnvelope{}, err
 	}
-	return ""
+	target, err := decodeRoute("target_route", row.TargetRoute)
+	if err != nil {
+		return events.EventEnvelope{}, err
+	}
+	var targetSet []events.RouteIdentity
+	if len(row.TargetSet) == 0 {
+		return events.EventEnvelope{}, fmt.Errorf("target_set is required")
+	}
+	if err := json.Unmarshal(row.TargetSet, &targetSet); err != nil {
+		return events.EventEnvelope{}, fmt.Errorf("decode target_set: %w", err)
+	}
+	envelope := events.EventEnvelope{
+		EntityID: row.EntityID, FlowInstance: row.FlowInstance, Scope: events.EventScope(row.Scope),
+		Source: source, Target: target, TargetSet: targetSet,
+	}
+	if err := events.ValidateEnvelope(envelope); err != nil {
+		return events.EventEnvelope{}, err
+	}
+	return envelope.Normalized(), nil
 }
 
 func jsonSemanticallyEqual(left, right []byte) bool {
@@ -225,45 +273,39 @@ func resolveExistingEventIdentity(eventID string, want persistedEventIdentity, g
 	return false, &eventIdentityConflictError{EventID: eventID}
 }
 
-func loadPostgresEventIdentity(ctx context.Context, q rowQueryer, caps StoreSchemaCapabilities, eventID string) (persistedEventIdentity, bool, error) {
-	runIDExpr := `''`
-	if caps.Events.LogRunID {
-		runIDExpr = `COALESCE(run_id::text, '')`
-	}
-	sourceRouteExpr := `'{}'::jsonb`
-	targetRouteExpr := `'{}'::jsonb`
-	targetSetExpr := `'[]'::jsonb`
-	if caps.Events.LogRouteIdentity {
-		sourceRouteExpr = `COALESCE(source_route, '{}'::jsonb)`
-		targetRouteExpr = `COALESCE(target_route, '{}'::jsonb)`
-		targetSetExpr = `COALESCE(target_set, '[]'::jsonb)`
-	}
+func loadPostgresEventIdentity(ctx context.Context, q rowQueryer, eventID string) (persistedEventIdentity, bool, error) {
 	query := `
 		SELECT
-			` + runIDExpr + `,
+			event_id::text,
+			COALESCE(run_id::text, ''),
 			COALESCE(event_name, ''),
+			COALESCE(task_id, ''),
 			COALESCE(entity_id::text, ''),
 			COALESCE(flow_instance, ''),
 			COALESCE(scope, ''),
 			payload,
+			execution_mode,
 			COALESCE(chain_depth, 0),
 			COALESCE(produced_by, ''),
 			COALESCE(produced_by_type, ''),
 			COALESCE(source_event_id::text, ''),
 			created_at,
-			` + sourceRouteExpr + `,
-			` + targetRouteExpr + `,
-			` + targetSetExpr + `
+			COALESCE(source_route, '{}'::jsonb),
+			COALESCE(target_route, '{}'::jsonb),
+			COALESCE(target_set, '[]'::jsonb)
 		FROM events
 		WHERE event_id = $1::uuid`
 	var row persistedEventIdentity
 	err := q.QueryRowContext(ctx, query, eventID).Scan(
+		&row.EventID,
 		&row.RunID,
 		&row.EventName,
+		&row.TaskID,
 		&row.EntityID,
 		&row.FlowInstance,
 		&row.Scope,
 		&row.Payload,
+		&row.ExecutionMode,
 		&row.ChainDepth,
 		&row.ProducedBy,
 		&row.ProducedByType,
@@ -280,52 +322,46 @@ func loadPostgresEventIdentity(ctx context.Context, q rowQueryer, caps StoreSche
 		return persistedEventIdentity{}, false, fmt.Errorf("load existing event identity: %w", err)
 	}
 	return newPersistedEventIdentity(
-		row.RunID, row.EventName, row.EntityID, row.FlowInstance, row.Scope, row.Payload,
+		row.EventID, row.RunID, row.EventName, row.TaskID, row.EntityID, row.FlowInstance, row.Scope, row.Payload, row.ExecutionMode,
 		row.ChainDepth, row.ProducedBy, row.ProducedByType, row.SourceEventID, row.CreatedAt,
 		row.SourceRoute, row.TargetRoute, row.TargetSet,
 	), true, nil
 }
 
-func loadSQLiteEventIdentity(ctx context.Context, q rowQueryer, caps StoreSchemaCapabilities, eventID string) (persistedEventIdentity, bool, error) {
-	runIDExpr := `''`
-	if caps.Events.LogRunID {
-		runIDExpr = `COALESCE(run_id, '')`
-	}
-	sourceRouteExpr := `'{}'`
-	targetRouteExpr := `'{}'`
-	targetSetExpr := `'[]'`
-	if caps.Events.LogRouteIdentity {
-		sourceRouteExpr = `COALESCE(source_route, '{}')`
-		targetRouteExpr = `COALESCE(target_route, '{}')`
-		targetSetExpr = `COALESCE(target_set, '[]')`
-	}
+func loadSQLiteEventIdentity(ctx context.Context, q rowQueryer, eventID string) (persistedEventIdentity, bool, error) {
 	query := `
 		SELECT
-			` + runIDExpr + `,
+			event_id,
+			COALESCE(run_id, ''),
 			COALESCE(event_name, ''),
+			COALESCE(task_id, ''),
 			COALESCE(entity_id, ''),
 			COALESCE(flow_instance, ''),
 			COALESCE(scope, ''),
 			payload,
+			execution_mode,
 			COALESCE(chain_depth, 0),
 			COALESCE(produced_by, ''),
 			COALESCE(produced_by_type, ''),
 			COALESCE(source_event_id, ''),
 			created_at,
-			` + sourceRouteExpr + `,
-			` + targetRouteExpr + `,
-			` + targetSetExpr + `
+			COALESCE(source_route, '{}'),
+			COALESCE(target_route, '{}'),
+			COALESCE(target_set, '[]')
 		FROM events
 		WHERE event_id = ?`
 	var row persistedEventIdentity
 	var createdAt any
 	err := q.QueryRowContext(ctx, query, eventID).Scan(
+		&row.EventID,
 		&row.RunID,
 		&row.EventName,
+		&row.TaskID,
 		&row.EntityID,
 		&row.FlowInstance,
 		&row.Scope,
 		&row.Payload,
+		&row.ExecutionMode,
 		&row.ChainDepth,
 		&row.ProducedBy,
 		&row.ProducedByType,
@@ -349,7 +385,7 @@ func loadSQLiteEventIdentity(ctx context.Context, q rowQueryer, caps StoreSchema
 		return persistedEventIdentity{}, false, fmt.Errorf("load existing sqlite event identity: created_at is required")
 	}
 	return newPersistedEventIdentity(
-		row.RunID, row.EventName, row.EntityID, row.FlowInstance, row.Scope, row.Payload,
+		row.EventID, row.RunID, row.EventName, row.TaskID, row.EntityID, row.FlowInstance, row.Scope, row.Payload, row.ExecutionMode,
 		row.ChainDepth, row.ProducedBy, row.ProducedByType, row.SourceEventID, parsedCreatedAt,
 		row.SourceRoute, row.TargetRoute, row.TargetSet,
 	), true, nil

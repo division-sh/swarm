@@ -189,52 +189,42 @@ func (s *SQLiteRuntimeStore) AppendEventTxOutcome(ctx context.Context, tx *sql.T
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	id, runID, name, entityID, flowInstance, scope, payload, chainDepth, producedBy, producedByType, sourceEventID, createdAt, err := eventStorageEnvelope(evt)
+	wantIdentity := eventStorageEnvelope(evt)
+	if err := s.validateEventPayload(ctx, wantIdentity.EventName, wantIdentity.Payload); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
+	if !caps.Events.LogRunID || !caps.Events.LogTaskID || !caps.Events.LogRouteIdentity {
+		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("canonical events run_id/task_id/route columns are required")
+	}
+	existingIdentity, found, err := loadSQLiteEventIdentity(ctx, tx, wantIdentity.EventID)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	if err := s.validateEventPayload(ctx, name, payload); err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	sourceRoute, targetRoute, targetSet := eventRouteStorageEnvelope(evt)
-	if eventHasRouteIdentity(evt) && !caps.Events.LogRouteIdentity {
-		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("events source_route/target_route/target_set columns required for routed event")
-	}
-	wantIdentity := newPersistedEventIdentity(
-		runID, name, entityID, flowInstance, scope, payload, chainDepth, producedBy,
-		producedByType, sourceEventID, createdAt, sourceRoute, targetRoute, targetSet,
-	)
-	existingIdentity, found, err := loadSQLiteEventIdentity(ctx, tx, caps, id)
-	if err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	duplicate, err := resolveExistingEventIdentity(id, wantIdentity, existingIdentity, found)
+	duplicate, err := resolveExistingEventIdentity(wantIdentity.EventID, wantIdentity, existingIdentity, found)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	if duplicate {
 		return runtimebus.EventAppendExactDuplicate, nil
 	}
-	if caps.Events.LogRunID {
-		var ensureErr error
-		if evt.AdmissionClass() == events.EventAdmissionDiagnosticDirect && evt.Type() == events.EventTypePlatformRuntimeLog {
-			ensureErr = sqliteRequireRunRowPresent(ctx, tx, runID)
-		} else {
-			ensureErr = sqliteEnsureActiveRunRow(ctx, tx, runID, id, name, createdAt)
-		}
-		if ensureErr != nil {
-			return runtimebus.EventAppendOutcomeUnknown, ensureErr
-		}
+	var ensureErr error
+	if evt.AdmissionClass() == events.EventAdmissionDiagnosticDirect && evt.Type() == events.EventTypePlatformRuntimeLog {
+		ensureErr = sqliteRequireRunRowPresent(ctx, tx, wantIdentity.RunID)
+	} else {
+		ensureErr = sqliteEnsureActiveRunRow(ctx, tx, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName, wantIdentity.CreatedAt)
+	}
+	if ensureErr != nil {
+		return runtimebus.EventAppendOutcomeUnknown, ensureErr
 	}
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO events (
-			event_id, run_id, event_name, entity_id, flow_instance, source_route, target_route, target_set,
+			event_id, run_id, event_name, task_id, entity_id, flow_instance, source_route, target_route, target_set,
 			scope, payload, execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(event_id) DO NOTHING
-	`, id, sqliteNullUUID(runID), name, sqliteNullUUID(entityID), sqliteNullString(flowInstance), string(sourceRoute), string(targetRoute), string(targetSet),
-		scope, string(payload), evt.ExecutionMode(), chainDepth, sqliteNullString(producedBy), producedByType, sqliteNullUUID(sourceEventID), createdAt.UTC())
+	`, wantIdentity.EventID, sqliteNullString(wantIdentity.RunID), wantIdentity.EventName, sqliteNullString(wantIdentity.TaskID), sqliteNullString(wantIdentity.EntityID), sqliteNullString(wantIdentity.FlowInstance), string(wantIdentity.SourceRoute), string(wantIdentity.TargetRoute), string(wantIdentity.TargetSet),
+		wantIdentity.Scope, string(wantIdentity.Payload), wantIdentity.ExecutionMode, wantIdentity.ChainDepth, sqliteNullString(wantIdentity.ProducedBy), wantIdentity.ProducedByType, sqliteNullString(wantIdentity.SourceEventID), wantIdentity.CreatedAt.UTC())
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("append sqlite event: %w", err)
 	}
@@ -243,25 +233,25 @@ func (s *SQLiteRuntimeStore) AppendEventTxOutcome(ctx context.Context, tx *sql.T
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("append sqlite event: read affected rows: %w", err)
 	}
 	if rows == 0 {
-		existingIdentity, found, err := loadSQLiteEventIdentity(ctx, tx, caps, id)
+		existingIdentity, found, err := loadSQLiteEventIdentity(ctx, tx, wantIdentity.EventID)
 		if err != nil {
 			return runtimebus.EventAppendOutcomeUnknown, err
 		}
-		duplicate, err := resolveExistingEventIdentity(id, wantIdentity, existingIdentity, found)
+		duplicate, err := resolveExistingEventIdentity(wantIdentity.EventID, wantIdentity, existingIdentity, found)
 		if err != nil {
 			return runtimebus.EventAppendOutcomeUnknown, err
 		}
 		if !duplicate {
-			return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("append sqlite event: event_id=%s was not inserted", id)
+			return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("append sqlite event: event_id=%s was not inserted", wantIdentity.EventID)
 		}
 		return runtimebus.EventAppendExactDuplicate, nil
 	}
 	if caps.Events.LogRunID && caps.Events.RunCounterColumns && runLifecycleEntityStateCountSource(caps) {
-		if err := sqliteSyncRunCounts(ctx, tx, runID); err != nil {
+		if err := sqliteSyncRunCounts(ctx, tx, wantIdentity.RunID); err != nil {
 			return runtimebus.EventAppendOutcomeUnknown, err
 		}
 	}
-	if err := recordPersistedEventAuthorActivity(ctx, s, evt, producedBy, producedByType); err != nil {
+	if err := recordPersistedEventAuthorActivity(ctx, s, evt, wantIdentity.ProducedBy, wantIdentity.ProducedByType); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	return runtimebus.EventAppendInserted, nil
@@ -293,9 +283,10 @@ func (s *SQLiteRuntimeStore) eventPersistenceAdmissionOptions(ctx context.Contex
 		}
 	}
 	return events.AdmissionOptions{
-		RunIDCandidate:           runID,
-		ParentEventIDCandidate:   parentID,
-		SelectedForkLineageOwner: selectedForkLineageOwnerFromContext(ctx),
+		RunIDCandidate:                runID,
+		ParentEventIDCandidate:        parentID,
+		SelectedForkLineageOwner:      selectedForkLineageOwnerFromContext(ctx),
+		RequirePersistentUUIDIdentity: true,
 	}
 }
 

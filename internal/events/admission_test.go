@@ -39,14 +39,14 @@ func TestAdmissionRootIngressAllocatesPersistedFacts(t *testing.T) {
 func TestAdmissionPreservesPlatformDeliveryContext(t *testing.T) {
 	want := DeliveryContext{Reply: &ReplyContextRef{ID: "reply-v1:admission"}}
 	admitted, err := AdmitForPublish(NewProjectionEvent(
-		"event-1",
+		"11111111-1111-4111-8111-111111111111",
 		EventType("provider.replied"),
 		NodeProducer("provider-node"),
 		"",
 		nil,
 		0,
-		"run-1",
-		"request-1",
+		"22222222-2222-4222-8222-222222222222",
+		"33333333-3333-4333-8333-333333333333",
 		EventEnvelope{},
 		time.Now().UTC(),
 	).WithDeliveryContext(want), AdmissionOptions{})
@@ -58,6 +58,46 @@ func TestAdmissionPreservesPlatformDeliveryContext(t *testing.T) {
 	}
 	if got := admitted.ProducerType(); got != EventProducerNode {
 		t.Fatalf("admitted producer type = %q, want node", got)
+	}
+}
+
+func TestAdmissionRequiresUUIDIdentityOnlyAtSelectedStoreBoundary(t *testing.T) {
+	evt := NewProjectionEvent(
+		"event-logical",
+		EventType("provider.replied"),
+		NodeProducer("provider-node"),
+		"task-logical",
+		nil,
+		0,
+		"run-logical",
+		"parent-logical",
+		EventEnvelope{EntityID: "entity-logical"},
+		time.Now().UTC(),
+	)
+
+	if _, err := AdmitForPublish(evt, AdmissionOptions{}); err != nil {
+		t.Fatalf("semantic publish admission rejected logical identity: %v", err)
+	}
+	_, err := AdmitForPersistence(evt, AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err == nil || !strings.Contains(err.Error(), `event_id "event-logical" must be a UUID`) {
+		t.Fatalf("selected-store admission error = %v, want event_id UUID failure", err)
+	}
+
+	evt = NewProjectionEvent(
+		"11111111-1111-4111-8111-111111111111",
+		EventType("provider.replied"),
+		NodeProducer("provider-node"),
+		"task-logical",
+		nil,
+		0,
+		"22222222-2222-4222-8222-222222222222",
+		"33333333-3333-4333-8333-333333333333",
+		EventEnvelope{EntityID: "entity-logical"},
+		time.Now().UTC(),
+	)
+	_, err = AdmitForPersistence(evt, AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err == nil || !strings.Contains(err.Error(), `entity_id "entity-logical" must be a UUID`) {
+		t.Fatalf("selected-store envelope error = %v, want entity_id UUID failure", err)
 	}
 }
 
@@ -167,7 +207,7 @@ func TestAdmissionPublishStillDefaultsProjectionShell(t *testing.T) {
 		time.Time{},
 	), AdmissionOptions{
 		Now:            now,
-		RunIDCandidate: "run-from-publish",
+		RunIDCandidate: "44444444-4444-4444-8444-444444444444",
 	})
 	if err != nil {
 		t.Fatalf("AdmitForPublish projection shell: %v", err)
@@ -175,7 +215,7 @@ func TestAdmissionPublishStillDefaultsProjectionShell(t *testing.T) {
 	if admitted.ID() == "" {
 		t.Fatal("admitted projection shell event_id is empty")
 	}
-	if got := admitted.RunID(); got != "run-from-publish" {
+	if got := admitted.RunID(); got != "44444444-4444-4444-8444-444444444444" {
 		t.Fatalf("admitted projection shell run_id = %q, want publish candidate", got)
 	}
 	if !admitted.CreatedAt().Equal(now) {
@@ -237,13 +277,13 @@ func TestAdmissionRejectsMissingLineageExecutionModeInsteadOfDefaultingLive(t *t
 
 func TestAdmissionReplayAllowsSelectedForkTypedLineageOwner(t *testing.T) {
 	admitted, err := AdmitForPublish(NewReplayEvent(
-		"evt-fork",
+		"55555555-5555-4555-8555-555555555555",
 		EventType("task.completed"),
 		PlatformProducer("runtime.run_fork.selected_contract_execution"),
 		"",
 		nil,
 		0,
-		EventLineage{RunID: "run-fork", ExecutionMode: executionmode.Live},
+		EventLineage{RunID: "66666666-6666-4666-8666-666666666666", ExecutionMode: executionmode.Live},
 		EventEnvelope{},
 		time.Time{},
 	), AdmissionOptions{

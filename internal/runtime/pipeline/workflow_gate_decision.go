@@ -120,7 +120,7 @@ func (pc *PipelineCoordinator) handleProposedEffectDecisionCard(ctx context.Cont
 			}
 			if continuation.ReplyContextID != "" {
 				delivery := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: continuation.ReplyContextID}}
-				product = product.WithDeliveryContext(delivery)
+				product = events.Project(product, events.ProjectDeliveryContext(delivery))
 				txctx = events.WithDeliveryContext(txctx, delivery)
 			}
 			if err := publisher.PublishInMutation(txctx, product); err != nil {
@@ -251,7 +251,7 @@ func (pc *PipelineCoordinator) handleDecisionCardDeferredEvent(ctx context.Conte
 	return nil, pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
 		if continuation.ReplyContextID != "" {
 			delivery := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: continuation.ReplyContextID}}
-			product = product.WithDeliveryContext(delivery)
+			product = events.Project(product, events.ProjectDeliveryContext(delivery))
 			txctx = events.WithDeliveryContext(txctx, delivery)
 		}
 		publisher, ok := pc.bus.(decisionCardDirectMutationPublisher)
@@ -305,7 +305,7 @@ func (pc *PipelineCoordinator) handleDecisionCardExpiredEvent(ctx context.Contex
 	return nil, pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
 		if continuation.ReplyContextID != "" {
 			delivery := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: continuation.ReplyContextID}}
-			product = product.WithDeliveryContext(delivery)
+			product = events.Project(product, events.ProjectDeliveryContext(delivery))
 			txctx = events.WithDeliveryContext(txctx, delivery)
 		}
 		publisher, ok := pc.bus.(decisionCardDirectMutationPublisher)
@@ -430,7 +430,7 @@ func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, 
 			humanTaskRequesterOutcomeEnvelope(continuation), card.DecidedAt.UTC())
 		if continuation.ReplyContextID != "" {
 			delivery := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: continuation.ReplyContextID}}
-			product = product.WithDeliveryContext(delivery)
+			product = events.Project(product, events.ProjectDeliveryContext(delivery))
 			txctx = events.WithDeliveryContext(txctx, delivery)
 		}
 		publisher, ok := pc.bus.(decisionCardDirectMutationPublisher)

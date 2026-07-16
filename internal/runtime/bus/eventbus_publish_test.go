@@ -498,7 +498,7 @@ func (i deliveryContextDeferredInterceptor) Intercept(ctx context.Context, evt e
 	i.t.Helper()
 	switch evt.Type() {
 	case events.EventType("custom.root"):
-		next := eventtest.RootIngress(
+		next := eventtest.ForDelivery(eventtest.RootIngress(
 			"",
 			events.EventType("custom.middle"),
 			"",
@@ -509,7 +509,7 @@ func (i deliveryContextDeferredInterceptor) Intercept(ctx context.Context, evt e
 			"",
 			events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()),
 			time.Now().UTC(),
-		).WithDeliveryContext(i.want)
+		), i.want)
 		return false, []events.Event{next}, nil
 	case events.EventType("custom.middle"):
 		if got := events.DeliveryContextFromContext(ctx).ReplyContextID(); got != i.want.ReplyContextID() {

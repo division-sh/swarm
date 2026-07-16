@@ -1,6 +1,7 @@
 package events
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -9,11 +10,12 @@ import (
 )
 
 type AdmissionOptions struct {
-	Class                    EventAdmissionClass
-	Now                      time.Time
-	RunIDCandidate           string
-	ParentEventIDCandidate   string
-	SelectedForkLineageOwner string
+	Class                         EventAdmissionClass
+	Now                           time.Time
+	RunIDCandidate                string
+	ParentEventIDCandidate        string
+	SelectedForkLineageOwner      string
+	RequirePersistentUUIDIdentity bool
 }
 
 func AdmitForPublish(evt Event, opts AdmissionOptions) (Event, error) {
@@ -94,7 +96,7 @@ func admitPersistableEvent(evt Event, opts AdmissionOptions, allowProjectionDefa
 		return Event{}, fmt.Errorf("unsupported event admission class %q", class)
 	}
 
-	return newEvent(
+	admitted := Project(newEvent(
 		class,
 		id,
 		eventType,
@@ -106,7 +108,11 @@ func admitPersistableEvent(evt Event, opts AdmissionOptions, allowProjectionDefa
 		parentEventID,
 		evt.NormalizedEnvelope(),
 		createdAt,
-	).WithExecutionMode(evt.ExecutionMode()).WithDeliveryContext(evt.DeliveryContext()), nil
+	), ProjectExecutionMode(evt.ExecutionMode()), ProjectDeliveryContext(evt.DeliveryContext()))
+	if err := validateAdmittedEvent(admitted, opts.RequirePersistentUUIDIdentity); err != nil {
+		return Event{}, err
+	}
+	return admitted, nil
 }
 
 func admitAuthoritativeProjectionForPersistence(evt Event, opts AdmissionOptions, eventType EventType) (Event, error) {
@@ -126,7 +132,7 @@ func admitAuthoritativeProjectionForPersistence(evt Event, opts AdmissionOptions
 	if parentEventID == "" && strings.TrimSpace(opts.ParentEventIDCandidate) != "" {
 		return Event{}, fmt.Errorf("%s event %s requires authoritative parent_event_id for persistence admission", EventAdmissionProjection, eventType)
 	}
-	return newEvent(
+	admitted := Project(newEvent(
 		EventAdmissionProjection,
 		id,
 		eventType,
@@ -138,7 +144,35 @@ func admitAuthoritativeProjectionForPersistence(evt Event, opts AdmissionOptions
 		parentEventID,
 		evt.NormalizedEnvelope(),
 		createdAt.UTC(),
-	).WithExecutionMode(evt.ExecutionMode()).WithDeliveryContext(evt.DeliveryContext()), nil
+	), ProjectExecutionMode(evt.ExecutionMode()), ProjectDeliveryContext(evt.DeliveryContext()))
+	if err := validateAdmittedEvent(admitted, opts.RequirePersistentUUIDIdentity); err != nil {
+		return Event{}, err
+	}
+	return admitted, nil
+}
+
+func validateAdmittedEvent(evt Event, requirePersistentUUIDIdentity bool) error {
+	if requirePersistentUUIDIdentity {
+		if err := validateOptionalUUID("event_id", evt.ID()); err != nil {
+			return err
+		}
+		if err := validateOptionalUUID("run_id", evt.RunID()); err != nil {
+			return err
+		}
+		if err := validateOptionalUUID("parent_event_id", evt.ParentEventID()); err != nil {
+			return err
+		}
+	}
+	if evt.ChainDepth() < 0 {
+		return fmt.Errorf("event chain_depth must be nonnegative")
+	}
+	if payload := evt.Payload(); !json.Valid(payload) {
+		return fmt.Errorf("event payload must be valid JSON")
+	}
+	if err := validateEnvelope(evt.Envelope(), requirePersistentUUIDIdentity); err != nil {
+		return err
+	}
+	return nil
 }
 
 func normalizedAdmissionClass(class EventAdmissionClass) EventAdmissionClass {

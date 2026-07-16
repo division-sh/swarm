@@ -31,6 +31,7 @@ type EventSchemaCapabilities struct {
 	RunBundleSource           bool
 	RunBundleFingerprint      bool
 	LogRunID                  bool
+	LogTaskID                 bool
 	DeliveryRunID             bool
 	LogIdempotencyKey         bool
 	LogRouteIdentity          bool
@@ -208,8 +209,9 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 	caps.Events = EventSchemaCapabilities{
 		Log: detectSchemaFlavor(catalog, "events",
 			[]string{
-				"event_id", "event_name", "entity_id", "flow_instance", "scope", "payload",
+				"event_id", "run_id", "event_name", "task_id", "entity_id", "flow_instance", "scope", "payload",
 				"execution_mode", "chain_depth", "produced_by", "produced_by_type", "source_event_id", "created_at",
+				"source_route", "target_route", "target_set",
 			},
 			[]string{"id", "type", "source_agent", "task_id", "entity_id", "payload", "created_at"},
 		),
@@ -238,6 +240,7 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 		RunBundleSource:           catalog.hasColumns("runs", "bundle_source"),
 		RunBundleFingerprint:      catalog.hasColumns("runs", "bundle_fingerprint"),
 		LogRunID:                  catalog.hasColumns("events", "run_id"),
+		LogTaskID:                 catalog.hasColumns("events", "task_id"),
 		DeliveryRunID:             catalog.hasColumns("event_deliveries", "run_id"),
 		LogIdempotencyKey:         catalog.hasColumns("events", "idempotency_key"),
 		LogRouteIdentity:          catalog.hasColumns("events", "source_route", "target_route", "target_set"),
