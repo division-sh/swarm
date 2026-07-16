@@ -321,14 +321,7 @@ func cloneSystemNodeContractMap(in map[string]SystemNodeContract) map[string]Sys
 	return out
 }
 func cloneEventCatalogEntryMap(in map[string]EventCatalogEntry) map[string]EventCatalogEntry {
-	if len(in) == 0 {
-		return map[string]EventCatalogEntry{}
-	}
-	out := make(map[string]EventCatalogEntry, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
+	return CloneEventCatalogEntries(in)
 }
 func cloneAgentRegistryEntryMap(in map[string]AgentRegistryEntry) map[string]AgentRegistryEntry {
 	if len(in) == 0 {

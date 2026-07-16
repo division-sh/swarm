@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
@@ -203,6 +202,10 @@ func (v *SchemaLiteral) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+func (v SchemaLiteral) MarshalYAML() (any, error) {
+	return v.Node, nil
+}
+
 func (a *ToolAdditionalProperties) UnmarshalYAML(node *yaml.Node) error {
 	if a == nil || node == nil {
 		return nil
@@ -266,30 +269,11 @@ func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
 	if err := node.Decode(&aux); err != nil {
 		return err
 	}
-	if aux.MinLength != nil && *aux.MinLength < 0 {
-		return fmt.Errorf("tool schema minLength must be >= 0")
+	decoded := ToolInputSchema(aux)
+	if err := ValidateToolInputSchema(decoded); err != nil {
+		return fmt.Errorf("tool schema: %w", err)
 	}
-	if aux.MaxLength != nil && *aux.MaxLength < 0 {
-		return fmt.Errorf("tool schema maxLength must be >= 0")
-	}
-	if aux.MinLength != nil && aux.MaxLength != nil && *aux.MinLength > *aux.MaxLength {
-		return fmt.Errorf("tool schema minLength must be <= maxLength")
-	}
-	if aux.MinItems != nil && *aux.MinItems < 0 {
-		return fmt.Errorf("tool schema minItems must be >= 0")
-	}
-	if aux.MaxItems != nil && *aux.MaxItems < 0 {
-		return fmt.Errorf("tool schema maxItems must be >= 0")
-	}
-	if aux.MinItems != nil && aux.MaxItems != nil && *aux.MinItems > *aux.MaxItems {
-		return fmt.Errorf("tool schema minItems must be <= maxItems")
-	}
-	if strings.TrimSpace(aux.Pattern) != "" {
-		if _, err := regexp.Compile(aux.Pattern); err != nil {
-			return fmt.Errorf("tool schema pattern is invalid: %w", err)
-		}
-	}
-	*s = ToolInputSchema(aux)
+	*s = decoded
 	return nil
 }
 

@@ -452,27 +452,23 @@ func (b *WorkflowContractBundle) generatedActivityEventsForNode(nodeID string) [
 
 func toolInputSchemaToJSONSchema(schema ToolInputSchema) map[string]any {
 	out := map[string]any{}
-	if value := strings.TrimSpace(schema.Type); value != "" {
-		out["type"] = value
+	if schema.Type != "" {
+		out["type"] = schema.Type
 	} else {
 		out["type"] = "object"
 	}
-	if value := strings.TrimSpace(schema.Description); value != "" {
-		out["description"] = value
+	if schema.Description != "" {
+		out["description"] = schema.Description
 	}
 	if len(schema.Properties) > 0 {
 		props := make(map[string]any, len(schema.Properties))
 		for name, prop := range schema.Properties {
-			name = strings.TrimSpace(name)
-			if name == "" {
-				continue
-			}
 			props[name] = toolInputSchemaToJSONSchema(prop)
 		}
 		out["properties"] = props
 	}
 	if len(schema.Required) > 0 {
-		out["required"] = normalizeStrings(schema.Required)
+		out["required"] = append([]string(nil), schema.Required...)
 	}
 	if schema.Items != nil {
 		out["items"] = toolInputSchemaToJSONSchema(*schema.Items)
@@ -495,8 +491,8 @@ func toolInputSchemaToJSONSchema(schema ToolInputSchema) map[string]any {
 	if schema.Maximum != nil {
 		out["maximum"] = *schema.Maximum
 	}
-	if value := strings.TrimSpace(schema.Pattern); value != "" {
-		out["pattern"] = value
+	if schema.Pattern != "" {
+		out["pattern"] = schema.Pattern
 	}
 	if schema.MinLength != nil {
 		out["minLength"] = *schema.MinLength

@@ -201,6 +201,61 @@ func TestValidatePayloadAgainstSchema_RejectsCaseVariantEnumValue(t *testing.T) 
 	}
 }
 
+func TestRuntimeSchemaValidationPreservesTypedEnumsPatternsAndAdditionalSchemas(t *testing.T) {
+	t.Parallel()
+
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"status": map[string]any{
+				"type": "string", "pattern": " approved $", "enum": []any{" approved "},
+			},
+			"typed": map[string]any{
+				"type": "object", "enum": []any{map[string]any{"code": float64(7)}},
+				"properties": map[string]any{"code": map[string]any{"type": "integer"}},
+				"required":   []any{"code"}, "additionalProperties": false,
+			},
+		},
+		"required":             []any{"status", "typed"},
+		"additionalProperties": map[string]any{"type": "integer"},
+	}
+	valid := map[string]any{
+		"status": " approved ", "typed": map[string]any{"code": float64(7)}, "attempt": float64(2),
+	}
+	if err := ValidatePayloadAgainstSchema(schema, valid); err != nil {
+		t.Fatalf("valid exact value rejected: %v", err)
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(map[string]any)
+		want   string
+	}{
+		{name: "trimmed enum", mutate: func(value map[string]any) { value["status"] = "approved" }, want: "invalid enum"},
+		{name: "stringified typed enum", mutate: func(value map[string]any) { value["typed"] = `{"code":7}` }, want: "invalid enum"},
+		{name: "schema-valued additional property", mutate: func(value map[string]any) { value["attempt"] = "2" }, want: "must be integer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := map[string]any{}
+			for key, value := range valid {
+				candidate[key] = value
+			}
+			tc.mutate(candidate)
+			if err := ValidatePayloadAgainstSchema(schema, candidate); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ValidatePayloadAgainstSchema error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+
+	projected := CanonicalAcceptanceSchema(schema)
+	properties := projected["properties"].(map[string]any)
+	if got := properties["status"].(map[string]any)["pattern"]; got != " approved $" {
+		t.Fatalf("pattern was normalized to %#v", got)
+	}
+	if _, ok := projected["additionalProperties"].(map[string]any); !ok {
+		t.Fatalf("schema-valued additionalProperties collapsed: %#v", projected["additionalProperties"])
+	}
+}
+
 func TestValidatePayloadAgainstSchema_EnforcesSchemaRefinements(t *testing.T) {
 	t.Parallel()
 

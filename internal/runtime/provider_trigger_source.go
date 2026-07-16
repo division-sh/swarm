@@ -192,9 +192,5 @@ func (s providerTriggerEventSource) ProjectScopes() []semanticview.ProjectScope 
 }
 
 func cloneEventCatalog(in map[string]runtimecontracts.EventCatalogEntry) map[string]runtimecontracts.EventCatalogEntry {
-	out := make(map[string]runtimecontracts.EventCatalogEntry, len(in))
-	for name, entry := range in {
-		out[name] = entry
-	}
-	return out
+	return runtimecontracts.CloneEventCatalogEntries(in)
 }

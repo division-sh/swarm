@@ -37,7 +37,7 @@ func (p SatisfactionPlan) GenerationID() (string, error) {
 			"name":       event.Name,
 			"event":      event.Event,
 			"fields":     event.Fields,
-			"descriptor": event.Descriptor,
+			"descriptor": channelTriggerEventGenerationValue(event.Descriptor),
 		}
 	}
 	return canonicaljson.Hash(map[string]any{
@@ -53,6 +53,17 @@ func (p SatisfactionPlan) GenerationID() (string, error) {
 		"operations":            operations,
 		"events":                events,
 	})
+}
+
+func channelTriggerEventGenerationValue(event TriggerEvent) map[string]any {
+	fields := make(map[string]any, len(event.Fields))
+	for name, field := range event.Fields {
+		fields[name] = map[string]any{
+			"required": field.Required,
+			"schema":   runtimecontracts.ToolInputSchemaJSONSchema(field.Schema),
+		}
+	}
+	return map[string]any{"name": event.Name, "fields": fields}
 }
 
 func channelSchemaMapGenerationValue(schemas map[string]runtimecontracts.ToolInputSchema) map[string]any {
