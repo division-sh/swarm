@@ -115,6 +115,7 @@ func TestUpdateEntityState_PreservesMutationCommittedWhileTransitionWaits(t *tes
 	}
 
 	ctx := testWorkflowStoreRunContext(t, store)
+	transitionCtx := testPersistedWorkflowStateTransitionContext(t, store, ctx, entityID, "workflow.completed")
 	firstEntered := make(chan struct{})
 	releaseFirst := make(chan struct{})
 	errCh := make(chan error, 2)
@@ -129,7 +130,7 @@ func TestUpdateEntityState_PreservesMutationCommittedWhileTransitionWaits(t *tes
 
 	<-firstEntered
 	go func() {
-		errCh <- pc.updateEntityState(ctx, entityID, "done", "workflow.completed")
+		errCh <- pc.updateEntityState(transitionCtx, entityID, "done", "workflow.completed")
 	}()
 
 	time.Sleep(100 * time.Millisecond)
@@ -211,14 +212,8 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 		CurrentState:    "queued",
 		Metadata:        map[string]any{},
 		StateBuckets:    map[string]any{},
-		TimerState: []WorkflowTimerState{{
-			TimerID:   "task_timer",
-			EventType: "timer.task_timeout",
-			CreatedAt: now,
-			FiresAt:   now.Add(time.Hour),
-		}},
 	}); err != nil {
-		t.Fatalf("seed workflow instance with timer state: %v", err)
+		t.Fatalf("seed workflow instance: %v", err)
 	}
 
 	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `
@@ -242,20 +237,13 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 		t.Fatalf("mutate with scheduler-owned timer row present: %v", err)
 	}
 
-	instance, ok, err := store.Load(testWorkflowStoreRunContext(t, store), entityID)
+	_, ok, err := store.Load(testWorkflowStoreRunContext(t, store), entityID)
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
 	if !ok {
 		t.Fatal("expected workflow instance to persist")
 	}
-	if len(instance.TimerState) != 1 {
-		t.Fatalf("timer state count = %d, want 1", len(instance.TimerState))
-	}
-	if got := instance.TimerState[0].TimerID; got != "task_timer" {
-		t.Fatalf("timer state id = %q, want task_timer", got)
-	}
-
 	var schedulerRows int
 	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COUNT(*)

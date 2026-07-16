@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
@@ -22,6 +23,12 @@ func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.S
 	}
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
 		return fmt.Errorf("agent_id and event_type are required")
+	}
+	if sc.EffectiveTimerID() != "" || timeridentity.IsWorkflowTimerActivationTaskID(sc.TaskID) {
+		return fmt.Errorf("workflow timer activations must be persisted by WorkflowTimerLifecycle")
+	}
+	if _, ok := timeridentity.ParseWorkflowTimerOccurrenceTaskID(sc.TaskID); ok {
+		return fmt.Errorf("workflow timer occurrences must be persisted by WorkflowTimerLifecycle")
 	}
 	if strings.TrimSpace(sc.Mode) == "" {
 		sc.Mode = "once"
@@ -71,6 +78,9 @@ func (s *PostgresStore) CancelScheduleExact(ctx context.Context, sc runtimepipel
 	}
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
 		return fmt.Errorf("agent_id and event_type are required")
+	}
+	if sc.EffectiveTimerID() != "" {
+		return fmt.Errorf("workflow timer cancellation must be owned by WorkflowTimerLifecycle")
 	}
 	entityID := sc.EffectiveEntityID()
 	sc.EntityID = entityID
@@ -124,6 +134,9 @@ func (s *PostgresStore) MarkScheduleFiredExact(ctx context.Context, sc runtimepi
 	}
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
 		return nil
+	}
+	if sc.EffectiveTimerID() != "" {
+		return fmt.Errorf("workflow timer completion must be owned by WorkflowTimerLifecycle")
 	}
 	entityID := sc.EffectiveEntityID()
 	sc.EntityID = entityID
@@ -187,10 +200,11 @@ func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeli
 		  AND owner_agent = $2
 		  AND fire_event = $3
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
-		  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
-		  AND %s = $6
-		  AND status = 'active'
-		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID)); err != nil {
+			  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
+			  AND %s = $6
+			  AND timer_name NOT LIKE $7
+			  AND status = 'active'
+		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix()+"%"); err != nil {
 			return fmt.Errorf("deactivate previous timer: %w", err)
 		}
 
@@ -239,11 +253,12 @@ func (s *PostgresStore) cancelScheduleSpec(ctx context.Context, runID, agentID, 
 		result, err := tx.ExecContext(ctx, `
 			UPDATE timers
 			SET status = 'cancelled'
-		WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
-		  AND owner_agent = $2
-		  AND fire_event = $3
-		  AND status = 'active'
-		`, runID, agentID, eventType)
+			WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
+			  AND owner_agent = $2
+			  AND fire_event = $3
+			  AND timer_name NOT LIKE $4
+			  AND status = 'active'
+		`, runID, agentID, eventType, timeridentity.WorkflowTimerActivationTaskPrefix()+"%")
 		return scheduleMutationChanged(result, err)
 	})
 }
@@ -257,10 +272,11 @@ func (s *PostgresStore) cancelScheduleExactSpec(ctx context.Context, sc runtimep
 		  AND owner_agent = $2
 		  AND fire_event = $3
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
-		  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
-		  AND %s = $6
-		  AND status = 'active'
-		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID))
+			  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
+			  AND %s = $6
+			  AND timer_name NOT LIKE $7
+			  AND status = 'active'
+		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix()+"%")
 		return scheduleMutationChanged(result, err)
 	})
 }
@@ -271,8 +287,9 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 			COALESCE(t.run_id::text, ''),
 			t.owner_agent,
 			t.fire_event,
-			CASE WHEN t.recurring THEN 'cron' ELSE 'once' END,
+			t.recurring,
 			COALESCE(t.recurrence_cron, ''),
+			COALESCE(t.recurrence_interval, ''),
 			t.fire_at,
 			COALESCE(t.entity_id::text, ''),
 			COALESCE(t.flow_instance, ''),
@@ -282,9 +299,10 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 		LEFT JOIN runs run ON run.run_id = t.run_id
 		WHERE t.status = 'active'
 		  AND t.owner_agent IS NOT NULL
+		  AND t.timer_name NOT LIKE $1
 		  AND (t.run_id IS NULL OR run.status IN ('running', 'paused'))
 		ORDER BY t.created_at ASC
-	`)
+	`, timeridentity.WorkflowTimerActivationTaskPrefix()+"%")
 	if err != nil {
 		return nil, fmt.Errorf("query active timers: %w", err)
 	}
@@ -293,17 +311,21 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 	out := make([]runtimepipeline.Schedule, 0)
 	for rows.Next() {
 		var (
-			sc             runtimepipeline.Schedule
-			fireAt         time.Time
-			payload        []byte
-			replyContextID string
+			sc                 runtimepipeline.Schedule
+			recurring          bool
+			recurrenceCron     string
+			recurrenceInterval string
+			fireAt             time.Time
+			payload            []byte
+			replyContextID     string
 		)
 		if err := rows.Scan(
 			&sc.RunID,
 			&sc.AgentID,
 			&sc.EventType,
-			&sc.Mode,
-			&sc.Cron,
+			&recurring,
+			&recurrenceCron,
+			&recurrenceInterval,
 			&fireAt,
 			&sc.EntityID,
 			&sc.FlowInstance,
@@ -314,6 +336,10 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 		}
 		sc.At = fireAt
 		sc.TaskID, sc.Payload = extractPersistedScheduleTaskID(payload)
+		sc.Mode, sc.Cron, err = persistedScheduleMode(recurring, recurrenceCron, recurrenceInterval)
+		if err != nil {
+			return nil, fmt.Errorf("load generic timer recurrence: %w", err)
+		}
 		if replyContextID != "" {
 			sc.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}}
 		}
@@ -326,44 +352,56 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 }
 
 func (s *PostgresStore) markScheduleFiredSpec(ctx context.Context, sc runtimepipeline.Schedule) error {
-	status := "fired"
-	if !strings.EqualFold(strings.TrimSpace(sc.Mode), "once") {
-		status = "active"
-	}
 	return s.runScheduleMutation(ctx, sc.RunID, "mark timer fired", func(tx *sql.Tx) (bool, error) {
 		result, err := tx.ExecContext(ctx, `
 			UPDATE timers
-		SET status = $4,
-		    fired_at = now()
-		WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
-		  AND owner_agent = $2
-		  AND fire_event = $3
-		  AND status = 'active'
-		`, sc.RunID, sc.AgentID, sc.EventType, status)
+			SET status = CASE WHEN recurring THEN 'active' ELSE 'fired' END,
+			    fired_at = now()
+			WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
+			  AND owner_agent = $2
+			  AND fire_event = $3
+			  AND timer_name NOT LIKE $4
+			  AND status = 'active'
+		`, sc.RunID, sc.AgentID, sc.EventType, timeridentity.WorkflowTimerActivationTaskPrefix()+"%")
 		return scheduleMutationChanged(result, err)
 	})
 }
 
 func (s *PostgresStore) markScheduleFiredExactSpec(ctx context.Context, sc runtimepipeline.Schedule) error {
-	status := "fired"
-	if !strings.EqualFold(strings.TrimSpace(sc.Mode), "once") {
-		status = "active"
-	}
 	return s.runScheduleMutation(ctx, sc.RunID, "mark exact timer fired", func(tx *sql.Tx) (bool, error) {
 		result, err := tx.ExecContext(ctx, fmt.Sprintf(`
 			UPDATE timers
-		SET status = $7,
-		    fired_at = now()
+			SET status = CASE WHEN recurring THEN 'active' ELSE 'fired' END,
+			    fired_at = now()
 		WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
 		  AND owner_agent = $2
 		  AND fire_event = $3
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
-		  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
-		  AND %s = $6
-		  AND status = 'active'
-		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), status)
+			  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
+			  AND %s = $6
+			  AND timer_name NOT LIKE $7
+			  AND status = 'active'
+		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix()+"%")
 		return scheduleMutationChanged(result, err)
 	})
+}
+
+func persistedScheduleMode(recurring bool, recurrenceCron, recurrenceInterval string) (string, string, error) {
+	if !recurring {
+		return "once", "", nil
+	}
+	recurrenceCron = strings.TrimSpace(recurrenceCron)
+	recurrenceInterval = strings.TrimSpace(recurrenceInterval)
+	if recurrenceCron != "" && recurrenceInterval != "" {
+		return "", "", fmt.Errorf("recurring timer has both cron and interval recurrence")
+	}
+	if recurrenceCron != "" {
+		return "cron", recurrenceCron, nil
+	}
+	if interval, ok := timeridentity.ParseDelayDuration(recurrenceInterval); ok {
+		return "cron", "@every " + interval.String(), nil
+	}
+	return "", "", fmt.Errorf("recurring timer is missing a valid recurrence")
 }
 
 func (s *PostgresStore) runScheduleMutation(ctx context.Context, runID, label string, mutate func(*sql.Tx) (bool, error)) error {

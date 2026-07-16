@@ -43,7 +43,7 @@ func TestExecutorPersistPropagatesDeliveryContextToEveryContinuationIntent(t *te
 		req: ExecutionRequest{EntityID: identity.EntityID("entity-a")},
 		result: ExecutionResult{
 			EmitIntents:     []EmitIntent{{}},
-			TimerIntents:    []TimerIntent{{TimerID: "provider-timeout"}},
+			TimerIntents:    []TimerIntent{{Operation: TimerReconcile}},
 			ActivityIntents: []ActivityIntent{{ActivityID: "provider-call", ExecutionMode: executionmode.Live}},
 		},
 	}

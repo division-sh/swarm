@@ -156,7 +156,6 @@ type StateSnapshot struct {
 	CurrentState    string
 	EnteredStateAt  time.Time
 	StateCarrier
-	TimerState []TimerState
 }
 
 func (s StateSnapshot) MetadataBucket() values.Bucket {
@@ -201,17 +200,6 @@ func (s *StateSnapshot) EnsureStateBucket(name string) values.Bucket {
 
 func (s StateSnapshot) StateBucket(name string) (values.Bucket, bool) {
 	return s.StateCarrier.StateBucket(name)
-}
-
-type TimerState struct {
-	TimerID   string
-	EventType string
-	CreatedAt time.Time
-	FiresAt   time.Time
-	StartedBy string
-	Recurring bool
-	Cancelled bool
-	Fired     bool
 }
 
 type ExecutionRequest struct {
@@ -318,16 +306,14 @@ type EmitIntent struct {
 }
 
 type TimerIntent struct {
-	Context      events.DeliveryContext
-	Operation    TimerOperation
-	TimerID      string
-	Owner        identity.NodeID
-	EventType    string
-	FireAt       time.Time
-	Recurring    bool
-	FromState    string
-	ToState      string
-	TriggerEvent string
+	Context          events.DeliveryContext
+	Operation        TimerOperation
+	Owner            identity.NodeID
+	FromState        string
+	ToState          string
+	TriggerEventID   string
+	TriggerEventType string
+	TriggeredAt      time.Time
 }
 
 type ActivityIntent struct {
@@ -393,7 +379,10 @@ func (i ActivityIntent) Normalized() ActivityIntent {
 }
 
 type StateMutation struct {
-	NextState string
+	NextState        string
+	TriggerEventID   string
+	TriggerEventType string
+	TriggeredAt      time.Time
 	StateCarrier
 	ClearGates       []string
 	SetGate          string

@@ -466,11 +466,12 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 			start := make(chan struct{})
 			armErr := make(chan error, 1)
 			arrivalErr := make(chan error, 1)
+			transitionCtx := testPersistedWorkflowStateTransitionContext(t, store, ctx, entityID, "dispatch.completed")
 			go func() {
 				<-start
 				unlock := pc.lockWorkflowEntity(entityID)
 				defer unlock()
-				armErr <- pc.updateEntityState(ctx, entityID, "awaiting", "dispatch.completed")
+				armErr <- pc.updateEntityState(transitionCtx, entityID, "awaiting", "dispatch.completed")
 			}()
 			go func() {
 				<-start
@@ -560,7 +561,8 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 			}
 
 			assertClass(deliver(pc, "early", "a", "one"), runtimefailures.ClassEarlyArrival)
-			if err := pc.updateEntityState(ctx, entityID, "awaiting", "dispatch.completed"); err != nil {
+			transitionCtx := testPersistedWorkflowStateTransitionContext(t, store, ctx, entityID, "dispatch.completed")
+			if err := pc.updateEntityState(transitionCtx, entityID, "awaiting", "dispatch.completed"); err != nil {
 				t.Fatal(err)
 			}
 			assertClass(deliver(pc, "unexpected", "c", "other"), runtimefailures.ClassUnexpectedArrival)
@@ -733,7 +735,8 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 				t.Fatalf("completion schedules = %#v", schedules.schedules)
 			}
 			completion := schedules.schedules[0]
-			if err := pc.updateEntityState(ctx, entityID, "dispatching", "manual.abort"); err != nil {
+			transitionCtx := testPersistedWorkflowStateTransitionContext(t, store, ctx, entityID, "manual.abort")
+			if err := pc.updateEntityState(transitionCtx, entityID, "dispatching", "manual.abort"); err != nil {
 				t.Fatalf("exit join stage: %v", err)
 			}
 			if schedules.cancelOwned != 1 || len(schedules.cancels) != 1 || schedules.cancels[0].EventType != joinCompleteEvent || len(schedules.cancelTx) != 1 || !schedules.cancelTx[0] {

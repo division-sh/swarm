@@ -386,9 +386,6 @@ func (s *WorkflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 		}); err != nil {
 			return err
 		}
-		if err := s.replaceWorkflowTimersSQLite(txctx, tx, runID, rowID, storageRef, instance.TimerState); err != nil {
-			return err
-		}
 		return nil
 	})
 }
@@ -498,11 +495,6 @@ func (s *WorkflowInstanceStore) scanSQLiteWorkflowInstances(ctx context.Context,
 		item.StorageRef = persistedIdentity.StorageRef
 		item.InstanceID = persistedIdentity.InstanceID
 		item.TransitionHistory = append([]WorkflowTransitionRecord{}, projection.Control.TransitionHistory...)
-		timers, err := s.loadWorkflowTimersSQLite(ctx, runID, persistedIdentity.RowID())
-		if err != nil {
-			return nil, err
-		}
-		item.TimerState = timers
 		if item.StateBuckets == nil {
 			item.StateBuckets = map[string]any{}
 		}
@@ -709,80 +701,6 @@ func insertSQLiteEntityMutationRecord(ctx context.Context, tx *sql.Tx, runID str
 		return nil
 	}
 	return runtimeauthoractivity.Record(ctx, draft)
-}
-
-func (s *WorkflowInstanceStore) replaceWorkflowTimersSQLite(ctx context.Context, tx *sql.Tx, runID, entityID, storageRef string, timers []WorkflowTimerState) error {
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM timers
-		WHERE run_id = ? AND entity_id = ? AND flow_instance = ? AND owner_node = ? AND owner_agent IS NULL
-	`, runID, entityID, storageRef, workflowInstanceTimerOwnerNode); err != nil {
-		return err
-	}
-	for _, timer := range timers {
-		payloadJSON, err := workflowTimerStatePayload(timer)
-		if err != nil {
-			return err
-		}
-		status := "active"
-		if timer.Fired {
-			status = "fired"
-		} else if timer.Cancelled {
-			status = "cancelled"
-		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO timers (
-				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-				fire_at, recurring, owner_node, task_type, status, created_at
-			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, workflowInstanceTimerRowID(runID, workflowTimerStateTaskID(timer), entityID), runID, workflowTimerStateTaskID(timer), entityID, storageRef,
-			strings.TrimSpace(timer.EventType), jsonOrDefault(payloadJSON, "{}"), timer.FiresAt.UTC(), timer.Recurring,
-			workflowInstanceTimerOwnerNode, workflowInstanceTimerTaskType(timer), status, workflowTimeOrNow(timer.CreatedAt)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *WorkflowInstanceStore) loadWorkflowTimersSQLite(ctx context.Context, runID, entityID string) ([]WorkflowTimerState, error) {
-	rows, err := dbQueryContext(ctx, s.db, `
-		SELECT timer_name, fire_event, created_at, fire_at, fire_payload, recurring, status
-		FROM timers
-		WHERE run_id = ? AND entity_id = ? AND owner_node = ? AND owner_agent IS NULL
-		ORDER BY created_at ASC, timer_name ASC
-	`, runID, entityID, workflowInstanceTimerOwnerNode)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := make([]WorkflowTimerState, 0, 4)
-	for rows.Next() {
-		var timer WorkflowTimerState
-		var createdRaw, firesRaw any
-		var payloadRaw any
-		var status string
-		if err := rows.Scan(&timer.TaskID, &timer.EventType, &createdRaw, &firesRaw, &payloadRaw, &timer.Recurring, &status); err != nil {
-			return nil, err
-		}
-		if err := decodeWorkflowTimerStatePayload(payloadRaw, &timer); err != nil {
-			return nil, err
-		}
-		status = strings.TrimSpace(status)
-		timer.Cancelled = status == "cancelled"
-		timer.Fired = status == "fired"
-		if at, ok, err := sqliteWorkflowTimeValue(createdRaw); err != nil {
-			return nil, err
-		} else if ok {
-			timer.CreatedAt = at
-		}
-		if at, ok, err := sqliteWorkflowTimeValue(firesRaw); err != nil {
-			return nil, err
-		} else if ok {
-			timer.FiresAt = at
-		}
-		out = append(out, timer)
-	}
-	return out, rows.Err()
 }
 
 func (s *WorkflowInstanceStore) queryEntityStateCountSQLite(ctx context.Context, runID string, source semanticview.Source, contract entityruntime.Contract, predicate workflowEntityQueryPredicate) (int, error) {

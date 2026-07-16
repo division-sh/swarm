@@ -70,16 +70,13 @@ type TimerOperation uint8
 
 const (
 	TimerUnknown TimerOperation = iota
-	TimerStart
-	TimerCancel
+	TimerReconcile
 )
 
 func (t TimerOperation) String() string {
 	switch t {
-	case TimerStart:
-		return "start"
-	case TimerCancel:
-		return "cancel"
+	case TimerReconcile:
+		return "reconcile"
 	default:
 		return ""
 	}

@@ -536,7 +536,10 @@ func (h *runtimeHarness) waitForExpectedEmittedEvents(expected catalogExpectedDo
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if h.hasExpectedEmittedEvents(ctx, entityID, expected.Expected.EmittedEvents, flowPrefix, source) {
+		eventsReady := h.hasExpectedEmittedEvents(ctx, entityID, expected.Expected.EmittedEvents, flowPrefix, source)
+		stateReady := flowPrefix != "" || strings.TrimSpace(expected.Expected.EntityState) == "" ||
+			h.hasExpectedRootEntityState(ctx, entityID, expected.Expected.EntityState)
+		if eventsReady && stateReady {
 			if err := h.rt.WaitForQuiescence(ctx); err != nil {
 				h.t.Fatalf("WaitForQuiescence(after emitted events): %v", err)
 			}
@@ -548,6 +551,18 @@ func (h *runtimeHarness) waitForExpectedEmittedEvents(expected catalogExpectedDo
 		case <-ticker.C:
 		}
 	}
+}
+
+func (h *runtimeHarness) hasExpectedRootEntityState(ctx context.Context, entityID, want string) bool {
+	h.t.Helper()
+	if h == nil || h.workflow == nil {
+		return false
+	}
+	instance, found, err := h.workflow.Load(ctx, strings.TrimSpace(entityID))
+	if err != nil {
+		h.t.Fatalf("load workflow instance while waiting for emitted-event effects: %v", err)
+	}
+	return found && strings.TrimSpace(instance.CurrentState) == strings.TrimSpace(want)
 }
 
 func (h *runtimeHarness) expectedTriggerEntityID(expected catalogExpectedDocument) string {

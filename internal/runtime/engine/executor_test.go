@@ -588,6 +588,24 @@ type stubTx struct{ ctx context.Context }
 
 func (s stubTx) Context() context.Context { return s.ctx }
 
+func TestExecutorTimerReconciliationRequiresExactEventAuthority(t *testing.T) {
+	executor := &Executor{deps: RuntimeDependencies{Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{Timers: []runtimecontracts.WorkflowTimerContract{{
+			ID: "waiting.timeout", Stage: "waiting", StageOwned: true, Event: "timer.timeout", Delay: "1h",
+		}}},
+	})}}
+	frame := executor.newExecutionFrame(stubTx{ctx: context.Background()}, ExecutionRequest{
+		EntityID: "entity-1",
+		Event: eventtest.RootIngress(
+			"event-1", "work.received", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{},
+		),
+		State: StateSnapshot{CurrentState: "waiting"},
+	})
+	if _, err := executor.buildTimerIntents(&frame); err == nil || !strings.Contains(err.Error(), "exact event id, type, and time") {
+		t.Fatalf("buildTimerIntents error = %v, want exact-authority refusal", err)
+	}
+}
+
 func testStateSnapshot(currentState string, metadata map[string]any, gates map[string]bool, buckets map[string]map[string]any) StateSnapshot {
 	return StateSnapshot{
 		CurrentState: currentState,
@@ -2833,7 +2851,7 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "done",
 			ClearGates: []string{"gate_a"},

@@ -46,7 +46,6 @@ func (r *persistentStateRepo) LoadState(context.Context, identity.EntityID) (Sta
 			r.snapshot.StateCarrier.Gates,
 			r.snapshot.StateCarrier.StateBuckets,
 		),
-		TimerState: append([]TimerState(nil), r.snapshot.TimerState...),
 	}, true, nil
 }
 

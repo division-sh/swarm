@@ -6210,7 +6210,10 @@ engine:
   timer_model:
     description: Timers are durable delayed events. The platform schedules them and fires them as regular events entering
       the event loop. Canonical staged lifecycle timer authoring lives under `stages.<stage>.timers`; lower-level
-      node timers remain kernel/legacy declarations for non-staged or platform-owned schedules.
+      node timers remain kernel declarations for non-staged or platform-owned schedules. WorkflowTimerLifecycle is the
+      sole semantic owner for run/entity-scoped workflow timer activation, cancellation, occurrence completion, restore,
+      fork identity, scheduler projection, and accepted-fire authorization. Generic schedules such as join closure and
+      boot-start platform work are separate schedule families and cannot interpret workflow activation rows.
     declaration:
       description: >
         Public staged lifecycle timers are declared as stage-resident rows in schema.yaml. Legacy/kernel timers are
@@ -6242,31 +6245,43 @@ engine:
           id: Optional stable row ID. If omitted, defaults to `<stage>.<emit-event-or-advance-target>`.
         invalid_fields: [delay, interrupting, repeat, recurring]
     lifecycle:
-    - 1. Timer starts when the entity enters the owning stage for stage timer rows, when the entity enters the
-      start_on state, when the start_on event fires, or when start_on is boot and platform startup schedules it.
-    - 2. Platform renders the timer delay at start time and persists the timer. State/event timers persist run/entity or
-      flow scope plus fire_at. Boot-start timers persist as global schedules with entity_id, flow_instance, and run_id NULL.
-      Non-recurring boot timers persist a one-shot fire_at. Recurring boot timers persist the recurring schedule interval.
-      Active timers keep the persisted fire_at or recurrence value; later policy/config changes do not rewrite already scheduled
-      timers unless a separate explicit reschedule primitive is defined.
-    - 3. Stage timers cancel durably when the entity leaves the owning stage before fire_at. The schedule/cancel intent
-      is part of the same lifecycle mutation unit as the stage transition; persistence failure is fatal to the mutation.
-    - 4. When fire_at is reached, platform emits the timer event into the event loop. Advance-only stage timers use the
-      internal event `platform.stage_timer`; user-authored emit timers use their declared event and remain visible to
-      downstream consumers.
-    - 5. Timer event is a regular event for user-authored emit timers — routed to subscribers, processed by handlers.
-      For advance-only stage timers, the runtime consumes the internal event and applies the derived timed transition.
-    - 6. If cancel_on state is reached or cancel_on event fires before fire_at, a legacy/kernel timer is cancelled.
-      cancel_on is invalid for start_on boot timers until an explicit global cancellation primitive is specified.
-    - 7. Recurring timers restart after firing unless cancelled. Stage timer rows do not support repeat/recurring behavior
-      in this slice.
+    - 1. A workflow timer activation is derived only from an exact persisted initial-state, event, or state-transition
+      cause. Its deterministic activation ID includes run, entity, flow instance, declaration, loop generation, and exact
+      causal identity. `timers.timer_name` carries the versioned typed activation discriminator; `fire_payload` carries
+      business input only and is never interpreted as lifecycle identity.
+    - 2. The platform renders delay once at activation and inserts exactly one canonical row in the same selected workflow
+      mutation as the triggering state/event effect. The row's persisted `fire_at` is the executable occurrence coordinate.
+      Policy/config changes do not rewrite an active coordinate without an explicit reschedule operation.
+    - 3. Leaving an owning stage, matching cancel_on, loop-generation supersession, run quiescence, or preservation cleanup
+      may only monotonically cancel or delete the canonical row. Cancellation is in the same mutation as the causal lifecycle
+      transition; the in-memory scheduler is updated only after commit.
+    - 4. The scheduler projects one wake-up for the row's current persisted coordinate. A callback must carry the exact typed
+      activation and due coordinate. Callback time, random identity, timer payload metadata, or reconstructed workflow
+      snapshots are not executable authority.
+    - 5. Fire publication and row completion occur in one selected database transaction. The event ID is deterministic from
+      activation ID plus persisted due coordinate. A one-shot row becomes fired. A recurring row remains active and atomically
+      advances `fire_at` by its persisted positive recurrence interval; therefore retries of one occurrence reuse its ID while
+      distinct recurring occurrences receive distinct IDs.
+    - 6. Scheduler claims are released only after the outer fire transaction commits. PostgreSQL must not release a borrowed
+      claim while that transaction can still roll back. A recurring next coordinate is registered only after commit.
+    - 7. The accepted timer event is authorized against the canonical row and exact deterministic occurrence ID before any
+      workflow handler or timed transition runs. Handlers do not write timer status. User-authored emit timers continue through
+      normal event routing; advance-only stage timers use `platform.stage_timer` and apply their derived state transition.
+    - 8. Boot-start timers remain explicitly generic global schedules with entity_id, flow_instance, and run_id NULL.
+      Join completion/timeout schedules are also generic. Neither family may write or interpret a typed workflow activation row.
+      Stage timer rows do not support repeat/recurring authoring; recurring lower-level workflow declarations use the same
+      canonical occurrence transition.
     crash_recovery: >
-      Timers are persisted. On restart, platform checks for expired timers and fires them. Overdue stage timers fire late
-      by contract and record a typed runtime diagnostic including the timer ID, stage, and lateness instead of pretending
-      punctual delivery.
+      Restart restores only active typed workflow rows for active runs and registers their exact persisted occurrence
+      coordinates once. Overdue coordinates fire late by contract and retain deterministic occurrence identity. The runtime
+      does not reconstruct timers from workflow-instance state, handlers, declarations, or logs. A database containing obsolete
+      workflow-instance-owned timer rows is unsupported pre-1.0 state and startup refuses it; recreate the database rather than
+      migrating, converting, or dual-reading those rows.
     replay_and_fork: >
-      Replay and fork reconstruct stage timer facts from recorded timer state under the run/fork admission rules. Fired
-      and cancelled stage timers are not rescheduled as active work.
+      Replay observes canonical persisted timer facts. Fork copies eligible canonical rows under the existing run-fork
+      transaction, preserves business payload and due coordinate, and deterministically remints activation identity and any
+      loop generation for the fork run. Fired and cancelled rows do not become active fork work. No workflow snapshot or
+      payload-encoded lifecycle metadata is an alternate reconstruction source.
     boot_validation:
       start_on: start_on must match state:<name>, event:<name>, or boot. Any other form is a boot error.
       cancel_on: cancel_on must match state:<name> or event:<name>. boot is not valid.
@@ -12520,8 +12535,12 @@ platform_tables:
         flow_instance set, tied to a specific entity lifecycle inside run_id. Global timers: entity_id, flow_instance,
         and run_id NULL, used for boot-start workflow timers and platform-level work (periodic scans, health checks,
         digest compilation).
-        fire_payload carries business input when the timer fires; reply_context_id separately carries opaque route-scoped
-        continuation authority for one-shot timers. owner_node OR owner_agent identifies who declared the timer
+        For run/entity-scoped workflow timers, timer_name carries the strict versioned WorkflowTimerLifecycle activation
+        discriminator and timer_id is that activation ID. fire_payload carries business input only; it must not carry workflow
+        activation, occurrence, generation, status, or reconstruction authority. fire_at is the current persisted occurrence
+        coordinate. One-shot completion changes status to fired; recurring completion keeps status active and advances fire_at
+        atomically. Generic schedule readers must exclude typed workflow activation rows. reply_context_id separately carries
+        opaque route-scoped continuation authority for one-shot generic timers. owner_node OR owner_agent identifies who declared the timer
         (mutually exclusive). source_timer_id, forked_from_run_id, forked_from_event_id, and reconstruction_owner are
         lineage-only fields for fork-local reconstructed timers and must not make the source timer executable fork truth.
         recurrence_cron supports cron expressions for global recurring schedules. recurrence_interval supports duration

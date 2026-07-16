@@ -42,6 +42,7 @@ type PipelineCoordinator struct {
 	instanceDeactivator     FlowInstanceDeactivator
 	timerScheduler          *Scheduler
 	timerScheduleStore      SchedulePersistence
+	workflowTimers          *WorkflowTimerLifecycle
 	mailboxMaterializer     MailboxWriteMaterializationStore
 	decisionCards           decisioncard.Store
 	eventReceiptsCapability func(context.Context) (bool, error)
@@ -122,7 +123,7 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 	if credentials == nil {
 		credentials = runtimecredentials.NewEnvStore()
 	}
-	return &PipelineCoordinator{
+	coordinator := &PipelineCoordinator{
 		bus:                              bus,
 		db:                               db,
 		module:                           module,
@@ -148,6 +149,8 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		testEngineEmitNow:                opts.TestEngineEmitNow,
 		entityLocks:                      make(map[string]*sync.Mutex),
 	}
+	coordinator.workflowTimers = newWorkflowTimerLifecycle(coordinator)
+	return coordinator
 }
 
 func NewPipelineCoordinator(bus Bus, db *sql.DB) *PipelineCoordinator {
@@ -444,9 +447,6 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	}
 	pc.notifyTestLifecycleHandlerCompleted(ctx, nodeID, evt, "completed")
 	pc.recordInterceptedEmitDeadLetters(ctx, evt, nodeID, result.Outcome)
-	if result.Handled {
-		pc.reconcileWorkflowEventTimers(ctx, workflowEventEntityID(evt), trigger)
-	}
 	return result.Handled, nil
 }
 

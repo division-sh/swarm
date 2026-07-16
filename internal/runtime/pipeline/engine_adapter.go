@@ -150,19 +150,6 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identit
 				pipelineFlowScope(ctx),
 				out.StateCarrier.PersistedMetadata(),
 			)
-			out.TimerState = make([]runtimeengine.TimerState, 0, len(instance.TimerState))
-			for _, timer := range instance.TimerState {
-				out.TimerState = append(out.TimerState, runtimeengine.TimerState{
-					TimerID:   strings.TrimSpace(timer.TimerID),
-					EventType: strings.TrimSpace(timer.EventType),
-					CreatedAt: timer.CreatedAt,
-					FiresAt:   timer.FiresAt,
-					StartedBy: strings.TrimSpace(timer.StartedBy),
-					Recurring: timer.Recurring,
-					Cancelled: timer.Cancelled,
-					Fired:     timer.Fired,
-				})
-			}
 			return out, true, nil
 		}
 		return runtimeengine.StateSnapshot{}, false, nil
@@ -191,6 +178,8 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 		return nil
 	}
 	materializedState := false
+	currentState := ""
+	nextState := strings.TrimSpace(mutation.NextState)
 	if r.coordinator.workflowStore != nil && r.coordinator.workflowStore.Enabled() {
 		if err := r.ensureFlowOwnsEntity(ctx, entityID.String()); err != nil {
 			return err
@@ -201,7 +190,23 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 		}
 		allowedFields := workflowEntitySchemaFields(r.coordinator.SemanticSource(), pipelineFlowScope(ctx))
 		if err := r.coordinator.workflowStore.MutateE(ctx, entityID.String(), func(instance *WorkflowInstance) error {
-			return applyEngineStateMutation(instance, mutation, allowedFields, r.coordinator.SemanticSource(), pipelineFlowScope(ctx))
+			currentState = strings.TrimSpace(instance.CurrentState)
+			if err := applyEngineStateMutation(instance, mutation, allowedFields, r.coordinator.SemanticSource(), pipelineFlowScope(ctx)); err != nil {
+				return err
+			}
+			if nextState == "" || nextState == currentState {
+				return nil
+			}
+			if strings.TrimSpace(mutation.TriggerEventID) == "" || strings.TrimSpace(mutation.TriggerEventType) == "" || mutation.TriggeredAt.IsZero() {
+				return fmt.Errorf("workflow state transition requires exact trigger event identity")
+			}
+			instance.CurrentState = nextState
+			instance.EnteredStageAt = mutation.TriggeredAt.UTC()
+			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(
+				r.coordinator.WorkflowDefinition(), currentState, nextState,
+				mutation.TriggerEventID, mutation.TriggerEventType, mutation.TriggeredAt,
+			))
+			return nil
 		}); err != nil {
 			return err
 		}
@@ -217,11 +222,9 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 			}
 		}
 	}
-	if next := strings.TrimSpace(mutation.NextState); next != "" {
-		if err := r.coordinator.updateEntityState(ctx, entityID.String(), next, ""); err != nil {
-			return err
-		}
-		if err := r.coordinator.maybeDeactivateTerminalFlowInstance(ctx, entityID.String(), next); err != nil {
+	if nextState != "" {
+		r.coordinator.notifyTestEntityStateUpdated(entityID.String(), nextState)
+		if err := r.coordinator.maybeDeactivateTerminalFlowInstance(ctx, entityID.String(), nextState); err != nil {
 			return err
 		}
 	}
@@ -321,26 +324,35 @@ func (a pipelineEngineTimerApplier) ApplyTimerIntents(ctx context.Context, entit
 	if entityID.IsZero() {
 		return nil
 	}
-	type transitionKey struct {
-		from    string
-		to      string
-		trigger string
+	if len(intents) != 1 {
+		return fmt.Errorf("workflow timer lifecycle requires exactly one event reconcile intent, got %d", len(intents))
 	}
-	seen := map[transitionKey]struct{}{}
 	for _, intent := range intents {
-		key := transitionKey{
-			from:    strings.TrimSpace(intent.FromState),
-			to:      strings.TrimSpace(intent.ToState),
-			trigger: strings.TrimSpace(intent.TriggerEvent),
+		if intent.Operation != runtimeengine.TimerReconcile || strings.TrimSpace(intent.TriggerEventID) == "" ||
+			strings.TrimSpace(intent.TriggerEventType) == "" || intent.TriggeredAt.IsZero() {
+			return fmt.Errorf("workflow timer reconcile intent is missing exact event identity")
 		}
-		if key.to == "" || key.from == "" || key.from == key.to {
-			continue
+		fromState := strings.TrimSpace(intent.FromState)
+		toState := strings.TrimSpace(intent.ToState)
+		cause := workflowTimerCause{
+			Kind:       workflowTimerCauseEvent,
+			EventID:    intent.TriggerEventID,
+			EventType:  intent.TriggerEventType,
+			OccurredAt: intent.TriggeredAt,
+			FromState:  fromState,
+			ToState:    toState,
 		}
-		if _, ok := seen[key]; ok {
-			continue
+		if fromState != "" && toState != "" && fromState != toState {
+			cause.Kind = workflowTimerCauseTransition
+			cause.TransitionID = workflowTransitionIdentity(pc.WorkflowDefinition(), fromState, toState, intent.TriggerEventType)
 		}
-		seen[key] = struct{}{}
-		if err := pc.applyWorkflowTimerIntents(ctx, entityID.String(), key.from, key.to, key.trigger); err != nil {
+		if err := pc.workflowTimers.Reconcile(ctx, entityID.String(), fromState, toState, cause); err != nil {
+			return err
+		}
+		if err := pc.applyWorkflowJoinIntents(ctx, entityID.String(), fromState, toState); err != nil {
+			return err
+		}
+		if err := pc.applyWorkflowGateIntents(ctx, entityID.String(), fromState, toState, intent.TriggerEventType); err != nil {
 			return err
 		}
 	}

@@ -141,7 +141,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	if _, err := store.DB.ExecContext(ctx, `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, conversation, runtime_state, status) VALUES (?, ?, ?, 'standing/ingress', 1, 'authored', '[]', '{}', 'active')`, sessionID, created.RunID, agentID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status) VALUES (?, 'standing-timer', ?, 'timer.fire', ?, 'active')`, timerID, created.RunID, time.Now().UTC().Add(time.Hour)); err != nil {
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status) VALUES (?, ?, ?, 'timer.fire', ?, 'active')`, timerID, aggregateWorkflowTimerTaskID(timerID), created.RunID, time.Now().UTC().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -337,6 +337,7 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	eventID := uuid.NewString()
 	unsettledEventID := uuid.NewString()
 	agentID := "standing-agent"
+	timerID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO events (execution_mode, event_id, run_id, event_name, payload) VALUES ('live', $1::uuid, $2::uuid, 'standing.work', '{}')`, eventID, created[0].RunID); err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +353,7 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, conversation, runtime_state, status) VALUES ($1::uuid, $2::uuid, $3, 'standing/ingress', TRUE, 'authored', '[]', '{}', 'active')`, uuid.NewString(), created[0].RunID, agentID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status) VALUES ($1::uuid, 'standing-timer', $2::uuid, 'timer.fire', $3, 'active')`, uuid.NewString(), created[0].RunID, time.Now().UTC().Add(time.Hour)); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status) VALUES ($1::uuid, $2, $3::uuid, 'timer.fire', $4, 'active')`, timerID, aggregateWorkflowTimerTaskID(timerID), created[0].RunID, time.Now().UTC().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	suspended, err := workflowStore.SuspendStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID, Actor: "tester", Reason: "maintenance"})

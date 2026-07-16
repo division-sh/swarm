@@ -487,8 +487,8 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 			}
 			next := strings.TrimSpace(route.AdvancesTo)
 			instance.CurrentState = next
-			instance.EnteredStageAt = time.Now().UTC()
-			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(pc.WorkflowDefinition(), currentStage, next, evt.ID()))
+			instance.EnteredStageAt = evt.CreatedAt().UTC()
+			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(pc.WorkflowDefinition(), currentStage, next, evt.ID(), string(evt.Type()), evt.CreatedAt()))
 			instance.StateBuckets = carrier.PersistedStateBuckets()
 			return nil
 		}); err != nil {
@@ -498,13 +498,22 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 			return nil
 		}
 		pc.notifyTestEntityStateUpdated(anchor.EntityID, route.AdvancesTo)
-		if err := pc.reconcileWorkflowStageTimers(txctx, anchor.EntityID, currentStage, route.AdvancesTo, evt.ID()); err != nil {
+		cause := workflowTimerCause{
+			Kind:         workflowTimerCauseTransition,
+			EventID:      evt.ID(),
+			EventType:    strings.TrimSpace(string(evt.Type())),
+			OccurredAt:   evt.CreatedAt(),
+			TransitionID: workflowTransitionIdentity(pc.WorkflowDefinition(), currentStage, route.AdvancesTo, string(evt.Type())),
+			FromState:    currentStage,
+			ToState:      route.AdvancesTo,
+		}
+		if err := pc.workflowTimers.Reconcile(txctx, anchor.EntityID, currentStage, route.AdvancesTo, cause); err != nil {
 			return err
 		}
 		if err := pc.applyWorkflowJoinIntents(txctx, anchor.EntityID, currentStage, route.AdvancesTo); err != nil {
 			return err
 		}
-		if err := pc.applyWorkflowGateIntents(txctx, anchor.EntityID, currentStage, route.AdvancesTo, evt.ID()); err != nil {
+		if err := pc.applyWorkflowGateIntents(txctx, anchor.EntityID, currentStage, route.AdvancesTo, string(evt.Type())); err != nil {
 			return err
 		}
 		if emitted != nil {

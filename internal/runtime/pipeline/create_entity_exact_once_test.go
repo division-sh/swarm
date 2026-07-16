@@ -43,7 +43,6 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 		t.Run(tc.name, func(t *testing.T) {
 			pc, ctx, _, _, _ := tc.setup(t)
 			bus := pc.bus.(*recordingPipelineBus)
-			schedules := pc.timerScheduleStore.(*recordingScheduleStore)
 			mailbox := pc.mailboxMaterializer.(*recordingMailboxWriteMaterializer)
 			eventID := uuid.NewString()
 			evt := eventtest.RootIngress(eventID,
@@ -77,13 +76,6 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			if got := len(mailbox.rows()); got != 1 {
 				t.Fatalf("mailbox rows = %d, want 1", got)
 			}
-			if got := len(schedules.upserts); got != 1 {
-				t.Fatalf("timer schedule upserts = %d, want 1", got)
-			}
-			if got := strings.TrimSpace(schedules.upserts[0].EventType); got != "timer.check" {
-				t.Fatalf("timer schedule event = %q, want timer.check", got)
-			}
-
 			entityID := bus.publishedEvent(0).EntityID()
 			if entityID == "" {
 				t.Fatal("expected emitted event to carry created entity id")
@@ -94,6 +86,13 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			}
 			if !ok {
 				t.Fatal("created entity missing")
+			}
+			activations, err := pc.workflowStore.listWorkflowTimerActivations(ctx, runtimecorrelation.RunIDFromContext(ctx), entityID, true)
+			if err != nil {
+				t.Fatalf("list canonical workflow timers: %v", err)
+			}
+			if len(activations) != 1 || strings.TrimSpace(activations[0].EventType) != "timer.check" {
+				t.Fatalf("canonical workflow timers = %#v, want one timer.check activation", activations)
 			}
 			if got := strings.TrimSpace(instance.CurrentState); got != "done" {
 				t.Fatalf("current state = %q, want done", got)

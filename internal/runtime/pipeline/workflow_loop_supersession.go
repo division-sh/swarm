@@ -35,12 +35,6 @@ func supersedePriorLoopGenerationArtifacts(instance *WorkflowInstance, previousB
 			continue
 		}
 		priorGeneration := prior.Generation()
-		for i := range instance.TimerState {
-			state := &instance.TimerState[i]
-			if state.Generation.Equal(priorGeneration) && !state.Fired {
-				state.Cancelled = true
-			}
-		}
 		joins, err := joinruntime.List(nextCarrier.StateBuckets)
 		if err != nil {
 			return fmt.Errorf("list joins for loop supersession: %w", err)
@@ -90,20 +84,8 @@ func (pc *PipelineCoordinator) reconcileSupersededLoopSchedules(ctx context.Cont
 			return err
 		}
 	}
-	source := pc.SemanticSource()
-	for _, state := range instance.TimerState {
-		if !state.Cancelled || !state.Generation.Valid() {
-			continue
-		}
-		if source == nil {
-			return fmt.Errorf("loop schedule reconciliation requires semantic source")
-		}
-		timer, found := source.WorkflowTimerByID(state.TimerID)
-		if !found {
-			continue
-		}
-		schedule := workflowTimerSchedule(timer, entityID, instance.StorageRef, state.FiresAt, workflowTimerPolicy(source, timer.FlowID), state.Generation)
-		if err := pc.persistWorkflowTimerCancellation(ctx, scheduleWithRunIDFromContext(ctx, schedule)); err != nil {
+	if pc.workflowTimers != nil {
+		if err := pc.workflowTimers.CancelSupersededGenerations(ctx, entityID, current); err != nil {
 			return err
 		}
 	}

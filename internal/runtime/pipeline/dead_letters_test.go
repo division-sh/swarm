@@ -142,7 +142,7 @@ func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 
 func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testPipelineRunContext(t, db)
 	entityID := uuid.NewString()
 	evt := eventtest.RootIngress(
 		uuid.NewString(),
@@ -158,9 +158,9 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 	)
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ('live', $1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
-	`, evt.ID(), string(evt.Type()), entityID, string(evt.Payload())); err != nil {
+		INSERT INTO events (execution_mode, event_id, run_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ('live', $1::uuid, $2::uuid, $3, $4::uuid, 'runtime', 'entity', $5::jsonb, 'src', 'agent', now())
+	`, evt.ID(), testPipelineRunID, string(evt.Type()), entityID, string(evt.Payload())); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
 

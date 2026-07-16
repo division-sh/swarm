@@ -1,7 +1,7 @@
 package store
 
 import (
-	"encoding/json"
+	"bytes"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/google/uuid"
 )
 
 func TestForkAttemptGenerationRemintsActivationAndTimerIdentity(t *testing.T) {
@@ -62,24 +63,27 @@ func TestForkAttemptGenerationRemintsActivationAndTimerIdentity(t *testing.T) {
 		}
 	}
 
-	handle := timeridentity.WorkflowTimerHandle("review.expiry")
-	handle.Generation = activation.Generation()
-	payload, err := json.Marshal(handle.PayloadMetadata())
+	sourceTimerID := uuid.NewString()
+	ref := timeridentity.WorkflowTimerActivationRef{
+		ActivationID: sourceTimerID,
+		Declaration:  "review.expiry",
+		Generation:   activation.Generation(),
+	}
+	payload := []byte(`{"business":"unchanged"}`)
+	row := runForkTimerReconstructionRow{
+		TimerID: sourceTimerID, EntityID: "entity-1", TimerName: ref.TaskID(), FirePayload: payload,
+	}
+	forkedRow, err := forkAttemptGenerationTimer(row, "fork-run", uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
-	row := runForkTimerReconstructionRow{EntityID: "entity-1", TimerName: handle.TaskID(), FirePayload: payload}
-	forkedRow, err := forkAttemptGenerationTimer(row, "fork-run")
-	if err != nil {
-		t.Fatal(err)
+	forkedRef, ok := timeridentity.ParseWorkflowTimerActivationTaskID(forkedRow.TimerName)
+	if !ok || !forkedRef.Generation.Equal(forked.Generation()) || forkedRow.TimerName == row.TimerName ||
+		forkedRow.ForkTimerID == row.TimerID || forkedRef.ActivationID != forkedRow.ForkTimerID {
+		t.Fatalf("forked timer = row %#v ref %#v", forkedRow, forkedRef)
 	}
-	var forkedPayload map[string]any
-	if err := json.Unmarshal(forkedRow.FirePayload, &forkedPayload); err != nil {
-		t.Fatal(err)
-	}
-	forkedHandle, ok := timeridentity.ParseTimerHandle(forkedPayload)
-	if !ok || !forkedHandle.Generation.Equal(forked.Generation()) || forkedRow.TimerName == row.TimerName {
-		t.Fatalf("forked timer = row %#v handle %#v", forkedRow, forkedHandle)
+	if !bytes.Equal(forkedRow.FirePayload, payload) {
+		t.Fatalf("forked business payload = %s, want %s", forkedRow.FirePayload, payload)
 	}
 }
 

@@ -531,11 +531,6 @@ func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) 
 			}
 			continue
 		}
-		runCtx := runtimecorrelation.WithRunID(ctx, reconciliation.RunID)
-		runCtx = runtimecorrelation.WithBundleSourceFact(runCtx, fact)
-		if err := ensureLifecycleWorkflowSchedules(runCtx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline); err != nil {
-			return nil, nil, fmt.Errorf("rehydrate standing flow %s schedules: %w", declaration.FlowID, err)
-		}
 		activations = append(activations, StandingActivation{
 			BundleHash: fact.BundleHash, ServiceID: plan.serviceID, PackageKey: declaration.PackageKey, FlowID: declaration.FlowID,
 			RunID: reconciliation.RunID, Generation: reconciliation.Generation, PublicationSequence: publicationSequence, InstanceID: instance.InstanceID,
