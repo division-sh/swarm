@@ -85,6 +85,9 @@ func mockConnectorCredentialFixture(t *testing.T, credentialKind string, include
 		HandlerType: "http",
 		EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 		HTTP:        &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://provider.example/messages"},
+		ResponseSuccess: &runtimecontracts.HTTPResponseSuccess{
+			Kind: "http_status_2xx",
+		},
 		OutputSchema: runtimecontracts.ToolInputSchema{
 			Type:     "object",
 			Required: []string{"message_id"},
@@ -109,12 +112,6 @@ func mockConnectorCredentialFixture(t *testing.T, credentialKind string, include
 			HTTP:        &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://audit.example/calls"},
 		}
 	}
-	plan, err := providerconnectors.NewMockResponsePlan(map[string]map[string]any{
-		"provider.send": {"message_id": "mock-message-1"},
-	})
-	if err != nil {
-		t.Fatalf("NewMockResponsePlan: %v", err)
-	}
 	bundle := &runtimecontracts.WorkflowContractBundle{Tools: tools}
 	if includeSibling {
 		bundle.Policy = runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
@@ -123,7 +120,12 @@ func mockConnectorCredentialFixture(t *testing.T, credentialKind string, include
 			}},
 		}}
 	}
-	return semanticview.Wrap(bundle), plan
+	source := semanticview.Wrap(bundle)
+	plan, err := providerconnectors.CompileMockResponsePlan(source)
+	if err != nil {
+		t.Fatalf("CompileMockResponsePlan: %v", err)
+	}
+	return source, plan
 }
 
 func credentialFindingContains(findings []Finding, location, fragment string) bool {

@@ -1,0 +1,164 @@
+package providerconnectors
+
+import (
+	"bytes"
+	"reflect"
+	"strings"
+	"testing"
+
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"gopkg.in/yaml.v3"
+)
+
+func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministically(t *testing.T) {
+	tools := map[string]runtimecontracts.ToolSchemaEntry{}
+	for _, installed := range DefaultPackRegistry().Inventory() {
+		tools[installed.ToolID] = installed.Tool
+	}
+	if got := len(tools); got != 7 {
+		t.Fatalf("shipped connector tool count = %d, want 7", got)
+	}
+
+	flowLocal := telegramConnectorTool("https://example.test")
+	flowLocal.OutputSchema = runtimecontracts.ToolInputSchema{
+		Type: "object",
+		Properties: map[string]runtimecontracts.ToolInputSchema{
+			"accepted": {Type: "boolean"},
+			"count":    {Type: "integer", Minimum: float64Pointer(2), Maximum: float64Pointer(5)},
+			"items":    {Type: "array", Items: &runtimecontracts.ToolInputSchema{Type: "string"}},
+			"metadata": {Type: "object"},
+			"name": {
+				Type: "string",
+				Enum: []runtimecontracts.SchemaLiteral{{Node: yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "fixture"}}},
+			},
+			"nothing":  {Type: "null"},
+			"optional": {Type: "string"},
+		},
+		Required: []string{"accepted", "count", "items", "metadata", "name", "nothing"},
+	}
+	tools["acme.create"] = flowLocal
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: tools})
+
+	first, err := CompileMockResponsePlan(source)
+	if err != nil {
+		t.Fatalf("CompileMockResponsePlan first: %v", err)
+	}
+	second, err := CompileMockResponsePlan(source)
+	if err != nil {
+		t.Fatalf("CompileMockResponsePlan second: %v", err)
+	}
+	if len(first.responses) != 8 || len(second.responses) != 8 {
+		t.Fatalf("compiled response counts = %d, %d, want 8", len(first.responses), len(second.responses))
+	}
+	for toolID, firstRaw := range first.responses {
+		if !bytes.Equal(firstRaw, second.responses[toolID]) {
+			t.Fatalf("response %q is not byte-deterministic: first=%s second=%s", toolID, firstRaw, second.responses[toolID])
+		}
+		admitted, admitErr := first.Admit(toolID, tools[toolID])
+		if admitErr != nil {
+			t.Fatalf("Admit(%s): %v", toolID, admitErr)
+		}
+		if _, materializeErr := admitted.Materialize(); materializeErr != nil {
+			t.Fatalf("Materialize(%s): %v", toolID, materializeErr)
+		}
+	}
+
+	admitted, err := first.Admit("acme.create", flowLocal)
+	if err != nil {
+		t.Fatalf("Admit flow-local response: %v", err)
+	}
+	got, err := admitted.Materialize()
+	if err != nil {
+		t.Fatalf("Materialize flow-local response: %v", err)
+	}
+	want := map[string]any{
+		"accepted": false,
+		"count":    float64(2),
+		"items":    []any{},
+		"metadata": map[string]any{},
+		"name":     "fixture",
+		"nothing":  nil,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("flow-local generated response = %#v, want %#v", got, want)
+	}
+	if _, exists := got["optional"]; exists {
+		t.Fatalf("flow-local generated response invented optional field: %#v", got)
+	}
+}
+
+func TestCompileMockResponsePlanFailsClosedWithExactSchemaPath(t *testing.T) {
+	tests := []struct {
+		name   string
+		schema runtimecontracts.ToolInputSchema
+		want   string
+	}{
+		{
+			name:   "root must be object",
+			schema: runtimecontracts.ToolInputSchema{Type: "string"},
+			want:   "output_schema: provider connector mock response root must be object",
+		},
+		{
+			name:   "required property must be declared",
+			schema: runtimecontracts.ToolInputSchema{Type: "object", Required: []string{"missing"}},
+			want:   "output_schema.properties.missing: required property has no declared schema",
+		},
+		{
+			name: "unsupported nested type",
+			schema: runtimecontracts.ToolInputSchema{
+				Type:       "object",
+				Properties: map[string]runtimecontracts.ToolInputSchema{"value": {Type: "date"}},
+				Required:   []string{"value"},
+			},
+			want: `output_schema.properties.value: unsupported schema type "date"`,
+		},
+		{
+			name: "contradictory bounds",
+			schema: runtimecontracts.ToolInputSchema{
+				Type:       "object",
+				Properties: map[string]runtimecontracts.ToolInputSchema{"value": {Type: "number", Minimum: float64Pointer(5), Maximum: float64Pointer(2)}},
+				Required:   []string{"value"},
+			},
+			want: "output_schema.properties.value: minimum 5 exceeds maximum 2",
+		},
+		{
+			name: "integer interval has no inhabitant",
+			schema: runtimecontracts.ToolInputSchema{
+				Type:       "object",
+				Properties: map[string]runtimecontracts.ToolInputSchema{"value": {Type: "integer", Minimum: float64Pointer(0.2), Maximum: float64Pointer(0.8)}},
+				Required:   []string{"value"},
+			},
+			want: "output_schema.properties.value: bounds contain no integer",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tool := telegramConnectorTool("https://example.test")
+			tool.OutputSchema = tc.schema
+			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"acme.create": tool}})
+			plan, err := CompileMockResponsePlan(source)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("CompileMockResponsePlan plan=%#v error=%v, want containing %q", plan, err, tc.want)
+			}
+			if plan != nil {
+				t.Fatalf("CompileMockResponsePlan returned partial plan %#v", plan)
+			}
+		})
+	}
+}
+
+func TestCompileMockResponsePlanReturnsNoAmbientPlan(t *testing.T) {
+	plan, err := CompileMockResponsePlan(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+	if err != nil {
+		t.Fatalf("CompileMockResponsePlan: %v", err)
+	}
+	if plan != nil {
+		t.Fatalf("CompileMockResponsePlan without effective connectors = %#v, want nil", plan)
+	}
+}
+
+func float64Pointer(value float64) *float64 {
+	return &value
+}

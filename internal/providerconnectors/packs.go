@@ -349,10 +349,7 @@ func SourceWithConnectorPackImportsFromRegistry(source semanticview.Source, regi
 	if source == nil {
 		return nil, nil
 	}
-	type applied interface {
-		ConnectorPackImportsApplied() bool
-	}
-	if wrapped, ok := source.(applied); ok && wrapped.ConnectorPackImportsApplied() {
+	if connectorPackImportsApplied(source) {
 		return source, nil
 	}
 	imports := connectorPackImportsFromSource(source)
@@ -409,6 +406,26 @@ func SourceWithConnectorPackImportsFromRegistry(source semanticview.Source, regi
 		importSources:          importSources,
 		importedByProjectScope: importedByProjectScope,
 	}, nil
+}
+
+func connectorPackImportsApplied(source semanticview.Source) bool {
+	type applied interface {
+		ConnectorPackImportsApplied() bool
+	}
+	type baseSource interface {
+		BaseSemanticSource() semanticview.Source
+	}
+	for depth := 0; source != nil && depth < 64; depth++ {
+		if wrapped, ok := source.(applied); ok && wrapped.ConnectorPackImportsApplied() {
+			return true
+		}
+		wrapped, ok := source.(baseSource)
+		if !ok {
+			return false
+		}
+		source = wrapped.BaseSemanticSource()
+	}
+	return false
 }
 
 type connectorPackImport struct {

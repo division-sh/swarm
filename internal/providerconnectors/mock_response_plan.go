@@ -9,9 +9,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 )
 
-// MockResponsePlan is an immutable, exact-tool response catalog. It is test
-// infrastructure for the first deterministic connector tier, not an authored
-// connector model.
+// MockResponsePlan is the immutable exact-tool response catalog compiled from
+// one effective semantic source. It is not an authored connector model.
 type MockResponsePlan struct {
 	responses map[string]json.RawMessage
 }

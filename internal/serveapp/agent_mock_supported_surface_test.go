@@ -5,18 +5,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -67,15 +63,7 @@ func TestForkChatSandboxBuildsCanonicalMockAdapter(t *testing.T) {
 func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)
-	var telegramCalls atomic.Int32
-	telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		telegramCalls.Add(1)
-		w.Header().Set("content-type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	}))
-	defer telegram.Close()
-
-	contractsRoot := canonicalrouting.CopyStandingTelegramMockServe(t, telegram.URL)
+	contractsRoot := canonicalrouting.CopyStandingTelegramMockServe(t, "https://example.invalid")
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsRoot)
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
@@ -93,18 +81,11 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 
 	var location string
 	var prepareRestart func()
-	mockResponses, err := providerconnectors.NewMockResponsePlan(map[string]map[string]any{
-		"telegram.send_message": {"ok": true},
-	})
-	if err != nil {
-		t.Fatalf("NewMockResponsePlan: %v", err)
-	}
 	opts := cliapp.ServeOptions{
 		ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, RequireBundleMatch: false, Dev: true, Verbose: true,
-		TestOutboxSweeperConfig:    servedEventPublishProofOutboxSweeperConfig(),
-		TestMockConnectorResponses: mockResponses,
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
 	switch backend {
 	case "sqlite":
@@ -189,9 +170,6 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	after := loadStandingMemorySessions(t, backend, location)
 	assertMockSessionContinuity(t, before, after)
 	assertMockSupportedEvidence(t, backend, location, entityID)
-	if got := telegramCalls.Load(); got != 0 {
-		t.Fatalf("Telegram HTTP calls = %d, want zero before-launch mock fence", got)
-	}
 	return time.Since(servedPathStarted)
 }
 

@@ -43,7 +43,7 @@ func TestValidateWorkflowContractSurfaceAllowsHarnessOnlyForExplicitVerifyPolicy
 }
 
 func TestEnsureWorkflowBootWiringRejectsHarnessInput(t *testing.T) {
-	err := ensureWorkflowBootWiring(RuntimeOptions{
+	_, err := ensureWorkflowBootWiring(RuntimeOptions{
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: loadHarnessInjectionValidationSource(t)},
 	}, runtimeeffects.ExecutionModeLive)
 	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only input source: harness") {
@@ -132,7 +132,7 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := ensureWorkflowBootWiring(RuntimeOptions{
+			_, err := ensureWorkflowBootWiring(RuntimeOptions{
 				WorkflowModule: semanticOnlyWorkflowRuntime{source: tc.source},
 			}, runtimeeffects.ExecutionModeLive)
 			if tc.wantErr {
@@ -395,7 +395,8 @@ func TestValidateWorkflowContractSurface_TelegramProviderConnectorToolAdmitted(t
 			},
 		},
 	}
-	_, err := ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+	result, err := ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		ExecutionMode:                  runtimeeffects.ExecutionModeMock,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
 		FatalToolImplementationWarning: false,
@@ -404,6 +405,18 @@ func TestValidateWorkflowContractSurface_TelegramProviderConnectorToolAdmitted(t
 	if err != nil {
 		t.Fatalf("ValidateWorkflowContractSurface error = %v, want Telegram connector admitted", err)
 	}
+	if result.mockConnectorResponses == nil {
+		t.Fatal("mock validation did not compile the effective flow-local connector response")
+	}
+	if _, err := result.mockConnectorResponses.Admit("telegram.send_message", bundle.Tools["telegram.send_message"]); err != nil {
+		t.Fatalf("generated flow-local response admission: %v", err)
+	}
+	for _, finding := range result.BootReport.Findings {
+		if finding.Location == "provider_credential" && strings.Contains(finding.Message, "telegram_bot_token") {
+			t.Fatalf("mock validation retained live connector credential finding: %#v", finding)
+		}
+	}
+
 }
 
 func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnectorToolAdmitted(t *testing.T) {
@@ -520,7 +533,7 @@ func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnector
 		FatalToolImplementationWarning: false,
 		FatalBootWarnings:              false,
 	})
-	if err == nil || !strings.Contains(err.Error(), "provider connector validation failed") || !strings.Contains(err.Error(), "must declare exactly one response_success policy") {
+	if err == nil || !strings.Contains(err.Error(), "provider connector mock response compilation failed") || !strings.Contains(err.Error(), "must declare exactly one response_success policy") {
 		t.Fatalf("ValidateWorkflowContractSurface error = %v, want connector response_success fail-closed", err)
 	}
 }
@@ -541,7 +554,7 @@ func TestValidateWorkflowContractSurface_ProviderConnectorToolFailsClosedForUnsu
 		FatalToolImplementationWarning: false,
 		FatalBootWarnings:              false,
 	})
-	if err == nil || !strings.Contains(err.Error(), "provider connector validation failed") || !strings.Contains(err.Error(), "effect_class must be non_idempotent_write") {
+	if err == nil || !strings.Contains(err.Error(), "provider connector mock response compilation failed") || !strings.Contains(err.Error(), "effect_class must be non_idempotent_write") {
 		t.Fatalf("ValidateWorkflowContractSurface error = %v, want provider connector fail-closed", err)
 	}
 }
@@ -754,7 +767,7 @@ func TestEnsureWorkflowBootWiringFailsClosedForIncompatiblePlatformVersion(t *te
 		},
 	}}
 
-	err := ensureWorkflowBootWiring(RuntimeOptions{
+	_, err := ensureWorkflowBootWiring(RuntimeOptions{
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)},
 	}, runtimeeffects.ExecutionModeLive)
 	if err == nil {

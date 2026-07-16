@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/providerconnectors"
 	swaruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
@@ -39,21 +38,19 @@ import (
 const selectedContractAgentRuntimeDefaultQuiescenceTimeout = 2 * time.Minute
 
 type SelectedContractAgentRuntimeOptions struct {
-	Config                 *config.Config
-	EntityStore            runtimetools.EntityPersistence
-	HumanTaskStore         runtimetools.HumanTaskCardStore
-	SessionRegistry        runtimesessions.Registry
-	ConversationStore      runtimellm.ConversationPersistence
-	ScheduleStore          runtimepipeline.SchedulePersistence
-	MailboxStore           runtimetools.MailboxPersistence
-	Workspace              workspace.Lifecycle
-	Credentials            runtimecredentials.Store
-	ManagedCredentials     runtimemanagedcredentials.Store
-	ProviderCredentials    runtimecredentials.Store
-	LLMRuntime             runtimellm.Runtime
-	MCPClient              *runtimemcp.Client
-	MockConnectorResponses *providerconnectors.MockResponsePlan
-
+	Config              *config.Config
+	EntityStore         runtimetools.EntityPersistence
+	HumanTaskStore      runtimetools.HumanTaskCardStore
+	SessionRegistry     runtimesessions.Registry
+	ConversationStore   runtimellm.ConversationPersistence
+	ScheduleStore       runtimepipeline.SchedulePersistence
+	MailboxStore        runtimetools.MailboxPersistence
+	Workspace           workspace.Lifecycle
+	Credentials         runtimecredentials.Store
+	ManagedCredentials  runtimemanagedcredentials.Store
+	ProviderCredentials runtimecredentials.Store
+	LLMRuntime          runtimellm.Runtime
+	MCPClient           *runtimemcp.Client
 	AgentFactory        runtimemanager.AgentFactory
 	AgentManagerOptions runtimemanager.AgentManagerOptions
 	QuiescenceTimeout   time.Duration

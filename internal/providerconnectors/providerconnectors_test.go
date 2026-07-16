@@ -959,6 +959,27 @@ func TestConnectorPackImportRequiresExplicitEnableAndReportsSurface(t *testing.T
 	}
 }
 
+func TestConnectorPackImportApplicationSurvivesSemanticSourceWrappers(t *testing.T) {
+	explicit := providerConnectorScopedSource{
+		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		projectScopes: []semanticview.ProjectScope{
+			projectScopeWithConnectorPackImport(".", "telegram", "telegram.send_message"),
+		},
+	}
+	imported, err := SourceWithConnectorPackImports(explicit)
+	if err != nil {
+		t.Fatalf("SourceWithConnectorPackImports: %v", err)
+	}
+	wrapper := providerConnectorSourceWrapper{Source: imported}
+	reapplied, err := SourceWithConnectorPackImports(wrapper)
+	if err != nil {
+		t.Fatalf("SourceWithConnectorPackImports wrapped: %v", err)
+	}
+	if _, ok := reapplied.ToolEntries()["telegram.send_message"]; !ok {
+		t.Fatal("wrapped imported source lost telegram.send_message")
+	}
+}
+
 func TestSlackConnectorPackImportRequiresExplicitEnableAndReportsManagedSurface(t *testing.T) {
 	ambient := providerConnectorScopedSource{
 		Source:        semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
@@ -1052,6 +1073,14 @@ type providerConnectorScopedSource struct {
 	semanticview.Source
 	projectScopes []semanticview.ProjectScope
 	flowScopes    []semanticview.FlowScope
+}
+
+type providerConnectorSourceWrapper struct {
+	semanticview.Source
+}
+
+func (s providerConnectorSourceWrapper) BaseSemanticSource() semanticview.Source {
+	return s.Source
 }
 
 func (s providerConnectorScopedSource) ProjectScopes() []semanticview.ProjectScope {

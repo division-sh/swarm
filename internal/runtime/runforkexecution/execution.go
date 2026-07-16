@@ -344,7 +344,7 @@ func selectedContractPipelineCoordinatorOptions(
 		EventReceiptsCapability: store.CanonicalEventReceiptsCapability,
 		Credentials:             agentRuntime.Credentials,
 		ManagedCredentials:      agentRuntime.ManagedCredentials,
-		MockConnectorResponses:  agentRuntime.MockConnectorResponses,
+		MockConnectorResponses:  loaded.MockConnectorResponses,
 		BundleHash:              loaded.BundleHash,
 	}
 }
