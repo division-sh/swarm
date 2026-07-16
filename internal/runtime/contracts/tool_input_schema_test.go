@@ -85,6 +85,16 @@ func TestToolInputSchemaRejectsExplicitEmptyEnum(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "enum must contain at least one value") {
 		t.Fatalf("empty enum error = %v", err)
 	}
+	typed := ToolInputSchema{Type: "string", Enum: []SchemaLiteral{}}
+	if err := ValidateToolInputSchema(typed); err == nil || !strings.Contains(err.Error(), "enum must contain at least one value") {
+		t.Fatalf("typed empty enum error = %v", err)
+	}
+	if _, err := ProjectToolInputSchema(typed); err == nil || !strings.Contains(err.Error(), "enum must contain at least one value") {
+		t.Fatalf("typed empty enum projection error = %v", err)
+	}
+	if ToolInputSchemaIsZero(typed) {
+		t.Fatal("typed empty enum was treated as an omitted schema")
+	}
 }
 
 func TestToolInputSchemaProjectionPreservesExactSemanticConstraints(t *testing.T) {
@@ -194,6 +204,42 @@ func TestCloneToolSchemaEntryOwnsEveryMutableSchemaCarrier(t *testing.T) {
 		entry.Credentials[0] != "token" || entry.CompiledResult.Fields["state"].From != "result.state" ||
 		entry.CompiledResult.OutputSchema.Enum[0].Node.Value != "approved" {
 		t.Fatal("tool schema clone leaked a mutable carrier")
+	}
+}
+
+func TestAdmitToolSchemaEntryOwnsTypedSemanticJSONCarriersAndRejectsCycles(t *testing.T) {
+	body := map[string]string{"text": "one"}
+	labels := []string{"one"}
+	equals := map[string]string{"state": "ok"}
+	entry := ToolSchemaEntry{
+		InputSchema:     ToolInputSchema{Type: "object"},
+		OutputSchema:    ToolInputSchema{Type: "object"},
+		HTTP:            &HTTPToolSpec{Body: body},
+		ResponseMapping: map[string]any{"labels": labels},
+		ResponseSuccess: &HTTPResponseSuccess{Kind: "field_equals", Equals: equals},
+	}
+	admitted, err := AdmitToolSchemaEntry(entry)
+	if err != nil {
+		t.Fatalf("AdmitToolSchemaEntry: %v", err)
+	}
+	body["text"] = "changed"
+	labels[0] = "changed"
+	equals["state"] = "changed"
+	if admitted.HTTP.Body.(map[string]any)["text"] != "one" ||
+		admitted.ResponseMapping["labels"].([]any)[0] != "one" ||
+		admitted.ResponseSuccess.Equals.(map[string]any)["state"] != "ok" {
+		t.Fatalf("typed semantic carriers retained caller ownership: %#v", admitted)
+	}
+
+	cyclic := map[string]any{}
+	cyclic["self"] = cyclic
+	entry.HTTP.Body = cyclic
+	if _, err := AdmitToolSchemaEntry(entry); err == nil || !strings.Contains(err.Error(), "http.body") || !strings.Contains(err.Error(), "cycle") {
+		t.Fatalf("cyclic semantic carrier error = %v", err)
+	}
+	cloned := CloneToolSchemaEntry(entry)
+	if ValidateToolInputSchema(cloned.InputSchema) == nil || cloned.HTTP != nil {
+		t.Fatalf("invalid carrier clone did not fail closed: %#v", cloned)
 	}
 }
 

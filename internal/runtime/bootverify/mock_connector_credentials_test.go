@@ -84,6 +84,7 @@ func mockConnectorCredentialFixture(t *testing.T, credentialKind string, include
 		Category:    "provider_connector",
 		HandlerType: "http",
 		EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+		InputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
 		HTTP:        &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://provider.example/messages"},
 		ResponseSuccess: &runtimecontracts.HTTPResponseSuccess{
 			Kind: "http_status_2xx",

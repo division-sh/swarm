@@ -103,14 +103,14 @@ func TestRuntimeProjectSupervisorReloadRecompilesAndInstallsChannelPlans(t *test
 	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
 	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
 	loads := 0
-	supervisor.SetChannelPackLoader(func(_ context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot) (channelPackLoad, error) {
+	supervisor.SetChannelPackLoader(func(_ context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error) {
 		loads++
 		if source == nil || catalog == nil {
 			t.Fatal("channel reload compiler received nil source or accepted trigger catalog")
 		}
 		plan := packs.SatisfactionPlan{Channel: packs.PackIdentity{ID: "provider.mock.channel"}}
 		binding := packs.OutboundBindingPlan{ID: "ops", Structural: plan}
-		return channelPackLoad{Plans: []packs.SatisfactionPlan{plan}, Bindings: []packs.OutboundBindingPlan{binding}}, nil
+		return cliapp.ChannelPackLoad{Plans: []packs.SatisfactionPlan{plan}, Bindings: []packs.OutboundBindingPlan{binding}}, nil
 	})
 
 	if _, err := supervisor.OpenProject(context.Background(), projectRoot); err != nil {

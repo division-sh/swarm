@@ -12,31 +12,14 @@ import (
 // Public ingress behavior is owned by the standing-activation served tests.
 // This release-layout test is bounded to pack discovery and provenance.
 
-func TestPlatformSpecRequiredProviderTriggerInventoryMatchesRuntimeOwner(t *testing.T) {
-	var spec struct {
-		ToolModel struct {
-			ProviderTriggerAdapters struct {
-				PackEnvelopeSourceAuthority struct {
-					RequiredPlatformInventory struct {
-						Owner      string                                  `yaml:"owner"`
-						Identities []providertriggers.PlatformPackIdentity `yaml:"identities"`
-					} `yaml:"required_platform_inventory"`
-				} `yaml:"pack_envelope_source_authority"`
-			} `yaml:"provider_trigger_adapters"`
-		} `yaml:"tool_model"`
+func TestPlatformSpecDoesNotRestoreHardCodedProviderTriggerInventory(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join(RepoRoot(), "platform-spec.yaml"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(RepoRoot(), "platform-spec.yaml"), &spec)
-	declared := spec.ToolModel.ProviderTriggerAdapters.PackEnvelopeSourceAuthority.RequiredPlatformInventory
-	if declared.Owner != "internal/providertriggers.RequiredPlatformPackIdentities" {
-		t.Fatalf("required platform inventory owner = %q", declared.Owner)
-	}
-	want := providertriggers.RequiredPlatformPackIdentities()
-	if len(declared.Identities) != len(want) {
-		t.Fatalf("spec required platform identities = %+v, want %+v", declared.Identities, want)
-	}
-	for i := range want {
-		if declared.Identities[i] != want[i] {
-			t.Fatalf("spec required platform identity[%d] = %+v, want %+v", i, declared.Identities[i], want[i])
+	for _, retired := range []string{"required_platform_inventory", "RequiredPlatformPackIdentities", "complete first-party platform pack inventory"} {
+		if strings.Contains(string(body), retired) {
+			t.Fatalf("platform spec restored retired inventory authority %q", retired)
 		}
 	}
 }
@@ -106,11 +89,12 @@ func TestProviderTriggerPackDirsResolveFromEffectiveDeclaringLayers(t *testing.T
 		t.Fatalf("mkdir local config dir: %v", err)
 	}
 	platformConfig := []string{"provider_triggers:", "  packs:", "    platform_dirs:"}
-	wantPlatformDirs := make([]string, 0, len(providertriggers.RequiredPlatformPackIdentities()))
-	for _, identity := range providertriggers.RequiredPlatformPackIdentities() {
-		relative := "platform-" + identity.Provider
+	providers := configuredProviderTriggerFixtureProviders()
+	wantPlatformDirs := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		relative := "platform-" + provider
 		target := filepath.Join(localDir, relative)
-		copyProviderTriggerPackFixture(t, identity.Provider, target, false)
+		copyProviderTriggerPackFixture(t, provider, target, false)
 		platformConfig = append(platformConfig, "      - ./"+relative)
 		wantPlatformDirs = append(wantPlatformDirs, target)
 	}
@@ -146,6 +130,10 @@ func TestProviderTriggerPackDirsResolveFromEffectiveDeclaringLayers(t *testing.T
 	if got := cfgResult.KeyOrigins["provider_triggers.packs.external_dirs"]; got.Path != filepath.Join(repo, "swarm.yaml") || got.Layer != unifiedLayerProject {
 		t.Fatalf("external key origin = %+v", got)
 	}
+}
+
+func configuredProviderTriggerFixtureProviders() []string {
+	return []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform"}
 }
 
 func rewriteProviderTriggerPackFixtureAsExternalAcme(t *testing.T, dir string) {

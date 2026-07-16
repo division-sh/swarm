@@ -136,28 +136,28 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		report.add(localPreflightProviderPackPrerequisite, "provider_trigger_pack_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix provider_triggers.packs.platform_dirs, provider_triggers.packs.external_dirs, or the referenced provider pack envelope")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
-	platformSpec, err := loadServePlatformSpecDocument(resolvedPaths.PlatformSpecPath)
+	platformSpec, err := loadChannelPlatformSpecDocument(resolvedPaths.PlatformSpecPath)
 	if err != nil {
 		report := configReport
-		report.add(localPreflightProviderPackPrerequisite, "channel_interface_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --platform-spec or the declared channel interface")
+		report.add(localPreflightProviderPackPrerequisite, "channel_interface_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix --platform-spec or the declared channel interface")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
-	providerCredentials, err := buildProviderCredentialStore()
+	providerCredentials, err := BuildProviderCredentialStore()
 	if err != nil {
 		report := configReport
-		report.add(localPreflightProviderPackPrerequisite, "channel_provider_credentials_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix provider credential configuration")
+		report.add(localPreflightProviderPackPrerequisite, "channel_provider_credentials_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix provider credential configuration")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
-	managedCredentials, err := buildManagedCredentialStore()
+	managedCredentials, err := BuildManagedCredentialStore()
 	if err != nil {
 		report := configReport
-		report.add(localPreflightProviderPackPrerequisite, "channel_managed_credentials_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix managed credential configuration")
+		report.add(localPreflightProviderPackPrerequisite, "channel_managed_credentials_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix managed credential configuration")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
-	channelPacks, err := loadConfiguredChannelPacks(ctx, repo, cfgResult, platformSpec, providerPackLoad.Catalog, providerCredentials, managedCredentials)
+	channelPacks, err := LoadConfiguredChannelPacks(ctx, repo, cfgResult, platformSpec, providerPackLoad.Catalog, providerCredentials, managedCredentials)
 	if err != nil {
 		report := configReport
-		report.add(localPreflightProviderPackPrerequisite, "channel_pack_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix channels.packs, channels.bindings, or the selected channel dependencies")
+		report.add(localPreflightProviderPackPrerequisite, "channel_pack_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix channels.packs, channels.bindings, or the selected channel dependencies")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	apiListenAddr, mcpListenAddr, err := resolveCLIServeListenerAddresses(cliServeListenerAddressOptions{

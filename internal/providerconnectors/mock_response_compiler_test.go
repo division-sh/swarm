@@ -16,8 +16,8 @@ func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministicall
 	for _, installed := range DefaultPackRegistry().Inventory() {
 		tools[installed.ToolID] = installed.Tool
 	}
-	if got := len(tools); got != 7 {
-		t.Fatalf("shipped connector tool count = %d, want 7", got)
+	if got := len(tools); got != 10 {
+		t.Fatalf("shipped connector tool count = %d, want 10", got)
 	}
 
 	flowLocal := telegramConnectorTool("https://example.test")
@@ -48,8 +48,8 @@ func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministicall
 	if err != nil {
 		t.Fatalf("CompileMockResponsePlan second: %v", err)
 	}
-	if len(first.responses) != 8 || len(second.responses) != 8 {
-		t.Fatalf("compiled response counts = %d, %d, want 8", len(first.responses), len(second.responses))
+	if len(first.responses) != 11 || len(second.responses) != 11 {
+		t.Fatalf("compiled response counts = %d, %d, want 11", len(first.responses), len(second.responses))
 	}
 	for toolID, firstRaw := range first.responses {
 		if !bytes.Equal(firstRaw, second.responses[toolID]) {
@@ -94,9 +94,29 @@ func TestCompileMockResponsePlanPreservesStructuredEnumKinds(t *testing.T) {
 type: object
 properties:
   value:
-    type: array
+    type: object
+    additionalProperties: false
+    properties:
+      null_value: {type: 'null'}
+      bool_value: {type: boolean}
+      int_value: {type: integer}
+      float_value: {type: number}
+      text_value: {type: string}
+      list_value: {type: array, items: {type: boolean}}
+      object_value:
+        type: object
+        additionalProperties: false
+        properties: {key: {type: boolean}}
+        required: [key]
+    required: [null_value, bool_value, int_value, float_value, text_value, list_value, object_value]
     enum:
-      - [!!null null, !!bool true, !!int 1, !!float 1.5, text, [false], {key: true}]
+      - null_value: !!null null
+        bool_value: !!bool true
+        int_value: !!int 1
+        float_value: !!float 1.5
+        text_value: text
+        list_value: [false]
+        object_value: {key: true}
 required: [value]
 `), &outputSchema); err != nil {
 		t.Fatalf("unmarshal structured enum schema: %v", err)
@@ -118,7 +138,10 @@ required: [value]
 		t.Fatalf("Materialize: %v", err)
 	}
 	want := map[string]any{
-		"value": []any{nil, true, float64(1), 1.5, "text", []any{false}, map[string]any{"key": true}},
+		"value": map[string]any{
+			"null_value": nil, "bool_value": true, "int_value": float64(1), "float_value": 1.5,
+			"text_value": "text", "list_value": []any{false}, "object_value": map[string]any{"key": true},
+		},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("structured enum response = %#v, want %#v", got, want)
@@ -126,40 +149,6 @@ required: [value]
 }
 
 func TestCompileMockResponsePlanFailsClosedWithExactSchemaPath(t *testing.T) {
-	var explicitEmptyEnum runtimecontracts.ToolInputSchema
-	if err := yaml.Unmarshal([]byte(`
-type: object
-properties:
-  status:
-    type: string
-    enum: []
-required: [status]
-`), &explicitEmptyEnum); err != nil {
-		t.Fatalf("unmarshal explicit empty enum schema: %v", err)
-	}
-	if explicitEmptyEnum.Properties["status"].Enum == nil {
-		t.Fatal("explicit empty enum lost authored presence")
-	}
-	decodeSchema := func(raw string) runtimecontracts.ToolInputSchema {
-		t.Helper()
-		var schema runtimecontracts.ToolInputSchema
-		if err := yaml.Unmarshal([]byte(raw), &schema); err != nil {
-			t.Fatalf("unmarshal enum schema: %v", err)
-		}
-		return schema
-	}
-	timestampEnum := decodeSchema(`
-type: object
-properties:
-  value: {type: string, enum: [2026-07-16T12:00:00Z]}
-required: [value]
-`)
-	binaryEnum := decodeSchema(`
-type: object
-properties:
-  value: {type: string, enum: [!!binary aGVsbG8=]}
-required: [value]
-`)
 	malformedLiteralSchema := func(typeName string, node yaml.Node) runtimecontracts.ToolInputSchema {
 		return runtimecontracts.ToolInputSchema{
 			Type: "object",
@@ -169,13 +158,17 @@ required: [value]
 			Required: []string{"value"},
 		}
 	}
-	mismatchedTagSchema := func(typeName, literal string) runtimecontracts.ToolInputSchema {
-		return decodeSchema(`
-type: object
-properties:
-  value: {type: ` + typeName + `, enum: [` + literal + `]}
-required: [value]
-`)
+	explicitEmptyEnum := runtimecontracts.ToolInputSchema{
+		Type: "object",
+		Properties: map[string]runtimecontracts.ToolInputSchema{
+			"status": {Type: "string", Enum: []runtimecontracts.SchemaLiteral{}},
+		},
+		Required: []string{"status"},
+	}
+	timestampEnum := malformedLiteralSchema("string", yaml.Node{Kind: yaml.ScalarNode, Tag: "!!timestamp", Value: "2026-07-16T12:00:00Z"})
+	binaryEnum := malformedLiteralSchema("string", yaml.Node{Kind: yaml.ScalarNode, Tag: "!!binary", Value: "aGVsbG8="})
+	mismatchedTagSchema := func(typeName, tag, literal string) runtimecontracts.ToolInputSchema {
+		return malformedLiteralSchema(typeName, yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: literal})
 	}
 
 	tests := []struct {
@@ -191,7 +184,7 @@ required: [value]
 		{
 			name:   "required property must be declared",
 			schema: runtimecontracts.ToolInputSchema{Type: "object", Required: []string{"missing"}},
-			want:   "output_schema.properties.missing: required property has no declared schema",
+			want:   `output_schema: $ required property "missing" is not declared`,
 		},
 		{
 			name: "unsupported nested type",
@@ -200,7 +193,7 @@ required: [value]
 				Properties: map[string]runtimecontracts.ToolInputSchema{"value": {Type: "date"}},
 				Required:   []string{"value"},
 			},
-			want: `output_schema.properties.value: unsupported schema type "date"`,
+			want: `output_schema: $.properties[value] requires an explicit supported JSON type, got "date"`,
 		},
 		{
 			name: "contradictory bounds",
@@ -209,7 +202,7 @@ required: [value]
 				Properties: map[string]runtimecontracts.ToolInputSchema{"value": {Type: "number", Minimum: float64Pointer(5), Maximum: float64Pointer(2)}},
 				Required:   []string{"value"},
 			},
-			want: "output_schema.properties.value: minimum 5 exceeds maximum 2",
+			want: "output_schema: $.properties[value] minimum must be <= maximum",
 		},
 		{
 			name: "integer interval has no inhabitant",
@@ -223,7 +216,7 @@ required: [value]
 		{
 			name:   "explicit empty enum has no inhabitant",
 			schema: explicitEmptyEnum,
-			want:   "output_schema.properties.status.enum: explicitly declared enum must contain at least one value",
+			want:   "output_schema: $.properties[status] enum must contain at least one value",
 		},
 		{
 			name:   "YAML timestamp enum is not coerced",
@@ -238,7 +231,7 @@ required: [value]
 		{
 			name:   "missing typed enum literal is rejected",
 			schema: malformedLiteralSchema("string", yaml.Node{}),
-			want:   "output_schema.properties.value.enum[0]: literal node is missing",
+			want:   "output_schema: $.properties[value] enum[0]: value is missing",
 		},
 		{
 			name: "invalid UTF-8 enum string is rejected",
@@ -247,7 +240,7 @@ required: [value]
 				Tag:   "!!str",
 				Value: string([]byte{0xff}),
 			}),
-			want: "output_schema.properties.value.enum[0]: string literal is not valid UTF-8",
+			want: "output_schema: $.properties[value] enum[0]: value is not semantic JSON: programmatic semantic string is not valid UTF-8",
 		},
 		{
 			name: "unsafe enum integer is rejected",
@@ -256,7 +249,7 @@ required: [value]
 				Tag:   "!!int",
 				Value: "9007199254740992",
 			}),
-			want: "output_schema.properties.value.enum[0]",
+			want: "output_schema: $.properties[value] enum[0]",
 		},
 		{
 			name: "non-finite enum number is rejected",
@@ -265,7 +258,7 @@ required: [value]
 				Tag:   "!!float",
 				Value: ".nan",
 			}),
-			want: "output_schema.properties.value.enum[0]",
+			want: "output_schema: $.properties[value] enum[0]",
 		},
 		{
 			name: "non-string enum object key is rejected",
@@ -277,27 +270,27 @@ required: [value]
 					{Kind: yaml.ScalarNode, Tag: "!!str", Value: "value"},
 				},
 			}),
-			want: "output_schema.properties.value.enum[0]: object key[0] must be a JSON string",
+			want: "output_schema: $.properties[value] enum[0]: value is not semantic JSON: json: unsupported type: map[interface {}]interface {}",
 		},
 		{
 			name:   "integer tag cannot carry boolean",
-			schema: mismatchedTagSchema("boolean", "!!int true"),
-			want:   `output_schema.properties.value.enum[0]: !!int literal "true" must decode to an integral JSON number`,
+			schema: mismatchedTagSchema("boolean", "!!int", "true"),
+			want:   "output_schema: $.properties[value] enum[0]: decode value: yaml: cannot decode !!bool `true` as a !!int",
 		},
 		{
 			name:   "boolean tag cannot carry integer",
-			schema: mismatchedTagSchema("integer", "!!bool 1"),
-			want:   `output_schema.properties.value.enum[0]: !!bool literal "1" must decode to a JSON boolean`,
+			schema: mismatchedTagSchema("integer", "!!bool", "1"),
+			want:   "output_schema: $.properties[value] enum[0]: decode value: yaml: cannot decode !!int `1` as a !!bool",
 		},
 		{
 			name:   "float tag cannot carry boolean",
-			schema: mismatchedTagSchema("boolean", "!!float false"),
-			want:   `output_schema.properties.value.enum[0]: !!float literal "false" must decode to a JSON number`,
+			schema: mismatchedTagSchema("boolean", "!!float", "false"),
+			want:   "output_schema: $.properties[value] enum[0]: decode value: yaml: cannot decode !!bool `false` as a !!float",
 		},
 		{
 			name:   "integer tag cannot carry fractional number",
-			schema: mismatchedTagSchema("number", "!!int 1.5"),
-			want:   `output_schema.properties.value.enum[0]: !!int literal "1.5" must decode to an integral JSON number`,
+			schema: mismatchedTagSchema("number", "!!int", "1.5"),
+			want:   "output_schema: $.properties[value] enum[0]: decode value: yaml: cannot decode !!float `1.5` as a !!int",
 		},
 	}
 

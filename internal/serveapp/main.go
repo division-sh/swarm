@@ -359,6 +359,8 @@ type serveRuntimeBundleContextRequest struct {
 	ManagedCredentials     runtimemanagedcredentials.Store
 	ProviderCredentials    runtimecredentials.Store
 	ProviderTriggerCatalog *providertriggers.CatalogSnapshot
+	ChannelPlans           []packs.SatisfactionPlan
+	ChannelBindings        []packs.OutboundBindingPlan
 	BootStartedAt          time.Time
 	BootProgress           func(runtime.BootProgressEvent)
 	EnableToolGateway      bool
@@ -645,6 +647,8 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	validationOpts := runtime.DefaultWorkflowContractValidationOptions(req.Credentials)
 	validationOpts.ManagedCredentials = req.ManagedCredentials
 	validationOpts.ProviderTriggerCatalog = req.ProviderTriggerCatalog
+	validationOpts.ChannelPlans = req.ChannelPlans
+	validationOpts.ChannelOutboundBindings = req.ChannelBindings
 	profile, err := req.Config.LLMBackendProfile()
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("resolve llm backend profile for workflow validation: %w", err)
@@ -682,6 +686,8 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			ManagedCredentials:               req.ManagedCredentials,
 			ProviderCredentials:              req.ProviderCredentials,
 			ProviderTriggerCatalog:           req.ProviderTriggerCatalog,
+			ChannelPlans:                     req.ChannelPlans,
+			ChannelOutboundBindings:          req.ChannelBindings,
 			BootStartedAt:                    req.BootStartedAt,
 			BootProgress:                     req.BootProgress,
 			SystemContainers:                 systemWorkspaceContainers(workspaces),
@@ -884,8 +890,23 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		})
 		return 3
 	}
+	managedCredentialStore, err := cliapp.BuildManagedCredentialStore()
+	if err != nil {
+		presenter.fail(5, "managed_credentials", err)
+		return 1
+	}
+	providerCredentialStore, err := cliapp.BuildProviderCredentialStore()
+	if err != nil {
+		presenter.fail(5, "provider_credentials", err)
+		return 1
+	}
+	channelPacks, err := cliapp.LoadConfiguredChannelPacks(ctx, repo, cfgResult, source.PlatformSpec(), providerPackLoad.Catalog, providerCredentialStore, managedCredentialStore)
+	if err != nil {
+		presenter.fail(5, "channel_packs", err)
+		return 1
+	}
 	if cliapp.ShouldRunServeLocalClaudeCLIPreflight(opts) {
-		preflight := cliapp.RunServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, providerPackLoad.Loaded, providerPackLoad.Catalog)
+		preflight := cliapp.RunServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, providerPackLoad.Loaded, providerPackLoad.Catalog, channelPacks)
 		if preflight.HasBlockers() {
 			detail := preflight.BlockerSummary()
 			presenter.failWithDiagnostic(5, "local_preflight", errors.New(detail), func(out io.Writer) bool {
@@ -923,17 +944,6 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(5, "credentials", err)
 		return 1
 	}
-	managedCredentialStore, err := cliapp.BuildManagedCredentialStore()
-	if err != nil {
-		presenter.fail(5, "managed_credentials", err)
-		return 1
-	}
-	providerCredentialStore, err := cliapp.BuildProviderCredentialStore()
-	if err != nil {
-		presenter.fail(5, "provider_credentials", err)
-		return 1
-	}
-
 	apiListener, err := cliapp.ListenServeHTTPListener("api", opts.APIListenAddr)
 	if err != nil {
 		presenter.fail(20, "http_listener_bind", err)
@@ -988,6 +998,8 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			ManagedCredentials:     managedCredentialStore,
 			ProviderCredentials:    providerCredentialStore,
 			ProviderTriggerCatalog: providerPackLoad.Catalog,
+			ChannelPlans:           channelPacks.Plans,
+			ChannelBindings:        channelPacks.Bindings,
 			BootStartedAt:          bootStartedAt,
 			BootProgress:           bootProgress,
 			EnableToolGateway:      i == 0,
@@ -1084,6 +1096,9 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) {
 		return providerPackLoad.Reload()
 	}
+	supervisor.SetChannelPackLoader(func(loadCtx context.Context, candidateSource semanticview.Source, candidateCatalog *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error) {
+		return cliapp.LoadConfiguredChannelPacks(loadCtx, repo, cfgResult, candidateSource.PlatformSpec(), candidateCatalog, providerCredentialStore, managedCredentialStore)
+	})
 	supervisor.replacementShutdown = runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
 	supervisor.runtimeLifetime = ctx
 	supervisor.SetRuntimeContextManager(runtimeContextManager, primaryContext.bundleSourceFact, primaryContext.bootIdentity)

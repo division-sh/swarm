@@ -1,4 +1,4 @@
-package main
+package cliapp
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 )
 
 func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *testing.T) {
-	repo := repoRoot()
+	repo := RepoRoot()
 	cfg := &config.Config{
 		ProviderTriggers: config.ProviderTriggersConfig{Packs: config.ProviderTriggerPacksConfig{
 			PlatformDirs: []string{"packs/provider-triggers/telegram"},
@@ -24,19 +24,19 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 			},
 		},
 	}
-	cfgResult := runtimeConfigLoadResult{Config: cfg, KeyOrigins: map[string]unifiedConfigKeyOrigin{}}
-	triggers, err := loadConfiguredProviderTriggerPacks(repo, cfgResult)
+	cfgResult := RuntimeConfigLoadResult{Config: cfg, KeyOrigins: map[string]unifiedConfigKeyOrigin{}}
+	triggers, err := LoadConfiguredProviderTriggerPacks(repo, cfgResult)
 	if err != nil {
-		t.Fatalf("loadConfiguredProviderTriggerPacks: %v", err)
+		t.Fatalf("LoadConfiguredProviderTriggerPacks: %v", err)
 	}
-	spec, err := loadServePlatformSpecDocument(filepath.Join(repo, defaultPlatformSpecPath))
+	spec, err := loadChannelPlatformSpecDocument(filepath.Join(repo, defaultPlatformSpecPath))
 	if err != nil {
-		t.Fatalf("loadServePlatformSpecDocument: %v", err)
+		t.Fatalf("loadChannelPlatformSpecDocument: %v", err)
 	}
 
-	withoutCredential, err := loadConfiguredChannelPacks(context.Background(), repo, cfgResult, spec, triggers.Catalog, nil, nil)
+	withoutCredential, err := LoadConfiguredChannelPacks(context.Background(), repo, cfgResult, spec, triggers.Catalog, nil, nil)
 	if err != nil {
-		t.Fatalf("loadConfiguredChannelPacks without credential: %v", err)
+		t.Fatalf("LoadConfiguredChannelPacks without credential: %v", err)
 	}
 	if len(withoutCredential.Plans) != 1 || len(withoutCredential.Bindings) != 1 {
 		t.Fatalf("channel load = %#v, want one plan and one binding", withoutCredential)
@@ -51,16 +51,16 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 	}
 
 	credentials := channelTestCredentialStore{"telegram_bot_token": "secret"}
-	ready, err := loadConfiguredChannelPacks(context.Background(), repo, cfgResult, spec, triggers.Catalog, credentials, nil)
+	ready, err := LoadConfiguredChannelPacks(context.Background(), repo, cfgResult, spec, triggers.Catalog, credentials, nil)
 	if err != nil {
-		t.Fatalf("loadConfiguredChannelPacks with credential: %v", err)
+		t.Fatalf("LoadConfiguredChannelPacks with credential: %v", err)
 	}
 	outbound, err = ready.Bindings[0].CapabilitySubject()
 	if err != nil || outbound.Status != packs.StatusReady {
 		t.Fatalf("outbound subject with credential = %#v, err=%v", outbound, err)
 	}
 
-	report := localPreflightReport{}
+	report := LocalPreflightReport{}
 	appendChannelCapabilitySubjects(&report, ready)
 	if len(report.CapabilitySubjects) != 2 {
 		t.Fatalf("preflight channel subjects = %#v, want structural and outbound", report.CapabilitySubjects)
