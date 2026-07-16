@@ -8,6 +8,7 @@ import (
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -79,6 +80,7 @@ type selectedAPICapabilityRequest struct {
 	Credentials             runtimecredentials.Store
 	ManagedCredentials      runtimemanagedcredentials.Store
 	ProviderCredentials     runtimecredentials.Store
+	MockConnectorResponses  *providerconnectors.MockResponsePlan
 }
 
 type selectedAPIOptionalCapabilityBuilder func(selectedAPICapabilityRequest) (selectedAPICapabilities, error)

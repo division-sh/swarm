@@ -691,6 +691,84 @@ func TestPipelineActivityRequestMockProviderConnectorUsesExactResponseAndJournal
 	}
 }
 
+func TestPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponsePlan(t *testing.T) {
+	backends := []struct {
+		name  string
+		store func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool)
+	}{
+		{name: "sqlite", store: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
+			db, journal := newSQLiteActivityJournalStore(t, ctx)
+			return db, journal, true
+		}},
+		{name: "postgres", store: func(t *testing.T, _ context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
+			_, db, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			return db, NewWorkflowInstanceStore(db), false
+		}},
+	}
+	for _, backend := range backends {
+		t.Run(backend.name, func(t *testing.T) {
+			ctx := context.Background()
+			db, journal, sqlite := backend.store(t, ctx)
+			runID := uuid.NewString()
+			seedActivityRun(t, db, sqlite, runID)
+			var httpCalls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				httpCalls.Add(1)
+			}))
+			defer server.Close()
+			tool := testTelegramConnectorTool(server.URL)
+			tool.OutputSchema = runtimecontracts.ToolInputSchema{
+				Type:       "object",
+				Properties: map[string]runtimecontracts.ToolInputSchema{"ok": {Type: "boolean"}},
+				Required:   []string{"ok"},
+			}
+			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
+				"telegram.send_message": tool,
+			}})
+			plan, err := providerconnectors.NewMockResponsePlan(map[string]map[string]any{
+				"telegram.send_message": {"ok": true},
+			})
+			if err != nil {
+				t.Fatalf("NewMockResponsePlan: %v", err)
+			}
+			intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
+			intent.Tool = "telegram.send_message"
+			intent.ActivityID = "telegram_send_message"
+			intent.ExecutionMode = executionmode.Mock
+			intent.Input = mustActivityInput(map[string]any{"chat_id": "42", "text": "hello"})
+
+			firstBus := &recordingPipelineBus{}
+			first := NewPipelineCoordinatorWithOptions(firstBus, db, PipelineCoordinatorOptions{
+				Module: staticSemanticWorkflowModule{source: source}, WorkflowStore: journal,
+				MockConnectorResponses: plan,
+			})
+			if err := (pipelineActivityDispatcher{coordinator: first}).executeActivityIntent(ctx, intent); err != nil {
+				t.Fatalf("execute initial mock activity: %v", err)
+			}
+			if len(firstBus.publishes) != 1 {
+				t.Fatalf("initial publications = %#v", firstBus.publishes)
+			}
+
+			restartBus := &recordingPipelineBus{}
+			credentials := &countingActivityCredentialStore{}
+			restarted := NewPipelineCoordinatorWithOptions(restartBus, db, PipelineCoordinatorOptions{
+				Module: staticSemanticWorkflowModule{source: source}, WorkflowStore: journal,
+				Credentials: credentials,
+			})
+			if err := (pipelineActivityDispatcher{coordinator: restarted}).executeActivityIntent(ctx, intent); err != nil {
+				t.Fatalf("replay terminal mock activity without current plan: %v", err)
+			}
+			if len(restartBus.publishes) != 1 || restartBus.publishes[0].ID() != firstBus.publishes[0].ID() {
+				t.Fatalf("restart publications = %#v, want journaled event %q", restartBus.publishes, firstBus.publishes[0].ID())
+			}
+			if httpCalls.Load() != 0 || credentials.reads.Load() != 0 {
+				t.Fatalf("replay launched live dependencies: HTTP=%d credentials=%d", httpCalls.Load(), credentials.reads.Load())
+			}
+		})
+	}
+}
+
 func TestPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTTP(t *testing.T) {
 	backends := []struct {
 		name  string
