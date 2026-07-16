@@ -81,6 +81,50 @@ func TestAdmitContractFrontier_SelectedContractChangesRecipients(t *testing.T) {
 	}
 }
 
+func TestAdmitContractFrontier_ConnectMatchesConcreteTemplateSourceEndpoint(t *testing.T) {
+	plan := testRunForkPlan("producer/inst-1/scan.requested", store.RunForkPendingClassificationPending, "node", "source-node")
+	plan.PendingWork[0].FlowInstance = "producer/inst-1"
+	source := testContractFrontierTemplateConnectSource()
+
+	admission, err := AdmitContractFrontier(ContractFrontierRequest{
+		Plan:              plan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+	})
+	if err != nil {
+		t.Fatalf("AdmitContractFrontier: %v", err)
+	}
+	event := admission.FrontierEvents[0]
+	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].SubscriberID != "consumer-node" {
+		t.Fatalf("derived recipients = %#v, want consumer-node through producer connect", event.DerivedRecipients)
+	}
+	if hasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved) {
+		t.Fatalf("blockers = %#v, want concrete template source connect to resolve", admission.UnsupportedBlockers)
+	}
+}
+
+func TestAdmitContractFrontier_ConnectRejectsUnrelatedTemplateSameLeaf(t *testing.T) {
+	plan := testRunForkPlan("unrelated/inst-1/scan.requested", store.RunForkPendingClassificationPending, "node", "source-node")
+	plan.PendingWork[0].FlowInstance = "unrelated/inst-1"
+	source := testContractFrontierTemplateConnectSource()
+
+	admission, err := AdmitContractFrontier(ContractFrontierRequest{
+		Plan:              plan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+	})
+	if err != nil {
+		t.Fatalf("AdmitContractFrontier: %v", err)
+	}
+	event := admission.FrontierEvents[0]
+	if len(event.DerivedRecipients) != 0 {
+		t.Fatalf("derived recipients = %#v, want unrelated same-leaf template excluded", event.DerivedRecipients)
+	}
+	if !hasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved) {
+		t.Fatalf("blockers = %#v, want unrelated same-leaf template to remain unresolved", admission.UnsupportedBlockers)
+	}
+}
+
 func TestAdmitContractFrontier_DeliveredCompletedHistoryIsNotFrontierWork(t *testing.T) {
 	plan := testRunForkPlan("producer/scan.requested", store.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
 	source := testContractFrontierSource("consumer-node")
@@ -374,6 +418,78 @@ func testContractFrontierTemplateSource() semanticview.Source {
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
 				"review": &root.Children[0],
+			},
+		},
+	})
+}
+
+func testContractFrontierTemplateConnectSource() semanticview.Source {
+	producer := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: "template",
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"scan.requested"}},
+			},
+		},
+		Path: "producer",
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"scan.requested": {},
+		},
+	}
+	unrelated := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "unrelated", Flow: "unrelated"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: "template",
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"scan.requested"}},
+			},
+		},
+		Path: "unrelated",
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"scan.requested": {},
+		},
+	}
+	consumer := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{"scan.requested"}},
+			},
+		},
+		Path: "consumer",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"consumer-node": {
+				ID:           "consumer-node",
+				SubscribesTo: []string{"scan.requested"},
+			},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, unrelated, consumer}}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:    "test-workflow",
+			Version: "v-test",
+			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{
+				"producer":  {{Name: "scan_requested", Event: "scan.requested"}},
+				"unrelated": {{Name: "scan_requested", Event: "scan.requested"}},
+			},
+			FlowInputEventPins: map[string][]runtimecontracts.FlowInputEventPin{
+				"consumer": {{Name: "scan_requested", Event: "scan.requested"}},
+			},
+			CompositionConnects: []runtimecontracts.FlowPackageConnect{{
+				SourceFile: "package.yaml",
+				SourceLine: 1,
+				From:       "producer.scan_requested",
+				To:         "consumer.scan_requested",
+			}},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"producer":  &root.Children[0],
+				"unrelated": &root.Children[1],
+				"consumer":  &root.Children[2],
 			},
 		},
 	})
