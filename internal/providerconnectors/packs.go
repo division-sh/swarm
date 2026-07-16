@@ -162,6 +162,15 @@ func NewPackRegistry(loaded ...LoadedPack) (*PackRegistry, error) {
 		if err := pack.Manifest.Validate(); err != nil {
 			return nil, fmt.Errorf("validate connector manifest for pack %q: %w", pack.Envelope.ID, err)
 		}
+		admittedTools := make(map[string]runtimecontracts.ToolSchemaEntry, len(pack.Manifest.Tools))
+		for toolID, tool := range pack.Manifest.Tools {
+			admitted, err := runtimecontracts.AdmitToolSchemaEntry(tool)
+			if err != nil {
+				return nil, fmt.Errorf("admit connector tool %q for pack %q: %w", toolID, pack.Envelope.ID, err)
+			}
+			admittedTools[toolID] = admitted
+		}
+		pack.Manifest.Tools = admittedTools
 		if pack.Manifest.Generation != nil {
 			if err := pack.Manifest.Generation.Validate(pack.Manifest.Provider, pack.Manifest.Tools); err != nil {
 				return nil, fmt.Errorf("validate generation evidence for pack %q: %w", pack.Envelope.ID, err)

@@ -231,7 +231,7 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		headers    map[string]string
 		eventNames []string
 	}{
-		{provider: "telegram", body: []byte(`{"update_id":901,"message":{"message_id":901,"chat":{"id":42},"text":"hello"}}`), headers: map[string]string{"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"}, eventNames: []string{"inbound.telegram", "inbound.telegram.text_message"}},
+		{provider: "telegram", body: []byte(`{"update_id":901,"message":{"message_id":901,"from":{"id":7},"chat":{"id":42,"type":"private"},"text":"hello"}}`), headers: map[string]string{"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"}, eventNames: []string{"inbound.telegram", "inbound.telegram.text_message"}},
 		{provider: "intercom", body: []byte(`{"id":"platform-unsigned-1","topic":"contact.created"}`), eventNames: []string{"inbound.intercom"}},
 		{provider: "acme_public", body: []byte(`{"id":"external-unsigned-1"}`), eventNames: []string{"inbound.acme_public"}},
 		{provider: "partner_auth", body: []byte(`{"value":1}`), headers: map[string]string{"X-Partner-Delivery": "partner-auth-1"}, eventNames: []string{"inbound.partner_auth"}},
@@ -362,10 +362,11 @@ func writeInboundAdmissionPolicyMatrixFixture(t testing.TB) string {
 func writeInboundAdmissionPackInventory(t *testing.T) ([]string, []string) {
 	t.Helper()
 	platformRoot := t.TempDir()
-	platformDirs := make([]string, 0, len(providertriggers.RequiredPlatformPackIdentities()))
-	for _, identity := range providertriggers.RequiredPlatformPackIdentities() {
-		dir := filepath.Join(platformRoot, identity.Provider)
-		copyProviderTriggerPackFixture(t, identity.Provider, dir, false)
+	providers := []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform"}
+	platformDirs := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		dir := filepath.Join(platformRoot, provider)
+		copyProviderTriggerPackFixture(t, provider, dir, false)
 		platformDirs = append(platformDirs, dir)
 	}
 	writeUnsignedProviderTriggerPack(t, filepath.Join(platformRoot, "intercom"), "provider.intercom", "intercom", "platform", "inbound.intercom")

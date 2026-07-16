@@ -204,11 +204,8 @@ func validateTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error 
 			errs = append(errs, fmt.Errorf("%s must declare http.url", context))
 		}
 	}
-	if err := runtimecontracts.ValidateToolInputSchema(tool.InputSchema); err != nil {
-		errs = append(errs, fmt.Errorf("%s input_schema: %w", context, err))
-	}
-	if err := runtimecontracts.ValidateToolInputSchema(tool.OutputSchema); err != nil {
-		errs = append(errs, fmt.Errorf("%s output_schema: %w", context, err))
+	if _, err := runtimecontracts.AdmitToolSchemaEntry(tool); err != nil {
+		errs = append(errs, fmt.Errorf("%s: %w", context, err))
 	}
 	effectClass := runtimecontracts.NormalizeActivityEffectClass(tool.EffectClass)
 	if effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {

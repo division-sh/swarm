@@ -18,28 +18,23 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func TestVerifyRejectsAmbientCheckoutProviderTriggerInventory(t *testing.T) {
+func TestVerifyDoesNotLoadAmbientCheckoutProviderTriggerInventory(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	root := writeVerifyLintEvidenceFixture(t)
 	opts := defaultVerifyCommandOptions()
 	opts.contractsPath = root
 	opts.platformSpecPath = filepath.Join(RepoRoot(), defaultPlatformSpecPath)
-	var errors []string
 	for _, repo := range []string{RepoRoot(), t.TempDir()} {
 		var out, errOut bytes.Buffer
-		if code := runVerifyCommandWithOutput(context.Background(), repo, opts, &out, &errOut); code == 0 {
-			t.Fatalf("verify unexpectedly admitted ambient inventory for repo %q:\n%s", repo, out.String())
+		if code := runVerifyCommandWithOutput(context.Background(), repo, opts, &out, &errOut); code != 0 {
+			t.Fatalf("verify repo %q exit=%d stdout=%s stderr=%s", repo, code, out.String(), errOut.String())
 		}
-		if out.Len() != 0 {
-			t.Fatalf("verify repo %q projected capabilities without configured inventory:\n%s", repo, out.String())
+		if strings.Contains(out.String(), "provider trigger pack") {
+			t.Fatalf("verify repo %q projected ambient provider inventory:\n%s", repo, out.String())
 		}
-		if !strings.Contains(errOut.String(), "provider_triggers.packs.platform_dirs is required") {
-			t.Fatalf("verify repo %q error omitted configured inventory requirement:\n%s", repo, errOut.String())
+		if strings.Contains(errOut.String(), "provider_triggers.packs") || strings.Contains(errOut.String(), "provider trigger pack") {
+			t.Fatalf("verify repo %q interpreted ambient provider inventory:\n%s", repo, errOut.String())
 		}
-		errors = append(errors, errOut.String())
-	}
-	if errors[0] != errors[1] {
-		t.Fatalf("identical configuration changed meaning by checkout presence:\ncheckout: %s\nempty repo: %s", errors[0], errors[1])
 	}
 }
 
@@ -153,7 +148,7 @@ func TestVerifyConfiguredInventoryProjectsUnsignedWarningAndReadback(t *testing.
 
 func TestProviderTriggerCapabilitySubjectsPreserveInstalledEffectiveMultiplicityAndRendering(t *testing.T) {
 	platformDirs, externalDirs := writeInboundAdmissionPackInventory(t)
-	catalog, _, err := providertriggers.NewCatalogSnapshotFromRequiredPlatformPackDirs("0.7.0", platformDirs, externalDirs)
+	catalog, _, err := providertriggers.NewCatalogSnapshotFromPackDirs("0.7.0", platformDirs, externalDirs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,10 +204,11 @@ func writeInboundAdmissionPolicyMatrixFixture(t testing.TB) string {
 func writeInboundAdmissionPackInventory(t *testing.T) ([]string, []string) {
 	t.Helper()
 	platformRoot := t.TempDir()
-	platformDirs := make([]string, 0, len(providertriggers.RequiredPlatformPackIdentities()))
-	for _, identity := range providertriggers.RequiredPlatformPackIdentities() {
-		dir := filepath.Join(platformRoot, identity.Provider)
-		copyProviderTriggerPackFixture(t, identity.Provider, dir, false)
+	providers := configuredProviderTriggerFixtureProviders()
+	platformDirs := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		dir := filepath.Join(platformRoot, provider)
+		copyProviderTriggerPackFixture(t, provider, dir, false)
 		platformDirs = append(platformDirs, dir)
 	}
 	writeUnsignedProviderTriggerPack(t, filepath.Join(platformRoot, "intercom"), "provider.intercom", "intercom", "platform", "inbound.intercom")

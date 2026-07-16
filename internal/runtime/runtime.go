@@ -93,7 +93,6 @@ type RuntimeOptions struct {
 	ManagedCredentials               runtimemanagedcredentials.Store
 	ProviderCredentials              runtimecredentials.Store
 	ProviderTriggerCatalog           *providertriggers.CatalogSnapshot
-	MockConnectorResponses           *providerconnectors.MockResponsePlan
 	ChannelPlans                     []packs.SatisfactionPlan
 	ChannelOutboundBindings          []packs.OutboundBindingPlan
 	BootStartedAt                    time.Time
@@ -555,7 +554,6 @@ func ensureWorkflowBootWiring(opts RuntimeOptions, executionMode runtimeeffects.
 	validationOpts.ManagedCredentials = opts.ManagedCredentials
 	validationOpts.ProviderTriggerCatalog = opts.ProviderTriggerCatalog
 	validationOpts.ExecutionMode = executionMode
-	validationOpts.MockConnectorResponses = opts.MockConnectorResponses
 	validationOpts.ChannelPlans = opts.ChannelPlans
 	validationOpts.ChannelOutboundBindings = opts.ChannelOutboundBindings
 	result, err := ValidateWorkflowContractSurface(context.Background(), source, validationOpts)

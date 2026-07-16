@@ -17,14 +17,16 @@ import (
 
 func TestChannelSchemaAdmissionRejectsRecursiveMalformedSchemasAtEveryTypedBoundary(t *testing.T) {
 	tests := []struct {
-		name   string
-		schema runtimecontracts.ToolInputSchema
-		want   string
+		name             string
+		schema           runtimecontracts.ToolInputSchema
+		want             string
+		programmaticOnly bool
 	}{
 		{name: "scalar regex", schema: runtimecontracts.ToolInputSchema{Type: "string", Pattern: "["}, want: "pattern is invalid"},
 		{name: "object required", schema: runtimecontracts.ToolInputSchema{Type: "object", Required: []string{"missing"}}, want: "is not declared"},
 		{name: "array items", schema: runtimecontracts.ToolInputSchema{Type: "array"}, want: "array requires items"},
 		{name: "typed enum", schema: runtimecontracts.ToolInputSchema{Type: "integer", Enum: []runtimecontracts.SchemaLiteral{{Node: yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "one"}}}}, want: "must be integer"},
+		{name: "programmatic empty enum", schema: runtimecontracts.ToolInputSchema{Type: "string", Enum: []runtimecontracts.SchemaLiteral{}}, want: "enum must contain at least one value", programmaticOnly: true},
 		{name: "additional properties schema", schema: runtimecontracts.ToolInputSchema{Type: "object", AdditionalProperties: runtimecontracts.ToolAdditionalProperties{Schema: &runtimecontracts.ToolInputSchema{Type: "array"}}}, want: "array requires items"},
 	}
 	boundaries := []struct {
@@ -76,12 +78,27 @@ func TestChannelSchemaAdmissionRejectsRecursiveMalformedSchemasAtEveryTypedBound
 	}
 	for _, tc := range tests {
 		for _, boundary := range boundaries {
+			if tc.programmaticOnly && boundary.name == "yaml" {
+				continue
+			}
 			t.Run(tc.name+"/"+boundary.name, func(t *testing.T) {
 				if err := boundary.admit(t, runtimecontracts.CloneToolInputSchema(tc.schema)); err == nil || !strings.Contains(err.Error(), tc.want) {
 					t.Fatalf("admission error = %v, want %q", err, tc.want)
 				}
 			})
 		}
+	}
+}
+
+func TestChannelGenerationRejectsProgrammaticEmptyEnum(t *testing.T) {
+	registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
+	plan, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+	if err != nil {
+		t.Fatalf("CompileChannel: %v", err)
+	}
+	plan.OpaqueTypes["external_account_reference"] = runtimecontracts.ToolInputSchema{Type: "string", Enum: []runtimecontracts.SchemaLiteral{}}
+	if _, err := plan.GenerationID(); err == nil || !strings.Contains(err.Error(), "enum must contain at least one value") {
+		t.Fatalf("GenerationID empty enum error = %v", err)
 	}
 }
 

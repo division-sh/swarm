@@ -1813,6 +1813,14 @@ func testTelegramConnectorTool(baseURL string) runtimecontracts.ToolSchemaEntry 
 		HandlerType: "http",
 		EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 		Credentials: []string{"telegram_bot_token"},
+		InputSchema: runtimecontracts.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]runtimecontracts.ToolInputSchema{
+				"chat_id": {Type: "string"},
+				"text":    {Type: "string"},
+			},
+			Required: []string{"chat_id", "text"},
+		},
 		OutputSchema: runtimecontracts.ToolInputSchema{
 			Type: "object",
 		},

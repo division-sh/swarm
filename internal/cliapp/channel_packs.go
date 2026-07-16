@@ -1,4 +1,4 @@
-package main
+package cliapp
 
 import (
 	"context"
@@ -15,9 +15,10 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-type channelPackLoad struct {
+type ChannelPackLoad struct {
 	Loaded       []packs.LoadedChannelPack
 	Plans        []packs.SatisfactionPlan
 	Bindings     []packs.OutboundBindingPlan
@@ -26,44 +27,63 @@ type channelPackLoad struct {
 	PlatformSpec runtimecontracts.PlatformSpecDocument
 }
 
-func loadConfiguredChannelPacks(ctx context.Context, repo string, cfgResult runtimeConfigLoadResult, platformSpec runtimecontracts.PlatformSpecDocument, triggerCatalog *providertriggers.CatalogSnapshot, staticCredentials runtimecredentials.Store, managedCredentials runtimemanagedcredentials.Store) (channelPackLoad, error) {
+func LoadConfiguredChannelPacks(ctx context.Context, repo string, cfgResult RuntimeConfigLoadResult, platformSpec runtimecontracts.PlatformSpecDocument, triggerCatalog *providertriggers.CatalogSnapshot, staticCredentials runtimecredentials.Store, managedCredentials runtimemanagedcredentials.Store) (ChannelPackLoad, error) {
 	if cfgResult.Config == nil {
-		return channelPackLoad{}, fmt.Errorf("runtime config is required")
+		return ChannelPackLoad{}, fmt.Errorf("runtime config is required")
 	}
 	if triggerCatalog == nil {
-		return channelPackLoad{}, fmt.Errorf("provider trigger catalog is required for channel satisfaction")
+		return ChannelPackLoad{}, fmt.Errorf("provider trigger catalog is required for channel satisfaction")
 	}
 	runningVersion, err := platform.PlatformVersion()
 	if err != nil {
-		return channelPackLoad{}, err
+		return ChannelPackLoad{}, err
 	}
 	platformDirs := resolveProviderTriggerPackDirs(repo, providerTriggerPackConfigOrigin(cfgResult, "channels.packs.platform_dirs"), cfgResult.Config.Channels.Packs.PlatformDirs)
 	externalDirs := resolveProviderTriggerPackDirs(repo, providerTriggerPackConfigOrigin(cfgResult, "channels.packs.external_dirs"), cfgResult.Config.Channels.Packs.ExternalDirs)
 	platformPacks, err := packs.LoadChannelPackDirs(runningVersion, "platform", platformDirs...)
 	if err != nil {
-		return channelPackLoad{}, err
+		return ChannelPackLoad{}, err
 	}
 	externalPacks, err := packs.LoadChannelPackDirs(runningVersion, "external", externalDirs...)
 	if err != nil {
-		return channelPackLoad{}, err
+		return ChannelPackLoad{}, err
 	}
 	loaded := append(append([]packs.LoadedChannelPack(nil), platformPacks...), externalPacks...)
 	registry, err := packs.NewInterfaceRegistry(platformSpec)
 	if err != nil {
-		return channelPackLoad{}, err
+		return ChannelPackLoad{}, err
 	}
 	plans, err := packs.CompileChannelInventory(registry, loaded, triggerCatalog.PackDescriptors(), providerconnectors.DefaultPackRegistry().PackDescriptors())
 	if err != nil {
-		return channelPackLoad{}, err
+		return ChannelPackLoad{}, err
 	}
 	bindings, err := compileChannelBindings(ctx, cfgResult.Config, plans, staticCredentials, managedCredentials)
 	if err != nil {
-		return channelPackLoad{}, err
+		return ChannelPackLoad{}, err
 	}
-	return channelPackLoad{
+	return ChannelPackLoad{
 		Loaded: loaded, Plans: plans, Bindings: bindings,
 		PlatformDirs: platformDirs, ExternalDirs: externalDirs, PlatformSpec: platformSpec,
 	}, nil
+}
+
+func loadChannelPlatformSpecDocument(platformSpecPath string) (runtimecontracts.PlatformSpecDocument, error) {
+	platformSpecPath = strings.TrimSpace(platformSpecPath)
+	if platformSpecPath == "" {
+		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("platform spec path is required")
+	}
+	source, err := yamlsource.LoadFile(platformSpecPath)
+	if err != nil {
+		if cause, ok := yamlsource.ParseCause(err); ok {
+			return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("unmarshal platform spec: %w", cause)
+		}
+		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("read platform spec: %w", err)
+	}
+	var spec runtimecontracts.PlatformSpecDocument
+	if err := source.Decode(&spec); err != nil {
+		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("unmarshal platform spec: %w", err)
+	}
+	return spec, nil
 }
 
 func compileChannelBindings(ctx context.Context, cfg *config.Config, plans []packs.SatisfactionPlan, staticCredentials runtimecredentials.Store, managedCredentials runtimemanagedcredentials.Store) ([]packs.OutboundBindingPlan, error) {
@@ -132,7 +152,7 @@ func sortedChannelOperationNames(operations map[string]packs.CompiledChannelOper
 	return names
 }
 
-func appendChannelCapabilitySubjects(report *localPreflightReport, load channelPackLoad) {
+func appendChannelCapabilitySubjects(report *LocalPreflightReport, load ChannelPackLoad) {
 	if report == nil {
 		return
 	}
@@ -140,7 +160,7 @@ func appendChannelCapabilitySubjects(report *localPreflightReport, load channelP
 	for _, plan := range load.Plans {
 		subject, err := plan.CapabilitySubject()
 		if err != nil {
-			report.add(localPreflightProviderPackPrerequisite, "channel_pack_surface_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix the selected channel pack")
+			report.add(localPreflightProviderPackPrerequisite, "channel_pack_surface_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the selected channel pack")
 			return
 		}
 		subjects = append(subjects, subject)
@@ -148,7 +168,7 @@ func appendChannelCapabilitySubjects(report *localPreflightReport, load channelP
 	for _, binding := range load.Bindings {
 		subject, err := binding.CapabilitySubject()
 		if err != nil {
-			report.add(localPreflightProviderPackPrerequisite, "channel_outbound_surface_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix the outbound channel binding or connector credentials")
+			report.add(localPreflightProviderPackPrerequisite, "channel_outbound_surface_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the outbound channel binding or connector credentials")
 			return
 		}
 		subjects = append(subjects, subject)

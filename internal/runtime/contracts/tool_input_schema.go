@@ -23,7 +23,7 @@ func ValidateToolInputSchema(schema ToolInputSchema) error {
 
 func ToolInputSchemaIsZero(schema ToolInputSchema) bool {
 	return schema.Type == "" && schema.Description == "" && len(schema.Properties) == 0 && len(schema.Required) == 0 &&
-		schema.Items == nil && len(schema.Enum) == 0 && !schema.enumDeclared &&
+		schema.Items == nil && schema.Enum == nil && !schema.enumDeclared &&
 		schema.AdditionalProperties.Allowed == nil && schema.AdditionalProperties.Schema == nil &&
 		schema.Minimum == nil && schema.Maximum == nil && schema.Pattern == "" &&
 		schema.MinLength == nil && schema.MaxLength == nil && schema.MinItems == nil && schema.MaxItems == nil
@@ -147,7 +147,7 @@ func validateToolInputSchema(path string, schema *ToolInputSchema, depth int, an
 		}
 	}
 
-	if schema.enumDeclared && len(schema.Enum) == 0 {
+	if schema.Enum != nil && len(schema.Enum) == 0 {
 		return fmt.Errorf("%s enum must contain at least one value", path)
 	}
 	seenEnums := []semanticvalue.Value{}
@@ -373,22 +373,65 @@ func cloneToolInputSchema(in ToolInputSchema, depth int, ancestors map[*ToolInpu
 	return out, true
 }
 
-// CloneToolSchemaEntry is the sole mutation-isolation owner for tool schema
-// carriers returned by accepted registries, semantic sources, and plans.
+// AdmitToolSchemaEntry validates the complete typed tool surface and converts
+// every semantic JSON carrier into the closed canonical representation before
+// accepted storage, hashing, or dispatch.
+func AdmitToolSchemaEntry(in ToolSchemaEntry) (ToolSchemaEntry, error) {
+	if err := ValidateToolInputSchema(in.InputSchema); err != nil {
+		return ToolSchemaEntry{}, fmt.Errorf("input_schema: %w", err)
+	}
+	if err := ValidateToolInputSchema(in.OutputSchema); err != nil {
+		return ToolSchemaEntry{}, fmt.Errorf("output_schema: %w", err)
+	}
+	if in.CompiledResult != nil {
+		if err := ValidateToolInputSchema(in.CompiledResult.OutputSchema); err != nil {
+			return ToolSchemaEntry{}, fmt.Errorf("compiled_result.output_schema: %w", err)
+		}
+	}
+	return cloneToolSchemaEntry(in)
+}
+
+// CloneToolSchemaEntry is the sole mutation-isolation owner for admitted tool
+// schema carriers returned by registries, semantic sources, and plans. Invalid
+// unadmitted carriers become an unusable entry instead of retaining mutable or
+// recursive caller-owned values.
 func CloneToolSchemaEntry(in ToolSchemaEntry) ToolSchemaEntry {
+	out, err := cloneToolSchemaEntry(in)
+	if err != nil {
+		return ToolSchemaEntry{
+			InputSchema:  ToolInputSchema{Type: "__invalid_tool_schema_carrier__"},
+			OutputSchema: ToolInputSchema{Type: "__invalid_tool_schema_carrier__"},
+		}
+	}
+	return out
+}
+
+func cloneToolSchemaEntry(in ToolSchemaEntry) (ToolSchemaEntry, error) {
 	out := in
 	out.InputSchema = CloneToolInputSchema(in.InputSchema)
 	out.OutputSchema = CloneToolInputSchema(in.OutputSchema)
 	if in.HTTP != nil {
 		httpSpec := *in.HTTP
 		httpSpec.Headers = cloneToolStringMap(in.HTTP.Headers)
-		httpSpec.Body = cloneToolSchemaCarrierValue(in.HTTP.Body)
+		body, err := cloneToolSchemaCarrierValue(in.HTTP.Body)
+		if err != nil {
+			return ToolSchemaEntry{}, fmt.Errorf("http.body: %w", err)
+		}
+		httpSpec.Body = body
 		out.HTTP = &httpSpec
 	}
-	out.ResponseMapping = cloneToolSchemaCarrierMap(in.ResponseMapping)
+	responseMapping, err := cloneToolSchemaCarrierMap(in.ResponseMapping)
+	if err != nil {
+		return ToolSchemaEntry{}, fmt.Errorf("response_mapping: %w", err)
+	}
+	out.ResponseMapping = responseMapping
 	if in.ResponseSuccess != nil {
 		response := *in.ResponseSuccess
-		response.Equals = cloneToolSchemaCarrierValue(in.ResponseSuccess.Equals)
+		equals, err := cloneToolSchemaCarrierValue(in.ResponseSuccess.Equals)
+		if err != nil {
+			return ToolSchemaEntry{}, fmt.Errorf("response_success.equals: %w", err)
+		}
+		response.Equals = equals
 		out.ResponseSuccess = &response
 	}
 	out.Credentials = append([]string(nil), in.Credentials...)
@@ -408,7 +451,7 @@ func CloneToolSchemaEntry(in ToolSchemaEntry) ToolSchemaEntry {
 		}
 		out.CompiledResult = projection
 	}
-	return out
+	return out, nil
 }
 
 func CloneToolSchemaEntries(in map[string]ToolSchemaEntry) map[string]ToolSchemaEntry {
@@ -509,42 +552,28 @@ func cloneToolStringMap(in map[string]string) map[string]string {
 	return out
 }
 
-func cloneToolSchemaCarrierMap(in map[string]any) map[string]any {
+func cloneToolSchemaCarrierMap(in map[string]any) (map[string]any, error) {
 	if in == nil {
-		return nil
+		return nil, nil
 	}
-	out := make(map[string]any, len(in))
-	for key, value := range in {
-		out[key] = cloneToolSchemaCarrierValue(value)
+	cloned, err := cloneToolSchemaCarrierValue(in)
+	if err != nil {
+		return nil, err
 	}
-	return out
+	out, ok := cloned.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("semantic JSON object projected as %T", cloned)
+	}
+	return out, nil
 }
 
-func cloneToolSchemaCarrierValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneToolSchemaCarrierMap(typed)
-	case map[any]any:
-		out := make(map[any]any, len(typed))
-		for key, item := range typed {
-			out[key] = cloneToolSchemaCarrierValue(item)
-		}
-		return out
-	case []any:
-		out := make([]any, len(typed))
-		for index, item := range typed {
-			out[index] = cloneToolSchemaCarrierValue(item)
-		}
-		return out
-	case yaml.Node:
-		return cloneToolSchemaYAMLNode(typed)
-	case *yaml.Node:
-		if typed == nil {
-			return (*yaml.Node)(nil)
-		}
-		cloned := cloneToolSchemaYAMLNode(*typed)
-		return &cloned
-	default:
-		return value
+func cloneToolSchemaCarrierValue(value any) (any, error) {
+	if value == nil {
+		return nil, nil
 	}
+	admitted, err := canonicaljson.FromGo(value)
+	if err != nil {
+		return nil, fmt.Errorf("value is not semantic JSON: %w", err)
+	}
+	return admitted.Interface(), nil
 }

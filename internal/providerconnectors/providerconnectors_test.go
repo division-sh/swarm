@@ -474,6 +474,61 @@ func TestNewPackRegistryAdmitsSchemasAndReadbacksAreMutationIsolated(t *testing.
 	if err == nil || !strings.Contains(err.Error(), "schema cycle") {
 		t.Fatalf("cyclic connector registry error = %v", err)
 	}
+
+	emptyEnum := tool
+	emptyEnum.InputSchema = runtimecontracts.ToolInputSchema{Type: "string", Enum: []runtimecontracts.SchemaLiteral{}}
+	_, err = NewPackRegistry(LoadedPack{
+		Envelope: packs.Envelope{ID: "test.empty-enum"},
+		Manifest: ConnectorManifest{Provider: "telegram", Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"telegram.send_message": emptyEnum,
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "enum must contain at least one value") {
+		t.Fatalf("programmatic empty enum registry error = %v", err)
+	}
+
+	cyclicCarrier := tool
+	cyclicBody := map[string]any{}
+	cyclicBody["self"] = cyclicBody
+	cyclicHTTP := *cyclicCarrier.HTTP
+	cyclicHTTP.Body = cyclicBody
+	cyclicCarrier.HTTP = &cyclicHTTP
+	_, err = NewPackRegistry(LoadedPack{
+		Envelope: packs.Envelope{ID: "test.cyclic-carrier"},
+		Manifest: ConnectorManifest{Provider: "telegram", Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"telegram.send_message": cyclicCarrier,
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "http.body") || !strings.Contains(err.Error(), "cycle") {
+		t.Fatalf("cyclic HTTP carrier registry error = %v", err)
+	}
+
+	typedCarrier := tool
+	typedBody := map[string]string{"chat_id": "{{input.chat_id}}", "text": "{{input.text}}"}
+	typedLabels := []string{"{{response.body.result.label}}"}
+	typedHTTP := *typedCarrier.HTTP
+	typedHTTP.Body = typedBody
+	typedCarrier.HTTP = &typedHTTP
+	typedCarrier.ResponseMapping = map[string]any{"labels": typedLabels}
+	typedRegistry, err := NewPackRegistry(LoadedPack{
+		Envelope: packs.Envelope{ID: "test.typed-carrier"},
+		Manifest: ConnectorManifest{Provider: "telegram", Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"telegram.send_message": typedCarrier,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("typed carrier registry: %v", err)
+	}
+	typedBody["text"] = "changed"
+	typedLabels[0] = "changed"
+	typedReadback, ok := typedRegistry.Lookup("telegram", "telegram.send_message")
+	if !ok {
+		t.Fatal("typed carrier lookup failed")
+	}
+	typedTool := typedReadback.Manifest.Tools["telegram.send_message"]
+	if typedTool.HTTP.Body.(map[string]any)["text"] != "{{input.text}}" || typedTool.ResponseMapping["labels"].([]any)[0] != "{{response.body.result.label}}" {
+		t.Fatalf("typed connector carrier retained caller ownership: %#v", typedTool)
+	}
 }
 
 func TestCapabilitySubjectsEnumerateExactInstalledInventoryWithoutMakingToolsEffective(t *testing.T) {

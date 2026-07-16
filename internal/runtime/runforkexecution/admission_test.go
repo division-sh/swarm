@@ -691,6 +691,7 @@ func selectedMockConnectorTool() runtimecontracts.ToolSchemaEntry {
 		HandlerType:     "http",
 		EffectClass:     string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 		Credentials:     []string{"provider_token"},
+		InputSchema:     runtimecontracts.ToolInputSchema{Type: "object"},
 		OutputSchema:    runtimecontracts.ToolInputSchema{Type: "object"},
 		ResponseSuccess: &runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"},
 		HTTP:            &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.invalid/send"},

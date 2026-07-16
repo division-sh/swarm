@@ -326,8 +326,8 @@ func TestDoctorClaudeCLIPreflightJSONReportsOKWithoutDB(t *testing.T) {
 	if !report.OK || report.Owner != localPreflightOwner || report.Mode != "doctor" || report.Backend != "claude_cli" {
 		t.Fatalf("report = %#v", report)
 	}
-	if len(report.CapabilitySubjects) != 15 {
-		t.Fatalf("capability subjects = %#v, want eight triggers plus seven connector actions", report.CapabilitySubjects)
+	if len(report.CapabilitySubjects) != 18 {
+		t.Fatalf("capability subjects = %#v, want eight triggers plus ten connector actions", report.CapabilitySubjects)
 	}
 	for _, subject := range report.CapabilitySubjects {
 		code := "provider_connector_" + findingCode(subject.ID)

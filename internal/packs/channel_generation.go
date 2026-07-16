@@ -12,6 +12,9 @@ import (
 // targets pin this value so project reload cannot reinterpret an admitted
 // request through a replacement trigger, connector, schema, or projection.
 func (p SatisfactionPlan) GenerationID() (string, error) {
+	if err := validateSatisfactionPlanGenerationInputs(p); err != nil {
+		return "", err
+	}
 	operations := make(map[string]any, len(p.Operations))
 	for _, name := range sortedKeys(p.Operations) {
 		operation := p.Operations[name]
@@ -53,6 +56,31 @@ func (p SatisfactionPlan) GenerationID() (string, error) {
 		"operations":            operations,
 		"events":                events,
 	})
+}
+
+func validateSatisfactionPlanGenerationInputs(plan SatisfactionPlan) error {
+	for family, schemas := range map[string]map[string]runtimecontracts.ToolInputSchema{
+		"schema": plan.Schemas, "opaque type": plan.OpaqueTypes, "constraint": plan.Constraints,
+	} {
+		for name, schema := range schemas {
+			if err := runtimecontracts.ValidateToolInputSchema(schema); err != nil {
+				return fmt.Errorf("channel generation %s %q: %w", family, name, err)
+			}
+		}
+	}
+	for name, operation := range plan.Operations {
+		if _, err := runtimecontracts.AdmitToolSchemaEntry(operation.ToolSchema); err != nil {
+			return fmt.Errorf("channel generation operation %q tool: %w", name, err)
+		}
+	}
+	for eventName, event := range plan.Events {
+		for fieldName, field := range event.Descriptor.Fields {
+			if err := runtimecontracts.ValidateToolInputSchema(field.Schema); err != nil {
+				return fmt.Errorf("channel generation event %q field %q: %w", eventName, fieldName, err)
+			}
+		}
+	}
+	return nil
 }
 
 func channelTriggerEventGenerationValue(event TriggerEvent) map[string]any {
