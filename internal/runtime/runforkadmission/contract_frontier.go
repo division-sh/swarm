@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -64,7 +65,7 @@ func AdmitContractFrontier(req ContractFrontierRequest) (store.RunForkContractFr
 	frontier, lineageOnly := runForkFrontierEvents(req.Plan.PendingWork)
 	for i := range frontier {
 		eventName := frontier[i].EventName
-		routeKeys, connectOwned := contractFrontierRouteKeys(eventName, connectPlans)
+		routeKeys, connectOwned := contractFrontierRouteKeys(eventName, frontier[i].SourceFlowInstances, connectPlans)
 		frontier[i].RuntimeEventOwners = sortedUnique(req.Source.RuntimeEventOwners(eventName))
 		frontier[i].WorkflowNodeSubscribers = workflowNodeSubscribers(workflowNodes, routeKeys...)
 		frontier[i].DerivedRecipients = contractFrontierRecipients(resolveContractFrontierRoutes(routeTable, routeKeys, connectOwned))
@@ -318,15 +319,27 @@ func inferContractFrontierFlowInstanceFromEvent(source semanticview.Source, even
 	return ""
 }
 
-func contractFrontierRouteKeys(eventName string, plans []runtimepinrouting.ConnectRoutePlan) ([]string, bool) {
+func contractFrontierRouteKeys(eventName string, flowInstances []string, plans []runtimepinrouting.ConnectRoutePlan) ([]string, bool) {
 	eventName = strings.Trim(strings.TrimSpace(eventName), "/")
 	if eventName == "" {
 		return nil, false
 	}
+	probe := events.NewRouteProbeEvent(events.EventType(eventName))
+	matchesSource := func(endpoint runtimepinrouting.ConnectRoutePlanEndpoint) bool {
+		if len(flowInstances) == 0 {
+			return runtimepinrouting.ConnectSourceEndpointMatchesEvent(endpoint, probe)
+		}
+		for _, flowInstance := range flowInstances {
+			if runtimepinrouting.ConnectSourceEndpointMatchesEvent(endpoint, probe.WithFlowInstance(flowInstance)) {
+				return true
+			}
+		}
+		return false
+	}
 	matched := false
 	receiverEvents := map[string]struct{}{}
 	for _, plan := range plans {
-		if eventName != strings.Trim(strings.TrimSpace(plan.Source.ResolvedEvent), "/") {
+		if !matchesSource(plan.Source) {
 			continue
 		}
 		matched = true

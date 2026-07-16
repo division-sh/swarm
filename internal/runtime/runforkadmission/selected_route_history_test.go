@@ -66,6 +66,60 @@ func TestAdmitSelectedContractRouteHistoryDerivesSelectedRoutesWithoutMutating(t
 	}
 }
 
+func TestAdmitSelectedContractRouteHistoryConnectMatchesConcreteTemplateSourceEndpoint(t *testing.T) {
+	plan := testRunForkPlan("producer/inst-1/scan.requested", store.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
+	plan.PendingWork[0].FlowInstance = "producer/inst-1"
+	source := testContractFrontierTemplateConnectSource()
+	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
+		Plan:              plan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+	})
+	if err != nil {
+		t.Fatalf("AdmitContractFrontier: %v", err)
+	}
+
+	admission, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{
+		Plan:              plan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		FrontierAdmission: frontier,
+	})
+	if err != nil {
+		t.Fatalf("AdmitSelectedContractRouteHistory: %v", err)
+	}
+	if len(admission.SelectedRouteEvents) != 1 || len(admission.SelectedRouteEvents[0].DerivedRecipients) != 1 || admission.SelectedRouteEvents[0].DerivedRecipients[0].SubscriberID != "consumer-node" {
+		t.Fatalf("selected route events = %#v, want consumer-node through producer connect", admission.SelectedRouteEvents)
+	}
+}
+
+func TestAdmitSelectedContractRouteHistoryConnectRejectsUnrelatedTemplateSameLeaf(t *testing.T) {
+	plan := testRunForkPlan("unrelated/inst-1/scan.requested", store.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
+	plan.PendingWork[0].FlowInstance = "unrelated/inst-1"
+	source := testContractFrontierTemplateConnectSource()
+	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
+		Plan:              plan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+	})
+	if err != nil {
+		t.Fatalf("AdmitContractFrontier: %v", err)
+	}
+
+	admission, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{
+		Plan:              plan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		FrontierAdmission: frontier,
+	})
+	if err != nil {
+		t.Fatalf("AdmitSelectedContractRouteHistory: %v", err)
+	}
+	if len(admission.SelectedRouteEvents) != 1 || len(admission.SelectedRouteEvents[0].DerivedRecipients) != 0 {
+		t.Fatalf("selected route events = %#v, want unrelated same-leaf template excluded", admission.SelectedRouteEvents)
+	}
+}
+
 func TestAdmitSelectedContractRouteHistoryDoesNotDuplicateFrontierRecipients(t *testing.T) {
 	plan := testRunForkPlan("producer/scan.requested", store.RunForkPendingClassificationPending, "node", "source-node")
 	historyEventID := uuid.NewString()

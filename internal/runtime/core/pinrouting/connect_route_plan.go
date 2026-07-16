@@ -67,6 +67,113 @@ type ConnectRoutePlanEndpoint struct {
 	Carries       []string
 }
 
+// ConnectSourceEndpointMatchesEvent is the canonical source-side identity
+// matcher for lowered connect plans.
+func ConnectSourceEndpointMatchesEvent(endpoint ConnectRoutePlanEndpoint, evt events.Event) bool {
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
+	if eventType == "" {
+		return false
+	}
+	if endpoint.Root && !connectSourceFlowInstanceMatchesPath(evt.FlowInstance(), "") {
+		return false
+	}
+	sourceLocal := strings.Trim(strings.TrimSpace(endpoint.Event), "/")
+	sourceResolved := strings.Trim(strings.TrimSpace(endpoint.ResolvedEvent), "/")
+	sourcePath := strings.Trim(strings.TrimSpace(endpoint.FlowPath), "/")
+	if sourcePath == "" {
+		sourcePath = strings.Trim(strings.TrimSpace(endpoint.FlowID), "/")
+	}
+	sourceScoped := sourceLocal
+	if sourcePath != "" && sourceLocal != "" {
+		sourceScoped = sourcePath + "/" + sourceLocal
+	}
+	for _, candidate := range []string{sourceResolved, sourceScoped} {
+		if candidate != "" && eventType == candidate {
+			return true
+		}
+	}
+	if sourceLocal != "" && eventType == sourceLocal {
+		return connectSourceFlowInstanceMatchesPath(evt.FlowInstance(), sourcePath)
+	}
+	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
+	if flowInstance != "" && sourceLocal != "" && eventType == flowInstance+"/"+sourceLocal {
+		return connectSourceFlowInstanceMatchesPath(flowInstance, sourcePath)
+	}
+	for _, key := range connectSourceEventRouteKeys(evt) {
+		key = strings.Trim(strings.TrimSpace(key), "/")
+		if key != "" && (key == sourceResolved || key == sourceScoped) {
+			return true
+		}
+	}
+	return false
+}
+
+func connectSourceFlowInstanceMatchesPath(flowInstance, sourcePath string) bool {
+	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
+	sourcePath = strings.Trim(strings.TrimSpace(sourcePath), "/")
+	if sourcePath == "" {
+		return flowInstance == "" || runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance) == ""
+	}
+	if flowInstance == sourcePath {
+		return true
+	}
+	return runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance) == sourcePath
+}
+
+func connectSourceEventRouteKeys(evt events.Event) []string {
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
+	if eventType == "" {
+		return nil
+	}
+	out := []string{eventType}
+	if concrete := connectSourceConcreteEventKey(eventType, evt.FlowInstance()); concrete != "" {
+		out = append(out, concrete)
+	}
+	targets := evt.TargetRoutes()
+	if target := evt.TargetRoute(); !target.Empty() {
+		targets = []events.RouteIdentity{target}
+	}
+	for _, target := range targets {
+		flowInstance := strings.Trim(strings.TrimSpace(target.Normalized().FlowInstance), "/")
+		staticScope := runtimeflowidentity.SemanticScopeFromFlowInstanceRef(flowInstance)
+		localEvent := connectSourceLocalEvent(eventType, staticScope)
+		if flowInstance == "" || localEvent == "" {
+			continue
+		}
+		out = append(out, flowInstance+"/"+localEvent, localEvent)
+	}
+	return out
+}
+
+func connectSourceConcreteEventKey(eventType, flowInstance string) string {
+	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
+	staticScope := runtimeflowidentity.SemanticScopeFromFlowInstanceRef(flowInstance)
+	localEvent := connectSourceLocalEvent(eventType, staticScope)
+	if flowInstance == "" || localEvent == "" {
+		return ""
+	}
+	return flowInstance + "/" + localEvent
+}
+
+func connectSourceLocalEvent(eventType, staticScope string) string {
+	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
+	staticScope = strings.Trim(strings.TrimSpace(staticScope), "/")
+	if eventType == "" || staticScope == "" {
+		return ""
+	}
+	if strings.HasPrefix(eventType, staticScope+"/") {
+		localEvent := strings.TrimPrefix(eventType, staticScope+"/")
+		if localEvent == "" || strings.Contains(localEvent, "/") {
+			return ""
+		}
+		return localEvent
+	}
+	if strings.Contains(eventType, "/") {
+		return ""
+	}
+	return eventType
+}
+
 type ConnectRoutePlanAddress struct {
 	By          string
 	Source      string

@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -517,65 +516,14 @@ func (r connectRoutePlanResolver) connectIssueMatchesEvent(ctx context.Context, 
 		Event:         strings.TrimSpace(outputPin.EventType()),
 		ResolvedEvent: strings.TrimSpace(r.source.ResolveFlowEventReference(from.FlowID, outputPin.EventType())),
 	}
-	if !connectEndpointMatchesEvent(endpoint, evt) {
+	if !runtimepinrouting.ConnectSourceEndpointMatchesEvent(endpoint, evt) {
 		return false
 	}
 	return providerOutputAuthorizationMatches(ctx, issue.ProviderOutputAuthorization)
 }
 
 func connectRoutePlanMatchesEvent(ctx context.Context, plan runtimepinrouting.ConnectRoutePlan, evt events.Event) bool {
-	return connectEndpointMatchesEvent(plan.Source, evt) && providerOutputAuthorizationMatches(ctx, plan.ProviderOutputAuthorization)
-}
-
-func connectEndpointMatchesEvent(endpoint runtimepinrouting.ConnectRoutePlanEndpoint, evt events.Event) bool {
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
-	if eventType == "" {
-		return false
-	}
-	if endpoint.Root && !eventFlowInstanceMatchesSourcePath(evt.FlowInstance(), "") {
-		return false
-	}
-	sourceLocal := strings.Trim(strings.TrimSpace(endpoint.Event), "/")
-	sourceResolved := strings.Trim(strings.TrimSpace(endpoint.ResolvedEvent), "/")
-	sourcePath := strings.Trim(strings.TrimSpace(endpoint.FlowPath), "/")
-	if sourcePath == "" {
-		sourcePath = strings.Trim(strings.TrimSpace(endpoint.FlowID), "/")
-	}
-	sourceScoped := sourceLocal
-	if sourcePath != "" && sourceLocal != "" {
-		sourceScoped = sourcePath + "/" + sourceLocal
-	}
-	for _, candidate := range uniqueStrings([]string{sourceResolved, sourceScoped}) {
-		if candidate != "" && eventType == candidate {
-			return true
-		}
-	}
-	if sourceLocal != "" && eventType == sourceLocal {
-		return eventFlowInstanceMatchesSourcePath(evt.FlowInstance(), sourcePath)
-	}
-	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
-	if flowInstance != "" && sourceLocal != "" && eventType == flowInstance+"/"+sourceLocal {
-		return eventFlowInstanceMatchesSourcePath(flowInstance, sourcePath)
-	}
-	for _, key := range routedEventKeysForPlan(evt) {
-		key = strings.Trim(strings.TrimSpace(key), "/")
-		if key != "" && (key == sourceResolved || key == sourceScoped) {
-			return true
-		}
-	}
-	return false
-}
-
-func eventFlowInstanceMatchesSourcePath(flowInstance, sourcePath string) bool {
-	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
-	sourcePath = strings.Trim(strings.TrimSpace(sourcePath), "/")
-	if sourcePath == "" {
-		return flowInstance == "" || runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance) == ""
-	}
-	if flowInstance == sourcePath {
-		return true
-	}
-	return runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance) == sourcePath
+	return runtimepinrouting.ConnectSourceEndpointMatchesEvent(plan.Source, evt) && providerOutputAuthorizationMatches(ctx, plan.ProviderOutputAuthorization)
 }
 
 func connectMaterializedTargets(materialized runtimepinrouting.ConnectRoutePlanMaterialization) []events.RouteIdentity {

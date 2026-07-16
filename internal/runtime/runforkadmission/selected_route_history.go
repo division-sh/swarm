@@ -104,6 +104,7 @@ func selectedRouteHistoryHasSourceRouteFacts(plan store.RunForkPlan) bool {
 type selectedRouteHistoryEvent struct {
 	sourceEventID string
 	eventName     string
+	flowInstance  string
 }
 
 func selectedRouteHistoryEventEvidence(plan store.RunForkPlan, frontier store.RunForkContractFrontierAdmission) []selectedRouteHistoryEvent {
@@ -114,9 +115,10 @@ func selectedRouteHistoryEventEvidence(plan store.RunForkPlan, frontier store.Ru
 		}
 	}
 	seen := map[string]selectedRouteHistoryEvent{}
-	add := func(sourceEventID, eventName string) {
+	add := func(sourceEventID, eventName, flowInstance string) {
 		sourceEventID = strings.TrimSpace(sourceEventID)
 		eventName = strings.TrimSpace(eventName)
+		flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
 		if eventName == "" {
 			return
 		}
@@ -127,12 +129,12 @@ func selectedRouteHistoryEventEvidence(plan store.RunForkPlan, frontier store.Ru
 		if key == "" {
 			key = eventName
 		}
-		seen[key] = selectedRouteHistoryEvent{sourceEventID: sourceEventID, eventName: eventName}
+		seen[key] = selectedRouteHistoryEvent{sourceEventID: sourceEventID, eventName: eventName, flowInstance: flowInstance}
 	}
-	add(plan.ForkPoint.EventID, plan.ForkPoint.EventName)
+	add(plan.ForkPoint.EventID, plan.ForkPoint.EventName, "")
 	for _, item := range plan.PendingWork {
 		if strings.TrimSpace(item.Classification) == store.RunForkPendingClassificationDeliveredCompleted {
-			add(item.EventID, item.EventName)
+			add(item.EventID, item.EventName, item.FlowInstance)
 		}
 	}
 	keys := make(map[string]struct{}, len(seen))
@@ -150,7 +152,11 @@ func selectedRouteHistoryEventEvidence(plan store.RunForkPlan, frontier store.Ru
 func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectPlans []runtimepinrouting.ConnectRoutePlan, events []selectedRouteHistoryEvent) []store.RunForkSelectedContractRouteEvent {
 	out := make([]store.RunForkSelectedContractRouteEvent, 0, len(events))
 	for _, event := range events {
-		routeKeys, connectOwned := contractFrontierRouteKeys(event.eventName, connectPlans)
+		flowInstances := []string(nil)
+		if event.flowInstance != "" {
+			flowInstances = []string{event.flowInstance}
+		}
+		routeKeys, connectOwned := contractFrontierRouteKeys(event.eventName, flowInstances, connectPlans)
 		out = append(out, store.RunForkSelectedContractRouteEvent{
 			SourceEventID:     event.sourceEventID,
 			EventName:         event.eventName,
