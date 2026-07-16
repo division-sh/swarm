@@ -2137,17 +2137,6 @@ func routeIdentitySetJSON(routes []events.RouteIdentity) []byte {
 	return encoded
 }
 
-func eventEnvelopeFromStorage(entityID, flowInstance, scope string, sourceRouteRaw, targetRouteRaw, targetSetRaw []byte) events.EventEnvelope {
-	return events.EventEnvelope{
-		EntityID:     entityID,
-		FlowInstance: flowInstance,
-		Scope:        events.EventScope(scope),
-		Source:       decodeRouteIdentityJSON(sourceRouteRaw),
-		Target:       decodeRouteIdentityJSON(targetRouteRaw),
-		TargetSet:    decodeRouteIdentitySetJSON(targetSetRaw),
-	}.Normalized()
-}
-
 func decodeRouteIdentityJSON(raw []byte) events.RouteIdentity {
 	if len(raw) == 0 {
 		return events.RouteIdentity{}
@@ -2157,23 +2146,6 @@ func decodeRouteIdentityJSON(raw []byte) events.RouteIdentity {
 		return events.RouteIdentity{}
 	}
 	return route.Normalized()
-}
-
-func decodeRouteIdentitySetJSON(raw []byte) []events.RouteIdentity {
-	if len(raw) == 0 {
-		return nil
-	}
-	var routes []events.RouteIdentity
-	if err := json.Unmarshal(raw, &routes); err != nil {
-		return nil
-	}
-	out := make([]events.RouteIdentity, 0, len(routes))
-	for _, route := range routes {
-		if route = route.Normalized(); !route.Empty() {
-			out = append(out, route)
-		}
-	}
-	return out
 }
 
 func mapPipelineStatusToOutcome(status string) string {
