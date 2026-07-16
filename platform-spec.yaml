@@ -742,7 +742,9 @@ contract_formats:
         and the persisted produced_by/produced_by_type columns are projections of
         that value, not additional semantic facts. Production code MUST NOT mutate
         event-owned fields after construction and MUST NOT construct events through
-        direct carrier literals.
+        direct carrier literals. Canonical event admission normalizes created_at to
+        UTC microsecond precision before publication or selected-store persistence so
+        the writer can persist the admitted timestamp exactly on both supported stores.
 
         task_id is an independent event-owned fact persisted in events.task_id.
         Payload is a separate immutable authored fact: admission, writers, duplicate
