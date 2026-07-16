@@ -271,7 +271,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Prove explicit Postgres opt-in selector
-        run: go run ./cmd/swarm-test-postgres -- go test ./cmd/swarm -run TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction -count=1
+        run: go run ./cmd/swarm-test-postgres -- go test ./internal/serveapp -run '^TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction$' -count=1 -v
       - name: Prove runner-owned Docker service
         run: go run ./cmd/swarm-test-postgres -- go test ./internal/testutil -run '^TestStartPostgres_Smoke$' -count=1
       - name: Prove runner failure, interrupt, and hard-death reconciliation

@@ -86,7 +86,7 @@ rows:
     concepts:
       - raw SQLite runtime SQLDB exposure to producers
     owners:
-      - cmd/swarm buildStores
+      - internal/serveapp buildStores
       - runtime.Stores.SQLDB
       - raw_sql_runtime_consumer_boundary_for_sqlite
     proof_refs:
@@ -136,7 +136,7 @@ rows:
     owners:
       - .github/workflows/ci.yml sqlite-local-dev
       - internal/store/backendselection
-      - cmd/swarm buildStores
+      - internal/serveapp buildStores
     proof_refs:
       - kind: workflow
         path: .github/workflows/ci.yml
@@ -157,7 +157,7 @@ rows:
     owners:
       - .github/workflows/ci.yml Prove explicit Postgres opt-in selector
       - internal/store/backendselection
-      - cmd/swarm buildStores
+      - internal/serveapp buildStores
     proof_refs:
       - kind: workflow
         path: .github/workflows/ci.yml

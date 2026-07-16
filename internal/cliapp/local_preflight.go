@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const localPreflightOwner = "cmd/swarm local claude_cli preflight/admission owner"
+const localPreflightOwner = "internal/cliapp local claude_cli preflight/admission owner"
 
 type localPreflightCategory string
 

@@ -11,7 +11,7 @@ import (
 func TestSelectedStoreFacadeOwnsProducerBackendBranching(t *testing.T) {
 	files, err := os.ReadDir(".")
 	if err != nil {
-		t.Fatalf("read cmd/swarm: %v", err)
+		t.Fatalf("read internal/serveapp: %v", err)
 	}
 	var failures []string
 	for _, file := range files {
@@ -19,7 +19,7 @@ func TestSelectedStoreFacadeOwnsProducerBackendBranching(t *testing.T) {
 		if file.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		path := filepath.Join("cmd", "swarm", name)
+		path := filepath.Join("internal", "serveapp", name)
 		body, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)
@@ -40,7 +40,7 @@ func buildPublicSurfaceFromStore(stores storeBundle) {
 	}
 }
 `
-	failures := selectedStoreFacadeProducerBackendReferences(filepath.Join("cmd", "swarm", "fixture.go"), src)
+	failures := selectedStoreFacadeProducerBackendReferences(filepath.Join("internal", "serveapp", "fixture.go"), src)
 	if len(failures) == 0 {
 		t.Fatal("expected producer-side concrete backend fixture to fail the guard")
 	}
@@ -51,19 +51,19 @@ func buildPublicSurfaceFromStore(stores storeBundle) {
 
 func selectedStoreFacadeProducerBackendReferences(path, body string) []string {
 	allowed := map[string][]string{
-		filepath.Join("cmd", "swarm", "main.go"): {
+		filepath.Join("internal", "serveapp", "main.go"): {
 			"*store.PostgresStore",
 			"RuntimeSQLDB",
 			"store.NewPostgresStore",
 			"store.NewSQLiteRuntimeStore",
 		},
-		filepath.Join("cmd", "swarm", "store_facade.go"): {
+		filepath.Join("internal", "serveapp", "store_facade.go"): {
 			"SQLDB:               s.RuntimeSQLDB",
 			"f.stores.SQLDB == nil",
 			"f.stores.SQLDB.Close()",
 			"return f.stores.SQLDB",
 		},
-		filepath.Join("cmd", "swarm", "store_roles.go"): {
+		filepath.Join("internal", "serveapp", "store_roles.go"): {
 			"var _ selectedConcreteRuntimeStore = (*store.PostgresStore)(nil)",
 			"Name: \"Postgres\"",
 			"Name: \"RuntimeSQLDB\"",

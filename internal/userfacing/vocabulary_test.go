@@ -1,10 +1,12 @@
 package userfacing
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -36,7 +38,43 @@ func TestProductionUserFacingStringLiteralsAvoidGlobalForbiddenTerms(t *testing.
 		t.Fatal("resolve test source path")
 	}
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", ".."))
-	for _, relativeRoot := range []string{"cmd/swarm", "internal/runtime/bootverify", "internal/runtime/contracts"} {
+	relativeRoots := []string{"cmd/swarm", "internal/cliapp", "internal/serveapp", "internal/runtime/bootverify", "internal/runtime/contracts"}
+	failures, err := forbiddenProductionStringLiterals(repoRoot, relativeRoots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, failure := range failures {
+		t.Error(failure)
+	}
+}
+
+func TestProductionUserFacingStringGuardRejectsEachRelocatedOwner(t *testing.T) {
+	for _, relativeRoot := range []string{"internal/cliapp", "internal/serveapp"} {
+		t.Run(relativeRoot, func(t *testing.T) {
+			repoRoot := t.TempDir()
+			root := filepath.Join(repoRoot, relativeRoot)
+			if err := os.MkdirAll(root, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, "forbidden_fixture.go")
+			if err := os.WriteFile(path, []byte("package fixture\nconst output = \"Wave 1 contracts\"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			failures, err := forbiddenProductionStringLiterals(repoRoot, []string{relativeRoot})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(failures) != 1 || !strings.Contains(failures[0], "Wave 1") {
+				t.Fatalf("failures = %v, want one Wave 1 rejection", failures)
+			}
+		})
+	}
+}
+
+func forbiddenProductionStringLiterals(repoRoot string, relativeRoots []string) ([]string, error) {
+	var failures []string
+	for _, relativeRoot := range relativeRoots {
 		root := filepath.Join(repoRoot, relativeRoot)
 		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
@@ -57,18 +95,19 @@ func TestProductionUserFacingStringLiteralsAvoidGlobalForbiddenTerms(t *testing.
 				}
 				value, err := strconv.Unquote(literal.Value)
 				if err != nil {
-					t.Errorf("unquote %s: %v", fileSet.Position(literal.Pos()), err)
+					failures = append(failures, fmt.Sprintf("unquote %s: %v", fileSet.Position(literal.Pos()), err))
 					return true
 				}
 				if found := FindForbidden(ProfileOperatorOutput, value); len(found) > 0 {
-					t.Errorf("%s user-facing string literal %q contains globally forbidden terms %v", fileSet.Position(literal.Pos()), value, found)
+					failures = append(failures, fmt.Sprintf("%s user-facing string literal %q contains globally forbidden terms %v", fileSet.Position(literal.Pos()), value, found))
 				}
 				return true
 			})
 			return nil
 		})
 		if err != nil {
-			t.Fatalf("scan %s: %v", relativeRoot, err)
+			return nil, fmt.Errorf("scan %s: %w", relativeRoot, err)
 		}
 	}
+	return failures, nil
 }
