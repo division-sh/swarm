@@ -263,6 +263,10 @@ func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
 		if _, ok := allowed[key]; !ok {
 			return fmt.Errorf("tool schema field %q is unsupported", key)
 		}
+		value := node.Content[index+1]
+		if value.Kind == yaml.ScalarNode && strings.EqualFold(strings.TrimSpace(value.Tag), "!!null") {
+			return fmt.Errorf("tool schema field %q must not be null", key)
+		}
 	}
 	type alias ToolInputSchema
 	var aux alias

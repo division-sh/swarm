@@ -102,6 +102,74 @@ func TestChannelGenerationRejectsProgrammaticEmptyEnum(t *testing.T) {
 	}
 }
 
+func TestChannelSchemaYAMLAdmissionRejectsExplicitNullAtEveryBoundary(t *testing.T) {
+	tests := []struct {
+		name  string
+		body  string
+		admit func(*testing.T, []byte) error
+	}{
+		{
+			name: "interface",
+			body: "interfaces:\n  swarm.hitl-channel:\n    v1:\n      kind: pack_channel\n      schemas:\n        presentation:\n          type: string\n          enum: null\n      operations: {}\n      events: {}\n",
+			admit: func(_ *testing.T, body []byte) error {
+				var spec runtimecontracts.PlatformSpecDocument
+				if err := yaml.Unmarshal(body, &spec); err != nil {
+					return err
+				}
+				_, err := packs.NewInterfaceRegistry(spec)
+				return err
+			},
+		},
+		{
+			name: "trigger",
+			body: "provider: test\nnormalized_events:\n  - event: inbound.test.text\n    fields:\n      text:\n        from: message.text\n        schema:\n          type: string\n          enum: null\n",
+			admit: func(_ *testing.T, body []byte) error {
+				manifest, err := providertriggers.ParseManifest(body)
+				if err != nil {
+					return err
+				}
+				return manifest.Validate()
+			},
+		},
+		{
+			name: "channel",
+			body: "provider: test\nopaque_types:\n  destination:\n    type: string\n    enum: null\noperations: {}\nevents: {}\n",
+			admit: func(t *testing.T, body []byte) error {
+				var manifest packs.ChannelManifest
+				if err := yaml.Unmarshal(body, &manifest); err != nil {
+					return err
+				}
+				registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
+				channel.Manifest = manifest
+				_, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+				return err
+			},
+		},
+		{
+			name: "connector",
+			body: "provider: test\ntools:\n  test.send:\n    category: provider_connector\n    handler_type: http\n    effect_class: non_idempotent_write\n    input_schema:\n      type: string\n      enum: null\n    output_schema: {type: object}\n    response_success: {kind: http_status_2xx}\n    http: {method: POST, url: 'https://example.invalid/send'}\n",
+			admit: func(_ *testing.T, body []byte) error {
+				var manifest providerconnectors.ConnectorManifest
+				if err := yaml.Unmarshal(body, &manifest); err != nil {
+					return err
+				}
+				_, err := providerconnectors.NewPackRegistry(providerconnectors.LoadedPack{
+					Envelope: packs.Envelope{ID: "test.connector"}, Manifest: manifest,
+				})
+				return err
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.admit(t, []byte(tc.body))
+			if err == nil || !strings.Contains(err.Error(), `tool schema field "enum" must not be null`) {
+				t.Fatalf("YAML admission error = %v, want explicit null schema rejection", err)
+			}
+		})
+	}
+}
+
 func TestChannelCompilerPreservesExactEnumAndPinsItInGeneration(t *testing.T) {
 	var exact runtimecontracts.ToolInputSchema
 	if err := yaml.Unmarshal([]byte(`

@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"fmt"
 	"math"
 	"reflect"
 	"strings"
@@ -94,6 +95,40 @@ func TestToolInputSchemaRejectsExplicitEmptyEnum(t *testing.T) {
 	}
 	if ToolInputSchemaIsZero(typed) {
 		t.Fatal("typed empty enum was treated as an omitted schema")
+	}
+}
+
+func TestToolInputSchemaRejectsExplicitNullForEveryKeyword(t *testing.T) {
+	tests := []struct {
+		name    string
+		keyword string
+		body    string
+	}{
+		{name: "type", keyword: "type", body: "type: null\n"},
+		{name: "description", keyword: "description", body: "type: string\ndescription: null\n"},
+		{name: "properties", keyword: "properties", body: "type: object\nproperties: null\n"},
+		{name: "required", keyword: "required", body: "type: object\nproperties: {value: {type: string}}\nrequired: null\n"},
+		{name: "items", keyword: "items", body: "type: array\nitems: null\n"},
+		{name: "enum", keyword: "enum", body: "type: string\nenum: null\n"},
+		{name: "additionalProperties", keyword: "additionalProperties", body: "type: object\nadditionalProperties: null\n"},
+		{name: "minimum", keyword: "minimum", body: "type: number\nminimum: null\n"},
+		{name: "maximum", keyword: "maximum", body: "type: number\nmaximum: null\n"},
+		{name: "pattern", keyword: "pattern", body: "type: string\npattern: null\n"},
+		{name: "minLength", keyword: "minLength", body: "type: string\nminLength: null\n"},
+		{name: "maxLength", keyword: "maxLength", body: "type: string\nmaxLength: null\n"},
+		{name: "minItems", keyword: "minItems", body: "type: array\nitems: {type: string}\nminItems: null\n"},
+		{name: "maxItems", keyword: "maxItems", body: "type: array\nitems: {type: string}\nmaxItems: null\n"},
+		{name: "nested enum", keyword: "enum", body: "type: object\nproperties:\n  child:\n    type: string\n    enum: null\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var schema ToolInputSchema
+			err := yaml.Unmarshal([]byte(tc.body), &schema)
+			want := fmt.Sprintf("tool schema field %q must not be null", tc.keyword)
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, want)
+			}
+		})
 	}
 }
 
