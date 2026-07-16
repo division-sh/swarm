@@ -72,6 +72,50 @@ func TestResolveFlowInputProducer_ExplicitConnectOwnsRootInput(t *testing.T) {
 	}
 }
 
+func TestResolveFlowInputProducer_NestedPackageRootConnectDoesNotSuppressRepositoryRootIngress(t *testing.T) {
+	rootInput := runtimecontracts.FlowInputEventPin{Name: "work_requested", Event: "root.work.requested"}
+	childInput := runtimecontracts.FlowInputEventPin{Name: "work_requested", Event: "child.work.requested"}
+	child := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
+		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{
+			Events:    []string{childInput.EventType()},
+			EventPins: []runtimecontracts.FlowInputEventPin{childInput},
+		}}},
+		Path: "child",
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{
+			Events:    []string{rootInput.EventType()},
+			EventPins: []runtimecontracts.FlowInputEventPin{rootInput},
+		}}},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"child": child.Schema},
+		Semantics: runtimecontracts.WorkflowSemanticView{CompositionConnects: []runtimecontracts.FlowPackageConnect{{
+			PackageKey: "flows/child",
+			From:       "producer.work_completed",
+			To:         ".work_requested",
+		}}},
+	}
+	source := Wrap(bundle)
+
+	rootResolution := ResolveFlowInputProducer(source, "", rootInput.EventType())
+	if !rootResolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress) {
+		t.Fatalf("root evidence = %#v, want repository-root external ingress", rootResolution.Evidence)
+	}
+	if rootResolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
+		t.Fatalf("root evidence = %#v, nested package-root connect must not own the repository-root pin", rootResolution.Evidence)
+	}
+
+	childResolution := ResolveFlowInputProducer(source, "child", childInput.EventType())
+	if !childResolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
+		t.Fatalf("child evidence = %#v, want nested package-root connect ownership", childResolution.Evidence)
+	}
+}
+
 func TestResolveFlowInputProducer_ClassifiesParentConnectWithoutRoutePattern(t *testing.T) {
 	source := flowInputProducerFixture(runtimecontracts.FlowInputEventPin{
 		Name:  "work.requested",

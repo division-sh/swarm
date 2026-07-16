@@ -83,7 +83,7 @@ func ResolveFlowInputProducerWithOptions(source Source, flowID, eventType string
 func appendBoundaryIngressEvidence(source Source, flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
 	if flowID == "" && !opts.AllowNonInputEvent {
 		for _, pin := range flowInputPinsForEvent(source, flowID, eventType) {
-			if len(source.CompositionConnectsTo(flowID, pin.PinName())) > 0 {
+			if len(ResolvedCompositionConnectsTo(source, flowID, pin.PinName())) > 0 {
 				return
 			}
 		}
@@ -109,18 +109,17 @@ func appendBoundaryIngressEvidence(source Source, flowID, eventType string, opts
 
 func appendParentConnectEvidence(source Source, flowID, eventType string, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
 	for _, pin := range flowInputPinsForEvent(source, flowID, eventType) {
-		connects := source.CompositionConnectsTo(flowID, pin.PinName())
+		connects := ResolvedCompositionConnectsTo(source, flowID, pin.PinName())
 		if len(connects) == 0 {
 			continue
 		}
 		for _, connect := range connects {
-			ref, _ := connect.FromRef()
 			appendEvidence(runtimecontracts.FlowInputProducerEvidence{
 				Kind:      runtimecontracts.FlowInputProducerBoundaryParentConnect,
-				FlowID:    ref.FlowID,
+				FlowID:    connect.From.FlowID,
 				EventType: eventType,
 				Pin:       pin.PinName(),
-				Detail:    fmt.Sprintf("parent connect from %s", strings.TrimSpace(connect.From)),
+				Detail:    fmt.Sprintf("parent connect from %s", strings.TrimSpace(connect.Connect.From)),
 			})
 		}
 	}

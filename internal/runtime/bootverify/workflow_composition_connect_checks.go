@@ -406,19 +406,19 @@ func validateReplyInputPinResolution(source semanticview.Source, flowID string, 
 	if correlationKey != "" && !containsTrimmedString(requestPin.Carries, correlationKey) {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply correlation_key %q must name a carry declared by output pin %s", correlationKey, requestPinName), location))
 	}
-	requestConnects := source.CompositionConnectsFrom(flowID, requestPinName)
+	requestConnects := semanticview.ResolvedCompositionConnectsFrom(source, flowID, requestPinName)
 	if len(requestConnects) != 1 {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply request pin %s.%s must have exactly one connected counterpart, got %d", flowID, requestPinName, len(requestConnects)), location))
 		return findings
 	}
-	replyConnects := source.CompositionConnectsTo(flowID, pin.PinName())
+	replyConnects := semanticview.ResolvedCompositionConnectsTo(source, flowID, pin.PinName())
 	if len(replyConnects) != 1 {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply input pin %s.%s must have exactly one connected provider output, got %d", flowID, pin.PinName(), len(replyConnects)), location))
 		return findings
 	}
-	requestTarget, requestErr := requestConnects[0].ToRef()
-	replySource, replyErr := replyConnects[0].FromRef()
-	if requestErr != nil || replyErr != nil || requestTarget.Root || replySource.Root || strings.TrimSpace(requestTarget.FlowID) != strings.TrimSpace(replySource.FlowID) {
+	requestTarget := requestConnects[0].To
+	replySource := replyConnects[0].From
+	if requestTarget.Root || replySource.Root || strings.TrimSpace(requestTarget.FlowID) != strings.TrimSpace(replySource.FlowID) {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", "resolution mode reply request and reply edges must connect the same provider flow", location))
 	}
 	return findings

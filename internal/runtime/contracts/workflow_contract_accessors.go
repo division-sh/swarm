@@ -579,54 +579,6 @@ func (b *WorkflowContractBundle) CompositionConnects() []FlowPackageConnect {
 	}
 	return cloneFlowPackageConnects(b.Semantics.CompositionConnects)
 }
-func (b *WorkflowContractBundle) CompositionConnectsTo(flowID, pinName string) []FlowPackageConnect {
-	flowID = strings.TrimSpace(flowID)
-	pinName = strings.TrimSpace(pinName)
-	if b == nil || pinName == "" {
-		return nil
-	}
-	var out []FlowPackageConnect
-	for _, connect := range b.CompositionConnects() {
-		ref, err := connect.ToRef()
-		if err != nil {
-			continue
-		}
-		if flowPackagePinRefMatches(ref, flowID, pinName) {
-			out = append(out, connect)
-		}
-	}
-	return out
-}
-func (b *WorkflowContractBundle) CompositionConnectsFrom(flowID, pinName string) []FlowPackageConnect {
-	flowID = strings.TrimSpace(flowID)
-	pinName = strings.TrimSpace(pinName)
-	if b == nil || pinName == "" {
-		return nil
-	}
-	var out []FlowPackageConnect
-	for _, connect := range b.CompositionConnects() {
-		ref, err := connect.FromRef()
-		if err != nil {
-			continue
-		}
-		if flowPackagePinRefMatches(ref, flowID, pinName) {
-			out = append(out, connect)
-		}
-	}
-	return out
-}
-
-func flowPackagePinRefMatches(ref FlowPackagePinRef, flowID, pinName string) bool {
-	flowID = strings.TrimSpace(flowID)
-	pinName = strings.TrimSpace(pinName)
-	if pinName == "" {
-		return false
-	}
-	if ref.Root {
-		return flowID == "" && strings.TrimSpace(ref.Pin) == pinName
-	}
-	return strings.TrimSpace(ref.FlowID) == flowID && strings.TrimSpace(ref.Pin) == pinName
-}
 func (b *WorkflowContractBundle) FlowReadPins(flowID string) []string {
 	if b == nil {
 		return nil

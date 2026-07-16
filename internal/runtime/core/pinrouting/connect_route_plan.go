@@ -765,12 +765,12 @@ func connectReplyResolution(source semanticview.Source, connect runtimecontracts
 		if correlationKey != "" && !stringListContains(normalizedPinCarries(requestOutput.Carries), correlationKey) {
 			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReplyLineageMissing, Detail: fmt.Sprintf("resolution mode reply correlation_key %q must name a carry declared by output pin %s", correlationKey, requestOutputPin)}
 		}
-		requestConnects := source.CompositionConnectsFrom(receiverRef.FlowID, requestOutputPin)
+		requestConnects := semanticview.ResolvedCompositionConnectsFrom(source, receiverRef.FlowID, requestOutputPin)
 		if len(requestConnects) != 1 {
 			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReplyLineageMissing, Detail: fmt.Sprintf("resolution mode reply request pin %s.%s must have exactly one connected counterpart, got %d", receiverRef.FlowID, requestOutputPin, len(requestConnects))}
 		}
-		requestTarget, err := requestConnects[0].ToRef()
-		if err != nil || requestTarget.Root || strings.TrimSpace(requestTarget.FlowID) != strings.TrimSpace(sourceEndpoint.FlowID) {
+		requestTarget := requestConnects[0].To
+		if requestTarget.Root || strings.TrimSpace(requestTarget.FlowID) != strings.TrimSpace(sourceEndpoint.FlowID) {
 			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReplyLineageMissing, Detail: "resolution mode reply request and reply edges must connect the same provider flow"}
 		}
 		return &ConnectRoutePlanReplyResolution{
@@ -790,9 +790,9 @@ func connectReplyResolution(source semanticview.Source, connect runtimecontracts
 		if replyInput.Resolution.Mode != runtimecontracts.FlowInputResolutionModeReply || strings.TrimSpace(replyInput.Resolution.RepliesTo) != strings.TrimSpace(sourceEndpoint.Pin) {
 			continue
 		}
-		for _, replyConnect := range source.CompositionConnectsTo(sourceEndpoint.FlowID, replyInput.PinName()) {
-			from, err := replyConnect.FromRef()
-			if err != nil || from.Root || strings.TrimSpace(from.FlowID) != strings.TrimSpace(receiverRef.FlowID) {
+		for _, replyConnect := range semanticview.ResolvedCompositionConnectsTo(source, sourceEndpoint.FlowID, replyInput.PinName()) {
+			from := replyConnect.From
+			if from.Root || strings.TrimSpace(from.FlowID) != strings.TrimSpace(receiverRef.FlowID) {
 				continue
 			}
 			matches = append(matches, ConnectRoutePlanReplyResolution{

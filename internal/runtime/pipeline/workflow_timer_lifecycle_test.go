@@ -522,7 +522,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 	}
 }
 
-func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedToParentStillEmitsRootResult(t *testing.T) {
+func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRootResult(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -608,15 +608,12 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedT
 	if !passThrough {
 		t.Fatal("expected nested descendant completion to remain visible downstream")
 	}
-	if len(emitted) != 1 || string(emitted[0].Type()) != "pipeline.complete" {
-		t.Fatalf("emitted = %#v, want [pipeline.complete]", emitted)
-	}
-	if got := emitted[0].EntityID(); got != childRowID {
-		t.Fatalf("emitted entity_id = %q, want child target %q", got, childRowID)
+	if len(emitted) != 0 {
+		t.Fatalf("emitted = %#v, want none from an unauthorized repository-root handler", emitted)
 	}
 }
 
-func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTxStillEmitsRootResult(t *testing.T) {
+func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDoesNotAuthorizeRootResult(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -698,10 +695,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTx
 	if !passThrough {
 		t.Fatal("expected nested descendant completion to remain visible downstream")
 	}
-	if len(emitted) != 1 || string(emitted[0].Type()) != "pipeline.complete" {
-		t.Fatalf("emitted = %#v, want [pipeline.complete]", emitted)
-	}
-	if got := emitted[0].EntityID(); got != childRowID {
-		t.Fatalf("emitted entity_id = %q, want child target %q", got, childRowID)
+	if len(emitted) != 0 {
+		t.Fatalf("emitted = %#v, want none from an unauthorized repository-root handler", emitted)
 	}
 }
