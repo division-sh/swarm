@@ -538,6 +538,7 @@ seam_families:
       - internal/runtime/tools/executor_agents_test.go
       - internal/store/agent_lifecycle_subordinate_test.go
       - internal/store/delivery_receipt_invariants_test.go
+      - internal/store/event_producer_identity_lifecycle_parity_test.go
       - internal/store/event_receipt_store.go
       - internal/store/manager_retry_policy_test.go
       - internal/store/postgres_store_additional_test.go

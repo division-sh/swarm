@@ -177,7 +177,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 			emitted = events.NewChildEventWithLineage(
 				emitted.ID(),
 				emitted.Type(),
-				emitted.SourceAgent(),
+				emitted.Producer(),
 				emitted.TaskID(),
 				emitted.Payload(),
 				emitted.ChainDepth(),
