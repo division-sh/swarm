@@ -143,7 +143,7 @@ func newCompleteEventDispatchFixture(t *testing.T, backend string, decisionOblig
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	ctx := testAuthorActivityContext(context.Background())
-	createdAt := time.Now().UTC().Add(-time.Minute)
+	createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	runID, eventID := uuid.NewString(), uuid.NewString()
 	sourceRoute := events.RouteIdentity{
 		FlowID: "source-flow", FlowInstance: "source-flow/one", EntityID: uuid.NewString(),

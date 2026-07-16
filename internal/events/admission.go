@@ -62,7 +62,7 @@ func admitPersistableEvent(evt Event, opts AdmissionOptions, allowProjectionDefa
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
-	createdAt = createdAt.UTC()
+	createdAt = createdAt.UTC().Truncate(time.Microsecond)
 
 	runID := firstNonEmpty(evt.RunID(), opts.RunIDCandidate)
 	parentEventID := firstNonEmpty(evt.ParentEventID(), opts.ParentEventIDCandidate)
@@ -143,7 +143,7 @@ func admitAuthoritativeProjectionForPersistence(evt Event, opts AdmissionOptions
 		runID,
 		parentEventID,
 		evt.NormalizedEnvelope(),
-		createdAt.UTC(),
+		createdAt.UTC().Truncate(time.Microsecond),
 	), ProjectExecutionMode(evt.ExecutionMode()), ProjectDeliveryContext(evt.DeliveryContext()))
 	if err := validateAdmittedEvent(admitted, opts.RequirePersistentUUIDIdentity); err != nil {
 		return Event{}, err

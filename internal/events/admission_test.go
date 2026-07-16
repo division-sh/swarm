@@ -36,6 +36,42 @@ func TestAdmissionRootIngressAllocatesPersistedFacts(t *testing.T) {
 	}
 }
 
+func TestAdmissionCanonicalizesCreatedAtToDurableMicrosecondPrecision(t *testing.T) {
+	createdAt := time.Date(2026, 7, 16, 12, 13, 14, 123456789, time.FixedZone("source", -3*60*60))
+	evt := NewProjectionEvent(
+		"11111111-1111-4111-8111-111111111111",
+		EventType("provider.replied"),
+		NodeProducer("provider-node"),
+		"task-logical",
+		nil,
+		0,
+		"22222222-2222-4222-8222-222222222222",
+		"",
+		EventEnvelope{},
+		createdAt,
+	)
+	want := createdAt.UTC().Truncate(time.Microsecond)
+
+	for name, admit := range map[string]func(Event) (Event, error){
+		"publish": func(candidate Event) (Event, error) {
+			return AdmitForPublish(candidate, AdmissionOptions{})
+		},
+		"persistence": func(candidate Event) (Event, error) {
+			return AdmitForPersistence(candidate, AdmissionOptions{RequirePersistentUUIDIdentity: true})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			admitted, err := admit(evt)
+			if err != nil {
+				t.Fatalf("admit: %v", err)
+			}
+			if !admitted.CreatedAt().Equal(want) || admitted.CreatedAt().Location() != time.UTC {
+				t.Fatalf("created_at = %s, want UTC microsecond %s", admitted.CreatedAt(), want)
+			}
+		})
+	}
+}
+
 func TestAdmissionPreservesPlatformDeliveryContext(t *testing.T) {
 	want := DeliveryContext{Reply: &ReplyContextRef{ID: "reply-v1:admission"}}
 	admitted, err := AdmitForPublish(NewProjectionEvent(
