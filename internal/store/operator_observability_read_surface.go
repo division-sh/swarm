@@ -16,6 +16,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/google/uuid"
 )
 
 type OperatorEventListFilter struct {
@@ -433,7 +434,11 @@ func (r *OperatorObservabilityReadSurface) LoadOperatorEvent(ctx context.Context
 	if eventID == "" {
 		return OperatorEventFull{}, ErrEventNotFound
 	}
-	row, found, err := loadPostgresEventIdentity(ctx, r.db, eventID)
+	parsedEventID, err := uuid.Parse(eventID)
+	if err != nil {
+		return OperatorEventFull{}, ErrEventNotFound
+	}
+	row, found, err := loadPostgresEventIdentity(ctx, r.db, parsedEventID.String())
 	if err != nil {
 		return OperatorEventFull{}, fmt.Errorf("load operator event: %w", err)
 	}

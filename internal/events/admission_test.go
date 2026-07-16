@@ -97,6 +97,36 @@ func TestAdmissionPreservesPlatformDeliveryContext(t *testing.T) {
 	}
 }
 
+func TestEnvelopeClaimIsDeepClonedThroughConstructionProjectionAndClone(t *testing.T) {
+	constructedRoutes := []RouteIdentity{{FlowID: "constructed", FlowInstance: "constructed/one"}}
+	evt := NewProjectionEvent(
+		"11111111-1111-4111-8111-111111111111",
+		EventType("provider.replied"),
+		NodeProducer("provider-node"),
+		"task-logical",
+		nil,
+		0,
+		"22222222-2222-4222-8222-222222222222",
+		"",
+		EventEnvelope{Scope: EventScopeGlobal, TargetSet: constructedRoutes},
+		time.Now().UTC(),
+	)
+	constructedRoutes[0].FlowID = "mutated-after-construction"
+
+	projectedRoutes := []RouteIdentity{{FlowID: "projected", FlowInstance: "projected/one"}}
+	projected := Project(evt, ProjectEnvelope(EventEnvelope{Scope: EventScopeGlobal, TargetSet: projectedRoutes}))
+	cloned := projected.Clone()
+	projectedRoutes[0].FlowID = "mutated-after-projection"
+
+	admitted, err := AdmitForPersistence(cloned, AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatalf("AdmitForPersistence: %v", err)
+	}
+	if got := admitted.TargetRoutes(); len(got) != 1 || got[0].FlowID != "projected" {
+		t.Fatalf("admitted target_set = %#v, want deep-cloned projected claim", got)
+	}
+}
+
 func TestAdmissionRequiresUUIDIdentityOnlyAtSelectedStoreBoundary(t *testing.T) {
 	evt := NewProjectionEvent(
 		"event-logical",
