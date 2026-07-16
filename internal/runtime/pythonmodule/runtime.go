@@ -176,6 +176,7 @@ func runHarness(ctx context.Context, req Request, envelope harnessEnvelope, fuel
 	if err := contextError(ctx); err != nil {
 		return harnessWireResult{}, err
 	}
+	ctxDone := ctx.Done()
 	root, err := materializedArtifactDir()
 	if err != nil {
 		return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
@@ -246,7 +247,7 @@ func runHarness(ctx context.Context, req Request, envelope harnessEnvelope, fuel
 	callDone := make(chan struct{})
 	go func() {
 		select {
-		case <-ctx.Done():
+		case <-ctxDone:
 			engine.IncrementEpoch()
 		case <-callDone:
 		}
