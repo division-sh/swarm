@@ -458,6 +458,16 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 			return true, nil
 		},
 	})
+	subscribed := make(chan struct{}, 1)
+	pc.SetTestSubscribeHook(func() { subscribed <- struct{}{} })
+	runCtx, cancel := context.WithCancel(ctx)
+	t.Cleanup(cancel)
+	go pc.Run(runCtx)
+	select {
+	case <-subscribed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("workflow runtime did not subscribe")
+	}
 
 	mailbox := eventtest.RootIngress(
 		"99999999-9999-4999-8999-999999999913",

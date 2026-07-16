@@ -7,6 +7,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -56,13 +57,17 @@ func AdmitContractFrontier(req ContractFrontierRequest) (store.RunForkContractFr
 	if err != nil {
 		return store.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract workflow nodes: %w", err)
 	}
-
+	connectPlans, connectIssues := runtimepinrouting.LowerCompositionConnectRoutePlans(req.Source)
+	if len(connectIssues) != 0 {
+		return store.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract connect routes: %#v", connectIssues)
+	}
 	frontier, lineageOnly := runForkFrontierEvents(req.Plan.PendingWork)
 	for i := range frontier {
 		eventName := frontier[i].EventName
+		routeKeys, connectOwned := contractFrontierRouteKeys(eventName, connectPlans)
 		frontier[i].RuntimeEventOwners = sortedUnique(req.Source.RuntimeEventOwners(eventName))
-		frontier[i].WorkflowNodeSubscribers = workflowNodeSubscribers(workflowNodes, eventName)
-		frontier[i].DerivedRecipients = contractFrontierRecipients(routeTable.Resolve(eventName))
+		frontier[i].WorkflowNodeSubscribers = workflowNodeSubscribers(workflowNodes, routeKeys...)
+		frontier[i].DerivedRecipients = contractFrontierRecipients(resolveContractFrontierRoutes(routeTable, routeKeys, connectOwned))
 	}
 	sort.Slice(frontier, func(i, j int) bool {
 		if frontier[i].EventName != frontier[j].EventName {
@@ -313,15 +318,65 @@ func inferContractFrontierFlowInstanceFromEvent(source semanticview.Source, even
 	return ""
 }
 
-func workflowNodeSubscribers(nodes []runtimepipeline.WorkflowNode, eventName string) []string {
-	eventName = strings.TrimSpace(eventName)
+func contractFrontierRouteKeys(eventName string, plans []runtimepinrouting.ConnectRoutePlan) ([]string, bool) {
+	eventName = strings.Trim(strings.TrimSpace(eventName), "/")
 	if eventName == "" {
+		return nil, false
+	}
+	matched := false
+	receiverEvents := map[string]struct{}{}
+	for _, plan := range plans {
+		if eventName != strings.Trim(strings.TrimSpace(plan.Source.ResolvedEvent), "/") {
+			continue
+		}
+		matched = true
+		if plan.RequiresRuntimeResolution {
+			continue
+		}
+		local := strings.Trim(strings.TrimSpace(plan.Receiver.Event), "/")
+		receiverPath := strings.Trim(strings.TrimSpace(plan.Receiver.FlowPath), "/")
+		if receiverPath == "" {
+			receiverPath = strings.Trim(strings.TrimSpace(plan.Receiver.FlowID), "/")
+		}
+		addString(receiverEvents, plan.Receiver.ResolvedEvent)
+		if receiverPath != "" && local != "" {
+			addString(receiverEvents, receiverPath+"/"+local)
+		}
+		if target := plan.Target.Normalized(); target.FlowInstance != "" && local != "" {
+			addString(receiverEvents, target.FlowInstance+"/"+local)
+		}
+	}
+	if matched {
+		return sortedSet(receiverEvents), true
+	}
+	return []string{eventName}, false
+}
+
+func resolveContractFrontierRoutes(routeTable *runtimebus.RouteTable, eventNames []string, connectOwned bool) []runtimebus.Subscriber {
+	var out []runtimebus.Subscriber
+	for _, eventName := range eventNames {
+		for _, subscriber := range routeTable.Resolve(eventName) {
+			if connectOwned && strings.TrimSpace(subscriber.RouteSource) != "receiver_carrier" {
+				continue
+			}
+			out = append(out, subscriber)
+		}
+	}
+	return out
+}
+
+func workflowNodeSubscribers(nodes []runtimepipeline.WorkflowNode, eventNames ...string) []string {
+	wanted := map[string]struct{}{}
+	for _, eventName := range eventNames {
+		addString(wanted, eventName)
+	}
+	if len(wanted) == 0 {
 		return nil
 	}
 	seen := map[string]struct{}{}
 	for _, node := range nodes {
 		for _, subscription := range node.Subscriptions {
-			if strings.TrimSpace(string(subscription)) != eventName {
+			if _, ok := wanted[strings.TrimSpace(string(subscription))]; !ok {
 				continue
 			}
 			addString(seen, node.ID)

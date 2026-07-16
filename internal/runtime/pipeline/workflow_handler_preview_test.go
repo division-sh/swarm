@@ -8,10 +8,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestPreviewContractHandlerExecution_DeniesImportBoundaryWildcardRawFallback(t *testing.T) {
-	bundle := loadPipelineImportBoundaryWildcardBundle(t, "")
+	bundle := loadPipelineImportBoundaryWildcardBundle(t, canonicalrouting.ImportBoundaryWildcardDenied)
 	_, err := PreviewContractHandlerExecution(
 		testAuthorActivityContext(context.Background()),
 		bundle,
@@ -29,7 +30,7 @@ func TestPreviewContractHandlerExecution_DeniesImportBoundaryWildcardRawFallback
 }
 
 func TestPreviewContractHandlerExecution_AllowsGrantedImportBoundaryWildcard(t *testing.T) {
-	bundle := loadPipelineImportBoundaryWildcardBundle(t, "      observe:\n        - source: producer\n          events: [task.done]\n")
+	bundle := loadPipelineImportBoundaryWildcardBundle(t, canonicalrouting.ImportBoundaryWildcardObserveGranted)
 	preview, err := PreviewContractHandlerExecution(
 		testAuthorActivityContext(context.Background()),
 		bundle,

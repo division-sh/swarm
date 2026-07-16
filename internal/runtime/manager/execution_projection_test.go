@@ -292,7 +292,9 @@ func TestSelectedForkEphemeralRegistrationInstallsCarrierOnlyRoute(t *testing.T)
 
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()
-	am.RunAuthoritativeDeliveryOnly(runCtx)
+	if err := am.RunAuthoritativeDeliveryOnly(managedExecutionTestContext(t, runCtx)); err != nil {
+		t.Fatalf("RunAuthoritativeDeliveryOnly: %v", err)
+	}
 	route, ok := bus.current(agentID)
 	if !ok {
 		t.Fatal("selected-fork execution did not install its typed carrier")
@@ -338,7 +340,9 @@ func TestEphemeralCloneConsumesAdmittedBaseSubscriptions(t *testing.T) {
 
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()
-	am.Run(runCtx)
+	if err := am.Run(managedExecutionTestContext(t, runCtx)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
 	route, ok := bus.current("clone-agent")
 	if !ok {
 		t.Fatal("clone route missing")

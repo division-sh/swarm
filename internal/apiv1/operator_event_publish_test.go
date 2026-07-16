@@ -303,7 +303,19 @@ func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 	}
 	ctx := context.Background()
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "repo-observer")
-	ch := bus.Subscribe("repo-observer", events.EventType(canonicalEventName))
+	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{
+		AgentID:       "repo-observer",
+		FlowID:        "repo-scaffold",
+		FlowPath:      "repo-scaffold",
+		Subscriptions: []string{"repo_scaffold.repo_commit_succeeded"},
+	})
+	if err != nil {
+		t.Fatalf("AdmitFlowOwnedAgentSubscriptions: %v", err)
+	}
+	ch := bus.SubscribeAgent(admission)
+	if ch == nil {
+		t.Fatal("SubscribeAgent returned nil admitted carrier")
+	}
 	defer bus.Unsubscribe("repo-observer")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 	body := eventPublishBody("", runStartTestFingerprint, "repo-scaffold/repo_scaffold.repo_commit_succeeded", `{"topic":"medicine"}`, "", "idem-flow-scoped")
