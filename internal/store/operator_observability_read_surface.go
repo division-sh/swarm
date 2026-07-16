@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -53,6 +54,7 @@ type OperatorEventFull struct {
 	SourceEventID string                     `json:"source_event_id,omitempty"`
 	CreatedAt     time.Time                  `json:"created_at"`
 	Source        string                     `json:"source"`
+	ProducerType  events.EventProducerType   `json:"producer_type"`
 	Payload       map[string]any             `json:"payload"`
 	Deliveries    []OperatorEventDelivery    `json:"deliveries"`
 	DeadLetters   []OperatorDeadLetterRecord `json:"dead_letters"`
@@ -427,7 +429,12 @@ func (r *OperatorObservabilityReadSurface) LoadOperatorEvent(ctx context.Context
 	} else if err != nil {
 		return OperatorEventFull{}, fmt.Errorf("load operator event: %w", err)
 	}
-	event.Source = firstNonEmptyStore(producedBy, producedByType, "unknown")
+	producer, err := events.NewProducerIdentity(events.EventProducerType(producedByType), producedBy)
+	if err != nil {
+		return OperatorEventFull{}, fmt.Errorf("load operator event producer identity: %w", err)
+	}
+	event.Source = producer.ID()
+	event.ProducerType = producer.Type()
 	payload, err := decodeStoreJSONMap(payloadRaw)
 	if err != nil {
 		return OperatorEventFull{}, fmt.Errorf("decode operator event payload: %w", err)

@@ -772,7 +772,8 @@ func (s *stubBuilderRunStore) ListOperatorEvents(_ context.Context, opts store.O
 			EntityID:      strings.TrimSpace(evt.EntityID()),
 			RunID:         strings.TrimSpace(evt.RunID()),
 			CreatedAt:     evt.CreatedAt().UTC(),
-			Source:        strings.TrimSpace(firstNonEmpty(evt.SourceAgent(), "unknown")),
+			Source:        strings.TrimSpace(evt.SourceAgent()),
+			ProducerType:  evt.ProducerType(),
 			Payload:       payload,
 		})
 	}

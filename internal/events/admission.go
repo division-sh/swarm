@@ -14,7 +14,6 @@ type AdmissionOptions struct {
 	RunIDCandidate           string
 	ParentEventIDCandidate   string
 	SelectedForkLineageOwner string
-	SourceAgentDefault       string
 }
 
 func AdmitForPublish(evt Event, opts AdmissionOptions) (Event, error) {
@@ -35,6 +34,10 @@ func admitPersistableEvent(evt Event, opts AdmissionOptions, allowProjectionDefa
 	}
 	if class == EventAdmissionRouteProbe {
 		return Event{}, fmt.Errorf("route probe events are not persistable")
+	}
+	producer := evt.Producer()
+	if err := producer.Validate(); err != nil {
+		return Event{}, fmt.Errorf("event producer identity is required for persistence admission: %w", err)
 	}
 	eventType := EventType(strings.TrimSpace(string(evt.Type())))
 	if eventType == "" {
@@ -61,8 +64,6 @@ func admitPersistableEvent(evt Event, opts AdmissionOptions, allowProjectionDefa
 
 	runID := firstNonEmpty(evt.RunID(), opts.RunIDCandidate)
 	parentEventID := firstNonEmpty(evt.ParentEventID(), opts.ParentEventIDCandidate)
-	sourceAgent := firstNonEmpty(evt.SourceAgent(), opts.SourceAgentDefault)
-
 	switch class {
 	case EventAdmissionRootIngress:
 		if runID == "" {
@@ -83,7 +84,7 @@ func admitPersistableEvent(evt Event, opts AdmissionOptions, allowProjectionDefa
 			return Event{}, fmt.Errorf("%s event %s requires admitted parent_event_id or selected_fork_lineage_owner", class, eventType)
 		}
 	case EventAdmissionRuntimeControl, EventAdmissionRuntimeDiagnostic:
-		if isStandaloneRuntimePlatformEvent(eventType, sourceAgent) && runID == "" {
+		if isStandaloneRuntimePlatformEvent(eventType, producer.ID()) && runID == "" {
 			runID = uuid.NewString()
 		}
 	case EventAdmissionDiagnosticDirect, EventAdmissionProjection:
@@ -97,7 +98,7 @@ func admitPersistableEvent(evt Event, opts AdmissionOptions, allowProjectionDefa
 		class,
 		id,
 		eventType,
-		sourceAgent,
+		producer,
 		evt.TaskID(),
 		evt.Payload(),
 		evt.ChainDepth(),
@@ -105,7 +106,7 @@ func admitPersistableEvent(evt Event, opts AdmissionOptions, allowProjectionDefa
 		parentEventID,
 		evt.NormalizedEnvelope(),
 		createdAt,
-	).WithProducerType(evt.ProducerType()).WithExecutionMode(evt.ExecutionMode()).WithDeliveryContext(evt.DeliveryContext()), nil
+	).WithExecutionMode(evt.ExecutionMode()).WithDeliveryContext(evt.DeliveryContext()), nil
 }
 
 func admitAuthoritativeProjectionForPersistence(evt Event, opts AdmissionOptions, eventType EventType) (Event, error) {
@@ -129,7 +130,7 @@ func admitAuthoritativeProjectionForPersistence(evt Event, opts AdmissionOptions
 		EventAdmissionProjection,
 		id,
 		eventType,
-		evt.SourceAgent(),
+		evt.Producer(),
 		evt.TaskID(),
 		evt.Payload(),
 		evt.ChainDepth(),
@@ -137,7 +138,7 @@ func admitAuthoritativeProjectionForPersistence(evt Event, opts AdmissionOptions
 		parentEventID,
 		evt.NormalizedEnvelope(),
 		createdAt.UTC(),
-	).WithProducerType(evt.ProducerType()).WithExecutionMode(evt.ExecutionMode()).WithDeliveryContext(evt.DeliveryContext()), nil
+	).WithExecutionMode(evt.ExecutionMode()).WithDeliveryContext(evt.DeliveryContext()), nil
 }
 
 func normalizedAdmissionClass(class EventAdmissionClass) EventAdmissionClass {

@@ -58,7 +58,7 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 	evt := events.NewRuntimeDiagnosticEvent(
 		uuid.NewString(),
 		eventType,
-		"runtime",
+		events.PlatformProducer("runtime"),
 		"",
 		raw,
 		0,

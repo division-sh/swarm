@@ -100,7 +100,7 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 	evt := events.NewChildEventWithLineage(
 		uuid.NewString(),
 		events.EventType(in.EventType),
-		in.SourceAgent,
+		events.AgentProducer(in.SourceAgent),
 		in.TaskID,
 		wirePayload,
 		0,

@@ -114,18 +114,7 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 		return HandlerPreview{}, fmt.Errorf("preview coordinator is nil")
 	}
 	if evt.CreatedAt().IsZero() {
-		evt = events.NewProjectionEvent(
-			evt.ID(),
-			evt.Type(),
-			evt.SourceAgent(),
-			evt.TaskID(),
-			evt.Payload(),
-			evt.ChainDepth(),
-			evt.RunID(),
-			evt.ParentEventID(),
-			evt.NormalizedEnvelope(),
-			time.Now().UTC(),
-		).WithProducerType(evt.ProducerType()).WithExecutionMode(evt.ExecutionMode())
+		evt = events.Project(evt, events.ProjectCreatedAt(time.Now().UTC()))
 	}
 	result, err := pc.executeNodeContractHandler(ctx, nodeID, handler, workflowTriggerContext{
 		Event: evt,

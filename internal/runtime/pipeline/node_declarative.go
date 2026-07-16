@@ -411,18 +411,7 @@ func ensureHandlerEntityID(source semanticview.Source, flowID string, handler Sy
 	entityID = strings.TrimSpace(firstNonEmptyString(entityID, evt.EntityID()))
 	if entityID != "" {
 		if strings.TrimSpace(evt.EntityID()) == "" {
-			evt = events.NewProjectionEvent(
-				evt.ID(),
-				evt.Type(),
-				evt.SourceAgent(),
-				evt.TaskID(),
-				evt.Payload(),
-				evt.ChainDepth(),
-				evt.RunID(),
-				evt.ParentEventID(),
-				events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID),
-				evt.CreatedAt(),
-			).WithProducerType(evt.ProducerType()).WithExecutionMode(evt.ExecutionMode())
+			evt = events.Project(evt, events.ProjectEnvelope(events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID)))
 		}
 		return entityID, evt
 	}
@@ -433,18 +422,7 @@ func ensureHandlerEntityID(source semanticview.Source, flowID string, handler Sy
 	if entityID == "" {
 		return "", evt
 	}
-	return entityID, events.NewProjectionEvent(
-		evt.ID(),
-		evt.Type(),
-		evt.SourceAgent(),
-		evt.TaskID(),
-		evt.Payload(),
-		evt.ChainDepth(),
-		evt.RunID(),
-		evt.ParentEventID(),
-		events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID),
-		evt.CreatedAt(),
-	).WithProducerType(evt.ProducerType()).WithExecutionMode(evt.ExecutionMode())
+	return entityID, events.Project(evt, events.ProjectEnvelope(events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID)))
 }
 
 func canonicalHandlerEntityID(source semanticview.Source, flowID string, evt Event) string {

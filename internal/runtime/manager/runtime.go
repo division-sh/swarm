@@ -275,7 +275,7 @@ func (am *AgentManager) quarantinePoisonEvent(ctx context.Context, agentID strin
 		"timestamp":             time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	eventCtx := am.runtimePlatformControlEventContext(ctx)
-	if err := am.bus.Publish(eventCtx, events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("platform.event_quarantined"), "runtime", "", mustJSON(payload), 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
+	if err := am.bus.Publish(eventCtx, events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("platform.event_quarantined"), events.PlatformProducer("runtime"), "", mustJSON(payload), 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		if am.bus != nil {
 			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 				Level:     "error",
@@ -1373,7 +1373,7 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 		if err != nil {
 			return fmt.Errorf("marshal platform.reset payload: %w", err)
 		}
-		platformResetEvent = events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("platform.reset"), "runtime", "", payload, 0, "", "", events.EventEnvelope{}, time.Now())
+		platformResetEvent = events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("platform.reset"), events.PlatformProducer("runtime"), "", payload, 0, "", "", events.EventEnvelope{}, time.Now())
 		hasPlatformResetEvent = true
 	}
 
@@ -1730,7 +1730,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 	}), "agent-manager", "agent_loop")
 
 	eventCtx := am.runtimePlatformControlEventContext(ctx)
-	if err := am.bus.Publish(eventCtx, events.NewRuntimeDiagnosticEvent(uuid.NewString(), events.EventType("platform.agent_panic"), "runtime", "", mustJSON(map[string]any{
+	if err := am.bus.Publish(eventCtx, events.NewRuntimeDiagnosticEvent(uuid.NewString(), events.EventType("platform.agent_panic"), events.PlatformProducer("runtime"), "", mustJSON(map[string]any{
 		"agent_id":        agent.ID(),
 		"flow_instance":   flowInstance,
 		"entity_id":       entityID,
@@ -1767,7 +1767,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		})
 	}
 
-	if err := am.bus.Publish(eventCtx, events.NewRuntimeDiagnosticEvent(uuid.NewString(), events.EventType("platform.agent_failed"), "runtime", "", mustJSON(map[string]any{
+	if err := am.bus.Publish(eventCtx, events.NewRuntimeDiagnosticEvent(uuid.NewString(), events.EventType("platform.agent_failed"), events.PlatformProducer("runtime"), "", mustJSON(map[string]any{
 		"agent_id":        agent.ID(),
 		"flow_instance":   flowInstance,
 		"entity_id":       entityID,

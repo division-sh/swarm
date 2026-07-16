@@ -296,18 +296,7 @@ func rootPinDeclaredOutput(source semanticview.Source, eventType string) bool {
 
 func Resolve(input ResolutionInput, evt events.Event) Resolution {
 	resolution := ResolveEnvelope(input, evt.NormalizedEnvelope())
-	resolution.Event = events.NewProjectionEvent(
-		evt.ID(),
-		evt.Type(),
-		evt.SourceAgent(),
-		evt.TaskID(),
-		evt.Payload(),
-		evt.ChainDepth(),
-		evt.RunID(),
-		evt.ParentEventID(),
-		resolution.Envelope,
-		evt.CreatedAt(),
-	).WithProducerType(evt.ProducerType()).WithExecutionMode(evt.ExecutionMode())
+	resolution.Event = events.Project(evt, events.ProjectEnvelope(resolution.Envelope))
 	return resolution
 }
 

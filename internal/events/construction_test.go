@@ -20,27 +20,7 @@ type eventConstructorCallsite struct {
 }
 
 var productionProjectionEventAllowlist = map[eventConstructorCallsite]int{
-	{Path: "internal/store/decision_card_route_obligations.go", Scope: "scanDecisionRouteObligationEvents"}:                             1,
-	{Path: "internal/store/events.go", Scope: "PostgresStore.listEventsMissingPipelineReceiptSpec"}:                                     1,
-	{Path: "internal/store/events.go", Scope: "PostgresStore.listEventsMissingPipelineReceiptForRunSpec"}:                               1,
-	{Path: "internal/store/events.go", Scope: "PostgresStore.listEventsWithPendingDeliveriesForRunSpec"}:                                1,
-	{Path: "internal/store/pending_delivery_read_surface.go", Scope: "scanPendingAgentDeliveryRecords"}:                                 1,
-	{Path: "internal/store/inbound_publication.go", Scope: "loadPostgresInboundPublicationEvent"}:                                       1,
-	{Path: "internal/store/sqlite_inbound_publication.go", Scope: "loadSQLiteInboundPublicationEvent"}:                                  1,
-	{Path: "internal/store/sqlite_runtime_delivery_replay.go", Scope: "SQLiteRuntimeStore.ListPendingSubscribedEvents"}:                 1,
-	{Path: "internal/store/sqlite_runtime_delivery_replay.go", Scope: "SQLiteRuntimeStore.listSQLiteEventsMissingPipelineReceipt"}:      1,
-	{Path: "internal/store/sqlite_runtime_delivery_replay.go", Scope: "SQLiteRuntimeStore.listSQLiteEventsWithPendingDeliveriesForRun"}: 1,
-	{Path: "internal/store/sqlite_runtime_delivery_replay.go", Scope: "SQLiteRuntimeStore.listSQLitePendingAgentDeliveryRecords"}:       1,
-	{Path: "internal/runtime/bus/eventbus_publish.go", Scope: "projectEventForDeliveryRoute"}:                                           1,
-	{Path: "internal/runtime/bus/outbox.go", Scope: "clonePostCommitEvent"}:                                                             1,
-	{Path: "internal/runtime/core/pinrouting/pinrouting.go", Scope: "Resolve"}:                                                          1,
-	{Path: "internal/runtime/correlation/context.go", Scope: "CorrelateEvent"}:                                                          1,
-	{Path: "internal/runtime/manager/receipts.go", Scope: "AgentManager.processEventDetailed"}:                                          1,
-	{Path: "internal/runtime/pipeline/engine_adapter.go", Scope: "cloneEvent"}:                                                          1,
-	{Path: "internal/runtime/pipeline/node_declarative.go", Scope: "ensureHandlerEntityID"}:                                             2,
-	{Path: "internal/runtime/pipeline/select_entity.go", Scope: "PipelineCoordinator.createdHandlerEntityForDeclaredKey"}:               1,
-	{Path: "internal/runtime/pipeline/select_entity.go", Scope: "PipelineCoordinator.selectedHandlerEntityFromInstance"}:                1,
-	{Path: "internal/runtime/pipeline/workflow_handler_preview.go", Scope: "PreviewContractHandlerExecution"}:                           1,
+	{Path: "internal/store/event_persistence_identity.go", Scope: "eventFromPersistedIdentity"}: 1,
 }
 
 var productionRouteProbeEventAllowlist = map[eventConstructorCallsite]int{
@@ -53,7 +33,7 @@ func TestNewChildEventWithLineageOwnsRuntimeFields(t *testing.T) {
 	parent := NewRootIngressEvent(
 		"parent-event",
 		EventType("root.started"),
-		"",
+		ExternalProducer("test-root"),
 		"task-1",
 		json.RawMessage(`{"ok":true}`),
 		0,
@@ -66,7 +46,7 @@ func TestNewChildEventWithLineageOwnsRuntimeFields(t *testing.T) {
 	child := NewChildEvent(
 		"child-event",
 		EventType("child.done"),
-		"",
+		AgentProducer("test-child"),
 		"",
 		json.RawMessage(`{"done":true}`),
 		0,
@@ -93,7 +73,7 @@ func TestLineageConstructorsPreserveMockExecutionMode(t *testing.T) {
 	parent := NewRootIngressEvent(
 		"parent-event",
 		EventType("root.started"),
-		"",
+		ExternalProducer("test-root"),
 		"task-1",
 		nil,
 		0,
@@ -107,11 +87,11 @@ func TestLineageConstructorsPreserveMockExecutionMode(t *testing.T) {
 	if lineage.ExecutionMode != executionmode.Mock {
 		t.Fatalf("lineage execution mode = %q, want mock", lineage.ExecutionMode)
 	}
-	child := NewChildEvent("child-event", EventType("child.done"), "", "", nil, 0, parent, EventEnvelope{}, time.Now().UTC())
+	child := NewChildEvent("child-event", EventType("child.done"), AgentProducer("test-child"), "", nil, 0, parent, EventEnvelope{}, time.Now().UTC())
 	if child.ExecutionMode() != executionmode.Mock {
 		t.Fatalf("child execution mode = %q, want mock", child.ExecutionMode())
 	}
-	replay := NewReplayEvent("replay-event", EventType("child.done"), "", "", nil, 0, lineage, EventEnvelope{}, time.Now().UTC())
+	replay := NewReplayEvent("replay-event", EventType("child.done"), AgentProducer("test-child"), "", nil, 0, lineage, EventEnvelope{}, time.Now().UTC())
 	if replay.ExecutionMode() != executionmode.Mock {
 		t.Fatalf("replay execution mode = %q, want mock", replay.ExecutionMode())
 	}
@@ -121,7 +101,7 @@ func TestNewRootIngressEventPreservesExplicitCheckpointLineage(t *testing.T) {
 	evt := NewRootIngressEvent(
 		"evt-1",
 		EventType("operator.checkpoint"),
-		"operator",
+		ExternalProducer("operator"),
 		"",
 		json.RawMessage(`{"checkpoint":true}`),
 		0,
@@ -144,7 +124,7 @@ func TestNewRuntimeDiagnosticEventCopiesPayload(t *testing.T) {
 	evt := NewRuntimeDiagnosticEvent(
 		"diag-1",
 		EventType("platform.diagnostic"),
-		"",
+		PlatformProducer("runtime"),
 		"",
 		payload,
 		0,

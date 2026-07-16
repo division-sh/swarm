@@ -20,7 +20,7 @@ func runtimeLogEvent(ctx context.Context, record runtimepkg.RuntimeLogPersistenc
 	evt := events.NewDiagnosticDirectEvent(
 		"",
 		events.EventType(runtimeLogEventName),
-		"runtime",
+		events.PlatformProducer("runtime"),
 		"",
 		json.RawMessage(record.Payload),
 		0,

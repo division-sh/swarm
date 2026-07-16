@@ -12,6 +12,8 @@ import (
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/division-sh/swarm/internal/events"
 )
 
 var ErrEventIdentityConflict = errors.New("event identity conflict")
@@ -97,6 +99,53 @@ func (i persistedEventIdentity) equal(other persistedEventIdentity) bool {
 		jsonSemanticallyEqual(i.SourceRoute, other.SourceRoute) &&
 		jsonSemanticallyEqual(i.TargetRoute, other.TargetRoute) &&
 		jsonSemanticallyEqual(i.TargetSet, other.TargetSet)
+}
+
+// eventFromPersistedIdentity is the only store-level decoder from a durable
+// event row into runtime event semantics. Every PostgreSQL and SQLite runtime
+// readback must supply the complete identity; missing producer facts fail
+// before recovery, replay, or dispatch can observe the event.
+func eventFromPersistedIdentity(eventID, executionMode string, row persistedEventIdentity) (events.Event, error) {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return events.EmptyEvent(), fmt.Errorf("persisted event_id is required")
+	}
+	eventName := strings.TrimSpace(row.EventName)
+	if eventName == "" {
+		return events.EmptyEvent(), fmt.Errorf("persisted event %s requires event_name", eventID)
+	}
+	producer, err := events.NewProducerIdentity(events.EventProducerType(row.ProducedByType), row.ProducedBy)
+	if err != nil {
+		return events.EmptyEvent(), fmt.Errorf("persisted event %s producer identity: %w", eventID, err)
+	}
+	if row.CreatedAt.IsZero() {
+		return events.EmptyEvent(), fmt.Errorf("persisted event %s requires created_at", eventID)
+	}
+	evt := events.NewProjectionEvent(
+		eventID,
+		events.EventType(eventName),
+		producer,
+		eventTaskIDFromPayload(row.Payload),
+		row.Payload,
+		row.ChainDepth,
+		row.RunID,
+		row.SourceEventID,
+		eventEnvelopeFromStorage(row.EntityID, row.FlowInstance, row.Scope, row.SourceRoute, row.TargetRoute, row.TargetSet),
+		row.CreatedAt,
+	)
+	return eventWithStoredExecutionMode(evt, executionMode)
+}
+
+func eventTaskIDFromPayload(payload []byte) string {
+	var object map[string]json.RawMessage
+	if len(payload) == 0 || json.Unmarshal(payload, &object) != nil {
+		return ""
+	}
+	var taskID string
+	if raw, ok := object["task_id"]; ok && json.Unmarshal(raw, &taskID) == nil {
+		return strings.TrimSpace(taskID)
+	}
+	return ""
 }
 
 func jsonSemanticallyEqual(left, right []byte) bool {

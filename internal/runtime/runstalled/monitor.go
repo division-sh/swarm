@@ -214,7 +214,7 @@ func (m *Monitor) eventForSnapshot(snapshot RunSnapshot, now time.Time) (events.
 	if err != nil {
 		return events.EmptyEvent(), EscalationKey{}, false, err
 	}
-	evt := events.NewRuntimeDiagnosticEvent("", events.EventType(EventType), "runtime", "", payload, 0, runID, "", events.EventEnvelope{FlowInstance: snapshot.FlowInstance}, now.UTC())
+	evt := events.NewRuntimeDiagnosticEvent("", events.EventType(EventType), events.PlatformProducer("runtime"), "", payload, 0, runID, "", events.EventEnvelope{FlowInstance: snapshot.FlowInstance}, now.UTC())
 	return evt, key, true, nil
 }
 

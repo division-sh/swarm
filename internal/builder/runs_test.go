@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
+	eventtypes "github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -27,7 +27,7 @@ type snapshotRunStore struct {
 	terminalCalls int
 }
 
-func (s *snapshotRunStore) AppendEvent(ctx context.Context, evt events.Event) error {
+func (s *snapshotRunStore) AppendEvent(ctx context.Context, evt eventtypes.Event) error {
 	if s.appendErr != nil {
 		return s.appendErr
 	}
@@ -385,6 +385,7 @@ func TestRunHubSubscribe_PrimesCanonicalReplayDedupeState(t *testing.T) {
 			EntityID:      "entity-1",
 			CreatedAt:     now.Add(1 * time.Second),
 			Source:        "builder",
+			ProducerType:  eventtypes.EventProducerExternal,
 			Payload:       map[string]any{"topic": "sample"},
 		}},
 	}
@@ -421,6 +422,7 @@ func TestRunHubSyncCanonical_UsesLatestCanonicalEventWindow(t *testing.T) {
 			EntityID:      "entity-1",
 			CreatedAt:     now.Add(time.Duration(i) * time.Second),
 			Source:        "builder",
+			ProducerType:  eventtypes.EventProducerExternal,
 			Payload:       map[string]any{"index": i},
 		})
 	}

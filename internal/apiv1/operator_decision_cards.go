@@ -138,7 +138,7 @@ func decisionCardHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 					if err != nil {
 						return nil, err
 					}
-					evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_deferred"), "platform", "", payload, 0, card.RunID, "",
+					evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_deferred"), events.PlatformProducer("platform"), "", payload, 0, card.RunID, "",
 						events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance), now().UTC())
 					if err := publisher.PublishInMutation(txctx, evt); err != nil {
 						return nil, fmt.Errorf("publish budget-deferred decision card event: %w", err)
@@ -168,7 +168,7 @@ func decisionCardHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 				if err != nil {
 					return nil, err
 				}
-				evt := events.NewRuntimeControlEvent(eventID, events.EventType(decisionCardEventName), "platform", "", payload, 0, card.RunID, "",
+				evt := events.NewRuntimeControlEvent(eventID, events.EventType(decisionCardEventName), events.PlatformProducer("platform"), "", payload, 0, card.RunID, "",
 					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance), now().UTC())
 				if err := publisher.PublishInMutation(txctx, evt); err != nil {
 					return nil, fmt.Errorf("publish decision card event: %w", err)
@@ -199,7 +199,7 @@ func decisionCardHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 				if err != nil {
 					return nil, err
 				}
-				evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_deferred"), "platform", "", payload, 0,
+				evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_deferred"), events.PlatformProducer("platform"), "", payload, 0,
 					outcome.Card.RunID, "", events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance), now().UTC())
 				if err := publisher.PublishInMutation(txctx, evt); err != nil {
 					return nil, fmt.Errorf("publish decision card deferred event: %w", err)

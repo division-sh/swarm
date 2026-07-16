@@ -733,12 +733,16 @@ contract_formats:
       owner: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
       rule: |
         Runtime event carriers are read-only outside the event package.
-        Event-owned fields such as id, type, source_agent, producer_type, task_id, payload,
+        Event-owned fields such as id, type, producer_identity, task_id, payload,
         chain_depth, run_id, source_event_id/parent_event_id, envelope, and
         created_at MUST be supplied through semantic event constructors or
-        through explicitly bounded projection/readback constructors. Production
-        code MUST NOT mutate event-owned fields after construction and MUST NOT
-        construct events through direct carrier literals.
+        through explicitly bounded projection/readback constructors. ProducerIdentity
+        is one mandatory validated {producer_type, producer_id} value; its members
+        MUST NOT be owned or changed independently. The source_agent event accessor
+        and the persisted produced_by/produced_by_type columns are projections of
+        that value, not additional semantic facts. Production code MUST NOT mutate
+        event-owned fields after construction and MUST NOT construct events through
+        direct carrier literals.
 
         The constructor class is part of the semantic claim. A runtime producer
         MUST use the constructor class that matches the producer role rather
@@ -746,18 +750,23 @@ contract_formats:
         caller-owned payload bytes, normalize event-owned identity fields, and
         expose event facts through read-only accessors.
 
-        Declarative workflow-node emits MUST stamp producer_type=node together
-        with the exact node identity at construction. Admission, routing
-        projections, transactional outbox copies, persistence, and author
-        activity MUST preserve and consume that typed fact; a node ID in
-        source_agent MUST NOT be reclassified as an agent by string shape.
+        Every persistable producer MUST stamp its exact typed identity at
+        construction. Declarative workflow-node emits specifically MUST stamp
+        {producer_type: node, producer_id: <exact node identity>}. Admission,
+        routing projections, transactional outbox copies, persistence, runtime
+        readback/recovery/replay, and author activity MUST preserve and consume
+        the pair. A producer ID MUST NOT be reclassified by string shape, event
+        label, admission class, payload, database default, or missing-field
+        fallback.
 
         Persisted event admission is the canonical boundary between constructed
         event shells, context/correlation candidates, and storage. The admission
-        owner MUST classify or consume the constructor class before any event row
-        is written. It may materialize explicitly admitted event_id and created_at
-        defaults, and may allocate root-ingress run_id when the ingress class
-        permits server allocation. Runtime-owned routable platform events emitted
+        owner MUST classify or consume the constructor class and validate the
+        complete producer identity before any event row is written. Missing,
+        partial, or invalid producer identity fails admission. It may materialize
+        explicitly admitted event_id and created_at defaults, and may allocate
+        root-ingress run_id when the ingress class permits server allocation.
+        Runtime-owned routable platform events emitted
         by the runtime-control or runtime-diagnostic classes may also allocate an
         explicit standalone run_id at admission so the platform event enters the
         normal run/delivery lifecycle without relying on store fallbacks. It MUST
@@ -768,7 +777,16 @@ contract_formats:
         envelopes MUST consume this owner. Stores and database defaults are
         schema fallbacks only; they MUST NOT silently invent event_id, run_id,
         created_at, source_event_id, target, target_set, or other class-required
-        facts after admission.
+        facts after admission. The selected-store writer MUST persist the exact
+        admitted producer pair without classification or defaults.
+
+        PostgreSQL and SQLite runtime readback share one canonical persisted-event
+        decoder. Every readback family that can return an executable, recoverable,
+        or replayable event MUST select the complete produced_by/produced_by_type
+        pair and all event-owned facts consumed by that decoder. Missing, partial,
+        or invalid producer identity fails before dispatch, recovery, or replay;
+        readers MUST NOT infer or repair it. Historical replay must carry the same
+        validated pair into the replayed event.
       terminal_run_admission:
         owner: internal/store/runlifecycle plus the selected-store event mutation boundary
         rule: >
@@ -871,22 +889,27 @@ contract_formats:
       projection_boundary:
         rule: |
           Projection construction is not runtime producer authority. It exists
-          only to reconstruct or copy an event from facts that another canonical
-          owner has already produced. Production projection call sites MUST be
-          exact-path/function/count allowlisted by the event-construction guard.
-          Adding a new production projection call requires naming the upstream
-          owner whose facts are being projected and proving that the projection
-          does not create, repair, or infer missing lineage, envelope, recipient,
+          only to reconstruct an event from facts that another canonical owner
+          has already produced. Direct all-fields projection construction is
+          restricted to the one canonical selected-store persisted-event decoder
+          and MUST be exact-path/function/count allowlisted by the event-construction
+          guard. Copies and bounded projections of an existing runtime event MUST
+          use the event package's preservation-safe Clone/Project owner. That owner
+          clones every event-owned fact, including producer identity, and applies
+          only explicit typed changes so new fields cannot be silently dropped.
+          Adding a direct projection call requires naming the upstream owner whose
+          facts are being reconstructed and proving that the projection does not
+          create, repair, or infer missing lineage, producer, envelope, recipient,
           or delivery authority.
         allowed_classes:
-        - persisted event-store, delivery, replay, and readback row hydration
-        - publish-admission default projection of an already constructed event
-          shell for generated event_id, created_at, or source_agent facts before
-          persistence
-        - route/envelope projection after RoutePlan, pin-routing, or selected
-          entity owners have already resolved the final envelope facts
-        - pure immutable carrier copy/snapshot for post-commit, preview, or
-          engine adapter isolation
+        - canonical persisted event-store row hydration shared by PostgreSQL and
+          SQLite runtime delivery, recovery, and replay readers
+        - publish-admission projection of an already constructed event shell for
+          generated event_id, created_at, or class-owned lineage facts before persistence
+        - preservation-safe route/envelope Project after RoutePlan, pin-routing,
+          or selected-entity owners have already resolved the final envelope facts
+        - preservation-safe immutable Clone for post-commit, preview, or engine
+          adapter isolation
         - route-query/sentinel probes that are not persisted runtime events and
           cannot become executable delivery work
         invalid_authority:
@@ -905,8 +928,10 @@ contract_formats:
           event-owned field assignment, event With* projection/mutation calls,
           dot-imported event APIs, and unallowlisted NewProjectionEvent or
           NewRouteProbeEvent calls.
-          Projection allowlist entries MUST be exact enough to detect both new
-          call sites and extra calls added inside an existing allowed function;
+          The NewProjectionEvent allowlist MUST name only the canonical persisted
+          event decoder and MUST be exact enough to detect both new call sites and
+          extra calls added inside the allowed function; preservation projections
+          consume Project or Clone instead of expanding that allowlist.
           route-probe allowlist entries MUST meet the same exactness bar.
     routing_derivation:
       description: 'Routing is derived from two mechanisms:'
@@ -24203,6 +24228,14 @@ api_specification:
         enum:
         - node
         - agent
+      EventProducerType:
+        type: string
+        description: Canonical discriminator for the mandatory event producer identity.
+        enum:
+        - node
+        - agent
+        - platform
+        - external
       EventDelivery:
         type: object
         additionalProperties: false
@@ -24548,6 +24581,7 @@ api_specification:
         - event_name
         - execution_mode
         - created_at
+        - producer_type
         - source
         - payload
         - deliveries
@@ -24570,7 +24604,10 @@ api_specification:
             $ref: '#/components/schemas/Timestamp'
           source:
             type: string
-            description: Producer identifier (node_id, agent_id, or "external").
+            description: Exact producer identifier paired with producer_type.
+          producer_type:
+            $ref: '#/components/schemas/EventProducerType'
+            description: Exact producer discriminator paired with source.
           payload:
             type: object
             additionalProperties: true

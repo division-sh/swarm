@@ -187,7 +187,7 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
-	ictx, evt, err := admitEventForPublish(ctx, evt, time.Now(), "")
+	ictx, evt, err := admitEventForPublish(ctx, evt, time.Now())
 	if err != nil {
 		return err
 	}
@@ -319,7 +319,7 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
-	ictx, evt, err := admitEventForPublish(ctx, evt, time.Now(), "")
+	ictx, evt, err := admitEventForPublish(ctx, evt, time.Now())
 	if err != nil {
 		return err
 	}
@@ -450,7 +450,7 @@ func (eb *EventBus) preparePublishInMutation(ctx context.Context, evt events.Eve
 			return PreparedPublish{}, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
-	ictx, evt, err := admitEventForPublish(ctx, evt, time.Now(), "")
+	ictx, evt, err := admitEventForPublish(ctx, evt, time.Now())
 	if err != nil {
 		return PreparedPublish{}, err
 	}
@@ -818,18 +818,12 @@ func projectEventForDeliveryRoute(evt events.Event, route events.DeliveryRoute) 
 	} else if !target.Empty() {
 		envelope = events.EnvelopeForTargetRoute(envelope, target)
 	}
-	return events.NewProjectionEvent(
-		evt.ID(),
-		evt.Type(),
-		evt.SourceAgent(),
-		evt.TaskID(),
-		payload,
-		evt.ChainDepth(),
-		evt.RunID(),
-		evt.ParentEventID(),
-		envelope,
-		evt.CreatedAt(),
-	).WithProducerType(evt.ProducerType()).WithExecutionMode(evt.ExecutionMode()).WithDeliveryContext(route.Context), nil
+	return events.Project(
+		evt,
+		events.ProjectPayload(payload),
+		events.ProjectEnvelope(envelope),
+		events.ProjectDeliveryContext(route.Context),
+	), nil
 }
 
 func (eb *EventBus) withBundleFingerprint(ctx context.Context) context.Context {
@@ -1223,7 +1217,7 @@ func admitDeferredEvents(ctx context.Context, out []events.Event) ([]events.Even
 	}
 	deferred := make([]events.Event, 0, len(out))
 	for _, d := range out {
-		_, admitted, err := admitEventForPublish(ctx, d, time.Now(), "")
+		_, admitted, err := admitEventForPublish(ctx, d, time.Now())
 		if err != nil {
 			return nil, err
 		}
@@ -1232,13 +1226,12 @@ func admitDeferredEvents(ctx context.Context, out []events.Event) ([]events.Even
 	return deferred, nil
 }
 
-func admitEventForPublish(ctx context.Context, evt events.Event, now time.Time, sourceAgentDefault string) (context.Context, events.Event, error) {
+func admitEventForPublish(ctx context.Context, evt events.Event, now time.Time) (context.Context, events.Event, error) {
 	opts := events.AdmissionOptions{
 		Now:                      now,
 		RunIDCandidate:           publishRunIDCandidate(ctx, evt),
 		ParentEventIDCandidate:   publishParentEventIDCandidate(ctx, evt),
 		SelectedForkLineageOwner: publishSelectedForkLineageOwner(ctx),
-		SourceAgentDefault:       sourceAgentDefault,
 	}
 	admitted, err := events.AdmitForPublish(evt, opts)
 	if err != nil {
@@ -1307,7 +1300,7 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 		return fmt.Errorf("invalid deferred event type: %s", strings.TrimSpace(string(evt.Type())))
 	}
 	ctx = WithoutEventMutationContext(runtimepipeline.WithoutPipelineSQLTxContext(ctx))
-	ctx, evt, err = admitEventForPublish(ctx, evt, time.Now(), "runtime")
+	ctx, evt, err = admitEventForPublish(ctx, evt, time.Now())
 	if err != nil {
 		return err
 	}
@@ -1888,7 +1881,7 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
-	ctx, evt, err = admitEventForPublish(ctx, evt, time.Now(), "")
+	ctx, evt, err = admitEventForPublish(ctx, evt, time.Now())
 	if err != nil {
 		return err
 	}
@@ -2001,7 +1994,7 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 			return PublishRecipientPlan{}, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
-	ictx, evt, err := admitEventForPublish(ctx, evt, time.Now(), "")
+	ictx, evt, err := admitEventForPublish(ctx, evt, time.Now())
 	if err != nil {
 		return PublishRecipientPlan{}, err
 	}
@@ -2045,7 +2038,7 @@ func (eb *EventBus) publishPersistedRecipients(ctx context.Context, evt events.E
 		return fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
 	var err error
-	ctx, evt, err = admitEventForPublish(ctx, evt, time.Now(), "")
+	ctx, evt, err = admitEventForPublish(ctx, evt, time.Now())
 	if err != nil {
 		return err
 	}

@@ -1230,7 +1230,7 @@ func scheduledEvent(sc runtimepipeline.Schedule) events.Event {
 	return events.NewRuntimeControlEvent(
 		uuid.NewString(),
 		events.EventType(sc.EventType),
-		sc.AgentID,
+		events.AgentProducer(sc.AgentID),
 		sc.TaskID,
 		scheduleEventPayload(sc),
 		0,
@@ -1634,7 +1634,7 @@ func (rt *Runtime) recordStartupManagerRecoveryFailure(ctx context.Context, deci
 	})
 	if rt.Bus != nil {
 		if publishErr := rt.Bus.Publish(ctx, events.NewRuntimeDiagnosticEvent(
-			uuid.NewString(), events.EventType("platform.recovery_failed"), "runtime", "", payload, 0, "", "", events.EventEnvelope{}, time.Now(),
+			uuid.NewString(), events.EventType("platform.recovery_failed"), events.PlatformProducer("runtime"), "", payload, 0, "", "", events.EventEnvelope{}, time.Now(),
 		)); publishErr != nil && rt.Logger != nil {
 			handleRuntimeLogPersistenceError("runtime", "recovery_failed_publish_failed", rt.Logger.Error(ctx, "runtime", "recovery_failed_publish_failed", nil, publishErr))
 		}
@@ -1924,7 +1924,7 @@ func (rt *Runtime) publishBootCompleted(ctx context.Context, report bootComplete
 	evt := events.NewRuntimeControlEvent(
 		eventID,
 		t,
-		"runtime",
+		events.PlatformProducer("runtime"),
 		"",
 		payload,
 		0,

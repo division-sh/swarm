@@ -26,26 +26,6 @@ import (
 
 type pipelineEmitCollectorKey struct{}
 type pipelineEmitIntentCollectorKey struct{}
-type pipelineSourceAgentKey struct{}
-
-func withPipelineSourceAgent(ctx context.Context, sourceAgent string) context.Context {
-	sourceAgent = strings.TrimSpace(sourceAgent)
-	if sourceAgent == "" {
-		return ctx
-	}
-	return context.WithValue(ctx, pipelineSourceAgentKey{}, sourceAgent)
-}
-
-func pipelineSourceAgent(ctx context.Context) string {
-	if ctx == nil {
-		return ""
-	}
-	if v, ok := ctx.Value(pipelineSourceAgentKey{}).(string); ok {
-		return strings.TrimSpace(v)
-	}
-	return ""
-}
-
 type PipelineCoordinator struct {
 	bus Bus
 	db  *sql.DB
@@ -532,14 +512,10 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			"timestamp":        time.Now().UTC().Format(time.RFC3339Nano),
 		}
 		if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
-			sourceAgent := pipelineSourceAgent(ctx)
-			if sourceAgent == "" {
-				sourceAgent = runtimeWorkflowID
-			}
 			*collector = append(*collector, events.NewRuntimeDiagnosticEvent(
 				uuid.NewString(),
 				events.EventType("platform.dead_letter"),
-				sourceAgent,
+				events.PlatformProducer(runtimeWorkflowID),
 				"",
 				mustJSON(deadLetterPayload),
 				0,
@@ -634,15 +610,11 @@ func (pc *PipelineCoordinator) publish(ctx context.Context, eventType, entityID 
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	sourceAgent := pipelineSourceAgent(ctx)
-	if sourceAgent == "" {
-		sourceAgent = runtimeWorkflowID
-	}
 	flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/")
 	emitted := events.NewRuntimeDiagnosticEvent(
 		uuid.NewString(),
 		events.EventType(strings.TrimSpace(eventType)),
-		sourceAgent,
+		events.PlatformProducer(runtimeWorkflowID),
 		"",
 		mustJSON(payload),
 		0,
@@ -674,15 +646,11 @@ func (pc *PipelineCoordinator) publishDirect(ctx context.Context, eventType, ent
 	if len(recipients) == 0 {
 		return pc.publish(ctx, eventType, entityID, payload)
 	}
-	sourceAgent := pipelineSourceAgent(ctx)
-	if sourceAgent == "" {
-		sourceAgent = runtimeWorkflowID
-	}
 	flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/")
 	emitted := events.NewRuntimeDiagnosticEvent(
 		uuid.NewString(),
 		events.EventType(strings.TrimSpace(eventType)),
-		sourceAgent,
+		events.PlatformProducer(runtimeWorkflowID),
 		"",
 		mustJSON(payload),
 		0,

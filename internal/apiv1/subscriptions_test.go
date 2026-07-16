@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/gorilla/websocket"
@@ -93,6 +94,7 @@ func TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay(t *testing.T) {
 				EntityID:      "entity-1",
 				CreatedAt:     base.Add(time.Second),
 				Source:        "runtime",
+				ProducerType:  events.EventProducerPlatform,
 				Payload:       map[string]any{"ok": true},
 				Deliveries:    []store.OperatorEventDelivery{},
 				DeadLetters:   []store.OperatorDeadLetterRecord{},
@@ -104,6 +106,7 @@ func TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay(t *testing.T) {
 				RunID:         "run-1",
 				CreatedAt:     base.Add(2 * time.Second),
 				Source:        "runtime",
+				ProducerType:  events.EventProducerPlatform,
 				Payload:       map[string]any{"entity_id": "entity-1", "marker": "payload-only"},
 				Deliveries:    []store.OperatorEventDelivery{},
 				DeadLetters:   []store.OperatorDeadLetterRecord{},

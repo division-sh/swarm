@@ -7,6 +7,7 @@ package eventtest
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -15,38 +16,38 @@ import (
 
 // RootIngress builds a test fixture for a root ingress event.
 func RootIngress(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
-	return events.NewRootIngressEvent(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+	return events.NewRootIngressEvent(id, eventType, events.ExternalProducer(fixtureProducerID(sourceAgent, "eventtest-external")), taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
 }
 
 // RuntimeControl builds a test fixture for a runtime control event.
 func RuntimeControl(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
-	return events.NewRuntimeControlEvent(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+	return events.NewRuntimeControlEvent(id, eventType, events.PlatformProducer(fixtureProducerID(sourceAgent, "runtime")), taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
 }
 
 // RuntimeDiagnostic builds a test fixture for a runtime diagnostic event.
 func RuntimeDiagnostic(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
-	return events.NewRuntimeDiagnosticEvent(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+	return events.NewRuntimeDiagnosticEvent(id, eventType, events.PlatformProducer(fixtureProducerID(sourceAgent, "runtime")), taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
 }
 
 // DiagnosticDirect builds a test fixture for direct diagnostic persistence.
 func DiagnosticDirect(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
-	return events.NewDiagnosticDirectEvent(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+	return events.NewDiagnosticDirectEvent(id, eventType, events.PlatformProducer(fixtureProducerID(sourceAgent, "runtime")), taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
 }
 
 // Child builds a test fixture for a runtime child event derived from a parent.
 func Child(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, parent events.Event, envelope events.EventEnvelope, createdAt time.Time) events.Event {
-	return events.NewChildEvent(id, eventType, sourceAgent, taskID, payload, chainDepth, parent, envelope, createdAt)
+	return events.NewChildEvent(id, eventType, events.AgentProducer(fixtureProducerID(sourceAgent, "eventtest-agent")), taskID, payload, chainDepth, parent, envelope, createdAt)
 }
 
 // ChildWithLineage builds a test fixture for a runtime child event when the
 // parent carrier is not available in the fixture.
 func ChildWithLineage(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, lineage events.EventLineage, envelope events.EventEnvelope, createdAt time.Time) events.Event {
-	return events.NewChildEventWithLineage(id, eventType, sourceAgent, taskID, payload, chainDepth, lineage, envelope, createdAt)
+	return events.NewChildEventWithLineage(id, eventType, events.AgentProducer(fixtureProducerID(sourceAgent, "eventtest-agent")), taskID, payload, chainDepth, lineage, envelope, createdAt)
 }
 
 // Replay builds a test fixture for replaying an already-recorded event.
 func Replay(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, lineage events.EventLineage, envelope events.EventEnvelope, createdAt time.Time) events.Event {
-	return events.NewReplayEvent(id, eventType, sourceAgent, taskID, payload, chainDepth, lineage, envelope, createdAt)
+	return events.NewReplayEvent(id, eventType, events.AgentProducer(fixtureProducerID(sourceAgent, "eventtest-agent")), taskID, payload, chainDepth, lineage, envelope, createdAt)
 }
 
 // PersistedProjection builds a persisted projection/readback fixture from
@@ -54,7 +55,21 @@ func Replay(id string, eventType events.EventType, sourceAgent, taskID string, p
 // ChildWithLineage, Replay, RuntimeControl, RuntimeDiagnostic, or
 // DiagnosticDirect instead.
 func PersistedProjection(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
-	return events.NewProjectionEvent(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+	return events.NewProjectionEvent(id, eventType, events.AgentProducer(fixtureProducerID(sourceAgent, "eventtest-agent")), taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+}
+
+func fixtureProducerID(candidate, fallback string) string {
+	candidate = strings.TrimSpace(candidate)
+	if candidate != "" {
+		return candidate
+	}
+	return fallback
+}
+
+// PersistedProjectionForProducer builds a persisted/readback fixture with an
+// exact producer identity.
+func PersistedProjectionForProducer(id string, eventType events.EventType, producer events.ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
+	return events.NewProjectionEvent(id, eventType, producer, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
 }
 
 // RouteProbe builds a route-resolution probe fixture.
@@ -74,7 +89,7 @@ func MalformedChildWithoutRunLineage(eventType events.EventType, sourceAgent str
 	return events.NewChildEventWithLineage(
 		"",
 		eventType,
-		sourceAgent,
+		events.AgentProducer(sourceAgent),
 		"",
 		payload,
 		0,
@@ -91,7 +106,7 @@ func MalformedProjectionWithoutAuthoritativeFacts(eventType events.EventType, so
 	return events.NewProjectionEvent(
 		"",
 		eventType,
-		sourceAgent,
+		events.AgentProducer(sourceAgent),
 		"",
 		payload,
 		0,
@@ -109,7 +124,7 @@ func MalformedProjectionWithoutAuthoritativeRun(id string, eventType events.Even
 	return events.NewProjectionEvent(
 		id,
 		eventType,
-		sourceAgent,
+		events.AgentProducer(sourceAgent),
 		"",
 		payload,
 		0,

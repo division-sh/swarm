@@ -1379,6 +1379,7 @@ func (s *mutatingRuntimeProbeState) storeEvent(evt events.Event, deliveries []st
 		SourceEventID: strings.TrimSpace(evt.ParentEventID()),
 		CreatedAt:     evt.CreatedAt().UTC(),
 		Source:        evt.SourceAgent(),
+		ProducerType:  evt.ProducerType(),
 		Payload:       payload,
 		Deliveries:    deliveries,
 	}
@@ -1403,6 +1404,7 @@ func mutatingProbeOriginalEvent(eventID string, subscribers []string, status str
 		RunID:         "00000000-0000-0000-0000-000000000101",
 		CreatedAt:     time.Unix(1700000000, 0).UTC(),
 		Source:        "origin-agent",
+		ProducerType:  events.EventProducerAgent,
 		Payload:       map[string]any{"topic": "medicine"},
 		Deliveries:    deliveries,
 	}

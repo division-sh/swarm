@@ -1131,18 +1131,7 @@ func (pc *PipelineCoordinator) isTerminalFlowState(flowID, state string) bool {
 }
 
 func cloneEvent(evt events.Event) events.Event {
-	return events.NewProjectionEvent(
-		evt.ID(),
-		evt.Type(),
-		evt.SourceAgent(),
-		evt.TaskID(),
-		evt.Payload(),
-		evt.ChainDepth(),
-		evt.RunID(),
-		evt.ParentEventID(),
-		evt.NormalizedEnvelope(),
-		evt.CreatedAt(),
-	).WithProducerType(evt.ProducerType()).WithExecutionMode(evt.ExecutionMode()).WithDeliveryContext(evt.DeliveryContext())
+	return evt.Clone()
 }
 
 func workflowStateFromEngine(snapshot runtimeengine.StateSnapshot) *WorkflowState {

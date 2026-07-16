@@ -100,6 +100,7 @@ func TestReplayEventFromOriginalUsesCanonicalEventEntityOnly(t *testing.T) {
 		ExecutionMode: "mock",
 		RunID:         "run-1",
 		Source:        "origin-agent",
+		ProducerType:  events.EventProducerAgent,
 		Payload:       map[string]any{"entity_id": "payload-entity", "topic": "medicine"},
 	}
 

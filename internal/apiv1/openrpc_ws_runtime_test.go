@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apispec"
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/store"
@@ -469,6 +470,7 @@ func webSocketRuntimeProbeObservability(base time.Time) *fakeObservabilityReadSt
 				EntityID:      "entity-1",
 				CreatedAt:     base.Add(time.Second),
 				Source:        "runtime",
+				ProducerType:  events.EventProducerPlatform,
 				Payload:       map[string]any{"ok": true},
 				Deliveries:    []store.OperatorEventDelivery{},
 				DeadLetters:   []store.OperatorDeadLetterRecord{},

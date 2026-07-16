@@ -193,7 +193,7 @@ func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, ope
 	if err != nil {
 		return events.EmptyEvent(), err
 	}
-	return events.NewDiagnosticDirectEvent(eventID, events.EventType(DirectiveEventType), "runtime", "", raw, 0, target.RunID, "", events.EventEnvelope{}, now), nil
+	return events.NewDiagnosticDirectEvent(eventID, events.EventType(DirectiveEventType), events.PlatformProducer("runtime"), "", raw, 0, target.RunID, "", events.EventEnvelope{}, now), nil
 }
 
 func ValidateBoardDirective(d BoardDirective) error {

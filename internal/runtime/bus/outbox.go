@@ -216,18 +216,7 @@ func clonePostCommitEmitIntents(intents []runtimeengine.EmitIntent) []runtimeeng
 }
 
 func clonePostCommitEvent(evt events.Event) events.Event {
-	return events.NewProjectionEvent(
-		evt.ID(),
-		evt.Type(),
-		evt.SourceAgent(),
-		evt.TaskID(),
-		evt.Payload(),
-		evt.ChainDepth(),
-		evt.RunID(),
-		evt.ParentEventID(),
-		evt.NormalizedEnvelope(),
-		evt.CreatedAt(),
-	).WithProducerType(evt.ProducerType()).WithExecutionMode(evt.ExecutionMode())
+	return evt.Clone()
 }
 
 func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengine.EmitIntent) (bool, error) {
@@ -334,7 +323,7 @@ func (d engineDispatcher) dispatchExplicitDirectIntent(ctx context.Context, inte
 }
 
 func normalizeOutboxEvent(ctx context.Context, evt events.Event) (events.Event, error) {
-	_, admitted, err := admitEventForPublish(ctx, evt, time.Now().UTC(), "")
+	_, admitted, err := admitEventForPublish(ctx, evt, time.Now().UTC())
 	return admitted, err
 }
 

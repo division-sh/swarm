@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -38,8 +39,10 @@ func TestEventPublishDeliveriesExposeFailureEvidence(t *testing.T) {
 func TestEventReplayTargetsExposeOriginalFailureEvidence(t *testing.T) {
 	at := time.Unix(1700000000, 0).UTC()
 	original := store.OperatorEventFull{
-		EventID:   "event-1",
-		EventName: "task.failed",
+		EventID:      "event-1",
+		EventName:    "task.failed",
+		Source:       "runtime",
+		ProducerType: events.EventProducerPlatform,
 		Deliveries: []store.OperatorEventDelivery{{
 			DeliveryID:     "delivery-1",
 			SubscriberType: "agent",

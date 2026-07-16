@@ -428,7 +428,7 @@ func eventPublicationEvent(params eventPublicationParams, createdAt time.Time) e
 	if params.TargetRouteSet {
 		envelope = events.EnvelopeForTargetRoute(envelope, params.TargetRoute)
 	}
-	return events.NewRootIngressEvent(params.EventID, events.EventType(params.EventName), params.Emitter, "", params.Payload, 0, params.RunID, params.SourceEventID, envelope, createdAt)
+	return events.NewRootIngressEvent(params.EventID, events.EventType(params.EventName), events.ExternalProducer(params.Emitter), "", params.Payload, 0, params.RunID, params.SourceEventID, envelope, createdAt)
 }
 
 func validateEventPublication(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams, cfg eventPublicationConfig) (eventPublicationParams, error) {

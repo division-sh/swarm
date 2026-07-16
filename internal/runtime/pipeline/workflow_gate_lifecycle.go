@@ -169,7 +169,7 @@ func (pc *PipelineCoordinator) publishWorkflowGateSuperseded(ctx context.Context
 	if err != nil {
 		return err
 	}
-	evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_superseded"), "platform", "", payload, 0, card.RunID, "",
+	evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_superseded"), events.PlatformProducer("platform"), "", payload, 0, card.RunID, "",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, anchor.EntityID), anchor.FlowInstance), now.UTC())
 	if err := publisher.PublishInMutation(ctx, evt); err != nil {
 		return fmt.Errorf("publish decision card superseded event: %w", err)

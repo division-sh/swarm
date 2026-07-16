@@ -351,7 +351,7 @@ func ensureEventReplayAudit(
 	if err := publisher.Publish(ctx, events.NewReplayEvent(
 		stored.AuditEventID,
 		events.EventType(eventReplaySyntheticEventName),
-		eventReplayActorSource(req),
+		events.PlatformProducer(eventReplayActorSource(req)),
 		"",
 		auditPayload,
 		0,
@@ -443,14 +443,14 @@ func replayEventFromOriginal(original store.OperatorEventFull, replayEventID str
 	if err != nil {
 		return events.EmptyEvent(), err
 	}
-	source := strings.TrimSpace(original.Source)
-	if source == "" || source == "unknown" {
-		source = "event.replay"
+	producer, err := events.NewProducerIdentity(original.ProducerType, original.Source)
+	if err != nil {
+		return events.EmptyEvent(), fmt.Errorf("event %s producer identity: %w", original.EventID, err)
 	}
 	evt := events.NewReplayEvent(
 		replayEventID,
 		events.EventType(original.EventName),
-		source,
+		producer,
 		"",
 		payload,
 		0,

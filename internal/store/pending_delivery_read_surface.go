@@ -266,14 +266,19 @@ func (s *PostgresStore) listPendingAgentDeliveryRecordsSpec(ctx context.Context,
 			e.event_id::text,
 			COALESCE(e.run_id::text, ''),
 			e.event_name,
-			COALESCE(e.produced_by, ''),
 			COALESCE(e.entity_id::text, ''),
 			COALESCE(e.flow_instance, ''),
 			COALESCE(e.scope, 'global'),
 			e.payload,
-			e.created_at,
+			COALESCE(e.chain_depth, 0),
+			COALESCE(e.produced_by, ''),
+			COALESCE(e.produced_by_type, ''),
 			COALESCE(e.source_event_id::text, ''),
+			e.created_at,
 			e.execution_mode,
+			COALESCE(e.source_route, '{}'::jsonb),
+			COALESCE(e.target_route, '{}'::jsonb),
+			COALESCE(e.target_set, '[]'::jsonb),
 			TRUE,
 			COALESCE(d.status, ''),
 			COALESCE(d.retry_count, 0),
@@ -312,29 +317,29 @@ func scanPendingAgentDeliveryRecords(rows *sql.Rows) ([]pendingAgentDeliveryReco
 	out := make([]pendingAgentDeliveryRecord, 0)
 	for rows.Next() {
 		var (
-			record                 pendingAgentDeliveryRecord
-			eventID, runID         string
-			eventName, producedBy  string
-			payload                json.RawMessage
-			createdAt              time.Time
-			sourceEventID          string
-			executionMode          string
-			entityID, flowInstance string
-			scope                  string
+			record        pendingAgentDeliveryRecord
+			eventID       string
+			executionMode string
+			row           persistedEventIdentity
 		)
 		if err := rows.Scan(
 			&record.AgentID,
 			&eventID,
-			&runID,
-			&eventName,
-			&producedBy,
-			&entityID,
-			&flowInstance,
-			&scope,
-			&payload,
-			&createdAt,
-			&sourceEventID,
+			&row.RunID,
+			&row.EventName,
+			&row.EntityID,
+			&row.FlowInstance,
+			&row.Scope,
+			&row.Payload,
+			&row.ChainDepth,
+			&row.ProducedBy,
+			&row.ProducedByType,
+			&row.SourceEventID,
+			&row.CreatedAt,
 			&executionMode,
+			&row.SourceRoute,
+			&row.TargetRoute,
+			&row.TargetSet,
 			&record.DeliveryFound,
 			&record.DeliveryStatus,
 			&record.DeliveryRetryCount,
@@ -345,24 +350,8 @@ func scanPendingAgentDeliveryRecords(rows *sql.Rows) ([]pendingAgentDeliveryReco
 			return nil, fmt.Errorf("scan pending agent delivery record: %w", err)
 		}
 		record.AgentID = strings.TrimSpace(record.AgentID)
-		record.Event = events.NewProjectionEvent(
-			eventID,
-			events.EventType(eventName),
-			producedBy,
-			"",
-			payload,
-			0,
-			runID,
-			sourceEventID,
-			events.EventEnvelope{
-				EntityID:     entityID,
-				FlowInstance: flowInstance,
-				Scope:        events.EventScope(scope),
-			},
-			createdAt,
-		)
 		var err error
-		record.Event, err = eventWithStoredExecutionMode(record.Event, executionMode)
+		record.Event, err = eventFromPersistedIdentity(eventID, executionMode, row)
 		if err != nil {
 			return nil, err
 		}

@@ -170,18 +170,7 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 	}
 	for idx, e := range out {
 		if strings.TrimSpace(e.ID()) == "" {
-			e = events.NewProjectionEvent(
-				deterministicOutputEventID(evt, agent.ID(), idx, e),
-				e.Type(),
-				e.SourceAgent(),
-				e.TaskID(),
-				e.Payload(),
-				e.ChainDepth(),
-				e.RunID(),
-				e.ParentEventID(),
-				e.Envelope(),
-				e.CreatedAt(),
-			).WithProducerType(e.ProducerType()).WithExecutionMode(e.ExecutionMode())
+			e = events.Project(e, events.ProjectID(deterministicOutputEventID(evt, agent.ID(), idx, e)))
 		}
 		if am.shouldSkipAlreadyPublishedOutput(ctx, e.ID()) {
 			continue
@@ -406,7 +395,7 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID
 		flowInstance = flowPathFromAgentConfig(cfg)
 	}
 	if authRequired {
-		authEvt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("platform.auth_required"), "runtime", "", mustJSON(map[string]any{
+		authEvt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("platform.auth_required"), events.PlatformProducer("runtime"), "", mustJSON(map[string]any{
 			"agent_id":      strings.TrimSpace(agentID),
 			"entity_id":     entityID,
 			"flow_instance": flowInstance,
@@ -646,7 +635,7 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 	}
 
 	eventCtx := am.runtimePlatformControlEventContext(ctx)
-	if err := am.bus.Publish(eventCtx, events.NewRuntimeDiagnosticEvent(uuid.NewString(), events.EventType("platform.dead_letter_escalation"), "runtime", "", mustJSON(map[string]any{
+	if err := am.bus.Publish(eventCtx, events.NewRuntimeDiagnosticEvent(uuid.NewString(), events.EventType("platform.dead_letter_escalation"), events.PlatformProducer("runtime"), "", mustJSON(map[string]any{
 		"flow_instance":     flowInstance,
 		"dead_letter_count": count,
 		"window_minutes":    int(deadLetterEscalationWindow / time.Minute),

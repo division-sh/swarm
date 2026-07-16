@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -30,6 +31,7 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 				RunID:         "run-1",
 				CreatedAt:     now,
 				Source:        "runtime",
+				ProducerType:  events.EventProducerPlatform,
 				Payload:       map[string]any{"ok": true},
 				Deliveries: []store.OperatorEventDelivery{{
 					DeliveryID:     "del-1",
@@ -190,6 +192,7 @@ func TestOperatorObservabilityHandlersKeepPayloadEntityOutOfTopLevelEventIdentit
 				RunID:         "run-1",
 				CreatedAt:     now,
 				Source:        "runtime",
+				ProducerType:  events.EventProducerPlatform,
 				Payload:       map[string]any{"entity_id": payloadEntityID, "marker": "payload-only"},
 				Deliveries:    []store.OperatorEventDelivery{},
 				DeadLetters:   []store.OperatorDeadLetterRecord{},
