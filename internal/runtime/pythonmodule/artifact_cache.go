@@ -106,7 +106,7 @@ func materializeVerifiedArtifact(cacheRoot string, raw []byte, digestHex string,
 	}
 	finalDir := filepath.Join(parent, digestHex)
 	if err := validateMaterializedArtifact(finalDir, manifest); err == nil {
-		return finalDir, nil
+		return acceptMaterializedArtifact(parent, digestHex, finalDir)
 	}
 
 	stagingDir, err := os.MkdirTemp(parent, "."+digestHex+".staging-")
@@ -120,15 +120,21 @@ func materializeVerifiedArtifact(cacheRoot string, raw []byte, digestHex string,
 		}
 	}()
 	if err := extractArchive(stagingDir, raw, manifest); err != nil {
+		if finalErr := validateMaterializedArtifact(finalDir, manifest); finalErr == nil {
+			return acceptMaterializedArtifact(parent, digestHex, finalDir)
+		}
 		return "", err
 	}
 	if err := validateMaterializedArtifactShape(stagingDir, manifest); err != nil {
+		if finalErr := validateMaterializedArtifact(finalDir, manifest); finalErr == nil {
+			return acceptMaterializedArtifact(parent, digestHex, finalDir)
+		}
 		return "", fmt.Errorf("validate staged CPython-WASI artifact: %w", err)
 	}
 
 	for attempt := 0; attempt < 4; attempt++ {
 		if err := validateMaterializedArtifact(finalDir, manifest); err == nil {
-			return finalDir, nil
+			return acceptMaterializedArtifact(parent, digestHex, finalDir)
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			if err := quarantineInvalidArtifact(finalDir); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return "", err
@@ -136,13 +142,39 @@ func materializeVerifiedArtifact(cacheRoot string, raw []byte, digestHex string,
 		}
 		if err := os.Rename(stagingDir, finalDir); err == nil {
 			stagingOwned = false
-			return finalDir, nil
+			return acceptMaterializedArtifact(parent, digestHex, finalDir)
 		}
 		if err := validateMaterializedArtifact(finalDir, manifest); err == nil {
-			return finalDir, nil
+			return acceptMaterializedArtifact(parent, digestHex, finalDir)
 		}
 	}
 	return "", fmt.Errorf("publish CPython-WASI artifact sha256:%s: concurrent cache entry did not converge", digestHex)
+}
+
+func acceptMaterializedArtifact(parent, digestHex, finalDir string) (string, error) {
+	if err := removeSupersededArtifactTrees(parent, digestHex); err != nil {
+		return "", fmt.Errorf("remove superseded CPython-WASI artifact trees: %w", err)
+	}
+	return finalDir, nil
+}
+
+func removeSupersededArtifactTrees(parent, digestHex string) error {
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return err
+	}
+	prefixes := []string{"." + digestHex + ".staging-", "." + digestHex + ".invalid-"}
+	for _, entry := range entries {
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(entry.Name(), prefix) {
+				if err := removeArtifactTree(filepath.Join(parent, entry.Name())); err != nil {
+					return err
+				}
+				break
+			}
+		}
+	}
+	return nil
 }
 
 func manifestFromArchive(raw []byte, declaredDigest string) (artifactManifest, string, error) {
