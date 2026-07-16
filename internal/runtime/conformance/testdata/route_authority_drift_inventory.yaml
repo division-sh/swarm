@@ -468,6 +468,7 @@ seam_families:
       - internal/runtime/semanticview/import_boundary_aliases_test.go
       - internal/runtime/bootverify/workflow_composition_connect_checks.go
       - internal/runtime/bootverify/workflow_composition_connect_checks_test.go
+      - internal/runtime/testfixtures/canonicalrouting/import_boundary_variants.go
     search_dimensions: [import_boundary_pin_alias_route_authority, connect_route_plan]
     notes: >
       Binding input/output pins remains canonical interface and event-name
@@ -671,7 +672,7 @@ seam_families:
       - internal/runtime/runforkadmission/contract_frontier.go
       - internal/runtime/runforkadmission/selected_route_history.go
       - internal/runtime/runstart/root_inputs.go
-    search_dimensions: [route_table_resolve, route_event_key_derivation]
+    search_dimensions: [route_table_resolve, route_event_key_derivation, connect_route_plan, receiver_carrier]
     notes: >
       RouteTable.Resolve must be classified by role. EventBus lowered-connect
       use is post-identity receiver-carrier lookup; runstart/runfork uses are
