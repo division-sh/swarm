@@ -88,7 +88,7 @@ func validateMockResponseSchema(schema runtimecontracts.ToolInputSchema, path st
 
 	enum, enumPresent, err := runtimecontracts.ToolInputSchemaEnumProjection(schema)
 	if err != nil {
-		return fmt.Errorf("%s.enum: %w", path, err)
+		return fmt.Errorf("%s.%w", path, err)
 	}
 	if enumPresent && len(enum) == 0 {
 		return fmt.Errorf("%s.enum: explicitly declared enum must contain at least one value", path)
@@ -159,7 +159,7 @@ func validateMockNumericBounds(schema runtimecontracts.ToolInputSchema, path, ty
 func deterministicMockSchemaValue(schema runtimecontracts.ToolInputSchema, path string) (any, error) {
 	enum, enumPresent, err := runtimecontracts.ToolInputSchemaEnumProjection(schema)
 	if err != nil {
-		return nil, fmt.Errorf("%s.enum: %w", path, err)
+		return nil, fmt.Errorf("%s.%w", path, err)
 	}
 	if enumPresent {
 		if len(enum) == 0 {

@@ -1,14 +1,16 @@
 package contracts
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -503,23 +505,78 @@ func ToolInputSchemaEnumProjection(schema ToolInputSchema) ([]any, bool, error) 
 	}
 	values := make([]any, 0, len(schema.Enum))
 	for index, literal := range schema.Enum {
-		var decoded any
-		if literal.Node.Kind != 0 {
-			if err := literal.Node.Decode(&decoded); err != nil {
-				return nil, true, fmt.Errorf("value %d: decode typed literal: %w", index, err)
-			}
-		}
-		raw, err := json.Marshal(decoded)
+		value, err := toolInputSchemaEnumLiteralValue(&literal.Node)
 		if err != nil {
-			return nil, true, fmt.Errorf("value %d: literal is not JSON-compatible: %w", index, err)
+			return nil, true, fmt.Errorf("enum[%d]: %w", index, err)
 		}
-		var normalized any
-		if err := json.Unmarshal(raw, &normalized); err != nil {
-			return nil, true, fmt.Errorf("value %d: normalize typed literal: %w", index, err)
-		}
-		values = append(values, normalized)
+		values = append(values, value)
 	}
 	return values, true, nil
+}
+
+func toolInputSchemaEnumLiteralValue(node *yaml.Node) (any, error) {
+	if node == nil || node.Kind == 0 {
+		return nil, fmt.Errorf("literal node is missing")
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		switch node.Tag {
+		case "!!str":
+			if !utf8.ValidString(node.Value) {
+				return nil, fmt.Errorf("string literal is not valid UTF-8")
+			}
+			return node.Value, nil
+		case "!!bool", "!!int", "!!float", "!!null":
+			var value any
+			if err := canonicaljson.DecodeInto([]byte(node.Value), &value); err != nil {
+				return nil, fmt.Errorf("%s literal %q is not an admitted JSON value: %w", node.Tag, node.Value, err)
+			}
+			return value, nil
+		default:
+			return nil, fmt.Errorf("YAML scalar tag %q is not a JSON value", node.Tag)
+		}
+	case yaml.SequenceNode:
+		if node.Tag != "" && node.Tag != "!!seq" {
+			return nil, fmt.Errorf("YAML sequence tag %q is not a JSON value", node.Tag)
+		}
+		values := make([]any, 0, len(node.Content))
+		for index, child := range node.Content {
+			value, err := toolInputSchemaEnumLiteralValue(child)
+			if err != nil {
+				return nil, fmt.Errorf("item[%d]: %w", index, err)
+			}
+			values = append(values, value)
+		}
+		return values, nil
+	case yaml.MappingNode:
+		if node.Tag != "" && node.Tag != "!!map" {
+			return nil, fmt.Errorf("YAML mapping tag %q is not a JSON value", node.Tag)
+		}
+		if len(node.Content)%2 != 0 {
+			return nil, fmt.Errorf("object literal has an unmatched key")
+		}
+		values := make(map[string]any, len(node.Content)/2)
+		for index := 0; index < len(node.Content); index += 2 {
+			keyNode := node.Content[index]
+			if keyNode == nil || keyNode.Kind != yaml.ScalarNode || keyNode.Tag != "!!str" {
+				return nil, fmt.Errorf("object key[%d] must be a JSON string", index/2)
+			}
+			if !utf8.ValidString(keyNode.Value) {
+				return nil, fmt.Errorf("object key[%d] is not valid UTF-8", index/2)
+			}
+			if _, exists := values[keyNode.Value]; exists {
+				return nil, fmt.Errorf("duplicate object key %q", keyNode.Value)
+			}
+			value, err := toolInputSchemaEnumLiteralValue(node.Content[index+1])
+			if err != nil {
+				return nil, fmt.Errorf("object property %q: %w", keyNode.Value, err)
+			}
+			values[keyNode.Value] = value
+		}
+		return values, nil
+	default:
+		return nil, fmt.Errorf("YAML node kind %d is not a JSON value", node.Kind)
+	}
 }
 
 // ToolInputSchemaJSONSchema exposes the canonical ToolInputSchema projection

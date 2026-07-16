@@ -103,6 +103,35 @@ required: [status]
 	if explicitEmptyEnum.Properties["status"].Enum == nil {
 		t.Fatal("explicit empty enum lost authored presence")
 	}
+	decodeSchema := func(raw string) runtimecontracts.ToolInputSchema {
+		t.Helper()
+		var schema runtimecontracts.ToolInputSchema
+		if err := yaml.Unmarshal([]byte(raw), &schema); err != nil {
+			t.Fatalf("unmarshal enum schema: %v", err)
+		}
+		return schema
+	}
+	timestampEnum := decodeSchema(`
+type: object
+properties:
+  value: {type: string, enum: [2026-07-16T12:00:00Z]}
+required: [value]
+`)
+	binaryEnum := decodeSchema(`
+type: object
+properties:
+  value: {type: string, enum: [!!binary aGVsbG8=]}
+required: [value]
+`)
+	malformedLiteralSchema := func(node yaml.Node) runtimecontracts.ToolInputSchema {
+		return runtimecontracts.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]runtimecontracts.ToolInputSchema{
+				"value": {Type: "string", Enum: []runtimecontracts.SchemaLiteral{{Node: node}}},
+			},
+			Required: []string{"value"},
+		}
+	}
 
 	tests := []struct {
 		name   string
@@ -150,6 +179,60 @@ required: [status]
 			name:   "explicit empty enum has no inhabitant",
 			schema: explicitEmptyEnum,
 			want:   "output_schema.properties.status.enum: explicitly declared enum must contain at least one value",
+		},
+		{
+			name:   "YAML timestamp enum is not coerced",
+			schema: timestampEnum,
+			want:   `output_schema.properties.value.enum[0]: YAML scalar tag "!!timestamp" is not a JSON value`,
+		},
+		{
+			name:   "YAML binary enum is not coerced",
+			schema: binaryEnum,
+			want:   `output_schema.properties.value.enum[0]: YAML scalar tag "!!binary" is not a JSON value`,
+		},
+		{
+			name:   "missing typed enum literal is rejected",
+			schema: malformedLiteralSchema(yaml.Node{}),
+			want:   "output_schema.properties.value.enum[0]: literal node is missing",
+		},
+		{
+			name: "invalid UTF-8 enum string is rejected",
+			schema: malformedLiteralSchema(yaml.Node{
+				Kind:  yaml.ScalarNode,
+				Tag:   "!!str",
+				Value: string([]byte{0xff}),
+			}),
+			want: "output_schema.properties.value.enum[0]: string literal is not valid UTF-8",
+		},
+		{
+			name: "unsafe enum integer is rejected",
+			schema: malformedLiteralSchema(yaml.Node{
+				Kind:  yaml.ScalarNode,
+				Tag:   "!!int",
+				Value: "9007199254740992",
+			}),
+			want: "output_schema.properties.value.enum[0]",
+		},
+		{
+			name: "non-finite enum number is rejected",
+			schema: malformedLiteralSchema(yaml.Node{
+				Kind:  yaml.ScalarNode,
+				Tag:   "!!float",
+				Value: ".nan",
+			}),
+			want: "output_schema.properties.value.enum[0]",
+		},
+		{
+			name: "non-string enum object key is rejected",
+			schema: malformedLiteralSchema(yaml.Node{
+				Kind: yaml.MappingNode,
+				Tag:  "!!map",
+				Content: []*yaml.Node{
+					{Kind: yaml.ScalarNode, Tag: "!!int", Value: "1"},
+					{Kind: yaml.ScalarNode, Tag: "!!str", Value: "value"},
+				},
+			}),
+			want: "output_schema.properties.value.enum[0]: object key[0] must be a JSON string",
 		},
 	}
 
