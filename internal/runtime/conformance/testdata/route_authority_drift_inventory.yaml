@@ -458,6 +458,77 @@ seam_families:
       connect.map remains non-authoritative for that class. #1577 adds the
       connect-time template lifecycle owner that consumes the lowered instance
       key plan and creates, reuses, or fails closed before delivery rows commit.
+  - id: connect_source_endpoint_mode_authority
+    layer: route_plan_authority
+    classification: canonical_owner
+    paths:
+      - internal/runtime/core/pinrouting/connect_route_plan.go
+      - internal/runtime/core/pinrouting/connect_route_plan_test.go
+      - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/pipeline/workflow_nodes.go
+      - internal/runtime/pipeline/workflow_nodes_test.go
+      - internal/runtime/engine/executor.go
+      - internal/runtime/engine/executor_test.go
+      - internal/runtime/runforkadmission/contract_frontier.go
+      - internal/runtime/runforkadmission/contract_frontier_test.go
+      - internal/runtime/runforkadmission/selected_route_history.go
+      - internal/runtime/conformance/fan_in_stream_conformance_test.go
+      - internal/runtime/conformance/reply_resolution_conformance_test.go
+      - internal/runtime/conformance/notify_all_children_runtime_conformance_test.go
+    search_dimensions: [connect_route_plan, route_event_key_derivation]
+    invalid_authority:
+      - template base identity without concrete source-route provenance
+      - static or singleton descendant identity
+      - target-route identity substituted for producer identity
+      - executor state metadata overriding the admitted producer route
+      - suffix or same-leaf event-name fallback
+    notes: >
+      ConnectSourceEndpointMatches is the canonical producer endpoint matcher.
+      It consumes the lowered producer Mode: template sources require exact
+      concrete instance provenance, while static and singleton sources reject
+      descendant evidence. Pipeline execution preserves its already-admitted
+      producer route when constructing output events. EventBus plans and issues,
+      workflow-node connect localization, selected-contract frontier admission,
+      route-history admission, and supported fan-in/reply/fan-out runtime proofs
+      consume the same owner.
+  - id: selected_contract_connect_receiver_policy
+    layer: replay_recovery_consumers
+    classification: valid_consumer
+    paths:
+      - internal/runtime/core/pinrouting/connect_route_plan.go
+      - internal/runtime/runforkadmission/contract_frontier.go
+      - internal/runtime/runforkadmission/contract_frontier_test.go
+      - internal/runtime/runforkadmission/selected_route_history.go
+    search_dimensions: [connect_route_plan, route_table_resolve, receiver_carrier]
+    invalid_authority:
+      - applying receiver_carrier filtering to a global-root connect receiver
+      - treating a nested package-root receiver as the repository root
+      - admitting non-carrier routes for a non-root connect receiver
+    notes: >
+      Selected-contract connect lookup preserves receiver kind per lowered plan.
+      A repository-root receiver consumes ordinary root node/agent routes;
+      nested and non-root receivers remain receiver-carrier-only. The shared
+      per-plan lookup is consumed by both frontier and route-history admission.
+  - id: selected_contract_connect_fanout_completeness
+    layer: replay_recovery_consumers
+    classification: valid_consumer
+    paths:
+      - internal/runtime/core/pinrouting/connect_route_plan.go
+      - internal/runtime/runforkadmission/contract_frontier.go
+      - internal/runtime/runforkadmission/contract_frontier_test.go
+      - internal/runtime/runforkadmission/selected_route_history.go
+    search_dimensions: [connect_route_plan, route_table_resolve, receiver_carrier]
+    invalid_authority:
+      - a proven static sibling suppressing an unresolved runtime receiver
+      - discarding proven root or static-child recipients because another plan is unresolved
+      - dynamically resolving template receivers inside selected-contract admission
+    notes: >
+      Each matched connect row retains its own runtime-resolution state.
+      Frontier and route-history admission preserve recipients from proven
+      static/root rows while classifying the event fail-closed when any sibling
+      receiver still requires runtime resolution. Dynamic resolution remains
+      separately tracked and is not implemented here.
   - id: import_boundary_pin_interface_adaptation
     layer: route_plan_consumers
     classification: valid_consumer

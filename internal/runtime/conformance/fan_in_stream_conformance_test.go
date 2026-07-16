@@ -3,6 +3,7 @@ package conformance
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -374,6 +375,9 @@ func fanInStreamPublishAndExecute(
 }
 
 func fanInStreamEvent(eventType, id, flowInstance, reportID, periodID string, revenue int) events.Event {
+	if prefix := templatefanin.ProducerFlowID + "/"; strings.HasPrefix(eventType, prefix) {
+		eventType = strings.Trim(strings.TrimSpace(flowInstance), "/") + "/" + strings.TrimPrefix(eventType, prefix)
+	}
 	payload, _ := json.Marshal(map[string]any{
 		"portfolio_id": "portfolio-default",
 		"report_id":    reportID,

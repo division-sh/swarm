@@ -63,13 +63,16 @@ func AdmitContractFrontier(req ContractFrontierRequest) (store.RunForkContractFr
 		return store.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract connect routes: %#v", connectIssues)
 	}
 	frontier, lineageOnly := runForkFrontierEvents(req.Plan.PendingWork)
+	incompleteRoutes := map[string]bool{}
 	for i := range frontier {
 		eventName := frontier[i].EventName
 		sourceRoute := contractFrontierSourceRoute(req.Plan.PendingWork, frontier[i].SourceEventID)
-		routeKeys, connectOwned := contractFrontierRouteKeys(eventName, sourceRoute, connectPlans)
+		lookups := contractFrontierRouteLookups(eventName, sourceRoute, connectPlans)
+		routeKeys := contractFrontierLookupEventNames(lookups)
+		incompleteRoutes[frontier[i].SourceEventID] = incompleteRoutes[frontier[i].SourceEventID] || contractFrontierLookupsRequireRuntimeResolution(lookups)
 		frontier[i].RuntimeEventOwners = sortedUnique(req.Source.RuntimeEventOwners(eventName))
 		frontier[i].WorkflowNodeSubscribers = workflowNodeSubscribers(workflowNodes, routeKeys...)
-		frontier[i].DerivedRecipients = contractFrontierRecipients(resolveContractFrontierRoutes(routeTable, routeKeys, connectOwned))
+		frontier[i].DerivedRecipients = contractFrontierRecipients(resolveContractFrontierRoutes(routeTable, lookups))
 	}
 	sort.Slice(frontier, func(i, j int) bool {
 		if frontier[i].EventName != frontier[j].EventName {
@@ -86,6 +89,13 @@ func AdmitContractFrontier(req ContractFrontierRequest) (store.RunForkContractFr
 		})
 	}
 	for _, event := range frontier {
+		if incompleteRoutes[event.SourceEventID] {
+			blockers = appendRunForkBlocker(blockers, store.RunForkUnsupportedBlocker{
+				Code:    store.RunForkBlockerContractFrontierRouteUnresolved,
+				Message: "selected-contract frontier has a matched connect receiver that still requires runtime resolution",
+			})
+			continue
+		}
 		if len(event.DerivedRecipients) > 0 || len(event.RuntimeEventOwners) > 0 || len(event.WorkflowNodeSubscribers) > 0 {
 			continue
 		}
@@ -272,51 +282,107 @@ func contractFrontierSourceRoute(pending []store.RunForkPendingWork, eventID str
 	return events.RouteIdentity{}
 }
 
-func contractFrontierRouteKeys(eventName string, sourceRoute events.RouteIdentity, plans []runtimepinrouting.ConnectRoutePlan) ([]string, bool) {
+type contractFrontierReceiverPolicy uint8
+
+const (
+	contractFrontierReceiverDirect contractFrontierReceiverPolicy = iota
+	contractFrontierReceiverRoot
+	contractFrontierReceiverCarrier
+)
+
+type contractFrontierRouteLookup struct {
+	eventNames                []string
+	receiverPolicy            contractFrontierReceiverPolicy
+	requiresRuntimeResolution bool
+}
+
+func contractFrontierRouteLookups(eventName string, sourceRoute events.RouteIdentity, plans []runtimepinrouting.ConnectRoutePlan) []contractFrontierRouteLookup {
 	eventName = strings.Trim(strings.TrimSpace(eventName), "/")
 	if eventName == "" {
-		return nil, false
-	}
-	matchesSource := func(endpoint runtimepinrouting.ConnectRoutePlanEndpoint) bool {
-		return runtimepinrouting.ConnectSourceEndpointMatches(endpoint, eventName, sourceRoute)
+		return nil
 	}
 	matched := false
-	receiverEvents := map[string]struct{}{}
+	lookups := make([]contractFrontierRouteLookup, 0)
 	for _, plan := range plans {
-		if !matchesSource(plan.Source) {
+		if !runtimepinrouting.ConnectSourceEndpointMatches(plan.Source, eventName, sourceRoute) {
 			continue
 		}
 		matched = true
-		if plan.RequiresRuntimeResolution {
-			continue
+		lookup := contractFrontierRouteLookup{
+			receiverPolicy:            contractFrontierReceiverCarrier,
+			requiresRuntimeResolution: plan.RequiresRuntimeResolution,
 		}
-		local := strings.Trim(strings.TrimSpace(plan.Receiver.Event), "/")
-		receiverPath := strings.Trim(strings.TrimSpace(plan.Receiver.FlowPath), "/")
-		if receiverPath == "" {
-			receiverPath = strings.Trim(strings.TrimSpace(plan.Receiver.FlowID), "/")
+		if plan.Receiver.Root {
+			lookup.receiverPolicy = contractFrontierReceiverRoot
 		}
-		addString(receiverEvents, plan.Receiver.ResolvedEvent)
-		if receiverPath != "" && local != "" {
-			addString(receiverEvents, receiverPath+"/"+local)
+		if !plan.RequiresRuntimeResolution {
+			lookup.eventNames = contractFrontierReceiverEventNames(plan)
 		}
-		if target := plan.Target.Normalized(); target.FlowInstance != "" && local != "" {
+		lookups = append(lookups, lookup)
+	}
+	if matched {
+		return lookups
+	}
+	return []contractFrontierRouteLookup{{eventNames: []string{eventName}, receiverPolicy: contractFrontierReceiverDirect}}
+}
+
+func contractFrontierReceiverEventNames(plan runtimepinrouting.ConnectRoutePlan) []string {
+	receiverEvents := map[string]struct{}{}
+	local := strings.Trim(strings.TrimSpace(plan.Receiver.Event), "/")
+	receiverPath := strings.Trim(strings.TrimSpace(plan.Receiver.FlowPath), "/")
+	if receiverPath == "" {
+		receiverPath = strings.Trim(strings.TrimSpace(plan.Receiver.FlowID), "/")
+	}
+	addString(receiverEvents, plan.Receiver.ResolvedEvent)
+	if receiverPath != "" && local != "" {
+		addString(receiverEvents, receiverPath+"/"+local)
+	}
+	if target := plan.Target.Normalized(); target.FlowInstance != "" && local != "" {
+		addString(receiverEvents, target.FlowInstance+"/"+local)
+	}
+	for _, target := range plan.TargetSet {
+		if target = target.Normalized(); target.FlowInstance != "" && local != "" {
 			addString(receiverEvents, target.FlowInstance+"/"+local)
 		}
 	}
-	if matched {
-		return sortedSet(receiverEvents), true
+	if plan.Receiver.Root {
+		addString(receiverEvents, local)
 	}
-	return []string{eventName}, false
+	return sortedSet(receiverEvents)
 }
 
-func resolveContractFrontierRoutes(routeTable *runtimebus.RouteTable, eventNames []string, connectOwned bool) []runtimebus.Subscriber {
+func contractFrontierLookupEventNames(lookups []contractFrontierRouteLookup) []string {
+	eventNames := map[string]struct{}{}
+	for _, lookup := range lookups {
+		for _, eventName := range lookup.eventNames {
+			addString(eventNames, eventName)
+		}
+	}
+	return sortedSet(eventNames)
+}
+
+func contractFrontierLookupsRequireRuntimeResolution(lookups []contractFrontierRouteLookup) bool {
+	for _, lookup := range lookups {
+		if lookup.requiresRuntimeResolution {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveContractFrontierRoutes(routeTable *runtimebus.RouteTable, lookups []contractFrontierRouteLookup) []runtimebus.Subscriber {
 	var out []runtimebus.Subscriber
-	for _, eventName := range eventNames {
-		for _, subscriber := range routeTable.Resolve(eventName) {
-			if connectOwned && strings.TrimSpace(subscriber.RouteSource) != "receiver_carrier" {
-				continue
+	for _, lookup := range lookups {
+		if lookup.requiresRuntimeResolution {
+			continue
+		}
+		for _, eventName := range lookup.eventNames {
+			for _, subscriber := range routeTable.Resolve(eventName) {
+				if lookup.receiverPolicy == contractFrontierReceiverCarrier && strings.TrimSpace(subscriber.RouteSource) != "receiver_carrier" {
+					continue
+				}
+				out = append(out, subscriber)
 			}
-			out = append(out, subscriber)
 		}
 	}
 	return out

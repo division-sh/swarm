@@ -350,10 +350,52 @@ func TestWorkflowNodeConnectedInputEventHandlerResolution_ConsumesLoweredPackage
 }
 
 func TestWorkflowNodeConnectedInputHandlerMatchesConcreteTemplateProducer(t *testing.T) {
+	source := testWorkflowNodeConnectedInputSource("template")
+	evt := eventtest.RootIngress("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+		FlowInstance: "receiver",
+		Source:       events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "producer-entity"},
+		Target:       events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: "receiver-entity"},
+	}, time.Unix(1, 0).UTC())
+
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "receiver-node", evt)
+	if !resolved.Matched || resolved.HandlerEventKey != "deploy.requested" {
+		t.Fatalf("concrete template connect handler resolution = %#v, want receiver deploy.requested", resolved)
+	}
+}
+
+func TestWorkflowNodeConnectedInputHandlerEnforcesProducerMode(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		mode      string
+		eventType string
+		source    events.RouteIdentity
+		want      bool
+	}{
+		{name: "static exact scope", mode: "static", eventType: "producer/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}, want: true},
+		{name: "static descendant", mode: "static", eventType: "producer/inst-1/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}},
+		{name: "template concrete instance", mode: "template", eventType: "producer/inst-1/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}, want: true},
+		{name: "template base scope", mode: "template", eventType: "producer/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}},
+		{name: "template concrete name without route", mode: "template", eventType: "producer/inst-1/deploy.done"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evt := eventtest.RootIngress("", events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+				FlowInstance: "receiver",
+				Source:       tc.source,
+				Target:       events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: "receiver-entity"},
+			}, time.Unix(1, 0).UTC())
+			resolved := workflowNodeEventHandlerResolutionForDelivery(testWorkflowNodeConnectedInputSource(tc.mode), "receiver-node", evt)
+			if resolved.Matched != tc.want {
+				t.Fatalf("handler resolution = %#v, want matched %v", resolved, tc.want)
+			}
+		})
+	}
+}
+
+func testWorkflowNodeConnectedInputSource(producerMode string) semanticview.Source {
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: "template",
+			Mode: producerMode,
 			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{
 				Name: "deploy_done", Event: "deploy.done",
 			}}}},
@@ -379,7 +421,7 @@ func TestWorkflowNodeConnectedInputHandlerMatchesConcreteTemplateProducer(t *tes
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, receiver}}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{
 				"producer": {{Name: "deploy_done", Event: "deploy.done"}},
@@ -402,16 +444,6 @@ func TestWorkflowNodeConnectedInputHandlerMatchesConcreteTemplateProducer(t *tes
 			},
 		},
 	})
-	evt := eventtest.RootIngress("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
-		FlowInstance: "receiver",
-		Source:       events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "producer-entity"},
-		Target:       events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: "receiver-entity"},
-	}, time.Unix(1, 0).UTC())
-
-	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "receiver-node", evt)
-	if !resolved.Matched || resolved.HandlerEventKey != "deploy.requested" {
-		t.Fatalf("concrete template connect handler resolution = %#v, want receiver deploy.requested", resolved)
-	}
 }
 
 func TestWorkflowNodeHandlerResolution_LocalizesProducerScopedEventThroughTargetRoute(t *testing.T) {

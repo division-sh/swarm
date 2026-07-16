@@ -8,6 +8,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
@@ -144,6 +145,142 @@ func TestAdmitContractFrontier_ConnectRejectsUnrelatedTemplateSameLeaf(t *testin
 	}
 	if !hasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved) {
 		t.Fatalf("blockers = %#v, want unrelated same-leaf template to remain unresolved", admission.UnsupportedBlockers)
+	}
+}
+
+func TestSelectedContractAdmissionsEnforceProducerMode(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		mode      string
+		eventName string
+		source    events.RouteIdentity
+	}{
+		{name: "template rejects base identity", mode: "template", eventName: "producer/scan.requested", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}},
+		{name: "static rejects descendant identity", mode: "static", eventName: "producer/inst-1/scan.requested", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}},
+		{name: "singleton rejects descendant identity", mode: "singleton", eventName: "producer/inst-1/scan.requested", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := testContractFrontierConnectSource(tc.mode)
+			frontierPlan := testRunForkPlan(tc.eventName, store.RunForkPendingClassificationPending, "node", "source-node")
+			frontierPlan.PendingWork[0].SourceRoute = tc.source
+			frontier, err := AdmitContractFrontier(ContractFrontierRequest{
+				Plan:              frontierPlan,
+				Source:            source,
+				ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+			})
+			if err != nil {
+				t.Fatalf("AdmitContractFrontier: %v", err)
+			}
+			if len(frontier.FrontierEvents) != 1 || len(frontier.FrontierEvents[0].DerivedRecipients) != 0 {
+				t.Fatalf("frontier events = %#v, want producer mode mismatch rejected", frontier.FrontierEvents)
+			}
+			if !hasBlocker(frontier.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved) {
+				t.Fatalf("frontier blockers = %#v, want unresolved route", frontier.UnsupportedBlockers)
+			}
+
+			historyPlan := testRunForkPlan(tc.eventName, store.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
+			historyPlan.PendingWork[0].SourceRoute = tc.source
+			historyFrontier, err := AdmitContractFrontier(ContractFrontierRequest{
+				Plan:              historyPlan,
+				Source:            source,
+				ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+			})
+			if err != nil {
+				t.Fatalf("AdmitContractFrontier history: %v", err)
+			}
+			history, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{
+				Plan:              historyPlan,
+				Source:            source,
+				ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+				FrontierAdmission: historyFrontier,
+			})
+			if err != nil {
+				t.Fatalf("AdmitSelectedContractRouteHistory: %v", err)
+			}
+			if len(history.SelectedRouteEvents) != 1 || len(history.SelectedRouteEvents[0].DerivedRecipients) != 0 {
+				t.Fatalf("selected route events = %#v, want producer mode mismatch rejected", history.SelectedRouteEvents)
+			}
+		})
+	}
+}
+
+func TestSelectedContractAdmissionsPreserveRootAndCarrierPoliciesAndRuntimeIncompleteFanout(t *testing.T) {
+	for _, includeRuntimeReceiver := range []bool{false, true} {
+		name := "static root and child"
+		if includeRuntimeReceiver {
+			name = "static root and child plus runtime receiver"
+		}
+		t.Run(name, func(t *testing.T) {
+			source := testContractFrontierMixedReceiverSource(t, includeRuntimeReceiver)
+			frontierPlan := testRunForkPlan("producer/work.ready", store.RunForkPendingClassificationPending, "node", "source-node")
+			frontier, err := AdmitContractFrontier(ContractFrontierRequest{
+				Plan:              frontierPlan,
+				Source:            source,
+				ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+			})
+			if err != nil {
+				t.Fatalf("AdmitContractFrontier: %v", err)
+			}
+			if len(frontier.FrontierEvents) != 1 {
+				t.Fatalf("frontier events = %#v, want one", frontier.FrontierEvents)
+			}
+			assertContractFrontierMixedRecipients(t, frontier.FrontierEvents[0].DerivedRecipients)
+			if got := hasBlocker(frontier.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved); got != includeRuntimeReceiver {
+				t.Fatalf("frontier unresolved blocker = %v, want %v: %#v", got, includeRuntimeReceiver, frontier.UnsupportedBlockers)
+			}
+
+			historyPlan := testRunForkPlan("producer/work.ready", store.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
+			historyFrontier, err := AdmitContractFrontier(ContractFrontierRequest{
+				Plan:              historyPlan,
+				Source:            source,
+				ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+			})
+			if err != nil {
+				t.Fatalf("AdmitContractFrontier history: %v", err)
+			}
+			history, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{
+				Plan:              historyPlan,
+				Source:            source,
+				ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+				FrontierAdmission: historyFrontier,
+			})
+			if err != nil {
+				t.Fatalf("AdmitSelectedContractRouteHistory: %v", err)
+			}
+			if len(history.SelectedRouteEvents) != 1 {
+				t.Fatalf("selected route events = %#v, want one", history.SelectedRouteEvents)
+			}
+			assertContractFrontierMixedRecipients(t, history.SelectedRouteEvents[0].DerivedRecipients)
+			wantDisposition := store.RunForkSelectedContractDispositionEvidenceOnly
+			if includeRuntimeReceiver {
+				wantDisposition = store.RunForkSelectedContractDispositionFailClosed
+			}
+			if history.SelectedRouteEvents[0].Disposition != wantDisposition {
+				t.Fatalf("history disposition = %q, want %q", history.SelectedRouteEvents[0].Disposition, wantDisposition)
+			}
+			if got := hasBlocker(history.UnsupportedBlockers, store.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven); got != includeRuntimeReceiver {
+				t.Fatalf("history dynamic blocker = %v, want %v: %#v", got, includeRuntimeReceiver, history.UnsupportedBlockers)
+			}
+		})
+	}
+}
+
+func assertContractFrontierMixedRecipients(t *testing.T, recipients []store.RunForkContractFrontierRecipient) {
+	t.Helper()
+	want := map[string]bool{
+		"node/root-node":     false,
+		"agent/root-agent":   false,
+		"node/consumer-node": true,
+	}
+	if len(recipients) != len(want) {
+		t.Fatalf("recipients = %#v, want root node, root agent, and child carrier", recipients)
+	}
+	for _, recipient := range recipients {
+		key := recipient.SubscriberType + "/" + recipient.SubscriberID
+		wantCarrier, ok := want[key]
+		if !ok || (recipient.RouteSource == "receiver_carrier") != wantCarrier {
+			t.Fatalf("recipient = %#v, want root routes non-carrier and child route carrier", recipient)
+		}
 	}
 }
 
@@ -446,10 +583,14 @@ func testContractFrontierTemplateSource() semanticview.Source {
 }
 
 func testContractFrontierTemplateConnectSource() semanticview.Source {
+	return testContractFrontierConnectSource("template")
+}
+
+func testContractFrontierConnectSource(producerMode string) semanticview.Source {
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: "template",
+			Mode: producerMode,
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"scan.requested"}},
 			},
@@ -515,6 +656,25 @@ func testContractFrontierTemplateConnectSource() semanticview.Source {
 			},
 		},
 	})
+}
+
+func testContractFrontierMixedReceiverSource(t testing.TB, includeRuntimeReceiver bool) semanticview.Source {
+	t.Helper()
+	variant := canonicalrouting.CompositionConnectReceiverFanoutStatic
+	if includeRuntimeReceiver {
+		variant = canonicalrouting.CompositionConnectReceiverFanoutRuntimeIncomplete
+	}
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundleRoot := canonicalrouting.CopyCompositionConnectReceiverFanout(t, variant)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		bundleRoot,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load composition connect receiver fanout: %v", err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func hasString(values []string, want string) bool {

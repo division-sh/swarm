@@ -79,6 +79,70 @@ type targetRouteMemoryEventMutation struct {
 	store *connectRoutePlanMutationStore
 }
 
+func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
+	baseEndpoint := runtimepinrouting.ConnectRoutePlanEndpoint{
+		FlowID: "producer", FlowPath: "producer", Event: "deploy.done", ResolvedEvent: "producer/deploy.done",
+	}
+	for _, tc := range []struct {
+		name      string
+		endpoint  runtimepinrouting.ConnectRoutePlanEndpoint
+		eventType string
+		source    events.RouteIdentity
+		want      bool
+	}{
+		{name: "root accepts root event", endpoint: runtimepinrouting.ConnectRoutePlanEndpoint{Root: true, Mode: "root", Event: "deploy.done", ResolvedEvent: "deploy.done"}, eventType: "deploy.done", want: true},
+		{name: "root rejects child evidence", endpoint: runtimepinrouting.ConnectRoutePlanEndpoint{Root: true, Mode: "root", Event: "deploy.done", ResolvedEvent: "deploy.done"}, eventType: "deploy.done", source: events.RouteIdentity{FlowID: "producer"}},
+		{name: "static accepts exact scope", endpoint: connectRoutePlanEndpointWithMode(baseEndpoint, "static"), eventType: "producer/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}, want: true},
+		{name: "static rejects descendant", endpoint: connectRoutePlanEndpointWithMode(baseEndpoint, "static"), eventType: "producer/inst-1/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}},
+		{name: "singleton accepts exact scope", endpoint: connectRoutePlanEndpointWithMode(baseEndpoint, "singleton"), eventType: "producer/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}, want: true},
+		{name: "singleton rejects descendant", endpoint: connectRoutePlanEndpointWithMode(baseEndpoint, "singleton"), eventType: "producer/inst-1/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}},
+		{name: "template accepts concrete instance", endpoint: connectRoutePlanEndpointWithMode(baseEndpoint, "template"), eventType: "producer/inst-1/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}, want: true},
+		{name: "template rejects base scope", endpoint: connectRoutePlanEndpointWithMode(baseEndpoint, "template"), eventType: "producer/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}},
+	} {
+		t.Run("plan/"+tc.name, func(t *testing.T) {
+			evt := eventtest.RootIngress("", events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: tc.source}, time.Unix(1, 0).UTC())
+			plan := runtimepinrouting.ConnectRoutePlan{Source: tc.endpoint}
+			if got := connectRoutePlanMatchesEvent(context.Background(), plan, evt); got != tc.want {
+				t.Fatalf("connectRoutePlanMatchesEvent = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name      string
+		mode      string
+		eventType string
+		source    events.RouteIdentity
+		want      bool
+	}{
+		{name: "static exact scope", mode: "static", eventType: "producer/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}, want: true},
+		{name: "static descendant", mode: "static", eventType: "producer/inst-1/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}},
+		{name: "template concrete instance", mode: "template", eventType: "producer/inst-1/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}, want: true},
+		{name: "template base scope", mode: "template", eventType: "producer/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}},
+	} {
+		t.Run("issue/"+tc.name, func(t *testing.T) {
+			source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
+				id: "producer", mode: tc.mode,
+				outputs: []runtimecontracts.FlowOutputEventPin{{Name: "deploy_done", Event: "deploy.done"}},
+			}}, nil))
+			resolver := connectRoutePlanResolver{source: source}
+			issue := runtimepinrouting.ConnectRoutePlanIssue{
+				Failure: runtimepinrouting.ConnectFailureReceiverFlowMissing,
+				Connect: runtimecontracts.FlowPackageConnect{From: "producer.deploy_done"},
+			}
+			evt := eventtest.RootIngress("", events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: tc.source}, time.Unix(1, 0).UTC())
+			if got := resolver.connectIssueMatchesEvent(context.Background(), issue, evt); got != tc.want {
+				t.Fatalf("connectIssueMatchesEvent = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func connectRoutePlanEndpointWithMode(endpoint runtimepinrouting.ConnectRoutePlanEndpoint, mode string) runtimepinrouting.ConnectRoutePlanEndpoint {
+	endpoint.Mode = mode
+	return endpoint
+}
+
 func (s *connectRoutePlanMutationStore) RunEventMutation(ctx context.Context, fn func(EventMutation) error) error {
 	postCommit := make([]func(), 0, 2)
 	rollback := make([]func(), 0, 2)

@@ -185,6 +185,106 @@ func CopyCompositionConnectAmbiguity(t testing.TB) string {
 	return writeCompositionConnectAmbiguityFixture(t)
 }
 
+type CompositionConnectReceiverFanoutVariant uint8
+
+const (
+	CompositionConnectReceiverFanoutStatic CompositionConnectReceiverFanoutVariant = iota + 1
+	CompositionConnectReceiverFanoutRuntimeIncomplete
+)
+
+// CopyCompositionConnectReceiverFanout owns the closed root/child receiver
+// policy fixture used by selected-contract routing admission.
+func CopyCompositionConnectReceiverFanout(t testing.TB, variant CompositionConnectReceiverFanoutVariant) string {
+	t.Helper()
+	includeRuntimeReceiver := false
+	switch variant {
+	case CompositionConnectReceiverFanoutStatic:
+	case CompositionConnectReceiverFanoutRuntimeIncomplete:
+		includeRuntimeReceiver = true
+	default:
+		t.Fatalf("unsupported composition-connect receiver fanout variant %d", variant)
+	}
+	root := CopyExample(t, ParentConnect)
+	packageBody := `name: composition-connect-receiver-fanout
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: consumer
+    flow: consumer
+    mode: static
+connect:
+  - from: producer.work_ready
+    to: .work_ready
+  - from: producer.work_ready
+    to: consumer.work_ready
+    adapter: work_ready_to_consumer
+`
+	if includeRuntimeReceiver {
+		packageBody = strings.Replace(packageBody, "connect:\n", "  - id: dynamic\n    flow: dynamic\n    mode: template\nconnect:\n", 1)
+		packageBody += "  - from: producer.work_ready\n    to: dynamic.work_ready\n    adapter: work_ready_to_dynamic\n"
+	}
+	writeClosedVariantFile(t, root, "package.yaml", packageBody)
+	writeClosedVariantFile(t, root, "schema.yaml", `name: composition-connect-receiver-fanout
+pins:
+  inputs:
+    events:
+      - name: work_ready
+        event: work.ready
+`)
+	writeClosedVariantFile(t, root, "events.yaml", "work.ready:\n  work_id: string\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", `root-node:
+  id: root-node
+  execution_type: system_node
+  subscribes_to: [work.ready]
+  event_handlers:
+    work.ready: {}
+`)
+	writeClosedVariantFile(t, root, "agents.yaml", `root-agent:
+  id: root-agent
+  model: regular
+  subscriptions: [work.ready]
+`)
+	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
+mode: static
+pins:
+  inputs:
+    events:
+      - name: work_ready
+        event: consumer.work.ready
+`, "consumer.work.ready:\n  work_id: string\n", "{}\n", `consumer-node:
+  id: consumer-node
+  execution_type: system_node
+  subscribes_to: [consumer.work.ready]
+  event_handlers:
+    consumer.work.ready: {}
+`)
+	if includeRuntimeReceiver {
+		writeLegacyInstanceFlow(t, root, "dynamic", `name: dynamic
+mode: template
+pins:
+  inputs:
+    events:
+      - name: work_ready
+        event: dynamic.work.ready
+        address:
+          by: work_id
+          source: payload.work_id
+          target: _entity.id
+          cardinality: one
+`, "dynamic.work.ready:\n  work_id: string\n", "{}\n", `dynamic-node:
+  id: dynamic-node-{instance_id}
+  execution_type: system_node
+  subscribes_to: [dynamic.work.ready]
+  event_handlers:
+    dynamic.work.ready: {}
+`)
+	}
+	return root
+}
+
 type compositionConnectFixtureOptions struct {
 	connectFrom                    string
 	connectTo                      string

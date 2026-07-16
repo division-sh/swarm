@@ -4593,6 +4593,59 @@ func TestExecutor_EmitIntentUsesTargetStateFlowIdentityBeforeInboundSource(t *te
 	}
 }
 
+func TestExecutor_EmitIntentUsesAdmittedProducerRouteBeforeStateMetadata(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+
+	admitted := events.RouteIdentity{
+		FlowID:       "validation",
+		FlowInstance: "validation",
+		EntityID:     "validation-entity",
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID:      identity.NormalizeEntityID(admitted.EntityID),
+		NodeID:        "validation-router",
+		FlowID:        "validation",
+		ProducerRoute: admitted,
+		Event: eventtest.RootIngress(
+			"evt-1",
+			"validation.started",
+			"",
+			"",
+			json.RawMessage(`{}`),
+			0,
+			"",
+			"",
+			events.EnvelopeForFlowInstance(events.EventEnvelope{}, "validation/validation"),
+			time.Time{},
+		),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Emit: runtimecontracts.EmitSpec{Event: "validation.completed"},
+		},
+		State: testStateSnapshot("researching", map[string]any{
+			"flow_path": "validation/validation",
+		}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := len(result.EmitIntents); got != 1 {
+		t.Fatalf("EmitIntents count = %d, want 1", got)
+	}
+	if got := result.EmitIntents[0].Event.SourceRoute(); got != admitted.Normalized() {
+		t.Fatalf("emitted source route = %#v, want admitted %#v", got, admitted.Normalized())
+	}
+}
+
 func TestExecutor_EmitIntentFallsBackToInboundFlowWhenStateFlowPathNormalizesEmpty(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     stubSource(),
