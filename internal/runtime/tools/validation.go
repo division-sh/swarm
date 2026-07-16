@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -26,6 +27,9 @@ func ValidateToolImplementations(source semanticview.Source) ([]error, error) {
 	warnings := make([]error, 0)
 	for _, name := range names {
 		entry := entries[name]
+		if strings.HasPrefix(name, runtimecontracts.PrivateChannelActivityPrefix) {
+			return warnings, fmt.Errorf("tool %s uses reserved private channel activity namespace %s*", name, runtimecontracts.PrivateChannelActivityPrefix)
+		}
 		rawType := strings.ToLower(strings.TrimSpace(entry.HandlerType))
 		normalized := normalizeImplementationClass(name, entry)
 		switch rawType {

@@ -65,7 +65,7 @@ tools:
       additionalProperties: false
       required: [message_id]
       properties:
-        message_id: {type: integer}
+        message_id: {type: integer, minimum: 1, maximum: 2147483647}
     response_success:
       kind: json_field_equals
       path: response.body.ok
@@ -118,7 +118,7 @@ tools:
       additionalProperties: false
       required: [message_id]
       properties:
-        message_id: {type: integer}
+        message_id: {type: integer, minimum: 1, maximum: 2147483647}
     response_success:
       kind: json_field_equals
       path: response.body.ok

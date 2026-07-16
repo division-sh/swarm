@@ -667,6 +667,22 @@ func TestValidateToolImplementations_RejectsMalformedHTTPTool(t *testing.T) {
 	}
 }
 
+func TestValidateToolImplementationsRejectsAuthoredPrivateChannelActivityNamespace(t *testing.T) {
+	toolID := runtimecontracts.PrivateChannelActivityPrefix + "authored.send.gdeadbeef"
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			toolID: {
+				HandlerType: "http",
+				HTTP:        &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.invalid/send"},
+			},
+		},
+	})
+	_, err := ValidateToolImplementations(source)
+	if err == nil || !strings.Contains(err.Error(), "reserved private channel activity namespace") {
+		t.Fatalf("ValidateToolImplementations error = %v, want private namespace rejection", err)
+	}
+}
+
 func TestValidateToolImplementations_AcceptsDeprecatedHandlerWithoutHTTPAsWarning(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{

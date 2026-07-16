@@ -2478,7 +2478,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 			wantBodyParts: []string{
 				"provider.telegram", "version=0.1.0", "manifest_hash=sha256:",
 				`normalized event "inbound.telegram.text_message"`, `path "message.message_id"`,
-				"number_to_text requires a numeric value, got string",
+				"value type string is incompatible with integer and implicit conversion is forbidden",
 			},
 		},
 		{

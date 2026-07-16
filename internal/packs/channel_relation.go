@@ -127,26 +127,9 @@ func channelPathParts(path string) []string {
 // validateDirectionalRelation proves that every admitted source value is
 // valid for the target. It deliberately implements the channel contract's
 // finite schema subset rather than general JSON-Schema implication.
-func validateDirectionalRelation(subject string, source, target *runtimecontracts.ToolInputSchema, conversion string) error {
+func validateDirectionalRelation(subject string, source, target *runtimecontracts.ToolInputSchema) error {
 	if source == nil || target == nil {
 		return fmt.Errorf("%s has no source or target schema", subject)
-	}
-	sourceType := channelSchemaType(*source)
-	targetType := channelSchemaType(*target)
-	switch conversion {
-	case runtimecontracts.FieldProjectionConvertNumberToText:
-		if sourceType != "integer" || targetType != "string" {
-			return fmt.Errorf("%s number_to_text requires integer source and string target", subject)
-		}
-		return nil
-	case "decimal_text_to_int32":
-		if sourceType != "string" || targetType != "integer" {
-			return fmt.Errorf("%s decimal_text_to_int32 requires string source and integer target", subject)
-		}
-		return nil
-	case "":
-	default:
-		return fmt.Errorf("%s uses unsupported conversion %q", subject, conversion)
 	}
 	return validateChannelSchemaSubset(subject, *source, *target)
 }

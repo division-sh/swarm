@@ -8245,10 +8245,11 @@ tool_model:
       - reject duplicate or ancestor/descendant overlap in mapped targets and recursively consumed item sources; the compiler records one topology that runtime preparation consumes
       - prove recursively that every admitted source value is assignable to its target, including object requiredness and additional-properties policy, array items and bounds, enums, patterns, and scalar bounds
       - reject any directional relation the finite compiler cannot prove; constraint intersection is not assignability
-      - permit only scalar identity, one ordered each-item object projection, number_to_text, and decimal_text_to_int32 mappings
+      - permit only scalar identity and one ordered each-item object projection; channel-operation conversions are not supported
       - reject caller-supplied provider context, ambient values, defaults, functions, concatenation, conditions, or partial mappings
       - validate connector output first, then apply the compiled channel output projection, then validate the satisfier-bound opaque result
       - require every exact normalized trigger field and its declared type before compiling an interface event mapping
+      - reserve platform.channel_activity.* for generation-pinned private targets and reject any authored or imported tool in that namespace during load/boot validation
       selected_constraints: >
         Runtime authoring limits are the intersection of interface invariants and the selected connector schemas for deliver
         and edit. Text length, action count, action-label length, and action-token length require finite maxima; absent or
@@ -8265,7 +8266,7 @@ tool_model:
         text: inbound.telegram.text_message
         direct_private_predicate: 'when.equals: {message.chat.type: private} or {callback_query.message.chat.type: private}'
         branch_exclusivity: callback uses callback_query exists/message absent; text uses message exists/callback_query absent
-        numeric_projection: external account, conversation, and provider message integers use number_to_text
+        numeric_projection: external account and conversation integers use number_to_text; bounded provider message ids remain integers end to end
       rule: >
         Telegram is one data-defined satisfier. Generic pack, runtime, status, and activity code must contain no Telegram
         branch. A structurally different satisfier with object/scalar reference differences and tighter limits must pass the

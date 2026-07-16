@@ -114,7 +114,7 @@ func channelMappingGenerationValue(mappings map[string]ChannelMapping) map[strin
 			items = append(items, channelMappingGenerationValue(item))
 		}
 		out[target] = map[string]any{
-			"from": mapping.From, "convert": mapping.Convert, "each": mapping.Each, "item": items,
+			"from": mapping.From, "each": mapping.Each, "item": items,
 		}
 	}
 	return out
@@ -157,5 +157,5 @@ func (p OutboundBindingPlan) RuntimeActivityTarget(operation string) (string, st
 		return "", "", fmt.Errorf("compute channel plan generation: %w", err)
 	}
 	identity := strings.TrimPrefix(generation, "sha256:")
-	return "platform.channel_activity." + strings.TrimSpace(p.ID) + "." + operation + ".g" + identity, generation, nil
+	return runtimecontracts.PrivateChannelActivityPrefix + strings.TrimSpace(p.ID) + "." + operation + ".g" + identity, generation, nil
 }

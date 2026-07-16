@@ -17,6 +17,7 @@ import (
 const (
 	ActivityResultStatusSucceeded = "succeeded"
 	ActivityResultStatusFailed    = "failed"
+	PrivateChannelActivityPrefix  = "platform.channel_activity."
 )
 
 type ActivitySite struct {

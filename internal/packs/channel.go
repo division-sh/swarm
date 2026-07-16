@@ -167,10 +167,9 @@ type ChannelEventBinding struct {
 }
 
 type ChannelMapping struct {
-	From    string
-	Convert string
-	Each    string
-	Item    []map[string]ChannelMapping
+	From string
+	Each string
+	Item []map[string]ChannelMapping
 }
 
 func (m *ChannelMapping) UnmarshalYAML(node *yaml.Node) error {
@@ -185,31 +184,29 @@ func (m *ChannelMapping) UnmarshalYAML(node *yaml.Node) error {
 		}
 		return nil
 	case yaml.MappingNode:
-		if err := rejectChannelMappingFields(node, "from", "convert", "each", "item"); err != nil {
+		if err := rejectChannelMappingFields(node, "from", "each", "item"); err != nil {
 			return err
 		}
 		type wire struct {
-			From    string                      `yaml:"from"`
-			Convert string                      `yaml:"convert"`
-			Each    string                      `yaml:"each"`
-			Item    []map[string]ChannelMapping `yaml:"item"`
+			From string                      `yaml:"from"`
+			Each string                      `yaml:"each"`
+			Item []map[string]ChannelMapping `yaml:"item"`
 		}
 		var decoded wire
 		if err := node.Decode(&decoded); err != nil {
 			return err
 		}
 		m.From = strings.TrimSpace(decoded.From)
-		m.Convert = strings.TrimSpace(decoded.Convert)
 		m.Each = strings.TrimSpace(decoded.Each)
 		m.Item = decoded.Item
 		if m.Each != "" {
-			if m.From != "" || m.Convert != "" || len(m.Item) == 0 {
+			if m.From != "" || len(m.Item) == 0 {
 				return fmt.Errorf("channel each mapping requires each and item only")
 			}
 			return nil
 		}
 		if m.From == "" || len(m.Item) != 0 {
-			return fmt.Errorf("channel scalar mapping requires from and optional convert")
+			return fmt.Errorf("channel scalar mapping requires from only")
 		}
 		return nil
 	default:
@@ -387,7 +384,7 @@ func validateChannelTargetAndMapping(subject, target string, mapping ChannelMapp
 		}
 		for _, item := range mapping.Item {
 			for itemTarget, itemMapping := range item {
-				if itemMapping.Each != "" || itemMapping.Convert != "" {
+				if itemMapping.Each != "" {
 					return fmt.Errorf("%s item mapping supports scalar identity only", subject)
 				}
 				if err := validateChannelPath(itemTarget); err != nil {
@@ -403,12 +400,7 @@ func validateChannelTargetAndMapping(subject, target string, mapping ChannelMapp
 	if err := validateChannelPath(mapping.From); err != nil {
 		return fmt.Errorf("%s source: %w", subject, err)
 	}
-	switch mapping.Convert {
-	case "", runtimecontracts.FieldProjectionConvertNumberToText, "decimal_text_to_int32":
-		return nil
-	default:
-		return fmt.Errorf("%s conversion %q is unsupported", subject, mapping.Convert)
-	}
+	return nil
 }
 
 func validateChannelPath(raw string) error {
@@ -604,7 +596,7 @@ func (p SatisfactionPlan) OperationTool(name string) (runtimecontracts.ToolSchem
 	fields := make(map[string]runtimecontracts.CompiledResultField, len(operation.OutputTopology.Targets))
 	for _, target := range operation.OutputTopology.Targets {
 		mapping := operation.Output[target]
-		fields[target] = runtimecontracts.CompiledResultField{From: mapping.From, Convert: mapping.Convert}
+		fields[target] = runtimecontracts.CompiledResultField{From: mapping.From}
 	}
 	tool.CompiledResult = &runtimecontracts.CompiledResultProjection{Fields: fields, OutputSchema: outputSchema}
 	return tool, nil
@@ -751,11 +743,7 @@ func (p SatisfactionPlan) PrepareOperationInput(name string, input, context any)
 		if !ok {
 			return nil, fmt.Errorf("channel operation %q source %q is missing", name, mapping.From)
 		}
-		converted, err := convertChannelValue(value, mapping.Convert)
-		if err != nil {
-			return nil, fmt.Errorf("channel operation %q source %q: %w", name, mapping.From, err)
-		}
-		if err := setChannelValueAtPath(out, target, converted); err != nil {
+		if err := setChannelValueAtPath(out, target, value); err != nil {
 			return nil, err
 		}
 	}
@@ -824,31 +812,6 @@ func setChannelValueAtPath(out map[string]any, path string, value any) error {
 	}
 	current[leaf] = value
 	return nil
-}
-
-func convertChannelValue(value any, conversion string) (any, error) {
-	switch strings.TrimSpace(conversion) {
-	case "":
-		return value, nil
-	case "decimal_text_to_int32":
-		text, ok := value.(string)
-		if !ok || text == "" || !regexp.MustCompile(`^(0|[1-9][0-9]*)$`).MatchString(text) {
-			return nil, fmt.Errorf("decimal_text_to_int32 requires canonical unsigned decimal text")
-		}
-		parsed, err := strconv.ParseInt(text, 10, 32)
-		if err != nil {
-			return nil, fmt.Errorf("decimal_text_to_int32 value is outside signed int32 range")
-		}
-		return float64(parsed), nil
-	case runtimecontracts.FieldProjectionConvertNumberToText:
-		number, ok := exactInteger(value)
-		if !ok || number < 0 {
-			return nil, fmt.Errorf("number_to_text requires an exact non-negative integer")
-		}
-		return strconv.FormatInt(number, 10), nil
-	default:
-		return nil, fmt.Errorf("channel conversion %q is unsupported", conversion)
-	}
 }
 
 func cloneRequirements(in []Requirement) []Requirement {
@@ -1211,7 +1174,7 @@ func validateOperationBinding(name string, operation runtimecontracts.PackInterf
 		if err != nil {
 			return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, fmt.Errorf("channel operation %q: %w", name, err)
 		}
-		if err := validateDirectionalRelation(name+" input "+mapping.From+" -> "+target, sourceSchema, targetSchema, mapping.Convert); err != nil {
+		if err := validateDirectionalRelation(name+" input "+mapping.From+" -> "+target, sourceSchema, targetSchema); err != nil {
 			return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, err
 		}
 		if err := usedSources.add(mapping.From); err != nil {
@@ -1245,7 +1208,7 @@ func validateOperationBinding(name string, operation runtimecontracts.PackInterf
 		if !ok {
 			return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, fmt.Errorf("channel operation %q output source %q is absent from connector schema", name, mapping.From)
 		}
-		if err := validateDirectionalRelation(name+" output "+mapping.From+" -> "+target, sourceSchema, targetSchema, mapping.Convert); err != nil {
+		if err := validateDirectionalRelation(name+" output "+mapping.From+" -> "+target, sourceSchema, targetSchema); err != nil {
 			return compiledChannelMappingTopology{}, compiledChannelMappingTopology{}, err
 		}
 		if err := outputSources.add(mapping.From); err != nil {
@@ -1286,7 +1249,7 @@ func validateEachItem(name string, mapping ChannelMapping, itemTargets []string,
 		if !ok {
 			return nil, fmt.Errorf("channel operation %q each item source %q is absent", name, itemMapping.From)
 		}
-		if err := validateDirectionalRelation(name+" each item "+itemMapping.From+" -> "+target, sourceSchema, targetSchema, ""); err != nil {
+		if err := validateDirectionalRelation(name+" each item "+itemMapping.From+" -> "+target, sourceSchema, targetSchema); err != nil {
 			return nil, err
 		}
 		if err := used.add(source); err != nil {

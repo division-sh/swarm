@@ -67,7 +67,7 @@ func TestTelegramSelectedTextMessageContractUsesShippedPack(t *testing.T) {
 	}
 	wantPayload := map[string]any{
 		"external_account_reference": "12345", "conversation_reference": "-1001234567890",
-		"provider_message_reference": "7", "text": "hello",
+		"provider_message_reference": json.Number("7"), "text": "hello",
 	}
 	if !reflect.DeepEqual(normalized.Payload, wantPayload) {
 		t.Fatalf("normalized payload = %#v, want %#v", normalized.Payload, wantPayload)
@@ -94,7 +94,7 @@ func TestTelegramSelectedCallbackActionContractUsesShippedPack(t *testing.T) {
 	}
 	want := map[string]any{
 		"token": "approve_1", "interaction_reference": "callback-1", "external_account_reference": "12345",
-		"conversation_reference": "67890", "provider_message_reference": "8",
+		"conversation_reference": "67890", "provider_message_reference": json.Number("8"),
 	}
 	if !reflect.DeepEqual(delivery.Events[1].Payload, want) {
 		t.Fatalf("callback payload = %#v, want %#v", delivery.Events[1].Payload, want)
@@ -281,7 +281,7 @@ func telegramSelectedTriggerDescriptors() []packs.TriggerEventDescriptor {
 				{Name: "conversation_reference", Type: "text", Required: true, CarryEligible: true},
 				{Name: "external_account_reference", Type: "text", Required: true, CarryEligible: true},
 				{Name: "interaction_reference", Type: "text", Required: true, CarryEligible: true},
-				{Name: "provider_message_reference", Type: "text", Required: true, CarryEligible: true},
+				{Name: "provider_message_reference", Type: "integer", Required: true, CarryEligible: true},
 				{Name: "token", Type: "text", Required: true, CarryEligible: true},
 			},
 		},
@@ -290,7 +290,7 @@ func telegramSelectedTriggerDescriptors() []packs.TriggerEventDescriptor {
 			Fields: []packs.TriggerEventFieldDescriptor{
 				{Name: "conversation_reference", Type: "text", Required: true, CarryEligible: true},
 				{Name: "external_account_reference", Type: "text", Required: true, CarryEligible: true},
-				{Name: "provider_message_reference", Type: "text", Required: true, CarryEligible: true},
+				{Name: "provider_message_reference", Type: "integer", Required: true, CarryEligible: true},
 				{Name: "text", Type: "text", Required: true, CarryEligible: true},
 			},
 		},

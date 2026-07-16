@@ -156,7 +156,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			if err != nil {
 				t.Fatalf("configured channel execute: %v", err)
 			}
-			wantResult := map[string]any{"delivery_reference": map[string]any{"id": "99"}}
+			wantResult := map[string]any{"delivery_reference": map[string]any{"id": float64(99)}}
 			if !reflect.DeepEqual(result, wantResult) {
 				t.Fatalf("channel result = %#v, want %#v", result, wantResult)
 			}
