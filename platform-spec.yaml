@@ -2104,7 +2104,10 @@ compute_module_contracts:
         file-size, and file-digest manifest. Missing, extra, altered, partial,
         symlinked, or otherwise non-regular entries MUST be rejected and replaced
         from same-filesystem private staging; only a complete validated tree may be
-        atomically published. Concurrent publishers MUST converge on that one tree.
+        atomically published. One digest-scoped interprocess mutation owner MUST
+        serialize final-entry revalidation, invalid-tree quarantine, publication,
+        and same-digest stale-work cleanup. Concurrent publishers and repairers
+        MUST converge on that one tree.
         Anonymous process-scoped interpreter extraction and marker-only cache trust
         are forbidden; invocation transport scratch remains separate and ephemeral.
         No official python.org prebuilt WASI binary exists; this first slice

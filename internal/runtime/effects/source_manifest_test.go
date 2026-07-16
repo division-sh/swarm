@@ -137,6 +137,8 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/pythonmodule/artifact_cache.go:extractArchive:filesystem_write:4":                                   ownerComputeSandbox,
 	"internal/runtime/pythonmodule/artifact_cache.go:materializeVerifiedArtifact:filesystem_write:1":                      ownerComputeSandbox,
 	"internal/runtime/pythonmodule/artifact_cache.go:materializeVerifiedArtifact:filesystem_write:2":                      ownerComputeSandbox,
+	"internal/runtime/pythonmodule/artifact_cache.go:materializeVerifiedArtifact:filesystem_write:3":                      ownerComputeSandbox,
+	"internal/runtime/pythonmodule/artifact_lock_windows.go:lockArtifactMutation:filesystem_write:1":                      ownerComputeSandbox,
 	"internal/runtime/pythonmodule/artifact_cache.go:quarantineInvalidArtifact:filesystem_write:1":                        ownerComputeSandbox,
 	"internal/runtime/pythonmodule/artifact_cache.go:quarantineInvalidArtifact:filesystem_write:2":                        ownerComputeSandbox,
 	"internal/runtime/pythonmodule/artifact_cache.go:removeArtifactTree:filesystem_write:1":                               ownerComputeSandbox,
