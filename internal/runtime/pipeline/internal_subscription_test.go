@@ -14,13 +14,6 @@ type recordingInternalSubscriptionBus struct {
 	eventTypes []events.EventType
 }
 
-func (b *recordingInternalSubscriptionBus) Subscribe(subscriber string, eventTypes ...events.EventType) <-chan events.Event {
-	b.mode = "subscribe"
-	b.subscriber = subscriber
-	b.eventTypes = append([]events.EventType(nil), eventTypes...)
-	return make(chan events.Event, 1)
-}
-
 func (b *recordingInternalSubscriptionBus) SubscribeInternal(subscriber string, eventTypes ...events.EventType) <-chan events.Event {
 	b.mode = "internal"
 	b.subscriber = subscriber
@@ -80,5 +73,31 @@ func TestSystemNodeRunnerSubscribe_UsesInternalSubscribers(t *testing.T) {
 	}
 	if len(bus.eventTypes) != 1 || bus.eventTypes[0] != "custom.trigger" {
 		t.Fatalf("event types = %#v, want [custom.trigger]", bus.eventTypes)
+	}
+}
+
+func TestActivityDispatcherSubscribe_UsesInternalSubscribers(t *testing.T) {
+	bus := &recordingInternalSubscriptionBus{}
+	node := newActivityBackgroundNode(&PipelineCoordinator{}, bus)
+	ready := make(chan struct{})
+	node.AddSubscriptionReadyHook(func() { close(ready) })
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		node.Run(ctx)
+	}()
+	<-ready
+	cancel()
+	<-done
+
+	if bus.mode != "internal" {
+		t.Fatalf("subscription mode = %q, want internal", bus.mode)
+	}
+	if bus.subscriber != activityDispatcherSubscriberID {
+		t.Fatalf("subscriber = %q, want %q", bus.subscriber, activityDispatcherSubscriberID)
+	}
+	if len(bus.eventTypes) != 1 || bus.eventTypes[0] != activityRequestEventType {
+		t.Fatalf("event types = %#v, want [%s]", bus.eventTypes, activityRequestEventType)
 	}
 }

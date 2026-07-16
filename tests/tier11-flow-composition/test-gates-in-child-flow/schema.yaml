@@ -8,6 +8,8 @@ pins:
   inputs:
     events:
       - name: validate.requested
+      - name: validation_done
+        event: validation.done
     reads: []
   outputs:
     events:

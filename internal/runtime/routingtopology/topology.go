@@ -53,22 +53,6 @@ type Endpoint struct {
 	ResolutionMode string                              `json:"resolution_mode,omitempty"`
 }
 
-const LegacyQualifiedSubscriptionDisposition = "legacy_qualified_subscription"
-
-type LegacyQualifiedSubscription struct {
-	ID               string        `json:"id"`
-	Disposition      string        `json:"disposition"`
-	Event            EventIdentity `json:"event"`
-	Consumer         Endpoint      `json:"consumer"`
-	TargetFlowID     string        `json:"target_flow_id"`
-	TargetFlowPath   string        `json:"target_flow_path"`
-	AuthoredLocation string        `json:"authored_location"`
-	RuntimeDelivery  bool          `json:"runtime_delivery"`
-	CanonicalEdge    bool          `json:"canonical_edge"`
-	FindingID        string        `json:"finding_id,omitempty"`
-	Migration        string        `json:"migration"`
-}
-
 type BoundaryExposure struct {
 	ID       string        `json:"id"`
 	Event    EventIdentity `json:"event"`
@@ -212,18 +196,17 @@ type Issue struct {
 }
 
 type Topology struct {
-	SchemaVersion                string                        `json:"schema_version"`
-	ProjectionOnly               bool                          `json:"projection_only"`
-	SourceAuthority              string                        `json:"source_authority"`
-	Producers                    []Endpoint                    `json:"producers"`
-	Consumers                    []Endpoint                    `json:"consumers"`
-	InputPins                    []Endpoint                    `json:"input_pins"`
-	OutputPins                   []Endpoint                    `json:"output_pins"`
-	RootInputSources             []RootInputSource             `json:"root_input_sources"`
-	BoundaryExposures            []BoundaryExposure            `json:"boundary_exposures"`
-	Edges                        []Edge                        `json:"edges"`
-	LegacyQualifiedSubscriptions []LegacyQualifiedSubscription `json:"legacy_qualified_subscriptions"`
-	Issues                       []Issue                       `json:"issues"`
+	SchemaVersion     string             `json:"schema_version"`
+	ProjectionOnly    bool               `json:"projection_only"`
+	SourceAuthority   string             `json:"source_authority"`
+	Producers         []Endpoint         `json:"producers"`
+	Consumers         []Endpoint         `json:"consumers"`
+	InputPins         []Endpoint         `json:"input_pins"`
+	OutputPins        []Endpoint         `json:"output_pins"`
+	RootInputSources  []RootInputSource  `json:"root_input_sources"`
+	BoundaryExposures []BoundaryExposure `json:"boundary_exposures"`
+	Edges             []Edge             `json:"edges"`
+	Issues            []Issue            `json:"issues"`
 }
 
 func Build(source semanticview.Source) Topology {
@@ -239,18 +222,17 @@ func Build(source semanticview.Source) Topology {
 	builder.addBoundaryExposures()
 	builder.addConnectEdges(plans)
 	return Topology{
-		SchemaVersion:                SchemaVersion,
-		ProjectionOnly:               true,
-		SourceAuthority:              SourceAuthority,
-		Producers:                    endpointViews(census.Producers()),
-		Consumers:                    endpointViews(census.Consumers()),
-		InputPins:                    endpointViews(census.InputPins()),
-		OutputPins:                   endpointViews(census.OutputPins()),
-		RootInputSources:             rootInputSourceViews(source),
-		BoundaryExposures:            builder.sortedExposures(),
-		Edges:                        builder.sortedEdges(),
-		LegacyQualifiedSubscriptions: legacyQualifiedSubscriptionViews(census.LegacyQualifiedSubscriptions()),
-		Issues:                       issueViews(planIssues, builder.relationIssues),
+		SchemaVersion:     SchemaVersion,
+		ProjectionOnly:    true,
+		SourceAuthority:   SourceAuthority,
+		Producers:         endpointViews(census.Producers()),
+		Consumers:         endpointViews(census.Consumers()),
+		InputPins:         endpointViews(census.InputPins()),
+		OutputPins:        endpointViews(census.OutputPins()),
+		RootInputSources:  rootInputSourceViews(source),
+		BoundaryExposures: builder.sortedExposures(),
+		Edges:             builder.sortedEdges(),
+		Issues:            issueViews(planIssues, builder.relationIssues),
 	}
 }
 
@@ -471,41 +453,6 @@ func endpointView(endpoint semanticview.AuthoredEventEndpoint) Endpoint {
 	}
 }
 
-func legacyQualifiedSubscriptionViews(subscriptions []semanticview.LegacyQualifiedSubscription) []LegacyQualifiedSubscription {
-	out := make([]LegacyQualifiedSubscription, 0, len(subscriptions))
-	for _, subscription := range subscriptions {
-		consumer := endpointView(subscription.Consumer)
-		out = append(out, LegacyQualifiedSubscription{
-			ID:               subscription.ID,
-			Disposition:      LegacyQualifiedSubscriptionDisposition,
-			Event:            eventView(subscription.Event),
-			Consumer:         consumer,
-			TargetFlowID:     strings.TrimSpace(subscription.TargetFlowID),
-			TargetFlowPath:   strings.TrimSpace(subscription.TargetFlowPath),
-			AuthoredLocation: endpointAuthoredLocation(consumer),
-			RuntimeDelivery:  true,
-			CanonicalEdge:    false,
-			Migration:        "Declare output/input pins and a connect, then replace the qualified cross-flow subscription with a flow-local event subscription.",
-		})
-	}
-	if out == nil {
-		return []LegacyQualifiedSubscription{}
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
-}
-
-func endpointAuthoredLocation(endpoint Endpoint) string {
-	file := strings.TrimSpace(endpoint.SourceFile)
-	if file == "" {
-		return strings.TrimSpace(endpoint.SourceLocation)
-	}
-	if endpoint.SourceLine > 0 {
-		return file + ":" + strconv.Itoa(endpoint.SourceLine)
-	}
-	return file
-}
-
 func eventView(proof semanticview.FlowEventProof) EventIdentity {
 	canonical := strings.TrimSpace(proof.Canonical)
 	if canonical == "" {
@@ -680,42 +627,7 @@ func WithIssues(topology Topology, additional ...Issue) Topology {
 	}
 	sort.SliceStable(issues, func(i, j int) bool { return issues[i].ID < issues[j].ID })
 	topology.Issues = issues
-	topology.LegacyQualifiedSubscriptions = linkLegacyQualifiedSubscriptionFindings(topology.LegacyQualifiedSubscriptions, issues)
 	return topology
-}
-
-func linkLegacyQualifiedSubscriptionFindings(subscriptions []LegacyQualifiedSubscription, issues []Issue) []LegacyQualifiedSubscription {
-	out := append([]LegacyQualifiedSubscription(nil), subscriptions...)
-	for i := range out {
-		best := -1
-		for j := range issues {
-			issue := issues[j]
-			if issue.CheckID != "legacy_qualified_subscription" || strings.TrimSpace(issue.Location) != strings.TrimSpace(out[i].AuthoredLocation) {
-				continue
-			}
-			if best < 0 || legacyFindingSeverityRank(issue.Severity) > legacyFindingSeverityRank(issues[best].Severity) {
-				best = j
-			}
-		}
-		if best >= 0 {
-			out[i].FindingID = issues[best].ID
-		}
-	}
-	if out == nil {
-		return []LegacyQualifiedSubscription{}
-	}
-	return out
-}
-
-func legacyFindingSeverityRank(severity string) int {
-	switch strings.TrimSpace(severity) {
-	case "hard_invalidity", "error":
-		return 2
-	case "semantic_drift_warning", "warning":
-		return 1
-	default:
-		return 0
-	}
 }
 
 func issueID(issue Issue) string {

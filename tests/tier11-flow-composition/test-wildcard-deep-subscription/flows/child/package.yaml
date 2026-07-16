@@ -6,3 +6,7 @@ flows:
 - id: grandchild
   flow: grandchild
   mode: static
+connect:
+  - from: grandchild.task_done
+    to: .task_done
+    adapter: grandchild_task_done_to_child_task_done

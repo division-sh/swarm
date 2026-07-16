@@ -208,7 +208,12 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 		}
 		return testAgent, nil
 	}, pg)
-	if err := am.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: testAgent.id, Model: "regular"}); err != nil {
+	if err := am.SpawnAgent(runtimeactors.AgentConfig{
+		ExecutionMode: "live",
+		ID:            testAgent.id,
+		Model:         "regular",
+		Subscriptions: []string{"scan.requested"},
+	}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	if err := am.Run(managedRuntimeAdmissionContextForTest(t, runStatusAuthorActivityContext())); err != nil {
@@ -324,7 +329,12 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 		}
 		return testAgent, nil
 	}, pg)
-	if err := am.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: testAgent.id, Model: "regular"}); err != nil {
+	if err := am.SpawnAgent(runtimeactors.AgentConfig{
+		ExecutionMode: "live",
+		ID:            testAgent.id,
+		Model:         "regular",
+		Subscriptions: []string{"scan.requested"},
+	}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	if err := am.Run(managedRuntimeAdmissionContextForTest(t, runStatusAuthorActivityContext())); err != nil {

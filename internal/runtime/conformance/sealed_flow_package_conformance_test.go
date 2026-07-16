@@ -123,10 +123,19 @@ func assertSealedPackageConformanceConnectRoutePlan(t *testing.T, source semanti
 	if len(issues) != 0 {
 		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
 	}
-	if len(plans) != 1 {
-		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want one parent connect route plan", plans)
+	if len(plans) != 3 {
+		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want three explicit connect route plans", plans)
 	}
-	plan := plans[0]
+	var plan runtimepinrouting.ConnectRoutePlan
+	for _, candidate := range plans {
+		if candidate.Source.ResolvedEvent == "producer/work.ready" && candidate.Receiver.ResolvedEvent == "consumer/work.ready" {
+			plan = candidate
+			break
+		}
+	}
+	if plan.Source.ResolvedEvent == "" {
+		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, missing producer/work.ready -> consumer/work.ready", plans)
+	}
 	if got, want := plan.Source.ResolvedEvent, "producer/work.ready"; got != want {
 		t.Fatalf("source resolved event = %q, want %q", got, want)
 	}

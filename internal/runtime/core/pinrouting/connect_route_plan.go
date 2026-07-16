@@ -40,7 +40,6 @@ const (
 	ConnectFailurePinRefInvalid              ConnectRoutePlanFailure = "connect_pin_ref_invalid"
 	ConnectFailureProducerFlowMissing        ConnectRoutePlanFailure = "producer_flow_missing"
 	ConnectFailureProducerOutputPinMissing   ConnectRoutePlanFailure = "producer_output_pin_missing"
-	ConnectFailureReceiverRootUnsupported    ConnectRoutePlanFailure = "receiver_root_unsupported"
 	ConnectFailureReceiverFlowMissing        ConnectRoutePlanFailure = "receiver_flow_missing"
 	ConnectFailureReceiverInputPinMissing    ConnectRoutePlanFailure = "receiver_input_pin_missing"
 	ConnectFailureReceiverAddressRuleMissing ConnectRoutePlanFailure = "receiver_address_rule_missing"
@@ -297,12 +296,45 @@ func lowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 	if err != nil {
 		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailurePinRefInvalid, Detail: err.Error()}
 	}
+	if from.Root {
+		flowID, ok := semanticview.PackageRootFlowID(source, connect.PackageKey)
+		if !ok {
+			return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureProducerFlowMissing, Detail: strings.TrimSpace(connect.PackageKey)}
+		}
+		from.FlowID, from.Root = flowID, flowID == ""
+	}
+	if to.Root {
+		flowID, ok := semanticview.PackageRootFlowID(source, connect.PackageKey)
+		if !ok {
+			return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReceiverFlowMissing, Detail: strings.TrimSpace(connect.PackageKey)}
+		}
+		to.FlowID, to.Root = flowID, flowID == ""
+	}
 	sourceEndpoint, outputPin, sourceIssue := connectRoutePlanSourceEndpoint(source, from, connect)
 	if sourceIssue.Failure != "" {
 		return ConnectRoutePlan{}, sourceIssue
 	}
 	if to.Root {
-		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReceiverRootUnsupported, Detail: strings.TrimSpace(connect.To)}
+		inputPin, ok := source.FlowInputEventPin("", to.Pin)
+		if !ok {
+			return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReceiverInputPinMissing, Detail: connect.To}
+		}
+		return ConnectRoutePlan{
+			PackageKey:       strings.TrimSpace(connect.PackageKey),
+			AuthoredLocation: connect.AuthoredLocation(),
+			Source:           sourceEndpoint,
+			Receiver: ConnectRoutePlanEndpoint{
+				Root:          true,
+				Mode:          "root",
+				Pin:           strings.TrimSpace(to.Pin),
+				Event:         eventidentity.Normalize(inputPin.EventType()),
+				ResolvedEvent: eventidentity.Normalize(source.ResolveFlowEventReference("", inputPin.EventType())),
+			},
+			Adapter:        strings.TrimSpace(connect.Adapter),
+			TargetKind:     ConnectTargetKindTarget,
+			ResolutionKind: ConnectResolutionStatic,
+			Map:            connectMapEntries(connect.Map),
+		}, ConnectRoutePlanIssue{}
 	}
 	receiverScope, ok := source.FlowScopeByID(to.FlowID)
 	if !ok {
@@ -415,6 +447,9 @@ func connectRoutePlanSourceEndpoint(source semanticview.Source, from runtimecont
 }
 
 func MaterializeConnectRoutePlan(plan ConnectRoutePlan, input ConnectRoutePlanMaterializationInput) ConnectRoutePlanMaterialization {
+	if plan.Receiver.Root {
+		return ConnectRoutePlanMaterialization{}
+	}
 	if !plan.Target.Empty() {
 		return ConnectRoutePlanMaterialization{Target: plan.Target}
 	}

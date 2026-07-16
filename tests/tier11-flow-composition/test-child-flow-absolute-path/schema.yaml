@@ -3,6 +3,9 @@ terminal_states: [done]
 states: [waiting, done]
 pins:
   inputs:
-    events: [work.start]
+    events:
+      - work.start
+      - name: task_done
+        event: task.done
   outputs:
     events: [work.finished]

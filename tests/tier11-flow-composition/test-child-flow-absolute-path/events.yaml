@@ -2,3 +2,4 @@ work.start:
 work.finished:
 child/task.requested:
 child/task.done:
+task.done:

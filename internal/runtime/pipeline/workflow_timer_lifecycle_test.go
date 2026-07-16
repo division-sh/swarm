@@ -329,7 +329,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	listenerCtx := withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), "child")
 	completion := eventtest.RootIngress(
 		uuid.NewString(),
-		events.EventType("child/work.completed"),
+		events.EventType("work.completed"),
 		"cataloge2e",
 		"",
 		[]byte(`{"entity_id":"ent-001"}`),
@@ -341,9 +341,9 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	)
 
 	seedPipelineNodeDeliveryAuthority(t, db, completion, "parent-listener")
-	handler, ok := pc.SemanticSource().NodeEventHandler("parent-listener", "child/work.completed")
+	handler, ok := pc.SemanticSource().NodeEventHandler("parent-listener", "work.completed")
 	if !ok {
-		t.Fatal("parent-listener handler missing for child/work.completed")
+		t.Fatal("parent-listener handler missing for root-local work.completed")
 	}
 	result, err := pc.executeNodeContractHandler(withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), "child"), "parent-listener", handler, workflowTriggerContext{
 		Event: completion,
@@ -357,7 +357,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	}
 
 	if handled := pc.executeNodeHandlerPlan(listenerCtx, "parent-listener", completion); !handled {
-		t.Fatal("parent-listener should clear inherited child flow scope and handle child/work.completed")
+		t.Fatal("parent-listener should clear inherited child flow scope and handle root-local work.completed")
 	}
 	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), "ent-001")
 	if err != nil {
@@ -406,7 +406,7 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 
 	completion := eventtest.RootIngress(
 		uuid.NewString(),
-		events.EventType("child/work.completed"),
+		events.EventType("work.completed"),
 		"cataloge2e",
 		"",
 		[]byte(`{"entity_id":"ent-001"}`),
@@ -423,7 +423,7 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 		t.Fatalf("Intercept: %v", err)
 	}
 	if !passThrough {
-		t.Fatal("expected child/work.completed to remain visible downstream")
+		t.Fatal("expected root-local work.completed to remain visible downstream")
 	}
 	if len(emitted) != 1 || string(emitted[0].Type()) != "job.done" {
 		t.Fatalf("emitted = %#v, want [job.done]", emitted)

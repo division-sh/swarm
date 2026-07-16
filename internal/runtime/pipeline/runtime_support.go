@@ -37,7 +37,7 @@ func pipelineDependencyFailure(err error, detailCode, component, operation strin
 }
 
 type Bus interface {
-	Subscribe(agentID string, eventTypes ...events.EventType) <-chan events.Event
+	SubscribeInternal(subscriberID string, eventTypes ...events.EventType) <-chan events.Event
 	Publish(ctx context.Context, evt events.Event) error
 	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
 	ResolveSubscribedRecipients(eventType string) []string

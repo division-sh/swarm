@@ -13,4 +13,3 @@ validator:
       sets_gate: g_validated
       emit:
         event: validation.done
-        broadcast: true

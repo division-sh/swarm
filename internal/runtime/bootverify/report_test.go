@@ -4504,65 +4504,48 @@ func TestRun_DoesNotWarnForFlowOwnedAgentEmissionsDeclaredAsFlowOutputs(t *testi
 	}
 }
 
-func TestRun_ReportsLegacyQualifiedSubscriptionWithExactRuntimeEvidence(t *testing.T) {
-	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-absolute-path"))
+func TestRun_RejectsExactQualifiedNodeAndAgentSubscriptions(t *testing.T) {
+	for _, kind := range []string{"node", "agent"} {
+		t.Run(kind, func(t *testing.T) {
+			child := runtimecontracts.FlowContractView{
+				Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
+				Path:   "child",
+				Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
+			}
+			root := runtimecontracts.FlowContractView{
+				Nodes:    map[string]runtimecontracts.SystemNodeContract{},
+				Children: []runtimecontracts.FlowContractView{child},
+			}
+			bundle := &runtimecontracts.WorkflowContractBundle{
+				FlowTree: runtimecontracts.FlowTree{
+					Root: &root,
+					ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
+				},
+				Nodes:  map[string]runtimecontracts.SystemNodeContract{},
+				Agents: map[string]runtimecontracts.AgentRegistryEntry{},
+			}
+			switch kind {
+			case "node":
+				listener := runtimecontracts.SystemNodeContract{
+					ID:               "listener",
+					SubscribesTo:     []string{"child/task.done"},
+					EventHandlers:    map[string]runtimecontracts.SystemNodeEventHandler{"child/task.done": {}},
+					ProducesDeclared: true,
+				}
+				bundle.Nodes["listener"] = listener
+				bundle.FlowTree.Root.Nodes["listener"] = listener
+			case "agent":
+				bundle.Agents["retired-agent"] = runtimecontracts.AgentRegistryEntry{ID: "retired-agent", Subscriptions: []string{"child/task.done"}}
+			}
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	var found *Finding
-	for i := range report.Findings {
-		finding := &report.Findings[i]
-		if finding.CheckID == "event_consumer_exists" && finding.Location == "child/task.done" {
-			found = finding
-			break
-		}
-	}
-	if found == nil {
-		t.Fatalf("findings = %#v, want legacy qualified subscription finding", report.Findings)
-	}
-	if found.Severity != SeveritySemanticDriftWarn || !strings.Contains(found.Message, "no canonical consumer") || !strings.Contains(found.Message, "nodes.yaml:13 still delivers at runtime") {
-		t.Fatalf("legacy finding = %#v, want warning with exact runtime evidence", *found)
-	}
-	if !strings.Contains(found.Remediation, "output/input pins and a connect") || len(found.Evidence) != 1 || !strings.Contains(found.Evidence[0], `"child/task.done"`) {
-		t.Fatalf("legacy remediation/evidence = %#v / %#v", found.Remediation, found.Evidence)
-	}
-}
-
-func TestRun_PromotesLegacyQualifiedSubscriptionToErrorForStagesFlow(t *testing.T) {
-	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-absolute-path"))
-	schema := bundle.FlowSchemas["child"]
-	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true}
-	bundle.FlowSchemas["child"] = schema
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "event_consumer_exists", "child/task.done") {
-		t.Fatalf("errors = %#v, want stages-era legacy subscription hard invalidity", report.Errors())
-	}
-	if !reportContains(report.Errors(), "legacy_qualified_subscription", "child/task.done") {
-		t.Fatalf("errors = %#v, want dedicated stages-era legacy finding", report.Errors())
-	}
-}
-
-func TestRun_PromotesLegacyQualifiedSubscriptionForStagedConsumerOrUnrelatedFlow(t *testing.T) {
-	tests := []struct {
-		name  string
-		stage func(*runtimecontracts.WorkflowContractBundle)
-	}{
-		{name: "root consumer staged", stage: func(bundle *runtimecontracts.WorkflowContractBundle) {
-			bundle.RootSchema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true}
-		}},
-		{name: "unrelated sibling staged", stage: func(bundle *runtimecontracts.WorkflowContractBundle) {
-			bundle.FlowSchemas["unrelated"] = runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true}}
-		}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-absolute-path"))
-			tc.stage(bundle)
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-			if !reportContains(report.Errors(), "event_consumer_exists", "child/task.done") || !reportContains(report.Errors(), "legacy_qualified_subscription", "child/task.done") {
-				t.Fatalf("errors = %#v, want bundle-wide hard findings", report.Errors())
+			if !reportContains(report.HardInvalidities(), "legacy_qualified_subscription", "child/task.done") {
+				t.Fatalf("hard invalidities = %#v, want exact qualified %s rejection", report.HardInvalidities(), kind)
+			}
+			for _, finding := range report.HardInvalidities() {
+				if finding.CheckID == "legacy_qualified_subscription" && (!strings.Contains(finding.Remediation, "package.yaml connect") || !strings.Contains(finding.Remediation, "receiver-local")) {
+					t.Fatalf("teaching remediation = %q, want connect plus local subscription", finding.Remediation)
+				}
 			}
 		})
 	}

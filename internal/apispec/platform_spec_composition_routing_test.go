@@ -88,7 +88,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 		}
 	}
 
-	assertScalarContains(t, mustYAMLPath(t, composition, "pin_alias_delivery_composition", "owner_consumed"), "pin_alias_delivery")
+	assertScalarContains(t, mustYAMLPath(t, composition, "pin_alias_interface_adaptation", "owner_consumed"), "pin_alias_interface_adaptation")
 	assertScalarContains(t, mustYAMLPath(t, composition, "emit_target_escape_hatch", "role"), "not a compatibility path")
 	assertScalarContains(t, mustYAMLPath(t, composition, "split_boundaries", "runtime_route_consumption"), "#1473 closes supported EventBus publish/preflight/outbox")
 	assertScalarContains(t, mustYAMLPath(t, composition, "split_boundaries", "runtime_route_consumption"), "selected-contract runfork readiness")

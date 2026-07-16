@@ -316,6 +316,10 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 	if err := am.resolveAgentModel(&rec.Config); err != nil {
 		return err
 	}
+	subscriptionAdmission, err := admitAgentConfigSubscriptions(am.semanticSource, &rec.Config, nil)
+	if err != nil {
+		return err
+	}
 	if err := am.validateNativeToolAdmission(ctx, rec.Config); err != nil {
 		return err
 	}
@@ -341,7 +345,7 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 			}
 			postCommitCtx := runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx))
 			if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
-				if err := am.publishCommittedAgent(postCommitCtx, rec, a, result); err != nil && am.bus != nil {
+				if err := am.publishCommittedAgent(postCommitCtx, rec, a, subscriptionAdmission, result); err != nil && am.bus != nil {
 					_ = am.bus.LogRuntime(postCommitCtx, runtimepipeline.RuntimeLogEntry{
 						Level: "error", Message: "Post-commit agent publication failed",
 						Component: "flow_activation", Action: "agent_post_commit_publish_failed",
@@ -354,7 +358,7 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 			return nil
 		}
 	}
-	if err := am.lifecycle.registerExecution(ctx, rec, persist, a); err != nil {
+	if err := am.lifecycle.registerExecution(ctx, rec, persist, a, subscriptionAdmission); err != nil {
 		return err
 	}
 	if persist && am.lifecycle.store == nil && am.store != nil {
@@ -376,12 +380,12 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 	return nil
 }
 
-func (am *AgentManager) publishCommittedAgent(ctx context.Context, rec PersistedAgent, a Agent, result AgentLifecycleTransitionResult) error {
+func (am *AgentManager) publishCommittedAgent(ctx context.Context, rec PersistedAgent, a Agent, subscriptionAdmission semanticview.FlowOwnedAgentSubscriptionAdmission, result AgentLifecycleTransitionResult) error {
 	rec.LifecycleEpoch = result.RuntimeEpoch
 	rec.LifecycleGeneration = result.Generation
 	rec.LifecyclePhase = result.Phase
 	rec.LifecycleRunMode = result.RunMode
-	if err := am.lifecycle.registerExecution(ctx, rec, false, a); err != nil {
+	if err := am.lifecycle.registerExecution(ctx, rec, false, a, subscriptionAdmission); err != nil {
 		return err
 	}
 	_ = am.projectLifecycleDiagnostics(ctx)

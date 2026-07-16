@@ -9,4 +9,3 @@ child-worker:
       advances_to: completed
       emit:
         event: work.completed
-        broadcast: true

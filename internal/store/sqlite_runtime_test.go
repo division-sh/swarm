@@ -1437,6 +1437,44 @@ func TestSQLiteRuntimeStoreImmediateTerminalReceiptPreservesOriginalFailure(t *t
 	}
 }
 
+func TestPendingSubscribedRecoveryUsesAdmittedSameScopeSubscriptionsSQLite(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
+		AgentID:       "reviewer",
+		FlowPath:      "review/inst-1",
+		Subscriptions: []string{"task.ready", "task.*"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subscriptions := make([]events.EventType, 0, len(admission.RoutePatterns()))
+	for _, pattern := range admission.RoutePatterns() {
+		subscriptions = append(subscriptions, events.EventType(pattern))
+	}
+	now := time.Now().UTC()
+	localID, foreignID := uuid.NewString(), uuid.NewString()
+	for _, row := range []struct {
+		id        string
+		eventType events.EventType
+	}{{localID, "review/inst-1/task.ready"}, {foreignID, "foreign/task.ready"}} {
+		if err := store.AppendEvent(ctx, eventtest.PersistedProjection(row.id, row.eventType, "runtime", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, now)); err != nil {
+			t.Fatalf("AppendEvent(%s): %v", row.eventType, err)
+		}
+		if err := store.InsertEventDeliveries(ctx, row.id, []string{"reviewer"}); err != nil {
+			t.Fatalf("InsertEventDeliveries(%s): %v", row.eventType, err)
+		}
+	}
+
+	got, err := store.ListPendingSubscribedEvents(ctx, "reviewer", subscriptions, now.Add(-time.Minute), 10)
+	if err != nil {
+		t.Fatalf("ListPendingSubscribedEvents: %v", err)
+	}
+	if len(got) != 1 || got[0].ID() != localID {
+		t.Fatalf("pending events = %#v, want only admitted local event %s", got, localID)
+	}
+}
+
 func TestSQLiteRuntimeStoreDirectDeadLetterIsNotRetryExhaustion(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)

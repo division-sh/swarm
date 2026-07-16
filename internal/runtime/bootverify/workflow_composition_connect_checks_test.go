@@ -582,7 +582,6 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 		{name: "missing producer output pin", variant: canonicalrouting.CompositionConnectMissingProducerPin, want: "producer_output_pin_missing"},
 		{name: "missing receiver flow", variant: canonicalrouting.CompositionConnectMissingReceiverFlow, want: "receiver_flow_missing"},
 		{name: "missing receiver input pin", variant: canonicalrouting.CompositionConnectMissingReceiverPin, want: "receiver_input_pin_missing"},
-		{name: "root receiver unsupported", variant: canonicalrouting.CompositionConnectRootReceiver, want: "receiver_root_unsupported"},
 		{name: "event names differ without adapter", variant: canonicalrouting.CompositionConnectMissingAdapter, want: "event_alias_or_adapter_invalid"},
 		{name: "missing address key", variant: canonicalrouting.CompositionConnectMissingAddressKey, want: "output_carries_address_key", wantExtra: "missing_vertical_id"},
 		{name: "incompatible address key types", variant: canonicalrouting.CompositionConnectIncompatibleKeyType, want: "key_types_incompatible"},
@@ -605,6 +604,19 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 				t.Fatalf("expected composition_connect_validation detail %q, got %#v", tc.wantExtra, report.Errors())
 			}
 		})
+	}
+}
+
+func TestRun_AcceptsParentCompositionConnectToRootInput(t *testing.T) {
+	root := writeCompositionConnectBootverifyFixture(t, canonicalrouting.CompositionConnectRootReceiver)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	for _, finding := range append(report.Errors(), report.Warnings()...) {
+		if finding.CheckID == "composition_connect_validation" {
+			t.Fatalf("unexpected composition connect finding: %#v", finding)
+		}
 	}
 }
 

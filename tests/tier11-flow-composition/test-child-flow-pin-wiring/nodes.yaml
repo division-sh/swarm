@@ -10,10 +10,10 @@ parent-node:
 parent-listener:
   id: parent-listener
   execution_type: system_node
-  subscribes_to: [child/work.completed]
+  subscribes_to: [work.completed]
   produces: [job.done]
   event_handlers:
-    child/work.completed:
+    work.completed:
       advances_to: done
       emit:
         event: job.done

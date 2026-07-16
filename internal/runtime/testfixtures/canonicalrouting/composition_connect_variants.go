@@ -60,7 +60,7 @@ func CopyCompositionConnect(t testing.TB, variant CompositionConnectVariant) str
 	case CompositionConnectMissingReceiverPin:
 		opts.connectTo = "consumer.missing_pin"
 	case CompositionConnectRootReceiver:
-		opts.connectTo = ".deploy_completed"
+		opts.connectTo, opts.omitMap, opts.rootReceiver = ".deploy_completed", true, true
 	case CompositionConnectMissingAdapter:
 		opts.noAdapter = true
 	case CompositionConnectMissingAddressKey:
@@ -213,6 +213,7 @@ type compositionConnectFixtureOptions struct {
 	consumerTemplateInstance       bool
 	consumerTemplateInstanceBy     string
 	consumerTemplateInstanceRegion bool
+	rootReceiver                   bool
 }
 
 type compositionConnectAdapterField struct {
@@ -290,12 +291,26 @@ connect:
     to: `+connectTo+`
 `+adapter+mapBlock+`
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: composition-connect-bootverify\n")
+	rootSchema := "name: composition-connect-bootverify\n"
+	if opts.rootReceiver {
+		rootSchema = `
+name: composition-connect-bootverify
+pins:
+  inputs:
+    events:
+      - name: deploy_completed
+        event: deploy.completed
+`
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), rootSchema)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	rootEvents := "{}\n"
 	if opts.producerRequiresOutput {
+		rootEvents = "deploy.completed:\n  vertical_id: string\n"
+	}
+	if opts.rootReceiver {
 		rootEvents = "deploy.completed:\n  vertical_id: string\n"
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), rootEvents)

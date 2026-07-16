@@ -9,6 +9,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -693,7 +694,7 @@ func (rt *RouteTable) addAgentPatternsLocked(source semanticview.Source, package
 			Path: strings.Trim(strings.TrimSpace(basePath), "/"),
 		}
 		for _, rawPattern := range normalizeStringList(entry.Subscriptions) {
-			if routeFlowInputHasLoweredConnectReceiver(source, flowID, rawPattern) && !routeInputAliasRequiresExclusivePatterns(source, flowID, rawPattern) {
+			if routeFlowInputHasLoweredConnectReceiver(source, flowID, rawPattern) {
 				rt.addReceiverCarrierPatternsLocked(inputEvents, basePath, subscriber, rawPattern)
 			}
 			for _, resolved := range routeResolveSubscriberPatterns(source, packageKey, flowID, inputEvents, basePath, localEvents, rawPattern) {
@@ -724,7 +725,7 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageK
 			patterns = source.NodeRuntimeSubscriptions(semanticNodeID)
 		}
 		for _, rawPattern := range patterns {
-			if routeFlowInputHasLoweredConnectReceiver(source, flowID, rawPattern) && !routeInputAliasRequiresExclusivePatterns(source, flowID, rawPattern) {
+			if routeFlowInputHasLoweredConnectReceiver(source, flowID, rawPattern) {
 				rt.addReceiverCarrierPatternsLocked(inputEvents, basePath, subscriber, rawPattern)
 			}
 			for _, resolved := range routeResolveSubscriberPatterns(source, packageKey, flowID, inputEvents, basePath, localEvents, rawPattern) {
@@ -732,9 +733,6 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageK
 					continue
 				}
 				rt.addResolvedPatternLocked(subscriber, resolved, "")
-			}
-			if routeInputAliasRequiresExclusivePatterns(source, flowID, rawPattern) {
-				continue
 			}
 			if resolved := routeResolveNodeCanonicalPattern(source, basePath, semanticNodeID, rawPattern); strings.TrimSpace(resolved.EventPattern) != "" {
 				rt.addResolvedPatternLocked(subscriber, resolved, "")
@@ -897,10 +895,23 @@ func routeResolveNodeCanonicalPattern(source semanticview.Source, basePath, node
 	if resolved == "" || resolved == rawPattern || strings.Contains(resolved, "*") {
 		return routeResolvedPattern{}
 	}
+	if !routeExactPatternOwnedByScope(basePath, resolved) {
+		return routeResolvedPattern{}
+	}
 	return routeResolvedPattern{
 		EventPattern: resolved,
 		RouteSource:  "subscription",
 	}
+}
+
+func routeExactPatternOwnedByScope(basePath, pattern string) bool {
+	basePath = eventidentity.Normalize(basePath)
+	pattern = eventidentity.Normalize(pattern)
+	if basePath == "" || pattern == "" || !strings.HasPrefix(pattern, basePath+"/") {
+		return false
+	}
+	local := strings.TrimPrefix(pattern, basePath+"/")
+	return local != "" && !strings.Contains(local, "/")
 }
 
 func (rt *RouteTable) rebuildLocked() {
@@ -982,31 +993,16 @@ func routeFlowInputHasLoweredConnectReceiver(source semanticview.Source, flowID,
 	if eventType == "" {
 		return false
 	}
-	for _, connect := range source.CompositionConnects() {
-		to, err := connect.ToRef()
-		if err != nil || strings.TrimSpace(to.FlowID) != strings.TrimSpace(flowID) {
+	plans, _ := runtimepinrouting.LowerCompositionConnectRoutePlans(source)
+	for _, plan := range plans {
+		if strings.TrimSpace(plan.Receiver.FlowID) != strings.TrimSpace(flowID) {
 			continue
 		}
-		inputPin, ok := source.FlowInputEventPin(to.FlowID, to.Pin)
-		if !ok {
-			continue
-		}
-		if eventidentity.Normalize(inputPin.EventType()) == eventType {
+		if eventidentity.Normalize(plan.Receiver.Event) == eventType {
 			return true
 		}
 	}
 	return false
-}
-
-func routeInputAliasRequiresExclusivePatterns(source semanticview.Source, flowID, eventType string) bool {
-	if source == nil || strings.TrimSpace(flowID) == "" {
-		return false
-	}
-	eventType = eventidentity.Normalize(eventType)
-	if eventType == "" || !source.FlowHasInputEvent(flowID, eventType) {
-		return false
-	}
-	return semanticview.ImportBoundaryInputAliasRequired(source, flowID, eventType)
 }
 
 func routeNodeLocalEventSet(node runtimecontracts.SystemNodeContract) map[string]struct{} {
@@ -1126,57 +1122,10 @@ func routeResolveSubscriberPatterns(source semanticview.Source, packageKey, flow
 	if flowID != "" && source != nil && source.FlowHasInputEvent(flowID, raw) {
 		patterns := routeInputProducerPatterns(source.ResolveFlowInputAutoWire(flowID, raw))
 		if len(patterns) > 0 {
-			if len(semanticview.ImportBoundaryInputAliases(source, flowID, raw)) > 0 {
-				for i := range patterns {
-					patterns[i].RouteSource = "pin_bind_input_alias"
-					patterns[i].LocalizedEvent = raw
-				}
-			}
 			return patterns
-		}
-		if semanticview.ImportBoundaryInputAliasRequired(source, flowID, raw) {
-			return nil
 		}
 	}
 	if source != nil {
-		outputAliases := semanticview.ImportBoundaryOutputAliasesForParentEvent(source, packageKey, flowID, raw)
-		if len(outputAliases) > 0 {
-			out := make([]routeResolvedPattern, 0, len(outputAliases))
-			for _, alias := range outputAliases {
-				pattern := eventidentity.Normalize(alias.EventPattern)
-				if pattern == "" {
-					continue
-				}
-				out = append(out, routeResolvedPattern{
-					EventPattern:   pattern,
-					RouteSource:    "pin_bind_output_alias",
-					LocalizedEvent: raw,
-				})
-			}
-			if len(out) > 0 {
-				return out
-			}
-		}
-		if strings.Contains(raw, "*") {
-			outputAliases := semanticview.ImportBoundaryOutputAliasesForParent(source, packageKey, flowID)
-			out := make([]routeResolvedPattern, 0, len(outputAliases))
-			for _, alias := range outputAliases {
-				parentEvent := eventidentity.Normalize(alias.ParentEvent)
-				pattern := eventidentity.Normalize(alias.EventPattern)
-				if parentEvent == "" || pattern == "" || !RouteMatches(raw, parentEvent) {
-					continue
-				}
-				out = append(out, routeResolvedPattern{
-					EventPattern:   pattern,
-					MatchPattern:   raw,
-					RouteSource:    "pin_bind_output_alias",
-					LocalizedEvent: parentEvent,
-				})
-			}
-			if len(out) > 0 {
-				return out
-			}
-		}
 		if strings.Contains(raw, "*") {
 			resolution := semanticview.ResolveImportBoundaryWildcardSubscription(source, packageKey, flowID, basePath, localEvents, raw)
 			if resolution.Scoped {
@@ -1199,6 +1148,9 @@ func routeResolveSubscriberPatterns(source semanticview.Source, packageKey, flow
 				return out
 			}
 		}
+	}
+	if !strings.Contains(raw, "*") && strings.Contains(raw, "/") && !routeExactPatternOwnedByScope(basePath, raw) {
+		return nil
 	}
 	scope := routeEventIdentityScope(basePath, localEvents, inputEvents)
 	pattern := scope.ResolveSubscriptionPattern(raw, routeDescendantScopes(source, flowID))

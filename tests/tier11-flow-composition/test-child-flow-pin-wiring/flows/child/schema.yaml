@@ -6,4 +6,6 @@ pins:
   inputs:
     events: [work.requested]
   outputs:
-    events: [work.completed]
+    events:
+      - name: work_completed
+        event: work.completed

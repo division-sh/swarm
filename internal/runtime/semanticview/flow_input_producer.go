@@ -82,6 +82,11 @@ func ResolveFlowInputProducerWithOptions(source Source, flowID, eventType string
 
 func appendBoundaryIngressEvidence(source Source, flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
 	if flowID == "" && !opts.AllowNonInputEvent {
+		for _, pin := range flowInputPinsForEvent(source, flowID, eventType) {
+			if len(source.CompositionConnectsTo(flowID, pin.PinName())) > 0 {
+				return
+			}
+		}
 		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
 			Kind:      runtimecontracts.FlowInputProducerBoundaryExternalIngress,
 			EventType: eventType,
@@ -103,16 +108,6 @@ func appendBoundaryIngressEvidence(source Source, flowID, eventType string, opts
 }
 
 func appendParentConnectEvidence(source Source, flowID, eventType string, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
-	for _, alias := range ImportBoundaryInputAliases(source, flowID, eventType) {
-		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
-			Kind:      runtimecontracts.FlowInputProducerBoundaryParentConnect,
-			FlowID:    strings.TrimSpace(alias.FlowID),
-			EventType: alias.ParentEvent,
-			Pin:       alias.Pin,
-			Pattern:   alias.EventPattern,
-			Detail:    "import-boundary input bind",
-		})
-	}
 	for _, pin := range flowInputPinsForEvent(source, flowID, eventType) {
 		connects := source.CompositionConnectsTo(flowID, pin.PinName())
 		if len(connects) == 0 {

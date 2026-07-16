@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 )
@@ -44,6 +45,7 @@ type agentExecutionProjection struct {
 	agent            Agent
 	config           models.AgentConfig
 	subscriptions    []events.EventType
+	admission        semanticview.FlowOwnedAgentSubscriptionAdmission
 	startedAt        time.Time
 	token            runtimeeffects.LifecycleToken
 	generationCtx    context.Context
@@ -58,7 +60,7 @@ type agentExecutionProjection struct {
 }
 
 type agentRouteBus interface {
-	ReplaceAgentRoute(runtimeeffects.LifecycleToken, ...events.EventType) <-chan events.Event
+	ReplaceAgentRoute(runtimeeffects.LifecycleToken, semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan events.Event
 	RemoveAgentRoute(runtimeeffects.LifecycleToken)
 }
 
@@ -70,6 +72,7 @@ type agentExecutionSnapshot struct {
 	Agent         Agent
 	Config        models.AgentConfig
 	Subscriptions []events.EventType
+	Admission     semanticview.FlowOwnedAgentSubscriptionAdmission
 	StartedAt     time.Time
 	Token         runtimeeffects.LifecycleToken
 }
@@ -168,14 +171,23 @@ func lifecycleReconfigureOperationID(agentID string, epoch int64, generation uin
 }
 
 func (c *agentLifecycleCoordinator) register(ctx context.Context, rec PersistedAgent, persist bool) error {
-	return c.registerExecution(ctx, rec, persist, nil)
+	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
+		AgentID: rec.Config.ID, FlowID: rec.Config.FlowID, FlowPath: rec.Config.CanonicalFlowPath(), Subscriptions: rec.Config.Subscriptions,
+	})
+	if err != nil {
+		return err
+	}
+	return c.registerExecution(ctx, rec, persist, nil, admission)
 }
 
-func (c *agentLifecycleCoordinator) registerExecution(ctx context.Context, rec PersistedAgent, persist bool, agent Agent) error {
+func (c *agentLifecycleCoordinator) registerExecution(ctx context.Context, rec PersistedAgent, persist bool, agent Agent, admission semanticview.FlowOwnedAgentSubscriptionAdmission) error {
 	if c == nil {
 		return fmt.Errorf("agent lifecycle coordinator is required")
 	}
 	agentID := strings.TrimSpace(rec.Config.ID)
+	if !admission.ValidForAgent(agentID) {
+		return fmt.Errorf("agent %s missing subscription admission", agentID)
+	}
 	revision, err := lifecycleConfigRevision(rec)
 	if err != nil {
 		return err
@@ -238,13 +250,11 @@ func (c *agentLifecycleCoordinator) registerExecution(ctx context.Context, rec P
 		startedAt = time.Now()
 	}
 	execution := &agentExecutionProjection{
-		agent: agent, config: rec.Config, startedAt: startedAt,
+		agent: agent, config: rec.Config, admission: admission, startedAt: startedAt,
 		token:         runtimeeffects.LifecycleToken{RuntimeEpoch: epoch, AgentID: agentID, Generation: generation},
 		generationCtx: generationCtx, cancelGeneration: cancelGeneration,
 	}
-	if agent != nil {
-		execution.subscriptions = append([]events.EventType(nil), agent.Subscriptions()...)
-	}
+	execution.subscriptions = admittedSubscriptionEventTypes(admission)
 	c.cells[agentID] = &agentLifecycleCell{epoch: epoch, generation: generation, phase: phase, configRevision: revision, runMode: mode, execution: execution}
 	return nil
 }
@@ -470,6 +480,7 @@ func snapshotExecution(execution *agentExecutionProjection) agentExecutionSnapsh
 	return agentExecutionSnapshot{
 		Agent: execution.agent, Config: execution.config,
 		Subscriptions: append([]events.EventType(nil), execution.subscriptions...),
+		Admission:     execution.admission,
 		StartedAt:     execution.startedAt, Token: execution.token,
 	}
 }

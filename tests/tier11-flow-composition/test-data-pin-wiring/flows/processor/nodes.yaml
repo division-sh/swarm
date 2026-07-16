@@ -16,4 +16,3 @@ processor-node:
       advances_to: finished
       emit:
         event: process.done
-        broadcast: true

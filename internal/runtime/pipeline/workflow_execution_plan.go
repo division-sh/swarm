@@ -45,6 +45,9 @@ func workflowEventEntityID(evt events.Event) string {
 }
 
 func workflowEventEntityIDWithPayload(evt events.Event, payload map[string]any) string {
+	if target := evt.TargetRoute().Normalized(); target.EntityID != "" {
+		return target.EntityID
+	}
 	return strings.TrimSpace(evt.EntityID())
 }
 

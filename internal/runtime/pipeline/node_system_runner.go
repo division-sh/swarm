@@ -20,7 +20,7 @@ import (
 )
 
 type systemNodeBus interface {
-	Subscribe(agentID string, eventTypes ...events.EventType) <-chan events.Event
+	SubscribeInternal(subscriberID string, eventTypes ...events.EventType) <-chan events.Event
 	Publish(ctx context.Context, evt events.Event) error
 }
 
@@ -247,12 +247,7 @@ func (n *systemNodeRunner) subscribe() <-chan events.Event {
 	if n.subscriptionsFn != nil {
 		subscriptions = n.subscriptionsFn()
 	}
-	if internalBus, ok := any(n.bus).(interface {
-		SubscribeInternal(string, ...events.EventType) <-chan events.Event
-	}); ok {
-		return internalBus.SubscribeInternal(n.nodeID, subscriptions...)
-	}
-	return n.bus.Subscribe(n.nodeID, subscriptions...)
+	return n.bus.SubscribeInternal(n.nodeID, subscriptions...)
 }
 
 func (n *systemNodeRunner) handle(ctx context.Context, evt events.Event) error {

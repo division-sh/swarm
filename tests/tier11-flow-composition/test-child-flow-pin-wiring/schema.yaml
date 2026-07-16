@@ -3,6 +3,9 @@ terminal_states: [done]
 states: [ready, done]
 pins:
   inputs:
-    events: [job.submit]
+    events:
+      - job.submit
+      - name: work_completed
+        event: work.completed
   outputs:
     events: [job.done]

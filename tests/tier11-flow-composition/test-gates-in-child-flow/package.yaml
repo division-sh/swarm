@@ -8,3 +8,6 @@ flows:
   - id: child
     flow: child
     mode: static
+connect:
+  - from: child.validation_done
+    to: .validation_done

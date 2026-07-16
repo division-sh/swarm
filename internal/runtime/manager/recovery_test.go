@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,8 @@ import (
 type recoveryTestBus struct {
 	storedRoutes            []runtimebus.FlowInstanceRouteRecord
 	selectedRouteRecoveries []SelectedContractRouteRecoveryRecord
+	routeListQueries        int
+	replayQueries           int
 	restored                []string
 	restoredRequests        []runtimebus.FlowInstanceRouteMaterializationRequest
 	replayable              []events.PersistedReplayEvent
@@ -107,6 +110,7 @@ func (*recoveryTestBus) ClaimPipelineReplay(context.Context, string) (runtimeown
 	return recoveryTestReplayLease{}, true, nil
 }
 func (b *recoveryTestBus) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
+	b.replayQueries++
 	return append([]events.PersistedReplayEvent(nil), b.replayable...), nil
 }
 func (b *recoveryTestBus) UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error {
@@ -116,6 +120,7 @@ func (b *recoveryTestBus) DeleteFlowInstanceRoute(context.Context, runtimeflowid
 	return nil
 }
 func (b *recoveryTestBus) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
+	b.routeListQueries++
 	out := make([]runtimeflowidentity.Route, 0, len(b.storedRoutes))
 	for _, route := range b.storedRoutes {
 		out = append(out, route.Identity)
@@ -134,7 +139,8 @@ func (b *recoveryTestBus) RestorePersistedFlowInstanceRoute(req runtimebus.FlowI
 }
 
 type recoveryTestStore struct {
-	agents []PersistedAgent
+	agents                  []PersistedAgent
+	pendingSubscriptionArgs [][]events.EventType
 }
 
 func (s *recoveryTestStore) UpsertAgent(context.Context, PersistedAgent) error { return nil }
@@ -148,8 +154,63 @@ func (s *recoveryTestStore) UpsertEventReceipt(context.Context, string, string, 
 func (s *recoveryTestStore) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
 	return nil, nil
 }
-func (s *recoveryTestStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
+
+func (s *recoveryTestStore) ListPendingSubscribedEvents(_ context.Context, _ string, subscriptions []events.EventType, _ time.Time, _ int) ([]events.Event, error) {
+	s.pendingSubscriptionArgs = append(s.pendingSubscriptionArgs, append([]events.EventType(nil), subscriptions...))
 	return nil, nil
+}
+
+func TestRecoverRejectsPersistedForeignExactAndPatternBeforeRouteOrPendingQuery(t *testing.T) {
+	for _, subscription := range []string{"foreign/task.ready", "foreign/**/task.ready"} {
+		t.Run(strings.ReplaceAll(subscription, "/", "_"), func(t *testing.T) {
+			store := &recoveryTestStore{agents: []PersistedAgent{{Config: models.AgentConfig{
+				ExecutionMode: "live",
+				ID:            "reviewer",
+				FlowPath:      "review/inst-1",
+				Subscriptions: []string{subscription},
+			}}}}
+			bus := &recoveryTestBus{}
+			am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+				return recoveryTestAgent{id: cfg.ID}, nil
+			}, store)
+			err := am.Recover(context.Background())
+			if err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
+				t.Fatalf("Recover error = %v, want admission rejection", err)
+			}
+			if am.Count() != 0 || len(store.pendingSubscriptionArgs) != 0 || bus.routeListQueries != 0 || bus.replayQueries != 0 {
+				t.Fatalf("recovery side effects: agents=%d pending_queries=%#v route_queries=%d replay_queries=%d, want none", am.Count(), store.pendingSubscriptionArgs, bus.routeListQueries, bus.replayQueries)
+			}
+		})
+	}
+}
+
+func TestPendingSubscribedRecoveryUsesAdmittedSameScopeSubscriptions(t *testing.T) {
+	store := &recoveryTestStore{}
+	am := NewAgentManager(&recoveryTestBus{}, func(cfg models.AgentConfig) (Agent, error) {
+		return recoveryTestAgent{id: cfg.ID}, nil
+	}, store)
+	if err := am.SpawnAgent(models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "reviewer",
+		FlowPath:      "review/inst-1",
+		Subscriptions: []string{"task.ready", "task.*"},
+	}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	execution, ok := am.lifecycle.executionSnapshot("reviewer")
+	if !ok {
+		t.Fatal("admitted execution missing")
+	}
+	if _, err := am.pendingEventsForAgent(context.Background(), "reviewer", execution.Subscriptions, time.Time{}); err != nil {
+		t.Fatalf("pendingEventsForAgent: %v", err)
+	}
+	if len(store.pendingSubscriptionArgs) != 1 {
+		t.Fatalf("pending subscription queries = %#v, want one", store.pendingSubscriptionArgs)
+	}
+	want := []events.EventType{"review/inst-1/task.*", "review/inst-1/task.ready"}
+	if got := store.pendingSubscriptionArgs[0]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("pending query subscriptions = %#v, want %#v", got, want)
+	}
 }
 
 type startupReplayTestStore struct {
@@ -525,8 +586,8 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 	if hydrated.Memory != agentmemory.Authored(true) {
 		t.Fatalf("memory = %+v, want authored true", hydrated.Memory)
 	}
-	if len(hydrated.Subscriptions) != 1 || hydrated.Subscriptions[0] != "review.ready" {
-		t.Fatalf("subscriptions = %#v, want [review.ready]", hydrated.Subscriptions)
+	if len(hydrated.Subscriptions) != 1 || hydrated.Subscriptions[0] != "review/inst-1/review.ready" {
+		t.Fatalf("subscriptions = %#v, want [review/inst-1/review.ready]", hydrated.Subscriptions)
 	}
 	if hydrated.ManagerFallback != "control-plane" {
 		t.Fatalf("manager_fallback = %q, want control-plane", hydrated.ManagerFallback)

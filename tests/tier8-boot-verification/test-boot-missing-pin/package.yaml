@@ -8,3 +8,6 @@ flows:
 - id: child
   flow: child
   mode: static
+connect:
+  - from: child.task_result
+    to: .task_result

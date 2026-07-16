@@ -1464,6 +1464,7 @@ func (am *AgentManager) replaceExecution(parent context.Context, agentID, trigge
 	}
 
 	candidate := current
+	candidateAdmission := current.Admission
 	var rec *PersistedAgent
 	subordinate := sessions.LifecycleMutationPlan{}
 	if patch != nil {
@@ -1475,6 +1476,10 @@ func (am *AgentManager) replaceExecution(parent context.Context, agentID, trigge
 			return replaceExecutionResult{}, fmt.Errorf("agent id mismatch: target=%s config.id=%s", strings.TrimSpace(agentID), updated.ID)
 		}
 		if err := am.resolveAgentModel(&updated); err != nil {
+			return replaceExecutionResult{}, err
+		}
+		subscriptionAdmission, err := admitAgentConfigSubscriptions(am.semanticSource, &updated, nil)
+		if err != nil {
 			return replaceExecutionResult{}, err
 		}
 		if err := am.validateNativeToolAdmission(am.runtimeContext(), updated); err != nil {
@@ -1497,9 +1502,11 @@ func (am *AgentManager) replaceExecution(parent context.Context, agentID, trigge
 		}
 		candidate = agentExecutionSnapshot{
 			Agent: candidateAgent, Config: updated,
-			Subscriptions: append([]events.EventType(nil), candidateAgent.Subscriptions()...),
+			Subscriptions: admittedSubscriptionEventTypes(subscriptionAdmission),
+			Admission:     subscriptionAdmission,
 			StartedAt:     current.StartedAt,
 		}
+		candidateAdmission = subscriptionAdmission
 		rec = &candidateRecord
 		subordinate = reconfigureSessionMutationPlan(current.Config, updated)
 	}
@@ -1528,6 +1535,7 @@ func (am *AgentManager) replaceExecution(parent context.Context, agentID, trigge
 	successor.agent = candidate.Agent
 	successor.config = candidate.Config
 	successor.subscriptions = append([]events.EventType(nil), candidate.Subscriptions...)
+	successor.admission = candidateAdmission
 	successor.startedAt = candidate.StartedAt
 	runMode := cell.runMode
 	am.lifecycle.mu.Unlock()
@@ -1537,11 +1545,11 @@ func (am *AgentManager) replaceExecution(parent context.Context, agentID, trigge
 		if routeBus == nil {
 			return replaceExecutionResult{}, errors.New("event bus does not support generation-owned agent routes")
 		}
-		routeSubscriptions := candidate.Subscriptions
+		routeAdmission := candidateAdmission
 		if runMode == AgentRunModeAuthoritativeDeliveryOnly {
-			routeSubscriptions = nil
+			routeAdmission = routeAdmission.CarrierOnly()
 		}
-		ch = routeBus.ReplaceAgentRoute(token, routeSubscriptions...)
+		ch = routeBus.ReplaceAgentRoute(token, routeAdmission)
 		if ch == nil {
 			return replaceExecutionResult{}, errors.New("failed to install generation-owned agent route")
 		}

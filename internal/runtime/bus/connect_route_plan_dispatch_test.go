@@ -34,6 +34,7 @@ type connectRoutePlanTestFlow struct {
 	mode         string
 	inputs       []runtimecontracts.FlowInputEventPin
 	outputs      []runtimecontracts.FlowOutputEventPin
+	agents       map[string]runtimecontracts.AgentRegistryEntry
 	nodes        map[string]runtimecontracts.SystemNodeContract
 	entityFields map[string]runtimecontracts.EntityFieldDecl
 }
@@ -331,6 +332,70 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscr
 	}
 }
 
+func TestEventBusConnectRouteDeliversToLiveAgentCarrier(t *testing.T) {
+	source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+		{
+			id:   "producer",
+			mode: "static",
+			outputs: []runtimecontracts.FlowOutputEventPin{{
+				Name:  "deploy_done",
+				Event: "deploy.done",
+			}},
+		},
+		{
+			id:   "consumer",
+			mode: "static",
+			inputs: []runtimecontracts.FlowInputEventPin{{
+				Name:  "deploy_completed",
+				Event: "deploy.completed",
+			}},
+			agents: map[string]runtimecontracts.AgentRegistryEntry{
+				"consumer-agent": {
+					ID:            "consumer-agent",
+					Subscriptions: []string{"deploy.completed"},
+				},
+			},
+		},
+	}, []runtimecontracts.FlowPackageConnect{{
+		From: "producer.deploy_done",
+		To:   "consumer.deploy_completed",
+	}}))
+	store := newTargetRouteMemoryStore()
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	admission := testAgentSubscriptionAdmissionForFlow(t, "consumer-agent", "consumer", events.EventType("deploy.completed")).CarrierOnly()
+	ch := eb.SubscribeAgent(admission)
+	if ch == nil {
+		t.Fatal("typed carrier-only agent admission returned no channel")
+	}
+	defer eb.Unsubscribe("consumer-agent")
+
+	evt := eventtest.RootIngress(uuid.NewString(), events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if len(plan.SubscriptionRecipients) != 0 {
+		t.Fatalf("subscription recipients = %#v, want none for carrier-only agent", plan.SubscriptionRecipients)
+	}
+	if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].SubscriberType != "agent" || plan.DeliveryRoutes[0].SubscriberID != "consumer-agent" {
+		t.Fatalf("delivery routes = %#v, want canonical connect route to agent/consumer-agent", plan.DeliveryRoutes)
+	}
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	select {
+	case got := <-ch:
+		if got.ID() != evt.ID() {
+			t.Fatalf("delivered event = %q, want %q", got.ID(), evt.ID())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canonical connect did not wake live agent carrier")
+	}
+}
+
 func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T) {
 	source := connectRoutePlanRootProducerStaticSource()
 	store := newTargetRouteMemoryStore()
@@ -343,8 +408,10 @@ func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T
 		t.Fatalf("receiver carrier route consumer/root.ready = %#v, want consumer-node receiver_carrier", receiverCarriers)
 	}
 	eventID := uuid.NewString()
+	rootInstanceID := uuid.NewString()
 	evt := eventtest.RootIngress(eventID,
-		events.EventType("root.ready"), "", "", json.RawMessage(`{"entity_id":"entity-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+		events.EventType("root.ready"), "", "", json.RawMessage(`{"entity_id":"entity-1"}`), 0, "", "",
+		events.EnvelopeForFlowInstance(events.EventEnvelope{}, rootInstanceID), time.Now().UTC())
 
 	want := events.DeliveryRoute{
 		SubscriberType: "node",
@@ -3048,6 +3115,7 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 			Paths:  runtimecontracts.FlowContractPaths{ID: flow.id, Flow: flow.id},
 			Schema: schema,
 			Path:   flow.id,
+			Agents: flow.agents,
 			Nodes:  flow.nodes,
 		}
 		children = append(children, view)

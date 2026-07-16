@@ -12,130 +12,47 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func TestImportBoundaryInputAliasRoutesParentEventToPackageInputPin(t *testing.T) {
+func TestImportBoundaryInputBindingDoesNotRouteWithoutConnect(t *testing.T) {
 	source := loadBusImportBoundaryAliasSource(t)
 	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	routes := rt.Resolve("parent.lead_captured")
-	if len(routes) != 1 || routes[0].ID != "worker-node" {
-		t.Fatalf("Resolve(parent.lead_captured) = %#v, want worker-node", routes)
-	}
-	if got := routes[0].LocalizedEvent; got != "work.requested" {
-		t.Fatalf("localized event = %q, want work.requested", got)
-	}
-	if got := rt.Resolve("work.requested"); len(got) != 0 {
-		t.Fatalf("Resolve(work.requested) = %#v, want no raw fallback", got)
-	}
-
-	store := &routePersistenceTestStore{}
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	evt := eventtest.RootIngress("evt-input-alias", "parent.lead_captured", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
-	if err != nil {
-		t.Fatalf("CheckPublishRecipientPlan: %v", err)
-	}
-	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != "worker-node" {
-		t.Fatalf("routed recipients = %#v, want worker-node", plan.RoutedRecipients)
-	}
-	if got := plan.RoutedRecipients[0].LocalizedEvent; got != "work.requested" {
-		t.Fatalf("plan localized event = %q, want work.requested", got)
-	}
-	if err := eb.Publish(context.Background(), evt); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	if got := store.deliveries["evt-input-alias"]; len(got) != 1 || got[0] != "worker-node" {
-		t.Fatalf("persisted deliveries = %#v, want worker-node", got)
+	if len(routes) != 0 {
+		t.Fatalf("Resolve(parent.lead_captured) = %#v, want bind-only input to be inert", routes)
 	}
 }
 
-func TestImportBoundaryOutputAliasRoutesPackageOutputToParentEvent(t *testing.T) {
+func TestImportBoundaryOutputBindingDoesNotRouteWithoutConnect(t *testing.T) {
 	source := loadBusImportBoundaryAliasSource(t)
 	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	routes := rt.Resolve("worker/work.completed")
-	if len(routes) != 1 || routes[0].ID != "parent-listener" {
-		t.Fatalf("Resolve(worker/work.completed) = %#v, want parent-listener", routes)
-	}
-	if got := routes[0].LocalizedEvent; got != "parent.lead_enriched" {
-		t.Fatalf("localized event = %q, want parent.lead_enriched", got)
-	}
-
-	store := &routePersistenceTestStore{}
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	evt := eventtest.RootIngress("evt-output-alias", "worker/work.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
-	if err != nil {
-		t.Fatalf("CheckPublishRecipientPlan: %v", err)
-	}
-	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != "parent-listener" {
-		t.Fatalf("routed recipients = %#v, want parent-listener", plan.RoutedRecipients)
-	}
-	if got := plan.RoutedRecipients[0].LocalizedEvent; got != "parent.lead_enriched" {
-		t.Fatalf("plan localized event = %q, want parent.lead_enriched", got)
-	}
-	if err := eb.Publish(context.Background(), evt); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	if got := store.deliveries["evt-output-alias"]; len(got) != 1 || got[0] != "parent-listener" {
-		t.Fatalf("persisted deliveries = %#v, want parent-listener", got)
+	if len(routes) != 0 {
+		t.Fatalf("Resolve(worker/work.completed) = %#v, want bind-only output to be inert", routes)
 	}
 }
 
-func TestImportBoundaryOutputAliasRoutesPackageOutputToWildcardParentSubscriber(t *testing.T) {
+func TestImportBoundaryOutputBindingDoesNotAuthorizeWildcardWithoutConnect(t *testing.T) {
 	source := loadBusImportBoundaryAliasWildcardOutputSource(t)
 	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	routes := rt.Resolve("worker/work.completed")
-	if len(routes) != 1 || routes[0].ID != "parent-listener" {
-		t.Fatalf("Resolve(worker/work.completed) = %#v, want parent-listener", routes)
-	}
-	if got := routes[0].MatchPattern; got != "parent.*" {
-		t.Fatalf("match pattern = %q, want parent.*", got)
-	}
-	if got := routes[0].LocalizedEvent; got != "parent.lead_enriched" {
-		t.Fatalf("localized event = %q, want parent.lead_enriched", got)
-	}
-
-	store := &routePersistenceTestStore{}
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	evt := eventtest.RootIngress("evt-output-alias-wildcard", "worker/work.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
-	if err != nil {
-		t.Fatalf("CheckPublishRecipientPlan: %v", err)
-	}
-	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != "parent-listener" {
-		t.Fatalf("routed recipients = %#v, want parent-listener", plan.RoutedRecipients)
-	}
-	if got := plan.RoutedRecipients[0].LocalizedEvent; got != "parent.lead_enriched" {
-		t.Fatalf("plan localized event = %q, want parent.lead_enriched", got)
-	}
-	if err := eb.Publish(context.Background(), evt); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	if got := store.deliveries["evt-output-alias-wildcard"]; len(got) != 1 || got[0] != "parent-listener" {
-		t.Fatalf("persisted deliveries = %#v, want parent-listener", got)
+	if len(routes) != 0 {
+		t.Fatalf("Resolve(worker/work.completed) = %#v, want bind-only output to grant no wildcard route", routes)
 	}
 }
 
-func TestImportBoundaryInputAliasMaterializesTemplateRoute(t *testing.T) {
+func TestImportBoundaryInputBindingDoesNotMaterializeTemplateRouteWithoutConnect(t *testing.T) {
 	source := loadBusImportBoundaryAliasTemplateSource(t)
 	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
@@ -150,17 +67,50 @@ func TestImportBoundaryInputAliasMaterializesTemplateRoute(t *testing.T) {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	routes := rt.Resolve("parent.lead_captured")
-	if len(routes) != 1 || routes[0].ID != "worker-node" {
-		t.Fatalf("Resolve(parent.lead_captured) = %#v, want worker-node", routes)
+	if len(routes) != 0 {
+		t.Fatalf("Resolve(parent.lead_captured) = %#v, want bind-only template route to remain inert", routes)
 	}
-	if got := routes[0].Path; got != "worker/inst-1" {
-		t.Fatalf("route path = %q, want worker/inst-1", got)
+}
+
+func TestImportBoundaryConnectConsumesBindingsForInputAndRootOutputDelivery(t *testing.T) {
+	source := loadBusImportBoundaryConnectedSource(t)
+	plans, issues := runtimepinrouting.LowerCompositionConnectRoutePlans(source)
+	if len(issues) != 0 || len(plans) != 2 {
+		t.Fatalf("connect plans = %#v, issues = %#v, want two valid plans", plans, issues)
 	}
-	if got := routes[0].LocalizedEvent; got != "work.requested" {
-		t.Fatalf("localized event = %q, want work.requested", got)
+	store := &routePersistenceTestStore{}
+	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if got := rt.Resolve("work.requested"); len(got) != 0 {
-		t.Fatalf("Resolve(work.requested) = %#v, want no raw template fallback", got)
+	for _, tc := range []struct {
+		id        string
+		eventType string
+		recipient string
+		envelope  events.EventEnvelope
+	}{
+		{id: "evt-input-connect", eventType: "parent.lead_captured", recipient: "worker-node"},
+		{
+			id:        "evt-output-connect",
+			eventType: "worker/work.completed",
+			recipient: "parent-listener",
+			envelope:  events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: "root-entity"}),
+		},
+	} {
+		evt := eventtest.RootIngress(tc.id, events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", tc.envelope, time.Now().UTC())
+		plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+		if err != nil {
+			t.Fatalf("CheckPublishRecipientPlan(%s): %v", tc.eventType, err)
+		}
+		if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != tc.recipient {
+			t.Fatalf("routed recipients for %s = %#v, want %s", tc.eventType, plan.RoutedRecipients, tc.recipient)
+		}
+		if err := eb.Publish(context.Background(), evt); err != nil {
+			t.Fatalf("Publish(%s): %v", tc.eventType, err)
+		}
+		if got := store.deliveries[tc.id]; len(got) != 1 || got[0] != tc.recipient {
+			t.Fatalf("persisted deliveries for %s = %#v, want %s", tc.eventType, got, tc.recipient)
+		}
 	}
 }
 
@@ -186,6 +136,21 @@ func loadBusImportBoundaryAliasSource(t *testing.T) semanticview.Source {
 	}
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := writeBusImportBoundaryAliasFixture(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func loadBusImportBoundaryConnectedSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
+	root := writeBusImportBoundaryConnectedFixture(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
@@ -224,12 +189,43 @@ func loadBusImportBoundaryAliasTemplateSource(t *testing.T) semanticview.Source 
 }
 
 func writeBusImportBoundaryAliasFixture(t *testing.T) string {
-	return writeBusImportBoundaryAliasFixtureWithParentSubscription(t, "parent.lead_enriched")
+	return writeBusImportBoundaryAliasFixtureWithOptions(t, "parent.lead_enriched", false)
 }
 
 func writeBusImportBoundaryAliasFixtureWithParentSubscription(t *testing.T, parentSubscription string) string {
+	return writeBusImportBoundaryAliasFixtureWithOptions(t, parentSubscription, false)
+}
+
+func writeBusImportBoundaryConnectedFixture(t *testing.T) string {
+	return writeBusImportBoundaryAliasFixtureWithOptions(t, "parent.lead_enriched", true)
+}
+
+func writeBusImportBoundaryAliasFixtureWithOptions(t *testing.T, parentSubscription string, connected bool) string {
 	t.Helper()
 	root := t.TempDir()
+	connect := ""
+	rootSchema := "name: bus-import-boundary-alias\n"
+	if connected {
+		connect = `
+connect:
+  - from: .lead_captured
+    to: worker.work_requested
+  - from: worker.work_completed
+    to: .lead_enriched
+`
+		rootSchema = `
+name: bus-import-boundary-alias
+pins:
+  inputs:
+    events:
+      - name: lead_enriched
+        event: parent.lead_enriched
+  outputs:
+    events:
+      - name: lead_captured
+        event: parent.lead_captured
+`
+	}
 	writeBusImportBoundaryFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: bus-import-boundary-alias
 version: "1.0.0"
@@ -243,8 +239,8 @@ flows:
         work.requested: parent.lead_captured
       outputs:
         work.completed: parent.lead_enriched
-`)
-	writeBusImportBoundaryFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: bus-import-boundary-alias\n")
+`+connect)
+	writeBusImportBoundaryFixtureFile(t, filepath.Join(root, "schema.yaml"), rootSchema)
 	writeBusImportBoundaryFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
 	writeBusImportBoundaryFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeBusImportBoundaryFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
@@ -272,9 +268,13 @@ name: worker
 mode: static
 pins:
   inputs:
-    events: [work.requested]
+    events:
+      - name: work_requested
+        event: work.requested
   outputs:
-    events: [work.completed]
+    events:
+      - name: work_completed
+        event: work.completed
 `)
 	writeBusImportBoundaryFixtureFile(t, filepath.Join(root, "flows", "worker", "policy.yaml"), "{}\n")
 	writeBusImportBoundaryFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), "{}\n")
@@ -314,9 +314,13 @@ name: worker
 mode: template
 pins:
   inputs:
-    events: [work.requested]
+    events:
+      - name: work_requested
+        event: work.requested
   outputs:
-    events: [work.completed]
+    events:
+      - name: work_completed
+        event: work.completed
 `)
 	return root
 }

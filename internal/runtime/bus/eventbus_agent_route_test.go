@@ -17,13 +17,13 @@ func TestEventBusAgentRouteReplacementIsExactFreshAndTokenFenced(t *testing.T) {
 	}
 	oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 1}
 	newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 2}
-	oldCh := eb.ReplaceAgentRoute(oldToken, events.EventType("test.old"), events.EventType("test.retained"))
+	oldCh := eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.old"), events.EventType("test.retained")))
 	queued := eventtest.RuntimeControl("queued", events.EventType("test.old"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
 	if err := eb.deliverToAgents(context.Background(), queued, []string{"agent-a"}); err != nil {
 		t.Fatalf("deliver predecessor event: %v", err)
 	}
 
-	newCh := eb.ReplaceAgentRoute(newToken, events.EventType("test.retained"), events.EventType("test.new"))
+	newCh := eb.ReplaceAgentRoute(newToken, testAgentSubscriptionAdmission(t, newToken.AgentID, events.EventType("test.retained"), events.EventType("test.new")))
 	if oldCh == newCh {
 		t.Fatal("replacement reused predecessor channel")
 	}

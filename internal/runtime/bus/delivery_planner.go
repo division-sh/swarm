@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 )
@@ -866,7 +867,7 @@ func routedRootInputFlowNodeMatchesNoTargetEvent(evt events.Event, subscriber Su
 		return false
 	}
 	switch strings.TrimSpace(subscriber.RouteSource) {
-	case "root_input_flow", "pin_bind_input_alias":
+	case "root_input_flow":
 	default:
 		return false
 	}
@@ -912,9 +913,6 @@ func routedRootNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber)
 	if !strings.Contains(eventType, "/") {
 		return true
 	}
-	if strings.TrimSpace(subscriber.RouteSource) == "pin_bind_output_alias" {
-		return true
-	}
 	matchPattern := strings.Trim(strings.TrimSpace(subscriber.MatchPattern), "/")
 	return matchPattern != "" && !strings.Contains(matchPattern, "*") && eventType == matchPattern
 }
@@ -932,6 +930,12 @@ func routedNodeInternalSubscriptionAliases(evt events.Event, routed []Subscriber
 		out = append(out, concrete)
 	}
 	for _, subscriber := range routed {
+		if localized := eventidentity.Normalize(subscriber.LocalizedEvent); localized != "" {
+			out = append(out, localized)
+			if path := eventidentity.Normalize(subscriber.Path); path != "" {
+				out = append(out, path+"/"+localized)
+			}
+		}
 		if !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
 			continue
 		}

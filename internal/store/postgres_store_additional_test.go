@@ -25,6 +25,7 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -3491,6 +3492,45 @@ func TestListPendingSubscribedEvents_RespectsDirectDeliveryScope(t *testing.T) {
 	}
 	if _, ok := gotSet[noDeliveryID]; ok {
 		t.Fatalf("did not expect delivery-less event %s in subscribed backlog, got=%v", noDeliveryID, gotSet)
+	}
+}
+
+func TestPendingSubscribedRecoveryUsesAdmittedSameScopeSubscriptionsPostgres(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
+		AgentID:       "reviewer",
+		FlowPath:      "review/inst-1",
+		Subscriptions: []string{"task.ready", "task.*"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subscriptions := make([]events.EventType, 0, len(admission.RoutePatterns()))
+	for _, pattern := range admission.RoutePatterns() {
+		subscriptions = append(subscriptions, events.EventType(pattern))
+	}
+	now := time.Now().UTC()
+	localID, foreignID := uuid.NewString(), uuid.NewString()
+	for _, row := range []struct {
+		id        string
+		eventType events.EventType
+	}{{localID, "review/inst-1/task.ready"}, {foreignID, "foreign/task.ready"}} {
+		if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(row.id, row.eventType, "runtime", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, now)); err != nil {
+			t.Fatalf("AppendEvent(%s): %v", row.eventType, err)
+		}
+		if err := pg.InsertEventDeliveries(ctx, row.id, []string{"reviewer"}); err != nil {
+			t.Fatalf("InsertEventDeliveries(%s): %v", row.eventType, err)
+		}
+	}
+
+	got, err := pg.ListPendingSubscribedEvents(ctx, "reviewer", subscriptions, now.Add(-time.Minute), 10)
+	if err != nil {
+		t.Fatalf("ListPendingSubscribedEvents: %v", err)
+	}
+	if len(got) != 1 || got[0].ID() != localID {
+		t.Fatalf("pending events = %#v, want only admitted local event %s", got, localID)
 	}
 }
 

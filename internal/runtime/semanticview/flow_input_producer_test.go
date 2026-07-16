@@ -41,6 +41,37 @@ func TestResolveFlowInputProducer_ClassifiesRootBoundaryExternalIngress(t *testi
 	}
 }
 
+func TestResolveFlowInputProducer_ExplicitConnectOwnsRootInput(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{
+					Events: []string{"work.requested"},
+					EventPins: []runtimecontracts.FlowInputEventPin{{
+						Name:  "work_requested",
+						Event: "work.requested",
+					}},
+				},
+			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			CompositionConnects: []runtimecontracts.FlowPackageConnect{{
+				From: "worker.work_completed",
+				To:   ".work_requested",
+			}},
+		},
+	}
+
+	resolution := ResolveFlowInputProducer(Wrap(bundle), "", "work.requested")
+
+	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
+		t.Fatalf("evidence = %#v, want parent connect", resolution.Evidence)
+	}
+	if resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress) {
+		t.Fatalf("evidence = %#v, connected root pin must not retain external-ingress authority", resolution.Evidence)
+	}
+}
+
 func TestResolveFlowInputProducer_ClassifiesParentConnectWithoutRoutePattern(t *testing.T) {
 	source := flowInputProducerFixture(runtimecontracts.FlowInputEventPin{
 		Name:  "work.requested",

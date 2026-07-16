@@ -1,8 +1,8 @@
 version: 1
 kind: route_authority_drift_inventory
 issue: 1364
-implementation_issues: [1364, 1494, 1495, 1496, 1545, 1546, 1552, 1577, 1826]
-parent_issues: [1340, 1353, 1481, 1493]
+implementation_issues: [1364, 1494, 1495, 1496, 1545, 1546, 1552, 1577, 1826, 2085]
+parent_issues: [1340, 1353, 1481, 1493, 1738, 1786, 1827, 2084]
 watchlist: runtime_operations.delivery_and_replay_ownership
 policy:
   closure_level: route_authority_seam_inventory_guardrail_first_slice
@@ -15,7 +15,11 @@ policy:
     readers/writers, public readback, and test fixtures across the repository.
     It explicitly covers event name/type, semantic scope, entity/run/source
     event context, route/event-key derivation helpers, lowered ConnectRoutePlan
-    artifacts, RouteTable.Resolve role boundaries, receiver-carrier evidence,
+    artifacts, import-boundary pin interface adaptation versus invalid
+    pin_bind_input_alias/pin_bind_output_alias route authority, flow-owned
+    exact/pattern subscription admission versus invalid live cross-flow routes,
+    required internal pipeline carriers versus raw agent-kind fallbacks,
+    RouteTable.Resolve role boundaries, receiver-carrier evidence,
     descriptor evidence, direct-delivery paths, removed legacy
     eventDeliveryPlan compatibility, and RoutePlan source/reason constants.
     It must not be used by itself as proof that runtime behavior changed.
@@ -60,11 +64,76 @@ search_dimensions:
       - platform-spec.yaml
       - internal/runtime/core/pinrouting/connect_route_plan.go
       - internal/runtime/core/pinrouting/connect_route_plan_test.go
+      - internal/runtime/core/pinrouting/pinrouting.go
+      - internal/runtime/core/pinrouting/pinrouting_test.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/bus/routing_derivation_test.go
       - internal/runtime/bus/route_plan.go
       - internal/apispec/platform_spec_composition_routing_test.go
     canonical_layer: route_plan_authority
+    classified_paths_required: true
+  - id: import_boundary_pin_alias_route_authority
+    pattern: 'pin_bind_input_alias|pin_bind_output_alias|ImportBoundary(Input|Output)Alias|bind\.inputs|bind\.outputs'
+    minimum_matching_files: 7
+    required_paths:
+      - platform-spec.yaml
+      - internal/runtime/contracts/workflow_contract_yaml_wave1.go
+      - internal/runtime/semanticview/import_boundary_aliases.go
+      - internal/runtime/bootverify/workflow_composition_connect_checks.go
+      - internal/runtime/semanticview/import_boundary_aliases_test.go
+    canonical_layer: invalid_old_authority
+    classified_paths_required: true
+  - id: live_agent_subscription_route_authority
+    pattern: 'type AgentConfig struct|\bnewLLMAgent\b|\bnewGenericAgent\b|\bbuildFlowAgentConfig\b|\bbuildStaticFlowAgentConfig\b|\bSpawnAgentForEntity\b|\bReconfigureAgent\b|\bReplaceAgentRoute\b|\bresolveSubscribedRecipientsForPlanning\b|\bpendingEventsForAgent\b|TestEventBusSubscribe_RejectsUnadmittedQualifiedAgentRoute'
+    minimum_matching_files: 21
+    required_paths:
+      - internal/runtime/core/actors/agent_config.go
+      - internal/runtime/agents/agent_llm.go
+      - internal/runtime/manager/generic_agent_support.go
+      - internal/runtime/manager/flow_activation.go
+      - internal/runtime/manager/agent_manager.go
+      - internal/runtime/manager/runtime.go
+      - internal/runtime/tools/executor_agents.go
+      - internal/runtime/bus/eventbus.go
+      - internal/runtime/bus/eventbus_routing.go
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/bus/eventbus_publish_test.go
+    canonical_layer: invalid_old_authority
+    classified_paths_required: true
+  - id: pending_agent_subscription_recovery_authority
+    pattern: '\bListPendingSubscribedEvents\b|\bpendingEventsForAgent\b'
+    minimum_matching_files: 19
+    required_paths:
+      - internal/runtime/manager/runtime.go
+      - internal/runtime/manager/types.go
+      - internal/store/event_receipt_store.go
+      - internal/store/sqlite_runtime_delivery_replay.go
+    canonical_layer: invalid_old_authority
+    classified_paths_required: true
+  - id: flow_owned_subscription_pattern_authority
+    pattern: 'wildcard_subscription_scope|ResolveImportBoundaryWildcardSubscription|ImportBoundaryWildcardSubscriptionMatches|\bbuildFlowAgentConfig\b|\bbuildStaticFlowAgentConfig\b|\bresolveSubscribedRecipientsForPlanning\b|\brouteMatches\b'
+    minimum_matching_files: 13
+    required_paths:
+      - platform-spec.yaml
+      - internal/runtime/semanticview/import_boundary_wildcards.go
+      - internal/runtime/bus/routing_derivation.go
+      - internal/runtime/bus/import_boundary_wildcard_routing_test.go
+      - internal/runtime/manager/flow_activation.go
+      - internal/runtime/bus/eventbus_routing.go
+      - internal/runtime/bus/delivery_planner.go
+    canonical_layer: invalid_old_authority
+    classified_paths_required: true
+  - id: pipeline_internal_carrier_registration
+    pattern: 'type Bus interface \{\n[[:space:]]*SubscribeInternal|type systemNodeBus interface|pc\.bus\.SubscribeInternal|n\.bus\.SubscribeInternal|Test(PipelineCoordinator|SystemNodeRunner|ActivityDispatcher)Subscribe_UsesInternalSubscribers'
+    minimum_matching_files: 5
+    required_paths:
+      - internal/runtime/pipeline/runtime_support.go
+      - internal/runtime/pipeline/coordinator.go
+      - internal/runtime/pipeline/node_system_runner.go
+      - internal/runtime/pipeline/activity_background.go
+      - internal/runtime/pipeline/internal_subscription_test.go
+    canonical_layer: invalid_old_authority
     classified_paths_required: true
   - id: route_table_resolve
     pattern: '\bRouteTable\.Resolve\b|\brouteTable\.Resolve\b'
@@ -365,9 +434,12 @@ seam_families:
       - internal/apispec/platform_spec_composition_routing_test.go
       - internal/runtime/core/pinrouting/connect_route_plan.go
       - internal/runtime/core/pinrouting/connect_route_plan_test.go
+      - internal/runtime/core/pinrouting/pinrouting.go
+      - internal/runtime/core/pinrouting/pinrouting_test.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/bus/routing_derivation_test.go
       - internal/runtime/bus/eventbus_delivery_projection_test.go
       - internal/runtime/bus/final_flow_instance_authoring_route_test.go
       - internal/runtime/bus/route_plan.go
@@ -386,6 +458,188 @@ seam_families:
       connect.map remains non-authoritative for that class. #1577 adds the
       connect-time template lifecycle owner that consumes the lowered instance
       key plan and creates, reuses, or fails closed before delivery rows commit.
+  - id: import_boundary_pin_interface_adaptation
+    layer: route_plan_consumers
+    classification: valid_consumer
+    paths:
+      - internal/runtime/contracts/workflow_contract_yaml_wave1.go
+      - internal/runtime/contracts/workflow_contract_yaml_test.go
+      - internal/runtime/semanticview/import_boundary_aliases.go
+      - internal/runtime/semanticview/import_boundary_aliases_test.go
+      - internal/runtime/bootverify/workflow_composition_connect_checks.go
+      - internal/runtime/bootverify/workflow_composition_connect_checks_test.go
+    search_dimensions: [import_boundary_pin_alias_route_authority, connect_route_plan]
+    notes: >
+      Binding input/output pins remains canonical interface and event-name
+      adaptation evidence. Under the #1786 ruling for #2085, a bind may validate
+      or adapt an explicit FlowPackageConnect lowered to ConnectRoutePlan, but
+      cannot create an inter-flow route by itself.
+  - id: import_boundary_pin_alias_route_engines
+    layer: invalid_old_authority
+    classification: invalid_old_authority_path
+    paths:
+      - platform-spec.yaml
+      - internal/runtime/semanticview/flow_input_producer.go
+      - internal/runtime/semanticview/flow_input_producer_test.go
+      - internal/runtime/semanticview/import_boundary_wildcards.go
+      - internal/runtime/pipeline/workflow_nodes.go
+      - internal/runtime/pipeline/workflow_nodes_test.go
+      - internal/runtime/bus/routing_derivation.go
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/bus/import_boundary_alias_routing_test.go
+    search_dimensions: [import_boundary_pin_alias_route_authority, connect_route_plan]
+    invalid_authority:
+      - bind.inputs creating pin_bind_input_alias RouteTable or recipient authority without explicit connect
+      - bind.outputs creating pin_bind_output_alias RouteTable or recipient authority without explicit connect
+      - import bindings being reported as parent-connect producer proof without an explicit connect edge
+      - workflow-node subscription rewriting reconstructing an inter-flow edge from a bind alone
+    notes: >
+      #1786 makes FlowPackageConnect lowered to ConnectRoutePlan the sole
+      inter-flow edge owner and adds symmetric connect.to root-input syntax.
+      #2085 must delete both alias route engines together; direction is not an
+      owner boundary. Old bind-only delivery is unsupported and receives no
+      compatibility route, migration reader, or dual-write period.
+  - id: live_agent_cross_flow_subscription_routes
+    layer: invalid_old_authority
+    classification: invalid_old_authority_path
+    paths:
+      - platform-spec.yaml
+      - internal/runtime/agents/agent_llm.go
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/bus/eventbus.go
+      - internal/runtime/bus/eventbus_agent_route_test.go
+      - internal/runtime/bus/eventbus_publish_test.go
+      - internal/runtime/bus/eventbus_route_generation_plan_test.go
+      - internal/runtime/bus/eventbus_routing.go
+      - internal/runtime/core/actors/agent_config.go
+      - internal/events/construction_test.go
+      - internal/runtime/conformance/delivery_lifecycle_conformance_test.go
+      - internal/runtime/conformance/persisted_surfaces_test.go
+      - internal/runtime/manager/agent_manager.go
+      - internal/runtime/manager/execution_projection_test.go
+      - internal/runtime/manager/flow_activation.go
+      - internal/runtime/manager/flow_activation_test.go
+      - internal/runtime/manager/generic_agent_support.go
+      - internal/runtime/manager/lifecycle_coordinator.go
+      - internal/runtime/manager/native_tool_admission_test.go
+      - internal/runtime/manager/receipts_test.go
+      - internal/runtime/manager/reconfigure_test.go
+      - internal/runtime/manager/recovery_test.go
+      - internal/runtime/manager/runtime.go
+      - internal/runtime/manager/runtime_chat_test.go
+      - internal/runtime/manager/runtime_shutdown_admission_test.go
+      - internal/runtime/manager/types.go
+      - internal/runtime/runtime_operational_config_test.go
+      - internal/runtime/runtime_recovery_diagnostics_test.go
+      - internal/runtime/runtime_shutdown_admission_test.go
+      - internal/runtime/tools/deps.go
+      - internal/runtime/tools/executor_agents.go
+      - internal/runtime/tools/executor_agents_test.go
+      - internal/store/agent_lifecycle_subordinate_test.go
+      - internal/store/delivery_receipt_invariants_test.go
+      - internal/store/event_receipt_store.go
+      - internal/store/manager_retry_policy_test.go
+      - internal/store/postgres_store_additional_test.go
+      - internal/store/sqlite_runtime_delivery_replay.go
+      - internal/store/sqlite_runtime_test.go
+    search_dimensions: [live_agent_subscription_route_authority, pending_agent_subscription_recovery_authority, connect_route_plan]
+    invalid_authority:
+      - flow-owned static or dynamic agents authoring a producer-qualified exact or pattern subscription instead of an admitted local identity
+      - ad-hoc agent creation or reconfiguration installing an exact or wildcard cross-flow live route outside ConnectRoutePlan or the typed wildcard/grant owner
+      - ReplaceAgentRoute and direct EventBus subscription matching recreating an inter-flow recipient from an unadmitted exact or pattern string
+      - pending subscribed-delivery recovery reviving exact or wildcard cross-flow authority from a forbidden persisted agent subscription
+    notes: >
+      #1786 makes authored flow-owned subscriptions scope-local. Admission must
+      classify exact and pattern subscriptions, derive canonical same-scope
+      identities only for the agent's own flow, and consume the typed import
+      wildcard/grant owner for cross-boundary patterns. Live agent channels
+      remain carriers for admitted same-flow pub/sub, supported root/non-import
+      wildcard behavior, governed observation, and typed connect recipients;
+      raw matching is not inter-flow authority. #2085 must reject before
+      registration, reconfiguration mutation, or recovery and retain no
+      old-run migration or compatibility path.
+  - id: flow_owned_agent_subscription_admission
+    layer: route_plan_authority
+    classification: canonical_owner
+    paths:
+      - platform-spec.yaml
+      - internal/runtime/semanticview/agent_subscription_admission.go
+      - internal/runtime/semanticview/agent_subscription_admission_test.go
+      - internal/runtime/manager/agent_subscription_admission.go
+      - internal/runtime/manager/agent_subscription_admission_test.go
+      - internal/runtime/manager/agent_manager.go
+      - internal/runtime/manager/agent_manager_llm_backend_test.go
+      - internal/runtime/manager/flow_activation.go
+      - internal/runtime/manager/flow_activation_test.go
+      - internal/runtime/manager/lifecycle_coordinator.go
+      - internal/runtime/manager/recovery_test.go
+      - internal/runtime/manager/runtime.go
+      - internal/runtime/bus/agent_subscription_admission_test.go
+      - internal/store/postgres_store_additional_test.go
+      - internal/store/sqlite_runtime_test.go
+    search_dimensions: [flow_owned_subscription_pattern_authority, live_agent_subscription_route_authority, pending_agent_subscription_recovery_authority]
+    notes: >
+      One typed admission derives canonical same-scope exact and pattern
+      identities, consumes imported wildcard/grant evidence, and rejects
+      foreign authority before lifecycle mutation, live route installation, or
+      pending recovery. Private admission state is the only capability accepted
+      by agent route APIs; live channels remain non-authoritative carriers.
+  - id: import_boundary_wildcard_pattern_authority
+    layer: route_plan_consumers
+    classification: valid_consumer
+    paths:
+      - platform-spec.yaml
+      - internal/runtime/accprojection/resolver.go
+      - internal/runtime/bus/import_boundary_wildcard_routing_test.go
+      - internal/runtime/bus/routing_derivation.go
+      - internal/runtime/pipeline/workflow_nodes.go
+      - internal/runtime/semanticview/bundle_source.go
+      - internal/runtime/semanticview/endpoint_census.go
+      - internal/runtime/semanticview/endpoint_census_test.go
+      - internal/runtime/semanticview/import_boundary_wildcards.go
+    search_dimensions: [flow_owned_subscription_pattern_authority, route_table_resolve]
+    notes: >
+      The platform-spec wildcard scope/grant resolver owns imported-package
+      pattern candidate sets and bind.observe grants. Low-level route matching
+      is only a primitive within those candidates. Same-scope and supported
+      root/non-import wildcard behavior remain canonical and must be preserved.
+  - id: unadmitted_live_agent_pattern_routes
+    layer: invalid_old_authority
+    classification: invalid_old_authority_path
+    paths:
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/bus/eventbus_routing.go
+      - internal/runtime/manager/flow_activation.go
+      - internal/runtime/manager/flow_activation_test.go
+    search_dimensions: [flow_owned_subscription_pattern_authority, live_agent_subscription_route_authority]
+    invalid_authority:
+      - an imported or flow-owned agent wildcard selecting a foreign event solely through global EventBus pattern matching
+      - static or dynamic materialization preserving an unmatched cross-boundary wildcard as live route authority
+      - recovery or pending replay treating an unadmitted pattern as a global event selector
+    notes: >
+      #2085 must make pattern admission consume semanticview's typed wildcard
+      scope/grant resolution or fail closed before persistence/lifecycle
+      mutation. Root/non-import and same-scope wildcard behavior are retained
+      through their canonical owner, not through an unrestricted live pattern.
+  - id: pipeline_raw_agent_subscription_fallbacks
+    layer: invalid_old_authority
+    classification: invalid_old_authority_path
+    paths:
+      - internal/runtime/pipeline/activity_background.go
+      - internal/runtime/pipeline/coordinator.go
+      - internal/runtime/pipeline/internal_subscription_test.go
+      - internal/runtime/pipeline/node_system_runner.go
+      - internal/runtime/pipeline/runtime_support.go
+    search_dimensions: [pipeline_internal_carrier_registration, live_agent_subscription_route_authority]
+    invalid_authority:
+      - workflow runtime registration downgrading to raw agent-kind Subscribe when SubscribeInternal is absent
+      - system-node runner registration downgrading to raw agent-kind Subscribe when SubscribeInternal is absent
+      - activity dispatcher registration downgrading to raw agent-kind Subscribe when SubscribeInternal is absent
+    notes: >
+      Internal carriers are required consumers of already-selected canonical
+      recipients. The pipeline boundary must require internal registration and
+      delete all three raw Subscribe compatibility fallbacks so carrier state
+      cannot become persisted direct-recipient authority.
   - id: authoring_routing_topology_projection
     layer: public_projection_non_authority
     classification: non_authoritative_observer_projection
@@ -435,6 +689,7 @@ seam_families:
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/eventbus_target_routes_test.go
       - internal/runtime/bus/routing_derivation.go
+      - internal/runtime/bus/routing_derivation_test.go
       - internal/runtime/conformance/route_authority_matrix_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
     search_dimensions: [receiver_carrier, connect_route_plan]

@@ -1,7 +1,17 @@
 name: child
 initial_state: waiting
 terminal_states: [completed]
-states: [waiting, completed]
+states: [waiting, delegated, completed]
 pins:
   inputs:
-    events: [step.begin]
+    events:
+      - name: step_begin
+        event: step.begin
+      - name: micro_done
+        event: micro.done
+  outputs:
+    events:
+      - name: micro_start
+        event: micro.start
+      - name: micro_relayed
+        event: micro.relayed

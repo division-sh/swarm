@@ -858,8 +858,8 @@ func TestLowerCompositionConnectRoutePlansRootProducerToStaticReceiver(t *testin
 	}
 }
 
-func TestLowerCompositionConnectRoutePlansRejectsRootReceiverEndpoint(t *testing.T) {
-	source := testRootConnectRoutePlanSource([]runtimecontracts.FlowOutputEventPin{{
+func TestLowerCompositionConnectRoutePlansSupportsRootReceiverEndpoint(t *testing.T) {
+	source := testRootReceiverConnectRoutePlanSource([]runtimecontracts.FlowInputEventPin{{
 		Name:  "root_ready",
 		Event: "root.ready",
 	}}, []connectRoutePlanFlow{
@@ -877,11 +877,18 @@ func TestLowerCompositionConnectRoutePlansRejectsRootReceiverEndpoint(t *testing
 	}})
 
 	plans, issues := LowerCompositionConnectRoutePlans(source)
-	if len(plans) != 0 {
-		t.Fatalf("plans = %#v, want none", plans)
+	if len(issues) != 0 {
+		t.Fatalf("issues = %#v, want none", issues)
 	}
-	if len(issues) != 1 || issues[0].Failure != ConnectFailureReceiverRootUnsupported {
-		t.Fatalf("issues = %#v, want receiver_root_unsupported", issues)
+	if len(plans) != 1 {
+		t.Fatalf("plans = %#v, want one", plans)
+	}
+	plan := plans[0]
+	if !plan.Receiver.Root || plan.Receiver.FlowID != "" || plan.Receiver.Pin != "root_ready" {
+		t.Fatalf("Receiver = %#v, want root input root_ready", plan.Receiver)
+	}
+	if plan.Target.FlowInstance != "" || plan.Target.EntityID != "" || plan.RequiresRuntimeResolution {
+		t.Fatalf("root target = %#v (runtime=%t), want root-static target", plan.Target, plan.RequiresRuntimeResolution)
 	}
 }
 
@@ -1091,6 +1098,14 @@ func testConnectRoutePlanSource(flows []connectRoutePlanFlow, connects []runtime
 }
 
 func testRootConnectRoutePlanSource(rootOutputs []runtimecontracts.FlowOutputEventPin, flows []connectRoutePlanFlow, connects []runtimecontracts.FlowPackageConnect) semanticview.Source {
+	return testRootInputOutputConnectRoutePlanSource(nil, rootOutputs, flows, connects)
+}
+
+func testRootReceiverConnectRoutePlanSource(rootInputs []runtimecontracts.FlowInputEventPin, flows []connectRoutePlanFlow, connects []runtimecontracts.FlowPackageConnect) semanticview.Source {
+	return testRootInputOutputConnectRoutePlanSource(rootInputs, nil, flows, connects)
+}
+
+func testRootInputOutputConnectRoutePlanSource(rootInputs []runtimecontracts.FlowInputEventPin, rootOutputs []runtimecontracts.FlowOutputEventPin, flows []connectRoutePlanFlow, connects []runtimecontracts.FlowPackageConnect) semanticview.Source {
 	connects = append([]runtimecontracts.FlowPackageConnect(nil), connects...)
 	for i := range connects {
 		connects[i].SourceFile = "package.yaml"
@@ -1136,6 +1151,10 @@ func testRootConnectRoutePlanSource(rootOutputs []runtimecontracts.FlowOutputEve
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{
+					Events:    inputEventNames(rootInputs),
+					EventPins: rootInputs,
+				},
 				Outputs: runtimecontracts.FlowOutputPins{
 					Events:    outputEventNames(rootOutputs),
 					EventPins: rootOutputs,

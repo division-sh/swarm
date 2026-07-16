@@ -212,7 +212,7 @@ var bootCheckRegistry = []Check{
 	{ID: semanticview.TypedPubSubFailureAuthorizationAmbiguous, Severity: SeverityHardInvalidity, Run: checkTypedPubSubAuthorization},
 	{ID: "event_consumer_exists", Severity: "warning", Run: checkEventConsumerExists},
 	{ID: "event_producer_exists", Severity: "warning", Run: checkEventProducerExists},
-	{ID: "legacy_qualified_subscription", Severity: "warning", Run: checkLegacyQualifiedSubscription},
+	{ID: "legacy_qualified_subscription", Severity: SeverityHardInvalidity, Run: checkLegacyQualifiedSubscription},
 	{ID: "semantic_drift_dead_event_schema", Severity: "warning", Run: checkSemanticDriftDeadEventSchema},
 	{ID: "entity_writer_coverage", Severity: SeverityHardInvalidity, Run: checkEntityWriterCoverage},
 	{ID: "payload_field_coverage", Severity: "error", Run: checkPayloadFieldCoverage},

@@ -4,3 +4,5 @@ child/task.assigned:
   description: Cross-flow event dispatching a task assignment to the child flow
 child/task.result:
   description: Cross-flow event returning a task result from the child flow
+task.result:
+  description: Receiver-local task result delivered through package connect

@@ -11,10 +11,10 @@ relay:
 listener:
   id: listener
   execution_type: system_node
-  subscribes_to: [grandchild/task.done]
+  subscribes_to: [task.done]
   produces: [work.finished]
   event_handlers:
-    grandchild/task.done:
+    task.done:
       advances_to: completed
       emit:
         event: work.finished

@@ -203,8 +203,8 @@ func TestRun_FlowPackagePinBindAliasValidationAcceptsValidAliases(t *testing.T) 
 	if got := report.HardInvalidities(); reportContains(got, "flow_package_pin_bind_alias_validation", "invalid") {
 		t.Fatalf("unexpected flow_package_pin_bind_alias_validation invalidity: %#v", got)
 	}
-	if reportContains(report.Errors(), "input_pin_wiring", "work.requested") {
-		t.Fatalf("input alias should satisfy input pin wiring, got errors %#v", report.Errors())
+	if !reportContains(report.Errors(), "input_pin_wiring", "work.requested") {
+		t.Fatalf("bind-only input must not satisfy input pin wiring, got errors %#v", report.Errors())
 	}
 }
 

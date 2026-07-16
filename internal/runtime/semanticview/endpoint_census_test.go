@@ -358,27 +358,36 @@ func TestTypedPubSubCrossFlowRelationDeduplicatesProofAndFailsClosedOnAmbiguity(
 	}
 }
 
-func TestLegacyQualifiedSubscriptionsUseDeclaredFlowIdentityAndExactSourceLine(t *testing.T) {
-	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
-		repoRoot,
-		filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-absolute-path"),
-		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
-	)
-	if err != nil {
-		t.Fatalf("load legacy fixture: %v", err)
+func TestLegacyQualifiedSubscriptionsResolveConsumerRelativeDescendantIdentity(t *testing.T) {
+	grandchild := runtimecontracts.FlowContractView{
+		Paths:  runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild", PackageKey: "flows/child/flows/grandchild"},
+		Path:   "child/grandchild",
+		Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
 	}
+	child := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
+		Path:  "child",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"listener": {ID: "listener", SubscribesTo: []string{"grandchild/task.done"}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"grandchild/task.done": {}}},
+		},
+		Children: []runtimecontracts.FlowContractView{grandchild},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
+	bundle := &runtimecontracts.WorkflowContractBundle{FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+		Root: &root,
+		ByID: map[string]*runtimecontracts.FlowContractView{
+			"child":      &root.Children[0],
+			"grandchild": &root.Children[0].Children[0],
+		},
+	}}
 
 	legacy := BuildAuthoredEventEndpointCensus(Wrap(bundle)).LegacyQualifiedSubscriptions()
 	if len(legacy) != 1 {
-		t.Fatalf("legacy subscriptions = %#v, want one direct qualified consumer", legacy)
+		t.Fatalf("retired subscriptions = %#v, want one child-relative qualified consumer", legacy)
 	}
 	got := legacy[0]
-	if got.Consumer.NodeID != "listener" || got.Consumer.Event.Authored != "child/task.done" || got.TargetFlowID != "child" {
-		t.Fatalf("legacy subscription = %#v, want root listener targeting child", got)
-	}
-	if got.Consumer.SourceFile != filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-absolute-path", "nodes.yaml") || got.Consumer.SourceLine != 13 {
-		t.Fatalf("legacy source = %s:%d, want nodes.yaml:13", got.Consumer.SourceFile, got.Consumer.SourceLine)
+	if got.Consumer.NodeID != "listener" || got.Consumer.Event.Authored != "grandchild/task.done" || got.TargetFlowID != "grandchild" || got.Event.Canonical != "child/grandchild/task.done" {
+		t.Fatalf("retired subscription = %#v, want child-relative listener targeting grandchild", got)
 	}
 }
 

@@ -285,8 +285,12 @@ func Stored(
 	workflowName = strings.TrimSpace(workflowName)
 	materializedPath = normalizeRef(materializedPath)
 	instancePath := materializedPath
+	scopeKey := ""
 	if instancePath == "" {
-		instancePath = normalizeRef(ScopeKey(source, workflowName))
+		scopeKey = normalizeRef(ScopeKey(source, workflowName))
+		instancePath = scopeKey
+	} else {
+		scopeKey = normalizeRef(storedScopeKey(source, workflowName, instancePath))
 	}
 	if strings.TrimSpace(instanceID) == "" && materializedPath != "" {
 		instanceID = LogicalInstanceID(materializedPath)
@@ -296,7 +300,7 @@ func Stored(
 	}
 	return Instance{
 		TemplateID:     workflowName,
-		ScopeKey:       normalizeRef(storedScopeKey(source, workflowName, instancePath)),
+		ScopeKey:       scopeKey,
 		InstanceID:     strings.TrimSpace(instanceID),
 		InstancePath:   instancePath,
 		EntityID:       strings.TrimSpace(entityID),

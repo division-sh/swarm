@@ -11,6 +11,7 @@ pins:
     reads: []
   outputs:
     events:
-      - name: validation.done
+      - name: validation_done
+        event: validation.done
     writes: []
 name: child

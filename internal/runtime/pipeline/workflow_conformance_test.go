@@ -11,7 +11,7 @@ import (
 type pipelineTestBus struct{}
 
 func (pipelineTestBus) Publish(context.Context, events.Event) error { return nil }
-func (pipelineTestBus) Subscribe(string, ...events.EventType) <-chan events.Event {
+func (pipelineTestBus) SubscribeInternal(string, ...events.EventType) <-chan events.Event {
 	return make(chan events.Event)
 }
 func (pipelineTestBus) DirectSubscribe(string) <-chan events.Event { return make(chan events.Event) }

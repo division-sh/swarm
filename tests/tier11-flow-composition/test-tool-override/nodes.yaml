@@ -1,12 +1,12 @@
 root-node:
   id: root-node
   execution_type: system_node
-  subscribes_to: [task.requested, child/child.done]
+  subscribes_to: [task.requested, child.done]
   produces: [task.done, child/child.start]
   event_handlers:
     task.requested:
       emit: child/child.start
-    child/child.done:
+    child.done:
       advances_to: done
       emit:
         event: task.done

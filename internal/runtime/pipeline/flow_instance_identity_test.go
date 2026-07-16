@@ -168,6 +168,25 @@ func TestWorkflowInstanceCoordinates_KeepNestedInstancePathDistinctFromScope(t *
 	}
 }
 
+func TestWorkflowInstanceCoordinates_DeriveNestedStaticScopeWithoutTruncation(t *testing.T) {
+	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
+
+	instance := WorkflowInstance{
+		WorkflowName: "grandchild",
+	}
+	identity := StoredFlowInstance(source, instance)
+
+	if identity.ScopeKey != "child/grandchild" {
+		t.Fatalf("StoredFlowInstance(static nested).ScopeKey = %q, want child/grandchild", identity.ScopeKey)
+	}
+	if identity.InstancePath != "child/grandchild" {
+		t.Fatalf("StoredFlowInstance(static nested).InstancePath = %q, want child/grandchild", identity.InstancePath)
+	}
+	if identity.HasStoredPath {
+		t.Fatal("StoredFlowInstance(static nested).HasStoredPath = true, want derived path")
+	}
+}
+
 func TestWorkflowInstanceOwnedByFlow_UsesExactSemanticScope(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
 

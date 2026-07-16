@@ -3,6 +3,12 @@ terminal_states: [done]
 states: [idle, done]
 pins:
   inputs:
-    events: [pipeline.start]
+    events:
+      - pipeline.start
+      - name: micro_done
+        event: micro.done
   outputs:
-    events: [pipeline.complete]
+    events:
+      - pipeline.complete
+      - name: step_begin
+        event: step.begin

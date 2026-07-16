@@ -9,4 +9,3 @@ child-node:
       advances_to: done
       emit:
         event: child.done
-        broadcast: true

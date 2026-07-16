@@ -4,7 +4,10 @@ terminal_states: [done]
 states: [idle, configured, done]
 pins:
   inputs:
-    events: [job.start]
+    events:
+      - job.start
+      - name: process_done
+        event: process.done
   outputs:
     events: [job.complete]
     writes: [task_config]

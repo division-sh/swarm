@@ -6,3 +6,6 @@ flows:
 - id: child
   flow: child
   mode: static
+connect:
+  - from: child.task_done
+    to: .task_done

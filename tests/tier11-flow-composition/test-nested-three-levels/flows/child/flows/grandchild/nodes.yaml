@@ -5,8 +5,6 @@ grandchild-worker:
   produces: [micro.done]
   event_handlers:
     micro.start:
-      create_entity: true
       advances_to: finished
       emit:
         event: micro.done
-        broadcast: true

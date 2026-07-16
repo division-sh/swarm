@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
@@ -322,6 +323,13 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 }
 
 func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string, descriptors []runtimepinrouting.Descriptor) (runtimepinrouting.ConnectRoutePlanMaterialization, TemplateInstanceLifecycleDecision, error) {
+	if plan.Receiver.Root {
+		target := evt.TargetRoute().Normalized()
+		if target.EntityID == "" {
+			return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureTargetUnresolved}, TemplateInstanceLifecycleDecision{}, nil
+		}
+		return runtimepinrouting.ConnectRoutePlanMaterialization{Target: target}, TemplateInstanceLifecycleDecision{}, nil
+	}
 	if materialized, decision, handled, err := r.lifecycle.Materialize(ctx, evt, plan, values, descriptors); handled || err != nil {
 		return materialized, decision, err
 	}
@@ -386,6 +394,9 @@ func (r connectRoutePlanResolver) descriptorsForPlans(ctx context.Context, plans
 
 func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.Context, plan runtimepinrouting.ConnectRoutePlan, materialized runtimepinrouting.ConnectRoutePlanMaterialization, decision TemplateInstanceLifecycleDecision) ([]events.DeliveryRoute, []Subscriber, error) {
 	targets := connectMaterializedTargets(materialized)
+	if plan.Receiver.Root && len(targets) == 0 {
+		targets = []events.RouteIdentity{{}}
+	}
 	if len(targets) == 0 {
 		return nil, nil, nil
 	}
@@ -455,6 +466,7 @@ func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(ctx context.Co
 				if !connectSubscriberMatchesPlanTarget(plan, subscriber, target) {
 					continue
 				}
+				subscriber.LocalizedEvent = eventidentity.Normalize(plan.Receiver.Event)
 				out = append(out, subscriber)
 			}
 		}
@@ -485,6 +497,13 @@ func (r connectRoutePlanResolver) connectIssueMatchesEvent(ctx context.Context, 
 	from, err := issue.Connect.FromRef()
 	if err != nil {
 		return false
+	}
+	if from.Root {
+		flowID, ok := semanticview.PackageRootFlowID(r.source, issue.Connect.PackageKey)
+		if !ok {
+			return false
+		}
+		from.FlowID, from.Root = flowID, flowID == ""
 	}
 	outputPin, ok := r.source.FlowOutputEventPin(from.FlowID, from.Pin)
 	if !ok {
@@ -551,7 +570,7 @@ func eventFlowInstanceMatchesSourcePath(flowInstance, sourcePath string) bool {
 	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
 	sourcePath = strings.Trim(strings.TrimSpace(sourcePath), "/")
 	if sourcePath == "" {
-		return flowInstance == ""
+		return flowInstance == "" || runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance) == ""
 	}
 	if flowInstance == sourcePath {
 		return true
