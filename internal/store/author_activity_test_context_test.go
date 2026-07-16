@@ -63,6 +63,7 @@ func registerTestAuthorActivityCatalogForContext(t *testing.T, target testAuthor
 		"phrase.completed", "review.requested", "scan.completed", "scan.dev", "scan.followup", "scan.requested", "scoring.requested",
 		"subscription.visible", "support_reply.rejected", "support_reply.revision_requested", "system.directive", "system.parent", "system.started", "task.completed",
 		"test.delivery_receipt", "test.delivery_requested", "test.direct_dead_letter", "test.event", "test.started", "test.terminal_admission", "test.terminal_delivery",
+		"test.node_emitted",
 		"trace.visible", "validation/validation.package_ready", "workflow.executable",
 	}
 	sort.Strings(eventTypes)
@@ -72,6 +73,8 @@ func registerTestAuthorActivityCatalogForContext(t *testing.T, target testAuthor
 		if eventType == "test.delivery_receipt" {
 			descriptor.Disposition = runtimeauthoractivity.StoryAuthored
 			descriptor.AuthorSummaryField = "text"
+		} else if eventType == "test.node_emitted" {
+			descriptor.Disposition = runtimeauthoractivity.StoryAuthored
 		}
 		descriptors = append(descriptors, descriptor)
 	}

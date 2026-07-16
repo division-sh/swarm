@@ -49,12 +49,15 @@ func TestAdmissionPreservesPlatformDeliveryContext(t *testing.T) {
 		"request-1",
 		EventEnvelope{},
 		time.Now().UTC(),
-	).WithDeliveryContext(want), AdmissionOptions{})
+	).WithProducerType(EventProducerNode).WithDeliveryContext(want), AdmissionOptions{})
 	if err != nil {
 		t.Fatalf("AdmitForPublish: %v", err)
 	}
 	if got := admitted.DeliveryContext().ReplyContextID(); got != want.ReplyContextID() {
 		t.Fatalf("admitted reply context = %q, want %q", got, want.ReplyContextID())
+	}
+	if got := admitted.ProducerType(); got != EventProducerNode {
+		t.Fatalf("admitted producer type = %q, want node", got)
 	}
 }
 

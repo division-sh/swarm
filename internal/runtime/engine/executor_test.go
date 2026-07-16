@@ -4676,6 +4676,9 @@ func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *test
 			if got := emitted.SourceAgent(); got != "component-node" {
 				t.Fatalf("source agent = %q, want component-node", got)
 			}
+			if got := emitted.ProducerType(); got != events.EventProducerNode {
+				t.Fatalf("producer type = %q, want node", got)
+			}
 			if got := emitted.TargetRoute().FlowInstance; got != parentRoute.FlowInstance {
 				t.Fatalf("target flow_instance = %q, want %s", got, parentRoute.FlowInstance)
 			}

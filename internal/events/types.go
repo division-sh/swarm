@@ -59,6 +59,24 @@ const (
 	EventAdmissionRouteProbe        EventAdmissionClass = "route_probe"
 )
 
+type EventProducerType string
+
+const (
+	EventProducerNode     EventProducerType = "node"
+	EventProducerAgent    EventProducerType = "agent"
+	EventProducerPlatform EventProducerType = "platform"
+	EventProducerExternal EventProducerType = "external"
+)
+
+func (t EventProducerType) Valid() bool {
+	switch EventProducerType(strings.TrimSpace(string(t))) {
+	case EventProducerNode, EventProducerAgent, EventProducerPlatform, EventProducerExternal:
+		return true
+	default:
+		return false
+	}
+}
+
 type EventEnvelope struct {
 	EntityID     string          `json:"-"`
 	FlowInstance string          `json:"-"`
@@ -224,6 +242,7 @@ type Event struct {
 	id              string
 	eventType       EventType
 	sourceAgent     string
+	producerType    EventProducerType
 	taskID          string
 	payload         json.RawMessage
 	chainDepth      int
@@ -260,6 +279,7 @@ type eventJSON struct {
 	ID            string             `json:"id"`
 	Type          EventType          `json:"type"`
 	SourceAgent   string             `json:"source_agent"`
+	ProducerType  EventProducerType  `json:"producer_type,omitempty"`
 	TaskID        string             `json:"task_id,omitempty"`
 	Payload       json.RawMessage    `json:"payload"`
 	CreatedAt     time.Time          `json:"created_at"`
@@ -375,6 +395,7 @@ func (e Event) MarshalJSON() ([]byte, error) {
 		ID:            e.ID(),
 		Type:          e.Type(),
 		SourceAgent:   e.SourceAgent(),
+		ProducerType:  e.ProducerType(),
 		TaskID:        e.TaskID(),
 		Payload:       e.Payload(),
 		CreatedAt:     e.CreatedAt(),
@@ -398,7 +419,7 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 		"",
 		EventEnvelope{},
 		raw.CreatedAt,
-	)
+	).WithProducerType(raw.ProducerType)
 	if !raw.ExecutionMode.Valid() {
 		return fmt.Errorf("event execution_mode must be live or mock")
 	}
@@ -443,6 +464,15 @@ func (e Event) Type() EventType {
 
 func (e Event) SourceAgent() string {
 	return strings.TrimSpace(e.sourceAgent)
+}
+
+func (e Event) ProducerType() EventProducerType {
+	return EventProducerType(strings.TrimSpace(string(e.producerType)))
+}
+
+func (e Event) WithProducerType(producerType EventProducerType) Event {
+	e.producerType = EventProducerType(strings.TrimSpace(string(producerType)))
+	return e
 }
 
 func (e Event) TaskID() string {

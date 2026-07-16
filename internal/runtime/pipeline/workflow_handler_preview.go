@@ -125,7 +125,7 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 			evt.ParentEventID(),
 			evt.NormalizedEnvelope(),
 			time.Now().UTC(),
-		).WithExecutionMode(evt.ExecutionMode())
+		).WithProducerType(evt.ProducerType()).WithExecutionMode(evt.ExecutionMode())
 	}
 	result, err := pc.executeNodeContractHandler(ctx, nodeID, handler, workflowTriggerContext{
 		Event: evt,

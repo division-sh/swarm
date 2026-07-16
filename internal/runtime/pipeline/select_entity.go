@@ -141,7 +141,7 @@ func (pc *PipelineCoordinator) selectedHandlerEntityFromInstance(ctx context.Con
 		evt.ParentEventID(),
 		envelope,
 		evt.CreatedAt(),
-	).WithExecutionMode(evt.ExecutionMode())
+	).WithProducerType(evt.ProducerType()).WithExecutionMode(evt.ExecutionMode())
 	return selectedHandlerEntity{
 		EntityID: entityID,
 		State:    state,
@@ -224,7 +224,7 @@ func (pc *PipelineCoordinator) createdHandlerEntityForDeclaredKey(ctx context.Co
 		evt.ParentEventID(),
 		envelope,
 		evt.CreatedAt(),
-	).WithExecutionMode(evt.ExecutionMode())
+	).WithProducerType(evt.ProducerType()).WithExecutionMode(evt.ExecutionMode())
 	return selectedHandlerEntity{
 		EntityID: entityID,
 		State:    state,

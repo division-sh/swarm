@@ -2183,9 +2183,16 @@ func eventStorageEnvelope(evt events.Event) (id string, runID string, eventName 
 		chainDepth = 0
 	}
 	producedBy = strings.TrimSpace(evt.SourceAgent())
-	producedByType = "agent"
-	if evt.AdmissionClass() == events.EventAdmissionDiagnosticDirect || producedBy == "" || producedBy == "runtime" {
-		producedByType = "platform"
+	if producerType := evt.ProducerType(); producerType != "" {
+		if !producerType.Valid() {
+			return "", "", "", "", "", "", nil, 0, "", "", "", time.Time{}, fmt.Errorf("event producer_type %q is invalid", producerType)
+		}
+		producedByType = string(producerType)
+	} else {
+		producedByType = "agent"
+		if evt.AdmissionClass() == events.EventAdmissionDiagnosticDirect || producedBy == "" || producedBy == "runtime" {
+			producedByType = "platform"
+		}
 	}
 	sourceEventID = sanitizeOptionalUUID(evt.ParentEventID())
 	createdAt = evt.CreatedAt()
