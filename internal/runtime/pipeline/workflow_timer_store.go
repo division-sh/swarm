@@ -87,6 +87,9 @@ func (a WorkflowTimerActivation) validate() error {
 	if a.Recurring && a.RecurrenceInterval <= 0 {
 		return fmt.Errorf("recurring workflow timer requires a positive interval")
 	}
+	if a.Recurring && !workflowTimerRecurringCoordinateValid(a) {
+		return fmt.Errorf("recurring workflow timer fire_at is outside its persisted occurrence lattice")
+	}
 	if !a.Recurring && a.RecurrenceInterval != 0 {
 		return fmt.Errorf("one-shot workflow timer cannot carry recurrence")
 	}
@@ -126,21 +129,21 @@ func canonicalWorkflowTimerTime(value time.Time) time.Time {
 	return value.UTC().Truncate(time.Microsecond)
 }
 
-func (s *WorkflowInstanceStore) insertWorkflowTimerActivation(ctx context.Context, activation WorkflowTimerActivation) (bool, error) {
+func (s *WorkflowInstanceStore) insertWorkflowTimerActivation(ctx context.Context, activation WorkflowTimerActivation) (WorkflowTimerActivation, bool, error) {
 	activation = activation.normalized()
 	if err := activation.validate(); err != nil {
-		return false, err
+		return WorkflowTimerActivation{}, false, err
 	}
 	tx, ok := sqlTxFromContext(ctx)
 	if !ok || tx == nil || !authoractivity.InMutation(ctx, tx) {
-		return false, fmt.Errorf("workflow timer activation requires the pipeline mutation owner")
+		return WorkflowTimerActivation{}, false, fmt.Errorf("workflow timer activation requires the pipeline mutation owner")
 	}
 	runID, err := s.requireActiveWorkflowRun(ctx, tx)
 	if err != nil {
-		return false, err
+		return WorkflowTimerActivation{}, false, err
 	}
 	if runID != activation.RunID {
-		return false, fmt.Errorf("workflow timer run mismatch: context=%s activation=%s", runID, activation.RunID)
+		return WorkflowTimerActivation{}, false, fmt.Errorf("workflow timer run mismatch: context=%s activation=%s", runID, activation.RunID)
 	}
 	var result sql.Result
 	if s.isSQLite() {
@@ -178,28 +181,28 @@ func (s *WorkflowInstanceStore) insertWorkflowTimerActivation(ctx context.Contex
 			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner)
 	}
 	if err != nil {
-		return false, fmt.Errorf("insert workflow timer activation: %w", err)
+		return WorkflowTimerActivation{}, false, fmt.Errorf("insert workflow timer activation: %w", err)
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return false, err
+		return WorkflowTimerActivation{}, false, err
 	}
 	persisted, found, err := s.loadWorkflowTimerActivation(ctx, activation.Ref.ActivationID, true)
 	if err != nil {
-		return false, err
+		return WorkflowTimerActivation{}, false, err
 	}
 	if !found {
-		return false, fmt.Errorf("workflow timer activation %s disappeared after insert", activation.Ref.ActivationID)
+		return WorkflowTimerActivation{}, false, fmt.Errorf("workflow timer activation %s disappeared after insert", activation.Ref.ActivationID)
 	}
-	if err := requireSameWorkflowTimerActivation(persisted, activation); err != nil {
-		return false, err
+	if err := requireSameWorkflowTimerActivationFacts(persisted, activation); err != nil {
+		return WorkflowTimerActivation{}, false, err
 	}
 	if rows > 0 {
 		if err := declarePipelineRunForkRevisionChange(ctx, activation.RunID, runforkrevision.FamilyTimers); err != nil {
-			return false, err
+			return WorkflowTimerActivation{}, false, err
 		}
 	}
-	return rows > 0, nil
+	return persisted, rows > 0, nil
 }
 
 func workflowTimerIntervalString(activation WorkflowTimerActivation) string {
@@ -216,19 +219,40 @@ func workflowTimerTaskType(activation WorkflowTimerActivation) string {
 	return "timer"
 }
 
-func requireSameWorkflowTimerActivation(actual, expected WorkflowTimerActivation) error {
+func requireSameWorkflowTimerActivationFacts(actual, expected WorkflowTimerActivation) error {
 	actual, expected = actual.normalized(), expected.normalized()
 	if actual.Ref != expected.Ref || actual.RunID != expected.RunID || actual.EntityID != expected.EntityID ||
 		actual.FlowInstance != expected.FlowInstance || actual.OwnerAgent != expected.OwnerAgent ||
-		actual.EventType != expected.EventType || !actual.FireAt.Equal(expected.FireAt) ||
-		actual.Recurring != expected.Recurring || actual.RecurrenceInterval != expected.RecurrenceInterval ||
-		actual.Status != expected.Status || !actual.CreatedAt.Equal(expected.CreatedAt) ||
+		actual.EventType != expected.EventType || actual.Recurring != expected.Recurring ||
+		actual.RecurrenceInterval != expected.RecurrenceInterval || !actual.CreatedAt.Equal(expected.CreatedAt) ||
 		actual.SourceTimerID != expected.SourceTimerID || actual.ForkedFromRunID != expected.ForkedFromRunID ||
 		actual.ForkedFromEventID != expected.ForkedFromEventID || actual.ReconstructionOwner != expected.ReconstructionOwner ||
-		!workflowTimerJSONEqual(actual.Payload, expected.Payload) {
+		!workflowTimerJSONEqual(actual.Payload, expected.Payload) || !workflowTimerReplayCoordinateMatches(actual, expected) {
 		return fmt.Errorf("workflow timer activation %s conflicts with persisted facts", expected.Ref.ActivationID)
 	}
 	return nil
+}
+
+func workflowTimerReplayCoordinateMatches(actual, expected WorkflowTimerActivation) bool {
+	if !expected.Recurring {
+		return actual.FireAt.Equal(expected.FireAt)
+	}
+	if expected.RecurrenceInterval <= 0 || actual.FireAt.Before(expected.FireAt) {
+		return false
+	}
+	return actual.FireAt.Sub(expected.FireAt)%expected.RecurrenceInterval == 0
+}
+
+func workflowTimerRecurringCoordinateValid(activation WorkflowTimerActivation) bool {
+	activation = activation.normalized()
+	if !activation.Recurring || activation.RecurrenceInterval <= 0 {
+		return false
+	}
+	firstDue := canonicalWorkflowTimerTime(activation.CreatedAt.Add(activation.RecurrenceInterval))
+	if activation.FireAt.Before(firstDue) {
+		return false
+	}
+	return activation.FireAt.Sub(firstDue)%activation.RecurrenceInterval == 0
 }
 
 func workflowTimerJSONEqual(left, right []byte) bool {

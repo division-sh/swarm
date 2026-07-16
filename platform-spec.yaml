@@ -6248,7 +6248,9 @@ engine:
     - 1. A workflow timer activation is derived only from an exact persisted initial-state, event, or state-transition
       cause. Its deterministic activation ID includes run, entity, flow instance, declaration, loop generation, and exact
       causal identity. `timers.timer_name` carries the versioned typed activation discriminator; `fire_payload` carries
-      business input only and is never interpreted as lifecycle identity.
+      business input only and is never interpreted as lifecycle identity. Replaying that exact cause compares immutable
+      activation facts against the existing row and converges on its current active, fired, or cancelled state without
+      reinsertion, resurrection, or conflict on mutable completion fields.
     - 2. The platform renders delay once at activation and inserts exactly one canonical row in the same selected workflow
       mutation as the triggering state/event effect. The row's persisted `fire_at` is the executable occurrence coordinate.
       Policy/config changes do not rewrite an active coordinate without an explicit reschedule operation.
@@ -6263,7 +6265,10 @@ engine:
       advances `fire_at` by its persisted positive recurrence interval; therefore retries of one occurrence reuse its ID while
       distinct recurring occurrences receive distinct IDs.
     - 6. Scheduler claims are released only after the outer fire transaction commits. PostgreSQL must not release a borrowed
-      claim while that transaction can still roll back. A recurring next coordinate is registered only after commit.
+      claim while that transaction can still roll back. A recurring next coordinate is registered only after commit. Exact
+      registration failures remain lifecycle-owned retries until registration succeeds, the row ceases to be active, or
+      runtime shutdown begins. Previous-occurrence claim release and next-occurrence registration settle independently;
+      failure of either operation must not abandon the other.
     - 7. The accepted timer event is authorized against the canonical row and exact deterministic occurrence ID before any
       workflow handler or timed transition runs. Handlers do not write timer status. User-authored emit timers continue through
       normal event routing; advance-only stage timers use `platform.stage_timer` and apply their derived state transition.
@@ -6280,8 +6285,11 @@ engine:
     replay_and_fork: >
       Replay observes canonical persisted timer facts. Fork copies eligible canonical rows under the existing run-fork
       transaction, preserves business payload and due coordinate, and deterministically remints activation identity and any
-      loop generation for the fork run. Fired and cancelled rows do not become active fork work. No workflow snapshot or
-      payload-encoded lifecycle metadata is an alternate reconstruction source.
+      loop generation for the fork run through WorkflowTimerLifecycle's typed fork operation; the store supplies lineage and
+      persists the returned activation but does not interpret workflow timer identity. An active recurring row remains eligible
+      after prior accepted occurrences: fork remint preserves its created_at recurrence anchor, current fire_at coordinate, and
+      interval while clearing source fired_at for the fork-local occurrence history. Fired one-shot and cancelled rows do not
+      become active fork work. No workflow snapshot or payload-encoded lifecycle metadata is an alternate reconstruction source.
     boot_validation:
       start_on: start_on must match state:<name>, event:<name>, or boot. Any other form is a boot error.
       cancel_on: cancel_on must match state:<name> or event:<name>. boot is not valid.

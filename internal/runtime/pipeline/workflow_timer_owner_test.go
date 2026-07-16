@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -63,6 +64,46 @@ func TestWorkflowTimerLifecycleOneShotExactCompletionOnBothStores(t *testing.T) 
 				t.Fatalf("wrong event id authorization recognized=%v err=%v, want recognized rejection", recognized, err)
 			}
 		})
+	}
+}
+
+func TestWorkflowTimerLifecycleExactCauseReplayConvergesAfterTerminalStateOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		for _, terminal := range []string{workflowTimerStatusFired, workflowTimerStatusCancelled} {
+			t.Run(tc.name+"/"+terminal, func(t *testing.T) {
+				store, ctx := tc.open(t)
+				pc, entityID, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, &recordingPipelineBus{}, false)
+				if terminal == workflowTimerStatusFired {
+					if outcome, err := pc.FireWorkflowTimer(ctx, activation.schedule()); err != nil || outcome != WorkflowTimerFireCommitted {
+						t.Fatalf("fire activation outcome=%q err=%v", outcome, err)
+					}
+				} else if err := store.RunPipelineMutation(ctx, func(txctx context.Context) error {
+					cancelled, changed, err := store.cancelWorkflowTimerActivation(txctx, activation.Ref)
+					if err != nil || !changed {
+						return errors.Join(err, fmt.Errorf("cancel changed=%v", changed))
+					}
+					return pc.workflowTimers.queueCancellation(txctx, cancelled)
+				}); err != nil {
+					t.Fatalf("cancel activation: %v", err)
+				}
+
+				cause := workflowTimerCause{
+					Kind: workflowTimerCauseInitial, OccurredAt: activation.CreatedAt, ToState: "waiting",
+				}
+				if err := store.RunPipelineMutation(ctx, func(txctx context.Context) error {
+					return pc.workflowTimers.Reconcile(txctx, entityID, "", "waiting", cause)
+				}); err != nil {
+					t.Fatalf("replay exact activation cause: %v", err)
+				}
+				all := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, false)
+				if len(all) != 1 || all[0].Ref != activation.Ref || all[0].Status != terminal {
+					t.Fatalf("activation history after replay = %#v, want one %s row", all, terminal)
+				}
+				if active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true); len(active) != 0 {
+					t.Fatalf("active rows after terminal replay = %#v, want none", active)
+				}
+			})
+		}
 	}
 }
 
@@ -527,34 +568,119 @@ func TestWorkflowTimerLifecycleTargetedRegistrationRecoveryOnBothStores(t *testi
 			}
 		})
 
-		t.Run(tc.name+"/register_retry", func(t *testing.T) {
+		t.Run(tc.name+"/persistent_retry", func(t *testing.T) {
 			store, ctx := tc.open(t)
-			claims := &recordingSchedulePersistence{}
-			stopped := NewScheduler()
-			stopped.Stop()
-			pc, activation := seedWorkflowTimerOwnerRegisteredActivation(t, store, ctx, claims, stopped)
-			if claims.claimCalls != 3 {
-				t.Fatalf("claim attempts against stopped scheduler = %d, want 3", claims.claimCalls)
+			claims := &workflowTimerRetrySchedulePersistence{failuresRemaining: 5}
+			scheduler := NewScheduler()
+			t.Cleanup(scheduler.Stop)
+			pc, activation := seedWorkflowTimerOwnerRegisteredActivation(t, store, ctx, claims, scheduler)
+			waitForWorkflowTimerCondition(t, 5*time.Second, func() bool {
+				scheduler.mu.Lock()
+				defer scheduler.mu.Unlock()
+				return len(scheduler.tasks) == 1
+			}, "persistent exact registration")
+			if got := claims.claimCalls.Load(); got < 6 {
+				t.Fatalf("claim attempts = %d, want at least 6", got)
 			}
 			persisted := loadWorkflowTimerOwnerActivation(t, store, ctx, activation.Ref.ActivationID)
 			if persisted.Status != workflowTimerStatusActive {
 				t.Fatalf("activation after register failure = %q, want active", persisted.Status)
 			}
-
-			replacement := NewScheduler()
-			t.Cleanup(replacement.Stop)
-			pc.timerScheduler = replacement
-			if err := pc.workflowTimers.EnsureRegistered(ctx, activation.Ref); err != nil {
-				t.Fatalf("targeted same-process registration recovery: %v", err)
+			stopCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			if err := pc.StopWorkflowTimerLifecycle(stopCtx); err != nil {
+				t.Fatalf("stop recovered lifecycle: %v", err)
 			}
-			replacement.mu.Lock()
-			registered := len(replacement.tasks)
-			replacement.mu.Unlock()
-			if registered != 1 {
-				t.Fatalf("registered tasks after targeted recovery = %d, want 1", registered)
+		})
+
+		t.Run(tc.name+"/shutdown_stops_retry", func(t *testing.T) {
+			store, ctx := tc.open(t)
+			claims := &workflowTimerRetrySchedulePersistence{alwaysFail: true}
+			scheduler := NewScheduler()
+			t.Cleanup(scheduler.Stop)
+			pc, _ := seedWorkflowTimerOwnerRegisteredActivation(t, store, ctx, claims, scheduler)
+			waitForWorkflowTimerCondition(t, 5*time.Second, func() bool {
+				return claims.claimCalls.Load() > 3
+			}, "registration retries beyond the immediate budget")
+			stopCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			if err := pc.StopWorkflowTimerLifecycle(stopCtx); err != nil {
+				cancel()
+				t.Fatalf("stop retrying lifecycle: %v", err)
+			}
+			cancel()
+			stoppedAt := claims.claimCalls.Load()
+			time.Sleep(100 * time.Millisecond)
+			if got := claims.claimCalls.Load(); got != stoppedAt {
+				t.Fatalf("claim attempts after shutdown = %d, want %d", got, stoppedAt)
 			}
 		})
 	}
+}
+
+type workflowTimerRetrySchedulePersistence struct {
+	claimCalls        atomic.Int32
+	failuresRemaining int32
+	alwaysFail        bool
+}
+
+func (*workflowTimerRetrySchedulePersistence) UpsertSchedule(context.Context, Schedule) error {
+	return nil
+}
+
+func (*workflowTimerRetrySchedulePersistence) LoadActiveSchedules(context.Context) ([]Schedule, error) {
+	return nil, nil
+}
+
+func (s *workflowTimerRetrySchedulePersistence) ClaimSchedule(context.Context, Schedule) (bool, error) {
+	s.claimCalls.Add(1)
+	if s.alwaysFail {
+		return false, errors.New("persistent claim failure")
+	}
+	for {
+		remaining := atomic.LoadInt32(&s.failuresRemaining)
+		if remaining <= 0 {
+			return true, nil
+		}
+		if atomic.CompareAndSwapInt32(&s.failuresRemaining, remaining, remaining-1) {
+			return false, errors.New("transient claim failure")
+		}
+	}
+}
+
+func (*workflowTimerRetrySchedulePersistence) ReleaseSchedule(context.Context, Schedule) error {
+	return nil
+}
+
+func (*workflowTimerRetrySchedulePersistence) ReleaseScheduleClaims(context.Context) error {
+	return nil
+}
+
+func (*workflowTimerRetrySchedulePersistence) CancelScheduleExact(context.Context, Schedule) error {
+	return nil
+}
+
+func (*workflowTimerRetrySchedulePersistence) CancelScheduleExactTerminal(context.Context, Schedule) error {
+	return nil
+}
+
+func (*workflowTimerRetrySchedulePersistence) MarkScheduleFiredExact(context.Context, Schedule) error {
+	return nil
+}
+
+func (*workflowTimerRetrySchedulePersistence) CompleteScheduleFireExact(context.Context, Schedule) error {
+	return nil
+}
+
+func waitForWorkflowTimerCondition(t *testing.T, timeout time.Duration, condition func() bool, description string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", description)
 }
 
 func TestWorkflowTimerLifecycleSchedulerRetryPreservesOccurrenceOnBothStores(t *testing.T) {

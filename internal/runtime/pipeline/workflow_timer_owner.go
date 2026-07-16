@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -82,13 +83,25 @@ const (
 // scheduler projection, fire publication, restore, and handler authorization.
 type WorkflowTimerLifecycle struct {
 	coordinator *PipelineCoordinator
+	recoveryCtx context.Context
+	cancel      context.CancelFunc
+	recoveryMu  sync.Mutex
+	recoveryWG  sync.WaitGroup
+	recovering  map[string]struct{}
+	stopped     bool
 }
 
 func newWorkflowTimerLifecycle(coordinator *PipelineCoordinator) *WorkflowTimerLifecycle {
 	if coordinator == nil {
 		return nil
 	}
-	return &WorkflowTimerLifecycle{coordinator: coordinator}
+	recoveryCtx, cancel := context.WithCancel(context.Background())
+	return &WorkflowTimerLifecycle{
+		coordinator: coordinator,
+		recoveryCtx: recoveryCtx,
+		cancel:      cancel,
+		recovering:  make(map[string]struct{}),
+	}
 }
 
 func (pc *PipelineCoordinator) IsWorkflowTimerSchedule(schedule Schedule) bool {
@@ -107,6 +120,13 @@ func (pc *PipelineCoordinator) RestoreWorkflowTimers(ctx context.Context) error 
 		return nil
 	}
 	return pc.workflowTimers.Restore(ctx)
+}
+
+func (pc *PipelineCoordinator) StopWorkflowTimerLifecycle(ctx context.Context) error {
+	if pc == nil || pc.workflowTimers == nil {
+		return nil
+	}
+	return pc.workflowTimers.stop(ctx)
 }
 
 func (l *WorkflowTimerLifecycle) store() *WorkflowInstanceStore {
@@ -203,13 +223,15 @@ func (l *WorkflowTimerLifecycle) Reconcile(ctx context.Context, entityID, curren
 			}
 			continue
 		}
-		_, err := store.insertWorkflowTimerActivation(ctx, activation)
+		persisted, _, err := store.insertWorkflowTimerActivation(ctx, activation)
 		if err != nil {
 			return err
 		}
-		activeByDeclaration[key] = activation
-		if err := l.queueEnsureRegistered(ctx, activation.Ref); err != nil {
-			return err
+		if persisted.Status == workflowTimerStatusActive {
+			activeByDeclaration[key] = persisted
+			if err := l.queueEnsureRegistered(ctx, persisted.Ref); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -349,12 +371,12 @@ func (l *WorkflowTimerLifecycle) EnsureRegistered(ctx context.Context, ref timer
 		return err
 	}
 	if !claimed && l.coordinator.timerScheduleStore != nil {
-		return nil
+		return fmt.Errorf("workflow timer activation %s is not yet claimed for registration", ref.ActivationID)
 	}
 	return nil
 }
 
-func (l *WorkflowTimerLifecycle) ensureRegisteredWithRetry(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) error {
+func (l *WorkflowTimerLifecycle) ensureRegisteredImmediately(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) error {
 	var last error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
@@ -381,8 +403,9 @@ func (l *WorkflowTimerLifecycle) queueEnsureRegistered(ctx context.Context, ref 
 	}
 	action := func() {
 		postCommitCtx := withoutSQLTxContext(context.WithoutCancel(ctx))
-		if err := l.ensureRegisteredWithRetry(postCommitCtx, ref); err != nil {
+		if err := l.ensureRegisteredImmediately(postCommitCtx, ref); err != nil {
 			l.logFailure(postCommitCtx, "workflow_timer_register_failed", ref, err)
+			l.startRegistrationRecovery(ref)
 		}
 	}
 	if _, inMutation := PipelineSQLTxFromContext(ctx); inMutation {
@@ -410,6 +433,7 @@ func (l *WorkflowTimerLifecycle) queueCancellation(ctx context.Context, activati
 		if l.coordinator.timerScheduleStore != nil {
 			if err := l.coordinator.timerScheduleStore.ReleaseSchedule(postCommitCtx, schedule); err != nil {
 				l.logFailure(postCommitCtx, "workflow_timer_claim_release_failed", activation.Ref, err)
+				l.startReleaseRecovery(schedule, activation.Ref)
 			}
 		}
 	}
@@ -510,7 +534,9 @@ func (l *WorkflowTimerLifecycle) Fire(ctx context.Context, schedule Schedule) (W
 	})
 	if err != nil {
 		recoveryCtx := withoutSQLTxContext(context.WithoutCancel(ctx))
-		if registerErr := l.ensureRegisteredWithRetry(recoveryCtx, occurrence.Activation); registerErr != nil {
+		if registerErr := l.ensureRegisteredImmediately(recoveryCtx, occurrence.Activation); registerErr != nil {
+			l.logFailure(recoveryCtx, "workflow_timer_register_failed", occurrence.Activation, registerErr)
+			l.startRegistrationRecovery(occurrence.Activation)
 			return WorkflowTimerFireRetry, errors.Join(err, fmt.Errorf("re-register workflow timer: %w", registerErr))
 		}
 		return WorkflowTimerFireRetry, err
@@ -518,6 +544,7 @@ func (l *WorkflowTimerLifecycle) Fire(ctx context.Context, schedule Schedule) (W
 	if terminal {
 		if l.coordinator.timerScheduleStore != nil {
 			if err := l.coordinator.timerScheduleStore.ReleaseSchedule(withoutSQLTxContext(ctx), schedule); err != nil {
+				l.startReleaseRecovery(schedule, occurrence.Activation)
 				return WorkflowTimerFireTerminal, errors.Join(terminalErr, err)
 			}
 		}
@@ -550,12 +577,13 @@ func (l *WorkflowTimerLifecycle) queueAfterFire(ctx context.Context, previous, n
 		if l.coordinator.timerScheduleStore != nil {
 			if err := l.coordinator.timerScheduleStore.ReleaseSchedule(postCommitCtx, previousSchedule); err != nil {
 				l.logFailure(postCommitCtx, "workflow_timer_claim_release_failed", previous.Ref, err)
-				return
+				l.startReleaseRecovery(previousSchedule, previous.Ref)
 			}
 		}
 		if next.Status == workflowTimerStatusActive {
-			if err := l.ensureRegisteredWithRetry(postCommitCtx, next.Ref); err != nil {
+			if err := l.ensureRegisteredImmediately(postCommitCtx, next.Ref); err != nil {
 				l.logFailure(postCommitCtx, "workflow_timer_recurrence_register_failed", next.Ref, err)
+				l.startRegistrationRecovery(next.Ref)
 			}
 		}
 	}
@@ -625,11 +653,121 @@ func (l *WorkflowTimerLifecycle) Restore(ctx context.Context) error {
 		return err
 	}
 	for _, activation := range activations {
-		if err := l.ensureRegisteredWithRetry(ctx, activation.Ref); err != nil {
-			return fmt.Errorf("restore workflow timer %s: %w", activation.Ref.ActivationID, err)
+		if err := l.ensureRegisteredImmediately(ctx, activation.Ref); err != nil {
+			l.logFailure(ctx, "workflow_timer_restore_register_failed", activation.Ref, err)
+			if !l.startRegistrationRecovery(activation.Ref) {
+				return fmt.Errorf("restore workflow timer %s: %w", activation.Ref.ActivationID, err)
+			}
 		}
 	}
 	return nil
+}
+
+func (l *WorkflowTimerLifecycle) startRegistrationRecovery(ref timeridentity.WorkflowTimerActivationRef) bool {
+	ref = ref.Normalize()
+	return l.startRecovery("register\x00"+ref.ActivationID, func(ctx context.Context) error {
+		return l.EnsureRegistered(ctx, ref)
+	}, func(ctx context.Context, err error) {
+		l.logFailure(ctx, "workflow_timer_register_retry_failed", ref, err)
+	})
+}
+
+func (l *WorkflowTimerLifecycle) startReleaseRecovery(schedule Schedule, ref timeridentity.WorkflowTimerActivationRef) bool {
+	ref = ref.Normalize()
+	return l.startRecovery("release\x00"+scheduleKey(schedule), func(ctx context.Context) error {
+		if l.coordinator == nil || l.coordinator.timerScheduleStore == nil {
+			return nil
+		}
+		return l.coordinator.timerScheduleStore.ReleaseSchedule(ctx, schedule)
+	}, func(ctx context.Context, err error) {
+		l.logFailure(ctx, "workflow_timer_claim_release_retry_failed", ref, err)
+	})
+}
+
+func (l *WorkflowTimerLifecycle) startRecovery(key string, operation func(context.Context) error, onFailure func(context.Context, error)) bool {
+	if l == nil || operation == nil {
+		return false
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false
+	}
+	l.recoveryMu.Lock()
+	if l.stopped {
+		l.recoveryMu.Unlock()
+		return false
+	}
+	if _, exists := l.recovering[key]; exists {
+		l.recoveryMu.Unlock()
+		return true
+	}
+	l.recovering[key] = struct{}{}
+	l.recoveryWG.Add(1)
+	l.recoveryMu.Unlock()
+
+	go func() {
+		defer func() {
+			l.recoveryMu.Lock()
+			delete(l.recovering, key)
+			l.recoveryMu.Unlock()
+			l.recoveryWG.Done()
+		}()
+		for attempt := 0; ; attempt++ {
+			timer := time.NewTimer(workflowTimerRecoveryDelay(attempt))
+			select {
+			case <-l.recoveryCtx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			if err := operation(l.recoveryCtx); err != nil {
+				if l.recoveryCtx.Err() != nil {
+					return
+				}
+				if onFailure != nil {
+					onFailure(l.recoveryCtx, err)
+				}
+				continue
+			}
+			return
+		}
+	}()
+	return true
+}
+
+func workflowTimerRecoveryDelay(attempt int) time.Duration {
+	delay := 20 * time.Millisecond
+	for attempt > 0 && delay < 500*time.Millisecond {
+		delay *= 2
+		attempt--
+	}
+	if delay > 500*time.Millisecond {
+		return 500 * time.Millisecond
+	}
+	return delay
+}
+
+func (l *WorkflowTimerLifecycle) stop(ctx context.Context) error {
+	if l == nil {
+		return nil
+	}
+	l.recoveryMu.Lock()
+	if !l.stopped {
+		l.stopped = true
+		l.cancel()
+	}
+	l.recoveryMu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		l.recoveryWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (l *WorkflowTimerLifecycle) logFailure(ctx context.Context, action string, ref timeridentity.WorkflowTimerActivationRef, err error) {
