@@ -733,7 +733,7 @@ contract_formats:
       owner: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
       rule: |
         Runtime event carriers are read-only outside the event package.
-        Event-owned fields such as id, type, source_agent, task_id, payload,
+        Event-owned fields such as id, type, source_agent, producer_type, task_id, payload,
         chain_depth, run_id, source_event_id/parent_event_id, envelope, and
         created_at MUST be supplied through semantic event constructors or
         through explicitly bounded projection/readback constructors. Production
@@ -745,6 +745,12 @@ contract_formats:
         than a generic all-fields constructor. Constructor APIs MUST clone
         caller-owned payload bytes, normalize event-owned identity fields, and
         expose event facts through read-only accessors.
+
+        Declarative workflow-node emits MUST stamp producer_type=node together
+        with the exact node identity at construction. Admission, routing
+        projections, transactional outbox copies, persistence, and author
+        activity MUST preserve and consume that typed fact; a node ID in
+        source_agent MUST NOT be reclassified as an agent by string shape.
 
         Persisted event admission is the canonical boundary between constructed
         event shells, context/correlation candidates, and storage. The admission

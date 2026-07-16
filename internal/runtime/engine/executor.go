@@ -3165,7 +3165,7 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 		frame.req.Event,
 		resolution.Envelope,
 		createdAt,
-	)
+	).WithProducerType(events.EventProducerNode)
 	frame.lastEmitCreatedAt = createdAt
 	return EmitIntent{
 		Event:         evt,

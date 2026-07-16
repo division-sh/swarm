@@ -84,6 +84,56 @@ func TestAuthorActivityDuplicateTerminalReceiptIsNoOpParity(t *testing.T) {
 	}
 }
 
+func TestAuthoredNodeEventProducerTypeParity(t *testing.T) {
+	tests := []struct {
+		name string
+		open func(*testing.T) authorActivityReceiptFixture
+	}{
+		{name: "sqlite", open: openSQLiteAuthorActivityReceiptFixture},
+		{name: "postgres", open: openPostgresAuthorActivityReceiptFixture},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := tt.open(t)
+			ctx := testAuthorActivityContext()
+			eventID := uuid.NewString()
+			event := eventtest.PersistedProjection(
+				eventID, events.EventType("test.node_emitted"), "declarative-node", "", []byte(`{}`), 0,
+				"", "", events.EventEnvelope{}, time.Date(2026, 7, 16, 3, 0, 0, 0, time.UTC),
+			).WithProducerType(events.EventProducerNode)
+
+			if err := fixture.store.PersistEventWithDeliveries(ctx, event, nil); err != nil {
+				t.Fatalf("PersistEventWithDeliveries: %v", err)
+			}
+			producedBy, producedByType := readEventProducerIdentity(t, fixture, ctx, eventID)
+			if producedBy != "declarative-node" || producedByType != "node" {
+				t.Fatalf("persisted producer = %q/%q, want declarative-node/node", producedBy, producedByType)
+			}
+			occurrences := listAuthorActivityForReceiptParity(t, fixture, ctx)
+			if len(occurrences) != 1 {
+				t.Fatalf("occurrences = %#v, want one emitted occurrence", occurrences)
+			}
+			projection := occurrences[0].Projection
+			if occurrences[0].Kind != runtimeauthoractivity.KindEventEmitted || projection.ProducerID != "declarative-node" || projection.ProducerType != "node" {
+				t.Fatalf("emitted occurrence = %#v, want exact declarative-node/node producer", occurrences[0])
+			}
+		})
+	}
+}
+
+func readEventProducerIdentity(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context, eventID string) (string, string) {
+	t.Helper()
+	query := `SELECT COALESCE(produced_by, ''), COALESCE(produced_by_type, '') FROM events WHERE event_id = ?`
+	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+		query = `SELECT COALESCE(produced_by, ''), COALESCE(produced_by_type, '') FROM events WHERE event_id = $1::uuid`
+	}
+	var producedBy, producedByType string
+	if err := fixture.db.QueryRowContext(ctx, query, eventID).Scan(&producedBy, &producedByType); err != nil {
+		t.Fatalf("read event producer identity: %v", err)
+	}
+	return producedBy, producedByType
+}
+
 func listAuthorActivityForReceiptParity(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context) []runtimeauthoractivity.Occurrence {
 	t.Helper()
 	page, err := runtimeauthoractivity.List(ctx, fixture.db, fixture.dialect, runtimeauthoractivity.ListOptions{Limit: 10})

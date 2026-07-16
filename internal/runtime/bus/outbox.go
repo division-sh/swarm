@@ -227,7 +227,7 @@ func clonePostCommitEvent(evt events.Event) events.Event {
 		evt.ParentEventID(),
 		evt.NormalizedEnvelope(),
 		evt.CreatedAt(),
-	).WithExecutionMode(evt.ExecutionMode())
+	).WithProducerType(evt.ProducerType()).WithExecutionMode(evt.ExecutionMode())
 }
 
 func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengine.EmitIntent) (bool, error) {

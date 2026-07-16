@@ -422,7 +422,7 @@ func ensureHandlerEntityID(source semanticview.Source, flowID string, handler Sy
 				evt.ParentEventID(),
 				events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID),
 				evt.CreatedAt(),
-			).WithExecutionMode(evt.ExecutionMode())
+			).WithProducerType(evt.ProducerType()).WithExecutionMode(evt.ExecutionMode())
 		}
 		return entityID, evt
 	}
@@ -444,7 +444,7 @@ func ensureHandlerEntityID(source semanticview.Source, flowID string, handler Sy
 		evt.ParentEventID(),
 		events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID),
 		evt.CreatedAt(),
-	).WithExecutionMode(evt.ExecutionMode())
+	).WithProducerType(evt.ProducerType()).WithExecutionMode(evt.ExecutionMode())
 }
 
 func canonicalHandlerEntityID(source semanticview.Source, flowID string, evt Event) string {
