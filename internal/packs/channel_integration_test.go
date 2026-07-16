@@ -114,6 +114,52 @@ func TestTelegramChannelCompilerRejectsUnboundedMessageIDOutput(t *testing.T) {
 	}
 }
 
+func TestTelegramChannelCompilerConsumesExactNormalizedIdentifierSchemas(t *testing.T) {
+	tests := []struct {
+		name  string
+		event string
+		field string
+		widen func(runtimecontracts.ToolInputSchema) runtimecontracts.ToolInputSchema
+		want  string
+	}{
+		{name: "text message", event: "inbound.telegram.text_message", field: "provider_message_reference", widen: withoutMaximum, want: "source maximum is broader"},
+		{name: "text account", event: "inbound.telegram.text_message", field: "external_account_reference", widen: withoutPattern, want: "not provably assignable"},
+		{name: "text conversation", event: "inbound.telegram.text_message", field: "conversation_reference", widen: withoutMaximumLength, want: "source maximum is broader"},
+		{name: "callback message", event: "inbound.telegram.callback_action", field: "provider_message_reference", widen: withoutMaximum, want: "source maximum is broader"},
+		{name: "callback account", event: "inbound.telegram.callback_action", field: "external_account_reference", widen: withoutPattern, want: "not provably assignable"},
+		{name: "callback conversation", event: "inbound.telegram.callback_action", field: "conversation_reference", widen: withoutMaximumLength, want: "source maximum is broader"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
+			event := trigger.Events[tc.event]
+			field := event.Fields[tc.field]
+			field.Schema = tc.widen(field.Schema)
+			event.Fields[tc.field] = field
+			trigger.Events[tc.event] = event
+			_, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("CompileChannel error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func withoutMaximum(schema runtimecontracts.ToolInputSchema) runtimecontracts.ToolInputSchema {
+	schema.Maximum = nil
+	return schema
+}
+
+func withoutPattern(schema runtimecontracts.ToolInputSchema) runtimecontracts.ToolInputSchema {
+	schema.Pattern = ""
+	return schema
+}
+
+func withoutMaximumLength(schema runtimecontracts.ToolInputSchema) runtimecontracts.ToolInputSchema {
+	schema.MaxLength = nil
+	return schema
+}
+
 func TestProductionCompilerAcceptsStructurallyDifferentTighterSatisfier(t *testing.T) {
 	registry := loadChannelInterfaceRegistry(t)
 	channel, trigger, connector := mockChannelSatisfier()
@@ -228,7 +274,7 @@ func TestProductionCompilerFailsClosedAcrossChannelContractPhases(t *testing.T) 
 			name: "event field type mismatch",
 			mutate: func(_ *packs.LoadedChannelPack, trigger *packs.TriggerPackDescriptor, _ *packs.ConnectorPackDescriptor) {
 				event := trigger.Events["mock.text"]
-				event.Fields["text"] = packs.TriggerEventField{Type: "integer", Required: true}
+				event.Fields["text"] = packs.TriggerEventField{Schema: runtimecontracts.ToolInputSchema{Type: "integer"}, Required: true}
 				trigger.Events["mock.text"] = event
 			},
 			want: "incompatible types",
@@ -664,7 +710,22 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 	triggerFields := func(names ...string) map[string]packs.TriggerEventField {
 		fields := make(map[string]packs.TriggerEventField, len(names))
 		for _, name := range names {
-			fields[name] = packs.TriggerEventField{Type: "string", Required: true}
+			var schema runtimecontracts.ToolInputSchema
+			switch name {
+			case "token":
+				schema = mockStringSchema(1, 20, `^[a-z0-9-]+$`)
+			case "cursor":
+				schema = mockStringSchema(1, 16, "")
+			case "principal", "room":
+				schema = mockStringSchema(1, 20, "")
+			case "message_ref":
+				schema = deliveryReference
+			case "text":
+				schema = text128
+			default:
+				panic("missing mock trigger field schema for " + name)
+			}
+			fields[name] = packs.TriggerEventField{Schema: schema, Required: true}
 		}
 		return fields
 	}

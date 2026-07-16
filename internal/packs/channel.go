@@ -31,8 +31,8 @@ type PackIdentity struct {
 }
 
 type TriggerEventField struct {
-	Type     string `json:"type"`
-	Required bool   `json:"required"`
+	Schema   runtimecontracts.ToolInputSchema `json:"schema"`
+	Required bool                             `json:"required"`
 }
 
 type TriggerEvent struct {
@@ -1288,21 +1288,9 @@ func validateEventBinding(name string, event runtimecontracts.PackInterfaceEvent
 		if !ok || !field.Required {
 			return fmt.Errorf("channel event %q source %q is not a required accepted trigger field", name, source)
 		}
-		if err := validateEventFieldTypeRelation(name+" event "+source+" -> "+target, field.Type, targetSchema); err != nil {
+		if err := validateDirectionalRelation(name+" event "+source+" -> "+target, &field.Schema, targetSchema); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func validateEventFieldTypeRelation(subject, sourceType string, target *runtimecontracts.ToolInputSchema) error {
-	if target == nil {
-		return fmt.Errorf("%s has no target schema", subject)
-	}
-	sourceType = normalizeSchemaType(sourceType)
-	targetType := channelSchemaType(*target)
-	if sourceType != targetType && !(sourceType == "integer" && targetType == "number") {
-		return fmt.Errorf("%s has incompatible types %s and %s", subject, sourceType, targetType)
 	}
 	return nil
 }
@@ -1825,6 +1813,7 @@ func cloneTriggerEvent(in TriggerEvent) TriggerEvent {
 	out := in
 	out.Fields = make(map[string]TriggerEventField, len(in.Fields))
 	for name, field := range in.Fields {
+		field.Schema = cloneSchema(field.Schema)
 		out.Fields[name] = field
 	}
 	return out

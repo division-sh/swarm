@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -1338,11 +1337,7 @@ func projectCompiledActivityResult(result any, projection runtimecontracts.Compi
 		if !ok {
 			return nil, fmt.Errorf("compiled result source %q is missing", field.From)
 		}
-		converted, err := convertCompiledActivityResult(value, field.Convert)
-		if err != nil {
-			return nil, fmt.Errorf("compiled result source %q: %w", field.From, err)
-		}
-		if err := setActivityValueAtPath(out, target, converted); err != nil {
+		if err := setActivityValueAtPath(out, target, value); err != nil {
 			return nil, err
 		}
 	}
@@ -1393,21 +1388,6 @@ func setActivityValueAtPath(out map[string]any, path string, value any) error {
 	}
 	current[leaf] = value
 	return nil
-}
-
-func convertCompiledActivityResult(value any, conversion string) (any, error) {
-	switch strings.TrimSpace(conversion) {
-	case "":
-		return value, nil
-	case runtimecontracts.FieldProjectionConvertNumberToText:
-		number, ok := value.(float64)
-		if !ok || math.IsNaN(number) || math.IsInf(number, 0) || math.Trunc(number) != number || math.Abs(number) > semanticvalue.MaxSafeInteger {
-			return nil, fmt.Errorf("number_to_text requires an exact I-JSON-safe integer")
-		}
-		return strconv.FormatFloat(number, 'f', 0, 64), nil
-	default:
-		return nil, fmt.Errorf("compiled result conversion %q is unsupported", conversion)
-	}
 }
 
 func flattenActivityHTTPHeaders(headers http.Header) map[string]any {

@@ -146,8 +146,8 @@ func (s *CatalogSnapshot) PackDescriptors() []packs.TriggerPackDescriptor {
 			}
 			fields := make(map[string]packs.TriggerEventField, len(output.Fields))
 			for name, projection := range output.Fields {
-				projection = projection.Normalized()
-				fields[name] = packs.TriggerEventField{Type: projection.Type, Required: !projection.Optional}
+				projection = projection.normalized()
+				fields[name] = packs.TriggerEventField{Schema: cloneNormalizedEventSchema(projection.Schema), Required: !projection.Optional}
 			}
 			events[output.Event] = packs.TriggerEvent{Name: output.Event, Fields: fields}
 		}

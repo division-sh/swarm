@@ -25,21 +25,21 @@ normalized_events:
     fields:
       token:
         from: callback_query.data
-        type: text
+        schema: {type: string, minLength: 1, maxLength: 64}
       interaction_reference:
         from: callback_query.id
-        type: text
+        schema: {type: string, minLength: 1}
       external_account_reference:
         from: callback_query.from.id
-        type: text
+        schema: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 17}
         convert: number_to_text
       conversation_reference:
         from: callback_query.message.chat.id
-        type: text
+        schema: {type: string, pattern: '^-?[0-9]+$', minLength: 1, maxLength: 17}
         convert: number_to_text
       provider_message_reference:
         from: callback_query.message.message_id
-        type: integer
+        schema: {type: integer, minimum: 1, maximum: 2147483647}
     when:
       absent: [message]
       equals:
@@ -52,18 +52,18 @@ normalized_events:
     fields:
       text:
         from: message.text
-        type: text
+        schema: {type: string, minLength: 1, maxLength: 4096}
       external_account_reference:
         from: message.from.id
-        type: text
+        schema: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 17}
         convert: number_to_text
       conversation_reference:
         from: message.chat.id
-        type: text
+        schema: {type: string, pattern: '^-?[0-9]+$', minLength: 1, maxLength: 17}
         convert: number_to_text
       provider_message_reference:
         from: message.message_id
-        type: integer
+        schema: {type: integer, minimum: 1, maximum: 2147483647}
     when:
       absent: [callback_query]
       equals:

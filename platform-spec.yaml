@@ -8185,6 +8185,7 @@ tool_model:
       immutable_interface: platform-spec.yaml interfaces.swarm.hitl-channel.v1
       universal_envelope: internal/packs
       accepted_trigger_inventory: internal/providertriggers.CatalogSnapshot
+      normalized_trigger_field_schema: internal/providertriggers.NormalizedEventFieldProjection.Schema
       accepted_connector_inventory: internal/providerconnectors.PackRegistry
       structural_compiler: internal/packs.CompileChannelInventory
       directional_assignability_and_cardinality: internal/packs channel relation owner
@@ -8248,7 +8249,7 @@ tool_model:
       - permit only scalar identity and one ordered each-item object projection; channel-operation conversions are not supported
       - reject caller-supplied provider context, ambient values, defaults, functions, concatenation, conditions, or partial mappings
       - validate connector output first, then apply the compiled channel output projection, then validate the satisfier-bound opaque result
-      - require every exact normalized trigger field and its declared type before compiling an interface event mapping
+      - require every normalized trigger field to declare one post-conversion schema; normalization admits against that schema and the accepted trigger owner exports the same schema to the recursive event-mapping relation
       - reserve platform.channel_activity.* for generation-pinned private targets and reject any authored or imported tool in that namespace during load/boot validation
       selected_constraints: >
         Runtime authoring limits are the intersection of interface invariants and the selected connector schemas for deliver
@@ -8266,7 +8267,7 @@ tool_model:
         text: inbound.telegram.text_message
         direct_private_predicate: 'when.equals: {message.chat.type: private} or {callback_query.message.chat.type: private}'
         branch_exclusivity: callback uses callback_query exists/message absent; text uses message exists/callback_query absent
-        numeric_projection: external account and conversation integers use number_to_text; bounded provider message ids remain integers end to end
+        numeric_projection: external account and conversation integers use number_to_text and are admitted against their exact post-conversion string schemas; bounded provider message ids remain integers end to end
       rule: >
         Telegram is one data-defined satisfier. Generic pack, runtime, status, and activity code must contain no Telegram
         branch. A structurally different satisfier with object/scalar reference differences and tighter limits must pass the
@@ -8525,7 +8526,6 @@ tool_model:
         `manifest_hash`, `capabilities`, and `requires` are deterministic build-stamped summaries; import verifies exact-byte
         body hash and body-derived equality.
       non_goals:
-      - provider-trigger manifest vocabulary changes
       - pack signing, remote distribution, ownership transfer, or marketplace trust economics
       - executing pack-declared tests
       - provider setup/teardown, OAuth, connector tools, or provider action calls
@@ -8539,15 +8539,16 @@ tool_model:
         and requires the relevant signed-payload recipe to fail closed on malformed form input.
       normalized_events:
         shape: >
-          Optional list entries use `{event, fields, when, author_summary_field}`. `event` must be an exact `inbound.<provider>.*` literal.
-          `fields` is the same carry-style typed projection vocabulary: each field declares `from`, a standalone-resolvable
-          Wave-1 `type`, optional `optional`, and optional closed conversion. Because trigger manifests do not declare a
-          type catalog, unresolved named types fail pack load; built-in, list, and map references are validated recursively.
-          The event payload schema, required set, extraction plan, carry
-          eligibility, and capability descriptor derive mechanically from this one block.
-          Optional `author_summary_field` must name one declared text field and is the only normalized provider content
+          Optional list entries use `{event, fields, when, author_summary_field, author_subject}`. `event` must be an exact
+          `inbound.<provider>.*` literal.
+          Each field declares `from`, one required post-conversion JSON `schema`, optional `optional`, and an optional closed
+          conversion. The schema is the sole admitted-value owner: runtime normalization, imported event refinements,
+          accepted trigger descriptors, channel assignability, carry eligibility, and capability type projection derive
+          mechanically from this one block. The retired `type` spelling is rejected; there is no compatibility alias.
+          Optional `author_summary_field` must name one declared string field and is the only normalized provider content
           eligible for the author story after the connector projection/redaction boundary. Readers never inspect another
-          payload field to recover a preview.
+          payload field to recover a preview. Optional `author_subject` must declare its registered subject type and name one
+          declared string field; both members are required together.
         paths: >
           `from` and `when.exists/absent` use strict dotted paths relative to the decoded raw provider object. Empty
           segments, rooted JSONPath, CEL, runtime namespaces, expression syntax, and unsupported segments fail pack load.
@@ -8557,9 +8558,10 @@ tool_model:
           events and a remediation naming `when.absent`. Runtime multi-match rejection remains a fail-closed unreachable
           backstop. No match publishes the raw event only.
         extraction: >
-          A matched branch must extract every required field with its declared type. Missing optional fields are omitted.
-          Missing required fields, type mismatch, or conversion failure rejects the provider delivery with pack
-          id/version/manifest_hash, normalized event, field, and path provenance; no marker or output survives.
+          A matched branch must extract every required field, apply its declared conversion when present, and admit the
+          result against its exact schema. Missing optional fields are omitted. Missing required fields, schema mismatch,
+          or conversion failure rejects the provider delivery with pack id/version/manifest_hash, normalized event, field,
+          and path provenance; no marker or output survives.
         conversion: >
           The v1 closed enum contains exactly `number_to_text`. It converts a lossless JSON integer to canonical decimal
           text. There is no implicit coercion and unknown conversions fail pack load.
