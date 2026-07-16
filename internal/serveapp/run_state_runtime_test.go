@@ -12,8 +12,10 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -21,10 +23,42 @@ import (
 	"github.com/google/uuid"
 )
 
+const runStatusTestRuntimeInstanceID = "22222222-2222-2222-2222-222222222222"
+const runStatusTestBundleHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+func runStatusAuthorActivityContext() context.Context {
+	ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runStatusTestRuntimeInstanceID)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, runtimecorrelation.BundleSourceFact{
+		BundleHash:   runStatusTestBundleHash,
+		BundleSource: storerunlifecycle.BundleSourceEphemeral,
+	})
+	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runStatusTestRuntimeInstanceID, runStatusTestBundleHash))
+}
+
+type runStatusEventCatalogRegistrar interface {
+	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
+}
+
+func registerRunStatusEventCatalog(t *testing.T, registrar runStatusEventCatalogRegistrar) {
+	t.Helper()
+	scope, ok := runtimeauthoractivity.ScopeFromContext(runStatusAuthorActivityContext())
+	if !ok {
+		t.Fatal("run status author activity scope is unavailable")
+	}
+	lease, err := registrar.RegisterAuthorActivityEventCatalog(scope, []runtimeauthoractivity.EventDescriptor{
+		{EventType: "scan.completed", Disposition: runtimeauthoractivity.StoryDifferent},
+		{EventType: "scan.requested", Disposition: runtimeauthoractivity.StoryDifferent},
+	})
+	if err != nil {
+		t.Fatalf("register run status event catalog: %v", err)
+	}
+	t.Cleanup(lease.Release)
+}
+
 func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, entityID string) string {
 	t.Helper()
 	eventID := uuid.NewString()
-	if err := bus.Publish(context.Background(), eventtest.RootIngress(
+	if err := bus.Publish(runStatusAuthorActivityContext(), eventtest.RootIngress(
 		eventID,
 		events.EventType("scan.requested"),
 		"api.v1",
@@ -62,7 +96,7 @@ func seedRunStatusEntityState(t *testing.T, db *sql.DB, runID, entityID string) 
 
 func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, eventID string) {
 	t.Helper()
-	if err := pg.ConvergeNormalRunCompletion(context.Background(), eventID, []string{"ready"}, map[string][]string{"run-status-test": {"ready"}}); err != nil {
+	if err := pg.ConvergeNormalRunCompletion(runStatusAuthorActivityContext(), eventID, []string{"ready"}, map[string][]string{"run-status-test": {"ready"}}); err != nil {
 		t.Fatalf("converge normal run completion: %v", err)
 	}
 }
@@ -121,6 +155,7 @@ func TestRunState_UsesDurableCompletedRunState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
+	registerRunStatusEventCatalog(t, pg)
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := publishRunStatusRootEvent(t, eb, runID, entityID)
@@ -157,6 +192,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
+	registerRunStatusEventCatalog(t, pg)
 
 	agentStarted := make(chan struct{}, 1)
 	releaseAgent := make(chan struct{})
@@ -175,7 +211,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: testAgent.id, Model: "regular"}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	if err := am.Run(managedRuntimeAdmissionContextForTest(t, context.Background())); err != nil {
+	if err := am.Run(managedRuntimeAdmissionContextForTest(t, runStatusAuthorActivityContext())); err != nil {
 		t.Fatalf("AgentManager.Run: %v", err)
 	}
 	defer func() { _ = am.Shutdown() }()
@@ -272,6 +308,7 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
+	registerRunStatusEventCatalog(t, pg)
 
 	agentStarted := make(chan struct{}, 1)
 	releaseAgent := make(chan struct{})
@@ -290,7 +327,7 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: testAgent.id, Model: "regular"}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	if err := am.Run(managedRuntimeAdmissionContextForTest(t, context.Background())); err != nil {
+	if err := am.Run(managedRuntimeAdmissionContextForTest(t, runStatusAuthorActivityContext())); err != nil {
 		t.Fatalf("AgentManager.Run: %v", err)
 	}
 	defer func() { _ = am.Shutdown() }()

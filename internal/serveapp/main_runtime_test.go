@@ -2024,7 +2024,7 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 			}
 			return stores, err
 		}
-		endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
+		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 			ContractsPath:           contractsPath,
 			PlatformSpecPath:        defaultPlatformSpecPath,
@@ -2040,7 +2040,7 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for control served parity proof")
 		}
-		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt}
 	case servedparity.BackendExplicitPostgres:
 		_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
@@ -2048,7 +2048,7 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 		contractsPath := fixture(t)
 		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
-		endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
+		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:              writeServeRuntimeTestConfig(t),
 			ContractsPath:           contractsPath,
 			PlatformSpecPath:        defaultPlatformSpecPath,
@@ -2062,7 +2062,7 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 			TestLifecycleProbe:      probe,
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		})
-		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt}
 	default:
 		t.Fatalf("unknown served control backend %q", backend)
 		return servedControlProofRuntime{}
@@ -3205,19 +3205,25 @@ func jsonScalarInt(value any, want int64) bool {
 
 func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) servedDecisionCardFixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := servedControlProofAuthorActivityContext(t, rt)
 	now := time.Now().UTC().Add(-time.Minute)
 	runID, entityID, sourceEventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	bundleFact := rt.Runtime.Options.BundleSourceFact.Normalized()
+	bundleHash := strings.TrimSpace(bundleFact.BundleHash)
 	var cards decisioncard.Store
 	var workflow *runtimepipeline.WorkflowInstanceStore
 	var seedEvent func(context.Context, events.Event) error
 	var insertNotice func(context.Context, runtimetools.MailboxItem) (string, error)
+	var eventCatalog interface {
+		RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
+	}
 	switch rt.Backend {
 	case "postgres":
-		if _, err := rt.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, now); err != nil {
+		if _, err := rt.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'running', $2, $3, $4)`, runID, bundleHash, bundleFact.BundleSource, now); err != nil {
 			t.Fatalf("seed postgres decision-card run: %v", err)
 		}
 		pg := &store.PostgresStore{DB: rt.DB}
+		eventCatalog = pg
 		cards, workflow, insertNotice = pg, runtimepipeline.NewWorkflowInstanceStore(rt.DB), pg.InsertMailboxItem
 		seedEvent = func(ctx context.Context, evt events.Event) error {
 			return pg.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
@@ -3231,10 +3237,11 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 			})
 		}
 	case "sqlite":
-		if _, err := rt.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, now); err != nil {
+		if _, err := rt.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES (?, 'running', ?, ?, ?)`, runID, bundleHash, bundleFact.BundleSource, now); err != nil {
 			t.Fatalf("seed sqlite decision-card run: %v", err)
 		}
 		sqlite := &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: rt.DB}}
+		eventCatalog = sqlite
 		cards = sqlite
 		workflow = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(rt.DB, sqlite)
 		insertNotice = sqlite.InsertMailboxItem
@@ -3252,6 +3259,17 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	default:
 		t.Fatalf("unknown decision-card proof backend %q", rt.Backend)
 	}
+	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
+	if !ok {
+		t.Fatal("decision-card fixture author activity scope is unavailable")
+	}
+	lease, err := eventCatalog.RegisterAuthorActivityEventCatalog(scope, []runtimeauthoractivity.EventDescriptor{{
+		EventType: "review.requested", Disposition: runtimeauthoractivity.StoryDifferent,
+	}})
+	if err != nil {
+		t.Fatalf("register decision-card fixture event descriptor: %v", err)
+	}
+	t.Cleanup(lease.Release)
 	evt := eventtest.RootIngress(sourceEventID, "review.requested", "", "", json.RawMessage(`{"review":true}`), 0, runID, "",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "root"), now)
 	if err := seedEvent(ctx, evt); err != nil {
@@ -3265,10 +3283,6 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		t.Fatalf("seed mailbox notice: %v", err)
 	}
 
-	bundleHash := strings.TrimSpace(rt.BundleHash)
-	if bundleHash == "" {
-		bundleHash = "bundle-v1:sha256:" + strings.Repeat("a", 64)
-	}
 	routes, err := gateruntime.FreezeRoutes(map[string]runtimecontracts.WorkflowGateOutcomePlan{
 		"approve": {Verdict: "approve", AdvancesTo: "done"},
 		"reject":  {Verdict: "reject", AdvancesTo: "rework"},
@@ -7019,11 +7033,13 @@ func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testin
 	stubServeRuntimeWorkspaceLifecycle(t)
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	runID, eventID := seedServeRuntimeSQLiteAbandonWork(t, sqlitePath)
+	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
+	bundleHash := servedEventPublishFixtureBundleHash(t, filepath.Join(cliapp.RepoRoot(), contractsPath))
+	runID, eventID := seedServeRuntimeSQLiteAbandonWork(t, sqlitePath, bundleHash)
 	ctx := context.Background()
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath:         writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		ContractsPath:      contractsPath,
 		PlatformSpecPath:   defaultPlatformSpecPath,
 		APIListenAddr:      "127.0.0.1:0",
 		MCPListenAddr:      "127.0.0.1:0",
@@ -7501,7 +7517,7 @@ func installServeRuntimeEmptyPostgresTestStores(t *testing.T, workspaceFactory f
 	}, false)
 }
 
-func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string) (string, string) {
+func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash string) (string, string) {
 	t.Helper()
 	spec, err := loadServePlatformSpecDocument(filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath))
 	if err != nil {
@@ -7522,9 +7538,9 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string) (string,
 	eventID := uuid.NewString()
 	activeSessionID := uuid.NewString()
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_fingerprint, started_at)
-		VALUES (?, 'running', ?, ?)
-	`, runID, "sha256:2222222222222222222222222222222222222222222222222222222222222222", now.Add(-time.Hour)); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
+		VALUES (?, 'running', ?, ?, ?, ?)
+	`, runID, bundleHash, storerunlifecycle.BundleSourceEphemeral, "sha256:2222222222222222222222222222222222222222222222222222222222222222", now.Add(-time.Hour)); err != nil {
 		_ = sqliteStore.Close()
 		t.Fatalf("seed sqlite active run: %v", err)
 	}
@@ -8845,11 +8861,13 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	activeSessionID := uuid.NewString()
+	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
+	bundleHash := servedEventPublishFixtureBundleHash(t, filepath.Join(cliapp.RepoRoot(), contractsPath))
 	mismatchFingerprint := "sha256:2222222222222222222222222222222222222222222222222222222222222222"
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_fingerprint, started_at)
-		VALUES ($1::uuid, 'running', $2, now())
-	`, runID, mismatchFingerprint); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
+		VALUES ($1::uuid, 'running', $2, $3, $4, now())
+	`, runID, bundleHash, storerunlifecycle.BundleSourceEphemeral, mismatchFingerprint); err != nil {
 		t.Fatalf("seed active mismatched run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -8873,7 +8891,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath:         writeServeRuntimeTestConfig(t),
-		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		ContractsPath:      contractsPath,
 		PlatformSpecPath:   defaultPlatformSpecPath,
 		StoreMode:          "postgres",
 		APIListenAddr:      "127.0.0.1:0",
