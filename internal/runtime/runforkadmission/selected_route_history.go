@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 )
@@ -44,7 +45,11 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if err := installContractFrontierFlowInstanceRoutes(routeTable, req.Source, req.Plan.PendingWork); err != nil {
 		return store.RunForkSelectedContractRouteAdmission{}, err
 	}
-	routeEvents := selectedRouteHistoryEvents(routeTable, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
+	connectPlans, connectIssues := runtimepinrouting.LowerCompositionConnectRoutePlans(req.Source)
+	if len(connectIssues) != 0 {
+		return store.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission connect routes: %#v", connectIssues)
+	}
+	routeEvents := selectedRouteHistoryEvents(routeTable, connectPlans, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
 	dynamicFlowInstances := selectedRouteHistoryDynamicFlowInstances(req.Source, req.Plan, req.FrontierAdmission)
 	blockers := []store.RunForkUnsupportedBlocker{{
 		Code:    store.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
@@ -142,13 +147,14 @@ func selectedRouteHistoryEventEvidence(plan store.RunForkPlan, frontier store.Ru
 	return out
 }
 
-func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, events []selectedRouteHistoryEvent) []store.RunForkSelectedContractRouteEvent {
+func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectPlans []runtimepinrouting.ConnectRoutePlan, events []selectedRouteHistoryEvent) []store.RunForkSelectedContractRouteEvent {
 	out := make([]store.RunForkSelectedContractRouteEvent, 0, len(events))
 	for _, event := range events {
+		routeKeys, connectOwned := contractFrontierRouteKeys(event.eventName, connectPlans)
 		out = append(out, store.RunForkSelectedContractRouteEvent{
 			SourceEventID:     event.sourceEventID,
 			EventName:         event.eventName,
-			DerivedRecipients: contractFrontierRecipients(routeTable.Resolve(event.eventName)),
+			DerivedRecipients: contractFrontierRecipients(resolveContractFrontierRoutes(routeTable, routeKeys, connectOwned)),
 			Disposition:       store.RunForkSelectedContractDispositionEvidenceOnly,
 		})
 	}

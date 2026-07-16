@@ -26,6 +26,9 @@ const (
 	ownerDiagnostic          primitiveOwner = "diagnostic"
 	ownerComputeSandbox      primitiveOwner = "compute_sandbox"
 	ownerBuildTest           primitiveOwner = "build_test_infrastructure"
+
+	canonicalImportBoundaryAliasWrite    = "internal/runtime/testfixtures/canonicalrouting/import_boundary_variants.go:CopyImportBoundaryAlias:filesystem_write:1"
+	canonicalImportBoundaryWildcardWrite = "internal/runtime/testfixtures/canonicalrouting/import_boundary_variants.go:CopyImportBoundaryWildcard:filesystem_write:1"
 )
 
 // sourcePrimitiveOwners is an exact source-derived ledger. Keys include the
@@ -87,6 +90,8 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:writeFixtureFile:filesystem_write:1":                       ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:writeFixtureFile:filesystem_write:2":                       ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:writeYAMLDocument:filesystem_write:1":                      ownerBuildTest,
+	canonicalImportBoundaryAliasWrite:    ownerBuildTest,
+	canonicalImportBoundaryWildcardWrite: ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/specialized_variants.go:removeInheritedScenarios:filesystem_write:1":  ownerBuildTest,
 	"internal/runtime/tools/executor_http.go:execHTTPRequestOnce:http_do:1":                                               ownerManagedAgent,
 	"internal/runtime/tools/executor_native.go:doNormalizedSearch:http_do:1":                                              ownerManagedAgent,
