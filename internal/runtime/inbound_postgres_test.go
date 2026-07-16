@@ -685,7 +685,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 
 	g := newTestInboundGateway(t, bus, nil, nil, pg)
 
-	body := []byte(`{"update_id":123456789,"undeclared_root":"root-must-not-enter-author-story","message":{"message_id":7,"chat":{"id":42},"text":"hello","undeclared_private":"private-must-not-enter-author-story"}}`)
+	body := []byte(`{"update_id":123456789,"undeclared_root":"root-must-not-enter-author-story","message":{"message_id":7,"from":{"id":41},"chat":{"id":42,"type":"private"},"text":"hello","undeclared_private":"private-must-not-enter-author-story"}}`)
 	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body)
 	rec := httptest.NewRecorder()
 	handleBoundedProviderDelivery(t, g, bus, pg, rec, req, runID, entityID, provider, webhookSecret)
@@ -756,7 +756,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 
 	g := newTestInboundGateway(t, bus, nil, nil, sqliteStore)
 
-	body := []byte(`{"update_id":987654321,"undeclared_root":"root-must-not-enter-author-story","message":{"message_id":8,"chat":{"id":42},"text":"hello sqlite","undeclared_private":"private-must-not-enter-author-story"}}`)
+	body := []byte(`{"update_id":987654321,"undeclared_root":"root-must-not-enter-author-story","message":{"message_id":8,"from":{"id":41},"chat":{"id":42,"type":"private"},"text":"hello sqlite","undeclared_private":"private-must-not-enter-author-story"}}`)
 	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body)
 	rec := httptest.NewRecorder()
 	handleBoundedProviderDelivery(t, g, bus, sqliteStore, rec, req, runID, entityID, provider, webhookSecret)
