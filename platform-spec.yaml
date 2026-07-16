@@ -2097,6 +2097,16 @@ compute_module_contracts:
         pinned as `brettcannon/cpython-wasi-build` v3.13.14
         `python-3.13.14-wasi_sdk-24.zip`, digest
         `sha256:a70a750951302744d84746340b4932b80dabad5b153cc3392bcae114b293c060`.
+        Runtime and test processes MUST materialize this immutable archive through
+        one user-local content-addressed cache entry keyed by that full archive
+        digest. Before first use in each process, the host MUST verify the embedded
+        archive digest and the cached tree against the exact archive-derived path,
+        file-size, and file-digest manifest. Missing, extra, altered, partial,
+        symlinked, or otherwise non-regular entries MUST be rejected and replaced
+        from same-filesystem private staging; only a complete validated tree may be
+        atomically published. Concurrent publishers MUST converge on that one tree.
+        Anonymous process-scoped interpreter extraction and marker-only cache trust
+        are forbidden; invocation transport scratch remains separate and ephemeral.
         No official python.org prebuilt WASI binary exists; this first slice
         records the artifact as an unofficial-but-canonical community/core-dev
         build. Self-building CPython-WASI from source in swarm release CI is a
@@ -2120,8 +2130,8 @@ compute_module_contracts:
         Python modules run with a fixed runtime environment containing only
         `PYTHONHOME`, `PYTHONPATH`, `PYTHONHASHSEED`, and `PYTHONNOUSERSITE`;
         host/user environment variables MUST NOT be inherited. The only
-        filesystem mount is the embedded CPython-WASI interpreter artifact,
-        mounted read-only at `/` so the interpreter can import its standard
+        filesystem mount is the verified content-addressed CPython-WASI interpreter
+        tree, mounted read-only at `/` so the interpreter can import its standard
         library. Host, project, user, and working-directory filesystems are not
         mounted. Network, subprocess, threads, third-party packages, generated
         bindings, and ambient host capabilities are not supported.
