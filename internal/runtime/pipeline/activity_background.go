@@ -3,8 +3,6 @@ package pipeline
 import (
 	"context"
 	"sync"
-
-	"github.com/division-sh/swarm/internal/events"
 )
 
 const activityDispatcherSubscriberID = "workflow-activity-dispatcher"
@@ -33,14 +31,7 @@ func (n *activityBackgroundNode) Run(ctx context.Context) {
 	if n == nil || n.coordinator == nil || n.bus == nil {
 		return
 	}
-	var ch <-chan events.Event
-	if internal, ok := any(n.bus).(interface {
-		SubscribeInternal(string, ...events.EventType) <-chan events.Event
-	}); ok {
-		ch = internal.SubscribeInternal(activityDispatcherSubscriberID, activityRequestEventType)
-	} else {
-		ch = n.bus.Subscribe(activityDispatcherSubscriberID, activityRequestEventType)
-	}
+	ch := n.bus.SubscribeInternal(activityDispatcherSubscriberID, activityRequestEventType)
 	n.mu.Lock()
 	hooks := append([]func(){}, n.readyHooks...)
 	n.mu.Unlock()

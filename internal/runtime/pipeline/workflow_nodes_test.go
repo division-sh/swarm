@@ -253,7 +253,7 @@ func TestLoadWorkflowNodes_UsesEffectiveFactsForMinimizedSystemNode(t *testing.T
 	}
 }
 
-func TestLoadWorkflowNodes_UsesImportBoundaryInputAlias(t *testing.T) {
+func TestLoadWorkflowNodes_ImportInputBindingRequiresEffectiveConnect(t *testing.T) {
 	source := loadPipelineImportBoundaryAliasSource(t)
 	nodes, err := LoadWorkflowNodes(source)
 	if err != nil {
@@ -263,23 +263,20 @@ func TestLoadWorkflowNodes_UsesImportBoundaryInputAlias(t *testing.T) {
 	if worker == nil {
 		t.Fatalf("worker-node missing from %#v", nodes)
 	}
-	if !workflowNodeHasSubscriptionForTest(*worker, "parent.lead_captured") {
-		t.Fatalf("worker-node subscriptions = %#v, want parent.lead_captured", worker.Subscriptions)
+	if !workflowNodeHasSubscriptionForTest(*worker, "work.requested") {
+		t.Fatalf("worker-node subscriptions = %#v, want receiver-local work.requested", worker.Subscriptions)
 	}
-	if workflowNodeHasSubscriptionForTest(*worker, "work.requested") || workflowNodeHasSubscriptionForTest(*worker, "worker/work.requested") {
-		t.Fatalf("worker-node subscriptions = %#v, should not preserve raw required-import input fallback", worker.Subscriptions)
+	if workflowNodeHasSubscriptionForTest(*worker, "parent.lead_captured") {
+		t.Fatalf("worker-node subscriptions = %#v, bind must not add producer authority", worker.Subscriptions)
 	}
 	evt := eventtest.RootIngress("", "parent.lead_captured", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "worker-node", evt)
-	if !resolved.Matched {
-		t.Fatal("expected worker-node handler to resolve through input alias")
-	}
-	if got := resolved.HandlerEventKey; got != "work.requested" {
-		t.Fatalf("handler event key = %q, want work.requested", got)
+	if resolved.Matched {
+		t.Fatalf("bind-only producer event resolved handler: %#v", resolved)
 	}
 }
 
-func TestLoadWorkflowNodes_UsesImportBoundaryOutputAliasForParentHandler(t *testing.T) {
+func TestLoadWorkflowNodes_ImportOutputBindingRequiresEffectiveConnect(t *testing.T) {
 	source := loadPipelineImportBoundaryAliasSource(t)
 	nodes, err := LoadWorkflowNodes(source)
 	if err != nil {
@@ -289,20 +286,17 @@ func TestLoadWorkflowNodes_UsesImportBoundaryOutputAliasForParentHandler(t *test
 	if parent == nil {
 		t.Fatalf("parent-listener missing from %#v", nodes)
 	}
-	if !workflowNodeHasSubscriptionForTest(*parent, "worker/work.completed") {
-		t.Fatalf("parent-listener subscriptions = %#v, want worker/work.completed output alias", parent.Subscriptions)
+	if !workflowNodeHasSubscriptionForTest(*parent, "parent.lead_enriched") {
+		t.Fatalf("parent-listener subscriptions = %#v, want receiver-local parent.lead_enriched", parent.Subscriptions)
 	}
 	evt := eventtest.RootIngress("", "worker/work.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "parent-listener", evt)
-	if !resolved.Matched {
-		t.Fatal("expected parent-listener handler to resolve through output alias")
-	}
-	if got := resolved.HandlerEventKey; got != "parent.lead_enriched" {
-		t.Fatalf("handler event key = %q, want parent.lead_enriched", got)
+	if resolved.Matched {
+		t.Fatalf("bind-only child event resolved parent handler: %#v", resolved)
 	}
 }
 
-func TestLoadWorkflowNodes_UsesImportBoundaryOutputAliasForWildcardParentSubscription(t *testing.T) {
+func TestLoadWorkflowNodes_ImportOutputWildcardRequiresEffectiveConnect(t *testing.T) {
 	source := loadPipelineImportBoundaryAliasSourceWithParentSubscription(t, "parent.*")
 	nodes, err := LoadWorkflowNodes(source)
 	if err != nil {
@@ -312,16 +306,31 @@ func TestLoadWorkflowNodes_UsesImportBoundaryOutputAliasForWildcardParentSubscri
 	if parent == nil {
 		t.Fatalf("parent-listener missing from %#v", nodes)
 	}
-	if !workflowNodeHasSubscriptionForTest(*parent, "worker/work.completed") {
-		t.Fatalf("parent-listener subscriptions = %#v, want worker/work.completed output alias for wildcard parent subscription", parent.Subscriptions)
+	if workflowNodeHasSubscriptionForTest(*parent, "worker/work.completed") {
+		t.Fatalf("parent-listener subscriptions = %#v, bind must not authorize child output", parent.Subscriptions)
 	}
 	evt := eventtest.RootIngress("", "worker/work.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "parent-listener", evt)
-	if !resolved.Matched {
-		t.Fatal("expected parent-listener handler to resolve through output alias")
+	if resolved.Matched {
+		t.Fatalf("bind-only child event resolved wildcard parent handler: %#v", resolved)
 	}
-	if got := resolved.HandlerEventKey; got != "parent.lead_enriched" {
-		t.Fatalf("handler event key = %q, want parent.lead_enriched", got)
+}
+
+func TestWorkflowNodeHandlerResolution_ConnectConsumesImportBindings(t *testing.T) {
+	source := loadPipelineImportBoundaryConnectedSource(t)
+	for _, tc := range []struct {
+		nodeID    string
+		eventType events.EventType
+		wantKey   string
+	}{
+		{nodeID: "worker-node", eventType: "parent.lead_captured", wantKey: "work.requested"},
+		{nodeID: "parent-listener", eventType: "worker/work.completed", wantKey: "parent.lead_enriched"},
+	} {
+		evt := eventtest.RootIngress("", tc.eventType, "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+		resolved := workflowNodeEventHandlerResolutionForDelivery(source, tc.nodeID, evt)
+		if !resolved.Matched || resolved.HandlerEventKey != tc.wantKey {
+			t.Fatalf("handler resolution for %s = %#v, want %s", tc.eventType, resolved, tc.wantKey)
+		}
 	}
 }
 
@@ -441,7 +450,7 @@ func loadPipelineImportBoundaryAliasSource(t *testing.T) semanticview.Source {
 
 func loadPipelineImportBoundaryAliasSourceWithParentSubscription(t *testing.T, parentSubscription string) semanticview.Source {
 	t.Helper()
-	root := writePipelineImportBoundaryAliasFixture(t, parentSubscription)
+	root := writePipelineImportBoundaryAliasFixture(t, parentSubscription, false)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(contractComplianceRepoRoot(t), root, runtimecontracts.DefaultPlatformSpecFile(contractComplianceRepoRoot(t)))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
@@ -449,9 +458,42 @@ func loadPipelineImportBoundaryAliasSourceWithParentSubscription(t *testing.T, p
 	return semanticview.Wrap(bundle)
 }
 
-func writePipelineImportBoundaryAliasFixture(t *testing.T, parentSubscription string) string {
+func loadPipelineImportBoundaryConnectedSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	root := writePipelineImportBoundaryAliasFixture(t, "parent.lead_enriched", true)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(contractComplianceRepoRoot(t), root, runtimecontracts.DefaultPlatformSpecFile(contractComplianceRepoRoot(t)))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func writePipelineImportBoundaryAliasFixture(t *testing.T, parentSubscription string, connected bool) string {
 	t.Helper()
 	root := t.TempDir()
+	connect := ""
+	rootSchema := "name: pipeline-import-boundary-alias\n"
+	if connected {
+		connect = `
+connect:
+  - from: .lead_captured
+    to: worker.work_requested
+  - from: worker.work_completed
+    to: .lead_enriched
+`
+		rootSchema = `
+name: pipeline-import-boundary-alias
+pins:
+  inputs:
+    events:
+      - name: lead_enriched
+        event: parent.lead_enriched
+  outputs:
+    events:
+      - name: lead_captured
+        event: parent.lead_captured
+`
+	}
 	writePipelineFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: pipeline-import-boundary-alias
 version: "1.0.0"
@@ -465,8 +507,8 @@ flows:
         work.requested: parent.lead_captured
       outputs:
         work.completed: parent.lead_enriched
-`)
-	writePipelineFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: pipeline-import-boundary-alias\n")
+`+connect)
+	writePipelineFixtureFile(t, filepath.Join(root, "schema.yaml"), rootSchema)
 	writePipelineFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
 	writePipelineFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writePipelineFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
@@ -494,9 +536,13 @@ name: worker
 mode: static
 pins:
   inputs:
-    events: [work.requested]
+    events:
+      - name: work_requested
+        event: work.requested
   outputs:
-    events: [work.completed]
+    events:
+      - name: work_completed
+        event: work.completed
 `)
 	writePipelineFixtureFile(t, filepath.Join(root, "flows", "worker", "policy.yaml"), "{}\n")
 	writePipelineFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), "{}\n")

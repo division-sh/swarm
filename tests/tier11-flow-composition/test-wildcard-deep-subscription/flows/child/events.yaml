@@ -2,3 +2,4 @@ work.begin:
 work.finished:
 grandchild/task.start:
 grandchild/task.done:
+task.done:

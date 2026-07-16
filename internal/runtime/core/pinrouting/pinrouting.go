@@ -135,15 +135,7 @@ func ProducerRouteCommonPathFailure(source semanticview.Source, flowID, eventTyp
 }
 
 func compositionConnectsFromOutputEvent(source semanticview.Source, flowID, eventType string) bool {
-	if source == nil {
-		return false
-	}
-	for _, pin := range outputPinsForEvent(source, flowID, eventType) {
-		if len(source.CompositionConnectsFrom(flowID, pin.PinName())) > 0 {
-			return true
-		}
-	}
-	return false
+	return len(compositionConnectRoutePlansFromOutputEvent(source, flowID, eventType)) > 0
 }
 
 func compositionConnectsFromOutputEventToFlow(source semanticview.Source, flowID, eventType, targetFlowID string) bool {
@@ -157,15 +149,34 @@ func compositionConnectsFromOutputEventToFlow(source semanticview.Source, flowID
 	if _, ok := source.FlowScopeByID(targetFlowID); !ok {
 		return false
 	}
-	for _, pin := range outputPinsForEvent(source, flowID, eventType) {
-		for _, connect := range source.CompositionConnectsFrom(flowID, pin.PinName()) {
-			to, err := connect.ToRef()
-			if err == nil && strings.TrimSpace(to.FlowID) == targetFlowID {
-				return true
-			}
+	for _, plan := range compositionConnectRoutePlansFromOutputEvent(source, flowID, eventType) {
+		if strings.TrimSpace(plan.Receiver.FlowID) == targetFlowID {
+			return true
 		}
 	}
 	return false
+}
+
+func compositionConnectRoutePlansFromOutputEvent(source semanticview.Source, flowID, eventType string) []ConnectRoutePlan {
+	if source == nil {
+		return nil
+	}
+	flowID = strings.TrimSpace(flowID)
+	eventType = eventidentity.Normalize(eventType)
+	if eventType == "" {
+		return nil
+	}
+	plans, _ := LowerCompositionConnectRoutePlans(source)
+	out := make([]ConnectRoutePlan, 0)
+	for _, plan := range plans {
+		if strings.TrimSpace(plan.Source.FlowID) != flowID {
+			continue
+		}
+		if eventReferencesOverlap(source, flowID, []string{eventType}, flowID, []string{plan.Source.Event, plan.Source.ResolvedEvent}) {
+			out = append(out, plan)
+		}
+	}
+	return out
 }
 
 func outputPinsForEvent(source semanticview.Source, flowID, eventType string) []runtimecontracts.FlowOutputEventPin {
@@ -316,9 +327,20 @@ func ResolveEnvelope(input ResolutionInput, envelope events.EventEnvelope) Resol
 	if failure := ProducerRouteCommonPathFailure(input.Source, input.FlowID, input.EventType, input.Emit); failure != "" {
 		return Resolution{Envelope: envelope.Normalized(), Failure: failure}
 	}
-	if compositionConnectsFromOutputEvent(input.Source, input.FlowID, input.EventType) {
+	connectPlans := compositionConnectRoutePlansFromOutputEvent(input.Source, input.FlowID, input.EventType)
+	if len(connectPlans) > 0 {
 		if failure := ValidateTargetSpec(input.Source, input.FlowID, input.Emit, true); failure != "" {
 			return Resolution{Envelope: envelope.Normalized(), Failure: failure}
+		}
+		if connectPlansContainRootReceiver(connectPlans) {
+			parentRoute := input.ParentRoute.Normalized()
+			if parentRoute.EntityID == "" {
+				return Resolution{Envelope: envelope.Normalized(), Failure: FailureParentRouteIncomplete}
+			}
+			return Resolution{
+				Envelope: events.EnvelopeForTargetRoute(envelope, parentRoute),
+				Target:   parentRoute,
+			}
 		}
 		return Resolution{Envelope: envelope.Normalized()}
 	}
@@ -372,6 +394,15 @@ func ResolveEnvelope(input ResolutionInput, envelope events.EventEnvelope) Resol
 	default:
 		return Resolution{Envelope: envelope.Normalized(), Failure: FailureTargetMalformed}
 	}
+}
+
+func connectPlansContainRootReceiver(plans []ConnectRoutePlan) bool {
+	for _, plan := range plans {
+		if plan.Receiver.Root {
+			return true
+		}
+	}
+	return false
 }
 
 func TargetMechanismPresent(spec runtimecontracts.EmitSpec, structuralParentRouteEligible bool) bool {

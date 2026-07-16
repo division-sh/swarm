@@ -354,12 +354,7 @@ func (pc *PipelineCoordinator) interceptPolicy(ctx context.Context, eventType st
 
 func (pc *PipelineCoordinator) subscribe() <-chan events.Event {
 	subscriptions := workflowRuntimeSubscriptions(pc.WorkflowNodes())
-	if internalBus, ok := any(pc.bus).(interface {
-		SubscribeInternal(string, ...events.EventType) <-chan events.Event
-	}); ok {
-		return internalBus.SubscribeInternal(runtimeWorkflowID, subscriptions...)
-	}
-	return pc.bus.Subscribe(runtimeWorkflowID, subscriptions...)
+	return pc.bus.SubscribeInternal(runtimeWorkflowID, subscriptions...)
 }
 
 func (pc *PipelineCoordinator) handleEvent(ctx context.Context, evt events.Event) bool {

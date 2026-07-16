@@ -10,10 +10,10 @@ dispatcher:
 listener:
   id: listener
   execution_type: system_node
-  subscribes_to: [child/task.done]
+  subscribes_to: [task.done]
   produces: [work.finished]
   event_handlers:
-    child/task.done:
+    task.done:
       advances_to: done
       emit:
         event: work.finished

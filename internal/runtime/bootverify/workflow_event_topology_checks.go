@@ -50,7 +50,6 @@ func (c *checkerContext) eventWarnings() []Finding {
 	c.eventWarningLoaded = true
 	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
 	topology := routingtopology.Build(c.source)
-	stagedBundle := bundleUsesAuthoredStages(c.source)
 	rejectedProducers := map[string]struct{}{}
 	for _, issue := range topology.Issues {
 		if strings.TrimSpace(issue.Failure) != semanticview.TypedPubSubFailureAuthorizationAmbiguous {
@@ -75,22 +74,12 @@ func (c *checkerContext) eventWarnings() []Finding {
 			rejectedProducers[producerID] = struct{}{}
 		}
 	}
-	for _, subscription := range topology.LegacyQualifiedSubscriptions {
-		message := fmt.Sprintf("legacy qualified subscription '%s' at %s still delivers at runtime but is outside canonical same-flow pub/sub and pin/connect topology; migrate to pins/connect", subscription.Consumer.Event.Authored, subscription.AuthoredLocation)
-		remediation := subscription.Migration
-		evidence := []string{fmt.Sprintf("legacy qualified subscription %q at %q", subscription.Consumer.Event.Authored, subscription.AuthoredLocation)}
-		if stagedBundle {
-			c.eventWarningFindings = append(c.eventWarningFindings, NewHardInvalidityFinding("legacy_qualified_subscription", subscription.AuthoredLocation, message, remediation, evidence...))
-		} else {
-			c.eventWarningFindings = append(c.eventWarningFindings, Finding{
-				CheckID:     "legacy_qualified_subscription",
-				Severity:    SeveritySemanticDriftWarn,
-				Message:     message,
-				Location:    subscription.AuthoredLocation,
-				Remediation: remediation,
-				Evidence:    evidence,
-			})
-		}
+	for _, subscription := range census.LegacyQualifiedSubscriptions() {
+		location := legacyQualifiedSubscriptionLocation(subscription)
+		message := fmt.Sprintf("qualified subscription '%s' at %s crosses a flow boundary and cannot create an inter-flow route", subscription.Consumer.Event.Authored, location)
+		remediation := "Declare output/input pins and package.yaml connect for the boundary edge, then subscribe to the receiver-local input event. Exact qualified subscriptions cannot replace connect."
+		evidence := []string{fmt.Sprintf("retired qualified subscription %q at %q", subscription.Consumer.Event.Authored, location)}
+		c.eventWarningFindings = append(c.eventWarningFindings, NewHardInvalidityFinding("legacy_qualified_subscription", location, message, remediation, evidence...))
 	}
 	emitted := topologyWarningEndpoints(census.Producers(), true)
 	subscribed := topologyWarningEndpoints(append(census.Consumers(), census.InputPins()...), false)
@@ -121,26 +110,15 @@ func (c *checkerContext) eventWarnings() []Finding {
 		if topologyRoutesProducer(topology, entry.ID) || eventHasExternalConsumerLocal(ref.Entry) {
 			continue
 		}
-		if legacy := legacyQualifiedConsumersForEvent(topology, ref.Canonical); len(legacy) > 0 {
-			location := legacy[0].AuthoredLocation
-			message := fmt.Sprintf("'%s' has no canonical consumer (same-flow subscriber or connected pin); legacy qualified subscription '%s' at %s still delivers at runtime; migrate to pins/connect", ref.Canonical, legacy[0].Consumer.Event.Authored, location)
+		if legacy := legacyQualifiedConsumersForEvent(census, ref.Canonical); len(legacy) > 0 {
+			location := legacyQualifiedSubscriptionLocation(legacy[0])
+			message := fmt.Sprintf("'%s' has no canonical consumer (same-flow subscriber or connected pin); retired qualified subscription '%s' at %s cannot provide delivery authority", ref.Canonical, legacy[0].Consumer.Event.Authored, location)
 			remediation := fmt.Sprintf("Declare output/input pins and a connect for %s, then replace every legacy qualified subscription with a flow-local subscription.", ref.Canonical)
 			evidence := make([]string, 0, len(legacy))
 			for _, subscription := range legacy {
-				evidence = append(evidence, fmt.Sprintf("legacy qualified subscription %q at %q", subscription.Consumer.Event.Authored, subscription.AuthoredLocation))
+				evidence = append(evidence, fmt.Sprintf("retired qualified subscription %q at %q", subscription.Consumer.Event.Authored, legacyQualifiedSubscriptionLocation(subscription)))
 			}
-			if stagedBundle {
-				c.eventWarningFindings = append(c.eventWarningFindings, NewHardInvalidityFinding("event_consumer_exists", ref.Canonical, message, remediation, evidence...))
-			} else {
-				c.eventWarningFindings = append(c.eventWarningFindings, Finding{
-					CheckID:     "event_consumer_exists",
-					Severity:    SeveritySemanticDriftWarn,
-					Message:     message,
-					Location:    ref.Canonical,
-					Remediation: remediation,
-					Evidence:    evidence,
-				})
-			}
+			c.eventWarningFindings = append(c.eventWarningFindings, NewHardInvalidityFinding("event_consumer_exists", ref.Canonical, message, remediation, evidence...))
 			continue
 		}
 		c.eventWarningFindings = append(c.eventWarningFindings, Finding{
@@ -208,15 +186,26 @@ func generatedActivityResultEventNamesLocal(source semanticview.Source) map[stri
 	return out
 }
 
-func legacyQualifiedConsumersForEvent(topology routingtopology.Topology, canonical string) []routingtopology.LegacyQualifiedSubscription {
+func legacyQualifiedConsumersForEvent(census semanticview.AuthoredEventEndpointCensus, canonical string) []semanticview.LegacyQualifiedSubscription {
 	canonical = strings.TrimSpace(canonical)
-	out := make([]routingtopology.LegacyQualifiedSubscription, 0)
-	for _, subscription := range topology.LegacyQualifiedSubscriptions {
+	out := make([]semanticview.LegacyQualifiedSubscription, 0)
+	for _, subscription := range census.LegacyQualifiedSubscriptions() {
 		if strings.TrimSpace(subscription.Event.Canonical) == canonical {
 			out = append(out, subscription)
 		}
 	}
 	return out
+}
+
+func legacyQualifiedSubscriptionLocation(subscription semanticview.LegacyQualifiedSubscription) string {
+	file := strings.TrimSpace(subscription.Consumer.SourceFile)
+	if file != "" && subscription.Consumer.SourceLine > 0 {
+		return fmt.Sprintf("%s:%d", file, subscription.Consumer.SourceLine)
+	}
+	if file != "" {
+		return file
+	}
+	return strings.TrimSpace(subscription.Consumer.SourceLocation)
 }
 
 func topologyWarningEndpoints(endpoints []semanticview.AuthoredEventEndpoint, producers bool) map[string]semanticview.AuthoredEventEndpoint {

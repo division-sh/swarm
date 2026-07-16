@@ -1,12 +1,12 @@
 dispatcher:
   id: dispatcher
   execution_type: system_node
-  subscribes_to: [task.requested, child/task.result]
+  subscribes_to: [task.requested, task.result]
   produces: [task.completed, child/task.assigned]
   event_handlers:
     task.requested:
       emit: child/task.assigned
-    child/task.result:
+    task.result:
       advances_to: done
       emit:
         event: task.completed

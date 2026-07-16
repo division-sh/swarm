@@ -513,18 +513,6 @@ func writeRoutingTopologyText(out io.Writer, topology routingtopology.Topology) 
 			fmt.Fprintf(out, "    - %s: %s -> output %s.%s\n", exposure.Event.Canonical, routingEndpointText(exposure.Producer), routingFlowLabel(exposure.Output.FlowID), exposure.Output.PinName)
 		}
 	}
-	if len(topology.LegacyQualifiedSubscriptions) > 0 {
-		fmt.Fprintln(out, "  legacy qualified subscriptions:")
-		for _, subscription := range topology.LegacyQualifiedSubscriptions {
-			fmt.Fprintf(out, "    - disposition=%s event=%s consumer=%s at %s\n", formatCLIHumanCode(cliHumanCodeRoutingTopology, subscription.Disposition), subscription.Event.Canonical, routingEndpointText(subscription.Consumer), subscription.AuthoredLocation)
-			fmt.Fprintf(out, "      runtime delivery=%t canonical edge=%t", subscription.RuntimeDelivery, subscription.CanonicalEdge)
-			if subscription.FindingID != "" {
-				fmt.Fprintf(out, " finding=%s", subscription.FindingID)
-			}
-			fmt.Fprintln(out)
-			fmt.Fprintf(out, "      migration: %s\n", subscription.Migration)
-		}
-	}
 	if len(topology.Issues) > 0 {
 		fmt.Fprintln(out, "  route issues:")
 		for _, issue := range topology.Issues {

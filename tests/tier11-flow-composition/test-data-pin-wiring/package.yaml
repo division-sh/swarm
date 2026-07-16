@@ -6,3 +6,6 @@ flows:
 - id: processor
   flow: processor
   mode: static
+connect:
+  - from: processor.process_done
+    to: .process_done

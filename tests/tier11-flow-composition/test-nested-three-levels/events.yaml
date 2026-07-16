@@ -2,3 +2,5 @@ pipeline.start:
 pipeline.complete:
 child/step.begin:
 child/grandchild/micro.done:
+step.begin:
+micro.done:

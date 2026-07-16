@@ -8,16 +8,16 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
-func TestImportBoundaryPinAliasesResolveInputAndOutputBindings(t *testing.T) {
+func TestImportBoundaryPinAliasesDescribeBindingsWithoutCreatingInputProducerAuthority(t *testing.T) {
 	source := loadImportBoundaryAliasFixture(t, importBoundaryAliasFixtureOptions{})
 
 	resolution := source.ResolveFlowInputAutoWire("worker", "work.requested")
-	if got, want := resolution.Patterns, []string{"parent.lead_captured"}; len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("ResolveFlowInputAutoWire patterns = %#v, want %#v", got, want)
+	if len(resolution.Patterns) != 0 {
+		t.Fatalf("ResolveFlowInputAutoWire patterns = %#v, want no bind-only route", resolution.Patterns)
 	}
 	proof := runtimecontracts.FlowInputProducerResolution{Evidence: resolution.Evidence}
-	if !proof.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
-		t.Fatalf("ResolveFlowInputAutoWire evidence = %#v, want parent connect", resolution.Evidence)
+	if proof.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
+		t.Fatalf("ResolveFlowInputAutoWire evidence = %#v, bind must not impersonate parent connect", resolution.Evidence)
 	}
 	if !ImportBoundaryInputAliasRequired(source, "worker", "work.requested") {
 		t.Fatal("expected work.requested to require import-boundary input alias")
@@ -48,14 +48,14 @@ func TestImportBoundaryPinAliasesResolveInputAndOutputBindings(t *testing.T) {
 	}
 }
 
-func TestImportBoundaryInputAliasRequiredDoesNotRawFallbackToSameNameProducer(t *testing.T) {
+func TestImportBoundaryInputAliasDoesNotRouteSameNameProducerWithoutConnect(t *testing.T) {
 	source := loadImportBoundaryAliasFixture(t, importBoundaryAliasFixtureOptions{
 		producerOutput: "work.requested",
 	})
 
 	resolution := source.ResolveFlowInputAutoWire("worker", "work.requested")
-	if got, want := resolution.Patterns, []string{"parent.lead_captured"}; len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("ResolveFlowInputAutoWire patterns = %#v, want only explicit bind %#v", got, want)
+	if len(resolution.Patterns) != 0 {
+		t.Fatalf("ResolveFlowInputAutoWire patterns = %#v, want no bind-only or same-name route", resolution.Patterns)
 	}
 }
 

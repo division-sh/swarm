@@ -258,7 +258,7 @@ func TestDescribeRoutesHumanRendersTypedConnectIssueWithExactSource(t *testing.T
 	}
 }
 
-func TestDescribeRoutesRendersFindingLinkedLegacyQualifiedSubscriptions(t *testing.T) {
+func TestDescribeRoutesRendersCanonicalRootConnectWithoutLegacyDebt(t *testing.T) {
 	contractsRoot := filepath.Join(RepoRoot(), "tests", "tier11-flow-composition", "test-child-flow-absolute-path")
 	var jsonOut, jsonErr bytes.Buffer
 	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot, "--json"}, &jsonOut, &jsonErr, defaultRootCommandOptions()); code != 0 {
@@ -268,31 +268,27 @@ func TestDescribeRoutesRendersFindingLinkedLegacyQualifiedSubscriptions(t *testi
 	if err := json.Unmarshal(jsonOut.Bytes(), &topology); err != nil {
 		t.Fatalf("decode routes topology: %v", err)
 	}
-	if len(topology.LegacyQualifiedSubscriptions) != 1 {
-		t.Fatalf("legacy subscriptions = %#v, want one", topology.LegacyQualifiedSubscriptions)
-	}
-	legacy := topology.LegacyQualifiedSubscriptions[0]
-	if legacy.FindingID == "" || legacy.CanonicalEdge || !legacy.RuntimeDelivery {
-		t.Fatalf("legacy subscription = %#v, want finding-linked non-edge runtime debt", legacy)
-	}
-	linked := false
-	for _, issue := range topology.Issues {
-		if issue.ID == legacy.FindingID && issue.CheckID == "legacy_qualified_subscription" {
-			linked = true
+	foundConnect := false
+	for _, edge := range topology.Edges {
+		if edge.Scope == routingtopology.DeliveryScopeInterFlowConnect && edge.Boundary != nil && edge.Boundary.To == ".task_done" {
+			foundConnect = true
 		}
 	}
-	if !linked {
-		t.Fatalf("legacy finding %q not present in issues: %#v", legacy.FindingID, topology.Issues)
+	if !foundConnect {
+		t.Fatalf("topology edges = %#v, want canonical root connect", topology.Edges)
 	}
 
 	var humanOut, humanErr bytes.Buffer
 	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("describe routes code=%d stderr=%s", code, humanErr.String())
 	}
-	for _, want := range []string{"legacy qualified subscriptions:", "disposition=legacy_qualified_subscription", "runtime delivery=true canonical edge=false", "finding="} {
+	for _, want := range []string{"[inter_flow_connect]", "connect: child.task_done -> .task_done"} {
 		if !strings.Contains(humanOut.String(), want) {
 			t.Fatalf("human routes missing %q:\n%s", want, humanOut.String())
 		}
+	}
+	if strings.Contains(humanOut.String(), "legacy qualified subscriptions:") {
+		t.Fatalf("human routes retained legacy debt projection:\n%s", humanOut.String())
 	}
 }
 

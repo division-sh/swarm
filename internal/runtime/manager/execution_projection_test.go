@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type projectionTestRoute struct {
@@ -54,9 +56,14 @@ func (*projectionTestBus) ResetInMemoryState() error      { return nil }
 func (*projectionTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error {
 	return nil
 }
-func (b *projectionTestBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToken, subscriptions ...events.EventType) <-chan events.Event {
+func (b *projectionTestBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan events.Event {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	patterns := admission.RoutePatterns()
+	subscriptions := make([]events.EventType, 0, len(patterns))
+	for _, pattern := range patterns {
+		subscriptions = append(subscriptions, events.EventType(pattern))
+	}
 	route := projectionTestRoute{
 		token: token, channel: make(chan events.Event, 128),
 		subscriptions: append([]events.EventType(nil), subscriptions...),
@@ -168,7 +175,7 @@ func TestExecutionProjectionReconfigureSerializesRestartSelection(t *testing.T) 
 	factory := &projectionTestFactory{secondStarted: make(chan struct{}), releaseSecond: releaseBuild, handled: handled}
 	am := NewAgentManager(bus, factory.Build)
 	const agentID = "projection-restart"
-	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID}); err != nil {
+	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID, Subscriptions: []string{"test.old"}}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
@@ -177,7 +184,7 @@ func TestExecutionProjectionReconfigureSerializesRestartSelection(t *testing.T) 
 
 	reconfigureDone := make(chan error, 1)
 	go func() {
-		reconfigureDone <- am.ReconfigureAgent(agentID, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}})
+		reconfigureDone <- am.ReconfigureAgent(agentID, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}})
 	}()
 	<-factory.secondStarted
 	restartDone := make(chan error, 1)
@@ -231,12 +238,12 @@ func TestExecutionProjectionReconfigureSerializesBothRunModes(t *testing.T) {
 			factory := &projectionTestFactory{secondStarted: make(chan struct{}), releaseSecond: releaseBuild, handled: handled}
 			am := NewAgentManager(bus, factory.Build)
 			const agentID = "projection-run"
-			if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID}); err != nil {
+			if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID, Subscriptions: []string{"test.old"}}); err != nil {
 				t.Fatalf("SpawnAgent: %v", err)
 			}
 			reconfigureDone := make(chan error, 1)
 			go func() {
-				reconfigureDone <- am.ReconfigureAgent(agentID, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}})
+				reconfigureDone <- am.ReconfigureAgent(agentID, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}})
 			}()
 			<-factory.secondStarted
 			runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
@@ -268,6 +275,79 @@ func TestExecutionProjectionReconfigureSerializesBothRunModes(t *testing.T) {
 	}
 }
 
+func TestSelectedForkEphemeralRegistrationInstallsCarrierOnlyRoute(t *testing.T) {
+	bus := newProjectionTestBus()
+	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+		return &projectionTestAgent{id: cfg.ID, subs: []events.EventType{"foreign/task.ready"}, handled: make(chan int, 1)}, nil
+	})
+	const agentID = "selected-fork-agent"
+	if err := am.RegisterEphemeralAgentForExecution(context.Background(), PersistedAgent{Config: models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            agentID,
+		FlowPath:      "review/inst-1",
+		Subscriptions: []string{"task.ready", "task.*"},
+	}}); err != nil {
+		t.Fatalf("RegisterEphemeralAgentForExecution: %v", err)
+	}
+
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	am.RunAuthoritativeDeliveryOnly(runCtx)
+	route, ok := bus.current(agentID)
+	if !ok {
+		t.Fatal("selected-fork execution did not install its typed carrier")
+	}
+	if len(route.subscriptions) != 0 {
+		t.Fatalf("selected-fork carrier subscriptions = %#v, want none", route.subscriptions)
+	}
+	execution, ok := am.lifecycle.executionSnapshot(agentID)
+	if !ok {
+		t.Fatal("selected-fork execution projection missing")
+	}
+	want := []events.EventType{"review/inst-1/task.*", "review/inst-1/task.ready"}
+	if !reflect.DeepEqual(execution.Subscriptions, want) {
+		t.Fatalf("selected-fork admitted subscriptions = %#v, want %#v", execution.Subscriptions, want)
+	}
+}
+
+func TestEphemeralCloneConsumesAdmittedBaseSubscriptions(t *testing.T) {
+	bus := newProjectionTestBus()
+	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+		return &projectionTestAgent{id: cfg.ID, handled: make(chan int, 1)}, nil
+	})
+	if err := am.SpawnAgent(models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "base-agent",
+		FlowPath:      "review/inst-1",
+		Subscriptions: []string{"task.ready", "task.*"},
+	}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	if err := am.SpawnEphemeralClone("base-agent", "clone-agent"); err != nil {
+		t.Fatalf("SpawnEphemeralClone: %v", err)
+	}
+
+	base, baseOK := am.lifecycle.executionSnapshot("base-agent")
+	clone, cloneOK := am.lifecycle.executionSnapshot("clone-agent")
+	if !baseOK || !cloneOK {
+		t.Fatalf("execution snapshots: base=%v clone=%v", baseOK, cloneOK)
+	}
+	if !reflect.DeepEqual(clone.Subscriptions, base.Subscriptions) || clone.Admission.FlowPath() != base.Admission.FlowPath() {
+		t.Fatalf("clone admission = %#v/%q, want base %#v/%q", clone.Subscriptions, clone.Admission.FlowPath(), base.Subscriptions, base.Admission.FlowPath())
+	}
+
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	am.Run(runCtx)
+	route, ok := bus.current("clone-agent")
+	if !ok {
+		t.Fatal("clone route missing")
+	}
+	if !reflect.DeepEqual(route.subscriptions, base.Subscriptions) {
+		t.Fatalf("clone route subscriptions = %#v, want admitted base %#v", route.subscriptions, base.Subscriptions)
+	}
+}
+
 func TestExecutionProjectionDirectiveLeaseFencesReplacement(t *testing.T) {
 	bus := newProjectionTestBus()
 	bus.store = &directiveEventStore{}
@@ -284,7 +364,7 @@ func TestExecutionProjectionDirectiveLeaseFencesReplacement(t *testing.T) {
 	targetStore := &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{RunID: "00000000-0000-0000-0000-000000009901", Mode: runtimeagentcontrol.RunResolutionSpecified}}
 	am := NewAgentManager(bus, factory, targetStore)
 	const agentID = "projection-directive"
-	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID}); err != nil {
+	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID, Subscriptions: []string{"test.old"}}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
@@ -307,7 +387,7 @@ func TestExecutionProjectionDirectiveLeaseFencesReplacement(t *testing.T) {
 	}
 	reconfigureDone := make(chan error, 1)
 	go func() {
-		reconfigureDone <- am.ReconfigureAgent(agentID, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}})
+		reconfigureDone <- am.ReconfigureAgent(agentID, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}})
 	}()
 	select {
 	case <-runCtx.Done():
@@ -336,7 +416,7 @@ func TestExecutionProjectionRunCancellationRemovesExactRoute(t *testing.T) {
 	factory := &projectionTestFactory{handled: make(chan int, 1)}
 	am := NewAgentManager(bus, factory.Build)
 	const agentID = "projection-shutdown"
-	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID}); err != nil {
+	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID, Subscriptions: []string{"test.old"}}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
@@ -375,7 +455,7 @@ func TestExecutionProjectionTeardownRemovesExactRoute(t *testing.T) {
 	factory := &projectionTestFactory{handled: make(chan int, 1)}
 	am := NewAgentManager(bus, factory.Build)
 	const agentID = "projection-teardown"
-	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID}); err != nil {
+	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID, Subscriptions: []string{"test.old"}}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
@@ -413,7 +493,7 @@ func TestExecutionProjectionNaturalLoopExitRemovesExactRoute(t *testing.T) {
 	factory := &projectionTestFactory{handled: make(chan int, 1)}
 	am := NewAgentManager(bus, factory.Build)
 	const agentID = "projection-self-release"
-	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID}); err != nil {
+	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID, Subscriptions: []string{"test.old"}}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
@@ -474,7 +554,7 @@ func TestExecutionProjectionBacklogLeaseFencesReplacement(t *testing.T) {
 		}, nil
 	}
 	am := NewAgentManager(bus, factory, store)
-	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: models.AgentConfig{ExecutionMode: "live", ID: agentID}}, false); err != nil {
+	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: models.AgentConfig{ExecutionMode: "live", ID: agentID, Subscriptions: []string{"test.backlog"}}}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 	predecessor, ok := am.lifecycle.executionSnapshot(agentID)
@@ -488,7 +568,7 @@ func TestExecutionProjectionBacklogLeaseFencesReplacement(t *testing.T) {
 	}
 	reconfigureDone := make(chan error, 1)
 	go func() {
-		reconfigureDone <- am.ReconfigureAgent(agentID, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}})
+		reconfigureDone <- am.ReconfigureAgent(agentID, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.backlog"}})
 	}()
 	select {
 	case err := <-reconfigureDone:
@@ -515,7 +595,7 @@ func TestExecutionProjectionRecoveryStartsPersistedRunningCell(t *testing.T) {
 	am := NewAgentManager(bus, factory.Build)
 	const agentID = "projection-recovery"
 	rec := PersistedAgent{
-		Config: models.AgentConfig{ExecutionMode: "live", ID: agentID}, LifecycleEpoch: runtimebus.CurrentRuntimeEpoch(),
+		Config: models.AgentConfig{ExecutionMode: "live", ID: agentID, Subscriptions: []string{"test.old"}}, LifecycleEpoch: runtimebus.CurrentRuntimeEpoch(),
 		LifecycleGeneration: 4, LifecyclePhase: AgentLifecycleRunning, LifecycleRunMode: AgentRunModeStandard,
 	}
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), rec, false); err != nil {
@@ -554,7 +634,7 @@ func TestExecutionProjectionSpawnDuringRunActivatesRegisteredProjection(t *testi
 	defer cancelRun()
 	am.Run(managedExecutionTestContext(t, runCtx))
 	const agentID = "projection-flow-activation"
-	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID}); err != nil {
+	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID, Subscriptions: []string{"test.old"}}); err != nil {
 		t.Fatalf("SpawnAgent while running: %v", err)
 	}
 	route, live := bus.current(agentID)

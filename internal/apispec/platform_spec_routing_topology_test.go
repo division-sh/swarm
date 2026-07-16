@@ -61,7 +61,10 @@ func TestPlatformSpecPromotesVersionedRoutingTopologyArtifact(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, routing, "typed_pubsub_rule"), "low-level event.publish")
 	assertScalarContains(t, mustMappingValue(t, routing, "connect_source_rule"), "exact authored package.yaml file:line")
 	assertScalarContains(t, mustMappingValue(t, routing, "connect_source_rule"), "connect_source_location_missing")
-	assertScalarContains(t, mustMappingValue(t, routing, "legacy_qualified_subscription_rule"), "any root or child flow authors stages")
+	qualifiedRetirement := mustMappingValue(t, routing, "qualified_cross_flow_subscription_retirement")
+	assertScalarContains(t, qualifiedRetirement, "hard invalidity")
+	assertScalarContains(t, qualifiedRetirement, "never creates a route")
+	assertScalarContains(t, qualifiedRetirement, "parent connect")
 	deliveryScopes := mustMappingValue(t, routing, "delivery_scopes")
 	if deliveryScopes.Kind != yaml.SequenceNode || len(deliveryScopes.Content) != 2 {
 		t.Fatalf("delivery_scopes = %#v, want exactly two scopes for delivery between authored producers and consumers", deliveryScopes)

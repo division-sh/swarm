@@ -19,7 +19,7 @@ type systemNodeCompletionBus struct {
 	converged []string
 }
 
-func (*systemNodeCompletionBus) Subscribe(string, ...events.EventType) <-chan events.Event {
+func (*systemNodeCompletionBus) SubscribeInternal(string, ...events.EventType) <-chan events.Event {
 	return make(chan events.Event)
 }
 

@@ -79,7 +79,7 @@ func (b *recordingPipelineBus) PublishInMutation(ctx context.Context, evt events
 	return nil
 }
 
-func (*recordingPipelineBus) Subscribe(string, ...events.EventType) <-chan events.Event {
+func (*recordingPipelineBus) SubscribeInternal(string, ...events.EventType) <-chan events.Event {
 	return make(chan events.Event)
 }
 

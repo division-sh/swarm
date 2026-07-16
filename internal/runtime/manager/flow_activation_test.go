@@ -1413,7 +1413,7 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 		EntityID:      req.Instance.EntityID,
 		FlowPath:      "review/other-inst",
 	}
-	if err := am.lifecycle.registerExecution(ctx, PersistedAgent{Config: sharedConfig, Status: "active", HiredBy: "test"}, false, sharedAgent); err != nil {
+	if err := am.lifecycle.registerExecution(ctx, PersistedAgent{Config: sharedConfig, Status: "active", HiredBy: "test"}, false, sharedAgent, testManagerSubscriptionAdmission(t, sharedConfig)); err != nil {
 		t.Fatalf("register shared-subject-agent: %v", err)
 	}
 
@@ -1978,6 +1978,21 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 	}
 	if !cfg.NativeTools.Bash || !cfg.NativeTools.FileIO {
 		t.Fatalf("native_tools = %#v, want bash/file_io true", cfg.NativeTools)
+	}
+}
+
+func TestStaticAndDynamicFlowAgentConfigRejectForeignExactAndPattern(t *testing.T) {
+	source := semanticview.Wrap(testFlowBundle(""))
+	for _, subscription := range []string{"foreign/task.ready", "foreign/**/task.ready"} {
+		t.Run(strings.ReplaceAll(subscription, "/", "_"), func(t *testing.T) {
+			entry := runtimecontracts.AgentRegistryEntry{ID: "reviewer", Type: "generic", Subscriptions: []string{subscription}}
+			if _, err := buildStaticFlowAgentConfig(source, "review", "review", "reviewer", entry, map[string]struct{}{"task.started": {}}); err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
+				t.Fatalf("buildStaticFlowAgentConfig error = %v, want admission rejection", err)
+			}
+			if _, err := buildFlowAgentConfig(source, "review", "inst-1", "ent-1", "review/inst-1", "reviewer", entry, nil, map[string]struct{}{"task.started": {}}, nil); err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
+				t.Fatalf("buildFlowAgentConfig error = %v, want admission rejection", err)
+			}
+		})
 	}
 }
 

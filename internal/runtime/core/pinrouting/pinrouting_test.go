@@ -2,6 +2,7 @@ package pinrouting
 
 import (
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -9,7 +10,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"time"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestResolveTargetsCompleteParentRouteForPinDeclaredOutput(t *testing.T) {
@@ -295,6 +296,69 @@ func TestResolveAllowsParentConnectToOwnPinDeclaredOutput(t *testing.T) {
 	}
 }
 
+func TestResolveAllowsNestedPackageRootConnectToOwnPinDeclaredOutput(t *testing.T) {
+	source := testNestedPackageConnectSource(t)
+
+	result := Resolve(ResolutionInput{
+		Source:    source,
+		FlowID:    "child",
+		EventType: "micro.start",
+	}, eventtest.RootIngress("", "micro.start", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+
+	if result.Failure != "" {
+		t.Fatalf("Failure = %q, want nested package connect authority", result.Failure)
+	}
+	if got := result.Event.TargetRoute(); !got.Empty() {
+		t.Fatalf("Event target = %#v, want EventBus ConnectRoutePlan authority", got)
+	}
+}
+
+func TestResolveRootReceiverConnectCarriesCompleteParentRoute(t *testing.T) {
+	parent := events.RouteIdentity{
+		EntityID: "11111111-1111-1111-1111-111111111111",
+	}
+	result := Resolve(ResolutionInput{
+		Source:      testNestedPackageConnectSource(t),
+		FlowID:      "child",
+		EventType:   "micro.relayed",
+		ParentRoute: parent,
+	}, eventtest.RootIngress("", "micro.relayed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+
+	if result.Failure != "" {
+		t.Fatalf("Failure = %q, want complete parent route", result.Failure)
+	}
+	if got := result.Event.TargetRoute(); got != parent {
+		t.Fatalf("Event target = %#v, want parent %#v", got, parent)
+	}
+}
+
+func TestResolveRootReceiverConnectRejectsMissingParentRoute(t *testing.T) {
+	result := Resolve(ResolutionInput{
+		Source:    testNestedPackageConnectSource(t),
+		FlowID:    "child",
+		EventType: "micro.relayed",
+	}, eventtest.RootIngress("", "micro.relayed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+
+	if result.Failure != FailureParentRouteIncomplete {
+		t.Fatalf("Failure = %q, want %q", result.Failure, FailureParentRouteIncomplete)
+	}
+}
+
+func testNestedPackageConnectSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	repoRoot := canonicalrouting.RepoRoot(t)
+	fixtureRoot := repoRoot + "/tests/tier11-flow-composition/test-nested-three-levels"
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		fixtureRoot,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func TestResolveFailsClosedForUnknownProducerTargetFlowEvenWithParentConnect(t *testing.T) {
 	result := Resolve(ResolutionInput{
 		Source:    testProducerConnectSource(),
@@ -554,6 +618,10 @@ func testProducerRouteSource(connects []runtimecontracts.FlowPackageConnect) sem
 }
 
 func testProducerRouteSourceWithEvents(outputEvent, inputEvent string, connects []runtimecontracts.FlowPackageConnect) semanticview.Source {
+	for i := range connects {
+		connects[i].SourceFile = "package.yaml"
+		connects[i].SourceLine = i + 1
+	}
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{
 			ID:   "producer",
@@ -707,8 +775,10 @@ func testRootConnectPinRoutingSource() semanticview.Source {
 				"consumer": {{Name: "ready", Event: "root.ready"}},
 			},
 			CompositionConnects: []runtimecontracts.FlowPackageConnect{{
-				From: ".root_ready",
-				To:   "consumer.ready",
+				From:       ".root_ready",
+				To:         "consumer.ready",
+				SourceFile: "package.yaml",
+				SourceLine: 1,
 			}},
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{

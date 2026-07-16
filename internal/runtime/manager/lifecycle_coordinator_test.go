@@ -289,7 +289,7 @@ func TestLifecycleCoordinatorRecoveredGenerationZeroAdvancesFromDurableValue(t *
 	rec.LifecycleGeneration = 0
 	rec.LifecyclePhase = AgentLifecycleRegistered
 	rec.LifecycleRunMode = AgentRunModeStopped
-	if err := coordinator.registerExecution(testAuthorActivityContext(context.Background()), rec, false, reconfigureTestAgent{id: rec.Config.ID}); err != nil {
+	if err := coordinator.registerExecution(testAuthorActivityContext(context.Background()), rec, false, reconfigureTestAgent{id: rec.Config.ID}, testManagerSubscriptionAdmission(t, rec.Config)); err != nil {
 		t.Fatalf("register recovered agent: %v", err)
 	}
 	coordinator.beginRun(testAuthorActivityContext(context.Background()), AgentRunModeStandard)
@@ -311,7 +311,7 @@ func TestLifecycleCoordinatorInMemoryEffectContextCarriesCurrentToken(t *testing
 	registry := runtimesessions.NewInMemoryRegistry(0)
 	coordinator := newAgentLifecycleCoordinator(nil, registry)
 	rec := lifecycleTestPersistedAgent()
-	if err := coordinator.registerExecution(testAuthorActivityContext(context.Background()), rec, false, reconfigureTestAgent{id: rec.Config.ID}); err != nil {
+	if err := coordinator.registerExecution(testAuthorActivityContext(context.Background()), rec, false, reconfigureTestAgent{id: rec.Config.ID}, testManagerSubscriptionAdmission(t, rec.Config)); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	coordinator.beginRun(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())), AgentRunModeStandard)

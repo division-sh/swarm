@@ -9,4 +9,3 @@ worker:
       advances_to: finished
       emit:
         event: task.done
-        broadcast: true

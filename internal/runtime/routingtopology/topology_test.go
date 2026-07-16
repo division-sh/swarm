@@ -298,7 +298,7 @@ func TestBuildDoesNotInventDeliveryEdgesForMetadataSources(t *testing.T) {
 	}
 }
 
-func TestBuildProjectsLegacyQualifiedSubscriptionAsNonCanonicalDebt(t *testing.T) {
+func TestBuildProjectsCanonicalRootConnectInsteadOfQualifiedSubscriptionDebt(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,
@@ -306,37 +306,33 @@ func TestBuildProjectsLegacyQualifiedSubscriptionAsNonCanonicalDebt(t *testing.T
 		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 	)
 	if err != nil {
-		t.Fatalf("load legacy fixture: %v", err)
+		t.Fatalf("load migrated fixture: %v", err)
 	}
 	topology := Build(semanticview.Wrap(bundle))
-	if len(topology.LegacyQualifiedSubscriptions) != 1 {
-		t.Fatalf("legacy subscriptions = %#v, want one", topology.LegacyQualifiedSubscriptions)
-	}
-	legacy := topology.LegacyQualifiedSubscriptions[0]
-	if legacy.Disposition != LegacyQualifiedSubscriptionDisposition || !legacy.RuntimeDelivery || legacy.CanonicalEdge || legacy.AuthoredLocation == "" {
-		t.Fatalf("legacy disposition = %#v, want visible runtime debt outside canonical edges", legacy)
-	}
+	found := false
 	for _, edge := range topology.Edges {
-		if edge.Consumer.ID == legacy.Consumer.ID {
-			t.Fatalf("legacy qualified consumer leaked into canonical edges: %#v", edge)
+		if edge.Scope == DeliveryScopeInterFlowConnect && edge.Boundary != nil && edge.Boundary.To == ".task_done" {
+			found = true
 		}
+	}
+	if !found {
+		t.Fatalf("topology edges = %#v, want canonical connect to root task_done", topology.Edges)
 	}
 }
 
-func TestLegacyQualifiedSubscriptionInventoryMatchesE1aRetirementTracker(t *testing.T) {
+func TestExactQualifiedSubscriptionFixturesUseCanonicalAncestorEdge(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	tests := []struct {
-		fixture  string
-		event    string
-		consumer string
-		location string
+		fixture      string
+		minimumEdges int
 	}{
-		{fixture: "test-child-flow-absolute-path", event: "child/task.done", consumer: "listener", location: "nodes.yaml:13"},
-		{fixture: "test-child-flow-pin-wiring", event: "child/work.completed", consumer: "parent-listener", location: "nodes.yaml:13"},
-		{fixture: "test-data-pin-wiring", event: "processor/process.done", consumer: "result-listener", location: "nodes.yaml:20"},
-		{fixture: "test-gates-in-child-flow", event: "child/validation.done", consumer: "router", location: "nodes.yaml:5"},
-		{fixture: "test-nested-three-levels", event: "child/grandchild/micro.done", consumer: "root-collector", location: "nodes.yaml:13"},
-		{fixture: "test-tool-override", event: "child/child.done", consumer: "root-node", location: "nodes.yaml:4"},
+		{fixture: "test-child-flow-absolute-path", minimumEdges: 1},
+		{fixture: "test-child-flow-pin-wiring", minimumEdges: 1},
+		{fixture: "test-data-pin-wiring", minimumEdges: 1},
+		{fixture: "test-gates-in-child-flow", minimumEdges: 1},
+		{fixture: "test-nested-three-levels", minimumEdges: 2},
+		{fixture: "test-tool-override", minimumEdges: 1},
+		{fixture: "test-wildcard-deep-subscription", minimumEdges: 1},
 	}
 	for _, tc := range tests {
 		t.Run(tc.fixture, func(t *testing.T) {
@@ -344,9 +340,18 @@ func TestLegacyQualifiedSubscriptionInventoryMatchesE1aRetirementTracker(t *test
 			if err != nil {
 				t.Fatalf("load fixture: %v", err)
 			}
-			legacy := Build(semanticview.Wrap(bundle)).LegacyQualifiedSubscriptions
-			if len(legacy) != 1 || legacy[0].Event.Canonical != tc.event || legacy[0].Consumer.NodeID != tc.consumer || !strings.HasSuffix(legacy[0].AuthoredLocation, tc.location) {
-				t.Fatalf("legacy inventory = %#v, want %s/%s/%s", legacy, tc.event, tc.consumer, tc.location)
+			source := semanticview.Wrap(bundle)
+			if legacy := semanticview.BuildAuthoredEventEndpointCensus(source).LegacyQualifiedSubscriptions(); len(legacy) != 0 {
+				t.Fatalf("retired qualified subscriptions survive: %#v", legacy)
+			}
+			connectEdges := 0
+			for _, edge := range Build(source).Edges {
+				if edge.Scope == DeliveryScopeInterFlowConnect {
+					connectEdges++
+				}
+			}
+			if connectEdges < tc.minimumEdges {
+				t.Fatalf("connect edges = %d, want at least %d", connectEdges, tc.minimumEdges)
 			}
 		})
 	}
@@ -356,9 +361,18 @@ func TestLegacyQualifiedSubscriptionInventoryMatchesE1aRetirementTracker(t *test
 		if err != nil {
 			t.Fatalf("load fixture: %v", err)
 		}
-		legacy := Build(semanticview.Wrap(bundle)).LegacyQualifiedSubscriptions
-		if len(legacy) != 1 || legacy[0].Event.Canonical != "child/task.result" || legacy[0].Consumer.NodeID != "dispatcher" || !strings.HasSuffix(legacy[0].AuthoredLocation, "nodes.yaml:4") {
-			t.Fatalf("legacy inventory = %#v, want child/task.result dispatcher nodes.yaml:4", legacy)
+		source := semanticview.Wrap(bundle)
+		if legacy := semanticview.BuildAuthoredEventEndpointCensus(source).LegacyQualifiedSubscriptions(); len(legacy) != 0 {
+			t.Fatalf("retired qualified subscriptions survive: %#v", legacy)
+		}
+		connectEdges := 0
+		for _, edge := range Build(source).Edges {
+			if edge.Scope == DeliveryScopeInterFlowConnect {
+				connectEdges++
+			}
+		}
+		if connectEdges < 1 {
+			t.Fatalf("connect edges = %d, want at least one", connectEdges)
 		}
 	})
 }
@@ -431,20 +445,6 @@ func TestEdgeIDIncludesTypedPubSubAuthorizationProof(t *testing.T) {
 	}
 }
 
-func TestWithIssuesLinksLegacySubscriptionOnlyToStrongestDedicatedFinding(t *testing.T) {
-	topology := Topology{LegacyQualifiedSubscriptions: []LegacyQualifiedSubscription{{
-		ID: "legacy", AuthoredLocation: "nodes.yaml:13", Event: EventIdentity{Canonical: "child/task.done"},
-	}}}
-	warning := NewDiagnosticIssue("legacy_qualified_subscription", "semantic_drift_warning", "nodes.yaml:13", "warning", "migrate", "nodes.yaml:13")
-	hard := NewDiagnosticIssue("legacy_qualified_subscription", "hard_invalidity", "nodes.yaml:13", "hard", "migrate", "nodes.yaml:13")
-	unrelated := NewDiagnosticIssue("event_consumer_exists", "hard_invalidity", "child/task.done", "unrelated", "migrate", "nodes.yaml:13")
-
-	got := WithIssues(topology, warning, unrelated, hard)
-	if got.LegacyQualifiedSubscriptions[0].FindingID != hard.ID {
-		t.Fatalf("finding id = %q, want strongest dedicated finding %q", got.LegacyQualifiedSubscriptions[0].FindingID, hard.ID)
-	}
-}
-
 func TestBuildIsDeterministic(t *testing.T) {
 	source := templatefanin.LoadSource(t, templatefanin.Options{})
 	first, err := json.Marshal(Build(source))
@@ -471,7 +471,7 @@ func TestBuildEmptyTopologyUsesStableEmptyCollections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal empty topology: %v", err)
 	}
-	for _, field := range []string{"producers", "consumers", "input_pins", "output_pins", "root_input_sources", "boundary_exposures", "edges", "legacy_qualified_subscriptions", "issues"} {
+	for _, field := range []string{"producers", "consumers", "input_pins", "output_pins", "root_input_sources", "boundary_exposures", "edges", "issues"} {
 		if !strings.Contains(string(encoded), `"`+field+`":[]`) {
 			t.Fatalf("empty topology field %s is not a stable array: %s", field, encoded)
 		}

@@ -17,10 +17,10 @@ config-writer:
 result-listener:
   id: result-listener
   execution_type: system_node
-  subscribes_to: [processor/process.done]
+  subscribes_to: [process.done]
   produces: [job.complete]
   event_handlers:
-    processor/process.done:
+    process.done:
       advances_to: done
       emit:
         event: job.complete

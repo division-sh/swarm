@@ -4,3 +4,4 @@ job.start:
 job.complete:
 processor/process.run:
 processor/process.done:
+process.done:

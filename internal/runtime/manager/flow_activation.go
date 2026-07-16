@@ -712,6 +712,9 @@ func buildFlowAgentConfig(
 		Config:          rawConfig,
 	}
 	cfg.NormalizeRuntimeDescriptor()
+	if _, err := admitAgentConfigSubscriptions(source, &cfg, localEvents); err != nil {
+		return models.AgentConfig{}, fmt.Errorf("flow agent %s: %w", key, err)
+	}
 	return cfg, nil
 }
 
@@ -898,6 +901,9 @@ func buildStaticFlowAgentConfig(
 		Config:          rawConfig,
 	}
 	cfg.NormalizeRuntimeDescriptor()
+	if _, err := admitAgentConfigSubscriptions(source, &cfg, localEvents); err != nil {
+		return models.AgentConfig{}, fmt.Errorf("static flow agent %s: %w", logicalID, err)
+	}
 	return cfg, nil
 }
 

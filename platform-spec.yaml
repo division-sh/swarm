@@ -9697,14 +9697,13 @@ flow_model:
           identity_rule: >
             Every endpoint and edge carries authored, local, and canonical event identity plus stable flow/package
             scope. Declared-input and fan-in associations fail closed on zero or multiple matches.
-          legacy_qualified_subscription_rule: >
-            A concrete qualified cross-flow subscription that runtime still honors without a pin/connect route is
-            projected in `legacy_qualified_subscriptions` with disposition `legacy_qualified_subscription`, exact
-            authored file:line evidence, runtime_delivery true, canonical_edge false, migration remediation, and a
-            linked verifier finding. It MUST NOT appear as a canonical edge. Staged/new-model bundles receive a hard
-            invalidity when any root or child flow authors stages; all-legacy bundles receive a semantic-drift warning until E1a retires qualified cross-flow
-            delivery. Wildcard imports and consumers reached through a declared input pin plus connect are not this
-            legacy class.
+          qualified_cross_flow_subscription_retirement: >
+            A concrete qualified subscription that crosses a flow boundary is a hard invalidity and never creates a
+            route, recipient, or topology edge. The authored endpoint census may retain exact file:line evidence only
+            to produce the retirement diagnostic. Inter-flow delivery must use declared output/input pins plus parent
+            connect, while the receiver subscribes to its local event identity. Imported wildcard subscriptions are a
+            distinct typed relation governed by wildcard_subscription_scope; raw exact qualification is never an
+            authorization proof or compatibility path.
           supported_outputs:
           - swarm describe routes
           - swarm describe routes --json
@@ -9876,25 +9875,25 @@ flow_model:
           helper that independently interprets imported package policy or credential handles is non-authoritative. Imported
           package credential use with no declared `requires.credentials` item must resolve as an import-boundary miss, not
           as a raw deployment credential key.
-      pin_alias_delivery:
+      pin_alias_interface_adaptation:
         owner: Runtime import-boundary pin alias resolver over semanticview ProjectScopes and FlowScopes.
         inputs: >
           For an imported package with a declared `requires.inputs` pin, the parent import-site `bind.inputs` value is
-          the canonical producer pattern consumed by flow input auto-wire, boot/verify input pin wiring, RouteTable
-          static/template derivation, EventBus recipient planning/persistence, and workflow-node materialization.
-          The child handler still consumes the package-local input pin name as its localized event. Raw same-name
-          local input fallback is forbidden for declared imported package input pins; same-name fallback remains valid
-          only for authored/local flows or imports that do not declare the input requirement.
+          interface-name adaptation evidence consumed only by an explicit parent connect. Bind alone does not prove a
+          producer, create a RouteTable entry, materialize a workflow-node subscription, or authorize an EventBus
+          recipient. After connect lowering, the child handler consumes the package-local input event identity. Raw
+          same-name local input fallback is forbidden for declared imported package input pins.
         outputs: >
           For an imported package with a declared `requires.outputs` pin, the emitted/persisted event identity remains
-          the child flow output event pattern. Parent-facing subscribers consume the parent import-site `bind.outputs`
-          event name through the same runtime alias resolver. Delivery/readback localized event for the parent consumer
-          is the parent-facing event name; the source event identity, replay scope, target routing metadata, broadcast
-          semantics, correlation, and cardinality are not rewritten by the alias.
+          the child flow output event pattern. The parent import-site `bind.outputs` value adapts that interface name
+          only when an explicit connect consumes it. Bind alone does not create an exact or wildcard RouteTable entry,
+          materialize a parent subscription, or authorize a root recipient. Delivery/readback localization comes from
+          the lowered connect plan; source identity, replay scope, target metadata, correlation, and cardinality are not
+          rewritten by bind.
         fail_closed: >
-          Runtime consumers must use the shared import-boundary alias resolver; local helpers must not independently
-          reinterpret package-local pins, parent event names, or raw same-name fallback for declared imported package
-          pins.
+          Runtime consumers must use the shared import-boundary alias resolver as adaptation evidence inside connect
+          lowering. Local helpers must not independently reinterpret package-local pins, parent event names, or bind
+          values as delivery authority. No pin_bind_input_alias or pin_bind_output_alias route source exists.
       wildcard_subscription_scope:
         owner: Runtime import-boundary wildcard scope/grant resolver over semanticview ProjectScopes, FlowScopes, and
           parent import-site `bind.observe` grants.
@@ -9943,6 +9942,22 @@ flow_model:
           Root and non-imported flow wildcard subscriptions keep their existing wildcard route behavior. Target and
           target_set delivery narrowing still applies after the scoped wildcard candidate is produced; wildcard grants
           do not override delivery target filtering.
+      flow_owned_agent_subscription_admission:
+        owner: semanticview typed exact/pattern admission consumed by AgentManager lifecycle and EventBus agent routes.
+        rule: >
+          Before static, dynamic, ad-hoc, reconfigured, recovered, or pending-query agent state can persist or install a
+          live route, one admission decision resolves its declared flow scope and subscription intent. Same-scope exact
+          and pattern subscriptions become canonical local route identities. Imported cross-boundary patterns consume
+          wildcard_subscription_scope and its typed bind.observe evidence or fail closed. Qualified exact subscriptions
+          cannot cross a flow boundary. Raw EventBus subscription strings and low-level wildcard matching are not route
+          authority.
+        carriers: >
+          An admitted carrier may install no subscription patterns and still receive typed connect/direct delivery by
+          identity. Workflow runtime, system-node, and activity-dispatcher listeners use required typed internal-carrier
+          registration and cannot downgrade to agent-kind subscription routes.
+        recovery: >
+          Startup and pending delivery queries consume the same admitted persisted facts. Invalid exact or pattern
+          authority fails before route mutation or backlog selection; no old-store reader or migration path exists.
       split_runtime_semantics:
         final_e2e_package_proof: >
           Final multi-package marketplace-style runtime proof is tracked by #1455 and guarded by
@@ -10023,10 +10038,11 @@ flow_model:
             `connect` is a list of structured connections. Each entry binds one producer output pin to one receiver
             input pin and optionally names an alias/adapter. `from` uses either
             flow-id plus local pin name or the explicit package-root endpoint form `.{root_output_pin_name}`. `to` uses
-            flow-id plus local input pin name in this slice. Connect refs are not handler keys and not runtime instance paths.
+            flow-id plus local input pin name or the explicit package-root endpoint form
+            `.{root_input_pin_name}`. Connect refs are not handler keys and not runtime instance paths.
           fields:
             from: Required producer reference `{producer_flow_id}.{output_pin_name}` or package-root producer reference `.{root_output_pin_name}`.
-            to: Required receiver reference `{receiver_flow_id}.{input_pin_name}`.
+            to: Required receiver reference `{receiver_flow_id}.{input_pin_name}` or package-root receiver reference `.{root_input_pin_name}`.
             adapter: Optional named payload/event adapter when producer output and receiver input names or payload keys differ.
             map: Optional explicit map from receiver address keys to source/target expressions. Required when inference would be ambiguous or names differ.
           retired_fields:
@@ -10057,9 +10073,8 @@ flow_model:
           package-root endpoint form `.{root_output_pin_name}`.
         producer_output_pin_exists: The `from` pin must exist in the producer schema output event pins; for package-root
           endpoints it must exist in root schema.yaml pins.outputs.events.
-        receiver_flow_exists: The `to` flow must exist in the loaded package registry.
-        receiver_root_unsupported: Root receiver endpoints are not supported by #1508; `to` must name a loaded receiver flow input pin.
-        receiver_input_pin_exists: The `to` pin must exist in the receiver schema input event pins.
+        receiver_flow_exists: The `to` flow must exist in the loaded package registry unless `to` is the explicit package-root endpoint form `.{root_input_pin_name}`.
+        receiver_input_pin_exists: The `to` pin must exist in the receiver schema input event pins; for package-root endpoints it must exist in root schema.yaml pins.inputs.events.
         event_alias_or_adapter_valid: Differing local event names or payload keys require an explicit alias/adapter or unambiguous bind-derived alias; raw same-name fallback is not valid for declared imported package pins.
         output_carries_address_key: The producer output pin key/carries declaration must prove the top-level payload key used
           by the receiver instance.by route key, receiver address, or explicit connect.map source. Event payload schema and connect.map are validation inputs,
@@ -10202,7 +10217,6 @@ flow_model:
           - connect_pin_ref_invalid
           - producer_flow_missing
           - producer_output_pin_missing
-          - receiver_root_unsupported
           - receiver_flow_missing
           - receiver_input_pin_missing
           - receiver_address_rule_missing
@@ -10699,31 +10713,34 @@ flow_model:
             an explicit root connect consumes that output pin and routes to the
             same loaded receiver flow. Runtime must fail closed before producer
             target/broadcast can repair or override the canonical root connect
-            decision. Root receiver endpoints are not supported in this slice and
-            fail closed as receiver_root_unsupported.
+            decision. Parent connect may symmetrically name a package-root receiver
+            input pin with `to: .{root_input_pin_name}`. Nested package connects
+            resolve that endpoint to the owning package root; top-level connects
+            resolve it to the global root.
           root_endpoint_syntax:
             producer: '`.{root_output_pin_name}` in connect.from names root schema.yaml pins.outputs.events only.'
-            receiver: 'Unsupported in #1508; connect.to must name `{receiver_flow_id}.{input_pin_name}`.'
+            receiver: '`.{root_input_pin_name}` in connect.to names the owning package root schema.yaml pins.inputs.events only.'
           consumes:
           - root schema.yaml pins.outputs.events
           - parent package.yaml connect.from `.{root_output_pin_name}` entries
-          - receiver flow input pin declarations and addressed-input route-plan lowering
+          - receiver flow or owning package-root input pin declarations and addressed-input route-plan lowering
           - root producer authored emit target/broadcast syntax
           produces:
           - typed root ConnectRoutePlan producer endpoints
           - producer_target_common_path_forbidden for root target.flow/match common-path composition where root connect authority applies
           - producer_broadcast_common_path_forbidden for root broadcast:true common-path composition where root connect authority applies
-          - receiver_root_unsupported for attempted root connect receivers
+          - typed root ConnectRoutePlan receiver endpoints
           proof_obligations:
           - semanticview exposes root connect facts through CompositionConnectsFrom("", pin)
           - bootverify accepts root outputs with root connect and no producer target/broadcast
           - bootverify rejects root producer target.flow/match and broadcast:true when root connect authority applies
           - EventBus persists delivery rows and subscribed replay scope from lowered root ConnectRoutePlan authority
+          - strict load, verify, lowering, execution, persistence/replay, and readback accept package-root receivers
+          - nested package root receivers resolve to the owning ancestor package rather than the global root
           - existing loaded flow-scope connect/target/broadcast regressions remain covered
           does_not_close:
           - '#1479 business-field descriptor/index materialization'
           - '#1450 broader package policy/grants/final e2e work'
-          - 'root connect receiver semantics'
           - '#1474 already closed generated agent/node EventBus RoutePlan consumption'
           - '#1479 already closed declared indexed business-field descriptor materialization'
         implementation_slice_1485:
@@ -10823,12 +10840,12 @@ flow_model:
         - live subscription list used to invent missing connect topology
         - producer emit.target used as common parent-composed routing owner
         - select_entity used to repair an in-topology broadcast
-      pin_alias_delivery_composition:
+      pin_alias_interface_adaptation:
         rule: >
           Import-boundary `requires`/`bind` pin aliases from #1452 are lower-level name-adaptation inputs to connect
           lowering. They may rename the parent-facing input/output pin, but they do not rewrite source event identity,
           replay scope, target metadata, receiver resolution, correlation, or cardinality.
-        owner_consumed: platform-spec.yaml#flow_model.flow_package.import_boundary.pin_alias_delivery
+        owner_consumed: platform-spec.yaml#flow_model.flow_package.import_boundary.pin_alias_interface_adaptation
       emit_target_escape_hatch:
         role: >
           `emit.target` remains the only producer-authored dynamic routing escape hatch. It is valid for cases where the
@@ -17089,7 +17106,7 @@ static_analyzer:
     supported_surface: cmd/swarm verify
     spec_basis:
     - flow_model.flow_package.composition_routing
-    - flow_model.flow_package.import_boundary.pin_alias_delivery
+    - flow_model.flow_package.import_boundary.pin_alias_interface_adaptation
     - engine.cross_flow_routing
     scope:
       description: Validate parser/model/semantic-view consumption of parent package.yaml connect entries and receiver

@@ -4,6 +4,9 @@ terminal_states: [done]
 states: [pending, done]
 pins:
   inputs:
-    events: [task.requested]
+    events:
+      - task.requested
+      - name: child_done
+        event: child.done
   outputs:
     events: [task.done]

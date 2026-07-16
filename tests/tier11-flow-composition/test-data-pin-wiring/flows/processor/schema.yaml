@@ -7,5 +7,7 @@ pins:
     events: [process.run]
     reads: [task_config]
   outputs:
-    events: [process.done]
+    events:
+      - name: process_done
+        event: process.done
     writes: [result]

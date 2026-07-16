@@ -1,10 +1,12 @@
 child-relay:
   id: child-relay
   execution_type: system_node
-  subscribes_to: [step.begin]
-  produces: [grandchild/micro.start]
+  subscribes_to: [step.begin, micro.done]
+  produces: [micro.start, micro.relayed]
   event_handlers:
     step.begin:
-      create_entity: true
+      advances_to: delegated
+      emit: micro.start
+    micro.done:
       advances_to: completed
-      emit: grandchild/micro.start
+      emit: micro.relayed

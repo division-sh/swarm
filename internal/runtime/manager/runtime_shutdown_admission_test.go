@@ -135,7 +135,7 @@ func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown
 		RuntimeShutdownAdmissionClosed: func() bool { return false },
 	}, store)
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id},
+		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Subscriptions: []string{"test.in"}},
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 		RuntimeShutdownAdmissionClosed: func() bool { return false },
 	}, store)
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id},
+		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Subscriptions: []string{"test.in"}},
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}

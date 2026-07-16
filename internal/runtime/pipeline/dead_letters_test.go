@@ -581,7 +581,7 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 
 type deadLetterTestBus struct{}
 
-func (deadLetterTestBus) Subscribe(string, ...events.EventType) <-chan events.Event {
+func (deadLetterTestBus) SubscribeInternal(string, ...events.EventType) <-chan events.Event {
 	return make(chan events.Event)
 }
 
@@ -592,7 +592,7 @@ type capturingDeadLetterBus struct {
 	events []events.Event
 }
 
-func (b *capturingDeadLetterBus) Subscribe(string, ...events.EventType) <-chan events.Event {
+func (b *capturingDeadLetterBus) SubscribeInternal(string, ...events.EventType) <-chan events.Event {
 	return make(chan events.Event)
 }
 

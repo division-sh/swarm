@@ -97,7 +97,7 @@ type proposedEffectRouteProofBus struct {
 type proposedEffectRouteProofOutbox struct{ bus *proposedEffectRouteProofBus }
 type proposedEffectRouteProofDispatcher struct{ bus *proposedEffectRouteProofBus }
 
-func (*proposedEffectRouteProofBus) Subscribe(string, ...events.EventType) <-chan events.Event {
+func (*proposedEffectRouteProofBus) SubscribeInternal(string, ...events.EventType) <-chan events.Event {
 	return make(chan events.Event)
 }
 func (*proposedEffectRouteProofBus) Publish(context.Context, events.Event) error { return nil }

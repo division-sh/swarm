@@ -11,6 +11,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"time"
@@ -636,25 +637,36 @@ func TestDeriveRouteTable_StaticChildFlowInputSubscriptionsResolveCanonicalNodeO
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	for _, tc := range []struct {
-		fixture    string
-		eventType  string
-		nodeID     string
-		flowPath   string
-		routeMatch string
+		fixture     string
+		eventType   string
+		nodeID      string
+		flowPath    string
+		routeMatch  string
+		routeSource string
 	}{
 		{
-			fixture:    "test-child-flow-local-events",
-			eventType:  "child/child.start",
-			nodeID:     "child-intake",
-			flowPath:   "child",
-			routeMatch: "child/child.start",
+			fixture:     "test-child-flow-local-events",
+			eventType:   "child/child.start",
+			nodeID:      "child-intake",
+			flowPath:    "child",
+			routeMatch:  "child/child.start",
+			routeSource: "subscription",
 		},
 		{
-			fixture:    "test-nested-three-levels",
-			eventType:  "child/step.begin",
-			nodeID:     "child-relay",
-			flowPath:   "child",
-			routeMatch: "child/step.begin",
+			fixture:     "test-nested-three-levels",
+			eventType:   "child/step.begin",
+			nodeID:      "child-relay",
+			flowPath:    "child",
+			routeMatch:  "step.begin",
+			routeSource: "receiver_carrier",
+		},
+		{
+			fixture:     "test-nested-three-levels",
+			eventType:   "child/grandchild/micro.start",
+			nodeID:      "grandchild-worker",
+			flowPath:    "child/grandchild",
+			routeMatch:  "micro.start",
+			routeSource: "receiver_carrier",
 		},
 	} {
 		t.Run(tc.fixture, func(t *testing.T) {
@@ -673,8 +685,8 @@ func TestDeriveRouteTable_StaticChildFlowInputSubscriptionsResolveCanonicalNodeO
 				got[0].Type != "node" ||
 				got[0].Path != tc.flowPath ||
 				got[0].MatchPattern != tc.routeMatch ||
-				got[0].RouteSource != "subscription" {
-				t.Fatalf("Resolve(%s) = %#v, want %s %s %s", tc.eventType, got, tc.nodeID, tc.flowPath, tc.routeMatch)
+				got[0].RouteSource != tc.routeSource {
+				t.Fatalf("Resolve(%s) = %#v, want %s %s %s from %s", tc.eventType, got, tc.nodeID, tc.flowPath, tc.routeMatch, tc.routeSource)
 			}
 		})
 	}
@@ -835,12 +847,12 @@ func TestDeriveRouteTable_InputPinsStayLocalWithoutExternalProducer(t *testing.T
 	}
 }
 
-func TestDeriveRouteTable_DescendantSubscriptionsExternalizeWithinParentFlow(t *testing.T) {
+func TestDeriveRouteTable_NestedPackageConnectLocalizesWithinParentFlow(t *testing.T) {
 	grandchild := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild", PackageKey: "flows/child/flows/grandchild"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"micro.done"}},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "micro_done", Event: "micro.done"}}},
 			},
 		},
 		Path: "child/grandchild",
@@ -849,10 +861,10 @@ func TestDeriveRouteTable_DescendantSubscriptionsExternalizeWithinParentFlow(t *
 		},
 	}
 	child := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs:  runtimecontracts.FlowInputPins{Events: []string{"step.begin"}},
+				Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Name: "micro_done", Event: "micro.done"}}},
 				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"step.result"}},
 			},
 		},
@@ -860,9 +872,10 @@ func TestDeriveRouteTable_DescendantSubscriptionsExternalizeWithinParentFlow(t *
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"child-aggregator": {
 				ID:           "child-aggregator",
-				SubscribesTo: []string{"grandchild/micro.done"},
+				SubscribesTo: []string{"micro.done"},
 			},
 		},
+		Events:   map[string]runtimecontracts.EventCatalogEntry{"micro.done": {}},
 		Children: []runtimecontracts.FlowContractView{grandchild},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
@@ -874,17 +887,35 @@ func TestDeriveRouteTable_DescendantSubscriptionsExternalizeWithinParentFlow(t *
 				"grandchild": &root.Children[0].Children[0],
 			},
 		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"child":      child.Schema,
+			"grandchild": grandchild.Schema,
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{CompositionConnects: []runtimecontracts.FlowPackageConnect{{
+			PackageKey: "flows/child",
+			SourceFile: "flows/child/package.yaml",
+			SourceLine: 10,
+			From:       "grandchild.micro_done",
+			To:         ".micro_done",
+		}}},
+	}
+	plans, issues := runtimepinrouting.LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
+	if len(issues) != 0 || len(plans) != 1 {
+		t.Fatalf("nested connect plans = %#v issues = %#v, want one valid plan", plans, issues)
 	}
 	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	got := rt.Resolve("child/grandchild/micro.done")
-	if len(got) != 1 || got[0].ID != "child-aggregator" {
-		t.Fatalf("Resolve(child/grandchild/micro.done) = %#v, want child-aggregator", got)
+	if got := rt.Resolve("child/grandchild/micro.done"); len(got) != 0 {
+		t.Fatalf("direct descendant route = %#v, connect dispatch must own the boundary edge", got)
 	}
-	if got := rt.Resolve("grandchild/micro.done"); len(got) != 0 {
-		t.Fatalf("Resolve(grandchild/micro.done) = %#v, want none", got)
+	got := rt.Resolve("child/micro.done")
+	if len(got) != 1 || got[0].ID != "child-aggregator" {
+		t.Fatalf("Resolve(child/micro.done) = %#v, want receiver-local child-aggregator carrier", got)
+	}
+	if got[0].Path != "child" {
+		t.Fatalf("receiver carrier path = %q, want child", got[0].Path)
 	}
 }
 

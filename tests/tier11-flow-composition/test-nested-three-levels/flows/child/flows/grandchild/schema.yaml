@@ -4,6 +4,10 @@ terminal_states: [finished]
 states: [ready, finished]
 pins:
   inputs:
-    events: [micro.start]
+    events:
+      - name: micro_start
+        event: micro.start
   outputs:
-    events: [micro.done]
+    events:
+      - name: micro_done
+        event: micro.done

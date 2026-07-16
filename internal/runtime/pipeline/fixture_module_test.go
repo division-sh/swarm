@@ -11,7 +11,7 @@ import (
 
 type noopPipelineBus struct{}
 
-func (noopPipelineBus) Subscribe(string, ...events.EventType) <-chan events.Event {
+func (noopPipelineBus) SubscribeInternal(string, ...events.EventType) <-chan events.Event {
 	return make(chan events.Event)
 }
 func (noopPipelineBus) Publish(context.Context, events.Event) error { return nil }

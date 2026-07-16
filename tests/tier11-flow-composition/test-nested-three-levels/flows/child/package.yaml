@@ -6,3 +6,9 @@ flows:
 - id: grandchild
   flow: grandchild
   mode: static
+connect:
+  - from: .micro_start
+    to: grandchild.micro_start
+  - from: grandchild.micro_done
+    to: .micro_done
+    adapter: grandchild_micro_done_to_child_micro_done

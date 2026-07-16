@@ -136,7 +136,7 @@ var routingRemediationSplitCheckIDs = map[string]struct{}{
 	"receiver_instance_key_invalid":          {},
 	"receiver_instance_key_unavailable":      {},
 	"receiver_reference_invalid":             {},
-	"receiver_root_unsupported":              {},
+	"root_receiver_resolution_invalid":       {},
 	"receiver_route_key_missing":             {},
 }
 

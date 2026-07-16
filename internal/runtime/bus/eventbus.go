@@ -586,16 +586,34 @@ func (eb *EventBus) PendingAgentDeliveries() int {
 }
 
 func (eb *EventBus) Subscribe(agentID string, eventTypes ...events.EventType) <-chan events.Event {
-	return eb.subscribe(agentID, inMemorySubscriberAgent, eventTypes...)
+	values := make([]string, 0, len(eventTypes))
+	for _, eventType := range eventTypes {
+		values = append(values, string(eventType))
+	}
+	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
+		AgentID: agentID, Subscriptions: values,
+	})
+	if err != nil {
+		return nil
+	}
+	return eb.SubscribeAgent(admission)
+}
+
+func (eb *EventBus) SubscribeAgent(admission semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan events.Event {
+	if eb == nil || !admission.ValidForAgent(admission.AgentID()) {
+		return nil
+	}
+	return eb.subscribe(admission.AgentID(), inMemorySubscriberAgent, admittedAgentEventTypes(admission)...)
 }
 
 // ReplaceAgentRoute installs one exact lifecycle-generation route. The old
 // channel is detached, not closed: publishers may retain a lock-free snapshot
 // of it and must be allowed to finish without a send-on-closed panic.
-func (eb *EventBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToken, eventTypes ...events.EventType) <-chan events.Event {
-	if eb == nil || !token.Valid() {
+func (eb *EventBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan events.Event {
+	if eb == nil || !token.Valid() || !admission.ValidForAgent(token.AgentID) {
 		return nil
 	}
+	eventTypes := admittedAgentEventTypes(admission)
 	agentID := strings.TrimSpace(token.AgentID)
 	ch := make(chan events.Event, 128)
 	route := newAgentRouteHandle(token, ch)
@@ -617,6 +635,15 @@ func (eb *EventBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToken, event
 		eb.channels[eventType][agentID] = ch
 	}
 	return ch
+}
+
+func admittedAgentEventTypes(admission semanticview.FlowOwnedAgentSubscriptionAdmission) []events.EventType {
+	patterns := admission.RoutePatterns()
+	out := make([]events.EventType, 0, len(patterns))
+	for _, pattern := range patterns {
+		out = append(out, events.EventType(pattern))
+	}
+	return out
 }
 
 // RemoveAgentRoute removes only the exact generation that owns the route.

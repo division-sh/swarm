@@ -281,7 +281,7 @@ func TestEventBusPublish_TargetedNodeConsumeSuppressesLiveRecipientDelivery(t *t
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	live := eb.Subscribe("target-node", events.EventType(eventType))
+	live := eb.SubscribeAgent(testAgentSubscriptionAdmissionForFlow(t, "target-node", "worker", events.EventType(eventType)))
 	defer eb.Unsubscribe("target-node")
 	evt := eventtest.RootIngress(
 		eventID,
@@ -375,7 +375,7 @@ func TestEventBusAgentDispatchIgnoresSameIDNodeRouteTargets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := eb.Subscribe("shared-subscriber", events.EventType("review/inst-1/task.started"))
+	ch := eb.SubscribeAgent(testAgentSubscriptionAdmissionForFlow(t, "shared-subscriber", "review/inst-1", events.EventType("review/inst-1/task.started")))
 	defer eb.Unsubscribe("shared-subscriber")
 
 	evt := eventtest.RootIngress(uuid.NewString(),

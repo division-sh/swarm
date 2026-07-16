@@ -60,6 +60,60 @@ func TestImportBoundaryWildcardScopesImportedPackageToOwnSubtreeByDefault(t *tes
 	}
 }
 
+func TestFlowOwnedAgentAdmissionScopesImportedWildcardToOwnSubtree(t *testing.T) {
+	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{})
+	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{
+		AgentID:       "worker-agent",
+		FlowID:        "worker",
+		FlowPath:      "worker",
+		PackageKey:    "flows/worker",
+		LocalEvents:   map[string]struct{}{"task.done": {}},
+		Subscriptions: []string{"**/task.done"},
+	})
+	if err != nil {
+		t.Fatalf("AdmitFlowOwnedAgentSubscriptions: %v", err)
+	}
+	if got := admission.RoutePatterns(); len(got) != 1 || got[0] != "worker/**/task.done" {
+		t.Fatalf("route patterns = %#v, want only worker/**/task.done", got)
+	}
+}
+
+func TestFlowOwnedAgentAdmissionRejectsImportedSiblingWildcardWithoutGrant(t *testing.T) {
+	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{})
+	_, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{
+		AgentID:       "worker-agent",
+		FlowID:        "worker",
+		FlowPath:      "worker",
+		PackageKey:    "flows/worker",
+		LocalEvents:   map[string]struct{}{"task.done": {}},
+		Subscriptions: []string{"producer/**/task.done"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "no imported-package subtree candidate or bind.observe grant") {
+		t.Fatalf("error = %v, want missing typed wildcard/grant rejection", err)
+	}
+}
+
+func TestFlowOwnedAgentAdmissionConsumesImportedObserveGrant(t *testing.T) {
+	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
+		ObserveGrant: "      observe:\n        - source: producer\n          events: [task.done]\n",
+	})
+	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{
+		AgentID:       "worker-agent",
+		FlowID:        "worker",
+		FlowPath:      "worker",
+		PackageKey:    "flows/worker",
+		LocalEvents:   map[string]struct{}{"task.done": {}},
+		Subscriptions: []string{"**/task.done"},
+	})
+	if err != nil {
+		t.Fatalf("AdmitFlowOwnedAgentSubscriptions: %v", err)
+	}
+	got := strings.Join(admission.RoutePatterns(), ",")
+	if !strings.Contains(got, "worker/**/task.done") || !strings.Contains(got, "producer/task.done") {
+		t.Fatalf("route patterns = %#v, want own subtree and granted producer candidate", admission.RoutePatterns())
+	}
+}
+
 func TestImportBoundaryWildcardObserveGrantAddsNarrowSiblingCandidate(t *testing.T) {
 	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
 		ObserveGrant: "      observe:\n        - source: producer\n          events: [task.done]\n",

@@ -135,10 +135,19 @@ func assertSealedFlowPackageConnectPlan(t *testing.T, source semanticview.Source
 	if len(issues) != 0 {
 		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
 	}
-	if len(plans) != 1 {
-		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want one parent connect plan", plans)
+	if len(plans) != 3 {
+		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want three explicit parent connect plans", plans)
 	}
-	plan := plans[0]
+	var plan runtimepinrouting.ConnectRoutePlan
+	for _, candidate := range plans {
+		if candidate.Source.FlowID == "producer" && candidate.Receiver.FlowID == "consumer" {
+			plan = candidate
+			break
+		}
+	}
+	if plan.Source.FlowID == "" {
+		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, missing producer-to-consumer plan", plans)
+	}
 	if got, want := plan.Source.ResolvedEvent, "producer/work.ready"; got != want {
 		t.Fatalf("source resolved event = %q, want %q", got, want)
 	}

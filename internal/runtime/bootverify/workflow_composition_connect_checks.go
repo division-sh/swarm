@@ -38,6 +38,22 @@ func validateCompositionConnect(source semanticview.Source, connect runtimecontr
 	if fromErr != nil || toErr != nil {
 		return findings
 	}
+	if from.Root {
+		flowID, ok := semanticview.PackageRootFlowID(source, connect.PackageKey)
+		if !ok {
+			findings = append(findings, compositionConnectFinding(connect, "producer_flow_missing", fmt.Sprintf("package %s has no owning flow for root output pin %s", connect.PackageKey, from.Pin), connect.PackageKey))
+			return findings
+		}
+		from.FlowID, from.Root = flowID, flowID == ""
+	}
+	if to.Root {
+		flowID, ok := semanticview.PackageRootFlowID(source, connect.PackageKey)
+		if !ok {
+			findings = append(findings, compositionConnectFinding(connect, "receiver_flow_missing", fmt.Sprintf("package %s has no owning flow for root input pin %s", connect.PackageKey, to.Pin), connect.PackageKey))
+			return findings
+		}
+		to.FlowID, to.Root = flowID, flowID == ""
+	}
 
 	if !from.Root {
 		if _, ok := source.FlowSchemaByID(from.FlowID); !ok {
@@ -45,14 +61,14 @@ func validateCompositionConnect(source semanticview.Source, connect runtimecontr
 			return findings
 		}
 	}
-	if to.Root {
-		findings = append(findings, compositionConnectFinding(connect, "receiver_root_unsupported", "root receiver endpoints are not supported by this composition-routing slice", "root"))
-		return findings
-	}
-	receiverSchema, ok := source.FlowSchemaByID(to.FlowID)
-	if !ok {
-		findings = append(findings, compositionConnectFinding(connect, "receiver_flow_missing", fmt.Sprintf("receiver flow %s does not exist", to.FlowID), to.FlowID))
-		return findings
+	receiverSchema := runtimecontracts.FlowSchemaDocument{}
+	if !to.Root {
+		var ok bool
+		receiverSchema, ok = source.FlowSchemaByID(to.FlowID)
+		if !ok {
+			findings = append(findings, compositionConnectFinding(connect, "receiver_flow_missing", fmt.Sprintf("receiver flow %s does not exist", to.FlowID), to.FlowID))
+			return findings
+		}
 	}
 
 	outputPin, ok := source.FlowOutputEventPin(from.FlowID, from.Pin)
@@ -68,7 +84,13 @@ func validateCompositionConnect(source semanticview.Source, connect runtimecontr
 	}
 	inputPin, ok := source.FlowInputEventPin(to.FlowID, to.Pin)
 	if !ok {
-		findings = append(findings, compositionConnectFinding(connect, "receiver_input_pin_missing", fmt.Sprintf("receiver flow %s does not declare input pin %s", to.FlowID, to.Pin), to.FlowID))
+		receiverLabel := fmt.Sprintf("receiver flow %s", to.FlowID)
+		location := to.FlowID
+		if to.Root {
+			receiverLabel = "root schema"
+			location = "root"
+		}
+		findings = append(findings, compositionConnectFinding(connect, "receiver_input_pin_missing", fmt.Sprintf("%s does not declare input pin %s", receiverLabel, to.Pin), location))
 		return findings
 	}
 
@@ -81,6 +103,12 @@ func validateCompositionConnect(source semanticview.Source, connect runtimecontr
 		))
 	}
 	findings = append(findings, validateCompositionConnectSyntheticCarryCollisions(source, connect, from, outputPin, inputPin)...)
+	if to.Root {
+		if inputPin.Address != nil || !inputPin.Resolution.Empty() {
+			findings = append(findings, compositionConnectFinding(connect, "root_receiver_resolution_invalid", "root input pins are static receivers and cannot declare address or instance resolution", "root"))
+		}
+		return findings
+	}
 
 	instanceKeyFindings := validateCompositionConnectInstanceKey(source, connect, outputPin, inputPin, from.FlowID, to.FlowID)
 	findings = append(findings, validateCompositionConnectReceiverAddress(connect, inputPin, receiverSchema, to.FlowID, len(instanceKeyFindings) == 0)...)

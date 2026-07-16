@@ -517,9 +517,9 @@ func typedPubSubConsumerIssueSortKey(issue TypedPubSubConsumerIssue) string {
 	return strings.Join([]string{issue.Producer.ID, issue.Consumer.ID, issue.Event.EventKey(), issue.Failure}, "\x00")
 }
 
-// LegacyQualifiedSubscriptions returns runtime-deliverable qualified subscriptions
-// that cross a flow boundary without using pins and connect. They are intentionally
-// excluded from the canonical routing graph.
+// LegacyQualifiedSubscriptions returns retired exact subscriptions that cross
+// a flow boundary instead of using pins and connect. They are validation facts,
+// not executable routing authority.
 func (c AuthoredEventEndpointCensus) LegacyQualifiedSubscriptions() []LegacyQualifiedSubscription {
 	if c.source == nil {
 		return []LegacyQualifiedSubscription{}
@@ -538,25 +538,33 @@ func (c AuthoredEventEndpointCensus) LegacyQualifiedSubscriptions() []LegacyQual
 		if consumer.Pattern || !runtimeDeliveryConsumer(consumer.Kind) {
 			continue
 		}
-		if c.consumerReachedThroughConnectedInput(consumer) {
-			continue
-		}
 		authored := eventidentity.Normalize(consumer.Event.Authored)
 		if !strings.Contains(authored, "/") {
 			continue
 		}
+		consumerPath := eventidentity.Normalize(c.source.FlowPath(consumer.FlowID))
+		canonical := authored
+		if consumerPath != "" && !strings.HasPrefix(authored, consumerPath+"/") {
+			canonical = consumerPath + "/" + authored
+		}
+		if consumerPath != "" && strings.HasPrefix(canonical, consumerPath+"/") {
+			local := strings.TrimPrefix(canonical, consumerPath+"/")
+			if local != "" && !strings.Contains(local, "/") {
+				continue
+			}
+		}
 		for _, flow := range flows {
 			flowID := strings.TrimSpace(flow.ID)
 			flowPath := eventidentity.Normalize(flow.Path)
-			if flowID == "" || flowID == strings.TrimSpace(consumer.FlowID) || flowPath == "" || !strings.HasPrefix(authored, flowPath+"/") {
+			if flowID == "" || flowID == strings.TrimSpace(consumer.FlowID) || flowPath == "" || !strings.HasPrefix(canonical, flowPath+"/") {
 				continue
 			}
-			local := eventidentity.Normalize(strings.TrimPrefix(authored, flowPath+"/"))
+			local := eventidentity.Normalize(strings.TrimPrefix(canonical, flowPath+"/"))
 			if local == "" {
 				continue
 			}
 			proof := ResolveFlowEventProof(c.source, flowID, local)
-			if !proof.HasSchema || eventidentity.Normalize(proof.Canonical) != authored {
+			if !proof.HasSchema || eventidentity.Normalize(proof.Canonical) != canonical {
 				continue
 			}
 			legacy := LegacyQualifiedSubscription{
@@ -572,18 +580,6 @@ func (c AuthoredEventEndpointCensus) LegacyQualifiedSubscriptions() []LegacyQual
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
-}
-
-func (c AuthoredEventEndpointCensus) consumerReachedThroughConnectedInput(consumer AuthoredEventEndpoint) bool {
-	for _, input := range c.inputPins {
-		if strings.TrimSpace(input.FlowID) != strings.TrimSpace(consumer.FlowID) || !declaredInputIdentityMatches(c.source, input, consumer.Event.Authored) {
-			continue
-		}
-		if len(c.source.CompositionConnectsTo(input.FlowID, input.PinName)) > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 func runtimeDeliveryConsumer(kind EventEndpointKind) bool {

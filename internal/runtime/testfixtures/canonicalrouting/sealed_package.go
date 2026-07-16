@@ -25,6 +25,9 @@ func CopySealedParentConnect(t testing.TB, opts SealedParentConnectOptions) stri
 	applyClosedReplacement(t, packageFile,
 		"  - id: consumer\n    flow: consumer\n    mode: static\n",
 		sealedConsumerFlow(opts))
+	applyClosedReplacement(t, packageFile,
+		"connect:\n  - from: producer.work_ready\n    to: consumer.work_ready\n",
+		"connect:\n  - from: .producer_start\n    to: producer.work_requested\n  - from: producer.work_ready\n    to: consumer.work_ready\n  - from: .consumer_start\n    to: consumer.control_start\n")
 	applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "schema.yaml"), "        source: external\n", "")
 	if opts.InvalidConnectReceiver {
 		applyClosedReplacement(t, packageFile, "    to: consumer.work_ready\n", "    to: consumer.missing_work_ready\n")
@@ -51,6 +54,7 @@ func sealedConsumerFlow(opts SealedParentConnectOptions) string {
 
 func addSealedRootDependencies(t testing.TB, root string) {
 	t.Helper()
+	writeClosedVariantFile(t, root, "schema.yaml", "name: routing-parent-connect\npins:\n  inputs:\n    events: [parent.producer_start, parent.consumer_start]\n  outputs:\n    events:\n      - name: producer_start\n        event: parent.producer_start\n      - name: consumer_start\n        event: parent.consumer_start\n")
 	SetOverlayFile(t, root, "policy.yaml", "producer:\n  runtime:\n    profile: producer-bound\nconsumer:\n  runtime:\n    profile: consumer-bound\nruntime:\n  profile: ambient-root\n  ambient: should-not-leak\n")
 	SetOverlayFile(t, root, "events.yaml", "parent.producer_start:\n  work_id: text\nparent.producer_done:\n  work_id: text\nparent.consumer_start:\n  work_id: text\n")
 }

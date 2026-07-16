@@ -62,7 +62,7 @@ func (m *previewWorkflowModule) ActionRegistry() ActionRegistry {
 
 type previewBus struct{}
 
-func (previewBus) Subscribe(string, ...events.EventType) <-chan events.Event {
+func (previewBus) SubscribeInternal(string, ...events.EventType) <-chan events.Event {
 	return make(chan events.Event)
 }
 

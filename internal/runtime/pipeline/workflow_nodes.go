@@ -175,17 +175,17 @@ func workflowNodeEventHandlerResolutionForDelivery(source semanticview.Source, n
 	if resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeID, rawEventType); resolved.Matched {
 		return resolved
 	}
-	if resolved := workflowNodeInputAliasEventHandlerResolution(source, nodeID, rawEventType); resolved.Matched {
+	if resolved := workflowNodeConnectedInputEventHandlerResolution(source, nodeID, rawEventType); resolved.Matched {
 		return resolved
 	}
 	localizedEventType := workflowNodeConcreteInstanceLocalEventType(source, nodeID, evt)
 	if localizedEventType == "" || localizedEventType == rawEventType {
-		return workflowNodeOutputAliasEventHandlerResolution(source, nodeID, rawEventType)
+		return workflowNodeEventHandlerResolution{}
 	}
 	if resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeID, localizedEventType); resolved.Matched {
 		return resolved
 	}
-	return workflowNodeOutputAliasEventHandlerResolution(source, nodeID, rawEventType)
+	return workflowNodeEventHandlerResolution{}
 }
 
 func workflowNodeEventHandlerResolutionForEventType(source semanticview.Source, nodeID, eventType string) workflowNodeEventHandlerResolution {
@@ -249,7 +249,7 @@ func workflowNodeMatchedHandlerEventKey(source semanticview.Source, nodeID, even
 	return eventType
 }
 
-func workflowNodeInputAliasEventHandlerResolution(source semanticview.Source, nodeID, rawEventType string) workflowNodeEventHandlerResolution {
+func workflowNodeConnectedInputEventHandlerResolution(source semanticview.Source, nodeID, rawEventType string) workflowNodeEventHandlerResolution {
 	if source == nil {
 		return workflowNodeEventHandlerResolution{}
 	}
@@ -257,9 +257,25 @@ func workflowNodeInputAliasEventHandlerResolution(source semanticview.Source, no
 	if !ok {
 		return workflowNodeEventHandlerResolution{}
 	}
-	for _, alias := range semanticview.ImportBoundaryInputAliasesForParentEvent(source, strings.TrimSpace(contractSource.FlowID), rawEventType) {
-		if resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeID, alias.Pin); resolved.Matched {
-			return resolved
+	flowID := strings.TrimSpace(contractSource.FlowID)
+	for _, inputPin := range source.FlowInputEventPins(flowID) {
+		resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeID, inputPin.EventType())
+		if !resolved.Matched {
+			continue
+		}
+		for _, connect := range source.CompositionConnectsTo(flowID, inputPin.PinName()) {
+			from, err := connect.FromRef()
+			if err != nil {
+				continue
+			}
+			outputPin, ok := source.FlowOutputEventPin(from.FlowID, from.Pin)
+			if !ok {
+				continue
+			}
+			producerEvent := eventidentity.Normalize(source.ResolveFlowEventReference(from.FlowID, outputPin.EventType()))
+			if producerEvent == eventidentity.Normalize(rawEventType) {
+				return resolved
+			}
 		}
 	}
 	return workflowNodeEventHandlerResolution{}
@@ -488,9 +504,6 @@ func workflowNodeSubscriptionAliases(source semanticview.Source, nodeID, eventTy
 		return out
 	}
 	flowID := strings.TrimSpace(contractSource.FlowID)
-	for _, alias := range semanticview.ImportBoundaryOutputAliasesForParentEvent(source, contractSource.PackageKey, flowID, eventType) {
-		appendAlias(alias.EventPattern)
-	}
 	if strings.Contains(eventType, "*") {
 		if resolution := semanticview.ResolveImportBoundaryWildcardSubscriptionForNode(source, nodeID, eventType); resolution.Scoped {
 			for _, pattern := range resolution.Patterns {
@@ -498,26 +511,13 @@ func workflowNodeSubscriptionAliases(source semanticview.Source, nodeID, eventTy
 			}
 			return out
 		}
-		for _, alias := range semanticview.ImportBoundaryOutputAliasesForParent(source, contractSource.PackageKey, flowID) {
-			parentEvent := eventidentity.Normalize(alias.ParentEvent)
-			if parentEvent == "" || !eventidentity.MatchPattern(eventType, parentEvent) {
-				continue
-			}
-			appendAlias(alias.EventPattern)
+	}
+	if source.FlowHasInputEvent(flowID, eventType) {
+		for _, pattern := range source.FlowInputProducerPatterns(flowID, eventType) {
+			appendAlias(pattern)
 		}
-	}
-	if flowID == "" {
+	} else {
 		appendAlias(source.ResolveNodeEventReference(nodeID, eventType))
-		return out
-	}
-	if !source.FlowHasInputEvent(flowID, eventType) {
-		appendAlias(source.ResolveNodeEventReference(nodeID, eventType))
-		return out
-	}
-	for _, pattern := range source.FlowInputProducerPatterns(flowID, eventType) {
-		appendAlias(pattern)
-	}
-	if semanticview.ImportBoundaryInputAliasRequired(source, flowID, eventType) {
 		return out
 	}
 	appendAlias(source.ResolveNodeEventReference(nodeID, eventType))
@@ -530,22 +530,6 @@ func workflowFlowInputProducerAliases(source semanticview.Source, targetFlowID, 
 		return nil
 	}
 	return append([]string{}, source.ResolveFlowInputAutoWire(targetFlowID, eventType).Patterns...)
-}
-
-func workflowNodeOutputAliasEventHandlerResolution(source semanticview.Source, nodeID, rawEventType string) workflowNodeEventHandlerResolution {
-	if source == nil {
-		return workflowNodeEventHandlerResolution{}
-	}
-	contractSource, ok := source.NodeContractSource(nodeID)
-	if !ok {
-		return workflowNodeEventHandlerResolution{}
-	}
-	for _, parentEvent := range semanticview.ImportBoundaryOutputParentEventsForEvent(source, contractSource.PackageKey, strings.TrimSpace(contractSource.FlowID), rawEventType) {
-		if resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeID, parentEvent); resolved.Matched {
-			return resolved
-		}
-	}
-	return workflowNodeEventHandlerResolution{}
 }
 
 func workflowFlowHasInputEvent(source semanticview.Source, flowID, eventType string) bool {
