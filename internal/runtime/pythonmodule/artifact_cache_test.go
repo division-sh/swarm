@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -282,6 +283,13 @@ func TestArtifactCacheIgnoresInterruptedStagingAndReplacesPartialFinal(t *testin
 	if err := os.WriteFile(filepath.Join(interrupted, pythonWasmPath), []byte("partial staging"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	quarantine := filepath.Join(parent, "."+digestHex+".invalid-interrupted")
+	if err := os.Mkdir(quarantine, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(quarantine, pythonWasmPath), []byte("invalid quarantine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	partialFinal := filepath.Join(parent, digestHex)
 	if err := os.Mkdir(partialFinal, 0o755); err != nil {
 		t.Fatal(err)
@@ -304,8 +312,10 @@ func TestArtifactCacheIgnoresInterruptedStagingAndReplacesPartialFinal(t *testin
 	if err := validateMaterializedArtifact(materialized, manifest); err != nil {
 		t.Fatalf("materialized artifact: %v", err)
 	}
-	if _, err := os.Stat(interrupted); err != nil {
-		t.Fatalf("interrupted staging evidence was unexpectedly consumed: %v", err)
+	for _, path := range []string{interrupted, quarantine} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("superseded work tree %s still exists: %v", path, err)
+		}
 	}
 }
 
