@@ -33,7 +33,8 @@ var (
 	artifactDir  string
 	artifactErr  error
 
-	artifactCacheBaseDir = defaultArtifactCacheBaseDir
+	defaultArtifactCacheRoot, defaultArtifactCacheRootErr = resolveDefaultArtifactCacheBaseDir()
+	artifactCacheBaseDir                                  = defaultArtifactCacheBaseDir
 )
 
 type artifactManifest struct {
@@ -60,6 +61,10 @@ func materializedArtifactDir() (string, error) {
 }
 
 func defaultArtifactCacheBaseDir() (string, error) {
+	return defaultArtifactCacheRoot, defaultArtifactCacheRootErr
+}
+
+func resolveDefaultArtifactCacheBaseDir() (string, error) {
 	root, err := os.UserCacheDir()
 	if err != nil {
 		return "", err

@@ -92,6 +92,16 @@ func verifyPackageArtifactLifecycle(tempRoot string) error {
 	return nil
 }
 
+func TestDefaultArtifactCacheBaseDirIsProcessStable(t *testing.T) {
+	before, beforeErr := defaultArtifactCacheBaseDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	after, afterErr := defaultArtifactCacheBaseDir()
+	if before != after || !reflect.DeepEqual(beforeErr, afterErr) {
+		t.Fatalf("default cache root followed mutable process environment: before=(%q, %v) after=(%q, %v)", before, beforeErr, after, afterErr)
+	}
+}
+
 func TestArtifactCacheConcurrentProcessesConvergeOnEmbeddedArtifact(t *testing.T) {
 	if os.Getenv(artifactCacheHelperEnv) != "" {
 		cacheRoot := os.Getenv("SWARM_TEST_PYTHON_ARTIFACT_CACHE_ROOT")
