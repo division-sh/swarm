@@ -1820,6 +1820,11 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) 
 	if cancelStart != nil {
 		cancelStart()
 	}
+	if rt.Pipeline != nil {
+		if err := rt.Pipeline.StopWorkflowTimerLifecycle(drainCtx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("workflow timer lifecycle shutdown: %w", err))
+		}
+	}
 	if rt.Scheduler != nil {
 		rt.Scheduler.Stop()
 		if err := rt.Scheduler.Wait(drainCtx); err != nil {

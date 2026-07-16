@@ -71,9 +71,12 @@ func TestForkAttemptGenerationRemintsActivationAndTimerIdentity(t *testing.T) {
 	}
 	payload := []byte(`{"business":"unchanged"}`)
 	row := runForkTimerReconstructionRow{
-		TimerID: sourceTimerID, EntityID: "entity-1", TimerName: ref.TaskID(), FirePayload: payload,
+		TimerID: sourceTimerID, EntityID: "entity-1", FlowInstance: "review/1",
+		TimerName: ref.TaskID(), FireEvent: "review.expired", FirePayload: payload,
+		FireAt: now.Add(time.Hour), OwnerAgent: "reviewer", TaskType: "timer",
+		Status: "active", CreatedAt: now,
 	}
-	forkedRow, err := forkAttemptGenerationTimer(row, "fork-run", uuid.NewString())
+	forkedRow, err := remintRunForkWorkflowTimer(row, "source-run", "fork-run", uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}

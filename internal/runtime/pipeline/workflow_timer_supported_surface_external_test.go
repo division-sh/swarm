@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -401,6 +402,118 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			}
 		})
 	}
+}
+
+func TestRecurringWorkflowTimerRegistersNextOccurrenceWhenPostgresReleaseInitiallyFails(t *testing.T) {
+	selected := openPostgresGateRecoveryStore(t)
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	insertGateRecoveryRun(t, selected, runID)
+	ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
+	bundle := workflowTimerServedLifecycleBundle(true)
+	bundle.Semantics.Timers[0].AdvancesTo = ""
+	source := semanticview.Wrap(bundle)
+	bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
+		ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
+	}, runtimecontracts.WorkflowStageTimerInternalEvent)
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	baseScheduleStore, ok := selected.events.(runtimepipeline.SchedulePersistence)
+	if !ok {
+		t.Fatalf("selected postgres store does not implement SchedulePersistence")
+	}
+	scheduleStore := &failOnceReleaseSchedulePersistence{
+		SchedulePersistence: baseScheduleStore,
+		failures:            1,
+		releaseAttempts:     make(map[string]int),
+	}
+
+	fireErrors := make(chan error, 8)
+	var coordinator *runtimepipeline.PipelineCoordinator
+	scheduler := runtimepipeline.NewScheduler(func(schedule runtimepipeline.Schedule) {
+		if coordinator == nil {
+			fireErrors <- fmt.Errorf("workflow timer coordinator is unavailable")
+			return
+		}
+		if _, err := coordinator.FireWorkflowTimer(ctx, schedule); err != nil {
+			fireErrors <- err
+		}
+	})
+	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
+		Module: gateRecoveryModule{source: source}, WorkflowStore: selected.workflowStore,
+		TimerScheduler: scheduler, TimerScheduleStore: scheduleStore,
+		EventReceiptsCapability: func(context.Context) (bool, error) { return true, nil },
+	})
+	bus.SetInterceptors(coordinator)
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = coordinator.StopWorkflowTimerLifecycle(stopCtx)
+		scheduler.Stop()
+		_ = scheduler.Wait(stopCtx)
+	})
+
+	createdAt := time.Now().UTC()
+	if err := selected.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
+		InstanceID: entityID, StorageRef: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
+		CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
+		Metadata: map[string]any{"run_id": runID},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+	if err := coordinator.ArmFlowInstanceInitialStageLifecycle(ctx, entityID); err != nil {
+		t.Fatalf("ArmFlowInstanceInitialStageLifecycle: %v", err)
+	}
+	waitWorkflowTimerEventCount(t, selected, fireErrors, runID, runtimecontracts.WorkflowStageTimerInternalEvent, 2)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if scheduleStore.retriedRelease() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("initial failed claim release was not retried: %#v", scheduleStore.snapshotReleaseAttempts())
+}
+
+type failOnceReleaseSchedulePersistence struct {
+	runtimepipeline.SchedulePersistence
+	mu              sync.Mutex
+	failures        int
+	releaseAttempts map[string]int
+}
+
+func (s *failOnceReleaseSchedulePersistence) ReleaseSchedule(ctx context.Context, schedule runtimepipeline.Schedule) error {
+	s.mu.Lock()
+	s.releaseAttempts[schedule.TaskID]++
+	if s.failures > 0 {
+		s.failures--
+		s.mu.Unlock()
+		return errors.New("transient workflow timer claim release failure")
+	}
+	s.mu.Unlock()
+	return s.SchedulePersistence.ReleaseSchedule(ctx, schedule)
+}
+
+func (s *failOnceReleaseSchedulePersistence) retriedRelease() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, attempts := range s.releaseAttempts {
+		if attempts >= 2 {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *failOnceReleaseSchedulePersistence) snapshotReleaseAttempts() map[string]int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]int, len(s.releaseAttempts))
+	for taskID, attempts := range s.releaseAttempts {
+		out[taskID] = attempts
+	}
+	return out
 }
 
 func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(t *testing.T) {
