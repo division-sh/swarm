@@ -470,6 +470,8 @@ seam_families:
       - internal/runtime/pipeline/workflow_nodes_test.go
       - internal/runtime/engine/executor.go
       - internal/runtime/engine/executor_test.go
+      - internal/runtime/tools/executor_emit.go
+      - internal/runtime/tools/executor_emit_test.go
       - internal/runtime/runforkadmission/contract_frontier.go
       - internal/runtime/runforkadmission/contract_frontier_test.go
       - internal/runtime/runforkadmission/selected_route_history.go
@@ -490,8 +492,8 @@ seam_families:
       descendant evidence. Pipeline execution preserves its already-admitted
       producer route when constructing output events. EventBus plans and issues,
       workflow-node connect localization, selected-contract frontier admission,
-      route-history admission, and supported fan-in/reply/fan-out runtime proofs
-      consume the same owner.
+      route-history admission, agent-tool output construction, and supported
+      fan-in/reply/fan-out runtime proofs consume the same owner.
   - id: selected_contract_connect_receiver_policy
     layer: replay_recovery_consumers
     classification: valid_consumer

@@ -393,13 +393,16 @@ func flowWithinActorScope(actorFlow, inboundFlow string) bool {
 
 func (e *Executor) resolveAgentScopedEmitEventType(actor models.AgentConfig, eventType string) string {
 	eventType = strings.TrimSpace(eventType)
-	if eventType == "" || strings.Contains(eventType, "/") {
+	if eventType == "" {
 		return eventType
 	}
-	configured := UniqueNonEmpty(actor.EmitEvents)
-	for _, candidate := range configured {
-		if strings.Contains(candidate, "/") && eventidentity.LeafName(candidate) == eventType {
-			return strings.TrimSpace(candidate)
+	if !strings.Contains(eventType, "/") {
+		configured := UniqueNonEmpty(actor.EmitEvents)
+		for _, candidate := range configured {
+			if strings.Contains(candidate, "/") && eventidentity.LeafName(candidate) == eventType {
+				eventType = strings.TrimSpace(candidate)
+				break
+			}
 		}
 	}
 	flowID := strings.TrimSpace(actor.FlowID)
@@ -424,6 +427,17 @@ func (e *Executor) resolveAgentScopedEmitEventType(actor models.AgentConfig, eve
 	localEvents = append(localEvents, scope.OutputEvents...)
 	for candidate := range scope.Events {
 		localEvents = append(localEvents, candidate)
+	}
+	scopePath := eventidentity.Normalize(scope.Path)
+	if strings.EqualFold(strings.TrimSpace(scope.Mode), runtimecontracts.FlowModeTemplate) &&
+		flowPath != scopePath && strings.HasPrefix(eventidentity.Normalize(eventType), scopePath+"/") {
+		local := strings.TrimPrefix(eventidentity.Normalize(eventType), scopePath+"/")
+		for _, candidate := range eventidentity.NormalizeList(localEvents) {
+			if local == candidate {
+				eventType = local
+				break
+			}
+		}
 	}
 	return eventidentity.ExternalizeForFlow(flowPath, localEvents, eventType)
 }
