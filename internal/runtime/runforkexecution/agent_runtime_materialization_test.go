@@ -28,12 +28,12 @@ func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredeces
 	}
 	oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "fork-agent", Generation: 1}
 	newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "fork-agent", Generation: 2}
-	eventBus.ReplaceAgentRoute(oldToken, events.EventType("item.received"))
+	eventBus.ReplaceAgentRoute(oldToken, selectedContractAgentRouteAdmission(t, oldToken.AgentID, "item.received"))
 	oldEvent := eventtest.RuntimeControl("old-work", events.EventType("item.received"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
 	if err := eventBus.Publish(context.Background(), oldEvent); err != nil {
 		t.Fatalf("publish predecessor event: %v", err)
 	}
-	newRoute := eventBus.ReplaceAgentRoute(newToken, events.EventType("item.received"))
+	newRoute := eventBus.ReplaceAgentRoute(newToken, selectedContractAgentRouteAdmission(t, newToken.AgentID, "item.received"))
 	newEvent := eventtest.RuntimeControl("new-work", events.EventType("item.received"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
 	if err := eventBus.Publish(context.Background(), newEvent); err != nil {
 		t.Fatalf("publish successor event: %v", err)
@@ -60,6 +60,18 @@ func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredeces
 	if err := runtime.WaitForQuiescence(waitCtx, eventBus); err != nil {
 		t.Fatalf("WaitForQuiescence after current route settlement: %v", err)
 	}
+}
+
+func selectedContractAgentRouteAdmission(t *testing.T, agentID string, subscriptions ...string) semanticview.FlowOwnedAgentSubscriptionAdmission {
+	t.Helper()
+	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
+		AgentID:       agentID,
+		Subscriptions: subscriptions,
+	})
+	if err != nil {
+		t.Fatalf("admit selected-contract agent route: %v", err)
+	}
+	return admission
 }
 
 type selectedContractSelfReleaseScopeProbe struct {

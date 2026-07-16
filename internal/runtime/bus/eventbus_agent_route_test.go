@@ -99,7 +99,7 @@ func TestEventBusAgentRouteRemovalRetiresOnlyExactGenerationDeliveries(t *testin
 	}
 	oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 1}
 	newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 2}
-	eb.ReplaceAgentRoute(oldToken, events.EventType("test.work"))
+	eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.work")))
 	oldEvent := eventtest.RuntimeControl("work-old", events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
 	if err := eb.deliverToAgents(context.Background(), oldEvent, []string{"agent-a"}); err != nil {
 		t.Fatalf("deliver predecessor event: %v", err)
@@ -113,7 +113,7 @@ func TestEventBusAgentRouteRemovalRetiresOnlyExactGenerationDeliveries(t *testin
 		t.Fatalf("pending predecessor deliveries after removal = %d, want 0", got)
 	}
 
-	newCh := eb.ReplaceAgentRoute(newToken, events.EventType("test.work"))
+	newCh := eb.ReplaceAgentRoute(newToken, testAgentSubscriptionAdmission(t, newToken.AgentID, events.EventType("test.work")))
 	newEvent := eventtest.RuntimeControl("work-new", events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
 	if err := eb.deliverToAgents(context.Background(), newEvent, []string{"agent-a"}); err != nil {
 		t.Fatalf("deliver successor event: %v", err)
@@ -142,7 +142,7 @@ func TestEventBusAgentRouteDeliveryRemainsPendingAfterDequeueUntilCompletion(t *
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	token := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 1}
-	ch := eb.ReplaceAgentRoute(token, events.EventType("test.work"))
+	ch := eb.ReplaceAgentRoute(token, testAgentSubscriptionAdmission(t, token.AgentID, events.EventType("test.work")))
 	evt := eventtest.RuntimeControl("work-1", events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
 	if err := eb.deliverToAgents(context.Background(), evt, []string{"agent-a"}); err != nil {
 		t.Fatalf("deliver event: %v", err)
