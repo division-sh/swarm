@@ -1003,6 +1003,111 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 	}
 }
 
+func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflight(t *testing.T) {
+	source := emitRoutePlanRootReceiverSource()
+	store := newEmitRoutePlanStore()
+	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	emitRegistry := NewEmitRegistry(source, nil)
+	parentRoute := events.RouteIdentity{EntityID: "root-entity"}
+	actor := models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "producer-agent",
+		Role:          "producer",
+		FlowID:        "producer",
+		FlowPath:      "producer/inst-1",
+		EntityID:      "producer-entity",
+		EmitEvents:    []string{"producer/deploy.done"},
+	}
+	exec := NewExecutorWithOptions(eb, nil, ExecutorOptions{
+		WorkflowSource: source,
+		EmitRegistry:   emitRegistry,
+		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{
+			"producer/inst-1": {Metadata: map[string]any{"parent_entity_id": parentRoute.EntityID}},
+		}},
+	})
+	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RootIngress(
+		"evt-parent",
+		events.EventType("producer/deploy.requested"),
+		"runtime",
+		"",
+		nil,
+		0,
+		"run-root-receiver",
+		"",
+		events.EventEnvelope{},
+		time.Now().UTC()))
+
+	out, err := exec.handleEmitTool(ctx, actor, "emit_deploy_done", map[string]any{})
+	if err != nil {
+		t.Fatalf("handleEmitTool: %v", err)
+	}
+	eventID := emitToolResultString(t, out, "event_id")
+	persisted := store.events[eventID]
+	if got := persisted.TargetRoute(); got != parentRoute {
+		t.Fatalf("persisted target route = %#v, want parent route %#v", got, parentRoute)
+	}
+	wantRoute := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "root-receiver",
+		Target:         parentRoute,
+	}
+	if !emitDeliveryRoutesContain(store.routes[eventID], wantRoute) {
+		t.Fatalf("persisted delivery routes = %#v, want %#v", store.routes[eventID], wantRoute)
+	}
+	if got := store.receipts[eventID]; got != "processed" {
+		t.Fatalf("pipeline receipt = %q, want processed", got)
+	}
+}
+
+func TestHandleEmitTool_RootReceiverConnectRejectsMissingOrIncompleteParentIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rows map[string]runtimepipeline.WorkflowInstance
+	}{
+		{name: "missing", rows: map[string]runtimepipeline.WorkflowInstance{}},
+		{name: "incomplete", rows: map[string]runtimepipeline.WorkflowInstance{
+			"producer/inst-1": {Metadata: map[string]any{
+				"parent_flow_id":       "root",
+				"parent_flow_instance": "root/inst-1",
+			}},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := emitRoutePlanRootReceiverSource()
+			store := newEmitRoutePlanStore()
+			eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			actor := models.AgentConfig{
+				ExecutionMode: "live",
+				ID:            "producer-agent",
+				Role:          "producer",
+				FlowID:        "producer",
+				FlowPath:      "producer/inst-1",
+				EntityID:      "producer-entity",
+				EmitEvents:    []string{"producer/deploy.done"},
+			}
+			exec := NewExecutorWithOptions(eb, nil, ExecutorOptions{
+				WorkflowSource:    source,
+				EmitRegistry:      NewEmitRegistry(source, nil),
+				WorkflowInstances: emitWorkflowInstanceLoader{rows: tc.rows},
+			})
+
+			_, err = exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_deploy_done", map[string]any{})
+			if err == nil || !strings.Contains(err.Error(), "parent_route_incomplete") {
+				t.Fatalf("handleEmitTool error = %v, want parent_route_incomplete", err)
+			}
+			if len(store.events) != 0 || len(store.routes) != 0 {
+				t.Fatalf("persisted events/routes = %d/%d, want 0/0", len(store.events), len(store.routes))
+			}
+		})
+	}
+}
+
 func TestHandleEmitTool_FailsClosedForConnectedOutputWithoutCanonicalRouteAuthority(t *testing.T) {
 	source := emitRoutePlanSource(nil)
 	store := newEmitRoutePlanStore()
@@ -1431,6 +1536,44 @@ type emitRoutePlanTestFlow struct {
 
 func emitRoutePlanStaticSource(connect runtimecontracts.FlowPackageConnect) semanticview.Source {
 	return emitRoutePlanSource([]runtimecontracts.FlowPackageConnect{connect})
+}
+
+func emitRoutePlanRootReceiverSource() semanticview.Source {
+	bundle := emitRoutePlanTestBundle([]emitRoutePlanTestFlow{
+		{
+			id:   "producer",
+			mode: "template",
+			outputs: []runtimecontracts.FlowOutputEventPin{{
+				Name:  "deploy_done",
+				Event: "deploy.done",
+			}},
+		},
+	}, []runtimecontracts.FlowPackageConnect{{
+		From: "producer.deploy_done",
+		To:   ".deploy_completed",
+	}})
+	rootHandler := runtimecontracts.SystemNodeEventHandler{}
+	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{
+		Pins: runtimecontracts.FlowPins{
+			Inputs: runtimecontracts.FlowInputPins{
+				Events: []string{"deploy.done"},
+				EventPins: []runtimecontracts.FlowInputEventPin{{
+					Name:  "deploy_completed",
+					Event: "deploy.done",
+				}},
+			},
+		},
+	}
+	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+		"root-receiver": {
+			ID:            "root-receiver",
+			ExecutionType: "system_node",
+			SubscribesTo:  []string{"deploy.done"},
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.done": rootHandler},
+		},
+	}
+	bundle.Semantics.NodeHandlers["root-receiver"] = map[string]runtimecontracts.SystemNodeEventHandler{"deploy.done": rootHandler}
+	return semanticview.Wrap(bundle)
 }
 
 func emitRoutePlanSource(connects []runtimecontracts.FlowPackageConnect) semanticview.Source {
