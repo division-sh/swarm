@@ -508,10 +508,19 @@ func (r connectRoutePlanResolver) connectIssueMatchesEvent(ctx context.Context, 
 	if !ok {
 		return false
 	}
+	mode := "root"
+	if !from.Root {
+		scope, ok := r.source.FlowScopeByID(from.FlowID)
+		if !ok {
+			return false
+		}
+		mode = strings.TrimSpace(scope.Mode)
+	}
 	endpoint := runtimepinrouting.ConnectRoutePlanEndpoint{
 		Root:          from.Root,
 		FlowID:        strings.TrimSpace(from.FlowID),
 		FlowPath:      strings.Trim(strings.TrimSpace(routeFlowPath(r.source, from.FlowID)), "/"),
+		Mode:          mode,
 		Pin:           strings.TrimSpace(from.Pin),
 		Event:         strings.TrimSpace(outputPin.EventType()),
 		ResolvedEvent: strings.TrimSpace(r.source.ResolveFlowEventReference(from.FlowID, outputPin.EventType())),

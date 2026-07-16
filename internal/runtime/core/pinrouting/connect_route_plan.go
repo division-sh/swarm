@@ -84,6 +84,9 @@ func ConnectSourceEndpointMatches(endpoint ConnectRoutePlanEndpoint, eventType s
 	if sourcePath == "" {
 		sourcePath = strings.Trim(strings.TrimSpace(endpoint.FlowID), "/")
 	}
+	if connectSourceEndpointIsTemplate(endpoint) {
+		return source.FlowInstance != "" && sourceLocal != "" && eventType == source.FlowInstance+"/"+sourceLocal
+	}
 	sourceScoped := sourceLocal
 	if sourcePath != "" && sourceLocal != "" {
 		sourceScoped = sourcePath + "/" + sourceLocal
@@ -131,10 +134,17 @@ func connectSourceRouteMatchesEndpoint(endpoint ConnectRoutePlanEndpoint, source
 			return false
 		}
 	}
-	if source.FlowInstance != "" && !connectSourceFlowInstanceMatchesPath(source.FlowInstance, sourcePath) {
+	if connectSourceEndpointIsTemplate(endpoint) {
+		return source.FlowInstance != "" && source.FlowInstance != sourcePath && connectSourceFlowInstanceMatchesPath(source.FlowInstance, sourcePath)
+	}
+	if source.FlowInstance != "" && source.FlowInstance != sourcePath {
 		return false
 	}
 	return true
+}
+
+func connectSourceEndpointIsTemplate(endpoint ConnectRoutePlanEndpoint) bool {
+	return strings.EqualFold(strings.TrimSpace(endpoint.Mode), "template")
 }
 
 func connectSourceFlowInstanceMatchesPath(flowInstance, sourcePath string) bool {

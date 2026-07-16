@@ -1721,8 +1721,12 @@ func assertCreatedChildFlowIdentityCoherent(t *testing.T, db *sql.DB, flowID, en
 	if got := entityID; got != FlowInstanceEntityID(flowPath) {
 		t.Fatalf("created %s entity id = %q, want %q for flow path %q", flowID, got, FlowInstanceEntityID(flowPath), flowPath)
 	}
-	if got := emitted.FlowInstance(); got != flowPath {
-		t.Fatalf("created %s emitted flow_instance = %q, want %q", flowID, got, flowPath)
+	if got := emitted.FlowInstance(); got != flowID {
+		t.Fatalf("created %s emitted flow_instance = %q, want static scope %q", flowID, got, flowID)
+	}
+	wantSource := (events.RouteIdentity{FlowID: flowID, FlowInstance: flowID, EntityID: entityID}).Normalized()
+	if got := emitted.SourceRoute(); got != wantSource {
+		t.Fatalf("created %s emitted source route = %#v, want static scope %#v", flowID, got, wantSource)
 	}
 	var rowOwner string
 	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `

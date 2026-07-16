@@ -974,6 +974,11 @@ func replyConformanceEvent(eventType, id, flowID, flowInstance string, payload m
 }
 
 func replyConformanceEventForRun(eventType, id, runID, flowID, flowInstance string, payload map[string]any) events.Event {
+	flowID = strings.Trim(strings.TrimSpace(flowID), "/")
+	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
+	if flowInstance != "" && flowInstance != flowID && strings.HasPrefix(eventType, flowID+"/") {
+		eventType = flowInstance + "/" + strings.TrimPrefix(eventType, flowID+"/")
+	}
 	raw, _ := json.Marshal(payload)
 	return eventtest.RootIngress(
 		id,

@@ -22,6 +22,7 @@ func TestConnectSourceEndpointMatchesEventUsesImmutableSourceAcrossTargetProject
 	endpoint := ConnectRoutePlanEndpoint{
 		FlowID:        "producer",
 		FlowPath:      "producer",
+		Mode:          "template",
 		Event:         "deploy.done",
 		ResolvedEvent: "producer/deploy.done",
 	}
@@ -68,6 +69,7 @@ func TestConnectSourceEndpointMatchesEventRejectsConcreteInstanceWithoutSourceRo
 	endpoint := ConnectRoutePlanEndpoint{
 		FlowID:        "producer",
 		FlowPath:      "producer",
+		Mode:          "template",
 		Event:         "deploy.done",
 		ResolvedEvent: "producer/deploy.done",
 	}
@@ -75,6 +77,47 @@ func TestConnectSourceEndpointMatchesEventRejectsConcreteInstanceWithoutSourceRo
 	if ConnectSourceEndpointMatchesEvent(endpoint, evt) {
 		t.Fatalf("concrete instance event matched without authoritative source route; envelope = %#v", evt.NormalizedEnvelope())
 	}
+}
+
+func TestConnectSourceEndpointMatchesEnforcesProducerModeMatrix(t *testing.T) {
+	flowEndpoint := ConnectRoutePlanEndpoint{
+		FlowID:        "producer",
+		FlowPath:      "producer",
+		Event:         "deploy.done",
+		ResolvedEvent: "producer/deploy.done",
+	}
+	tests := []struct {
+		name      string
+		endpoint  ConnectRoutePlanEndpoint
+		eventType string
+		source    events.RouteIdentity
+		want      bool
+	}{
+		{name: "root static name", endpoint: ConnectRoutePlanEndpoint{Root: true, Mode: "root", Event: "deploy.done", ResolvedEvent: "deploy.done"}, eventType: "deploy.done", want: true},
+		{name: "root rejects child evidence", endpoint: ConnectRoutePlanEndpoint{Root: true, Mode: "root", Event: "deploy.done", ResolvedEvent: "deploy.done"}, eventType: "deploy.done", source: events.RouteIdentity{FlowID: "producer"}},
+		{name: "static scoped without route", endpoint: flowEndpoint, eventType: "producer/deploy.done", want: true},
+		{name: "static exact instance", endpoint: flowEndpoint, eventType: "producer/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}, want: true},
+		{name: "static rejects descendant instance", endpoint: flowEndpoint, eventType: "producer/inst-1/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}},
+		{name: "singleton exact instance", endpoint: withConnectSourceMode(flowEndpoint, "singleton"), eventType: "producer/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}, want: true},
+		{name: "singleton rejects descendant instance", endpoint: withConnectSourceMode(flowEndpoint, "singleton"), eventType: "producer/inst-1/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}},
+		{name: "template concrete instance", endpoint: withConnectSourceMode(flowEndpoint, "template"), eventType: "producer/inst-1/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}, want: true},
+		{name: "template rejects base without route", endpoint: withConnectSourceMode(flowEndpoint, "template"), eventType: "producer/deploy.done"},
+		{name: "template rejects base instance", endpoint: withConnectSourceMode(flowEndpoint, "template"), eventType: "producer/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}},
+		{name: "template rejects base name with concrete route", endpoint: withConnectSourceMode(flowEndpoint, "template"), eventType: "producer/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}},
+		{name: "template rejects concrete name without route", endpoint: withConnectSourceMode(flowEndpoint, "template"), eventType: "producer/inst-1/deploy.done"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ConnectSourceEndpointMatches(tc.endpoint, tc.eventType, tc.source); got != tc.want {
+				t.Fatalf("ConnectSourceEndpointMatches(%#v, %q, %#v) = %v, want %v", tc.endpoint, tc.eventType, tc.source, got, tc.want)
+			}
+		})
+	}
+}
+
+func withConnectSourceMode(endpoint ConnectRoutePlanEndpoint, mode string) ConnectRoutePlanEndpoint {
+	endpoint.Mode = mode
+	return endpoint
 }
 
 func TestConnectSourceEndpointMatchesRejectsStaticEventWhenSourceRouteContradicts(t *testing.T) {

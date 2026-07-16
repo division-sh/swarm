@@ -50,7 +50,7 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if len(connectIssues) != 0 {
 		return store.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission connect routes: %#v", connectIssues)
 	}
-	routeEvents := selectedRouteHistoryEvents(routeTable, connectPlans, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
+	routeEvents, incompleteRoutes := selectedRouteHistoryEvents(routeTable, connectPlans, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
 	dynamicFlowInstances := selectedRouteHistoryDynamicFlowInstances(req.Source, req.Plan, req.FrontierAdmission)
 	blockers := []store.RunForkUnsupportedBlocker{{
 		Code:    store.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
@@ -60,6 +60,12 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 		blockers = appendRunForkBlocker(blockers, store.RunForkUnsupportedBlocker{
 			Code:    store.RunForkBlockerFlowRouteHistoryUnproven,
 			Message: "source route rows are current operational state and remain evidence-only until selected route reconstruction is separately approved",
+		})
+	}
+	if incompleteRoutes {
+		blockers = appendRunForkBlocker(blockers, store.RunForkUnsupportedBlocker{
+			Code:    store.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven,
+			Message: "selected route history has a matched connect receiver that still requires runtime resolution",
 		})
 	}
 	frontierEventCount, frontierSourceEventIDs, frontierFingerprint := store.RunForkContractFrontierEvidenceBinding(req.FrontierAdmission)
@@ -150,18 +156,25 @@ func selectedRouteHistoryEventEvidence(plan store.RunForkPlan, frontier store.Ru
 	return out
 }
 
-func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectPlans []runtimepinrouting.ConnectRoutePlan, events []selectedRouteHistoryEvent) []store.RunForkSelectedContractRouteEvent {
+func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectPlans []runtimepinrouting.ConnectRoutePlan, events []selectedRouteHistoryEvent) ([]store.RunForkSelectedContractRouteEvent, bool) {
 	out := make([]store.RunForkSelectedContractRouteEvent, 0, len(events))
+	incomplete := false
 	for _, event := range events {
-		routeKeys, connectOwned := contractFrontierRouteKeys(event.eventName, event.sourceRoute, connectPlans)
+		lookups := contractFrontierRouteLookups(event.eventName, event.sourceRoute, connectPlans)
+		eventIncomplete := contractFrontierLookupsRequireRuntimeResolution(lookups)
+		incomplete = incomplete || eventIncomplete
+		disposition := store.RunForkSelectedContractDispositionEvidenceOnly
+		if eventIncomplete {
+			disposition = store.RunForkSelectedContractDispositionFailClosed
+		}
 		out = append(out, store.RunForkSelectedContractRouteEvent{
 			SourceEventID:     event.sourceEventID,
 			EventName:         event.eventName,
-			DerivedRecipients: contractFrontierRecipients(resolveContractFrontierRoutes(routeTable, routeKeys, connectOwned)),
-			Disposition:       store.RunForkSelectedContractDispositionEvidenceOnly,
+			DerivedRecipients: contractFrontierRecipients(resolveContractFrontierRoutes(routeTable, lookups)),
+			Disposition:       disposition,
 		})
 	}
-	return out
+	return out, incomplete
 }
 
 func selectedRouteHistoryDynamicFlowInstances(source semanticview.Source, plan store.RunForkPlan, frontier store.RunForkContractFrontierAdmission) []string {

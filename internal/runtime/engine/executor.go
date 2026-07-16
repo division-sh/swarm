@@ -3284,6 +3284,9 @@ func emitSourceRoute(frame *executionFrame) events.RouteIdentity {
 	if frame == nil {
 		return events.RouteIdentity{}
 	}
+	if admitted := frame.req.ProducerRoute.Normalized(); !admitted.Empty() {
+		return admitted
+	}
 	flowInstance := firstNonEmpty(
 		normalizedFlowInstanceCandidate(asString(frame.req.State.StateCarrier.Metadata["flow_path"])),
 		normalizedFlowInstanceCandidate(frame.req.Event.FlowInstance()),
