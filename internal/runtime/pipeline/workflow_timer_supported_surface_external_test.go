@@ -37,11 +37,11 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(false))
-			bus, err := runtimebus.NewEventBusWithOptions(selected.events, runtimebus.EventBusOptions{
+			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
-			})
+			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -118,11 +118,11 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(false))
-			bus, err := runtimebus.NewEventBusWithOptions(selected.events, runtimebus.EventBusOptions{
+			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
-			})
+			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -240,7 +240,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(context.Background(), runID))
+			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 			bundle := workflowTimerServedLifecycleBundle(true)
 			bundle.Semantics.Timers[0].AdvancesTo = ""
 			cancelHandler := runtimecontracts.SystemNodeEventHandler{AdvancesTo: "done"}
@@ -289,9 +289,9 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 					},
 				}},
 			}
-			bus, err := runtimebus.NewEventBusWithOptions(selected.events, runtimebus.EventBusOptions{
+			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
-			})
+			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -416,7 +416,7 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 			bundle := workflowTimerServedLifecycleBundle(false)
 			bundle.Semantics.Timers[0].Delay = "200ms"
 			source := semanticview.Wrap(bundle)
@@ -428,9 +428,9 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 					close(validator.releaseSecond)
 				}
 			}()
-			bus, err := runtimebus.NewEventBusWithOptions(selected.events, runtimebus.EventBusOptions{
+			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, PayloadValidator: validator.validate,
-			})
+			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -540,12 +540,12 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(false))
 			failingStore, failures := failNextWorkflowTimerPipelineReceipt(t, selected.events)
-			bus, err := runtimebus.NewEventBusWithOptions(failingStore, runtimebus.EventBusOptions{
+			bus, err := newScopedTestEventBus(t, failingStore, runtimebus.EventBusOptions{
 				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
-			})
+			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
