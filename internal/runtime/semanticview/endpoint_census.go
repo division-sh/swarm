@@ -543,39 +543,46 @@ func (c AuthoredEventEndpointCensus) LegacyQualifiedSubscriptions() []LegacyQual
 			continue
 		}
 		consumerPath := eventidentity.Normalize(c.source.FlowPath(consumer.FlowID))
-		canonical := authored
+		candidates := []string{authored}
 		if consumerPath != "" && !strings.HasPrefix(authored, consumerPath+"/") {
-			canonical = consumerPath + "/" + authored
+			candidates = append(candidates, consumerPath+"/"+authored)
 		}
-		if consumerPath != "" && strings.HasPrefix(canonical, consumerPath+"/") {
-			local := strings.TrimPrefix(canonical, consumerPath+"/")
-			if local != "" && !strings.Contains(local, "/") {
-				continue
+		matched := false
+		for _, canonical := range candidates {
+			if consumerPath != "" && strings.HasPrefix(canonical, consumerPath+"/") {
+				local := strings.TrimPrefix(canonical, consumerPath+"/")
+				if local != "" && !strings.Contains(local, "/") {
+					continue
+				}
 			}
-		}
-		for _, flow := range flows {
-			flowID := strings.TrimSpace(flow.ID)
-			flowPath := eventidentity.Normalize(flow.Path)
-			if flowID == "" || flowID == strings.TrimSpace(consumer.FlowID) || flowPath == "" || !strings.HasPrefix(canonical, flowPath+"/") {
-				continue
+			for _, flow := range flows {
+				flowID := strings.TrimSpace(flow.ID)
+				flowPath := eventidentity.Normalize(flow.Path)
+				if flowID == "" || flowID == strings.TrimSpace(consumer.FlowID) || flowPath == "" || !strings.HasPrefix(canonical, flowPath+"/") {
+					continue
+				}
+				local := eventidentity.Normalize(strings.TrimPrefix(canonical, flowPath+"/"))
+				if local == "" {
+					continue
+				}
+				proof := ResolveFlowEventProof(c.source, flowID, local)
+				if !proof.HasSchema || eventidentity.Normalize(proof.Canonical) != canonical {
+					continue
+				}
+				legacy := LegacyQualifiedSubscription{
+					Consumer:       consumer,
+					TargetFlowID:   flowID,
+					TargetFlowPath: flowPath,
+					Event:          proof,
+				}
+				legacy.ID = legacyQualifiedSubscriptionID(legacy)
+				out = append(out, legacy)
+				matched = true
+				break
 			}
-			local := eventidentity.Normalize(strings.TrimPrefix(canonical, flowPath+"/"))
-			if local == "" {
-				continue
+			if matched {
+				break
 			}
-			proof := ResolveFlowEventProof(c.source, flowID, local)
-			if !proof.HasSchema || eventidentity.Normalize(proof.Canonical) != canonical {
-				continue
-			}
-			legacy := LegacyQualifiedSubscription{
-				Consumer:       consumer,
-				TargetFlowID:   flowID,
-				TargetFlowPath: flowPath,
-				Event:          proof,
-			}
-			legacy.ID = legacyQualifiedSubscriptionID(legacy)
-			out = append(out, legacy)
-			break
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })

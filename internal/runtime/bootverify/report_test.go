@@ -4551,6 +4551,39 @@ func TestRun_RejectsExactQualifiedNodeAndAgentSubscriptions(t *testing.T) {
 	}
 }
 
+func TestRun_RejectsAbsoluteSiblingQualifiedSubscription(t *testing.T) {
+	producer := runtimecontracts.FlowContractView{
+		Paths:  runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "flows/producer"},
+		Path:   "producer",
+		Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
+	}
+	consumer := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer", PackageKey: "flows/consumer"},
+		Path:  "consumer",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"listener": {
+				ID:               "listener",
+				SubscribesTo:     []string{"producer/task.done"},
+				EventHandlers:    map[string]runtimecontracts.SystemNodeEventHandler{"producer/task.done": {}},
+				ProducesDeclared: true,
+			},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, consumer}}
+	bundle := &runtimecontracts.WorkflowContractBundle{FlowTree: runtimecontracts.FlowTree{
+		Root: &root,
+		ByID: map[string]*runtimecontracts.FlowContractView{
+			"producer": &root.Children[0],
+			"consumer": &root.Children[1],
+		},
+	}}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.HardInvalidities(), "legacy_qualified_subscription", "producer/task.done") {
+		t.Fatalf("hard invalidities = %#v, want absolute sibling qualified subscription rejection", report.HardInvalidities())
+	}
+}
+
 func TestRun_ReportsExpressionFieldReferenceWarning(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)

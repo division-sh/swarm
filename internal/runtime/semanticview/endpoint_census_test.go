@@ -391,6 +391,38 @@ func TestLegacyQualifiedSubscriptionsResolveConsumerRelativeDescendantIdentity(t
 	}
 }
 
+func TestLegacyQualifiedSubscriptionsPreserveAbsoluteSiblingIdentity(t *testing.T) {
+	producer := runtimecontracts.FlowContractView{
+		Paths:  runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "flows/producer"},
+		Path:   "producer",
+		Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
+	}
+	consumer := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer", PackageKey: "flows/consumer"},
+		Path:  "consumer",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"listener": {ID: "listener", SubscribesTo: []string{"producer/task.done"}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"producer/task.done": {}}},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, consumer}}
+	bundle := &runtimecontracts.WorkflowContractBundle{FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+		Root: &root,
+		ByID: map[string]*runtimecontracts.FlowContractView{
+			"producer": &root.Children[0],
+			"consumer": &root.Children[1],
+		},
+	}}
+
+	legacy := BuildAuthoredEventEndpointCensus(Wrap(bundle)).LegacyQualifiedSubscriptions()
+	if len(legacy) != 1 {
+		t.Fatalf("retired subscriptions = %#v, want one absolute sibling consumer", legacy)
+	}
+	got := legacy[0]
+	if got.Consumer.NodeID != "listener" || got.Consumer.Event.Authored != "producer/task.done" || got.TargetFlowID != "producer" || got.Event.Canonical != "producer/task.done" {
+		t.Fatalf("retired subscription = %#v, want consumer listener targeting producer", got)
+	}
+}
+
 func TestEndpointCensusReusesBundleYAMLAndPreservesNodeAndAgentSourceLines(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixture := filepath.Join(repoRoot, "tests", "tier7-composition", "test-agent-emits-to-node")
