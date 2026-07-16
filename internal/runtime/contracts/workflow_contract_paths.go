@@ -374,14 +374,7 @@ func cloneAgentRegistryEntry(in AgentRegistryEntry) AgentRegistryEntry {
 	return out
 }
 func cloneToolSchemaEntryMap(in map[string]ToolSchemaEntry) map[string]ToolSchemaEntry {
-	if len(in) == 0 {
-		return map[string]ToolSchemaEntry{}
-	}
-	out := make(map[string]ToolSchemaEntry, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
+	return CloneToolSchemaEntries(in)
 }
 func normalizeStrings(in []string) []string {
 	if len(in) == 0 {

@@ -270,6 +270,7 @@ func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	decoded := ToolInputSchema(aux)
+	decoded.enumDeclared = hasYAMLMappingKey(node, "enum")
 	if err := ValidateToolInputSchema(decoded); err != nil {
 		return fmt.Errorf("tool schema: %w", err)
 	}

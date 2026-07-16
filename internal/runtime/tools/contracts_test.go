@@ -224,6 +224,43 @@ required: [result]
 	}
 }
 
+func TestRegisteredToolProjectionConsumesExactCanonicalSchemaOwner(t *testing.T) {
+	var schema runtimecontracts.ToolInputSchema
+	if err := yaml.Unmarshal([]byte(`
+type: object
+properties:
+  state:
+    type: string
+    pattern: ' approved $'
+    enum: [' approved ']
+  metadata:
+    type: object
+    additionalProperties:
+      type: integer
+required: [state]
+additionalProperties: false
+`), &schema); err != nil {
+		t.Fatalf("decode schema: %v", err)
+	}
+	want, err := runtimecontracts.ProjectToolInputSchema(schema)
+	if err != nil {
+		t.Fatalf("ProjectToolInputSchema: %v", err)
+	}
+	registered, included, err := registeredToolFromContract("test.exact", runtimecontracts.ToolSchemaEntry{HandlerType: "http", InputSchema: schema})
+	if err != nil || !included {
+		t.Fatalf("registeredToolFromContract = (%#v, %v, %v)", registered, included, err)
+	}
+	if !reflect.DeepEqual(registered.InputSchema, want) {
+		t.Fatalf("registered schema = %#v, want exact %#v", registered.InputSchema, want)
+	}
+
+	cyclic := runtimecontracts.ToolInputSchema{Type: "array"}
+	cyclic.Items = &cyclic
+	if _, _, err := registeredToolFromContract("test.cyclic", runtimecontracts.ToolSchemaEntry{HandlerType: "http", InputSchema: cyclic}); err == nil || !strings.Contains(err.Error(), "schema cycle") {
+		t.Fatalf("cyclic registered schema error = %v", err)
+	}
+}
+
 func stringify(v any) string {
 	out, _ := yaml.Marshal(v)
 	return string(out)

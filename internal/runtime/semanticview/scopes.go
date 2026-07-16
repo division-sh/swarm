@@ -96,7 +96,7 @@ func flowScopeFromView(view runtimecontracts.FlowContractView) FlowScope {
 		Nodes:         view.Nodes,
 		Events:        view.Events,
 		Agents:        runtimecontracts.EffectiveAgentRegistryEntries(view.Agents),
-		Tools:         view.Tools,
+		Tools:         runtimecontracts.CloneToolSchemaEntries(view.Tools),
 		Policy:        view.Policy,
 	}
 }

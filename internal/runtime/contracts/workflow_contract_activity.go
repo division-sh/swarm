@@ -614,5 +614,19 @@ func toolInputSchemaEnumLiteralValue(node *yaml.Node) (any, error) {
 // ToolInputSchemaJSONSchema exposes the canonical ToolInputSchema projection
 // for provider-visible definitions and runtime validators.
 func ToolInputSchemaJSONSchema(schema ToolInputSchema) map[string]any {
-	return toolInputSchemaToJSONSchema(schema)
+	projected, err := ProjectToolInputSchema(schema)
+	if err != nil {
+		return map[string]any{"type": "null", "enum": []any{map[string]any{"invalid_schema": true}}}
+	}
+	return projected
+}
+
+// ProjectToolInputSchema validates and projects the exact admitted schema.
+// Runtime registrations use this owner instead of maintaining a second
+// interpretation of enum, regex, key, and additional-property semantics.
+func ProjectToolInputSchema(schema ToolInputSchema) (map[string]any, error) {
+	if err := ValidateToolInputSchema(schema); err != nil {
+		return nil, err
+	}
+	return toolInputSchemaToJSONSchema(schema), nil
 }

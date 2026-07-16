@@ -15,11 +15,40 @@ import (
 // ValidateToolInputSchema is the semantic admission owner for the closed
 // ToolInputSchema vocabulary used by pack interfaces, triggers, channels, and
 // connectors.
+const MaxToolInputSchemaDepth = 64
+
 func ValidateToolInputSchema(schema ToolInputSchema) error {
-	return validateToolInputSchema("$", schema)
+	return validateToolInputSchema("$", &schema, 0, map[*ToolInputSchema]string{})
 }
 
-func validateToolInputSchema(path string, schema ToolInputSchema) error {
+func ToolInputSchemaIsZero(schema ToolInputSchema) bool {
+	return schema.Type == "" && schema.Description == "" && len(schema.Properties) == 0 && len(schema.Required) == 0 &&
+		schema.Items == nil && len(schema.Enum) == 0 && !schema.enumDeclared &&
+		schema.AdditionalProperties.Allowed == nil && schema.AdditionalProperties.Schema == nil &&
+		schema.Minimum == nil && schema.Maximum == nil && schema.Pattern == "" &&
+		schema.MinLength == nil && schema.MaxLength == nil && schema.MinItems == nil && schema.MaxItems == nil
+}
+
+func ToolInputSchemaWithoutEnum(schema ToolInputSchema) ToolInputSchema {
+	out := CloneToolInputSchema(schema)
+	out.Enum = nil
+	out.enumDeclared = false
+	return out
+}
+
+func validateToolInputSchema(path string, schema *ToolInputSchema, depth int, ancestors map[*ToolInputSchema]string) error {
+	if schema == nil {
+		return fmt.Errorf("%s schema is missing", path)
+	}
+	if depth > MaxToolInputSchemaDepth {
+		return fmt.Errorf("%s exceeds maximum schema depth %d", path, MaxToolInputSchemaDepth)
+	}
+	if ancestor, exists := ancestors[schema]; exists {
+		return fmt.Errorf("%s forms a schema cycle through %s", path, ancestor)
+	}
+	ancestors[schema] = path
+	defer delete(ancestors, schema)
+
 	typeName := schema.Type
 	if !utf8.ValidString(typeName) || typeName != strings.TrimSpace(typeName) || typeName != strings.ToLower(typeName) {
 		return fmt.Errorf("%s type %q is not canonical", path, schema.Type)
@@ -81,7 +110,7 @@ func validateToolInputSchema(path string, schema ToolInputSchema) error {
 		if schema.Items == nil {
 			return fmt.Errorf("%s array requires items", path)
 		}
-		if err := validateToolInputSchema(path+".items", *schema.Items); err != nil {
+		if err := validateToolInputSchema(path+".items", schema.Items, depth+1, ancestors); err != nil {
 			return err
 		}
 	}
@@ -89,11 +118,12 @@ func validateToolInputSchema(path string, schema ToolInputSchema) error {
 		if schema.AdditionalProperties.Allowed != nil && schema.AdditionalProperties.Schema != nil {
 			return fmt.Errorf("%s additionalProperties must declare a boolean or schema, not both", path)
 		}
-		for name, property := range schema.Properties {
+		for name := range schema.Properties {
 			if name == "" || !utf8.ValidString(name) || name != strings.TrimSpace(name) {
 				return fmt.Errorf("%s property name %q is not canonical", path, name)
 			}
-			if err := validateToolInputSchema(path+".properties["+name+"]", property); err != nil {
+			property := schema.Properties[name]
+			if err := validateToolInputSchema(path+".properties["+name+"]", &property, depth+1, ancestors); err != nil {
 				return err
 			}
 		}
@@ -111,19 +141,22 @@ func validateToolInputSchema(path string, schema ToolInputSchema) error {
 			}
 		}
 		if schema.AdditionalProperties.Schema != nil {
-			if err := validateToolInputSchema(path+".additionalProperties", *schema.AdditionalProperties.Schema); err != nil {
+			if err := validateToolInputSchema(path+".additionalProperties", schema.AdditionalProperties.Schema, depth+1, ancestors); err != nil {
 				return err
 			}
 		}
 	}
 
+	if schema.enumDeclared && len(schema.Enum) == 0 {
+		return fmt.Errorf("%s enum must contain at least one value", path)
+	}
 	seenEnums := []semanticvalue.Value{}
 	for index, literal := range schema.Enum {
 		value, err := toolSchemaLiteralValue(literal)
 		if err != nil {
 			return fmt.Errorf("%s enum[%d]: %w", path, index, err)
 		}
-		if err := validateToolSchemaValue(path+fmt.Sprintf(".enum[%d]", index), schema, value, false); err != nil {
+		if err := validateToolSchemaValue(path+fmt.Sprintf(".enum[%d]", index), *schema, value, false); err != nil {
 			return err
 		}
 		for _, prior := range seenEnums {
@@ -269,21 +302,50 @@ func validateToolSchemaValue(path string, schema ToolInputSchema, value semantic
 	return nil
 }
 
-// CloneToolInputSchema returns a mutation-isolated schema, including every
-// structured enum YAML node and alias.
+// CloneToolInputSchema returns a mutation-isolated admitted schema, including
+// every structured enum YAML node and alias. Invalid cyclic or over-depth
+// values become an invalid non-empty schema so no later consumer can treat
+// them as an omitted schema and widen admission.
 func CloneToolInputSchema(in ToolInputSchema) ToolInputSchema {
+	out, ok := cloneToolInputSchema(in, 0, map[*ToolInputSchema]struct{}{})
+	if !ok {
+		return ToolInputSchema{Type: "__invalid_recursive_schema__"}
+	}
+	return out
+}
+
+func cloneToolInputSchema(in ToolInputSchema, depth int, ancestors map[*ToolInputSchema]struct{}) (ToolInputSchema, bool) {
+	if depth > MaxToolInputSchemaDepth {
+		return ToolInputSchema{}, false
+	}
 	out := in
-	out.Properties = make(map[string]ToolInputSchema, len(in.Properties))
-	for name, property := range in.Properties {
-		out.Properties[name] = CloneToolInputSchema(property)
+	if in.Properties != nil {
+		out.Properties = make(map[string]ToolInputSchema, len(in.Properties))
+		for name, property := range in.Properties {
+			cloned, ok := cloneToolInputSchema(property, depth+1, ancestors)
+			if !ok {
+				return ToolInputSchema{}, false
+			}
+			out.Properties[name] = cloned
+		}
 	}
 	out.Required = append([]string(nil), in.Required...)
-	out.Enum = make([]SchemaLiteral, len(in.Enum))
-	for index, literal := range in.Enum {
-		out.Enum[index] = SchemaLiteral{Node: cloneToolSchemaYAMLNode(literal.Node)}
+	if in.Enum != nil {
+		out.Enum = make([]SchemaLiteral, len(in.Enum))
+		for index, literal := range in.Enum {
+			out.Enum[index] = SchemaLiteral{Node: cloneToolSchemaYAMLNode(literal.Node)}
+		}
 	}
 	if in.Items != nil {
-		items := CloneToolInputSchema(*in.Items)
+		if _, cyclic := ancestors[in.Items]; cyclic {
+			return ToolInputSchema{}, false
+		}
+		ancestors[in.Items] = struct{}{}
+		items, ok := cloneToolInputSchema(*in.Items, depth+1, ancestors)
+		delete(ancestors, in.Items)
+		if !ok {
+			return ToolInputSchema{}, false
+		}
 		out.Items = &items
 	}
 	if in.AdditionalProperties.Allowed != nil {
@@ -291,7 +353,15 @@ func CloneToolInputSchema(in ToolInputSchema) ToolInputSchema {
 		out.AdditionalProperties.Allowed = &allowed
 	}
 	if in.AdditionalProperties.Schema != nil {
-		additional := CloneToolInputSchema(*in.AdditionalProperties.Schema)
+		if _, cyclic := ancestors[in.AdditionalProperties.Schema]; cyclic {
+			return ToolInputSchema{}, false
+		}
+		ancestors[in.AdditionalProperties.Schema] = struct{}{}
+		additional, ok := cloneToolInputSchema(*in.AdditionalProperties.Schema, depth+1, ancestors)
+		delete(ancestors, in.AdditionalProperties.Schema)
+		if !ok {
+			return ToolInputSchema{}, false
+		}
 		out.AdditionalProperties.Schema = &additional
 	}
 	out.Minimum = cloneToolSchemaFloat(in.Minimum)
@@ -300,6 +370,52 @@ func CloneToolInputSchema(in ToolInputSchema) ToolInputSchema {
 	out.MaxLength = cloneToolSchemaInt(in.MaxLength)
 	out.MinItems = cloneToolSchemaInt(in.MinItems)
 	out.MaxItems = cloneToolSchemaInt(in.MaxItems)
+	return out, true
+}
+
+// CloneToolSchemaEntry is the sole mutation-isolation owner for tool schema
+// carriers returned by accepted registries, semantic sources, and plans.
+func CloneToolSchemaEntry(in ToolSchemaEntry) ToolSchemaEntry {
+	out := in
+	out.InputSchema = CloneToolInputSchema(in.InputSchema)
+	out.OutputSchema = CloneToolInputSchema(in.OutputSchema)
+	if in.HTTP != nil {
+		httpSpec := *in.HTTP
+		httpSpec.Headers = cloneToolStringMap(in.HTTP.Headers)
+		httpSpec.Body = cloneToolSchemaCarrierValue(in.HTTP.Body)
+		out.HTTP = &httpSpec
+	}
+	out.ResponseMapping = cloneToolSchemaCarrierMap(in.ResponseMapping)
+	if in.ResponseSuccess != nil {
+		response := *in.ResponseSuccess
+		response.Equals = cloneToolSchemaCarrierValue(in.ResponseSuccess.Equals)
+		out.ResponseSuccess = &response
+	}
+	out.Credentials = append([]string(nil), in.Credentials...)
+	if in.ManagedCredential != nil {
+		managed := *in.ManagedCredential
+		managed.Scopes = append([]string(nil), in.ManagedCredential.Scopes...)
+		managed.TokenRequest.StaticHeaders = cloneToolStringMap(in.ManagedCredential.TokenRequest.StaticHeaders)
+		out.ManagedCredential = &managed
+	}
+	if in.CompiledResult != nil {
+		projection := &CompiledResultProjection{
+			Fields:       make(map[string]CompiledResultField, len(in.CompiledResult.Fields)),
+			OutputSchema: CloneToolInputSchema(in.CompiledResult.OutputSchema),
+		}
+		for target, field := range in.CompiledResult.Fields {
+			projection.Fields[target] = field
+		}
+		out.CompiledResult = projection
+	}
+	return out
+}
+
+func CloneToolSchemaEntries(in map[string]ToolSchemaEntry) map[string]ToolSchemaEntry {
+	out := make(map[string]ToolSchemaEntry, len(in))
+	for name, entry := range in {
+		out[name] = CloneToolSchemaEntry(entry)
+	}
 	return out
 }
 
@@ -380,4 +496,55 @@ func cloneToolSchemaFloat(value *float64) *float64 {
 	}
 	cloned := *value
 	return &cloned
+}
+
+func cloneToolStringMap(in map[string]string) map[string]string {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneToolSchemaCarrierMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = cloneToolSchemaCarrierValue(value)
+	}
+	return out
+}
+
+func cloneToolSchemaCarrierValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneToolSchemaCarrierMap(typed)
+	case map[any]any:
+		out := make(map[any]any, len(typed))
+		for key, item := range typed {
+			out[key] = cloneToolSchemaCarrierValue(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for index, item := range typed {
+			out[index] = cloneToolSchemaCarrierValue(item)
+		}
+		return out
+	case yaml.Node:
+		return cloneToolSchemaYAMLNode(typed)
+	case *yaml.Node:
+		if typed == nil {
+			return (*yaml.Node)(nil)
+		}
+		cloned := cloneToolSchemaYAMLNode(*typed)
+		return &cloned
+	default:
+		return value
+	}
 }

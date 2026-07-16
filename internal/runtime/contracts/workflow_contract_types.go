@@ -1132,6 +1132,7 @@ type ToolInputSchema struct {
 	MaxLength            *int                       `yaml:"maxLength,omitempty"`
 	MinItems             *int                       `yaml:"minItems,omitempty"`
 	MaxItems             *int                       `yaml:"maxItems,omitempty"`
+	enumDeclared         bool
 }
 type ProjectPackagePaths struct {
 	Key               string

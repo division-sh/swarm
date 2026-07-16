@@ -418,6 +418,64 @@ func TestDefaultPackRegistryLoadsTelegramFromVerifiedPlatformPack(t *testing.T) 
 	}
 }
 
+func TestNewPackRegistryAdmitsSchemasAndReadbacksAreMutationIsolated(t *testing.T) {
+	tool := telegramConnectorTool("https://api.telegram.org")
+	loaded := LoadedPack{
+		Envelope: packs.Envelope{ID: "test.telegram"},
+		Manifest: ConnectorManifest{Provider: "telegram", Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"telegram.send_message": tool,
+		}},
+	}
+	registry, err := NewPackRegistry(loaded)
+	if err != nil {
+		t.Fatalf("NewPackRegistry: %v", err)
+	}
+
+	mutate := func(entry *runtimecontracts.ToolSchemaEntry) {
+		entry.InputSchema.Properties["chat_id"] = runtimecontracts.ToolInputSchema{Type: "boolean"}
+		entry.HTTP.Headers = map[string]string{"X-Mutated": "true"}
+		entry.HTTP.Body.(map[string]any)["chat_id"] = "changed"
+	}
+	descriptors := registry.PackDescriptors()
+	descriptorTool := descriptors[0].Tools["telegram.send_message"]
+	mutate(&descriptorTool)
+	descriptors[0].Tools["telegram.send_message"] = descriptorTool
+	lookedUp, ok := registry.Lookup("telegram", "telegram.send_message")
+	if !ok {
+		t.Fatal("registry lookup failed")
+	}
+	lookupTool := lookedUp.Manifest.Tools["telegram.send_message"]
+	mutate(&lookupTool)
+	lookedUp.Manifest.Tools["telegram.send_message"] = lookupTool
+	inventory := registry.Inventory()
+	mutate(&inventory[0].Tool)
+	packTool := inventory[0].Pack.Manifest.Tools["telegram.send_message"]
+	mutate(&packTool)
+	inventory[0].Pack.Manifest.Tools["telegram.send_message"] = packTool
+
+	fresh, ok := registry.Lookup("telegram", "telegram.send_message")
+	if !ok {
+		t.Fatal("fresh registry lookup failed")
+	}
+	freshTool := fresh.Manifest.Tools["telegram.send_message"]
+	if freshTool.InputSchema.Properties["chat_id"].Type != "string" || len(freshTool.HTTP.Headers) != 0 || freshTool.HTTP.Body.(map[string]any)["chat_id"] != "{{input.chat_id}}" {
+		t.Fatalf("registry readback mutation leaked: %#v", freshTool)
+	}
+
+	cyclic := tool
+	cyclic.InputSchema = runtimecontracts.ToolInputSchema{Type: "array"}
+	cyclic.InputSchema.Items = &cyclic.InputSchema
+	_, err = NewPackRegistry(LoadedPack{
+		Envelope: packs.Envelope{ID: "test.cyclic"},
+		Manifest: ConnectorManifest{Provider: "telegram", Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"telegram.send_message": cyclic,
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "schema cycle") {
+		t.Fatalf("cyclic connector registry error = %v", err)
+	}
+}
+
 func TestCapabilitySubjectsEnumerateExactInstalledInventoryWithoutMakingToolsEffective(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	subjects, err := CapabilitySubjects(context.Background(), source, CapabilityOptions{IncludeInstalled: true})
