@@ -407,15 +407,14 @@ func loadSQLiteInboundPublicationRoutes(ctx context.Context, db inboundPublicati
 
 func loadSQLiteInboundPublicationEvent(ctx context.Context, db inboundPublicationQueryer, eventID string) (events.Event, error) {
 	var row persistedEventIdentity
-	var executionMode string
 	var createdAtValue any
 	err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(run_id, ''), event_name, COALESCE(entity_id, ''), COALESCE(flow_instance, ''),
+		SELECT COALESCE(run_id, ''), event_name, COALESCE(task_id, ''), COALESCE(entity_id, ''), COALESCE(flow_instance, ''),
 		       scope, payload, COALESCE(chain_depth, 0), COALESCE(produced_by, ''), COALESCE(produced_by_type, ''),
 		       COALESCE(source_event_id, ''), created_at, execution_mode, source_route, target_route, target_set
 		FROM events WHERE event_id = ?
-	`, eventID).Scan(&row.RunID, &row.EventName, &row.EntityID, &row.FlowInstance, &row.Scope, &row.Payload,
-		&row.ChainDepth, &row.ProducedBy, &row.ProducedByType, &row.SourceEventID, &createdAtValue, &executionMode,
+	`, eventID).Scan(&row.RunID, &row.EventName, &row.TaskID, &row.EntityID, &row.FlowInstance, &row.Scope, &row.Payload,
+		&row.ChainDepth, &row.ProducedBy, &row.ProducedByType, &row.SourceEventID, &createdAtValue, &row.ExecutionMode,
 		&row.SourceRoute, &row.TargetRoute, &row.TargetSet)
 	if err != nil {
 		return events.EmptyEvent(), fmt.Errorf("load sqlite inbound publication event: %w", err)
@@ -428,7 +427,8 @@ func loadSQLiteInboundPublicationEvent(ctx context.Context, db inboundPublicatio
 		return events.EmptyEvent(), fmt.Errorf("load sqlite inbound publication event created_at is missing")
 	}
 	row.CreatedAt = createdAt
-	return eventFromPersistedIdentity(eventID, executionMode, row)
+	row.EventID = eventID
+	return eventFromPersistedIdentity(row)
 }
 
 var _ runtimeinbound.Runner = (*SQLiteRuntimeStore)(nil)

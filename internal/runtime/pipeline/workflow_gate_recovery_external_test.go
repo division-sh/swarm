@@ -341,9 +341,9 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				t.Fatal(err)
 			}
 			const replyContextID = "reply-context-proposed-effect"
-			sourceEvent := eventtest.RootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-1",
+			sourceEvent := eventtest.ForDelivery(eventtest.RootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-1",
 				[]byte(`{"chat_id":"support-room","text":"Exact frozen reply"}`), 0, runID, "",
-				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()).WithDeliveryContext(
+				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()),
 				events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
 			)
 			seedProposedEffectProofDelivery(t, selected, sourceEvent, "support")
@@ -487,9 +487,9 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 
 			routeWithoutDispatch := func(verdict, wantEvent string, fields map[string]any) {
 				t.Helper()
-				proposal := eventtest.RootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-1",
+				proposal := eventtest.ForDelivery(eventtest.RootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-1",
 					[]byte(`{"chat_id":"support-room","text":"Needs another operator outcome"}`), 0, runID, "",
-					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()).WithDeliveryContext(
+					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()),
 					events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
 				)
 				seedProposedEffectProofDelivery(t, selected, proposal, "support")

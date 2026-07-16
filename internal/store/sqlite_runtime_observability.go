@@ -2,13 +2,11 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
@@ -334,33 +332,21 @@ func (s *SQLiteRuntimeStore) LoadOperatorEvent(ctx context.Context, eventID stri
 	if eventID == "" {
 		return OperatorEventFull{}, ErrEventNotFound
 	}
-	var event OperatorEventFull
-	var payloadRaw, createdRaw any
-	err := s.DB.QueryRowContext(ctx, `
-		SELECT event_id, event_name, COALESCE(entity_id, ''), COALESCE(run_id, ''), COALESCE(source_event_id, ''), execution_mode,
-		       created_at, COALESCE(produced_by, ''), COALESCE(produced_by_type, ''), payload
-		FROM events
-		WHERE event_id = ?
-	`, eventID).Scan(&event.EventID, &event.EventName, &event.EntityID, &event.RunID, &event.SourceEventID, &event.ExecutionMode, &createdRaw, &event.Source, &event.ProducerType, &payloadRaw)
-	if err == sql.ErrNoRows {
-		return OperatorEventFull{}, ErrEventNotFound
-	}
+	row, found, err := loadSQLiteEventIdentity(ctx, s.DB, eventID)
 	if err != nil {
 		return OperatorEventFull{}, fmt.Errorf("load sqlite operator event: %w", err)
 	}
-	producer, err := events.NewProducerIdentity(event.ProducerType, event.Source)
+	if !found {
+		return OperatorEventFull{}, ErrEventNotFound
+	}
+	decoded, err := eventFromPersistedIdentity(row)
 	if err != nil {
-		return OperatorEventFull{}, fmt.Errorf("load sqlite operator event producer identity: %w", err)
+		return OperatorEventFull{}, fmt.Errorf("load sqlite operator event: %w", err)
 	}
-	event.Source = producer.ID()
-	event.ProducerType = producer.Type()
-	if at, ok, err := sqliteTimeValue(createdRaw); err != nil {
+	event, err := NewOperatorEventFull(decoded)
+	if err != nil {
 		return OperatorEventFull{}, err
-	} else if ok {
-		event.CreatedAt = at
 	}
-	event.Payload = map[string]any{}
-	_ = json.Unmarshal(sqliteJSONRawMessage(payloadRaw), &event.Payload)
 	deadLetters, err := s.sqliteOperatorEventDeadLetters(ctx, eventID)
 	if err != nil {
 		return OperatorEventFull{}, err

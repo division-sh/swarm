@@ -617,7 +617,7 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	const triggerEventID = "33333333-3333-3333-3333-333333333333"
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID).WithExecutionMode(executionmode.Mock)
+	req.TriggerEvent = eventtest.InExecutionMode(testFlowActivationTriggerEvent(triggerEventID), executionmode.Mock)
 
 	err := am.ActivateFlowInstance(ctx, req)
 	if err != nil {

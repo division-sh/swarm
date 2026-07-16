@@ -545,7 +545,7 @@ func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing
 	}
 }
 
-func TestRecoveryManager_QuarantinesMissingRunIDSchemaCapability(t *testing.T) {
+func TestRecoveryManager_FailsClosedOnMissingRunIDSchemaCapability(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -563,35 +563,28 @@ func TestRecoveryManager_QuarantinesMissingRunIDSchemaCapability(t *testing.T) {
 
 	eventID := uuid.NewString()
 	parentID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.RootIngress(eventID,
-		events.EventType("system.recover.no-run-id"),
-		"runtime", "", []byte(`{"ok":true}`), 0, "", parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC())); err != nil {
-		t.Fatalf("AppendEvent: %v", err)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, event_name, task_id, entity_id, flow_instance,
+			source_route, target_route, target_set, scope, payload,
+			execution_mode, chain_depth, produced_by, produced_by_type,
+			source_event_id, created_at
+		)
+		VALUES (
+			$1::uuid, 'system.recover.no-run-id', '', NULL, '',
+			'{}'::jsonb, '{}'::jsonb, '[]'::jsonb, 'global', '{"ok":true}'::jsonb,
+			'live', 0, 'runtime', 'platform', $2::uuid, $3
+		)
+	`, eventID, parentID, time.Now().Add(-time.Minute).UTC()); err != nil {
+		t.Fatalf("seed event without run_id schema capability: %v", err)
 	}
 
 	rm := runtimepipeline.NewRecoveryManagerWith(pg, capture)
-	if err := rm.Recover(ctx); err != nil {
-		t.Fatalf("Recover: %v", err)
+	if err := rm.Recover(ctx); err == nil || !strings.Contains(err.Error(), "events schema is unsupported") {
+		t.Fatalf("Recover error = %v, want unsupported events schema", err)
 	}
 	if len(capture.direct) != 0 {
 		t.Fatalf("direct replayed events = %#v, want none", capture.direct)
-	}
-
-	var outcome, reason string
-	if err := db.QueryRowContext(ctx, `
-		SELECT outcome, COALESCE(reason_code, '')
-		FROM event_receipts
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'platform'
-		  AND subscriber_id = 'pipeline'
-	`, eventID).Scan(&outcome, &reason); err != nil {
-		t.Fatalf("load receipt: %v", err)
-	}
-	if outcome != "dead_letter" {
-		t.Fatalf("receipt outcome = %q, want dead_letter", outcome)
-	}
-	if reason != "persisted_replay_run_identity_invalid" {
-		t.Fatalf("receipt reason = %q, want persisted_replay_run_identity_invalid", reason)
 	}
 }
 

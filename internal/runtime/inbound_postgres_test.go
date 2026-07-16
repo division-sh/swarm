@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store"
@@ -708,16 +710,25 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 		t.Fatalf("agent delivery rows = %d, want 1", got)
 	}
 	requireInboundGatewayAuthorProjection(t, ctx, pg, runID, entityID, "hello", "chat", "42")
-	select {
-	case got := <-ch:
-		if got.ID() != eventID || got.Type() != events.EventType(providerEventName) {
-			t.Fatalf("delivered event = %s/%s, want %s/%s", got.ID(), got.Type(), eventID, providerEventName)
-		}
-	default:
-		// Telegram uses durable_before_dispatch; this proof is about persisted
-		// evidence and supported store admission.
+	record, found, err := pg.LoadInboundPublicationByIdentity(ctx, provider, entityID, providerEventID)
+	if err != nil || !found {
+		t.Fatalf("LoadInboundPublicationByIdentity = found:%v err:%v", found, err)
 	}
 	waitForInboundBusQuiescence(t, bus)
+	requireInboundPostCommitSnapshot(t, requireInboundBusEvent(t, ch, "Telegram PostgreSQL post-commit dispatch"), inboundPublicationEvent(t, record, eventID))
+
+	if _, err := db.ExecContext(ctx, `UPDATE events SET chain_depth = -1 WHERE event_id = $1::uuid`, eventID); err != nil {
+		t.Fatalf("corrupt Telegram PostgreSQL event lineage: %v", err)
+	}
+	duplicate := httptest.NewRecorder()
+	handleBoundedProviderDelivery(t, g, bus, pg, duplicate, newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body), runID, entityID, provider, webhookSecret)
+	if duplicate.Code != http.StatusServiceUnavailable {
+		t.Fatalf("corrupt duplicate status = %d, want 503 body=%s", duplicate.Code, duplicate.Body.String())
+	}
+	requireNoInboundBusEvent(t, ch, "corrupt Telegram PostgreSQL duplicate")
+	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
+		t.Fatalf("provider event rows after corrupt duplicate = %d, want 1", got)
+	}
 }
 
 func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *testing.T) {
@@ -770,16 +781,56 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 		t.Fatalf("agent delivery rows = %d, want 1", got)
 	}
 	requireInboundGatewayAuthorProjection(t, ctx, sqliteStore, runID, entityID, "hello sqlite", "chat", "42")
-	select {
-	case got := <-ch:
-		if got.ID() != eventID || got.Type() != events.EventType(providerEventName) {
-			t.Fatalf("delivered event = %s/%s, want %s/%s", got.ID(), got.Type(), eventID, providerEventName)
-		}
-	default:
-		// Telegram uses durable_before_dispatch; this proof is about persisted
-		// evidence and supported store admission.
+	record, found, err := sqliteStore.LoadInboundPublicationByIdentity(ctx, provider, entityID, providerEventID)
+	if err != nil || !found {
+		t.Fatalf("LoadInboundPublicationByIdentity = found:%v err:%v", found, err)
 	}
 	waitForInboundBusQuiescence(t, bus)
+	requireInboundPostCommitSnapshot(t, requireInboundBusEvent(t, ch, "Telegram SQLite post-commit dispatch"), inboundPublicationEvent(t, record, eventID))
+
+	if _, err := sqliteStore.DB.ExecContext(ctx, `UPDATE events SET chain_depth = -1 WHERE event_id = ?`, eventID); err != nil {
+		t.Fatalf("corrupt Telegram SQLite event lineage: %v", err)
+	}
+	duplicate := httptest.NewRecorder()
+	handleBoundedProviderDelivery(t, g, bus, sqliteStore, duplicate, newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body), runID, entityID, provider, webhookSecret)
+	if duplicate.Code != http.StatusServiceUnavailable {
+		t.Fatalf("corrupt duplicate status = %d, want 503 body=%s", duplicate.Code, duplicate.Body.String())
+	}
+	requireNoInboundBusEvent(t, ch, "corrupt Telegram SQLite duplicate")
+	if got := countSQLiteInboundProviderEvents(t, ctx, sqliteStore, runID, entityID, providerEventName, providerEventID); got != 1 {
+		t.Fatalf("provider event rows after corrupt duplicate = %d, want 1", got)
+	}
+}
+
+func inboundPublicationEvent(t testing.TB, record runtimeinbound.Record, eventID string) events.Event {
+	t.Helper()
+	for _, child := range record.Events {
+		if child.EventID == eventID {
+			return child.Event
+		}
+	}
+	t.Fatalf("inbound publication does not contain event %s: %#v", eventID, record.Events)
+	return events.EmptyEvent()
+}
+
+func requireInboundPostCommitSnapshot(t testing.TB, got, want events.Event) {
+	t.Helper()
+	var gotPayload, wantPayload any
+	if err := json.Unmarshal(got.Payload(), &gotPayload); err != nil {
+		t.Fatalf("decode dispatched inbound payload: %v", err)
+	}
+	if err := json.Unmarshal(want.Payload(), &wantPayload); err != nil {
+		t.Fatalf("decode persisted inbound payload: %v", err)
+	}
+	if got.ID() != want.ID() || got.Type() != want.Type() || !got.Producer().Equal(want.Producer()) ||
+		got.TaskID() != want.TaskID() || got.ChainDepth() != want.ChainDepth() || got.RunID() != want.RunID() ||
+		got.ParentEventID() != want.ParentEventID() || got.ExecutionMode() != want.ExecutionMode() ||
+		!got.CreatedAt().Truncate(time.Microsecond).Equal(want.CreatedAt().Truncate(time.Microsecond)) ||
+		!reflect.DeepEqual(gotPayload, wantPayload) || !reflect.DeepEqual(got.Envelope(), want.Envelope()) {
+		t.Fatalf("post-commit inbound snapshot changed\n got: id=%s type=%s producer=%s/%s task=%s depth=%d run=%s parent=%s mode=%s at=%s payload=%s envelope=%#v\nwant: id=%s type=%s producer=%s/%s task=%s depth=%d run=%s parent=%s mode=%s at=%s payload=%s envelope=%#v",
+			got.ID(), got.Type(), got.ProducerType(), got.SourceAgent(), got.TaskID(), got.ChainDepth(), got.RunID(), got.ParentEventID(), got.ExecutionMode(), got.CreatedAt(), got.Payload(), got.Envelope(),
+			want.ID(), want.Type(), want.ProducerType(), want.SourceAgent(), want.TaskID(), want.ChainDepth(), want.RunID(), want.ParentEventID(), want.ExecutionMode(), want.CreatedAt(), want.Payload(), want.Envelope())
+	}
 }
 
 type inboundAuthorActivityReader interface {

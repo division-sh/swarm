@@ -88,7 +88,7 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	if caps.Activity.Attempts != SchemaFlavorCanonical {
 		t.Fatalf("activity attempts capability = %s", caps.Activity.Attempts)
 	}
-	if caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogRunID || !caps.Events.LogIdempotencyKey || !caps.Events.LogRouteIdentity {
+	if caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogRunID || !caps.Events.LogTaskID || !caps.Events.LogIdempotencyKey || !caps.Events.LogRouteIdentity {
 		t.Fatalf("event log capabilities = %+v", caps.Events)
 	}
 	if caps.Events.Deliveries != SchemaFlavorCanonical || !caps.Events.DeliveryRunID || !caps.Events.DeliveryTargetRoute {

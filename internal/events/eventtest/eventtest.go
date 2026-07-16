@@ -83,6 +83,16 @@ func TargetRouted(evt events.Event, target events.RouteIdentity) events.Event {
 	return evt.WithTargetRoute(target)
 }
 
+// ForDelivery attaches platform-owned delivery context to a test fixture.
+func ForDelivery(evt events.Event, deliveryContext events.DeliveryContext) events.Event {
+	return events.Project(evt, events.ProjectDeliveryContext(deliveryContext))
+}
+
+// InExecutionMode applies an explicit execution mode to a test fixture.
+func InExecutionMode(evt events.Event, mode executionmode.Mode) events.Event {
+	return events.Project(evt, events.ProjectExecutionMode(mode))
+}
+
 // MalformedChildWithoutRunLineage builds the explicit negative fixture for
 // admission tests that assert child events without run lineage are rejected.
 func MalformedChildWithoutRunLineage(eventType events.EventType, sourceAgent string, payload json.RawMessage) events.Event {

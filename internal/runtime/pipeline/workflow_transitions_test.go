@@ -74,9 +74,14 @@ func TestRecordPipelineTransition_FailsClosedOnMixedSchemaCapability(t *testing.
 func canonicalTransitionSchemaRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{"table_name", "column_name"}).
 		AddRow("events", "event_id").
+		AddRow("events", "run_id").
 		AddRow("events", "event_name").
+		AddRow("events", "task_id").
 		AddRow("events", "entity_id").
 		AddRow("events", "flow_instance").
+		AddRow("events", "source_route").
+		AddRow("events", "target_route").
+		AddRow("events", "target_set").
 		AddRow("events", "scope").
 		AddRow("events", "payload").
 		AddRow("events", "execution_mode").

@@ -479,6 +479,7 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.
 			e.event_id,
 			COALESCE(e.run_id, ''),
 			e.event_name,
+			COALESCE(e.task_id, ''),
 			COALESCE(e.entity_id, ''),
 			COALESCE(e.flow_instance, ''),
 			COALESCE(e.scope, 'global'),
@@ -515,13 +516,14 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.
 	defer rows.Close()
 	out := make([]events.PersistedReplayEvent, 0, limit)
 	for rows.Next() {
-		var eventID, executionMode string
+		var eventID string
 		var row persistedEventIdentity
 		var payloadRaw, createdAtRaw, sourceRouteRaw, targetRouteRaw, targetSetRaw any
 		if err := rows.Scan(
 			&eventID,
 			&row.RunID,
 			&row.EventName,
+			&row.TaskID,
 			&row.EntityID,
 			&row.FlowInstance,
 			&row.Scope,
@@ -531,7 +533,7 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.
 			&row.ProducedByType,
 			&row.SourceEventID,
 			&createdAtRaw,
-			&executionMode,
+			&row.ExecutionMode,
 			&sourceRouteRaw,
 			&targetRouteRaw,
 			&targetSetRaw,
@@ -547,7 +549,8 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.
 		row.SourceRoute = sqliteJSONRawMessage(sourceRouteRaw)
 		row.TargetRoute = sqliteJSONRawMessage(targetRouteRaw)
 		row.TargetSet = sqliteJSONRawMessage(targetSetRaw)
-		evt, err := eventFromPersistedIdentity(eventID, executionMode, row)
+		row.EventID = eventID
+		evt, err := eventFromPersistedIdentity(row)
 		if err != nil {
 			return nil, err
 		}
@@ -571,6 +574,7 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsWithPendingDeliveriesForRun(ctx con
 			e.event_id,
 			COALESCE(e.run_id, ''),
 			e.event_name,
+			COALESCE(e.task_id, ''),
 			COALESCE(e.entity_id, ''),
 			COALESCE(e.flow_instance, ''),
 			COALESCE(e.scope, 'global'),
@@ -606,13 +610,14 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsWithPendingDeliveriesForRun(ctx con
 	defer rows.Close()
 	out := make([]events.PersistedReplayEvent, 0, limit)
 	for rows.Next() {
-		var eventID, executionMode string
+		var eventID string
 		var row persistedEventIdentity
 		var payloadRaw, createdAtRaw, sourceRouteRaw, targetRouteRaw, targetSetRaw any
 		if err := rows.Scan(
 			&eventID,
 			&row.RunID,
 			&row.EventName,
+			&row.TaskID,
 			&row.EntityID,
 			&row.FlowInstance,
 			&row.Scope,
@@ -622,7 +627,7 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsWithPendingDeliveriesForRun(ctx con
 			&row.ProducedByType,
 			&row.SourceEventID,
 			&createdAtRaw,
-			&executionMode,
+			&row.ExecutionMode,
 			&sourceRouteRaw,
 			&targetRouteRaw,
 			&targetSetRaw,
@@ -638,7 +643,8 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsWithPendingDeliveriesForRun(ctx con
 		row.SourceRoute = sqliteJSONRawMessage(sourceRouteRaw)
 		row.TargetRoute = sqliteJSONRawMessage(targetRouteRaw)
 		row.TargetSet = sqliteJSONRawMessage(targetSetRaw)
-		evt, err := eventFromPersistedIdentity(eventID, executionMode, row)
+		row.EventID = eventID
+		evt, err := eventFromPersistedIdentity(row)
 		if err != nil {
 			return nil, err
 		}
@@ -1031,6 +1037,7 @@ func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(ctx context.Context, ag
 			e.event_id,
 			COALESCE(e.run_id, ''),
 			e.event_name,
+			COALESCE(e.task_id, ''),
 			COALESCE(e.entity_id, ''),
 			COALESCE(e.flow_instance, ''),
 			COALESCE(e.scope, 'global'),
@@ -1076,7 +1083,7 @@ func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(ctx context.Context, ag
 	out := make([]events.Event, 0, limit)
 	now := s.now()
 	for rows.Next() {
-		var eventID, executionMode string
+		var eventID string
 		var row persistedEventIdentity
 		var payloadRaw, createdAtRaw, sourceRouteRaw, targetRouteRaw, targetSetRaw any
 		var deliveryCreatedAtRaw, deliveryDeliveredAtRaw any
@@ -1086,6 +1093,7 @@ func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(ctx context.Context, ag
 			&eventID,
 			&row.RunID,
 			&row.EventName,
+			&row.TaskID,
 			&row.EntityID,
 			&row.FlowInstance,
 			&row.Scope,
@@ -1095,7 +1103,7 @@ func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(ctx context.Context, ag
 			&row.ProducedByType,
 			&row.SourceEventID,
 			&createdAtRaw,
-			&executionMode,
+			&row.ExecutionMode,
 			&sourceRouteRaw,
 			&targetRouteRaw,
 			&targetSetRaw,
@@ -1129,7 +1137,8 @@ func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(ctx context.Context, ag
 		row.SourceRoute = sqliteJSONRawMessage(sourceRouteRaw)
 		row.TargetRoute = sqliteJSONRawMessage(targetRouteRaw)
 		row.TargetSet = sqliteJSONRawMessage(targetSetRaw)
-		record.Event, err = eventFromPersistedIdentity(eventID, executionMode, row)
+		row.EventID = eventID
+		record.Event, err = eventFromPersistedIdentity(row)
 		if err != nil {
 			return nil, err
 		}
@@ -1222,6 +1231,7 @@ func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.C
 			e.event_id,
 			COALESCE(e.run_id, ''),
 			e.event_name,
+			COALESCE(e.task_id, ''),
 			COALESCE(e.entity_id, ''),
 			COALESCE(e.flow_instance, ''),
 			COALESCE(e.scope, 'global'),
@@ -1263,7 +1273,6 @@ func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.C
 		var (
 			record               pendingAgentDeliveryRecord
 			eventID              string
-			executionMode        string
 			row                  persistedEventIdentity
 			payloadRaw           any
 			eventCreatedRaw      any
@@ -1278,6 +1287,7 @@ func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.C
 			&eventID,
 			&row.RunID,
 			&row.EventName,
+			&row.TaskID,
 			&row.EntityID,
 			&row.FlowInstance,
 			&row.Scope,
@@ -1287,7 +1297,7 @@ func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.C
 			&row.ProducedByType,
 			&row.SourceEventID,
 			&eventCreatedRaw,
-			&executionMode,
+			&row.ExecutionMode,
 			&sourceRouteRaw,
 			&targetRouteRaw,
 			&targetSetRaw,
@@ -1324,7 +1334,8 @@ func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.C
 		row.SourceRoute = sqliteJSONRawMessage(sourceRouteRaw)
 		row.TargetRoute = sqliteJSONRawMessage(targetRouteRaw)
 		row.TargetSet = sqliteJSONRawMessage(targetSetRaw)
-		record.Event, err = eventFromPersistedIdentity(eventID, executionMode, row)
+		row.EventID = eventID
+		record.Event, err = eventFromPersistedIdentity(row)
 		if err != nil {
 			return nil, err
 		}

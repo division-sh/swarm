@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -955,6 +957,41 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	eventID := uuid.NewString()
 	at := time.Unix(1700000850, 0).UTC()
 	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+	sourceParentID := uuid.NewString()
+	sourceEnvelope := events.EventEnvelope{
+		EntityID: entityID,
+		Scope:    events.EventScopeEntity,
+		Source:   events.RouteIdentity{FlowID: "source-flow", FlowInstance: "source-flow/instance", EntityID: uuid.NewString()},
+		Target:   events.RouteIdentity{EntityID: entityID},
+	}
+	sourceRoute, _ := json.Marshal(sourceEnvelope.Source)
+	targetRoute, _ := json.Marshal(sourceEnvelope.Target)
+	targetSet, _ := json.Marshal(sourceEnvelope.TargetSet)
+	if _, err := db.ExecContext(ctx, `
+		UPDATE events
+		SET task_id = 'event-owned-task',
+		    payload = '{"task_id":"payload-owned-task","topic":"fork-ready"}'::jsonb,
+		    execution_mode = 'mock',
+		    chain_depth = 3,
+		    produced_by = 'declarative-node',
+		    produced_by_type = 'node',
+		    source_event_id = $2::uuid,
+		    flow_instance = $3,
+		    source_route = $4::jsonb,
+		    target_route = $5::jsonb,
+		    target_set = $6::jsonb
+		WHERE event_id = $1::uuid
+	`, eventID, sourceParentID, sourceEnvelope.FlowInstance, sourceRoute, targetRoute, targetSet); err != nil {
+		t.Fatalf("seed complete historical replay source event: %v", err)
+	}
+	sourceRow, found, err := loadPostgresEventIdentity(ctx, db, eventID)
+	if err != nil || !found {
+		t.Fatalf("load complete historical replay source = found:%v err:%v", found, err)
+	}
+	sourceEvent, err := eventFromPersistedIdentity(sourceRow)
+	if err != nil {
+		t.Fatalf("decode complete historical replay source: %v", err)
+	}
 
 	var sourceDeliveryID string
 	if err := db.QueryRowContext(ctx, `
@@ -1030,24 +1067,29 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 		t.Fatalf("DeliveryEventReplay = %#v", activated.DeliveryEventReplay)
 	}
 
-	var forkEventID, forkRunID, eventName, forkEntityID, flowInstance, payload string
-	var sourceEventNull bool
-	var chainDepth int
+	var forkEventID string
 	if err := db.QueryRowContext(ctx, `
-		SELECT event_id::text, run_id::text, event_name, entity_id::text, COALESCE(flow_instance, ''), payload::text, source_event_id IS NULL, chain_depth
+		SELECT event_id::text
 		FROM events
 		WHERE run_id = $1::uuid
-	`, materialized.ForkRunID).Scan(&forkEventID, &forkRunID, &eventName, &forkEntityID, &flowInstance, &payload, &sourceEventNull, &chainDepth); err != nil {
+	`, materialized.ForkRunID).Scan(&forkEventID); err != nil {
 		t.Fatalf("load fork replay event: %v", err)
 	}
-	if forkEventID == eventID || forkRunID != materialized.ForkRunID || eventName != "fork.ready" || forkEntityID != entityID || flowInstance != "" {
-		t.Fatalf("fork event = id:%s run:%s name:%s entity:%s flow:%s", forkEventID, forkRunID, eventName, forkEntityID, flowInstance)
+	forkRow, found, err := loadPostgresEventIdentity(ctx, db, forkEventID)
+	if err != nil || !found {
+		t.Fatalf("load canonical fork replay event = found:%v err:%v", found, err)
 	}
-	if !sourceEventNull || chainDepth != 0 {
-		t.Fatalf("fork event source/chain = null:%v depth:%d, want fresh fork-local event tree", sourceEventNull, chainDepth)
+	forkEvent, err := eventFromPersistedIdentity(forkRow)
+	if err != nil {
+		t.Fatalf("decode canonical fork replay event: %v", err)
 	}
-	if payload != "{}" {
-		t.Fatalf("fork event payload = %s, want {}", payload)
+	if forkEvent.ID() == sourceEvent.ID() || forkEvent.RunID() != materialized.ForkRunID || forkEvent.Type() != sourceEvent.Type() ||
+		!forkEvent.Producer().Equal(sourceEvent.Producer()) || forkEvent.TaskID() != sourceEvent.TaskID() ||
+		forkEvent.ExecutionMode() != sourceEvent.ExecutionMode() || forkEvent.ChainDepth() != 0 || forkEvent.ParentEventID() != "" ||
+		!jsonSemanticallyEqual(forkEvent.Payload(), sourceEvent.Payload()) || !reflect.DeepEqual(forkEvent.Envelope(), sourceEvent.Envelope()) {
+		t.Fatalf("complete historical replay projection changed\n source: id=%s type=%s producer=%s/%s task=%s depth=%d run=%s parent=%s mode=%s payload=%s envelope=%#v\n replay: id=%s type=%s producer=%s/%s task=%s depth=%d run=%s parent=%s mode=%s payload=%s envelope=%#v",
+			sourceEvent.ID(), sourceEvent.Type(), sourceEvent.ProducerType(), sourceEvent.SourceAgent(), sourceEvent.TaskID(), sourceEvent.ChainDepth(), sourceEvent.RunID(), sourceEvent.ParentEventID(), sourceEvent.ExecutionMode(), sourceEvent.Payload(), sourceEvent.Envelope(),
+			forkEvent.ID(), forkEvent.Type(), forkEvent.ProducerType(), forkEvent.SourceAgent(), forkEvent.TaskID(), forkEvent.ChainDepth(), forkEvent.RunID(), forkEvent.ParentEventID(), forkEvent.ExecutionMode(), forkEvent.Payload(), forkEvent.Envelope())
 	}
 
 	var forkDeliveryID, deliveryRunID, deliveryEventID, subscriberType, subscriberID, status, reasonCode string
@@ -1127,6 +1169,27 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	}
 	ch := eb.Subscribe("safe-agent", events.EventType("fork.ready"))
 	currentOnly := eb.Subscribe("current-only-agent", events.EventType("fork.ready"))
+	if _, err := db.ExecContext(ctx, `UPDATE events SET chain_depth = -1 WHERE event_id = $1::uuid`, forkEventID); err != nil {
+		t.Fatalf("corrupt fork replay event before dispatch: %v", err)
+	}
+	if replayed, err := eb.SweepUndispatched(ctx, time.Hour, 10); err == nil || !strings.Contains(err.Error(), "chain_depth") {
+		t.Fatalf("SweepUndispatched corrupt replay = count:%d err:%v, want chain_depth failure", replayed, err)
+	}
+	select {
+	case evt := <-ch:
+		t.Fatalf("corrupt historical replay dispatched: %#v", evt)
+	case <-time.After(50 * time.Millisecond):
+	}
+	var corruptReceiptCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid`, forkEventID).Scan(&corruptReceiptCount); err != nil {
+		t.Fatalf("count corrupt historical replay receipts: %v", err)
+	}
+	if corruptReceiptCount != 0 {
+		t.Fatalf("corrupt historical replay receipts = %d, want 0", corruptReceiptCount)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE events SET chain_depth = 0 WHERE event_id = $1::uuid`, forkEventID); err != nil {
+		t.Fatalf("restore fork replay event before dispatch: %v", err)
+	}
 	replayed, err := eb.SweepUndispatched(ctx, time.Hour, 10)
 	if err != nil {
 		t.Fatalf("SweepUndispatched: %v", err)
@@ -1136,9 +1199,7 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	}
 	select {
 	case evt := <-ch:
-		if evt.ID() != forkEventID || evt.RunID() != materialized.ForkRunID {
-			t.Fatalf("delivered fork replay event = id:%s run:%s", evt.ID(), evt.RunID())
-		}
+		assertRunForkCompleteEventSnapshot(t, evt, forkEvent)
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for fork replay event delivery")
 	}
@@ -1159,6 +1220,19 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	}
 	if pipelineOutcome != "success" || pipelineReason != "pipeline_persisted" {
 		t.Fatalf("fork replay pipeline receipt = outcome:%s reason:%s", pipelineOutcome, pipelineReason)
+	}
+}
+
+func assertRunForkCompleteEventSnapshot(t *testing.T, got, want events.Event) {
+	t.Helper()
+	if got.ID() != want.ID() || got.Type() != want.Type() || !got.Producer().Equal(want.Producer()) ||
+		got.TaskID() != want.TaskID() || got.ChainDepth() != want.ChainDepth() || got.RunID() != want.RunID() ||
+		got.ParentEventID() != want.ParentEventID() || got.ExecutionMode() != want.ExecutionMode() ||
+		!got.CreatedAt().Truncate(time.Microsecond).Equal(want.CreatedAt().Truncate(time.Microsecond)) ||
+		!jsonSemanticallyEqual(got.Payload(), want.Payload()) || !reflect.DeepEqual(got.Envelope(), want.Envelope()) {
+		t.Fatalf("dispatched historical replay snapshot changed\n got: id=%s type=%s producer=%s/%s task=%s depth=%d run=%s parent=%s mode=%s at=%s payload=%s envelope=%#v\nwant: id=%s type=%s producer=%s/%s task=%s depth=%d run=%s parent=%s mode=%s at=%s payload=%s envelope=%#v",
+			got.ID(), got.Type(), got.ProducerType(), got.SourceAgent(), got.TaskID(), got.ChainDepth(), got.RunID(), got.ParentEventID(), got.ExecutionMode(), got.CreatedAt(), got.Payload(), got.Envelope(),
+			want.ID(), want.Type(), want.ProducerType(), want.SourceAgent(), want.TaskID(), want.ChainDepth(), want.RunID(), want.ParentEventID(), want.ExecutionMode(), want.CreatedAt(), want.Payload(), want.Envelope())
 	}
 }
 

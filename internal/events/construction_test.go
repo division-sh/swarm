@@ -635,7 +635,7 @@ func isCoreEventField(name string) bool {
 
 func isEventProjectionMethod(name string) bool {
 	switch name {
-	case "WithRunID", "WithParentEventID", "WithTaskID", "WithLineage", "WithEnvelope",
+	case "WithExecutionMode", "WithRunID", "WithParentEventID", "WithTaskID", "WithLineage", "WithEnvelope", "WithDeliveryContext",
 		"WithEntityID", "WithFlowInstance", "WithSourceRoute", "WithTargetRoute",
 		"WithTargetSet", "WithoutTargetRoute", "WithDeliveryTarget":
 		return true

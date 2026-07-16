@@ -191,7 +191,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	}
 	if len(req.AgentRuntime.Records) == 0 {
 		manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
-			BaseContext:       ctx,
+			BaseContext:       context.WithoutCancel(ctx),
 			SemanticSource:    req.LoadedSource.Source,
 			WorkflowInstances: runtimepipeline.NewWorkflowInstanceStore(req.Store.DB),
 		}, req.Store)
@@ -201,7 +201,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	if err != nil {
 		return nil, managedexecution.Admission{}, err
 	}
-	builder.options.BaseContext = ctx
+	builder.options.BaseContext = context.WithoutCancel(ctx)
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, builder.factory, builder.options, req.Store)
 	if builder.bindManager != nil {
 		builder.bindManager(manager)

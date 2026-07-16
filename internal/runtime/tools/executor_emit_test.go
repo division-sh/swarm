@@ -409,7 +409,7 @@ func TestHandleEmitTool_PreservesInboundChildFlowOwnerAndExecutionMode(t *testin
 		FlowPath:      "validation",
 		EmitEvents:    []string{"research.completed"},
 	}
-	inbound := eventtest.RootIngress(
+	inbound := eventtest.InExecutionMode(eventtest.RootIngress(
 		"",
 		events.EventType("validation/validation.started"),
 		"",
@@ -420,7 +420,7 @@ func TestHandleEmitTool_PreservesInboundChildFlowOwnerAndExecutionMode(t *testin
 		"",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), "validation/inst-1"),
 		time.Time{},
-	).WithExecutionMode(executionmode.Mock)
+	), executionmode.Mock)
 	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound)
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_research_completed", map[string]any{

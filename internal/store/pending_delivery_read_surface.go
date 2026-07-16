@@ -266,6 +266,7 @@ func (s *PostgresStore) listPendingAgentDeliveryRecordsSpec(ctx context.Context,
 			e.event_id::text,
 			COALESCE(e.run_id::text, ''),
 			e.event_name,
+			COALESCE(e.task_id, ''),
 			COALESCE(e.entity_id::text, ''),
 			COALESCE(e.flow_instance, ''),
 			COALESCE(e.scope, 'global'),
@@ -317,16 +318,16 @@ func scanPendingAgentDeliveryRecords(rows *sql.Rows) ([]pendingAgentDeliveryReco
 	out := make([]pendingAgentDeliveryRecord, 0)
 	for rows.Next() {
 		var (
-			record        pendingAgentDeliveryRecord
-			eventID       string
-			executionMode string
-			row           persistedEventIdentity
+			record  pendingAgentDeliveryRecord
+			eventID string
+			row     persistedEventIdentity
 		)
 		if err := rows.Scan(
 			&record.AgentID,
 			&eventID,
 			&row.RunID,
 			&row.EventName,
+			&row.TaskID,
 			&row.EntityID,
 			&row.FlowInstance,
 			&row.Scope,
@@ -336,7 +337,7 @@ func scanPendingAgentDeliveryRecords(rows *sql.Rows) ([]pendingAgentDeliveryReco
 			&row.ProducedByType,
 			&row.SourceEventID,
 			&row.CreatedAt,
-			&executionMode,
+			&row.ExecutionMode,
 			&row.SourceRoute,
 			&row.TargetRoute,
 			&row.TargetSet,
@@ -350,8 +351,9 @@ func scanPendingAgentDeliveryRecords(rows *sql.Rows) ([]pendingAgentDeliveryReco
 			return nil, fmt.Errorf("scan pending agent delivery record: %w", err)
 		}
 		record.AgentID = strings.TrimSpace(record.AgentID)
+		row.EventID = eventID
 		var err error
-		record.Event, err = eventFromPersistedIdentity(eventID, executionMode, row)
+		record.Event, err = eventFromPersistedIdentity(row)
 		if err != nil {
 			return nil, err
 		}

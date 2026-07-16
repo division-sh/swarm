@@ -488,7 +488,7 @@ func TestProcessEvent_PropagatesInboundParentWithoutTraceSeeding(t *testing.T) {
 	am := NewAgentManager(nil, nil)
 	evt := eventtest.RootIngress("evt-123",
 		events.EventType("discovery/market_research.scan_assigned"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
-	evt = evt.WithDeliveryContext(events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:agent-delivery"}})
+	evt = eventtest.ForDelivery(evt, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:agent-delivery"}})
 
 	if err := am.processEvent(testAuthorActivityContext(context.Background()), agent, evt); err != nil {
 		t.Fatalf("processEvent: %v", err)

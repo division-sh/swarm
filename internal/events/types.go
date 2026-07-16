@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/google/uuid"
 )
 
 type EventType string
@@ -418,6 +419,12 @@ func ProjectDeliveryContext(deliveryContext DeliveryContext) ProjectionChange {
 	}
 }
 
+func ProjectExecutionMode(mode executionmode.Mode) ProjectionChange {
+	return func(evt *Event) {
+		evt.executionMode = mode
+	}
+}
+
 func NewRootIngressEvent(id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
 	return newEvent(EventAdmissionRootIngress, id, eventType, producer, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
 }
@@ -569,9 +576,66 @@ func (e Event) withExecutionModeClaim(mode executionmode.Mode) Event {
 
 func clonePayload(payload json.RawMessage) json.RawMessage {
 	if len(payload) == 0 {
-		return nil
+		return json.RawMessage(`{}`)
 	}
 	return append(json.RawMessage(nil), payload...)
+}
+
+// ValidateEnvelope validates the complete event-owned routing identity. It
+// does not normalize or repair malformed facts.
+func ValidateEnvelope(envelope EventEnvelope) error {
+	return validateEnvelope(envelope, false)
+}
+
+func validateEnvelope(envelope EventEnvelope, requirePersistentUUIDIdentity bool) error {
+	entityID := strings.TrimSpace(envelope.EntityID)
+	flowInstance := strings.Trim(strings.TrimSpace(envelope.FlowInstance), "/")
+	scope := EventScope(strings.TrimSpace(string(envelope.Scope)))
+	if scope != EventScopeGlobal && scope != EventScopeFlow && scope != EventScopeEntity {
+		return fmt.Errorf("event scope %q is invalid", scope)
+	}
+	source := envelope.Source.Normalized()
+	target := envelope.Target.Normalized()
+	targetSet := normalizeRouteIdentities(envelope.TargetSet)
+	if requirePersistentUUIDIdentity {
+		if err := validateOptionalUUID("entity_id", entityID); err != nil {
+			return err
+		}
+		for label, route := range map[string]RouteIdentity{"source": source, "target": target} {
+			if err := validateOptionalUUID(label+".entity_id", route.EntityID); err != nil {
+				return err
+			}
+		}
+		for index, route := range targetSet {
+			if err := validateOptionalUUID(fmt.Sprintf("target_set[%d].entity_id", index), route.EntityID); err != nil {
+				return err
+			}
+		}
+	}
+	if !target.Empty() && len(targetSet) > 0 {
+		return fmt.Errorf("event envelope cannot declare both target and target_set")
+	}
+	if !target.Empty() && (entityID != target.EntityID || flowInstance != target.FlowInstance) {
+		return fmt.Errorf("event target route must exactly match entity_id and flow_instance projections")
+	}
+	if len(targetSet) > 0 && (entityID != "" || flowInstance != "") {
+		return fmt.Errorf("event target_set cannot carry singular entity_id or flow_instance projections")
+	}
+	if want := inferEventScope(entityID, flowInstance); scope != want {
+		return fmt.Errorf("event scope %q does not match entity/flow identity; want %q", scope, want)
+	}
+	return nil
+}
+
+func validateOptionalUUID(field, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	if _, err := uuid.Parse(value); err != nil {
+		return fmt.Errorf("event %s %q must be a UUID", field, value)
+	}
+	return nil
 }
 
 func (e Event) ID() string {

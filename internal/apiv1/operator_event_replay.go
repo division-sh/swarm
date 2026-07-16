@@ -436,30 +436,26 @@ func deliveriesForSubscribers(eventID string, index map[string]store.OperatorEve
 }
 
 func replayEventFromOriginal(original store.OperatorEventFull, replayEventID string, now time.Time) (events.Event, error) {
-	if !original.ExecutionMode.Valid() {
-		return events.EmptyEvent(), fmt.Errorf("event %s carries invalid execution mode %q", original.EventID, original.ExecutionMode)
-	}
-	payload, err := json.Marshal(original.Payload)
+	snapshot, err := original.EventSnapshot()
 	if err != nil {
 		return events.EmptyEvent(), err
 	}
-	producer, err := events.NewProducerIdentity(original.ProducerType, original.Source)
-	if err != nil {
-		return events.EmptyEvent(), fmt.Errorf("event %s producer identity: %w", original.EventID, err)
+	if !snapshot.ExecutionMode().Valid() {
+		return events.EmptyEvent(), fmt.Errorf("event %s carries invalid execution mode %q", snapshot.ID(), snapshot.ExecutionMode())
 	}
 	evt := events.NewReplayEvent(
 		replayEventID,
-		events.EventType(original.EventName),
-		producer,
-		"",
-		payload,
-		0,
+		snapshot.Type(),
+		snapshot.Producer(),
+		snapshot.TaskID(),
+		snapshot.Payload(),
+		snapshot.ChainDepth()+1,
 		events.EventLineage{
-			RunID:         original.RunID,
-			ParentEventID: original.EventID,
-			ExecutionMode: original.ExecutionMode,
+			RunID:         snapshot.RunID(),
+			ParentEventID: snapshot.ID(),
+			ExecutionMode: snapshot.ExecutionMode(),
 		},
-		events.EventEnvelope{EntityID: original.EntityID},
+		snapshot.Envelope(),
 		now,
 	)
 	return evt, nil

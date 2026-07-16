@@ -572,19 +572,19 @@ func loadPostgresInboundPublicationRoutes(ctx context.Context, db inboundPublica
 
 func loadPostgresInboundPublicationEvent(ctx context.Context, db inboundPublicationQueryer, eventID string) (events.Event, error) {
 	var row persistedEventIdentity
-	var executionMode string
 	err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(run_id::text, ''), event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''),
+		SELECT COALESCE(run_id::text, ''), event_name, COALESCE(task_id, ''), COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''),
 		       scope, payload, COALESCE(chain_depth, 0), COALESCE(produced_by, ''), COALESCE(produced_by_type, ''),
 		       COALESCE(source_event_id::text, ''), created_at, execution_mode, source_route, target_route, target_set
 		FROM events WHERE event_id = $1::uuid
-	`, eventID).Scan(&row.RunID, &row.EventName, &row.EntityID, &row.FlowInstance, &row.Scope, &row.Payload,
-		&row.ChainDepth, &row.ProducedBy, &row.ProducedByType, &row.SourceEventID, &row.CreatedAt, &executionMode,
+	`, eventID).Scan(&row.RunID, &row.EventName, &row.TaskID, &row.EntityID, &row.FlowInstance, &row.Scope, &row.Payload,
+		&row.ChainDepth, &row.ProducedBy, &row.ProducedByType, &row.SourceEventID, &row.CreatedAt, &row.ExecutionMode,
 		&row.SourceRoute, &row.TargetRoute, &row.TargetSet)
 	if err != nil {
 		return events.EmptyEvent(), fmt.Errorf("load inbound publication event: %w", err)
 	}
-	return eventFromPersistedIdentity(eventID, executionMode, row)
+	row.EventID = eventID
+	return eventFromPersistedIdentity(row)
 }
 
 func canonicalInboundRecipientManifest(raw json.RawMessage) (json.RawMessage, string, int, error) {

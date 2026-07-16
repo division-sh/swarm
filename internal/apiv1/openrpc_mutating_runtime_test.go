@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apispec"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -1366,23 +1367,12 @@ func (e *mutatingProbeRunForkExecutor) ExecuteRunFork(_ context.Context, req Run
 }
 
 func (s *mutatingRuntimeProbeState) storeEvent(evt events.Event, deliveries []store.OperatorEventDelivery) {
-	payload := map[string]any{}
-	if len(evt.Payload()) > 0 {
-		_ = json.Unmarshal(evt.Payload(), &payload)
+	view, err := store.NewOperatorEventFull(evt)
+	if err != nil {
+		panic(err)
 	}
-	s.observability.events[evt.ID()] = store.OperatorEventFull{
-		EventID:       evt.ID(),
-		EventName:     strings.TrimSpace(string(evt.Type())),
-		ExecutionMode: evt.ExecutionMode(),
-		EntityID:      evt.EntityID(),
-		RunID:         evt.RunID(),
-		SourceEventID: strings.TrimSpace(evt.ParentEventID()),
-		CreatedAt:     evt.CreatedAt().UTC(),
-		Source:        evt.SourceAgent(),
-		ProducerType:  evt.ProducerType(),
-		Payload:       payload,
-		Deliveries:    deliveries,
-	}
+	view.Deliveries = deliveries
+	s.observability.events[evt.ID()] = view
 }
 
 func mutatingProbeOriginalEvent(eventID string, subscribers []string, status string) store.OperatorEventFull {
@@ -1396,18 +1386,24 @@ func mutatingProbeOriginalEvent(eventID string, subscribers []string, status str
 			Status:         status,
 		})
 	}
-	return store.OperatorEventFull{
-		EventID:       eventID,
-		EventName:     "scan.requested",
-		ExecutionMode: "live",
-		EntityID:      "entity-1",
-		RunID:         "00000000-0000-0000-0000-000000000101",
-		CreatedAt:     time.Unix(1700000000, 0).UTC(),
-		Source:        "origin-agent",
-		ProducerType:  events.EventProducerAgent,
-		Payload:       map[string]any{"topic": "medicine"},
-		Deliveries:    deliveries,
+	event := eventtest.PersistedProjectionForProducer(
+		eventID,
+		events.EventType("scan.requested"),
+		events.AgentProducer("origin-agent"),
+		"",
+		json.RawMessage(`{"topic":"medicine"}`),
+		0,
+		"00000000-0000-0000-0000-000000000101",
+		"",
+		events.EventEnvelope{EntityID: "entity-1"},
+		time.Unix(1700000000, 0).UTC(),
+	)
+	view, err := store.NewOperatorEventFull(event)
+	if err != nil {
+		panic(err)
 	}
+	view.Deliveries = deliveries
+	return view
 }
 
 type mutatingProbeRunControl struct {

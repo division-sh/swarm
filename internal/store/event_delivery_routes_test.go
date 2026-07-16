@@ -17,6 +17,7 @@ func TestPostgresStore_EventDeliveryRoutesPersistNodeTargetRows(t *testing.T) {
 
 	ctx := testAuthorActivityContext()
 	pg := newTestPostgresStore(t, db)
+	entityA, entityB := uuid.NewString(), uuid.NewString()
 	evt := eventtest.PersistedProjectionForProducer(
 		uuid.NewString(),
 		events.EventType("child/output.done"),
@@ -27,8 +28,8 @@ func TestPostgresStore_EventDeliveryRoutesPersistNodeTargetRows(t *testing.T) {
 		"",
 		"",
 		events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{
-			{EntityID: "ent-a", FlowInstance: "child-a/inst-1"},
-			{EntityID: "ent-b", FlowInstance: "child-b/inst-1"},
+			{EntityID: entityA, FlowInstance: "child-a/inst-1"},
+			{EntityID: entityB, FlowInstance: "child-b/inst-1"},
 		}),
 		time.Now().UTC(),
 	)
@@ -37,8 +38,8 @@ func TestPostgresStore_EventDeliveryRoutesPersistNodeTargetRows(t *testing.T) {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	routes := []events.DeliveryRoute{
-		{SubscriberType: "node", SubscriberID: "workflow-runtime", Target: events.RouteIdentity{EntityID: "ent-a", FlowInstance: "child-a/inst-1"}},
-		{SubscriberType: "node", SubscriberID: "workflow-runtime", Target: events.RouteIdentity{EntityID: "ent-b", FlowInstance: "child-b/inst-1"}},
+		{SubscriberType: "node", SubscriberID: "workflow-runtime", Target: events.RouteIdentity{EntityID: entityA, FlowInstance: "child-a/inst-1"}},
+		{SubscriberType: "node", SubscriberID: "workflow-runtime", Target: events.RouteIdentity{EntityID: entityB, FlowInstance: "child-b/inst-1"}},
 	}
 	if err := pg.InsertEventDeliveryRoutes(ctx, evt.ID(), routes); err != nil {
 		t.Fatalf("InsertEventDeliveryRoutes: %v", err)
@@ -58,7 +59,7 @@ func TestPostgresStore_EventDeliveryRoutesPersistNodeTargetRows(t *testing.T) {
 		}
 		seen[route.Target.EntityID] = struct{}{}
 	}
-	for _, want := range []string{"ent-a", "ent-b"} {
+	for _, want := range []string{entityA, entityB} {
 		if _, ok := seen[want]; !ok {
 			t.Fatalf("missing delivery target %q in %#v", want, got)
 		}

@@ -364,7 +364,7 @@ func TestPipelineActivityRequestEventExecutesHTTPToolAndPublishesGeneratedSucces
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
 	}
-	handled, err := pc.handleEventResult(testAuthorActivityContext(context.Background()), request.Event.WithDeliveryContext(intent.Context))
+	handled, err := pc.handleEventResult(testAuthorActivityContext(context.Background()), eventtest.ForDelivery(request.Event, intent.Context))
 	if err != nil {
 		t.Fatalf("handleEventResult: %v", err)
 	}

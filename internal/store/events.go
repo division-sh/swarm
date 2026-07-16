@@ -16,7 +16,6 @@ import (
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
@@ -398,9 +397,10 @@ func (s *PostgresStore) eventPersistenceAdmissionOptions(ctx context.Context, ca
 		}
 	}
 	return events.AdmissionOptions{
-		RunIDCandidate:           runID,
-		ParentEventIDCandidate:   parentID,
-		SelectedForkLineageOwner: selectedForkLineageOwnerFromContext(ctx),
+		RunIDCandidate:                runID,
+		ParentEventIDCandidate:        parentID,
+		SelectedForkLineageOwner:      selectedForkLineageOwnerFromContext(ctx),
+		RequirePersistentUUIDIdentity: true,
 	}
 }
 
@@ -954,27 +954,19 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 	if err := runtimeauthoractivity.Require(ctx); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	id, runID, name, entityID, flowInstance, scope, payload, chainDepth, producedBy, producedByType, sourceEventID, createdAt, err := eventStorageEnvelope(evt)
-	if err != nil {
+	wantIdentity := eventStorageEnvelope(evt)
+	if err := s.validateEventPayload(ctx, wantIdentity.EventName, wantIdentity.Payload); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	sourceRoute, targetRoute, targetSet := eventRouteStorageEnvelope(evt)
-	if err := s.validateEventPayload(ctx, name, payload); err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
+	if !caps.Events.LogRunID || !caps.Events.LogTaskID || !caps.Events.LogRouteIdentity {
+		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("canonical events run_id/task_id/route columns are required")
 	}
-	if eventHasRouteIdentity(evt) && !caps.Events.LogRouteIdentity {
-		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("events source_route/target_route/target_set columns required for routed event")
-	}
-	wantIdentity := newPersistedEventIdentity(
-		runID, name, entityID, flowInstance, scope, payload, chainDepth, producedBy,
-		producedByType, sourceEventID, createdAt, sourceRoute, targetRoute, targetSet,
-	)
 	queryer := chooseRowQueryer(s.DB, tx)
-	existingIdentity, found, err := loadPostgresEventIdentity(ctx, queryer, caps, id)
+	existingIdentity, found, err := loadPostgresEventIdentity(ctx, queryer, wantIdentity.EventID)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	duplicate, err := resolveExistingEventIdentity(id, wantIdentity, existingIdentity, found)
+	duplicate, err := resolveExistingEventIdentity(wantIdentity.EventID, wantIdentity, existingIdentity, found)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
@@ -987,88 +979,42 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
 		execFn = conn.ExecContext
 	}
+	var ensureErr error
+	if evt.AdmissionClass() == events.EventAdmissionDiagnosticDirect && evt.Type() == events.EventTypePlatformRuntimeLog {
+		ensureErr = s.ensureRuntimeLogRunRow(ctx, caps, tx, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName)
+	} else {
+		ensureErr = s.ensureRunRow(ctx, caps, tx, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName)
+	}
+	if ensureErr != nil {
+		if errors.Is(ensureErr, storerunlifecycle.ErrRunNotActive) {
+			existingIdentity, found, loadErr := loadPostgresEventIdentity(ctx, queryer, wantIdentity.EventID)
+			if loadErr != nil {
+				return runtimebus.EventAppendOutcomeUnknown, loadErr
+			}
+			duplicate, duplicateErr := resolveExistingEventIdentity(wantIdentity.EventID, wantIdentity, existingIdentity, found)
+			if duplicateErr != nil {
+				return runtimebus.EventAppendOutcomeUnknown, duplicateErr
+			}
+			if duplicate {
+				return runtimebus.EventAppendExactDuplicate, nil
+			}
+		}
+		return runtimebus.EventAppendOutcomeUnknown, ensureErr
+	}
 	q := `
 		INSERT INTO events (
-			event_id, event_name, entity_id, flow_instance, scope, payload,
-			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at
+			event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload,
+			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
+			source_route, target_route, target_set
 		)
 		VALUES (
-			$1::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6::jsonb,
-			$7, $8, NULLIF($9,''), $10, NULLIF($11,'')::uuid, $12
+			$1::uuid, NULLIF($2,'')::uuid, $3, NULLIF($4,''), NULLIF($5,'')::uuid, NULLIF($6,''), $7, $8::jsonb,
+			$9, $10, NULLIF($11,''), $12, NULLIF($13,'')::uuid, $14,
+			$15::jsonb, $16::jsonb, $17::jsonb
 		)
 		ON CONFLICT (event_id) DO NOTHING
 	`
-	args := []any{id, name, entityID, flowInstance, scope, string(payload), evt.ExecutionMode(), chainDepth, producedBy, producedByType, sourceEventID, createdAt}
-	if caps.Events.LogRouteIdentity {
-		q = `
-			INSERT INTO events (
-				event_id, event_name, entity_id, flow_instance, scope, payload,
-				execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
-				source_route, target_route, target_set
-			)
-			VALUES (
-				$1::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6::jsonb,
-				$7, $8, NULLIF($9,''), $10, NULLIF($11,'')::uuid, $12,
-				$13::jsonb, $14::jsonb, $15::jsonb
-			)
-			ON CONFLICT (event_id) DO NOTHING
-		`
-		args = []any{id, name, entityID, flowInstance, scope, string(payload), evt.ExecutionMode(), chainDepth, producedBy, producedByType, sourceEventID, createdAt, string(sourceRoute), string(targetRoute), string(targetSet)}
-	} else if eventHasRouteIdentity(evt) {
-		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("events source_route/target_route/target_set columns required for routed event")
-	}
-	if caps.Events.LogRunID {
-		var ensureErr error
-		if evt.AdmissionClass() == events.EventAdmissionDiagnosticDirect && evt.Type() == events.EventTypePlatformRuntimeLog {
-			ensureErr = s.ensureRuntimeLogRunRow(ctx, caps, tx, runID, id, name)
-		} else {
-			ensureErr = s.ensureRunRow(ctx, caps, tx, runID, id, name)
-		}
-		if ensureErr != nil {
-			if errors.Is(ensureErr, storerunlifecycle.ErrRunNotActive) {
-				existingIdentity, found, loadErr := loadPostgresEventIdentity(ctx, queryer, caps, id)
-				if loadErr != nil {
-					return runtimebus.EventAppendOutcomeUnknown, loadErr
-				}
-				duplicate, duplicateErr := resolveExistingEventIdentity(id, wantIdentity, existingIdentity, found)
-				if duplicateErr != nil {
-					return runtimebus.EventAppendOutcomeUnknown, duplicateErr
-				}
-				if duplicate {
-					return runtimebus.EventAppendExactDuplicate, nil
-				}
-			}
-			return runtimebus.EventAppendOutcomeUnknown, ensureErr
-		}
-		q = `
-			INSERT INTO events (
-				event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
-				execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at
-			)
-			VALUES (
-				$1::uuid, NULLIF($2,'')::uuid, $3, NULLIF($4,'')::uuid, NULLIF($5,''), $6, $7::jsonb,
-				$8, $9, NULLIF($10,''), $11, NULLIF($12,'')::uuid, $13
-			)
-			ON CONFLICT (event_id) DO NOTHING
-		`
-		args = []any{id, runID, name, entityID, flowInstance, scope, string(payload), evt.ExecutionMode(), chainDepth, producedBy, producedByType, sourceEventID, createdAt}
-		if caps.Events.LogRouteIdentity {
-			q = `
-				INSERT INTO events (
-					event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
-					execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
-					source_route, target_route, target_set
-				)
-				VALUES (
-					$1::uuid, NULLIF($2,'')::uuid, $3, NULLIF($4,'')::uuid, NULLIF($5,''), $6, $7::jsonb,
-					$8, $9, NULLIF($10,''), $11, NULLIF($12,'')::uuid, $13,
-					$14::jsonb, $15::jsonb, $16::jsonb
-				)
-				ON CONFLICT (event_id) DO NOTHING
-			`
-			args = []any{id, runID, name, entityID, flowInstance, scope, string(payload), evt.ExecutionMode(), chainDepth, producedBy, producedByType, sourceEventID, createdAt, string(sourceRoute), string(targetRoute), string(targetSet)}
-		}
-	}
+	args := []any{wantIdentity.EventID, wantIdentity.RunID, wantIdentity.EventName, wantIdentity.TaskID, wantIdentity.EntityID, wantIdentity.FlowInstance, wantIdentity.Scope, string(wantIdentity.Payload), wantIdentity.ExecutionMode, wantIdentity.ChainDepth, wantIdentity.ProducedBy, wantIdentity.ProducedByType, wantIdentity.SourceEventID, wantIdentity.CreatedAt, string(wantIdentity.SourceRoute), string(wantIdentity.TargetRoute), string(wantIdentity.TargetSet)}
 	res, err := execFn(ctx, q, args...)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("append event: %w", err)
@@ -1078,27 +1024,27 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("append event: read affected rows: %w", rowsErr)
 	}
 	if rows == 0 {
-		existingIdentity, found, err := loadPostgresEventIdentity(ctx, queryer, caps, id)
+		existingIdentity, found, err := loadPostgresEventIdentity(ctx, queryer, wantIdentity.EventID)
 		if err != nil {
 			return runtimebus.EventAppendOutcomeUnknown, err
 		}
-		duplicate, err := resolveExistingEventIdentity(id, wantIdentity, existingIdentity, found)
+		duplicate, err := resolveExistingEventIdentity(wantIdentity.EventID, wantIdentity, existingIdentity, found)
 		if err != nil {
 			return runtimebus.EventAppendOutcomeUnknown, err
 		}
 		if !duplicate {
-			return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("append event: event_id=%s was not inserted", id)
+			return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("append event: event_id=%s was not inserted", wantIdentity.EventID)
 		}
 		return runtimebus.EventAppendExactDuplicate, nil
 	}
 	if caps.Events.LogRunID {
 		if caps.Events.RunCounterColumns && runLifecycleEntityStateCountSource(caps) {
-			if err := storerunlifecycle.SyncCounts(ctx, chooseExecQueryer(s.DB, tx), runID); err != nil {
+			if err := storerunlifecycle.SyncCounts(ctx, chooseExecQueryer(s.DB, tx), wantIdentity.RunID); err != nil {
 				return runtimebus.EventAppendOutcomeUnknown, err
 			}
 		}
 	}
-	if err := recordPersistedEventAuthorActivity(ctx, s, evt, producedBy, producedByType); err != nil {
+	if err := recordPersistedEventAuthorActivity(ctx, s, evt, wantIdentity.ProducedBy, wantIdentity.ProducedByType); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	return runtimebus.EventAppendInserted, nil
@@ -1599,7 +1545,7 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 	args = append(args, limit)
 	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
-			e.event_id::text, %s, e.event_name,
+			e.event_id::text, %s, e.event_name, COALESCE(e.task_id, ''),
 			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
 			e.payload, COALESCE(e.chain_depth, 0), COALESCE(e.produced_by, ''), COALESCE(e.produced_by_type, ''),
 			COALESCE(e.source_event_id::text, ''), e.created_at, e.execution_mode,
@@ -1628,12 +1574,12 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 
 	out := make([]events.PersistedReplayEvent, 0, limit)
 	for rows.Next() {
-		var eventID, executionMode string
 		var row persistedEventIdentity
 		if err := rows.Scan(
-			&eventID,
+			&row.EventID,
 			&row.RunID,
 			&row.EventName,
+			&row.TaskID,
 			&row.EntityID,
 			&row.FlowInstance,
 			&row.Scope,
@@ -1643,14 +1589,14 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 			&row.ProducedByType,
 			&row.SourceEventID,
 			&row.CreatedAt,
-			&executionMode,
+			&row.ExecutionMode,
 			&row.SourceRoute,
 			&row.TargetRoute,
 			&row.TargetSet,
 		); err != nil {
 			return nil, fmt.Errorf("scan missing pipeline receipt event: %w", err)
 		}
-		evt, err := eventFromPersistedIdentity(eventID, executionMode, row)
+		evt, err := eventFromPersistedIdentity(row)
 		if err != nil {
 			return nil, err
 		}
@@ -1679,7 +1625,7 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 	args = append(args, limit)
 	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
-			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name,
+			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.task_id, ''),
 			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
 			e.payload, COALESCE(e.chain_depth, 0), COALESCE(e.produced_by, ''), COALESCE(e.produced_by_type, ''),
 			COALESCE(e.source_event_id::text, ''), e.created_at, e.execution_mode,
@@ -1709,12 +1655,12 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 
 	out := make([]events.PersistedReplayEvent, 0, limit)
 	for rows.Next() {
-		var eventID, executionMode string
 		var row persistedEventIdentity
 		if err := rows.Scan(
-			&eventID,
+			&row.EventID,
 			&row.RunID,
 			&row.EventName,
+			&row.TaskID,
 			&row.EntityID,
 			&row.FlowInstance,
 			&row.Scope,
@@ -1724,14 +1670,14 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 			&row.ProducedByType,
 			&row.SourceEventID,
 			&row.CreatedAt,
-			&executionMode,
+			&row.ExecutionMode,
 			&row.SourceRoute,
 			&row.TargetRoute,
 			&row.TargetSet,
 		); err != nil {
 			return nil, fmt.Errorf("scan run missing pipeline receipt event: %w", err)
 		}
-		evt, err := eventFromPersistedIdentity(eventID, executionMode, row)
+		evt, err := eventFromPersistedIdentity(row)
 		if err != nil {
 			return nil, err
 		}
@@ -1758,7 +1704,7 @@ func (s *PostgresStore) listEventsWithPendingDeliveriesForRunSpec(ctx context.Co
 	args = append(args, limit)
 	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
-			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name,
+			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.task_id, ''),
 			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
 			e.payload, COALESCE(e.chain_depth, 0), COALESCE(e.produced_by, ''), COALESCE(e.produced_by_type, ''),
 			COALESCE(e.source_event_id::text, ''), e.created_at, e.execution_mode,
@@ -1786,12 +1732,12 @@ func (s *PostgresStore) listEventsWithPendingDeliveriesForRunSpec(ctx context.Co
 
 	out := make([]events.PersistedReplayEvent, 0, limit)
 	for rows.Next() {
-		var eventID, executionMode string
 		var row persistedEventIdentity
 		if err := rows.Scan(
-			&eventID,
+			&row.EventID,
 			&row.RunID,
 			&row.EventName,
+			&row.TaskID,
 			&row.EntityID,
 			&row.FlowInstance,
 			&row.Scope,
@@ -1801,14 +1747,14 @@ func (s *PostgresStore) listEventsWithPendingDeliveriesForRunSpec(ctx context.Co
 			&row.ProducedByType,
 			&row.SourceEventID,
 			&row.CreatedAt,
-			&executionMode,
+			&row.ExecutionMode,
 			&row.SourceRoute,
 			&row.TargetRoute,
 			&row.TargetSet,
 		); err != nil {
 			return nil, fmt.Errorf("scan run event with pending deliveries: %w", err)
 		}
-		evt, err := eventFromPersistedIdentity(eventID, executionMode, row)
+		evt, err := eventFromPersistedIdentity(row)
 		if err != nil {
 			return nil, err
 		}
@@ -1829,14 +1775,6 @@ func chooseRowQueryer(db *sql.DB, tx *sql.Tx) rowQueryer {
 		return tx
 	}
 	return db
-}
-
-func eventWithStoredExecutionMode(event events.Event, raw string) (events.Event, error) {
-	mode, ok := executionmode.Parse(raw)
-	if !ok {
-		return events.EmptyEvent(), fmt.Errorf("persisted event %s has invalid execution_mode %q", event.ID(), strings.TrimSpace(raw))
-	}
-	return event.WithExecutionMode(mode), nil
 }
 
 func chooseExecQueryer(db *sql.DB, tx *sql.Tx) execQueryer {
@@ -2121,68 +2059,15 @@ func (s *PostgresStore) convergeStandaloneRuntimePlatformRunByEventID(
 	return nil
 }
 
-func eventStorageEnvelope(evt events.Event) (id string, runID string, eventName string, entityID string, flowInstance string, scope string, payload []byte, chainDepth int, producedBy string, producedByType string, sourceEventID string, createdAt time.Time, err error) {
-	id = strings.TrimSpace(evt.ID())
-	if id == "" {
-		return "", "", "", "", "", "", nil, 0, "", "", "", time.Time{}, fmt.Errorf("event_id is required after admission")
-	}
-	runID = nullUUIDString(evt.RunID())
-	eventName = strings.TrimSpace(string(evt.Type()))
-	if eventName == "" {
-		return "", "", "", "", "", "", nil, 0, "", "", "", time.Time{}, fmt.Errorf("event_name is required after admission")
-	}
-	payload = eventPayloadForStorage(evt)
+func eventStorageEnvelope(evt events.Event) persistedEventIdentity {
 	envelope := evt.NormalizedEnvelope()
-	entityID, err = validateOptionalEntityUUID(envelope.EntityID)
-	if err != nil {
-		return "", "", "", "", "", "", nil, 0, "", "", "", time.Time{}, err
-	}
-	flowInstance = envelope.FlowInstance
-	scope = string(envelope.Scope)
-	if scope == "" {
-		scope = string(events.EventScopeGlobal)
-	}
-	chainDepth = evt.ChainDepth()
-	if chainDepth < 0 {
-		chainDepth = 0
-	}
+	sourceRoute, targetRoute, targetSet := eventRouteStorageEnvelope(evt)
 	producer := evt.Producer()
-	if err := producer.Validate(); err != nil {
-		return "", "", "", "", "", "", nil, 0, "", "", "", time.Time{}, fmt.Errorf("event producer identity is required after admission: %w", err)
-	}
-	producedBy = producer.ID()
-	producedByType = string(producer.Type())
-	sourceEventID = sanitizeOptionalUUID(evt.ParentEventID())
-	createdAt = evt.CreatedAt()
-	if createdAt.IsZero() {
-		return "", "", "", "", "", "", nil, 0, "", "", "", time.Time{}, fmt.Errorf("created_at is required after admission")
-	}
-	return
-}
-
-func eventPayloadForStorage(evt events.Event) []byte {
-	taskID := sanitizeOptionalUUID(evt.TaskID())
-	eventPayload := evt.Payload()
-	if taskID == "" {
-		if len(eventPayload) == 0 {
-			return []byte("{}")
-		}
-		return eventPayload
-	}
-	payload := map[string]any{}
-	if len(eventPayload) > 0 {
-		if err := json.Unmarshal(eventPayload, &payload); err != nil || payload == nil {
-			return eventPayload
-		}
-	}
-	if _, exists := payload["task_id"]; !exists {
-		payload["task_id"] = taskID
-	}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return eventPayload
-	}
-	return encoded
+	return newPersistedEventIdentity(
+		evt.ID(), evt.RunID(), string(evt.Type()), evt.TaskID(), envelope.EntityID, envelope.FlowInstance,
+		string(envelope.Scope), evt.Payload(), evt.ExecutionMode(), evt.ChainDepth(), producer.ID(),
+		string(producer.Type()), evt.ParentEventID(), evt.CreatedAt(), sourceRoute, targetRoute, targetSet,
+	)
 }
 
 func eventRouteStorageEnvelope(evt events.Event) (sourceRoute, targetRoute, targetSet []byte) {
