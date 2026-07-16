@@ -108,8 +108,13 @@ func ConnectSourceEndpointMatchesEvent(endpoint ConnectRoutePlanEndpoint, evt ev
 	if sourcePath == "" {
 		sourcePath = source.FlowID
 	}
-	if sourcePath == "" && strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != "" {
-		return false
+	if sourcePath == "" {
+		if !endpoint.Root {
+			return false
+		}
+		// Root ingress predates source-route stamping. Its envelope instance is
+		// used only to reject child scope, never as a producer identity.
+		sourcePath = evt.FlowInstance()
 	}
 	return ConnectSourceEndpointMatches(endpoint, string(evt.Type()), sourcePath)
 }
