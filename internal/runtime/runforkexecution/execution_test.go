@@ -308,8 +308,11 @@ func TestSelectedContractPipelineConsumesExactMockConnectorResponseOwner(t *test
 	}
 	opts := selectedContractPipelineCoordinatorOptions(
 		&store.PostgresStore{},
-		LoadedSelectedContractSource{BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
-		SelectedContractAgentRuntimeOptions{MockConnectorResponses: plan},
+		LoadedSelectedContractSource{
+			BundleHash:             "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			MockConnectorResponses: plan,
+		},
+		SelectedContractAgentRuntimeOptions{},
 		nil,
 		nil,
 	)

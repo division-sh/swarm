@@ -3443,7 +3443,7 @@ handler_specification:
         approval: 'optional object for non_idempotent_write only; canonical minimal form is `{decision: <stable-decision-id>}`'
       mock_execution: >
         Mock-mode activity execution is admitted before journal, credential, preparation, or transport work. Only an exact
-        provider_connector tool with a generation-supplied deterministic response matching that tool's output_schema may execute,
+        effective provider_connector tool with a source-compiled deterministic response matching that tool's output_schema may execute,
         and only through the non_idempotent_write attempt journal. Read-only tools, non-provider tools, and missing or invalid
         responders fail closed without an attempt row. A newly claimed mock attempt materializes the response and persists it with
         execution_mode mock; duplicate and restart delivery reuse that terminal row without rematerializing the response.
@@ -7686,10 +7686,13 @@ tool_model:
       execution: "handler `activity` lowering to `platform.activity_requested`."
       non_idempotent_journal: "`activity_attempts`."
       mock_response_plan: >
-        A generation-supplied immutable exact-tool response plan may satisfy mock-mode non_idempotent_write execution. It consumes
-        the same canonical ToolSchemaEntry and output_schema, admits only provider_connector tools, and is passed unchanged through
-        ordinary served and selected-contract pipeline construction. It is test infrastructure, not a second connector declaration,
-        authored response DSL, provider branch, or live fallback.
+        One immutable exact-tool response plan satisfies mock-mode non_idempotent_write execution. It is compiled from every effective
+        canonical provider_connector ToolSchemaEntry and output_schema after explicit connector-pack imports, regardless of whether
+        the effective declaration is flow-local or pack-imported. Declaration origin is provenance/readback only and MUST NOT select
+        response eligibility. Ordinary served construction and each disk- or catalog-loaded selected contract compile and consume the
+        plan from their own exact effective semantic source; caller-injected, process-current, or historical/current cross-source plans
+        are forbidden. The plan is generated fixture infrastructure, not a second connector declaration, authored response DSL,
+        provider branch, mock/live selector, or live fallback.
       credentials: "static credential store keys listed under tool `credentials`, or managed credential handles listed under tool `managed_credential`; exactly one credential mode owns connector auth."
       readback: "tool_model.provider_capability_surface, consuming canonical static and managed credential descriptors."
       display: "first CAN action label is derived from the authored tool `description`; if absent, it falls back to normalized `<action> via <Provider>`."
@@ -7740,6 +7743,31 @@ tool_model:
         credential is unavailable, unconnected, pending, refresh_failed, scope-insufficient, unsupported, or unbound.
         Duplicate/redelivered activity requests with an existing activity_attempts row must reuse the journaled result
         before resolving managed credentials and MUST NOT refresh or dispatch again.
+    generated_mock_response_compilation:
+      owner: internal/providerconnectors provider-generic effective-source compiler feeding MockResponsePlan
+      eligibility: >
+        Enumerate the exact effective semantic source ToolEntries after pack imports and compile every entry validated as a canonical
+        provider_connector. Explicit import remains the enablement fence for packed tools because unimported tools are absent from the
+        effective source. Flow-local and imported entries otherwise consume identical response-generation semantics.
+      deterministic_inhabitation: >
+        Connector response roots are objects. Omitted schema type has the existing object meaning. Objects materialize only required
+        declared properties in deterministic key order and invent no additional properties. Arrays materialize empty because the
+        admitted ToolInputSchema model has no minimum-item constraint. Enum-bearing values choose the first authored typed literal;
+        otherwise strings use empty text, booleans false, numbers zero clamped to inclusive bounds, integers the deterministic integer
+        nearest zero within inclusive bounds, and null values null. Optional properties, examples, defaults, and provider-semantic
+        values are not invented.
+      failure_policy: >
+        Unknown types, required names without declared property schemas, non-JSON enum literals, enum/type mismatch, non-finite or
+        contradictory bounds, integer intervals without an inhabitant, or canonical post-generation output-schema validation failure
+        reject the entire source compilation with exact tool and schema-path evidence. No partial plan or best-effort value survives.
+      source_binding: >
+        Workflow validation and ordinary RuntimeDeps construction consume the plan compiled from their effective source. Both selected-
+        contract source loaders apply connector-pack imports, compile the plan, and bind it to LoadedSelectedContractSource before the
+        fork-local pipeline is built. Test-only production response injection and SelectedContractAgentRuntimeOptions response-plan
+        selection are retired with no compatibility path. Direct plan construction remains only for bounded adversarial consumer tests.
+      override_boundary: >
+        Scenario-local authored overrides remain #1768 S6. They may later overlay this one generated owner but MUST NOT redefine base
+        eligibility, introduce another dispatcher or mock/live selector, or make missing generated admission fall through to live work.
     generated_catalog_first_slice:
       description: >
         The first OpenAPI-to-connector-pack transform proof generates exactly the three GitHub issue/comment/label write

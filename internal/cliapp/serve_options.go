@@ -4,7 +4,6 @@ import (
 	"io"
 	"time"
 
-	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -47,7 +46,6 @@ type ServeOptions struct {
 	TestWorkflowNodeHandlerStartHook runtimepipeline.WorkflowNodeHandlerStartHook
 	TestLifecycleProbe               runtimelifecycleprobe.Observer
 	TestLLMRuntime                   runtimellm.Runtime
-	TestMockConnectorResponses       *providerconnectors.MockResponsePlan
 	TestOutboxSweeperConfig          runtimebus.OutboxSweeperConfig
 	TestRuntimeReadyHook             func(*runtime.Runtime)
 	TestRuntimeContextsReadyHook     func(*runtime.RuntimeContextManager)

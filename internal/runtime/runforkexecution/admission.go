@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -35,11 +36,12 @@ type SelectedContractSourceLoadRequest struct {
 }
 
 type LoadedSelectedContractSource struct {
-	Selection  store.RunForkContractSelection
-	Source     semanticview.Source
-	Module     runtimepipeline.WorkflowModule
-	BundleHash string
-	Cleanup    func() error
+	Selection              store.RunForkContractSelection
+	Source                 semanticview.Source
+	Module                 runtimepipeline.WorkflowModule
+	BundleHash             string
+	MockConnectorResponses *providerconnectors.MockResponsePlan
+	Cleanup                func() error
 }
 
 type selectedContractWorkflowModule struct {
@@ -111,7 +113,10 @@ func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx contex
 	if err := runtimecontracts.ValidateBundlePlatformVersionCompatibility(bundle); err != nil {
 		return LoadedSelectedContractSource{}, fmt.Errorf("selected-contract source admission failed: %w", err)
 	}
-	source := semanticview.Wrap(bundle)
+	source, mockConnectorResponses, err := compileSelectedContractSource(semanticview.Wrap(bundle))
+	if err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
 	if strings.TrimSpace(selection.WorkflowName) == "" {
 		selection.WorkflowName = strings.TrimSpace(source.WorkflowName())
 	}
@@ -130,8 +135,9 @@ func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx contex
 		return LoadedSelectedContractSource{}, err
 	}
 	return LoadedSelectedContractSource{
-		Selection: selection,
-		Source:    source,
+		Selection:              selection,
+		Source:                 source,
+		MockConnectorResponses: mockConnectorResponses,
 		Module: selectedContractWorkflowModule{
 			source:         source,
 			workflow:       workflow,
@@ -208,7 +214,11 @@ func (l BundleCatalogSelectedContractSourceLoader) LoadRunForkSelectedContractSo
 	if err != nil {
 		return LoadedSelectedContractSource{}, fmt.Errorf("%s: load DB-backed selected-contract source %s: %w", runbundle.CodeBundleDataIntegrityError, bundleHash, err)
 	}
-	source := semanticview.Wrap(runtimeSource.Bundle)
+	source, mockConnectorResponses, err := compileSelectedContractSource(semanticview.Wrap(runtimeSource.Bundle))
+	if err != nil {
+		_ = runtimeSource.Cleanup()
+		return LoadedSelectedContractSource{}, err
+	}
 	if strings.TrimSpace(selection.WorkflowName) == "" {
 		selection.WorkflowName = strings.TrimSpace(source.WorkflowName())
 	}
@@ -230,9 +240,10 @@ func (l BundleCatalogSelectedContractSourceLoader) LoadRunForkSelectedContractSo
 		return LoadedSelectedContractSource{}, err
 	}
 	return LoadedSelectedContractSource{
-		Selection:  selection,
-		Source:     source,
-		BundleHash: bundleHash,
+		Selection:              selection,
+		Source:                 source,
+		BundleHash:             bundleHash,
+		MockConnectorResponses: mockConnectorResponses,
 		Module: selectedContractWorkflowModule{
 			source:         source,
 			workflow:       workflow,
@@ -242,6 +253,18 @@ func (l BundleCatalogSelectedContractSourceLoader) LoadRunForkSelectedContractSo
 		},
 		Cleanup: runtimeSource.Cleanup,
 	}, nil
+}
+
+func compileSelectedContractSource(source semanticview.Source) (semanticview.Source, *providerconnectors.MockResponsePlan, error) {
+	effective, err := providerconnectors.SourceWithConnectorPackImports(source)
+	if err != nil {
+		return nil, nil, fmt.Errorf("selected-contract provider connector pack import failed: %w", err)
+	}
+	plan, err := providerconnectors.CompileMockResponsePlan(effective)
+	if err != nil {
+		return nil, nil, fmt.Errorf("selected-contract mock response compilation failed: %w", err)
+	}
+	return effective, plan, nil
 }
 
 func loadRunForkSelectedContractSource(ctx context.Context, loader SelectedContractSourceLoader, req SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {

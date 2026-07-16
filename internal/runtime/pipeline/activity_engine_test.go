@@ -614,7 +614,7 @@ func TestPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCrede
 	}
 }
 
-func TestPipelineActivityRequestMockProviderConnectorUsesExactResponseAndJournal(t *testing.T) {
+func TestPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedResponseAndJournal(t *testing.T) {
 	ctx := context.Background()
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -632,15 +632,13 @@ func TestPipelineActivityRequestMockProviderConnectorUsesExactResponseAndJournal
 		},
 		Required: []string{"ok"},
 	}
-	plan, err := providerconnectors.NewMockResponsePlan(map[string]map[string]any{
-		"telegram.send_message": {"ok": true},
-	})
-	if err != nil {
-		t.Fatalf("NewMockResponsePlan: %v", err)
-	}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
 		"telegram.send_message": tool,
 	}})
+	plan, err := providerconnectors.CompileMockResponsePlan(source)
+	if err != nil {
+		t.Fatalf("CompileMockResponsePlan: %v", err)
+	}
 	bus := &recordingPipelineBus{}
 	db, store := newSQLiteActivityJournalStore(t, ctx)
 	seedActivityRun(t, db, true, runID)
@@ -676,7 +674,7 @@ func TestPipelineActivityRequestMockProviderConnectorUsesExactResponseAndJournal
 		t.Fatalf("mock attempt = %#v", record)
 	}
 	result, _ := record.ResultPayload["result"].(map[string]any)
-	if result["ok"] != true {
+	if result["ok"] != false {
 		t.Fatalf("mock result = %#v", record.ResultPayload)
 	}
 	if len(bus.publishes) != 2 || bus.publishes[0].ID() != bus.publishes[1].ID() {

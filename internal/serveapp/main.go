@@ -203,18 +203,17 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 				SourceLoader:                   runForkSourceLoader,
 				ContractSelection:              runtimerunforkadmission.SelectedContractSelection(req.Source, req.ContractsRoot),
 				AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
-					Config:                 req.Config,
-					EntityStore:            stores.ToolEntityStore,
-					HumanTaskStore:         stores.HumanTaskStore,
-					SessionRegistry:        stores.SessionRegistry,
-					ConversationStore:      stores.ConversationStore,
-					ScheduleStore:          stores.ScheduleStore,
-					MailboxStore:           stores.MailboxStore,
-					Workspace:              req.Workspaces,
-					Credentials:            req.Credentials,
-					ManagedCredentials:     req.ManagedCredentials,
-					ProviderCredentials:    req.ProviderCredentials,
-					MockConnectorResponses: req.MockConnectorResponses,
+					Config:              req.Config,
+					EntityStore:         stores.ToolEntityStore,
+					HumanTaskStore:      stores.HumanTaskStore,
+					SessionRegistry:     stores.SessionRegistry,
+					ConversationStore:   stores.ConversationStore,
+					ScheduleStore:       stores.ScheduleStore,
+					MailboxStore:        stores.MailboxStore,
+					Workspace:           req.Workspaces,
+					Credentials:         req.Credentials,
+					ManagedCredentials:  req.ManagedCredentials,
+					ProviderCredentials: req.ProviderCredentials,
 				},
 			},
 			RuntimeContexts:  req.RuntimeContextManager,
@@ -652,7 +651,6 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("resolve workflow execution mode: %w", err)
 	}
-	validationOpts.MockConnectorResponses = req.Options.TestMockConnectorResponses
 	validation, err := runtime.ValidateWorkflowContractSurface(req.Ctx, loaded.source, validationOpts)
 	if err != nil {
 		return serveRuntimeBundleContext{}, err
@@ -681,7 +679,6 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			ManagedCredentials:               req.ManagedCredentials,
 			ProviderCredentials:              req.ProviderCredentials,
 			ProviderTriggerCatalog:           req.ProviderTriggerCatalog,
-			MockConnectorResponses:           req.Options.TestMockConnectorResponses,
 			BootStartedAt:                    req.BootStartedAt,
 			BootProgress:                     req.BootProgress,
 			SystemContainers:                 systemWorkspaceContainers(workspaces),
@@ -1108,7 +1105,6 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		Credentials:             credentialStore,
 		ManagedCredentials:      managedCredentialStore,
 		ProviderCredentials:     providerCredentialStore,
-		MockConnectorResponses:  opts.TestMockConnectorResponses,
 		RuntimeContextManager:   runtimeContextManager,
 	})
 	if err != nil {

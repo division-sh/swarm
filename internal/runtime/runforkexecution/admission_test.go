@@ -11,8 +11,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/runbundle"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -551,6 +553,147 @@ func TestBundleCatalogSelectedContractSourceLoaderLoadsCrossBundleTargetSelectio
 	}
 	if loaded.Selection.ContractsRoot != "" {
 		t.Fatalf("loaded selection contracts_root = %q, want no path owner for bundle_hash mode", loaded.Selection.ContractsRoot)
+	}
+}
+
+func TestSelectedContractSourceLoadersCompileExactEffectiveConnectorResponses(t *testing.T) {
+	repoRoot := runForkExecutionRepoRoot(t)
+	for _, sourceKind := range []string{"flow_local", "pack_imported"} {
+		t.Run(sourceKind, func(t *testing.T) {
+			var contractsRoot string
+			if sourceKind == "flow_local" {
+				contractsRoot = canonicalrouting.CopyStandingTelegramServe(t, "https://example.invalid")
+			} else {
+				contractsRoot = canonicalrouting.CopyStandingTelegramServe(t, "https://example.invalid")
+				convertSelectedTelegramFixtureToPackImport(t, contractsRoot)
+			}
+
+			t.Run("disk", func(t *testing.T) {
+				loaded, err := (ContractBundleSourceLoader{RepoRoot: repoRoot}).LoadRunForkSelectedContractSource(context.Background(), store.RunForkContractSelection{
+					Mode:          store.RunForkContractSelectionModeSelectedContracts,
+					ContractsRoot: contractsRoot,
+				})
+				if err != nil {
+					t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
+				}
+				assertLoadedSelectedConnectorResponse(t, loaded)
+			})
+
+			t.Run("catalog", func(t *testing.T) {
+				bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractsRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+				if err != nil {
+					t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+				}
+				projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
+				if err != nil {
+					t.Fatalf("BuildBundleCatalogProjection: %v", err)
+				}
+				loader := BundleCatalogSelectedContractSourceLoader{
+					RepoRoot: repoRoot,
+					Store: &fakeBundleCatalogSelectedContractSourceStore{record: store.BundleCatalogRuntimeRecord{
+						BundleHash: projection.BundleHash, ContentYAML: projection.ContentYAML, DataBlob: projection.DataBlob,
+					}},
+				}
+				loaded, err := loader.LoadRunForkSelectedContractSource(context.Background(), store.RunForkContractSelection{
+					Mode: store.RunForkContractSelectionModeBundleHash, BundleHash: projection.BundleHash,
+				})
+				if err != nil {
+					t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
+				}
+				defer cleanupLoadedSelectedContractSource(loaded)
+				assertLoadedSelectedConnectorResponse(t, loaded)
+			})
+		})
+	}
+}
+
+func convertSelectedTelegramFixtureToPackImport(t *testing.T, contractsRoot string) {
+	t.Helper()
+	packagePath := filepath.Join(contractsRoot, "package.yaml")
+	body, err := os.ReadFile(packagePath)
+	if err != nil {
+		t.Fatalf("read selected package fixture: %v", err)
+	}
+	const marker = "platform_version: \">=0.7.0 <0.8.0\"\n"
+	if !strings.Contains(string(body), marker) {
+		t.Fatalf("selected package fixture is missing platform marker")
+	}
+	body = []byte(strings.Replace(string(body), marker, marker+"connector_packs:\n  imports:\n    - {provider: telegram, tool: telegram.send_message}\n", 1))
+	if err := os.WriteFile(packagePath, body, 0o644); err != nil {
+		t.Fatalf("write selected package fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(contractsRoot, "flows", "telegram-chat", "tools.yaml"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("remove selected flow-local connector fixture: %v", err)
+	}
+}
+
+func TestCompileSelectedContractSourceIsolatesEffectiveConnectorPlans(t *testing.T) {
+	firstTool := selectedMockConnectorTool()
+	secondTool := selectedMockConnectorTool()
+	first, firstPlan, err := compileSelectedContractSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
+		"first.send": firstTool,
+	}}))
+	if err != nil {
+		t.Fatalf("compile first selected source: %v", err)
+	}
+	second, secondPlan, err := compileSelectedContractSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
+		"second.send": secondTool,
+	}}))
+	if err != nil {
+		t.Fatalf("compile second selected source: %v", err)
+	}
+	if _, ok := first.ToolEntries()["second.send"]; ok {
+		t.Fatal("first selected source contains second connector")
+	}
+	if _, ok := second.ToolEntries()["first.send"]; ok {
+		t.Fatal("second selected source contains first connector")
+	}
+	if _, err := firstPlan.Admit("second.send", secondTool); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("first selected plan admitted second connector: %v", err)
+	}
+	if _, err := secondPlan.Admit("first.send", firstTool); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("second selected plan admitted first connector: %v", err)
+	}
+}
+
+func assertLoadedSelectedConnectorResponse(t *testing.T, loaded LoadedSelectedContractSource) {
+	t.Helper()
+	tool, ok := loaded.Source.ToolEntries()["telegram.send_message"]
+	if !ok {
+		t.Fatal("loaded selected source is missing effective telegram.send_message")
+	}
+	if loaded.MockConnectorResponses == nil {
+		t.Fatal("loaded selected source is missing its generated response plan")
+	}
+	admitted, err := loaded.MockConnectorResponses.Admit("telegram.send_message", tool)
+	if err != nil {
+		t.Fatalf("Admit telegram.send_message: %v", err)
+	}
+	response, err := admitted.Materialize()
+	if err != nil {
+		t.Fatalf("Materialize telegram.send_message: %v", err)
+	}
+	if len(response) != 0 {
+		t.Fatalf("telegram generated response = %#v, want canonical empty object", response)
+	}
+	ambient, ok := providerconnectors.BuiltinTool("github", "github.create_issue")
+	if !ok {
+		t.Fatal("built-in github.create_issue fixture missing")
+	}
+	if _, err := loaded.MockConnectorResponses.Admit("github.create_issue", ambient); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("selected response plan admitted unimported github.create_issue: %v", err)
+	}
+}
+
+func selectedMockConnectorTool() runtimecontracts.ToolSchemaEntry {
+	return runtimecontracts.ToolSchemaEntry{
+		Category:        providerconnectors.Category,
+		HandlerType:     "http",
+		EffectClass:     string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+		Credentials:     []string{"provider_token"},
+		OutputSchema:    runtimecontracts.ToolInputSchema{Type: "object"},
+		ResponseSuccess: &runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"},
+		HTTP:            &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.invalid/send"},
 	}
 }
 

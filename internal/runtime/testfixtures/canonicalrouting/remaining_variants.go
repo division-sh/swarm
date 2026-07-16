@@ -593,6 +593,11 @@ pins:
 func CopyStandingTelegramMockServe(t testing.TB, telegramBaseURL string) string {
 	t.Helper()
 	root := CopyStandingTelegramMemoryServe(t, telegramBaseURL)
+	applyClosedReplacement(t, filepath.Join(root, "package.yaml"), "platform_version: \">=0.7.0 <0.8.0\"\n", `platform_version: ">=0.7.0 <0.8.0"
+connector_packs:
+  imports:
+    - {provider: telegram, tool: telegram.send_message}
+`)
 	writeClosedVariantFile(t, root, "flows/telegram-chat/nodes.yaml", `telegram-responder:
   id: telegram-responder
   execution_type: system_node
@@ -614,6 +619,7 @@ telegram-revision:
     telegram-chat.telegram_send_message.revision_requested: {}
 `)
 	files := map[string]string{
+		"flows/telegram-chat/tools.yaml": "{}\n",
 		"flows/telegram-chat/agents.yaml": `phrase-bot:
   id: phrase-bot-{instance_id}
   role: phrase_bot

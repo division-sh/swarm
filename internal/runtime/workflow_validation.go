@@ -23,7 +23,6 @@ type WorkflowContractValidationOptions struct {
 	Credentials                    runtimecredentials.Store
 	ManagedCredentials             runtimemanagedcredentials.Store
 	ExecutionMode                  executionmode.Mode
-	MockConnectorResponses         *providerconnectors.MockResponsePlan
 	CheckMCPReachable              bool
 	StrictEmitSchemas              bool
 	FatalToolImplementationWarning bool
@@ -45,6 +44,7 @@ type WorkflowContractValidationResult struct {
 	CapabilitySubjects               []packs.Subject
 	HarnessInjectedInputCount        int
 	ProductionValid                  bool
+	mockConnectorResponses           *providerconnectors.MockResponsePlan
 }
 
 func DefaultWorkflowContractValidationOptions(credentials runtimecredentials.Store) WorkflowContractValidationOptions {
@@ -78,6 +78,11 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	if err != nil {
 		return result, fmt.Errorf("provider connector pack import failed: %w", err)
 	}
+	mockConnectorResponses, err := providerconnectors.CompileMockResponsePlan(source)
+	if err != nil {
+		return result, fmt.Errorf("provider connector mock response compilation failed: %w", err)
+	}
+	result.mockConnectorResponses = mockConnectorResponses
 	source, err = SourceWithProviderTriggerEvents(source, opts.ProviderTriggerCatalog)
 	if err != nil {
 		return result, fmt.Errorf("provider trigger event import failed: %w", err)
@@ -87,7 +92,7 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 		Credentials:             opts.Credentials,
 		ManagedCredentials:      opts.ManagedCredentials,
 		ExecutionMode:           opts.ExecutionMode,
-		MockConnectorResponses:  opts.MockConnectorResponses,
+		MockConnectorResponses:  mockConnectorResponses,
 		CheckMCPReachable:       opts.CheckMCPReachable,
 		ValidateModelResolution: opts.ValidateLLMModelResolution,
 		LLMProfile:              opts.LLMProfile,

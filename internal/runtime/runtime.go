@@ -90,7 +90,6 @@ type RuntimeOptions struct {
 	ManagedCredentials               runtimemanagedcredentials.Store
 	ProviderCredentials              runtimecredentials.Store
 	ProviderTriggerCatalog           *providertriggers.CatalogSnapshot
-	MockConnectorResponses           *providerconnectors.MockResponsePlan
 	BootStartedAt                    time.Time
 	BootProgress                     func(BootProgressEvent)
 	SystemContainers                 []string
@@ -116,6 +115,7 @@ type validatedRuntimeDeps struct {
 	PromptResolver             runtimecontracts.PromptResolver
 	Credentials                runtimecredentials.Store
 	ManagedCredentials         runtimemanagedcredentials.Store
+	MockConnectorResponses     *providerconnectors.MockResponsePlan
 	ExecutionMode              runtimeeffects.ExecutionMode
 	ProviderCredentialResolver llm.ProviderCredentialResolver
 	Authority                  runtimeauthority.Provider
@@ -533,27 +533,25 @@ func runtimeThrottleSuppressPrefixes(source semanticview.Source) []string {
 	}
 }
 
-func ensureWorkflowBootWiring(opts RuntimeOptions, executionMode runtimeeffects.ExecutionMode) error {
+func ensureWorkflowBootWiring(opts RuntimeOptions, executionMode runtimeeffects.ExecutionMode) (*providerconnectors.MockResponsePlan, error) {
 	if opts.WorkflowModule == nil {
-		return fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
+		return nil, fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
 	}
 	source := opts.WorkflowModule.SemanticSource()
 	if opts.WorkspaceLifecycle != nil {
 		if err := opts.WorkspaceLifecycle.ValidateSource(context.Background(), source); err != nil {
-			return fmt.Errorf("workspace validation failed: %w", err)
+			return nil, fmt.Errorf("workspace validation failed: %w", err)
 		}
 	}
 	validationOpts := DefaultWorkflowContractValidationOptions(opts.Credentials)
 	validationOpts.ManagedCredentials = opts.ManagedCredentials
 	validationOpts.ProviderTriggerCatalog = opts.ProviderTriggerCatalog
 	validationOpts.ExecutionMode = executionMode
-	validationOpts.MockConnectorResponses = opts.MockConnectorResponses
 	result, err := ValidateWorkflowContractSurface(context.Background(), source, validationOpts)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_ = result
-	return nil
+	return result.mockConnectorResponses, nil
 }
 
 type connectorPackWorkflowModule struct {
@@ -645,7 +643,8 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 		opts.WorkflowModule = workflowModule
 		source = wrappedSource
 	}
-	if err := ensureWorkflowBootWiring(opts, executionMode); err != nil {
+	mockConnectorResponses, err := ensureWorkflowBootWiring(opts, executionMode)
+	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
 	if source == nil {
@@ -681,6 +680,7 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 		PromptResolver:             promptResolver,
 		Credentials:                credentials,
 		ManagedCredentials:         opts.ManagedCredentials,
+		MockConnectorResponses:     mockConnectorResponses,
 		ExecutionMode:              executionMode,
 		ProviderCredentialResolver: providerCredentialResolver,
 		Authority:                  authorityProvider,
@@ -848,7 +848,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			EventReceiptsCapability: boot.EventReceiptCapability,
 			Credentials:             rt.Credentials,
 			ManagedCredentials:      rt.ManagedCredentials,
-			MockConnectorResponses:  opts.MockConnectorResponses,
+			MockConnectorResponses:  boot.MockConnectorResponses,
 			ArtifactRoot:            artifactRoot,
 			BundleHash:              opts.BundleSourceFact.BundleHash,
 			DecisionCardCadence: decisioncard.CadencePolicy{
@@ -933,7 +933,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		Credentials:            rt.Credentials,
 		ManagedCredentials:     rt.ManagedCredentials,
 		ExecutionMode:          boot.ExecutionMode,
-		MockConnectorResponses: opts.MockConnectorResponses,
+		MockConnectorResponses: boot.MockConnectorResponses,
 	}
 	if missing, err := runtimebootverify.MissingStaticCredentialRequirements(ctx, source, credentialValidationOptions); err != nil {
 		return nil, fmt.Errorf("credential validation failed: %w", err)
