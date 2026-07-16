@@ -72,6 +72,9 @@ func TestTelegramSelectedTextMessageContractUsesShippedPack(t *testing.T) {
 	if !reflect.DeepEqual(normalized.Payload, wantPayload) {
 		t.Fatalf("normalized payload = %#v, want %#v", normalized.Payload, wantPayload)
 	}
+	if normalized.AuthorSummary != "hello" || normalized.AuthorSubjectType != "chat" || normalized.AuthorSubjectID != "-1001234567890" {
+		t.Fatalf("normalized author projection = summary:%q subject:%q/%q", normalized.AuthorSummary, normalized.AuthorSubjectType, normalized.AuthorSubjectID)
+	}
 	if err := catalog.VerifyProviderOutputAuthorization(normalized.Authorization); err != nil {
 		t.Fatalf("VerifyProviderOutputAuthorization: %v", err)
 	}
@@ -98,6 +101,9 @@ func TestTelegramSelectedCallbackActionContractUsesShippedPack(t *testing.T) {
 	}
 	if !reflect.DeepEqual(delivery.Events[1].Payload, want) {
 		t.Fatalf("callback payload = %#v, want %#v", delivery.Events[1].Payload, want)
+	}
+	if delivery.Events[1].AuthorSummary != "" || delivery.Events[1].AuthorSubjectType != "chat" || delivery.Events[1].AuthorSubjectID != "67890" {
+		t.Fatalf("callback author projection = summary:%q subject:%q/%q", delivery.Events[1].AuthorSummary, delivery.Events[1].AuthorSubjectType, delivery.Events[1].AuthorSubjectID)
 	}
 }
 

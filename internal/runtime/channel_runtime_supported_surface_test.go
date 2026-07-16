@@ -43,7 +43,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 	const bundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	for _, selected := range []string{"postgres", "sqlite"} {
 		t.Run(selected, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := testAuthorActivityContext(context.Background())
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			flowInstance := "channel-runtime-" + selected
