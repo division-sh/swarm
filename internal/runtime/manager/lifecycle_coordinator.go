@@ -62,6 +62,10 @@ type agentRouteBus interface {
 	RemoveAgentRoute(runtimeeffects.LifecycleToken)
 }
 
+type agentRouteDeliveryCompleter interface {
+	CompleteAgentRouteDelivery(runtimeeffects.LifecycleToken)
+}
+
 type agentExecutionSnapshot struct {
 	Agent         Agent
 	Config        models.AgentConfig

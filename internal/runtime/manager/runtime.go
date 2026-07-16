@@ -1600,50 +1600,53 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 						if !ok {
 							return
 						}
-						if am.shutdownAdmissionClosed() {
-							return
-						}
-						evtCtx := runtimecorrelation.WithInboundEvent(loopCtx, evt)
-						evtCtx = runtimecorrelation.WithRunID(evtCtx, strings.TrimSpace(evt.RunID()))
-						err, evtPanicked, evtPanicText, evtStackTrace := am.safeProcessEvent(evtCtx, agent, evt)
-						if evtPanicked {
-							panicCount := am.incrementPoisonPanicCount(agent.ID(), evt.ID())
-							panicFailure := runtimefailures.FromError(runtimefailures.New(runtimefailures.ClassInternalFailure, "agent_event_panic", "agent-manager", "process_event", map[string]any{
-								"agent_id": agent.ID(), "event_id": evt.ID(), "event_type": evt.Type(),
-							}), "agent-manager", "process_event")
-							am.writeReceipt(evtCtx, evt.ID(), agent.ID(), ReceiptStatusError, &panicFailure.Failure)
-							if am.bus != nil {
-								am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
-									Level:     "error",
-									Component: "agent-manager",
-									Action:    "agent_event_panic",
-									EventID:   strings.TrimSpace(evt.ID()),
-									EventType: strings.TrimSpace(string(evt.Type())),
-									AgentID:   agent.ID(),
-									EntityID:  strings.TrimSpace(evt.EntityID()),
-									Detail: map[string]any{
-										"stack_trace": evtStackTrace,
-									},
-									Failure: &panicFailure.Failure,
-								})
+						stop := func() bool {
+							if completer, ok := am.bus.(agentRouteDeliveryCompleter); ok {
+								defer completer.CompleteAgentRouteDelivery(token)
 							}
-							if panicCount >= poisonPanicQuarantineAt {
-								am.quarantinePoisonEvent(evtCtx, agent.ID(), evt, panicCount, panicFailure.Failure)
-								am.clearPoisonPanicCount(agent.ID(), evt.ID())
-								consecutivePanics = 0
-								continue
+							if am.shutdownAdmissionClosed() {
+								return true
 							}
-							panicked = true
-							panicCtx = evtCtx
-							panicText = evtPanicText
-							stackTrace = evtStackTrace
-							lastEventType = strings.TrimSpace(string(evt.Type()))
-							return
-						}
-						am.clearPoisonPanicCount(agent.ID(), evt.ID())
-						consecutivePanics = 0
-						if err != nil {
-							if am.bus != nil {
+							evtCtx := runtimecorrelation.WithInboundEvent(loopCtx, evt)
+							evtCtx = runtimecorrelation.WithRunID(evtCtx, strings.TrimSpace(evt.RunID()))
+							err, evtPanicked, evtPanicText, evtStackTrace := am.safeProcessEvent(evtCtx, agent, evt)
+							if evtPanicked {
+								panicCount := am.incrementPoisonPanicCount(agent.ID(), evt.ID())
+								panicFailure := runtimefailures.FromError(runtimefailures.New(runtimefailures.ClassInternalFailure, "agent_event_panic", "agent-manager", "process_event", map[string]any{
+									"agent_id": agent.ID(), "event_id": evt.ID(), "event_type": evt.Type(),
+								}), "agent-manager", "process_event")
+								am.writeReceipt(evtCtx, evt.ID(), agent.ID(), ReceiptStatusError, &panicFailure.Failure)
+								if am.bus != nil {
+									am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
+										Level:     "error",
+										Component: "agent-manager",
+										Action:    "agent_event_panic",
+										EventID:   strings.TrimSpace(evt.ID()),
+										EventType: strings.TrimSpace(string(evt.Type())),
+										AgentID:   agent.ID(),
+										EntityID:  strings.TrimSpace(evt.EntityID()),
+										Detail: map[string]any{
+											"stack_trace": evtStackTrace,
+										},
+										Failure: &panicFailure.Failure,
+									})
+								}
+								if panicCount >= poisonPanicQuarantineAt {
+									am.quarantinePoisonEvent(evtCtx, agent.ID(), evt, panicCount, panicFailure.Failure)
+									am.clearPoisonPanicCount(agent.ID(), evt.ID())
+									consecutivePanics = 0
+									return false
+								}
+								panicked = true
+								panicCtx = evtCtx
+								panicText = evtPanicText
+								stackTrace = evtStackTrace
+								lastEventType = strings.TrimSpace(string(evt.Type()))
+								return true
+							}
+							am.clearPoisonPanicCount(agent.ID(), evt.ID())
+							consecutivePanics = 0
+							if err != nil && am.bus != nil {
 								am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
 									Level:     "error",
 									Component: "agent-manager",
@@ -1655,6 +1658,10 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 									Failure:   failureEnvelope(err, "agent-manager", "process_agent_event"),
 								})
 							}
+							return false
+						}()
+						if stop {
+							return
 						}
 					}
 				}

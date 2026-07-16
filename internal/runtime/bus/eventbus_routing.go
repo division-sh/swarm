@@ -69,6 +69,15 @@ func (r *agentRouteHandle) send(ctx context.Context, evt events.Event) agentRout
 	}
 }
 
+func (r *agentRouteHandle) lifecycleToken() runtimeeffects.LifecycleToken {
+	if r == nil {
+		return runtimeeffects.LifecycleToken{}
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.token
+}
+
 func (eb *EventBus) activeAgentDescriptors(ctx context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
 	ephemeral := eb.runtimeActiveAgentDescriptors()
 	lister, ok := eb.store.(ActiveAgentDescriptorLister)
@@ -360,7 +369,13 @@ func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt eve
 			if err != nil {
 				return err
 			}
-			switch recipient.send(ctx, deliverEvent) {
+			token := recipient.route.lifecycleToken()
+			tracked := eb.beginAgentRouteDelivery(token)
+			sendResult := recipient.send(ctx, deliverEvent)
+			if tracked && sendResult != agentRouteSendDelivered {
+				eb.CompleteAgentRouteDelivery(token)
+			}
+			switch sendResult {
 			case agentRouteSendDelivered:
 				delivered = append(delivered, recipient.agentID)
 			case agentRouteSendInactive:
@@ -403,6 +418,51 @@ func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt eve
 		return eb.logAuthoritativeDeliveryIncomplete(ctx, evt, expected, delivered, missing, timedOut, nil)
 	}
 	return nil
+}
+
+func (eb *EventBus) beginAgentRouteDelivery(token runtimeeffects.LifecycleToken) bool {
+	if eb == nil || !token.Valid() {
+		return false
+	}
+	eb.agentRouteDeliveryMu.Lock()
+	if eb.agentRouteDeliveries == nil {
+		eb.agentRouteDeliveries = make(map[runtimeeffects.LifecycleToken]int)
+	}
+	eb.agentRouteDeliveries[token]++
+	eb.agentRouteDeliveryMu.Unlock()
+	return true
+}
+
+// CompleteAgentRouteDelivery closes the exact enqueue-to-processing interval
+// for a generation-owned agent route. It remains keyed by lifecycle token so
+// successor installation cannot acknowledge predecessor work.
+func (eb *EventBus) CompleteAgentRouteDelivery(token runtimeeffects.LifecycleToken) {
+	if eb == nil || !token.Valid() {
+		return
+	}
+	eb.agentRouteDeliveryMu.Lock()
+	if count := eb.agentRouteDeliveries[token]; count <= 1 {
+		delete(eb.agentRouteDeliveries, token)
+	} else {
+		eb.agentRouteDeliveries[token] = count - 1
+	}
+	eb.agentRouteDeliveryMu.Unlock()
+}
+
+// PendingAgentRouteDeliveries includes deliveries already dequeued by an agent
+// loop but not yet settled, which channel length and manager in-flight state
+// cannot observe atomically.
+func (eb *EventBus) PendingAgentRouteDeliveries() int {
+	if eb == nil {
+		return 0
+	}
+	eb.agentRouteDeliveryMu.Lock()
+	defer eb.agentRouteDeliveryMu.Unlock()
+	pending := 0
+	for _, count := range eb.agentRouteDeliveries {
+		pending += count
+	}
+	return pending
 }
 
 func deliveryRoutesBySubscriber(deliveryRoutes []events.DeliveryRoute) map[deliveryRouteTargetKey][]events.DeliveryRoute {
