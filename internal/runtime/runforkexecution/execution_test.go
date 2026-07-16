@@ -1083,7 +1083,7 @@ func TestExecuteSelectedContractRunForkClaudeOAuthPersistsStartupAndTurnCapabili
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-host-token")
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := runForkTestContext()
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
@@ -1293,7 +1293,7 @@ func assertSelectedForkClaudeCapabilityEvidence(t testing.TB, ctx context.Contex
 
 func TestSelectedContractForkManagedPreflightExecutesEligibleMCPToolCall(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := runForkTestContext()
 	container := buildSelectedForkProofContainer(t, ctx, db)
 
 	manager := runtimemanager.NewAgentManager(nil, nil)
@@ -1476,7 +1476,7 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 
 func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostileAdmission(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := runForkTestContext()
 	container := buildSelectedForkProofContainer(t, ctx, db)
 	proof := container.Proof()
 	var requests atomic.Int32
@@ -1624,7 +1624,7 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 
 func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCleanup(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := runForkTestContext()
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
