@@ -40,8 +40,6 @@ type Source interface {
 	FlowInputEventPin(flowID, pinName string) (runtimecontracts.FlowInputEventPin, bool)
 	FlowOutputEventPin(flowID, pinName string) (runtimecontracts.FlowOutputEventPin, bool)
 	CompositionConnects() []runtimecontracts.FlowPackageConnect
-	CompositionConnectsTo(flowID, pinName string) []runtimecontracts.FlowPackageConnect
-	CompositionConnectsFrom(flowID, pinName string) []runtimecontracts.FlowPackageConnect
 	FlowWritePins(flowID string) []string
 	WritePinOwners(pin string) []string
 	FlowHasInputEvent(flowID, eventType string) bool

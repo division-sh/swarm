@@ -2150,7 +2150,7 @@ node-a:
 	}
 }
 
-func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionDoesNotBackPropagateToRoot(t *testing.T) {
+func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRepositoryRootHandler(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -2240,8 +2240,8 @@ func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionDoesNotBackPropa
 	if err != nil {
 		t.Fatalf("executeNodeHandlerPlanResult: %v", err)
 	}
-	if !handled {
-		t.Fatal("expected handler to execute")
+	if handled {
+		t.Fatal("nested package-root connect must not authorize the repository-root handler")
 	}
 	child, found, err := store.Load(testWorkflowStoreRunContext(t, store), childEntityID)
 	if err != nil {

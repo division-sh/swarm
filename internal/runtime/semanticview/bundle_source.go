@@ -294,12 +294,6 @@ func (s bundleSource) FlowOutputEventPin(flowID, pinName string) (runtimecontrac
 func (s bundleSource) CompositionConnects() []runtimecontracts.FlowPackageConnect {
 	return s.bundle.CompositionConnects()
 }
-func (s bundleSource) CompositionConnectsTo(flowID, pinName string) []runtimecontracts.FlowPackageConnect {
-	return s.bundle.CompositionConnectsTo(flowID, pinName)
-}
-func (s bundleSource) CompositionConnectsFrom(flowID, pinName string) []runtimecontracts.FlowPackageConnect {
-	return s.bundle.CompositionConnectsFrom(flowID, pinName)
-}
 func (s bundleSource) FlowWritePins(flowID string) []string { return s.bundle.FlowWritePins(flowID) }
 func (s bundleSource) WritePinOwners(pin string) []string   { return s.bundle.WritePinOwners(pin) }
 func (s bundleSource) FlowHasInputEvent(flowID, eventType string) bool {

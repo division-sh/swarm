@@ -12,6 +12,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -258,22 +259,17 @@ func workflowNodeConnectedInputEventHandlerResolution(source semanticview.Source
 		return workflowNodeEventHandlerResolution{}
 	}
 	flowID := strings.TrimSpace(contractSource.FlowID)
+	plans, _ := runtimepinrouting.LowerCompositionConnectRoutePlans(source)
 	for _, inputPin := range source.FlowInputEventPins(flowID) {
 		resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeID, inputPin.EventType())
 		if !resolved.Matched {
 			continue
 		}
-		for _, connect := range source.CompositionConnectsTo(flowID, inputPin.PinName()) {
-			from, err := connect.FromRef()
-			if err != nil {
+		for _, plan := range plans {
+			if strings.TrimSpace(plan.Receiver.FlowID) != flowID || strings.TrimSpace(plan.Receiver.Pin) != strings.TrimSpace(inputPin.PinName()) {
 				continue
 			}
-			outputPin, ok := source.FlowOutputEventPin(from.FlowID, from.Pin)
-			if !ok {
-				continue
-			}
-			producerEvent := eventidentity.Normalize(source.ResolveFlowEventReference(from.FlowID, outputPin.EventType()))
-			if producerEvent == eventidentity.Normalize(rawEventType) {
+			if eventidentity.Normalize(plan.Source.ResolvedEvent) == eventidentity.Normalize(rawEventType) {
 				return resolved
 			}
 		}

@@ -60,11 +60,11 @@ func TestCompositionConnectFactsExposeTypedPinsAndParentConnect(t *testing.T) {
 	if got, want := connects[0].To, "consumer.work_ready"; got != want {
 		t.Fatalf("connect to = %q, want %q", got, want)
 	}
-	if got, want := source.CompositionConnectsFrom("producer", "work_ready"), connects; len(got) != len(want) || got[0].From != want[0].From {
-		t.Fatalf("CompositionConnectsFrom = %#v, want %#v", got, want)
+	if got := ResolvedCompositionConnectsFrom(source, "producer", "work_ready"); len(got) != 1 || got[0].Connect.From != connects[0].From {
+		t.Fatalf("ResolvedCompositionConnectsFrom = %#v, want %#v", got, connects)
 	}
-	if got, want := source.CompositionConnectsTo("consumer", "work_ready"), connects; len(got) != len(want) || got[0].To != want[0].To {
-		t.Fatalf("CompositionConnectsTo = %#v, want %#v", got, want)
+	if got := ResolvedCompositionConnectsTo(source, "consumer", "work_ready"); len(got) != 1 || got[0].Connect.To != connects[0].To {
+		t.Fatalf("ResolvedCompositionConnectsTo = %#v, want %#v", got, connects)
 	}
 }
 
@@ -100,8 +100,8 @@ func TestCompositionConnectFactsExposeRootProducerEndpoint(t *testing.T) {
 	if !from.Root || from.FlowID != "" || from.Pin != "root_ready" {
 		t.Fatalf("FromRef = %#v, want root root_ready", from)
 	}
-	if got, want := source.CompositionConnectsFrom("", "root_ready"), connects; len(got) != len(want) || got[0].From != want[0].From {
-		t.Fatalf("CompositionConnectsFrom root = %#v, want %#v", got, want)
+	if got := ResolvedCompositionConnectsFrom(source, "", "root_ready"); len(got) != 1 || got[0].Connect.From != connects[0].From {
+		t.Fatalf("ResolvedCompositionConnectsFrom root = %#v, want %#v", got, connects)
 	}
 }
 

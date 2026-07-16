@@ -334,6 +334,20 @@ func TestWorkflowNodeHandlerResolution_ConnectConsumesImportBindings(t *testing.
 	}
 }
 
+func TestWorkflowNodeConnectedInputEventHandlerResolution_ConsumesLoweredPackageRootConnect(t *testing.T) {
+	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
+	producerEvent := source.ResolveFlowEventReference("grandchild", "micro.done")
+	receiverEvent := source.ResolveFlowEventReference("child", "micro.done")
+	if producerEvent == receiverEvent {
+		t.Fatalf("producer event %q must differ from receiver event %q for this proof", producerEvent, receiverEvent)
+	}
+
+	resolved := workflowNodeConnectedInputEventHandlerResolution(source, "child-relay", producerEvent)
+	if !resolved.Matched || resolved.HandlerEventKey != "micro.done" {
+		t.Fatalf("package-root connect handler resolution = %#v, want child-relay micro.done", resolved)
+	}
+}
+
 func TestWorkflowNodeHandlerResolution_LocalizesProducerScopedEventThroughTargetRoute(t *testing.T) {
 	accountCase := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "account_case", Flow: "account_case"},
