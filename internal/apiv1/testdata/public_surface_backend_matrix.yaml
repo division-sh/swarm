@@ -603,8 +603,8 @@ rows:
     cli_commands: [serve]
     store_owners:
       - internal/store/backendselection
-      - cmd/swarm buildStores
-      - cmd/swarm runServeRuntime
+      - internal/serveapp buildStores
+      - internal/serveapp runServeRuntime
     proof_dimensions: [backend_selection, selected_store, real_runtime_startup]
     proof_refs:
       - kind: go_test
@@ -626,8 +626,8 @@ rows:
     cli_commands: [serve]
     store_owners:
       - internal/store/backendselection
-      - cmd/swarm buildStores
-      - cmd/swarm runServeRuntime
+      - internal/serveapp buildStores
+      - internal/serveapp runServeRuntime
     proof_dimensions: [backend_selection, selected_store, real_runtime_startup]
     proof_refs:
       - kind: go_test
@@ -642,7 +642,7 @@ rows:
     api_methods: [health.check, run.start, run.get]
     openrpc_matrix_methods: [health.check, run.start, run.get]
     store_owners:
-      - cmd/swarm run start command local serve owner
+      - internal/cliapp run start command local serve owner
       - internal/store/backendselection
       - /v1/rpc health.check
       - /v1/rpc run.start
@@ -667,7 +667,7 @@ rows:
     api_methods: [health.check, run.start, run.get]
     openrpc_matrix_methods: [health.check, run.start, run.get]
     store_owners:
-      - cmd/swarm run start command local serve owner
+      - internal/cliapp run start command local serve owner
       - internal/store/backendselection
       - /v1/rpc health.check
       - /v1/rpc run.start
@@ -711,7 +711,7 @@ rows:
     api_methods: [entity.list, entity.get, entity.aggregate]
     openrpc_matrix_methods: [entity.list, entity.get, entity.aggregate]
     store_owners:
-      - cmd/swarm entity CLI commands
+      - internal/cliapp entity CLI commands
       - apiv1.EntityReadStore
       - schema_storage.entity_state
     proof_dimensions: [selected_store, real_v1_handler, cli_v1_path, canonical_store_owner, openrpc_publication]
@@ -816,7 +816,7 @@ rows:
     api_methods: [event.publish]
     openrpc_matrix_methods: [event.publish]
     store_owners:
-      - cmd/swarm event publish CLI
+      - internal/cliapp event publish CLI
       - /v1/rpc event.publish
     proof_dimensions: [selected_store, real_v1_handler, cli_v1_path, openrpc_publication]
     proof_refs:
@@ -841,7 +841,7 @@ rows:
     api_methods: [event.publish]
     openrpc_matrix_methods: [event.publish]
     store_owners:
-      - cmd/swarm event publish CLI
+      - internal/cliapp event publish CLI
       - /v1/rpc event.publish
       - apiv1.RunBundleContextStore
       - runtimebus.EventStore
@@ -880,7 +880,7 @@ rows:
     api_methods: [event.publish]
     openrpc_matrix_methods: [event.publish]
     store_owners:
-      - cmd/swarm event publish CLI
+      - internal/cliapp event publish CLI
       - /v1/rpc event.publish
       - runtimebus.EventStore
       - event.target canonical route identity
@@ -990,7 +990,7 @@ rows:
     api_methods: [mailbox.list, mailbox.get]
     openrpc_matrix_methods: [mailbox.list, mailbox.get]
     store_owners:
-      - cmd/swarm mailbox CLI commands
+      - internal/cliapp mailbox CLI commands
       - apiv1.MailboxAPIStore
     proof_dimensions: [selected_store, real_v1_handler, cli_v1_path, openrpc_publication]
     proof_refs:

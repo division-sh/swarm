@@ -360,7 +360,7 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	assertScalarValue(t, mustMappingValue(t, serveIngest, "status"), "implemented_for_local_postgres_serve_contracts")
 	assertScalarValue(t, mustMappingValue(t, serveIngest, "projection_owner"), "internal/runtime/contracts.BuildBundleCatalogProjection")
 	assertScalarValue(t, mustMappingValue(t, serveIngest, "store_owner"), "internal/store.PostgresStore.UpsertBundleCatalog")
-	assertScalarValue(t, mustMappingValue(t, serveIngest, "source_fact_owner"), "cmd/swarm.prepareServeBundleSource")
+	assertScalarValue(t, mustMappingValue(t, serveIngest, "source_fact_owner"), "internal/serveapp.prepareServeBundleSource")
 	assertScalarContains(t, mustMappingValue(t, serveIngest, "content_yaml"), "canonical content bytes as base64")
 	assertScalarContains(t, mustMappingValue(t, serveIngest, "data_blob"), "raw bytes as base64")
 	assertScalarContains(t, mustMappingValue(t, serveIngest, "parsed_json"), "Runtime-owned fields")

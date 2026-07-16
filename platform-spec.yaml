@@ -4659,12 +4659,12 @@ engine:
       is present. DB-loaded `--bundle-hash` boot remains Postgres-only until a separate bundle-catalog portability owner
       promotes SQLite support.
     required_consumers:
-    - cmd/swarm defaultServeOptions
-    - cmd/swarm swarm serve --store
-    - cmd/swarm runServeRuntime and buildStoresForServe
-    - cmd/swarm buildStores
-    - cmd/swarm startLocalRunServe through inherited serve options
-    - cmd/swarm runForkRuntimeOwnerHarness
+    - internal/cliapp DefaultServeOptions
+    - swarm serve --store command surface
+    - internal/serveapp runServeRuntime and buildStoresForServe
+    - internal/serveapp buildStores
+    - internal/cliapp startLocalRunServe through inherited serve options
+    - internal/serveapp runForkRuntimeOwnerHarness test owner
     - runtime config loading for store.backend and store.sqlite.path
     split_boundaries:
     - "SQLite dialect/schema/bootstrap is promoted by #1085."
@@ -4748,13 +4748,13 @@ engine:
           SQLite construction remains local/dev support only; it does not promote production multi-writer SQLite semantics.
     selected_contracts:
     - name: runtime_store_bundle_construction
-      owner: cmd/swarm buildStores plus storeBundle.runtimeStores consuming typed runtime store interfaces
+      owner: internal/serveapp buildStores plus storeBundle.runtimeStores consuming typed runtime store interfaces
       consumers:
       - swarm serve explicit --store sqlite
       - local foreground run startup through buildStores
       - runtime.NewRuntime store dependency graph
     - name: selected_runtime_store_facade
-      owner: cmd/swarm storeBundle selectedRuntimeStoreFacade
+      owner: internal/serveapp storeBundle selectedRuntimeStoreFacade
       promoted_by: '#1395'
       model_defined_by: '#1404'
       producer_facing_model_name: selected_runtime_store_capability_model
@@ -4771,7 +4771,7 @@ engine:
         construction has completed.
       capability_groups:
       - name: construction_only_backend_owner
-        owner: internal/store/backendselection plus cmd/swarm buildStores and backend-specific store constructors
+        owner: internal/store/backendselection plus internal/serveapp buildStores and backend-specific store constructors
         allowed_consumers:
         - backend selector/config parsing
         - schema/bootstrap construction
@@ -4827,7 +4827,7 @@ engine:
         - runtime contexts
         rule: Optional or not-yet-promoted feature families are represented as absent typed capabilities or explicit fail-closed diagnostics, not as producer-side backend checks. Mixed read/lifecycle roles must be segregated; conversation.fork_list and conversation.fork_view consume the read-only fork capability, while conversation.fork, conversation.fork_chat, and conversation.fork_delete consume the lifecycle capability. Both capabilities are selected for Postgres and local/dev SQLite through one shared fork semantic owner with backend-local transaction adapters.
       - name: workspace_and_process_db_capabilities
-        owner: cmd/swarm workspace lifecycle and process health construction
+        owner: internal/cliapp workspace lifecycle and internal/serveapp process health construction
         capabilities:
         - workspace lifecycle SQL handle
         - process DB close
@@ -4864,9 +4864,9 @@ engine:
       dependency_classifications:
       - dependency: internal/store/backendselection and selector parsing
         classification: legitimate backend-selection/construction boundary
-      - dependency: cmd/swarm buildStores concrete backend switch
+      - dependency: internal/serveapp buildStores concrete backend switch
         classification: legitimate backend-selection/construction boundary
-      - dependency: cmd/swarm storeBundle concrete/raw fields
+      - dependency: internal/serveapp storeBundle concrete/raw fields
         classification: construction payload only; producer-facing use is invalid and must migrate under #1401/#1402
       - dependency: selectedRuntimeStoreFacade methods
         classification: canonical selected capability composer
@@ -5052,7 +5052,7 @@ engine:
       excludes:
       - delivery release/abandon and replay behavior owned by #1087
     - name: serve_active_run_abandon_quiescence_rows
-      owner: runtimerunquiescence.ServeAbandonStore consumed by cmd/swarm serve --abandon-active-runs and --dev
+      owner: runtimerunquiescence.ServeAbandonStore consumed by internal/serveapp for swarm serve --abandon-active-runs and --dev
       promoted_by: '#1251'
       sqlite_owner: internal/store.SQLiteRuntimeStore.ApplyServeAbandonActiveRunQuiescence
       postgres_owner: internal/store.PostgresStore.ApplyServeAbandonActiveRunQuiescence
@@ -5060,7 +5060,7 @@ engine:
         The selected runtime store owns serve-startup active-run abandon quiescence for its backend. Both SQLite local/dev
         and Postgres production/external backends apply the same `server_restart_abandon` semantics over active runs,
         same-run recoverable agent/node deliveries, agent/node event receipts, and platform pipeline receipts before
-        runtime startup can reclaim work. `cmd/swarm serve` consumes this typed selected-store owner and must not infer
+        runtime startup can reclaim work. `swarm serve` consumes this typed selected-store owner and must not infer
         support from raw Postgres handles or skip the operation on SQLite.
       excludes:
       - destructive reset/runtime.nuke container and row-deletion semantics
@@ -8027,7 +8027,7 @@ tool_model:
     - broad provider-catalog expansion outside explicitly selected provider children
     - DB connectors, AWS SigV4/AssumeRole, non-HTTP, or native connector auth
     existing_gateway_owner: >
-      `cmd/swarm.runtimeProcessInboundHandler` owns the supported `/webhooks/{alias}/{provider}` route and resolves alias plus
+      `internal/serveapp.runtimeProcessInboundHandler` owns the supported `/webhooks/{alias}/{provider}` route and resolves alias plus
       provider through the loaded `RuntimeContextManager` standing-target registry. `internal/runtime/inbound.go` remains the
       generic HTTP ingress executor only after that exact target and its immutable InboundAdmissionPlan are resolved. It
       consumes `runtime_ingress.queueable_ingress.inbound.webhook`, executes only that plan, persists the inbound dedupe
@@ -9247,7 +9247,7 @@ flow_model:
         status: merge_bearing_supported_tooling
         implementation_tracker: '#1551'
         command: swarm describe
-        canonical_code_owner: internal/runtime/authoringview.Build + cmd/swarm describe
+        canonical_code_owner: internal/runtime/authoringview.Build + internal/cliapp describe
         rule: >
           The supported expanded authoring view is a projection over existing
           semantic owners. It must expose inferred primary entity, template
@@ -13736,7 +13736,7 @@ multi_bundle_persistence:
       status: implemented_for_local_postgres_serve_contracts
       projection_owner: internal/runtime/contracts.BuildBundleCatalogProjection
       store_owner: internal/store.PostgresStore.UpsertBundleCatalog
-      source_fact_owner: cmd/swarm.prepareServeBundleSource
+      source_fact_owner: internal/serveapp.prepareServeBundleSource
       runtime_context_owner: internal/runtime/correlation.BundleSourceFact
       applies_to:
         persisted: '`swarm serve --contracts` computes BundleHash, writes or reuses one bundles row, and stamps every new run row with bundle_hash plus bundle_source=persisted.'
@@ -13774,11 +13774,11 @@ multi_bundle_persistence:
       cli_flag: 'swarm serve --bundle-hash <bundle-v1:sha256:<64 lowercase hex>> [--bundle-hash <bundle-v1:sha256:<64 lowercase hex>> ...]'
       canonical_store_owner: internal/store.PostgresStore.LoadBundleCatalogRuntimeRecord
       runtime_source_owner: internal/runtime/contracts.LoadBundleCatalogRuntimeSource
-      serve_boot_owner: cmd/swarm.loadServeRuntimeBundleFromCatalog
-      source_fact_owner: cmd/swarm.prepareLoadedServeBundleSource
+      serve_boot_owner: internal/serveapp.loadServeRuntimeBundleFromCatalog
+      source_fact_owner: internal/serveapp.prepareLoadedServeBundleSource
       runtime_context_manager_owner: internal/runtime.RuntimeContextManager
       bundle_context_owner: internal/runtime.BundleContext
-      source_replacement_guard: cmd/swarm.runtimeProjectSupervisor.DisableSourceReplacement
+      source_replacement_guard: internal/serveapp.runtimeProjectSupervisor.DisableSourceReplacement
       supported_surface:
         - One or more canonical bundle_hash values may be pinned at process boot by repeating --bundle-hash. Values must be canonical, non-empty, duplicate-free, and mutually exclusive with --contracts and --dev.
         - The mode is Postgres-only and all-or-nothing before API readiness. SQLite, no-store, missing store, missing bundle row, malformed archive, missing bytes, hash mismatch, duplicate hash, and noncanonical hash fail closed before any runtime context is served.
@@ -14146,7 +14146,7 @@ multi_bundle_persistence:
       runtime_owners:
         - internal/runtime/contracts.BuildBundleCatalogProjection
         - internal/store.PostgresStore.UpsertBundleCatalog
-        - cmd/swarm.prepareServeBundleSource
+        - internal/serveapp.prepareServeBundleSource
         - internal/runtime/correlation.BundleSourceFact
       reason: serve --contracts / --dev ingest, canonical hashing, bundle row writes, and persisted/ephemeral run stamping are runtime boot implementation.
     startup_recovery_unavailable_bundle:
@@ -14169,9 +14169,9 @@ multi_bundle_persistence:
       runtime_owners:
         - internal/store.PostgresStore.LoadBundleCatalogRuntimeRecord
         - internal/runtime/contracts.LoadBundleCatalogRuntimeSource
-        - cmd/swarm.loadServeRuntimeBundleFromCatalog
-        - cmd/swarm.prepareLoadedServeBundleSource
-        - cmd/swarm.runtimeProjectSupervisor.DisableSourceReplacement
+        - internal/serveapp.loadServeRuntimeBundleFromCatalog
+        - internal/serveapp.prepareLoadedServeBundleSource
+        - internal/serveapp.runtimeProjectSupervisor.DisableSourceReplacement
         - internal/runtime.RuntimeContextManager
         - internal/runtime.BundleContext
       reason: >
@@ -15904,7 +15904,7 @@ workspace_model:
     promoted_by: '#1566'
     implementation_status: implemented_first_slice
     canonical_owner: platform-spec.yaml#workspace_model.local_workspace_image_build_authority
-    implementation_owner: cmd/swarm workspace build command plus embedded workspace Dockerfile materializer
+    implementation_owner: internal/cliapp workspace build command plus embedded workspace Dockerfile materializer
     scope: >
       Merge-bearing local setup authority for building and validating the Docker workspace image needed by local
       `claude_cli` proof flows. This owner is an explicit operator setup surface. It is separate from runtime startup:
@@ -15994,7 +15994,7 @@ workspace_model:
     - Docker workspace manager SharedDataSource mount consumer
     - Host workspace manager SharedDataSource mount consumer
     retired_non_authoritative_sources:
-    - repoRoot/data derivation in cmd/swarm configuredWorkspaceLifecycle
+    - repoRoot/data derivation in internal/cliapp configuredWorkspaceLifecycle
     - lower-level Docker default ownership of SWARM_WORKSPACE_DATA_SOURCE
     - parent-process SWARM_WORKSPACE_DATA_SOURCE
     - parent-process SWARM_WORKSPACE_VOLUMES_FROM
@@ -17784,7 +17784,7 @@ cli_specification:
       - incident aggregation horizons
       - API-only usage windows
     command_router:
-      canonical_owner: cmd/swarm Cobra command tree
+      canonical_owner: internal/cliapp Cobra command tree
       implementation_framework: github.com/spf13/cobra
       rule: 'Cobra is the only semantic command router. Bare os.Args routing or parallel flag dispatch for operator commands is not authoritative.'
     installed_binary_portability:
@@ -17918,7 +17918,7 @@ cli_specification:
         sandbox runtime construction as implicit semantic policy. RuntimeContextManager API routing remains
         adjacent and does not prove MCP/tool-gateway/forkchat routing is context-aware.
       consumers:
-      - '`cmd/swarm` serve listener binding'
+      - internal/serveapp serve listener binding
       - 'local foreground `swarm run start` through the serve startup owner'
       - 'runtime `RuntimeOptions.ToolGatewayBinding`'
       - runtime MCP gateway auth
@@ -17976,7 +17976,7 @@ cli_specification:
       promoted_by: '#1565'
       implementation_status: implemented
       canonical_owner: platform-spec.yaml#cli_specification.foundations.local_claude_cli_preflight_admission
-      implementation_owner: cmd/swarm local claude_cli preflight/admission owner
+      implementation_owner: internal/cliapp local claude_cli preflight/admission owner
       scope: >
         Merge-bearing authority for local `claude_cli` prerequisite diagnostics and admission. The owner materializes typed
         prerequisite findings for the selected backend and local runtime path, reports them through `swarm doctor`, and feeds
@@ -18028,7 +18028,7 @@ cli_specification:
     output_contract:
       promoted_by: '#848'
       canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract
-      future_runtime_owner: cmd/swarm shared output-mode/color policy renderer
+      future_runtime_owner: internal/cliapp shared output-mode/color policy renderer
       scope: >
         Merge-bearing CLI v2 authority for successful command output mode selection, shared rendering, and
         user-facing diagnostic conventions. This contract covers default text, `--json`, streaming NDJSON,
@@ -18052,7 +18052,7 @@ cli_specification:
       color_control:
         promoted_by: '#931'
         implementation_status: implemented for current shared-renderer first-slice consumers only
-        canonical_owner: cmd/swarm shared output-mode/color policy renderer
+        canonical_owner: internal/cliapp shared output-mode/color policy renderer
         accepted_sources:
           flag: --no-color
           environment: NO_COLOR
@@ -18480,12 +18480,12 @@ cli_specification:
             declares the load-bearing value itself as serialized JSON.
       shared_renderer_contract:
         owner_rule: >
-          Future CLI implementation MUST introduce or consume one shared `cmd/swarm` output-mode renderer owner for
+          Future CLI implementation MUST introduce or consume one shared `internal/cliapp` output-mode renderer owner for
           mode parsing, stdout/stderr policy, JSON/NDJSON encoding, quiet rendering, and exception enforcement.
           Command-local writers may provide command-specific facts and text renderers, but they MUST NOT each
           reinterpret output-mode semantics independently.
         display_renderer_rule: >
-          Successful human table/list/repeated-row/detail-display output MUST consume one shared `cmd/swarm`
+          Successful human table/list/repeated-row/detail-display output MUST consume one shared `internal/cliapp`
           display renderer for column alignment, empty values, empty list states, color/no-color policy,
           emoji-vocabulary policy, reviewed code-to-phrase projection, and truncation declarations. Command/API
           owners keep owning facts, machine codes, row order, and filtering. The shared human-code projector owns
@@ -18708,7 +18708,7 @@ cli_specification:
             pass must stay `split` with an owner issue until that owner lands.
           classification_values:
             shared_output: >
-              The command consumes the shared `cmd/swarm` output-mode/color owner for successful output and, when it
+              The command consumes the shared `internal/cliapp` output-mode/color owner for successful output and, when it
               renders table/list/detail human text, consumes the shared display renderer. It accepts `--json`,
               `--quiet`, and `--no-color` through the shared helper path.
             exception: >
@@ -19248,7 +19248,7 @@ cli_specification:
       - API/runtime method semantics
       - JSON error-body or rich structured-error output unless a later tracked child promotes it
       implementation_proof_requirements:
-      - grep proof that implemented output-mode/color behavior consumes one shared cmd/swarm output owner
+      - grep proof that implemented output-mode/color behavior consumes one shared internal/cliapp output owner
       - tests proving default text, JSON/NDJSON, and quiet behavior for every command row in the approved slice
       - tests proving `--no-color` and `NO_COLOR` consume the shared owner, strip ANSI from default text, and do not
         reshape JSON/quiet output
@@ -19259,7 +19259,7 @@ cli_specification:
       promoted_by: '#936'
       implementation_status: implemented for current shared-output first-slice consumers only
       canonical_owner: platform-spec.yaml#cli_specification.foundations.cli_logging_policy
-      future_runtime_owner: cmd/swarm shared CLI diagnostic logging policy resolver
+      future_runtime_owner: internal/cliapp shared CLI diagnostic logging policy resolver
       scope: >
         Merge-bearing CLI v2 authority for CLI process diagnostic logging controls. This owner governs
         `--log-level` source disposition, allowed levels, command applicability, stdout/stderr separation, and
@@ -19323,7 +19323,7 @@ cli_specification:
       implemented_logging_policy_first_slice:
         implemented_by: '#944'
         failure_class: runtime.cli.v2.logging_resolver_for_current_shared_output_consumers
-        owner: cmd/swarm shared CLI diagnostic logging policy resolver
+        owner: internal/cliapp shared CLI diagnostic logging policy resolver
         status: implemented
         rule: >
           These consumers accept `--log-level` through one shared CLI diagnostic logging policy resolver. The
@@ -19353,7 +19353,7 @@ cli_specification:
       implementation_boundaries:
       - 'This #936 first slice is source-of-truth repair only: no Cobra flags, config/env parsing, runtime logging, or command behavior change is implied.'
       - 'The #944 behavior slice implements only the current shared-output first-slice consumers listed above.'
-      - 'Future implementation MUST consume the shared cmd/swarm diagnostic logging policy resolver before accepting `--log-level` on any additional command row.'
+      - 'Future implementation MUST consume the shared internal/cliapp diagnostic logging policy resolver before accepting `--log-level` on any additional command row.'
       - 'Implementation MUST prove stdout/stderr separation for JSON, quiet, default text, and diagnostics.'
       - 'Future implementation MUST keep runtime log filters and serve boot verbosity classified as separate owners unless a later spec PR deliberately changes that boundary.'
     auth_boundary: >
@@ -19364,7 +19364,7 @@ cli_specification:
       promoted_by: '#1612'
       implementation_status: implemented_first_slice
       canonical_owner: platform-spec.yaml#cli_specification.foundations.local_target_resolution_authority
-      implementation_owner: cmd/swarm local target diagnostic resolver
+      implementation_owner: internal/cliapp local target diagnostic resolver
       scope: >
         Merge-bearing authority for local Swarm target/source explanation: the Swarm user/global state directory,
         project-root facts derived from the existing contracts resolver, target precedence, command-class safety, and
@@ -19526,7 +19526,7 @@ cli_specification:
       promoted_by: '#1615'
       implementation_status: implemented
       canonical_owner: platform-spec.yaml#cli_specification.foundations.local_runtime_state_authority
-      implementation_owner: cmd/swarm local runtime state resolver
+      implementation_owner: internal/cliapp local runtime state resolver
       scope: >
         Merge-bearing authority for local runtime store path, agent-visible data source defaulting, descriptor store/data
         metadata, doctor target reporting, and foreground `swarm run start` local-start admission. It closes the previous
@@ -19582,7 +19582,7 @@ cli_specification:
       promoted_by: '#1613'
       implementation_status: implemented_primitive_registry
       canonical_owner: platform-spec.yaml#cli_specification.foundations.local_context_registry_authority
-      implementation_owner: cmd/swarm local context registry helpers and lifecycle commands
+      implementation_owner: internal/cliapp local context registry helpers and lifecycle commands
       scope: >
         Merge-bearing authority for local context descriptor storage under the resolved Swarm-dir, descriptor schema,
         selected/current context storage, atomic registry writes, descriptor validation taxonomy, and minimal lifecycle
@@ -19878,7 +19878,7 @@ cli_specification:
       - '#743 swarm run start behavior and follow semantics'
       - '`--no-retry` retry policy'
       implementation_boundaries:
-      - 'API-backed command leaves consume one cmd/swarm resolver for this owner.'
+      - 'API-backed command leaves consume one internal/cliapp resolver for this owner.'
       - 'Client-side `SWARM_API_SERVER`, `SWARM_API_TOKEN`, and `SWARM_API_TOKEN_FILE` are invalid sources after #1636.'
       - 'Server-side `swarm serve` API auth token sourcing remains split to #1647.'
       - 'Global --config is implemented only as unified config-file selection; no inline --api-token, OpenRPC, output renderer, retry, or listener behavior changes are implied by this owner.'
@@ -19980,7 +19980,7 @@ cli_specification:
         command families consume this contract when their API-backed implementation is promoted. This contract consumes
         `cli_specification.foundations.output_contract.diagnostic_convention.exit_code_taxonomy` for global exit-code
         classes and declares narrower API-backed command exceptions.
-      canonical_owner: cmd/swarm shared CLI API error classifier
+      canonical_owner: internal/cliapp shared CLI API error classifier
       stdout_rule: >
         stdout is reserved for successful load-bearing command output. API/client/runtime errors, malformed API
         responses, validation failures, and retired-namespace migration messages render to stderr.
@@ -20705,16 +20705,16 @@ cli_specification:
           steps:
           - step: 1
             name: process_start
-            owner: cmd/swarm
+            owner: internal/serveapp
           - step: 2
             name: config_load
-            owner: cmd/swarm
+            owner: internal/serveapp
           - step: 3
             name: db_connection
-            owner: cmd/swarm
+            owner: internal/serveapp
           - step: 4
             name: bundle_load
-            owner: cmd/swarm
+            owner: internal/serveapp
           - step: 5
             name: startup_ownership_lease
             owner: internal/runtime
@@ -20762,13 +20762,13 @@ cli_specification:
             owner: internal/runtime
           - step: 20
             name: http_listener_bind
-            owner: cmd/swarm
+            owner: internal/serveapp
           - step: 21
             name: health_endpoints_respond
-            owner: cmd/swarm
+            owner: internal/serveapp
           - step: 22
             name: ready
-            owner: cmd/swarm
+            owner: internal/serveapp
         platform_boot_payload: >
           `platform.boot` carries the boot decision summary: boot timestamps/duration, bundle fingerprint,
           startup recovery decision, static and flow-required agent materialization lists, system container names,
@@ -20788,7 +20788,7 @@ cli_specification:
       active_run_abandon_quiescence:
         implemented_by: '#808/#1251'
         flag: --abandon-active-runs
-        owner: internal/runtime/runquiescence plus selected runtime store active-run quiescence owner, consumed by cmd/swarm serve
+        owner: internal/runtime/runquiescence plus selected runtime store active-run quiescence owner, consumed by internal/serveapp
         ordering: >
           `swarm serve --abandon-active-runs` applies after platform schema/state-store initialization and before bundle-match
           admission, startup recovery, runtime start, API readiness, or late delivery recovery can reclaim work. Failure to apply
@@ -20822,7 +20822,7 @@ cli_specification:
         implemented_by: '#825'
         flag: --shutdown-grace <duration>
         default: 30s
-        owner: cmd/swarm serve parses the operator duration; runtime.Runtime.ShutdownWithOptions and
+        owner: internal/cliapp serve command parses the operator duration; runtime.Runtime.ShutdownWithOptions and
           internal/runtime/manager.AgentManager.ShutdownWithOptions own the runtime shutdown drain budget.
         validation: >
           The duration MUST be a positive Go duration string accepted by the CLI duration parser. Invalid, zero, or negative
@@ -20847,7 +20847,7 @@ cli_specification:
         implemented_by: '#830/#2010 boot-presentation first slice'
         flag: --dev
         owner: >
-          `cmd/swarm serve` owns command-line composition; existing serve startup owners perform active-run abandon,
+          `internal/cliapp` owns command-line composition; existing internal/serveapp startup owners perform active-run abandon,
           bundle-match admission, and concise lifecycle presentation; `internal/runtime/workspace` plus
           `internal/runtime/containeridentity` own dev entity-container cleanup and preservation.
         composition:
@@ -22100,7 +22100,7 @@ cli_specification:
       - typed API error tests cover not-found and idempotency conflict mappings
       - static grep/no-bypass proof shows the CLI consumes only /v1/rpc conversation.fork* methods
       - 'go run ./cmd/swarm-openrpc-gen --check'
-      - focused cmd/swarm forkchat tests and existing conversation.fork API/store regression tests
+      - focused internal/cliapp forkchat tests and existing conversation.fork API/store regression tests
     entities_list:
       command: swarm entity list
       group: observe_debug

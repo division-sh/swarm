@@ -315,7 +315,8 @@ func validateForkReplayResumeStalePolicy(root string, policy forkReplayResumeSta
 		"platform-spec.yaml",
 		"internal/store",
 		"internal/runtime/runforkexecution",
-		"cmd/swarm",
+		"internal/cliapp",
+		"internal/serveapp",
 	}
 	for _, rel := range scanPaths {
 		path := filepath.Join(root, rel)

@@ -22,7 +22,7 @@ func TestProviderIngressProofRoleRegistryRejectsHiddenAuthorityFromSupportedProo
 		"internal/serveapp/provider_trigger_shopify_smoke_test.go":                                {"demoted_bounded", "optional live-provider smoke; not standing-ingress E2E"},
 		"internal/serveapp/provider_trigger_typeform_smoke_test.go":                               {"demoted_bounded", "optional live-provider smoke; not standing-ingress E2E"},
 		"internal/runtime/inbound_postgres_test.go":                                               {"demoted_bounded", "provider/store persistence integration"},
-		"internal/runtime/telegram_connector_supported_surface_test.go":                           {"superseded", "served Telegram proof moved to cmd/swarm standing-ingress E2E"},
+		"internal/runtime/telegram_connector_supported_surface_test.go":                           {"superseded", "served Telegram proof moved to internal/serveapp standing-ingress E2E"},
 		"internal/runtime/slack_connector_managed_credential_supported_surface_test.go":           {"demoted_bounded", "connector and managed-credential integration"},
 		"internal/runtime/notion_connector_managed_credential_supported_surface_test.go":          {"demoted_bounded", "connector and managed-credential integration"},
 		"internal/runtime/microsoft_graph_connector_client_credentials_supported_surface_test.go": {"demoted_bounded", "connector and managed-credential integration"},
