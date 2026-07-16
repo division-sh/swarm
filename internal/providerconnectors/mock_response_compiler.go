@@ -1,7 +1,6 @@
 package providerconnectors
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -87,12 +86,16 @@ func validateMockResponseSchema(schema runtimecontracts.ToolInputSchema, path st
 		return err
 	}
 
-	for index := range schema.Enum {
-		value, err := decodeMockSchemaLiteral(schema.Enum[index])
-		if err != nil {
-			return fmt.Errorf("%s.enum[%d]: %w", path, index, err)
-		}
-		if err := eventschema.ValidateValueAgainstSchema(runtimecontracts.ToolInputSchemaJSONSchema(schema), value); err != nil {
+	enum, enumPresent, err := runtimecontracts.ToolInputSchemaEnumProjection(schema)
+	if err != nil {
+		return fmt.Errorf("%s.enum: %w", path, err)
+	}
+	if enumPresent && len(enum) == 0 {
+		return fmt.Errorf("%s.enum: explicitly declared enum must contain at least one value", path)
+	}
+	projected := runtimecontracts.ToolInputSchemaJSONSchema(schema)
+	for index, value := range enum {
+		if err := eventschema.ValidateValueAgainstSchema(projected, value); err != nil {
 			return fmt.Errorf("%s.enum[%d]: value does not match declared schema: %w", path, index, err)
 		}
 	}
@@ -154,12 +157,15 @@ func validateMockNumericBounds(schema runtimecontracts.ToolInputSchema, path, ty
 }
 
 func deterministicMockSchemaValue(schema runtimecontracts.ToolInputSchema, path string) (any, error) {
-	if len(schema.Enum) > 0 {
-		value, err := decodeMockSchemaLiteral(schema.Enum[0])
-		if err != nil {
-			return nil, fmt.Errorf("%s.enum[0]: %w", path, err)
+	enum, enumPresent, err := runtimecontracts.ToolInputSchemaEnumProjection(schema)
+	if err != nil {
+		return nil, fmt.Errorf("%s.enum: %w", path, err)
+	}
+	if enumPresent {
+		if len(enum) == 0 {
+			return nil, fmt.Errorf("%s.enum: explicitly declared enum must contain at least one value", path)
 		}
-		return value, nil
+		return enum[0], nil
 	}
 	typeName := strings.TrimSpace(schema.Type)
 	if typeName == "" {
@@ -217,22 +223,6 @@ func deterministicMockInteger(schema runtimecontracts.ToolInputSchema) float64 {
 		value = math.Floor(*schema.Maximum)
 	}
 	return value
-}
-
-func decodeMockSchemaLiteral(literal runtimecontracts.SchemaLiteral) (any, error) {
-	var value any
-	if err := literal.Node.Decode(&value); err != nil {
-		return nil, fmt.Errorf("decode enum literal: %w", err)
-	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, fmt.Errorf("enum literal is not JSON-compatible: %w", err)
-	}
-	var normalized any
-	if err := json.Unmarshal(raw, &normalized); err != nil {
-		return nil, fmt.Errorf("normalize enum literal: %w", err)
-	}
-	return normalized, nil
 }
 
 func sortedUniqueStrings(values []string) []string {

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"gopkg.in/yaml.v3"
 )
 
 func TestMockResponsePlanAdmitsOnlyExactProviderConnectorResponses(t *testing.T) {
@@ -76,5 +77,30 @@ func TestMockResponsePlanRejectsOutputOutsideCanonicalToolSchema(t *testing.T) {
 	}
 	if _, err := plan.Admit("provider.write", tool); err == nil || !strings.Contains(err.Error(), "does not match output_schema") {
 		t.Fatalf("Admit error = %v", err)
+	}
+}
+
+func TestMockResponsePlanRejectsOutputOutsideTypedEnum(t *testing.T) {
+	plan, err := NewMockResponsePlan(map[string]map[string]any{
+		"provider.write": {"status": "wrong"},
+	})
+	if err != nil {
+		t.Fatalf("NewMockResponsePlan: %v", err)
+	}
+	tool := runtimecontracts.ToolSchemaEntry{
+		Category: Category, HandlerType: "http", HTTP: &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"},
+		OutputSchema: runtimecontracts.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]runtimecontracts.ToolInputSchema{
+				"status": {
+					Type: "string",
+					Enum: []runtimecontracts.SchemaLiteral{{Node: yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "ok"}}},
+				},
+			},
+			Required: []string{"status"},
+		},
+	}
+	if _, err := plan.Admit("provider.write", tool); err == nil || !strings.Contains(err.Error(), "$.status has invalid enum value wrong") {
+		t.Fatalf("Admit error = %v, want exact out-of-enum rejection", err)
 	}
 }

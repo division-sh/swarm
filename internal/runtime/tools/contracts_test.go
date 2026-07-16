@@ -1,10 +1,12 @@
 package tools
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"gopkg.in/yaml.v3"
 )
@@ -167,6 +169,58 @@ required: [mode]
 	nested, _ := metadata["additionalProperties"].(map[string]any)
 	if nested["type"] != "string" {
 		t.Fatalf("nested additionalProperties = %#v", metadata["additionalProperties"])
+	}
+}
+
+func TestProviderVisibleAndRuntimeToolSchemaPreserveNestedTypedEnumParity(t *testing.T) {
+	var schema runtimecontracts.ToolInputSchema
+	if err := yaml.Unmarshal([]byte(`
+type: object
+properties:
+  result:
+    type: object
+    properties:
+      approved:
+        type: boolean
+        enum: [true]
+      code:
+        type: integer
+        enum: [1, 2]
+    required: [approved, code]
+required: [result]
+`), &schema); err != nil {
+		t.Fatalf("unmarshal nested enum schema: %v", err)
+	}
+
+	providerVisible, err := schemaToMap(schema)
+	if err != nil {
+		t.Fatalf("provider-visible projection: %v", err)
+	}
+	runtimeAdmission := runtimecontracts.ToolInputSchemaJSONSchema(schema)
+	providerResult := providerVisible["properties"].(map[string]any)["result"].(map[string]any)
+	runtimeResult := runtimeAdmission["properties"].(map[string]any)["result"].(map[string]any)
+	providerNested := providerResult["properties"].(map[string]any)
+	runtimeNested := runtimeResult["properties"].(map[string]any)
+	for field, want := range map[string][]any{
+		"approved": {true},
+		"code":     {float64(1), float64(2)},
+	} {
+		providerEnum := providerNested[field].(map[string]any)["enum"]
+		runtimeEnum := runtimeNested[field].(map[string]any)["enum"]
+		if !reflect.DeepEqual(providerEnum, want) || !reflect.DeepEqual(runtimeEnum, want) || !reflect.DeepEqual(providerEnum, runtimeEnum) {
+			t.Fatalf("nested %s enum parity: provider=%#v runtime=%#v want=%#v", field, providerEnum, runtimeEnum, want)
+		}
+	}
+
+	accepted := map[string]any{"result": map[string]any{"approved": true, "code": float64(1)}}
+	for name, projected := range map[string]map[string]any{"provider_visible": providerVisible, "runtime_admission": runtimeAdmission} {
+		if err := eventschema.ValidatePayloadAgainstSchema(projected, accepted); err != nil {
+			t.Fatalf("%s rejected typed nested enum payload: %v", name, err)
+		}
+		rejected := map[string]any{"result": map[string]any{"approved": false, "code": float64(1)}}
+		if err := eventschema.ValidatePayloadAgainstSchema(projected, rejected); err == nil || !strings.Contains(err.Error(), "$.result.approved has invalid enum value false") {
+			t.Fatalf("%s enum rejection = %v", name, err)
+		}
 	}
 }
 

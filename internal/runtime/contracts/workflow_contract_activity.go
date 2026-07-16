@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -472,6 +473,11 @@ func toolInputSchemaToJSONSchema(schema ToolInputSchema) map[string]any {
 	if schema.Items != nil {
 		out["items"] = toolInputSchemaToJSONSchema(*schema.Items)
 	}
+	if enum, present, err := ToolInputSchemaEnumProjection(schema); err != nil {
+		out["enum"] = []any{}
+	} else if present {
+		out["enum"] = enum
+	}
 	if schema.AdditionalProperties.Allowed != nil {
 		out["additionalProperties"] = *schema.AdditionalProperties.Allowed
 	} else if schema.AdditionalProperties.Schema != nil {
@@ -488,8 +494,36 @@ func toolInputSchemaToJSONSchema(schema ToolInputSchema) map[string]any {
 	return out
 }
 
+// ToolInputSchemaEnumProjection is the one typed enum projection shared by
+// provider-visible schemas and runtime acceptance validation. The presence bit
+// distinguishes an omitted enum from an explicitly authored empty enum.
+func ToolInputSchemaEnumProjection(schema ToolInputSchema) ([]any, bool, error) {
+	if schema.Enum == nil {
+		return nil, false, nil
+	}
+	values := make([]any, 0, len(schema.Enum))
+	for index, literal := range schema.Enum {
+		var decoded any
+		if literal.Node.Kind != 0 {
+			if err := literal.Node.Decode(&decoded); err != nil {
+				return nil, true, fmt.Errorf("value %d: decode typed literal: %w", index, err)
+			}
+		}
+		raw, err := json.Marshal(decoded)
+		if err != nil {
+			return nil, true, fmt.Errorf("value %d: literal is not JSON-compatible: %w", index, err)
+		}
+		var normalized any
+		if err := json.Unmarshal(raw, &normalized); err != nil {
+			return nil, true, fmt.Errorf("value %d: normalize typed literal: %w", index, err)
+		}
+		values = append(values, normalized)
+	}
+	return values, true, nil
+}
+
 // ToolInputSchemaJSONSchema exposes the canonical ToolInputSchema projection
-// for runtime validators that consume the same authored tool model.
+// for provider-visible definitions and runtime validators.
 func ToolInputSchemaJSONSchema(schema ToolInputSchema) map[string]any {
 	return toolInputSchemaToJSONSchema(schema)
 }

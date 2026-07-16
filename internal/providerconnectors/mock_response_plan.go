@@ -64,7 +64,8 @@ func (p *MockResponsePlan) Admit(toolID string, tool runtimecontracts.ToolSchema
 	if err := json.Unmarshal(raw, &response); err != nil {
 		return AdmittedMockResponse{}, fmt.Errorf("decode mock connector response for tool %q: %w", toolID, err)
 	}
-	if err := eventschema.ValidatePayloadAgainstSchema(runtimecontracts.ToolInputSchemaJSONSchema(tool.OutputSchema), response); err != nil {
+	schema := runtimecontracts.ToolInputSchemaJSONSchema(tool.OutputSchema)
+	if err := eventschema.ValidatePayloadAgainstSchema(schema, response); err != nil {
 		return AdmittedMockResponse{}, fmt.Errorf("mock connector response for tool %q does not match output_schema: %w", toolID, err)
 	}
 	return AdmittedMockResponse{toolID: toolID, raw: append(json.RawMessage(nil), raw...)}, nil

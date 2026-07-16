@@ -302,7 +302,7 @@ func toolRequiredPermission(toolID string, entry runtimecontracts.ToolSchemaEntr
 }
 
 func schemaToMap(schema runtimecontracts.ToolInputSchema) (map[string]any, error) {
-	if schema.Type == "" && len(schema.Properties) == 0 && len(schema.Required) == 0 && schema.Items == nil && len(schema.Enum) == 0 {
+	if schema.Type == "" && len(schema.Properties) == 0 && len(schema.Required) == 0 && schema.Items == nil && schema.Enum == nil {
 		return nil, nil
 	}
 	return toolSchemaToMap(schema), nil
@@ -329,12 +329,10 @@ func toolSchemaToMap(schema runtimecontracts.ToolInputSchema) map[string]any {
 	if schema.Items != nil {
 		out["items"] = toolSchemaToMap(*schema.Items)
 	}
-	if len(schema.Enum) > 0 {
-		enumValues := make([]any, 0, len(schema.Enum))
-		for _, literal := range schema.Enum {
-			enumValues = append(enumValues, schemaLiteralValue(literal))
-		}
-		out["enum"] = enumValues
+	if enum, present, err := runtimecontracts.ToolInputSchemaEnumProjection(schema); err != nil {
+		out["enum"] = []any{}
+	} else if present {
+		out["enum"] = enum
 	}
 	if schema.AdditionalProperties.Allowed != nil {
 		out["additionalProperties"] = *schema.AdditionalProperties.Allowed
@@ -346,17 +344,6 @@ func toolSchemaToMap(schema runtimecontracts.ToolInputSchema) map[string]any {
 	}
 	if schema.Maximum != nil {
 		out["maximum"] = *schema.Maximum
-	}
-	return out
-}
-
-func schemaLiteralValue(literal runtimecontracts.SchemaLiteral) any {
-	if literal.Node.Kind == 0 {
-		return nil
-	}
-	var out any
-	if err := literal.Node.Decode(&out); err != nil {
-		return strings.TrimSpace(literal.Node.Value)
 	}
 	return out
 }
