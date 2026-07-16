@@ -7760,8 +7760,10 @@ tool_model:
         Provider-visible tool definitions and runtime output-schema admission consume one recursive ToolInputSchema projection for
         typed enum literals through properties and array items. Omitted enum and explicitly authored empty enum retain distinct presence
         semantics. Enum literal admission accepts only null, boolean, string, array, object, and admitted finite binary64 JSON-number
-        values before projection; missing nodes, YAML-only tags, invalid UTF-8, unsafe or non-finite numbers, and non-string object keys
-        fail without coercion at the exact enum index. Runtime admission compares enum members as typed canonical JSON values;
+        values before projection. Standard YAML scalar tags must agree with that admitted JSON kind: bool is boolean, int is an integral
+        number, float is a number, and null is null. Missing nodes, YAML-only tags, tag/kind mismatches, invalid UTF-8, unsafe or non-finite
+        numbers, and non-string object keys fail without coercion at the exact enum index. Runtime admission compares enum members as typed
+        canonical JSON values;
         stringification, case folding, and a provider-only or validator-only enum interpreter are forbidden. Schema-valued
         additionalProperties remains part of the broader exact ToolInputSchema acceptance work tracked by #1981 and is not claimed closed
         by this generated-response slice.

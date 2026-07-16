@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"unicode"
@@ -530,6 +531,25 @@ func toolInputSchemaEnumLiteralValue(node *yaml.Node) (any, error) {
 			var value any
 			if err := canonicaljson.DecodeInto([]byte(node.Value), &value); err != nil {
 				return nil, fmt.Errorf("%s literal %q is not an admitted JSON value: %w", node.Tag, node.Value, err)
+			}
+			switch node.Tag {
+			case "!!bool":
+				if _, ok := value.(bool); !ok {
+					return nil, fmt.Errorf("!!bool literal %q must decode to a JSON boolean", node.Value)
+				}
+			case "!!int":
+				number, ok := value.(float64)
+				if !ok || math.Trunc(number) != number {
+					return nil, fmt.Errorf("!!int literal %q must decode to an integral JSON number", node.Value)
+				}
+			case "!!float":
+				if _, ok := value.(float64); !ok {
+					return nil, fmt.Errorf("!!float literal %q must decode to a JSON number", node.Value)
+				}
+			case "!!null":
+				if value != nil {
+					return nil, fmt.Errorf("!!null literal %q must decode to JSON null", node.Value)
+				}
 			}
 			return value, nil
 		default:
