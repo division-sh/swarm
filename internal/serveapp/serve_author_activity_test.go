@@ -1,4 +1,4 @@
-package main
+package serveapp
 
 import (
 	"bytes"
@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/cliapp"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
@@ -116,7 +117,7 @@ func TestServeAuthorActivityFollowerRetriesUnchangedCursorAndExactScope(t *testi
 	}}
 	var errOut bytes.Buffer
 	out := &synchronizedBuffer{}
-	presenter := newServeLifecyclePresenter(serveOptions{Output: out, ErrorOutput: &errOut, Dev: true})
+	presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Output: out, ErrorOutput: &errOut, Dev: true})
 	ctx, cancel := context.WithCancel(context.Background())
 	scope := &mutableServeAuthorActivityScope{hashes: []string{"bundle-a", "bundle-b"}}
 	follower := newServeAuthorActivityFollower(
@@ -174,7 +175,7 @@ func TestServeAuthorActivityFollowerRetriesWriteAndFlushesBeforeReturn(t *testin
 	}}
 	out := &failOnceWriter{}
 	var errOut bytes.Buffer
-	presenter := newServeLifecyclePresenter(serveOptions{Output: out, ErrorOutput: &errOut, Dev: true})
+	presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Output: out, ErrorOutput: &errOut, Dev: true})
 	scope := &mutableServeAuthorActivityScope{hashes: []string{"bundle-a"}}
 	follower := newServeAuthorActivityFollower(
 		context.Background(), reader, presenter, "runtime-a", scope, 20,
@@ -217,7 +218,7 @@ func TestServeAuthorActivityFollowerRefreshesExactScopeAfterRuntimeReload(t *tes
 	scope := &mutableServeAuthorActivityScope{hashes: []string{"bundle-a"}}
 	out := &synchronizedBuffer{}
 	var errOut bytes.Buffer
-	presenter := newServeLifecyclePresenter(serveOptions{Output: out, ErrorOutput: &errOut, Dev: true})
+	presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Output: out, ErrorOutput: &errOut, Dev: true})
 	follower := newServeAuthorActivityFollower(
 		context.Background(), reader, presenter, "runtime-a", scope, 30,
 		runtimeauthoractivity.NewHumanRenderer(runtimeauthoractivity.RenderOptions{Mode: runtimeauthoractivity.RenderPlain, Width: 120}),
@@ -290,7 +291,7 @@ func serveStoryCallsContainExactScope(calls []runtimeauthoractivity.ListOptions,
 
 func TestServeNoFeedRequiresDevBeforeSideEffects(t *testing.T) {
 	var out, errOut bytes.Buffer
-	code := runServeRuntime(context.Background(), t.TempDir(), serveOptions{
+	code := Run(context.Background(), t.TempDir(), cliapp.ServeOptions{
 		NoFeed: true, Output: &out, ErrorOutput: &errOut,
 	})
 	if code != 2 {
