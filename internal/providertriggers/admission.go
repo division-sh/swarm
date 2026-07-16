@@ -13,7 +13,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packs"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 )
 
@@ -346,9 +345,9 @@ func (p InboundAdmissionPlan) RequiresSecret() bool { return p.requiresSecret }
 func (p InboundAdmissionPlan) Outputs() []OutputManifest {
 	out := make([]OutputManifest, 0, len(p.outputs))
 	for _, output := range p.outputs {
-		fields := make(map[string]runtimecontracts.FieldProjection, len(output.Fields))
+		fields := make(map[string]NormalizedEventFieldProjection, len(output.Fields))
 		for name, field := range output.Fields {
-			fields[name] = field
+			fields[name] = field.normalized()
 		}
 		output.Fields = fields
 		output.When.Exists = append([]string{}, output.When.Exists...)

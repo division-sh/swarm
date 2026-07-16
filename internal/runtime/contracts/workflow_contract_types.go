@@ -2071,8 +2071,7 @@ type CompiledResultProjection struct {
 }
 
 type CompiledResultField struct {
-	From    string
-	Convert string
+	From string
 }
 
 type HTTPResponseSuccess struct {

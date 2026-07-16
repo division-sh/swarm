@@ -976,8 +976,8 @@ func compiledRedactedNormalizedPlan(t *testing.T, version, projectedType string)
 		RedactKeys: []string{"text"},
 		NormalizedEvents: []providertriggers.NormalizedEventManifest{{
 			Event: "inbound.telegram.text_message",
-			Fields: map[string]runtimecontracts.FieldProjection{
-				"text": {From: "message.text", Type: projectedType},
+			Fields: map[string]providertriggers.NormalizedEventFieldProjection{
+				"text": {From: "message.text", Schema: runtimecontracts.ToolInputSchema{Type: mapProjectedSchemaType(projectedType)}},
 			},
 		}},
 	}
@@ -1000,6 +1000,13 @@ func compiledRedactedNormalizedPlan(t *testing.T, version, projectedType string)
 		t.Fatalf("CompileAdmission: %v", err)
 	}
 	return plan, catalog
+}
+
+func mapProjectedSchemaType(projectedType string) string {
+	if projectedType == "text" {
+		return "string"
+	}
+	return projectedType
 }
 
 func normalizedRetryRequest(body string) *http.Request {
@@ -2478,7 +2485,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 			wantBodyParts: []string{
 				"provider.telegram", "version=0.1.0", "manifest_hash=sha256:",
 				`normalized event "inbound.telegram.text_message"`, `path "message.message_id"`,
-				"value type string is incompatible with integer and implicit conversion is forbidden",
+				"projected value violates its declared output schema", "$ must be integer",
 			},
 		},
 		{
@@ -2489,7 +2496,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 			wantBodyParts: []string{
 				"provider.telegram", "version=0.1.0", "manifest_hash=sha256:",
 				`normalized event "inbound.telegram.text_message"`, `path "message.text"`,
-				"value type json.Number is incompatible with text and implicit conversion is forbidden",
+				"projected value violates its declared output schema", "$ must be string",
 			},
 		},
 		{

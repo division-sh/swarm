@@ -357,6 +357,21 @@ func TestActivityHTTPAppliesConnectorThenChannelResultProjection(t *testing.T) {
 	}
 }
 
+func TestCompiledResultProjectionHasNoConversionSeam(t *testing.T) {
+	if _, ok := reflect.TypeOf(runtimecontracts.CompiledResultField{}).FieldByName("Convert"); ok {
+		t.Fatal("CompiledResultField still exposes a conversion interpreter")
+	}
+	source, err := os.ReadFile("activity_engine.go")
+	if err != nil {
+		t.Fatalf("read activity_engine.go: %v", err)
+	}
+	for _, forbidden := range []string{"convertCompiledActivityResult", "compiled result conversion", "FieldProjectionConvertNumberToText"} {
+		if strings.Contains(string(source), forbidden) {
+			t.Fatalf("activity result projection retains legacy conversion seam %q", forbidden)
+		}
+	}
+}
+
 func TestChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStores(t *testing.T) {
 	for _, tc := range activityBoringStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {

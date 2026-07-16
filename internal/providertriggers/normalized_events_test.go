@@ -131,8 +131,8 @@ func TestNormalizedEventManifestRejectsOverlappingBranchesAtLoad(t *testing.T) {
 	manifest := normalizedEventTestManifest()
 	manifest.NormalizedEvents = append(manifest.NormalizedEvents, NormalizedEventManifest{
 		Event: "inbound.telegram.message_copy",
-		Fields: map[string]runtimecontracts.FieldProjection{
-			"text": {From: "message.text", Type: "text"},
+		Fields: map[string]NormalizedEventFieldProjection{
+			"text": {From: "message.text", Schema: runtimecontracts.ToolInputSchema{Type: "string"}},
 		},
 	})
 	err := manifest.Validate()
@@ -149,8 +149,8 @@ func TestNormalizedEventPlanRejectsForcedRuntimeMultiMatch(t *testing.T) {
 	manifest := normalizedEventTestManifest()
 	manifest.NormalizedEvents = append(manifest.NormalizedEvents, NormalizedEventManifest{
 		Event: "inbound.telegram.message_copy",
-		Fields: map[string]runtimecontracts.FieldProjection{
-			"text": {From: "message.text", Type: "text"},
+		Fields: map[string]NormalizedEventFieldProjection{
+			"text": {From: "message.text", Schema: runtimecontracts.ToolInputSchema{Type: "string"}},
 		},
 	})
 	_, err := manifest.Accept(Request{
@@ -225,6 +225,21 @@ func TestNormalizedEventManifestRejectsHostileProjectionSyntax(t *testing.T) {
 	}
 }
 
+func TestNormalizedEventManifestRejectsRetiredTypeSpelling(t *testing.T) {
+	_, err := parseManifestStrict([]byte(`
+provider: telegram
+normalized_events:
+  - event: inbound.telegram.text_message
+    fields:
+      text:
+        from: message.text
+        type: text
+`))
+	if err == nil || !strings.Contains(err.Error(), "field type not found") {
+		t.Fatalf("parseManifestStrict error = %v, want retired type spelling rejection", err)
+	}
+}
+
 func TestNormalizedEventManifestRejectsMalformedEventNamesAtLoad(t *testing.T) {
 	for _, eventName := range []string{
 		"inbound.telegram.",
@@ -264,20 +279,20 @@ func TestNormalizedEventManifestRejectsNonCanonicalFieldNames(t *testing.T) {
 	}
 }
 
-func TestNormalizedEventPlanRejectsCompositeTypeMismatchesWithPackProvenance(t *testing.T) {
+func TestNormalizedEventPlanRejectsCompositeSchemaMismatchesWithPackProvenance(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
-		typeRef  string
+		schema   runtimecontracts.ToolInputSchema
 		value    any
 		wantPart string
 	}{
-		{name: "list", typeRef: "[text]", value: []any{"ok", json.Number("2")}, wantPart: "list item 1"},
-		{name: "map", typeRef: "map[text]integer", value: map[string]any{"key": "not-an-integer"}, wantPart: "map value at \"key\""},
+		{name: "array", schema: runtimecontracts.ToolInputSchema{Type: "array", Items: &runtimecontracts.ToolInputSchema{Type: "string"}}, value: []any{"ok", json.Number("2")}, wantPart: "$[1] must be string"},
+		{name: "object", schema: runtimecontracts.ToolInputSchema{Type: "object", Properties: map[string]runtimecontracts.ToolInputSchema{"id": {Type: "integer"}}, Required: []string{"id"}}, value: map[string]any{"id": "not-an-integer"}, wantPart: "$.id must be integer"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			manifest := normalizedEventTestManifest()
 			field := manifest.NormalizedEvents[0].Fields["raw"]
-			field.Type = tc.typeRef
+			field.Schema = tc.schema
 			field.From = "message.raw"
 			field.Optional = false
 			manifest.NormalizedEvents[0].Fields["raw"] = field
@@ -320,10 +335,10 @@ func TestNormalizedEventPlanRejectsCompositeTypeMismatchesWithPackProvenance(t *
 	}
 }
 
-func TestNormalizedEventManifestRejectsUnresolvableNamedTypeWithPackProvenance(t *testing.T) {
+func TestNormalizedEventManifestRejectsMissingOutputSchemaWithPackProvenance(t *testing.T) {
 	manifest := normalizedEventTestManifest()
 	field := manifest.NormalizedEvents[0].Fields["text"]
-	field.Type = "MessageText"
+	field.Schema = runtimecontracts.ToolInputSchema{}
 	manifest.NormalizedEvents[0].Fields["text"] = field
 	_, err := NewCatalogSnapshot(CatalogEntry{
 		Manifest: manifest,
@@ -333,7 +348,7 @@ func TestNormalizedEventManifestRejectsUnresolvableNamedTypeWithPackProvenance(t
 		},
 		Source: "test",
 	})
-	for _, want := range []string{"provider.telegram", "version=1.0.0", "manifest_hash=sha256:", "MessageText", "not standalone-resolvable"} {
+	for _, want := range []string{"provider.telegram", "version=1.0.0", "manifest_hash=sha256:", "requires an explicit JSON type"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("NewCatalogSnapshot error = %v, want %q", err, want)
 		}
@@ -359,7 +374,7 @@ func TestNormalizedEventManifestRejectsImplicitAndUnknownConversions(t *testing.
 			"message_id": json.Number("7"), "chat": map[string]any{"id": json.Number("42")}, "text": "hello",
 		}},
 	})
-	if err == nil || !strings.Contains(err.Error(), "implicit conversion is forbidden") {
+	if err == nil || !strings.Contains(err.Error(), "must be string") {
 		t.Fatalf("Accept error = %v, want implicit conversion rejection", err)
 	}
 }
@@ -388,11 +403,11 @@ func normalizedEventTestManifest() Manifest {
 		EventName:             EventNameManifest{Literal: "inbound.telegram"},
 		NormalizedEvents: []NormalizedEventManifest{{
 			Event: "inbound.telegram.text_message",
-			Fields: map[string]runtimecontracts.FieldProjection{
-				"chat_id":    {From: "message.chat.id", Type: "text", Convert: runtimecontracts.FieldProjectionConvertNumberToText},
-				"text":       {From: "message.text", Type: "text"},
-				"message_id": {From: "message.message_id", Type: "integer"},
-				"raw":        {From: "message", Type: "json", Optional: true},
+			Fields: map[string]NormalizedEventFieldProjection{
+				"chat_id":    {From: "message.chat.id", Schema: runtimecontracts.ToolInputSchema{Type: "string"}, Convert: runtimecontracts.FieldProjectionConvertNumberToText},
+				"text":       {From: "message.text", Schema: runtimecontracts.ToolInputSchema{Type: "string"}},
+				"message_id": {From: "message.message_id", Schema: runtimecontracts.ToolInputSchema{Type: "integer"}},
+				"raw":        {From: "message", Schema: runtimecontracts.ToolInputSchema{Type: "object"}, Optional: true},
 			},
 		}},
 	}

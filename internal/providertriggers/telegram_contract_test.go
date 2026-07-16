@@ -101,6 +101,78 @@ func TestTelegramSelectedCallbackActionContractUsesShippedPack(t *testing.T) {
 	}
 }
 
+func TestTelegramTextRejectsOutOfRangeProviderMessageReference(t *testing.T) {
+	assertTelegramNormalizedIdentifierRejected(t, "text provider message", "message.message_id", map[string]any{
+		"update_id": 201,
+		"message": map[string]any{
+			"message_id": 2147483648, "from": map[string]any{"id": 12345},
+			"chat": map[string]any{"id": 67890, "type": "private"}, "text": "hello",
+		},
+	}, "must be <= 2.147483647e+09")
+}
+
+func TestTelegramTextRejectsNegativeExternalAccountReference(t *testing.T) {
+	assertTelegramNormalizedIdentifierRejected(t, "text external account", "message.from.id", map[string]any{
+		"update_id": 202,
+		"message": map[string]any{
+			"message_id": 7, "from": map[string]any{"id": -1},
+			"chat": map[string]any{"id": 67890, "type": "private"}, "text": "hello",
+		},
+	}, "must match pattern")
+}
+
+func TestTelegramTextRejectsOverlongConversationReference(t *testing.T) {
+	assertTelegramNormalizedIdentifierRejected(t, "text conversation", "message.chat.id", map[string]any{
+		"update_id": 203,
+		"message": map[string]any{
+			"message_id": 7, "from": map[string]any{"id": 12345},
+			"chat": map[string]any{"id": 123456789012345678, "type": "private"}, "text": "hello",
+		},
+	}, "length must be <= 17")
+}
+
+func TestTelegramCallbackRejectsOutOfRangeProviderMessageReference(t *testing.T) {
+	assertTelegramNormalizedIdentifierRejected(t, "callback provider message", "callback_query.message.message_id", map[string]any{
+		"update_id": 204,
+		"callback_query": map[string]any{
+			"id": "callback-1", "data": "approve_1", "from": map[string]any{"id": 12345},
+			"message": map[string]any{"message_id": 2147483648, "chat": map[string]any{"id": 67890, "type": "private"}},
+		},
+	}, "must be <= 2.147483647e+09")
+}
+
+func TestTelegramCallbackRejectsNegativeExternalAccountReference(t *testing.T) {
+	assertTelegramNormalizedIdentifierRejected(t, "callback external account", "callback_query.from.id", map[string]any{
+		"update_id": 205,
+		"callback_query": map[string]any{
+			"id": "callback-1", "data": "approve_1", "from": map[string]any{"id": -1},
+			"message": map[string]any{"message_id": 8, "chat": map[string]any{"id": 67890, "type": "private"}},
+		},
+	}, "must match pattern")
+}
+
+func TestTelegramCallbackRejectsOverlongConversationReference(t *testing.T) {
+	assertTelegramNormalizedIdentifierRejected(t, "callback conversation", "callback_query.message.chat.id", map[string]any{
+		"update_id": 206,
+		"callback_query": map[string]any{
+			"id": "callback-1", "data": "approve_1", "from": map[string]any{"id": 12345},
+			"message": map[string]any{"message_id": 8, "chat": map[string]any{"id": 123456789012345678, "type": "private"}},
+		},
+	}, "length must be <= 17")
+}
+
+func assertTelegramNormalizedIdentifierRejected(t *testing.T, subject, sourcePath string, payload map[string]any, want string) {
+	t.Helper()
+	_, _, plan := telegramPlatformContract(t)
+	delivery, err := plan.Accept(telegramContractRequest(t, payload))
+	if err == nil || !strings.Contains(err.Error(), sourcePath) || !strings.Contains(err.Error(), want) {
+		t.Fatalf("%s admission = %#v, error = %v; want source %q and %q", subject, delivery, err, sourcePath, want)
+	}
+	if len(delivery.Events) != 0 {
+		t.Fatalf("%s emitted events after identifier rejection: %#v", subject, delivery.Events)
+	}
+}
+
 func TestTelegramBotAPI101ResidualUpdateUnionRemainsRawOnly(t *testing.T) {
 	_, _, plan := telegramPlatformContract(t)
 	fixtures := []struct {
