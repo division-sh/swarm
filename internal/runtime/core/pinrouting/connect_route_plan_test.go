@@ -64,6 +64,19 @@ func TestConnectSourceEndpointMatchesEventRejectsTargetIdentityAsSource(t *testi
 	}
 }
 
+func TestConnectSourceEndpointMatchesEventRejectsConcreteInstanceWithoutSourceRoute(t *testing.T) {
+	endpoint := ConnectRoutePlanEndpoint{
+		FlowID:        "producer",
+		FlowPath:      "producer",
+		Event:         "deploy.done",
+		ResolvedEvent: "producer/deploy.done",
+	}
+	evt := eventtest.RootIngress("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	if ConnectSourceEndpointMatchesEvent(endpoint, evt) {
+		t.Fatalf("concrete instance event matched without authoritative source route; envelope = %#v", evt.NormalizedEnvelope())
+	}
+}
+
 func TestLowerTargetFreeInputRoutePlans_RejectsHarnessSource(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
