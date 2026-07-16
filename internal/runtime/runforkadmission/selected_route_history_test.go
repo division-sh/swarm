@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -68,7 +69,7 @@ func TestAdmitSelectedContractRouteHistoryDerivesSelectedRoutesWithoutMutating(t
 
 func TestAdmitSelectedContractRouteHistoryConnectMatchesConcreteTemplateSourceEndpoint(t *testing.T) {
 	plan := testRunForkPlan("producer/inst-1/scan.requested", store.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
-	plan.PendingWork[0].FlowInstance = "producer/inst-1"
+	plan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}
 	source := testContractFrontierTemplateConnectSource()
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
@@ -93,7 +94,7 @@ func TestAdmitSelectedContractRouteHistoryConnectMatchesConcreteTemplateSourceEn
 	}
 }
 
-func TestAdmitSelectedContractRouteHistoryConnectInfersTemplateIdentityWhenPersistedIdentityIsAbsent(t *testing.T) {
+func TestAdmitSelectedContractRouteHistoryRejectsConcreteTemplateIdentityWhenSourceRouteIsAbsent(t *testing.T) {
 	plan := testRunForkPlan("producer/inst-1/scan.requested", store.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
 	source := testContractFrontierTemplateConnectSource()
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -114,15 +115,15 @@ func TestAdmitSelectedContractRouteHistoryConnectInfersTemplateIdentityWhenPersi
 	if err != nil {
 		t.Fatalf("AdmitSelectedContractRouteHistory: %v", err)
 	}
-	if len(admission.SelectedRouteEvents) != 1 || len(admission.SelectedRouteEvents[0].DerivedRecipients) != 1 || admission.SelectedRouteEvents[0].DerivedRecipients[0].SubscriberID != "consumer-node" {
-		t.Fatalf("selected route events = %#v, want consumer-node through inferred producer identity", admission.SelectedRouteEvents)
+	if len(admission.SelectedRouteEvents) != 1 || len(admission.SelectedRouteEvents[0].DerivedRecipients) != 0 {
+		t.Fatalf("selected route events = %#v, want concrete template source without route rejected", admission.SelectedRouteEvents)
 	}
 }
 
 func TestSelectedContractAdmissionsRejectConflictingExplicitTemplateIdentity(t *testing.T) {
 	source := testContractFrontierTemplateConnectSource()
 	frontierPlan := testRunForkPlan("producer/inst-1/scan.requested", store.RunForkPendingClassificationPending, "node", "source-node")
-	frontierPlan.PendingWork[0].FlowInstance = "unrelated/inst-1"
+	frontierPlan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "unrelated", FlowInstance: "unrelated/inst-1"}
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              frontierPlan,
 		Source:            source,
@@ -139,7 +140,7 @@ func TestSelectedContractAdmissionsRejectConflictingExplicitTemplateIdentity(t *
 	}
 
 	historyPlan := testRunForkPlan("producer/inst-1/scan.requested", store.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
-	historyPlan.PendingWork[0].FlowInstance = "unrelated/inst-1"
+	historyPlan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "unrelated", FlowInstance: "unrelated/inst-1"}
 	historyFrontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              historyPlan,
 		Source:            source,
@@ -164,7 +165,7 @@ func TestSelectedContractAdmissionsRejectConflictingExplicitTemplateIdentity(t *
 
 func TestAdmitSelectedContractRouteHistoryConnectRejectsUnrelatedTemplateSameLeaf(t *testing.T) {
 	plan := testRunForkPlan("unrelated/inst-1/scan.requested", store.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
-	plan.PendingWork[0].FlowInstance = "unrelated/inst-1"
+	plan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "unrelated", FlowInstance: "unrelated/inst-1"}
 	source := testContractFrontierTemplateConnectSource()
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
@@ -240,7 +241,7 @@ func TestAdmitSelectedContractRouteHistoryDoesNotDuplicateFrontierRecipients(t *
 
 func TestAdmitSelectedContractRouteHistoryClassifiesDynamicFlowInstances(t *testing.T) {
 	plan := testRunForkPlan("review/inst-1/task.started", store.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
-	plan.PendingWork[0].FlowInstance = "review/inst-1"
+	plan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "review", FlowInstance: "review/inst-1"}
 	source := testContractFrontierTemplateSource()
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,

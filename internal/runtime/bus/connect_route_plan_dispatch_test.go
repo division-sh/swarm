@@ -476,7 +476,10 @@ func TestEventBusPublish_RootConnectRoutePlanDoesNotCaptureChildScopedSameNameEv
 		0,
 		"",
 		"",
-		events.EnvelopeForFlowInstance(events.EventEnvelope{}, "producer/child-1"),
+		events.EnvelopeForSourceRoute(
+			events.EnvelopeForFlowInstance(events.EventEnvelope{}, "consumer/inst-9"),
+			events.RouteIdentity{FlowID: "child", FlowInstance: "child"},
+		),
 		time.Now().UTC(),
 	)
 

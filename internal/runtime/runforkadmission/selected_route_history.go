@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -49,7 +50,7 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if len(connectIssues) != 0 {
 		return store.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission connect routes: %#v", connectIssues)
 	}
-	routeEvents := selectedRouteHistoryEvents(routeTable, connectPlans, selectedRouteHistoryEventEvidence(req.Source, req.Plan, req.FrontierAdmission))
+	routeEvents := selectedRouteHistoryEvents(routeTable, connectPlans, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
 	dynamicFlowInstances := selectedRouteHistoryDynamicFlowInstances(req.Source, req.Plan, req.FrontierAdmission)
 	blockers := []store.RunForkUnsupportedBlocker{{
 		Code:    store.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
@@ -104,10 +105,10 @@ func selectedRouteHistoryHasSourceRouteFacts(plan store.RunForkPlan) bool {
 type selectedRouteHistoryEvent struct {
 	sourceEventID string
 	eventName     string
-	flowInstance  string
+	sourceRoute   events.RouteIdentity
 }
 
-func selectedRouteHistoryEventEvidence(source semanticview.Source, plan store.RunForkPlan, frontier store.RunForkContractFrontierAdmission) []selectedRouteHistoryEvent {
+func selectedRouteHistoryEventEvidence(plan store.RunForkPlan, frontier store.RunForkContractFrontierAdmission) []selectedRouteHistoryEvent {
 	frontierEventIDs := map[string]struct{}{}
 	for _, event := range frontier.FrontierEvents {
 		if sourceEventID := strings.TrimSpace(event.SourceEventID); sourceEventID != "" {
@@ -115,14 +116,10 @@ func selectedRouteHistoryEventEvidence(source semanticview.Source, plan store.Ru
 		}
 	}
 	seen := map[string]selectedRouteHistoryEvent{}
-	add := func(sourceEventID, eventName, flowInstance string) {
+	add := func(sourceEventID, eventName string, sourceRoute events.RouteIdentity) {
 		sourceEventID = strings.TrimSpace(sourceEventID)
 		eventName = strings.TrimSpace(eventName)
-		effectiveFlowInstances := contractFrontierEffectiveFlowInstances(source, eventName, []string{flowInstance})
-		flowInstance = ""
-		if len(effectiveFlowInstances) > 0 {
-			flowInstance = effectiveFlowInstances[0]
-		}
+		sourceRoute = sourceRoute.Normalized()
 		if eventName == "" {
 			return
 		}
@@ -133,12 +130,12 @@ func selectedRouteHistoryEventEvidence(source semanticview.Source, plan store.Ru
 		if key == "" {
 			key = eventName
 		}
-		seen[key] = selectedRouteHistoryEvent{sourceEventID: sourceEventID, eventName: eventName, flowInstance: flowInstance}
+		seen[key] = selectedRouteHistoryEvent{sourceEventID: sourceEventID, eventName: eventName, sourceRoute: sourceRoute}
 	}
-	add(plan.ForkPoint.EventID, plan.ForkPoint.EventName, "")
+	add(plan.ForkPoint.EventID, plan.ForkPoint.EventName, events.RouteIdentity{})
 	for _, item := range plan.PendingWork {
 		if strings.TrimSpace(item.Classification) == store.RunForkPendingClassificationDeliveredCompleted {
-			add(item.EventID, item.EventName, item.FlowInstance)
+			add(item.EventID, item.EventName, item.SourceRoute)
 		}
 	}
 	keys := make(map[string]struct{}, len(seen))
@@ -156,11 +153,7 @@ func selectedRouteHistoryEventEvidence(source semanticview.Source, plan store.Ru
 func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectPlans []runtimepinrouting.ConnectRoutePlan, events []selectedRouteHistoryEvent) []store.RunForkSelectedContractRouteEvent {
 	out := make([]store.RunForkSelectedContractRouteEvent, 0, len(events))
 	for _, event := range events {
-		flowInstances := []string(nil)
-		if event.flowInstance != "" {
-			flowInstances = []string{event.flowInstance}
-		}
-		routeKeys, connectOwned := contractFrontierRouteKeys(event.eventName, flowInstances, connectPlans)
+		routeKeys, connectOwned := contractFrontierRouteKeys(event.eventName, event.sourceRoute, connectPlans)
 		out = append(out, store.RunForkSelectedContractRouteEvent{
 			SourceEventID:     event.sourceEventID,
 			EventName:         event.eventName,
@@ -180,7 +173,7 @@ func selectedRouteHistoryDynamicFlowInstances(source semanticview.Source, plan s
 		}
 	}
 	for _, item := range plan.PendingWork {
-		add(item.FlowInstance)
+		add(item.SourceRoute.Normalized().FlowInstance)
 	}
 	for _, event := range frontier.FrontierEvents {
 		for _, flowInstance := range event.SourceFlowInstances {
