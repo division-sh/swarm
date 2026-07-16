@@ -12,11 +12,14 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/runbundle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 type SelectedContractActivationStore interface {
 	LoadRunForkSelectedContractBinding(context.Context, string) (store.RunForkSelectedContractBinding, bool, error)
 	RequireRunForkSelectedContractBinding(context.Context, string) (store.RunForkSelectedContractBinding, error)
+	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
 	LoadRunForkSelectedContractRouteRecovery(context.Context, string) (store.RunForkSelectedContractRouteRecovery, bool, error)
 	PlanRunFork(context.Context, store.RunForkPlanRequest) (store.RunForkPlan, error)
 	ActivateRunFork(context.Context, store.RunForkActivateRequest) (store.RunForkActivation, error)
@@ -68,11 +71,31 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if req.SourceLoader == nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("selected-contract activation gate requires selected source loader")
 	}
+	forkBundleIdentity, err := req.Store.LoadRunBundleAvailability(ctx, forkRunID)
+	if err != nil {
+		return SelectedContractActivationGateResult{}, fmt.Errorf("load selected-contract fork bundle identity: %w", err)
+	}
+	expectedBundleHash := strings.TrimSpace(forkBundleIdentity.BundleHash)
+	if expectedBundleHash == "" {
+		return SelectedContractActivationGateResult{}, fmt.Errorf("%s: selected-contract fork run %s has no persisted bundle_hash", runbundle.CodeBundleDataIntegrityError, forkRunID)
+	}
+	expectedBundleSource, err := storerunlifecycle.CanonicalBundleSource(forkBundleIdentity.BundleSource)
+	if err != nil {
+		return SelectedContractActivationGateResult{}, fmt.Errorf("%s: selected-contract fork run %s has invalid bundle_source: %w", runbundle.CodeBundleDataIntegrityError, forkRunID, err)
+	}
+	if forkBundleIdentity.DataIntegrityError() {
+		return SelectedContractActivationGateResult{}, fmt.Errorf("%s: %s", runbundle.CodeBundleDataIntegrityError, forkBundleIdentity.DetailString())
+	}
+	if expectedBundleSource != storerunlifecycle.BundleSourceEphemeral && expectedBundleSource != storerunlifecycle.BundleSourcePersisted {
+		return SelectedContractActivationGateResult{}, fmt.Errorf("%s: selected-contract fork run %s has unavailable bundle_source %s", runbundle.CodeBundleUnavailable, forkRunID, expectedBundleSource)
+	}
 
 	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
-		SourceRunID: binding.SourceRunID,
-		BundleHash:  binding.ContractSelection.BundleHash,
-		Selection:   binding.ContractSelection,
+		SourceRunID:          binding.SourceRunID,
+		BundleHash:           expectedBundleHash,
+		ExpectedBundleHash:   expectedBundleHash,
+		ExpectedBundleSource: expectedBundleSource,
+		Selection:            binding.ContractSelection,
 	})
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("load selected semantic source for activation gate: %w", err)
@@ -144,7 +167,8 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		SourceRunID:       binding.SourceRunID,
-		BundleHash:        binding.ContractSelection.BundleHash,
+		BundleHash:        expectedBundleHash,
+		BundleSource:      expectedBundleSource,
 		BindingReader:     req.Store,
 		SourceLoader:      req.SourceLoader,
 		FrontierAdmission: frontier,

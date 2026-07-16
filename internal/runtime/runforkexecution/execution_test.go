@@ -2210,7 +2210,7 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 	}
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
-	materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded.Source, selection, sourceRunID, sourceEventID)
+	materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded, selection, sourceRunID, sourceEventID)
 
 	result, err := ActivateSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
 		ForkRunID:           materialized.ForkRunID,
@@ -2333,7 +2333,7 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	}
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
-	materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded.Source, selection, sourceRunID, sourceEventID)
+	materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded, selection, sourceRunID, sourceEventID)
 	seedSelectedExecutionPostForkSourceEvent(t, db, sourceRunID, afterEventID, entityID, at.Add(time.Second))
 	seedSelectedExecutionSourceReplayScopeMarker(t, db, sourceRunID, afterEventID, "replay_scope_direct", at.Add(time.Second))
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEventDeliveries)
@@ -3645,7 +3645,7 @@ func materializeSelectedExecutionForkForTest(
 	t *testing.T,
 	ctx context.Context,
 	pg *store.PostgresStore,
-	source semanticview.Source,
+	loaded LoadedSelectedContractSource,
 	selection store.RunForkContractSelection,
 	sourceRunID string,
 	sourceEventID string,
@@ -3656,13 +3656,13 @@ func materializeSelectedExecutionForkForTest(
 		t.Fatalf("PlanRunFork: %v", err)
 	}
 	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{
-		Plan: plan, Source: source, ContractSelection: selection,
+		Plan: plan, Source: loaded.Source, ContractSelection: selection,
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
 	}
 	routeAdmission, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{
-		Plan: plan, Source: source, ContractSelection: selection, FrontierAdmission: frontier,
+		Plan: plan, Source: loaded.Source, ContractSelection: selection, FrontierAdmission: frontier,
 	})
 	if err != nil {
 		t.Fatalf("AdmitSelectedContractRouteHistory: %v", err)
@@ -3680,7 +3680,7 @@ func materializeSelectedExecutionForkForTest(
 		t.Fatalf("BuildSelectedContractExecutionModel: %v", err)
 	}
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, store.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID, At: sourceEventID, ContractSelection: selection,
+		SourceRunID: sourceRunID, At: sourceEventID, ContractSelection: selection, BundleHash: loaded.BundleHash, BundleSource: loaded.BundleSource,
 		FrontierAdmission: frontier, RouteTopology: topology, RecipientPlanning: *model.RecipientPlanning,
 	})
 	if err != nil {

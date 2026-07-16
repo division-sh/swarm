@@ -815,6 +815,40 @@ type fakeSelectedContractSourceLoader struct {
 	requestedSelection store.RunForkContractSelection
 }
 
+func TestLoadRunForkSelectedContractSourceRejectsExpectedIdentityMismatch(t *testing.T) {
+	selection := testContractSelection()
+	for _, tc := range []struct {
+		name           string
+		expectedHash   string
+		expectedSource string
+		want           string
+	}{
+		{name: "bundle hash", expectedHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", expectedSource: "ephemeral", want: "bundle_hash mismatch"},
+		{name: "bundle source", expectedHash: runForkTestBundleHash, expectedSource: "persisted", want: "bundle_source mismatch"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cleaned := false
+			loaded := testLoadedSelectedSource(selection)
+			loaded.Cleanup = func() error {
+				cleaned = true
+				return nil
+			}
+			loader := &fakeSelectedContractSourceLoader{loaded: loaded}
+			_, err := loadRunForkSelectedContractSource(context.Background(), loader, SelectedContractSourceLoadRequest{
+				ExpectedBundleHash:   tc.expectedHash,
+				ExpectedBundleSource: tc.expectedSource,
+				Selection:            selection,
+			})
+			if err == nil || !strings.Contains(err.Error(), runbundle.CodeBundleDataIntegrityError) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %s %s", err, runbundle.CodeBundleDataIntegrityError, tc.want)
+			}
+			if !cleaned {
+				t.Fatal("mismatched selected source was not cleaned up")
+			}
+		})
+	}
+}
+
 func (l *fakeSelectedContractSourceLoader) LoadRunForkSelectedContractSource(_ context.Context, selection store.RunForkContractSelection) (LoadedSelectedContractSource, error) {
 	l.requestedSelection = selection
 	if l.err != nil {

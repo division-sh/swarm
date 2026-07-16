@@ -59,9 +59,11 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		return SelectedContractExecutionResult{}, err
 	}
 	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
-		SourceRunID: req.SourceRunID,
-		BundleHash:  req.BundleHash,
-		Selection:   selection,
+		SourceRunID:          req.SourceRunID,
+		BundleHash:           req.BundleHash,
+		ExpectedBundleHash:   req.BundleHash,
+		ExpectedBundleSource: req.BundleSource,
+		Selection:            selection,
 	})
 	if err != nil {
 		return SelectedContractExecutionResult{}, fmt.Errorf("load selected semantic source for execution: %w", err)
@@ -75,12 +77,6 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	materializationBundleSource := strings.TrimSpace(loadedSource.BundleSource)
 	if materializationBundleHash == "" || materializationBundleSource == "" {
 		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract source loader returned incomplete bundle identity")
-	}
-	if requested := strings.TrimSpace(req.BundleHash); requested != "" && requested != materializationBundleHash {
-		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract bundle_hash mismatch: request %s loaded %s", requested, materializationBundleHash)
-	}
-	if requested := strings.TrimSpace(req.BundleSource); requested != "" && requested != materializationBundleSource {
-		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract bundle_source mismatch: request %s loaded %s", requested, materializationBundleSource)
 	}
 	selectedScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, materializationBundleHash)
 	if err != nil {
@@ -175,6 +171,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		ForkRunID:         materialization.ForkRunID,
 		SourceRunID:       plan.SourceRunID,
 		BundleHash:        materializationBundleHash,
+		BundleSource:      materializationBundleSource,
 		BindingReader:     req.Store,
 		SourceLoader:      req.SourceLoader,
 		FrontierAdmission: frontier,

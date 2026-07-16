@@ -31,9 +31,11 @@ type SelectedContractSourceRequestLoader interface {
 }
 
 type SelectedContractSourceLoadRequest struct {
-	SourceRunID string
-	BundleHash  string
-	Selection   store.RunForkContractSelection
+	SourceRunID          string
+	BundleHash           string
+	ExpectedBundleHash   string
+	ExpectedBundleSource string
+	Selection            store.RunForkContractSelection
 }
 
 type LoadedSelectedContractSource struct {
@@ -277,10 +279,31 @@ func compileSelectedContractSource(source semanticview.Source) (semanticview.Sou
 }
 
 func loadRunForkSelectedContractSource(ctx context.Context, loader SelectedContractSourceLoader, req SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {
+	var (
+		loaded LoadedSelectedContractSource
+		err    error
+	)
 	if requestLoader, ok := loader.(SelectedContractSourceRequestLoader); ok {
-		return requestLoader.LoadRunForkSelectedContractSourceForRequest(ctx, req)
+		loaded, err = requestLoader.LoadRunForkSelectedContractSourceForRequest(ctx, req)
+	} else {
+		loaded, err = loader.LoadRunForkSelectedContractSource(ctx, req.Selection)
 	}
-	return loader.LoadRunForkSelectedContractSource(ctx, req.Selection)
+	if err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	expectedHash := strings.TrimSpace(req.ExpectedBundleHash)
+	loadedHash := strings.TrimSpace(loaded.BundleHash)
+	if expectedHash != "" && expectedHash != loadedHash {
+		cleanupLoadedSelectedContractSource(loaded)
+		return LoadedSelectedContractSource{}, fmt.Errorf("%s: selected-contract bundle_hash mismatch: expected %s loaded %s", runbundle.CodeBundleDataIntegrityError, expectedHash, loadedHash)
+	}
+	expectedSource := strings.TrimSpace(req.ExpectedBundleSource)
+	loadedBundleSource := strings.TrimSpace(loaded.BundleSource)
+	if expectedSource != "" && expectedSource != loadedBundleSource {
+		cleanupLoadedSelectedContractSource(loaded)
+		return LoadedSelectedContractSource{}, fmt.Errorf("%s: selected-contract bundle_source mismatch: expected %s loaded %s", runbundle.CodeBundleDataIntegrityError, expectedSource, loadedBundleSource)
+	}
+	return loaded, nil
 }
 
 func cleanupLoadedSelectedContractSource(source LoadedSelectedContractSource) {
@@ -293,6 +316,7 @@ type SelectedContractExecutionAdmissionRequest struct {
 	ForkRunID         string
 	SourceRunID       string
 	BundleHash        string
+	BundleSource      string
 	BindingReader     SelectedContractBindingReader
 	SourceLoader      SelectedContractSourceLoader
 	FrontierAdmission store.RunForkContractFrontierAdmission
@@ -323,9 +347,11 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 		return store.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("selected-contract execution admission requires selected source loader bound to %s", store.RunForkSelectedContractBindingOwner)
 	}
 	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
-		SourceRunID: firstNonEmpty(req.SourceRunID, binding.SourceRunID),
-		BundleHash:  req.BundleHash,
-		Selection:   binding.ContractSelection,
+		SourceRunID:          firstNonEmpty(req.SourceRunID, binding.SourceRunID),
+		BundleHash:           req.BundleHash,
+		ExpectedBundleHash:   req.BundleHash,
+		ExpectedBundleSource: req.BundleSource,
+		Selection:            binding.ContractSelection,
 	})
 	if err != nil {
 		return store.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("load selected semantic source for execution admission: %w", err)
