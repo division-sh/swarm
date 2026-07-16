@@ -177,10 +177,15 @@ func runHarness(ctx context.Context, req Request, envelope harnessEnvelope, fuel
 		return harnessWireResult{}, err
 	}
 	ctxDone := ctx.Done()
-	root, err := materializedArtifactDir()
+	root, engine, module, err := newInterpreterModuleForContext(ctx)
 	if err != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return harnessWireResult{}, contextErr
+		}
 		return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
 	}
+	defer engine.Close()
+	defer module.Close()
 	input, err := json.Marshal(envelope)
 	if err != nil {
 		return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
@@ -197,14 +202,28 @@ func runHarness(ctx context.Context, req Request, envelope harnessEnvelope, fuel
 		return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
 	}
 
-	engine, module, err := newInterpreterModule(root)
-	if err != nil {
-		return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
-	}
-	defer engine.Close()
-	defer module.Close()
 	store := wasmtime.NewStore(engine)
 	store.SetEpochDeadline(1)
+	callDone := make(chan struct{})
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		select {
+		case <-ctxDone:
+			engine.IncrementEpoch()
+		case <-callDone:
+		}
+	}()
+	watcherStopped := false
+	stopWatcher := func() {
+		if watcherStopped {
+			return
+		}
+		watcherStopped = true
+		close(callDone)
+		<-watcherDone
+	}
+	defer stopWatcher()
 	store.Limiter(memoryLimitBytes(req.MemoryPages), -1, -1, -1, -1)
 	if err := store.SetFuel(fuel); err != nil {
 		return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeFuel, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
@@ -244,16 +263,8 @@ func runHarness(ctx context.Context, req Request, envelope harnessEnvelope, fuel
 	if start == nil {
 		return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("embedded interpreter missing _start")}
 	}
-	callDone := make(chan struct{})
-	go func() {
-		select {
-		case <-ctxDone:
-			engine.IncrementEpoch()
-		case <-callDone:
-		}
-	}()
 	_, callErr := start.Call(store)
-	close(callDone)
+	stopWatcher()
 	if err := ctx.Err(); err != nil {
 		return harnessWireResult{}, err
 	}
@@ -280,6 +291,57 @@ func runHarness(ctx context.Context, req Request, envelope harnessEnvelope, fuel
 		return harnessWireResult{}, classifyPythonCallError(req, computemodule.CodeTrap, fmt.Errorf("%w; stderr=%s", callErr, strings.TrimSpace(string(stderr))))
 	}
 	return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("python harness emitted invalid response stdout=%q stderr=%q", strings.TrimSpace(string(stdout)), strings.TrimSpace(string(stderr)))}
+}
+
+type interpreterModuleResult struct {
+	root   string
+	engine *wasmtime.Engine
+	module *wasmtime.Module
+	err    error
+}
+
+func newInterpreterModuleForContext(ctx context.Context) (string, *wasmtime.Engine, *wasmtime.Module, error) {
+	result := make(chan interpreterModuleResult)
+	go func() {
+		root, err := materializedArtifactDir()
+		if err != nil {
+			select {
+			case result <- interpreterModuleResult{err: err}:
+			case <-ctx.Done():
+			}
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		engine, module, err := newInterpreterModule(root)
+		prepared := interpreterModuleResult{root: root, engine: engine, module: module, err: err}
+		select {
+		case result <- prepared:
+		case <-ctx.Done():
+			closeInterpreterModule(prepared)
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return "", nil, nil, ctx.Err()
+	case prepared := <-result:
+		if err := ctx.Err(); err != nil {
+			closeInterpreterModule(prepared)
+			return "", nil, nil, err
+		}
+		return prepared.root, prepared.engine, prepared.module, prepared.err
+	}
+}
+
+func closeInterpreterModule(prepared interpreterModuleResult) {
+	if prepared.module != nil {
+		prepared.module.Close()
+	}
+	if prepared.engine != nil {
+		prepared.engine.Close()
+	}
 }
 
 func newInterpreterModule(root string) (*wasmtime.Engine, *wasmtime.Module, error) {
