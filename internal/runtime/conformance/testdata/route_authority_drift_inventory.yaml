@@ -648,6 +648,7 @@ seam_families:
       - internal/runtime/manager/recovery_test.go
       - internal/runtime/manager/runtime.go
       - internal/runtime/bus/agent_subscription_admission_test.go
+      - internal/runtime/runforkexecution/agent_runtime_materialization_test.go
       - internal/store/postgres_store_additional_test.go
       - internal/store/sqlite_runtime_test.go
     search_dimensions: [flow_owned_subscription_pattern_authority, live_agent_subscription_route_authority, pending_agent_subscription_recovery_authority]
