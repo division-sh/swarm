@@ -263,7 +263,10 @@ func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
 		if _, ok := allowed[key]; !ok {
 			return fmt.Errorf("tool schema field %q is unsupported", key)
 		}
-		value := node.Content[index+1]
+		value, err := resolveToolSchemaYAMLValue(node.Content[index+1])
+		if err != nil {
+			return fmt.Errorf("tool schema field %q: %w", key, err)
+		}
 		if value.Kind == yaml.ScalarNode && strings.EqualFold(strings.TrimSpace(value.Tag), "!!null") {
 			return fmt.Errorf("tool schema field %q must not be null", key)
 		}
@@ -280,6 +283,27 @@ func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
 	}
 	*s = decoded
 	return nil
+}
+
+func resolveToolSchemaYAMLValue(node *yaml.Node) (*yaml.Node, error) {
+	seen := make(map[*yaml.Node]struct{})
+	for depth := 0; node != nil && node.Kind == yaml.AliasNode; depth++ {
+		if depth >= MaxToolInputSchemaDepth {
+			return nil, fmt.Errorf("YAML alias chain exceeds maximum depth %d", MaxToolInputSchemaDepth)
+		}
+		if _, exists := seen[node]; exists {
+			return nil, fmt.Errorf("YAML alias cycle")
+		}
+		seen[node] = struct{}{}
+		if node.Alias == nil {
+			return nil, fmt.Errorf("YAML alias has no target")
+		}
+		node = node.Alias
+	}
+	if node == nil {
+		return nil, fmt.Errorf("YAML value is missing")
+	}
+	return node, nil
 }
 
 func (d *PackInterfaceDefinition) UnmarshalYAML(node *yaml.Node) error {

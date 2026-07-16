@@ -2,6 +2,7 @@ package runforkexecution
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -18,6 +20,47 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 )
+
+func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredecessorRetirement(t *testing.T) {
+	eventBus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "fork-agent", Generation: 1}
+	newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "fork-agent", Generation: 2}
+	eventBus.ReplaceAgentRoute(oldToken, events.EventType("item.received"))
+	oldEvent := eventtest.RuntimeControl("old-work", events.EventType("item.received"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
+	if err := eventBus.Publish(context.Background(), oldEvent); err != nil {
+		t.Fatalf("publish predecessor event: %v", err)
+	}
+	newRoute := eventBus.ReplaceAgentRoute(newToken, events.EventType("item.received"))
+	newEvent := eventtest.RuntimeControl("new-work", events.EventType("item.received"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
+	if err := eventBus.Publish(context.Background(), newEvent); err != nil {
+		t.Fatalf("publish successor event: %v", err)
+	}
+	select {
+	case <-newRoute:
+	case <-time.After(time.Second):
+		t.Fatal("successor event was not dequeued")
+	}
+
+	runtime := &selectedContractAgentRuntime{manager: runtimemanager.NewAgentManager(nil, nil)}
+	waitCtx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	if err := runtime.WaitForQuiescence(waitCtx, eventBus); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("WaitForQuiescence with current route work = %v, want deadline exceeded", err)
+	}
+	eventBus.CompleteAgentRouteDelivery(oldToken)
+	if got := eventBus.PendingAgentRouteDeliveries(); got != 1 {
+		t.Fatalf("late predecessor completion changed current pending count to %d", got)
+	}
+	eventBus.CompleteAgentRouteDelivery(newToken)
+	waitCtx, cancel = context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := runtime.WaitForQuiescence(waitCtx, eventBus); err != nil {
+		t.Fatalf("WaitForQuiescence after current route settlement: %v", err)
+	}
+}
 
 type selectedContractSelfReleaseScopeProbe struct {
 	want runtimeauthoractivity.Scope

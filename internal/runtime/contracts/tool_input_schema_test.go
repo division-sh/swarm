@@ -121,14 +121,84 @@ func TestToolInputSchemaRejectsExplicitNullForEveryKeyword(t *testing.T) {
 		{name: "nested enum", keyword: "enum", body: "type: object\nproperties:\n  child:\n    type: string\n    enum: null\n"},
 	}
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var schema ToolInputSchema
-			err := yaml.Unmarshal([]byte(tc.body), &schema)
-			want := fmt.Sprintf("tool schema field %q must not be null", tc.keyword)
-			if err == nil || !strings.Contains(err.Error(), want) {
-				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, want)
-			}
-		})
+		for _, form := range []string{"direct", "alias"} {
+			t.Run(tc.name+"/"+form, func(t *testing.T) {
+				var schema ToolInputSchema
+				var err error
+				if form == "direct" {
+					err = yaml.Unmarshal([]byte(tc.body), &schema)
+				} else {
+					aliased := strings.Replace(tc.body, tc.keyword+": null", tc.keyword+": *nil", 1)
+					body := "null_anchor: &nil null\nschema:\n  " + strings.ReplaceAll(aliased, "\n", "\n  ")
+					var document struct {
+						Schema ToolInputSchema `yaml:"schema"`
+					}
+					err = yaml.Unmarshal([]byte(body), &document)
+					schema = document.Schema
+				}
+				want := fmt.Sprintf("tool schema field %q must not be null", tc.keyword)
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("yaml.Unmarshal error = %v, want %q; schema = %#v", err, want, schema)
+				}
+			})
+		}
+	}
+}
+
+func TestToolInputSchemaAliasAdmissionIsBoundedAndPreservesNonNullAliases(t *testing.T) {
+	var document struct {
+		Schema ToolInputSchema `yaml:"schema"`
+	}
+	if err := yaml.Unmarshal([]byte(`
+child_schema: &child
+  type: string
+  enum: [approved]
+schema:
+  type: object
+  properties:
+    child: *child
+`), &document); err != nil {
+		t.Fatalf("decode non-null schema alias: %v", err)
+	}
+	child := document.Schema.Properties["child"]
+	if child.Type != "string" || len(child.Enum) != 1 {
+		t.Fatalf("non-null schema alias = %#v", child)
+	}
+
+	if err := yaml.Unmarshal([]byte(`
+null_anchor: &nil null
+child_schema: &child
+  type: string
+  enum: *nil
+schema:
+  type: object
+  properties:
+    child: *child
+`), &document); err == nil || !strings.Contains(err.Error(), `tool schema field "enum" must not be null`) {
+		t.Fatalf("nested schema alias error = %v", err)
+	}
+
+	cycleA := &yaml.Node{Kind: yaml.AliasNode}
+	cycleB := &yaml.Node{Kind: yaml.AliasNode}
+	cycleA.Alias = cycleB
+	cycleB.Alias = cycleA
+	cycleSchema := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+		{Kind: yaml.ScalarNode, Tag: "!!str", Value: "enum"}, cycleA,
+	}}
+	var schema ToolInputSchema
+	if err := schema.UnmarshalYAML(cycleSchema); err == nil || !strings.Contains(err.Error(), "YAML alias cycle") {
+		t.Fatalf("alias-cycle error = %v", err)
+	}
+
+	alias := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}
+	for depth := 0; depth <= MaxToolInputSchemaDepth; depth++ {
+		alias = &yaml.Node{Kind: yaml.AliasNode, Alias: alias}
+	}
+	deepSchema := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+		{Kind: yaml.ScalarNode, Tag: "!!str", Value: "enum"}, alias,
+	}}
+	if err := schema.UnmarshalYAML(deepSchema); err == nil || !strings.Contains(err.Error(), "alias chain exceeds maximum depth") {
+		t.Fatalf("deep-alias error = %v", err)
 	}
 }
 

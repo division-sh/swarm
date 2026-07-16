@@ -449,6 +449,18 @@ func (eb *EventBus) CompleteAgentRouteDelivery(token runtimeeffects.LifecycleTok
 	eb.agentRouteDeliveryMu.Unlock()
 }
 
+// retireAgentRouteDeliveries abandons work owned by one detached generation.
+// A late predecessor completion remains harmless because successor work is
+// counted under a different lifecycle token.
+func (eb *EventBus) retireAgentRouteDeliveries(token runtimeeffects.LifecycleToken) {
+	if eb == nil || !token.Valid() {
+		return
+	}
+	eb.agentRouteDeliveryMu.Lock()
+	delete(eb.agentRouteDeliveries, token)
+	eb.agentRouteDeliveryMu.Unlock()
+}
+
 // PendingAgentRouteDeliveries includes deliveries already dequeued by an agent
 // loop but not yet settled, which channel length and manager in-flight state
 // cannot observe atomically.
