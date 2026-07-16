@@ -756,6 +756,88 @@ func TestRunServeRuntimeDBLoadedExecutesDockerManagerRecovery(t *testing.T) {
 	}
 }
 
+func TestRunServeRuntimeDiskLoadedRunForkSupportedSurfaceExecutesAndStampsEphemeralIdentity(t *testing.T) {
+	_, db, _ := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	ctx := context.Background()
+	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
+	bundle := loadWorkflowValidationFixtureBundle(t, contractsPath)
+	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	}
+	bootIdentity, err := runtimecontracts.BootBundleIdentity(bundle)
+	if err != nil {
+		t.Fatalf("BootBundleIdentity: %v", err)
+	}
+
+	serve := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		ContractsPath:      contractsPath,
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		StoreModeSet:       true,
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: true,
+		Verbose:            true,
+	})
+	serve.waitForReadyLine()
+	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, serve.outputString()) + "/v1/rpc"
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	at := time.Unix(1700000335, 0).UTC()
+	seedRunForkSelectedExecutionSourceEvent(t, db, sourceRunID, entityID, sourceEventID, "task.requested", "complete-task", "pending", "Serve Disk Loaded Entity", "serve-disk-loaded-test", at)
+	if _, err := db.ExecContext(ctx, `
+		UPDATE runs
+		SET bundle_hash = $2,
+		    bundle_source = $3
+		WHERE run_id = $1::uuid
+	`, sourceRunID, projection.BundleHash, storerunlifecycle.BundleSourcePersisted); err != nil {
+		t.Fatalf("stamp source run bundle identity: %v", err)
+	}
+
+	response := requestServedJSONRPCWithTimeout(t, endpoint, "run.fork", map[string]any{
+		"source_run_id":         sourceRunID,
+		"fork_event_id":         sourceEventID,
+		"confirm_source_freeze": true,
+		"idempotency_key":       "disk-loaded-serve-fork",
+	}, 20*time.Second)
+	if response.Error != nil {
+		t.Fatalf("run.fork error = %#v\nserve output:\n%s", response.Error, serve.outputString())
+	}
+	var result apiv1.RunForkExecutionResult
+	if err := json.Unmarshal(response.Result, &result); err != nil {
+		t.Fatalf("decode run.fork result: %v\n%s", err, string(response.Result))
+	}
+	if result.SourceRunID != sourceRunID || result.BundleHash != projection.BundleHash || result.ExecutedEventCount != 1 {
+		t.Fatalf("run.fork result = %#v, want source=%s bundle_hash=%s executed=1", result, sourceRunID, projection.BundleHash)
+	}
+	if !result.SourceFrozen || result.SourceRunStatus != store.RunForkSourceFrozenStatus || result.ForkRunID == "" {
+		t.Fatalf("run.fork source/fork outcome = %#v, want frozen source and materialized fork", result)
+	}
+
+	var forkBundleHash, forkBundleSource, forkBundleFingerprint string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(bundle_hash, ''), COALESCE(bundle_source, ''), COALESCE(bundle_fingerprint, '')
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, result.ForkRunID).Scan(&forkBundleHash, &forkBundleSource, &forkBundleFingerprint); err != nil {
+		t.Fatalf("load fork run bundle identity: %v", err)
+	}
+	if forkBundleHash != projection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourceEphemeral || forkBundleFingerprint != bootIdentity.Fingerprint {
+		t.Fatalf("fork bundle identity = hash:%q source:%q fingerprint:%q, want disk-loaded %s/%s/%s", forkBundleHash, forkBundleSource, forkBundleFingerprint, projection.BundleHash, storerunlifecycle.BundleSourceEphemeral, bootIdentity.Fingerprint)
+	}
+
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
+	}
+}
+
 func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersistedIdentity(t *testing.T) {
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
