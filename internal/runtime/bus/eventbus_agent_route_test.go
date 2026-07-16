@@ -77,3 +77,34 @@ func TestEventBusAgentRouteReplacementIsExactFreshAndTokenFenced(t *testing.T) {
 	default:
 	}
 }
+
+func TestEventBusAgentRouteDeliveryRemainsPendingAfterDequeueUntilCompletion(t *testing.T) {
+	eb, err := NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	token := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 1}
+	ch := eb.ReplaceAgentRoute(token, events.EventType("test.work"))
+	evt := eventtest.RuntimeControl("work-1", events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
+	if err := eb.deliverToAgents(context.Background(), evt, []string{"agent-a"}); err != nil {
+		t.Fatalf("deliver event: %v", err)
+	}
+	if got := eb.PendingAgentRouteDeliveries(); got != 1 {
+		t.Fatalf("pending route deliveries after enqueue = %d, want 1", got)
+	}
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("route delivery was not dequeued")
+	}
+	if got := eb.PendingAgentDeliveries(); got != 0 {
+		t.Fatalf("channel-backed pending deliveries after dequeue = %d, want 0", got)
+	}
+	if got := eb.PendingAgentRouteDeliveries(); got != 1 {
+		t.Fatalf("tracked pending route deliveries after dequeue = %d, want 1", got)
+	}
+	eb.CompleteAgentRouteDelivery(token)
+	if got := eb.PendingAgentRouteDeliveries(); got != 0 {
+		t.Fatalf("pending route deliveries after completion = %d, want 0", got)
+	}
+}

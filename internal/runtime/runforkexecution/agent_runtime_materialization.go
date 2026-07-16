@@ -502,7 +502,7 @@ func (r *selectedContractAgentRuntime) WaitForQuiescence(ctx context.Context, bu
 		}
 		pending := 0
 		if bus != nil {
-			pending = bus.PendingAgentDeliveries()
+			pending = bus.PendingAgentDeliveries() + bus.PendingAgentRouteDeliveries()
 		}
 		if pending == 0 {
 			stable++

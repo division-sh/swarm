@@ -71,6 +71,8 @@ type EventBus struct {
 	outboxSweeperActive         bool
 	inFlightPublishes           atomic.Int64
 	inFlightEventIDs            map[string]int
+	agentRouteDeliveryMu        sync.Mutex
+	agentRouteDeliveries        map[runtimeeffects.LifecycleToken]int
 }
 
 type transactionRouteOverlayKey struct{}
@@ -201,6 +203,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		runtimeAgentDescriptors:     make(map[string]ActiveAgentDescriptor),
 		pendingInternalByID:         make(map[string][]events.DeliveryRoute),
 		pendingOutboxByID:           make(map[string][]pendingOutboxOperation),
+		agentRouteDeliveries:        make(map[runtimeeffects.LifecycleToken]int),
 		routeTable:                  routeTable,
 		store:                       store,
 		logger:                      opts.Logger,
@@ -498,6 +501,9 @@ func (eb *EventBus) ResetInMemoryState() error {
 	eb.routeTable = routeTable
 	eb.rebuildRoutePlanners()
 	eb.inFlightPublishes.Store(0)
+	eb.agentRouteDeliveryMu.Lock()
+	eb.agentRouteDeliveries = make(map[runtimeeffects.LifecycleToken]int)
+	eb.agentRouteDeliveryMu.Unlock()
 	return nil
 }
 
