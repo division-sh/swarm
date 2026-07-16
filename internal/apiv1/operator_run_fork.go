@@ -75,7 +75,6 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 		SourceRunID:         strings.TrimSpace(req.SourceRunID),
 		At:                  strings.TrimSpace(req.ForkEventID),
 		BundleHash:          strings.TrimSpace(req.BundleHash),
-		BundleSource:        storerunlifecycle.BundleSourcePersisted,
 		ConfirmSourceFreeze: req.ConfirmSourceFreeze,
 		SourceLoader:        e.SourceLoader,
 		ContractSelection:   selection,
