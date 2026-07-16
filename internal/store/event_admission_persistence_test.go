@@ -99,6 +99,34 @@ func TestEventAdmissionRejectsMalformedCompleteFactsBeforeEveryMutationParity(t 
 				return eventtest.PersistedProjection(eventID, "test.invalid", "agent-1", "task", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{EntityID: "not-an-entity-uuid", Scope: events.EventScopeEntity}, createdAt)
 			},
 		},
+		{
+			name: "target_and_target_set",
+			want: "cannot declare both target and target_set",
+			make: func(eventID, runID string, createdAt time.Time) events.Event {
+				target := events.RouteIdentity{FlowID: "target-flow", FlowInstance: "target-flow/one", EntityID: uuid.NewString()}
+				return eventtest.PersistedProjection(eventID, "test.invalid", "agent-1", "task", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{
+					EntityID: target.EntityID, FlowInstance: target.FlowInstance, Scope: events.EventScopeEntity,
+					Target: target, TargetSet: []events.RouteIdentity{{FlowID: "other-flow", FlowInstance: "other-flow/one", EntityID: uuid.NewString()}},
+				}, createdAt)
+			},
+		},
+		{
+			name: "unknown_scope",
+			want: `scope "workspace" is invalid`,
+			make: func(eventID, runID string, createdAt time.Time) events.Event {
+				return eventtest.PersistedProjection(eventID, "test.invalid", "agent-1", "task", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScope("workspace")}, createdAt)
+			},
+		},
+		{
+			name: "target_projection_mismatch",
+			want: "target route must exactly match",
+			make: func(eventID, runID string, createdAt time.Time) events.Event {
+				return eventtest.PersistedProjection(eventID, "test.invalid", "agent-1", "task", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{
+					EntityID: uuid.NewString(), FlowInstance: "target-flow/two", Scope: events.EventScopeEntity,
+					Target: events.RouteIdentity{FlowID: "target-flow", FlowInstance: "target-flow/one", EntityID: uuid.NewString()},
+				}, createdAt)
+			},
+		},
 	}
 
 	for _, backend := range []struct {

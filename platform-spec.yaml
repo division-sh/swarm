@@ -746,6 +746,14 @@ contract_formats:
         UTC microsecond precision before publication or selected-store persistence so
         the writer can persist the admitted timestamp exactly on both supported stores.
 
+        Event construction and bounded envelope projection MUST preserve a private,
+        deep-cloned raw envelope claim until admission. Admission validates that raw
+        claim before materializing the normalized admitted envelope; normalization
+        MUST NOT erase target/target_set conflicts, invalid declared scope, or a
+        target/top-level projection mismatch before validation. An omitted scope may
+        be derived from the validated entity/flow identity, but a present unsupported
+        or contradictory scope fails closed.
+
         task_id is an independent event-owned fact persisted in events.task_id.
         Payload is a separate immutable authored fact: admission, writers, duplicate
         comparison, and readback MUST NOT derive task_id from payload, inject task_id

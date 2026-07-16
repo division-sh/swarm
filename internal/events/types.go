@@ -308,6 +308,7 @@ type Event struct {
 	chainDepth      int
 	runID           string
 	parentEventID   string
+	envelopeClaim   EventEnvelope
 	envelope        EventEnvelope
 	deliveryContext DeliveryContext
 	createdAt       time.Time
@@ -409,7 +410,7 @@ func ProjectPayload(payload json.RawMessage) ProjectionChange {
 
 func ProjectEnvelope(envelope EventEnvelope) ProjectionChange {
 	return func(evt *Event) {
-		evt.envelope = envelope.Normalized()
+		evt.setEnvelopeClaim(envelope)
 	}
 }
 
@@ -507,10 +508,10 @@ func newEvent(class EventAdmissionClass, id string, eventType EventType, produce
 		chainDepth:     chainDepth,
 		runID:          strings.TrimSpace(runID),
 		parentEventID:  strings.TrimSpace(parentEventID),
-		envelope:       envelope.Normalized(),
 		createdAt:      createdAt,
 		executionMode:  executionmode.Live,
 	}
+	evt.setEnvelopeClaim(envelope)
 	if !evt.createdAt.IsZero() {
 		evt.createdAt = evt.createdAt.UTC()
 	}
@@ -588,11 +589,20 @@ func ValidateEnvelope(envelope EventEnvelope) error {
 }
 
 func validateEnvelope(envelope EventEnvelope, requirePersistentUUIDIdentity bool) error {
+	return validateEnvelopeFields(envelope, requirePersistentUUIDIdentity, false)
+}
+
+func validateEnvelopeClaim(envelope EventEnvelope, requirePersistentUUIDIdentity bool) error {
+	return validateEnvelopeFields(envelope, requirePersistentUUIDIdentity, true)
+}
+
+func validateEnvelopeFields(envelope EventEnvelope, requirePersistentUUIDIdentity, allowOmittedScope bool) error {
 	entityID := strings.TrimSpace(envelope.EntityID)
 	flowInstance := strings.Trim(strings.TrimSpace(envelope.FlowInstance), "/")
-	scope := EventScope(strings.TrimSpace(string(envelope.Scope)))
-	if scope != EventScopeGlobal && scope != EventScopeFlow && scope != EventScopeEntity {
-		return fmt.Errorf("event scope %q is invalid", scope)
+	rawScope := EventScope(strings.TrimSpace(string(envelope.Scope)))
+	scope := normalizeEventScope(rawScope)
+	if scope == "" && (!allowOmittedScope || rawScope != "") {
+		return fmt.Errorf("event scope %q is invalid", rawScope)
 	}
 	source := envelope.Source.Normalized()
 	target := envelope.Target.Normalized()
@@ -621,7 +631,7 @@ func validateEnvelope(envelope EventEnvelope, requirePersistentUUIDIdentity bool
 	if len(targetSet) > 0 && (entityID != "" || flowInstance != "") {
 		return fmt.Errorf("event target_set cannot carry singular entity_id or flow_instance projections")
 	}
-	if want := inferEventScope(entityID, flowInstance); scope != want {
+	if want := inferEventScope(entityID, flowInstance); scope != "" && scope != want {
 		return fmt.Errorf("event scope %q does not match entity/flow identity; want %q", scope, want)
 	}
 	return nil
@@ -666,6 +676,7 @@ func (e Event) Clone() Event {
 	cloned := e
 	cloned.producer = e.Producer()
 	cloned.payload = e.Payload()
+	cloned.envelopeClaim = cloneEventEnvelope(e.envelopeClaim)
 	cloned.envelope = e.NormalizedEnvelope()
 	cloned.deliveryContext = e.DeliveryContext()
 	return cloned
@@ -732,7 +743,7 @@ func (e Event) WithLineage(lineage EventLineage) Event {
 }
 
 func (e Event) WithEnvelope(envelope EventEnvelope) Event {
-	e.envelope = envelope.Normalized()
+	e.setEnvelopeClaim(envelope)
 	return e
 }
 
@@ -748,37 +759,37 @@ func (e Event) DeliveryContext() DeliveryContext {
 }
 
 func (e Event) WithEntityID(entityID string) Event {
-	e.envelope = EnvelopeForEntityID(e.envelope, entityID)
+	e.setEnvelopeClaim(EnvelopeForEntityID(e.envelope, entityID))
 	return e
 }
 
 func (e Event) WithFlowInstance(flowInstance string) Event {
-	e.envelope = EnvelopeForFlowInstance(e.envelope, flowInstance)
+	e.setEnvelopeClaim(EnvelopeForFlowInstance(e.envelope, flowInstance))
 	return e
 }
 
 func (e Event) WithSourceRoute(route RouteIdentity) Event {
-	e.envelope = EnvelopeForSourceRoute(e.envelope, route)
+	e.setEnvelopeClaim(EnvelopeForSourceRoute(e.envelope, route))
 	return e
 }
 
 func (e Event) WithTargetRoute(route RouteIdentity) Event {
-	e.envelope = EnvelopeForTargetRoute(e.envelope, route)
+	e.setEnvelopeClaim(EnvelopeForTargetRoute(e.envelope, route))
 	return e
 }
 
 func (e Event) WithTargetSet(routes []RouteIdentity) Event {
-	e.envelope = EnvelopeForTargetSet(e.envelope, routes)
+	e.setEnvelopeClaim(EnvelopeForTargetSet(e.envelope, routes))
 	return e
 }
 
 func (e Event) WithoutTargetRoute() Event {
-	e.envelope = EnvelopeForBroadcast(e.envelope)
+	e.setEnvelopeClaim(EnvelopeForBroadcast(e.envelope))
 	return e
 }
 
 func (e Event) WithDeliveryTarget(route RouteIdentity) Event {
-	e.envelope = EnvelopeForTargetRoute(e.envelope, route)
+	e.setEnvelopeClaim(EnvelopeForTargetRoute(e.envelope, route))
 	return e
 }
 
@@ -864,6 +875,23 @@ func (e Event) TargetRoutes() []RouteIdentity {
 func (e Event) HasTargetRoute() bool {
 	envelope := e.envelope.Normalized()
 	return !envelope.Target.Empty() || len(envelope.TargetSet) > 0
+}
+
+// Keep the producer's raw claim separate so admission can reject facts that
+// the normalized read view intentionally projects into canonical form.
+func (e *Event) setEnvelopeClaim(envelope EventEnvelope) {
+	e.envelopeClaim = cloneEventEnvelope(envelope)
+	e.envelope = envelope.Normalized()
+}
+
+func (e Event) envelopeClaimForAdmission() EventEnvelope {
+	return cloneEventEnvelope(e.envelopeClaim)
+}
+
+func cloneEventEnvelope(envelope EventEnvelope) EventEnvelope {
+	cloned := envelope
+	cloned.TargetSet = append([]RouteIdentity(nil), envelope.TargetSet...)
+	return cloned
 }
 
 func (e EventEnvelope) Normalized() EventEnvelope {
