@@ -178,6 +178,7 @@ func replayClaimLockKey(eventID string) string {
 
 func scheduleClaimLockKey(sc runtimepipeline.Schedule) string {
 	return scheduleClaimNamespace + strings.Join([]string{
+		strings.TrimSpace(sc.EffectiveTimerID()),
 		strings.TrimSpace(sc.EffectiveRunID()),
 		strings.TrimSpace(sc.AgentID),
 		strings.TrimSpace(sc.EventType),

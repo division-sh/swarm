@@ -87,7 +87,7 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		if _, err := pg.DB.ExecContext(ctx, `
 			INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status)
 			VALUES ($1::uuid, $2, $3::uuid, 'timer.fired', now() + interval '1 hour', 'active')
-		`, timerID, "timer-"+source, runID); err != nil {
+		`, timerID, aggregateWorkflowTimerTaskID(timerID), runID); err != nil {
 			t.Fatalf("seed timer %s: %v", source, err)
 		}
 		cause, ok := preservationcleanup.CauseForBundleSource(source)

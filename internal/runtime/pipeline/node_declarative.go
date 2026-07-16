@@ -398,9 +398,6 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		return &HandlerOutcome{Handled: false}, nil
 	}
 	handled := result.Status != runtimeengine.OutcomeRejected && result.Status != runtimeengine.OutcomeDiscarded
-	if handled {
-		e.coordinator.reconcileWorkflowEventTimers(ctx, entityID, strings.TrimSpace(string(evt.Type())))
-	}
 	return &HandlerOutcome{
 		Handled:         handled,
 		ActionsExecuted: append([]string{}, result.ActionsExecuted...),

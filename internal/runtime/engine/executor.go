@@ -1851,7 +1851,6 @@ func (e *Executor) stepAdvancesTo(frame *executionFrame) error {
 		identity.ActionCancelStateTimers.String(),
 		identity.ActionStartStateTimers.String(),
 	)
-	frame.result.TimerIntents = append(frame.result.TimerIntents, e.buildTimerIntents(frame)...)
 	return nil
 }
 
@@ -2418,29 +2417,45 @@ func (e *Executor) stepClear(frame *executionFrame) error {
 	return nil
 }
 
-func (e *Executor) buildTimerIntents(frame *executionFrame) []TimerIntent {
-	if strings.TrimSpace(frame.result.CurrentState) == "" || strings.TrimSpace(frame.result.NextState) == "" {
-		return nil
+func (e *Executor) buildTimerIntents(frame *executionFrame) ([]TimerIntent, error) {
+	if frame == nil {
+		return nil, fmt.Errorf("timer reconciliation requires an execution frame")
+	}
+	eventID := strings.TrimSpace(frame.req.Event.ID())
+	eventType := strings.TrimSpace(string(frame.req.Event.Type()))
+	triggeredAt := frame.req.Event.CreatedAt()
+	if eventID == "" || eventType == "" || triggeredAt.IsZero() {
+		if e.deps.Source != nil && len(e.deps.Source.WorkflowTimers()) > 0 {
+			return nil, fmt.Errorf("timer reconciliation requires exact event id, type, and time")
+		}
+		return nil, nil
+	}
+	toState := strings.TrimSpace(frame.result.NextState)
+	if toState == "" {
+		toState = strings.TrimSpace(frame.result.CurrentState)
 	}
 	return []TimerIntent{
 		{
-			Operation:    TimerCancel,
-			Owner:        frame.req.NodeID,
-			FromState:    frame.result.CurrentState,
-			ToState:      frame.result.NextState,
-			TriggerEvent: strings.TrimSpace(string(frame.req.Event.Type())),
+			Operation:        TimerReconcile,
+			Owner:            frame.req.NodeID,
+			FromState:        strings.TrimSpace(frame.result.CurrentState),
+			ToState:          toState,
+			TriggerEventID:   eventID,
+			TriggerEventType: eventType,
+			TriggeredAt:      triggeredAt,
 		},
-		{
-			Operation:    TimerStart,
-			Owner:        frame.req.NodeID,
-			FromState:    frame.result.CurrentState,
-			ToState:      frame.result.NextState,
-			TriggerEvent: strings.TrimSpace(string(frame.req.Event.Type())),
-		},
-	}
+	}, nil
 }
 
 func (e *Executor) persist(ctx context.Context, frame executionFrame) error {
+	timerIntents, err := e.buildTimerIntents(&frame)
+	if err != nil {
+		return err
+	}
+	frame.result.TimerIntents = append(frame.result.TimerIntents, timerIntents...)
+	frame.result.StateMutation.TriggerEventID = strings.TrimSpace(frame.req.Event.ID())
+	frame.result.StateMutation.TriggerEventType = strings.TrimSpace(string(frame.req.Event.Type()))
+	frame.result.StateMutation.TriggeredAt = frame.req.Event.CreatedAt()
 	deliveryContext := events.DeliveryContextFromContext(ctx)
 	if !deliveryContext.Empty() {
 		for i := range frame.result.EmitIntents {
@@ -2640,9 +2655,6 @@ func mergeStateSnapshots(base, loaded StateSnapshot) StateSnapshot {
 	}
 	if len(out.StateCarrier.StateBuckets) == 0 {
 		out.StateCarrier.StateBuckets = cloneStateBucketSet(base.StateCarrier.StateBuckets)
-	}
-	if len(out.TimerState) == 0 && len(base.TimerState) > 0 {
-		out.TimerState = append([]TimerState(nil), base.TimerState...)
 	}
 	return out
 }

@@ -327,6 +327,18 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1846,
 			Reason:         "stage timer fire handling uses the selected workflow instance RunPipelineMutation owner to keep fired state and timed transition application in one unit of work",
 		},
+		"internal/runtime/pipeline/workflow_timer_owner.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2094,
+			SpecRef:        "platform-spec.yaml#engine.timer_model",
+			Reason:         "WorkflowTimerLifecycle is the canonical workflow-timer transaction owner for activation, cancellation, fire publication, completion, registration, restore, and accepted-event authorization",
+		},
+		"internal/runtime/pipeline/workflow_timer_store.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2094,
+			SpecRef:        "platform-spec.yaml#engine.timer_model",
+			Reason:         "the typed workflow-timer store implements exact selected SQLite/PostgreSQL row transitions inside the existing pipeline mutation boundary",
+		},
 		"internal/runtime/pipeline/workflow_transitions.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,

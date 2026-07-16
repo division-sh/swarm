@@ -3,10 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -829,12 +831,17 @@ func TestSelectedContractExecutionMaterializationReconstructsActiveTimer(t *test
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
+	sourceTimerID := uuid.NewString()
+	sourceRef := timeridentity.WorkflowTimerActivationRef{
+		ActivationID: sourceTimerID,
+		Declaration:  "selected-timer",
+	}
 	at := time.Unix(1700002500, 0).UTC()
 	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO timers (run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, fire_at, owner_agent, task_type, status, created_at)
-		VALUES ($1::uuid, 'selected-timer', $2::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb, $3, 'agent-a', 'timer', 'active', $4)
-	`, sourceRunID, entityID, at.Add(time.Hour), at); err != nil {
+		INSERT INTO timers (timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, fire_at, owner_agent, task_type, status, created_at)
+		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb, $5, 'agent-a', 'timer', 'active', $6)
+	`, sourceTimerID, sourceRunID, sourceRef.TaskID(), entityID, at.Add(time.Hour), at); err != nil {
 		t.Fatalf("seed timer: %v", err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
@@ -859,9 +866,10 @@ func TestSelectedContractExecutionMaterializationReconstructsActiveTimer(t *test
 			t.Fatalf("timer blocker survived reconstruction: %#v", materialized.ReplayResumeAdmission.UnsupportedBlockers)
 		}
 	}
-	var forkTimerCount int
+	var forkTimerID, forkTimerName, forkSourceTimerID string
+	var forkPayload []byte
 	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
+		SELECT timer_id::text, timer_name, source_timer_id::text, fire_payload
 		FROM timers
 		WHERE run_id = $1::uuid
 		  AND source_timer_id IS NOT NULL
@@ -869,11 +877,23 @@ func TestSelectedContractExecutionMaterializationReconstructsActiveTimer(t *test
 		  AND forked_from_event_id = $3::uuid
 		  AND reconstruction_owner = $4
 		  AND status = 'active'
-	`, materialized.ForkRunID, sourceRunID, eventID, RunForkHistoricalReplayTimerReconstructionOwner).Scan(&forkTimerCount); err != nil {
-		t.Fatalf("count reconstructed fork timers: %v", err)
+	`, materialized.ForkRunID, sourceRunID, eventID, RunForkHistoricalReplayTimerReconstructionOwner).Scan(
+		&forkTimerID, &forkTimerName, &forkSourceTimerID, &forkPayload,
+	); err != nil {
+		t.Fatalf("load reconstructed fork timer: %v", err)
 	}
-	if forkTimerCount != 1 {
-		t.Fatalf("reconstructed fork timers = %d, want 1", forkTimerCount)
+	expectedForkTimerID := timeridentity.WorkflowTimerForkActivationID(sourceTimerID, materialized.ForkRunID, eventID)
+	forkRef, ok := timeridentity.ParseWorkflowTimerActivationTaskID(forkTimerName)
+	if !ok || forkTimerID != expectedForkTimerID || forkSourceTimerID != sourceTimerID ||
+		forkRef.ActivationID != expectedForkTimerID || forkRef.Declaration != sourceRef.Declaration {
+		t.Fatalf("reconstructed fork timer = id:%q source:%q ref:%#v", forkTimerID, forkSourceTimerID, forkRef)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(forkPayload, &payload); err != nil {
+		t.Fatalf("decode reconstructed fork timer payload: %v", err)
+	}
+	if len(payload) != 1 || payload["source"] != true {
+		t.Fatalf("reconstructed business payload = %#v, want unchanged source payload", payload)
 	}
 	var sourceTimerCount int
 	if err := db.QueryRowContext(ctx, `

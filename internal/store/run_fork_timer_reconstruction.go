@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 )
 
 type runForkTimerReconstructionPlan struct {
@@ -17,6 +19,7 @@ type runForkTimerReconstructionPlan struct {
 
 type runForkTimerReconstructionRow struct {
 	TimerID            string
+	ForkTimerID        string
 	TimerName          string
 	EntityID           string
 	FlowInstance       string
@@ -158,6 +161,12 @@ func validateRunForkReconstructableSourceTimer(row runForkTimerReconstructionRow
 	if !json.Valid(row.FirePayload) {
 		return runForkTimerReconstructionRow{}, runForkReplayResumeError(RunForkBlockerTimerHistoryUnproven, RunForkReplayResumeFactTimerHistory, "selected-contract timer reconstruction blocked: source timer payload is invalid JSON")
 	}
+	if strings.HasPrefix(strings.TrimSpace(row.TimerName), timeridentity.WorkflowTimerActivationTaskPrefix()) {
+		ref, ok := timeridentity.ParseWorkflowTimerActivationTaskID(row.TimerName)
+		if !ok || ref.ActivationID != strings.TrimSpace(row.TimerID) || strings.TrimSpace(row.OwnerNode) != "" {
+			return runForkTimerReconstructionRow{}, runForkReplayResumeError(RunForkBlockerTimerHistoryUnproven, RunForkReplayResumeFactTimerHistory, "selected-contract timer reconstruction blocked: workflow timer activation identity is invalid")
+		}
+	}
 	return row, nil
 }
 
@@ -167,26 +176,26 @@ func insertRunForkSelectedContractTimerReconstructions(ctx context.Context, tx *
 	}
 	for _, row := range reconstruction.Rows {
 		var err error
-		row, err = forkAttemptGenerationTimer(row, forkRunID)
+		row, err = forkAttemptGenerationTimer(row, forkRunID, forkEventID)
 		if err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO timers (
-				run_id, source_timer_id, forked_from_run_id, forked_from_event_id, reconstruction_owner,
+				timer_id, run_id, source_timer_id, forked_from_run_id, forked_from_event_id, reconstruction_owner,
 				timer_name, entity_id, flow_instance, fire_event, fire_payload,
 				fire_at, recurring, recurrence_cron, recurrence_interval,
 				owner_node, owner_agent, task_type, status, created_at
 			)
 			VALUES (
-				$1::uuid, $2::uuid, $3::uuid, $4::uuid, $5,
-				$6, NULLIF($7,'')::uuid, NULLIF($8,''), $9, $10::jsonb,
-				$11, $12, NULLIF($13,''), NULLIF($14,''),
-				NULLIF($15,''), NULLIF($16,''), $17, 'active', $18
+				COALESCE(NULLIF($1,'')::uuid, gen_random_uuid()), $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6,
+				$7, NULLIF($8,'')::uuid, NULLIF($9,''), $10, $11::jsonb,
+				$12, $13, NULLIF($14,''), NULLIF($15,''),
+				NULLIF($16,''), NULLIF($17,''), $18, 'active', $19
 			)
 			ON CONFLICT DO NOTHING
 		`,
-			forkRunID, row.TimerID, sourceRunID, forkEventID, RunForkHistoricalReplayTimerReconstructionOwner,
+			row.ForkTimerID, forkRunID, row.TimerID, sourceRunID, forkEventID, RunForkHistoricalReplayTimerReconstructionOwner,
 			row.TimerName, row.EntityID, row.FlowInstance, row.FireEvent, string(row.FirePayload),
 			row.FireAt, row.Recurring, row.RecurrenceCron, row.RecurrenceInterval,
 			row.OwnerNode, row.OwnerAgent, row.TaskType, now,

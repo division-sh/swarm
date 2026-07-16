@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/robfig/cron/v3"
 )
 
@@ -24,7 +25,10 @@ type Schedule struct {
 	EntityID     string
 	FlowInstance string
 	TaskID       string
-	Payload      []byte
+	// TimerID is populated only for canonical workflow activations. Generic
+	// schedule persistence must never manufacture or reinterpret it.
+	TimerID string
+	Payload []byte
 }
 
 func (s Schedule) EffectiveRunID() string {
@@ -68,6 +72,22 @@ func (s *Schedule) NormalizeFlowInstance() {
 	s.FlowInstance = s.EffectiveFlowInstance()
 }
 
+func (s Schedule) EffectiveTimerID() string {
+	return strings.TrimSpace(s.TimerID)
+}
+
+func (s *Schedule) NormalizeTimerID() {
+	if s == nil {
+		return
+	}
+	s.TimerID = s.EffectiveTimerID()
+}
+
+func (s Schedule) CanonicalWorkflowTimer() bool {
+	ref, ok := timeridentity.ParseWorkflowTimerOccurrenceTaskID(s.TaskID)
+	return ok && s.EffectiveTimerID() != "" && ref.Activation.ActivationID == s.EffectiveTimerID()
+}
+
 type Scheduler struct {
 	mu      sync.Mutex
 	onFire  func(Schedule)
@@ -104,6 +124,7 @@ func (s *Scheduler) Register(sc Schedule) error {
 	sc.NormalizeDeliveryContext()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
+	sc.NormalizeTimerID()
 	if sc.Mode == "" {
 		sc.Mode = "once"
 	}
@@ -228,6 +249,9 @@ func (s *Scheduler) runOnce(task *scheduledTask, key string, sc Schedule) {
 	case <-task.stop:
 		return
 	case <-timer.C:
+		if scheduledTaskStopped(task) {
+			return
+		}
 		s.fire(sc)
 		s.unregisterTask(key, task)
 	}
@@ -242,6 +266,9 @@ func (s *Scheduler) runCron(task *scheduledTask, key string, sc Schedule, spec c
 			case <-task.stop:
 				return
 			case <-ticker.C:
+				if scheduledTaskStopped(task) {
+					return
+				}
 				s.fire(sc)
 			}
 		}
@@ -258,8 +285,23 @@ func (s *Scheduler) runCron(task *scheduledTask, key string, sc Schedule, spec c
 			timer.Stop()
 			return
 		case <-timer.C:
+			if scheduledTaskStopped(task) {
+				return
+			}
 			s.fire(sc)
 		}
+	}
+}
+
+func scheduledTaskStopped(task *scheduledTask) bool {
+	if task == nil {
+		return true
+	}
+	select {
+	case <-task.stop:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -287,6 +329,7 @@ func scheduleKey(sc Schedule) string {
 		strings.TrimSpace(sc.EffectiveEntityID()),
 		strings.TrimSpace(sc.EffectiveFlowInstance()),
 		strings.TrimSpace(sc.TaskID),
+		strings.TrimSpace(sc.EffectiveTimerID()),
 	}, "|")
 }
 

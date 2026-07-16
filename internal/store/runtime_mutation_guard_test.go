@@ -885,6 +885,14 @@ func sqliteActiveTxHelper(site runtimeWriterCallSite) bool {
 func runtimeWriterRules() []runtimeWriterRule {
 	return []runtimeWriterRule{
 		{
+			name:           "workflow timer lifecycle transaction helpers",
+			path:           rx(`^internal/runtime/pipeline/workflow_timer_store\.go$`),
+			function:       rx(`^(insertWorkflowTimerActivation|cancelWorkflowTimerActivation|completeWorkflowTimerOccurrence)$`),
+			kinds:          kinds(primitiveWrite),
+			classification: classActiveTxHelper,
+			reason:         "canonical workflow timer row transitions execute only through the selected WorkflowTimerLifecycle pipeline transaction",
+		},
+		{
 			name:           "decision card transactional helpers",
 			path:           rx(`^internal/store/decision_cards\.go$`),
 			function:       rx(`^(insertDecisionCard|decideDecisionCard|deferDecisionCard|beginDecisionCardInput|updateDecisionCardDraftStatus|transitionDecisionCardDrafts|supersedeDecisionCardsForStage|supersedeDecisionCardsForRun|supersedeRunGateActivations)$`),

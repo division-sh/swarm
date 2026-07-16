@@ -579,7 +579,9 @@ func TestUpdateEntityState_ReturnsWorkflowStoreMutationError(t *testing.T) {
 		},
 	}
 
-	err := pc.updateEntityState(testPipelineRunContextNoSeed(), "11111111-1111-1111-1111-111111111111", "marginal_review", "scoring/vertical.marginal")
+	const entityID = "11111111-1111-1111-1111-111111111111"
+	ctx := testPipelineRunContextNoSeed()
+	err := pc.updateEntityState(testWorkflowStateTransitionContext(ctx, entityID, "scoring/vertical.marginal"), entityID, "marginal_review", "scoring/vertical.marginal")
 	if err == nil {
 		t.Fatal("expected updateEntityState to fail when workflow store mutate fails")
 	}
@@ -3176,8 +3178,8 @@ func TestPipelineEngineTimerApplierPersistsTimersAndDefersSchedulerToPostCommit(
 		TaskID:    "timer-1",
 	}
 
-	if err := pc.persistWorkflowTimerSchedule(ctx, sc); err != nil {
-		t.Fatalf("persistWorkflowTimerSchedule: %v", err)
+	if err := pc.persistGenericSchedule(ctx, sc); err != nil {
+		t.Fatalf("persistGenericSchedule: %v", err)
 	}
 	if got := len(store.upserts); got != 1 {
 		t.Fatalf("persisted schedules = %d, want 1", got)
@@ -3195,8 +3197,8 @@ func TestPipelineEngineTimerApplierPersistsTimersAndDefersSchedulerToPostCommit(
 
 	cancelActions := make([]func(), 0, 1)
 	cancelCtx := withPipelinePostCommitActions(testAuthorActivityContext(context.Background()), &cancelActions)
-	if err := pc.persistWorkflowTimerCancellation(cancelCtx, sc); err != nil {
-		t.Fatalf("persistWorkflowTimerCancellation: %v", err)
+	if err := pc.cancelGenericSchedule(cancelCtx, sc); err != nil {
+		t.Fatalf("cancelGenericSchedule: %v", err)
 	}
 	if got := len(store.cancels); got != 1 {
 		t.Fatalf("persisted cancels = %d, want 1", got)

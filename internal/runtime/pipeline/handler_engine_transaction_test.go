@@ -578,7 +578,13 @@ func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIs
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	evt := eventtest.RootIngress(
+		uuid.NewString(), events.EventType("research.completed"), "", "", mustJSON(map[string]any{}), 0,
+		runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
+	)
+	seedExactOnceEvent(t, pc.workflowStore, ctx, evt)
+	_, err := pc.executeNodeContractHandler(ctx, "node-a", runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "business_brief"},
@@ -588,18 +594,7 @@ func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIs
 		Emit:       runtimecontracts.EmitSpec{Event: "spec.requested"},
 		AdvancesTo: "mvp_speccing",
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress(
-			"",
-			events.EventType("research.completed"),
-			"",
-			"",
-			mustJSON(map[string]any{}),
-			0,
-			"",
-			"",
-			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-			time.Time{},
-		),
+		Event: evt,
 
 		State: WorkflowState{
 			EntityID: entityID,
@@ -646,7 +641,14 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	evt := eventtest.RootIngress(
+		uuid.NewString(), events.EventType("research.completed"), "", "",
+		mustJSON(map[string]any{"business_brief": map[string]any{"summary": "validated"}}), 0,
+		runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
+	)
+	seedExactOnceEvent(t, pc.workflowStore, ctx, evt)
+	result, err := pc.executeNodeContractHandler(ctx, "node-a", runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "business_brief"},
@@ -656,20 +658,7 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 		Emit:       runtimecontracts.EmitSpec{Event: "spec.requested"},
 		AdvancesTo: "mvp_speccing",
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress(
-			"",
-			events.EventType("research.completed"),
-			"",
-			"",
-			mustJSON(map[string]any{
-				"business_brief": map[string]any{"summary": "validated"},
-			}),
-			0,
-			"",
-			"",
-			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-			time.Time{},
-		),
+		Event: evt,
 
 		State: WorkflowState{
 			EntityID: entityID,
@@ -2383,7 +2372,7 @@ func TestExecuteNodeContractHandlerExecutesEmitInsideEngine(t *testing.T) {
 	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{}),
+		Event: eventtest.RootIngress("00000000-0000-0000-0000-000000000002", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Unix(2, 0).UTC()),
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {

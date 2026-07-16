@@ -82,12 +82,10 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	ensurePipelineTestRun(t, store, runID)
-	schedules := &recordingSchedulePersistence{}
 	source := semanticview.Wrap(stageTimerTemplateLifecycleBundle())
 	pc := &PipelineCoordinator{
-		module:             &pipelineFixtureWorkflowModule{source: source},
-		workflowStore:      store,
-		timerScheduleStore: schedules,
+		module:        &pipelineFixtureWorkflowModule{source: source},
+		workflowStore: store,
 		instanceActivator: func(ctx context.Context, req FlowInstanceActivationRequest) error {
 			return store.Upsert(ctx, WorkflowInstance{
 				InstanceID:      req.Instance.InstanceID,
@@ -104,6 +102,7 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 			})
 		},
 	}
+	pc.workflowTimers = newWorkflowTimerLifecycle(pc)
 	trigger := eventtest.RootIngress(
 		"",
 		events.EventType("spawn.requested"),
@@ -132,15 +131,18 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 		t.Fatalf("createFlowInstance: %v", err)
 	}
 	entityID := FlowInstanceEntityID("review/inst-42")
-	instance, ok, err := store.Load(ctx, entityID)
-	if err != nil || !ok {
-		t.Fatalf("load created instance ok=%v err=%v", ok, err)
+	activations, err := store.listWorkflowTimerActivations(ctx, runID, entityID, true)
+	if err != nil {
+		t.Fatalf("list workflow timer activations: %v", err)
 	}
-	assertWorkflowTimerState(t, instance, "review.awaiting_review.expired", false)
-	if got := len(schedules.schedules); got != 1 {
-		t.Fatalf("persisted schedules = %d, want 1: %#v", got, schedules.schedules)
+	if len(activations) != 1 {
+		t.Fatalf("workflow timer activations = %d, want 1: %#v", len(activations), activations)
 	}
-	scheduledAt := schedules.schedules[0].At
+	activation := activations[0]
+	if activation.Ref.Declaration != "review.awaiting_review.expired" {
+		t.Fatalf("timer declaration = %q, want review.awaiting_review.expired", activation.Ref.Declaration)
+	}
+	scheduledAt := activation.FireAt
 	if scheduledAt.Before(beforeCreate.Add(2*time.Hour)) || scheduledAt.After(time.Now().UTC().Add(2*time.Hour+time.Second)) {
 		t.Fatalf("schedule At = %s, want child-flow policy rendered delay near 2h after create", scheduledAt)
 	}

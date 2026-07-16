@@ -123,12 +123,12 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, ent
 		return err
 	}
 	for _, schedule := range toCancel {
-		if err := pc.persistWorkflowTimerCancellation(ctx, scheduleWithRunIDFromContext(ctx, schedule)); err != nil {
+		if err := pc.cancelGenericSchedule(ctx, schedule); err != nil {
 			return err
 		}
 	}
 	for _, schedule := range toSchedule {
-		if err := pc.persistWorkflowTimerSchedule(ctx, scheduleWithRunIDFromContext(ctx, schedule)); err != nil {
+		if err := pc.persistGenericSchedule(ctx, schedule); err != nil {
 			return err
 		}
 	}
@@ -156,7 +156,7 @@ func (pc *PipelineCoordinator) reconcileClosedJoinSchedules(ctx context.Context,
 		if activation.TimerEventType == joinCompleteEvent {
 			kind = timeridentity.TimerHandleJoinComplete
 		}
-		if err := pc.persistWorkflowTimerCancellation(ctx, scheduleWithRunIDFromContext(ctx, joinSchedule(entityID, instance, activation, kind))); err != nil {
+		if err := pc.cancelGenericSchedule(ctx, joinSchedule(entityID, instance, activation, kind)); err != nil {
 			return err
 		}
 		activation.TimerCancelled = true
@@ -190,14 +190,18 @@ func (pc *PipelineCoordinator) armWorkflowCurrentStageLifecycle(ctx context.Cont
 		if stage == "" {
 			return nil
 		}
-		if strings.TrimSpace(sourceEvent) == "" {
-			sourceEvent = "state:" + stage
+		cause, err := workflowTimerInitialCause(instance, stage)
+		if err != nil {
+			return err
 		}
-		if err := pc.applyWorkflowTimerIntents(txctx, entityID, "", stage, sourceEvent); err != nil {
+		if err := pc.workflowTimers.Reconcile(txctx, entityID, "", stage, cause); err != nil {
 			return err
 		}
 		if err := pc.applyWorkflowJoinIntents(txctx, entityID, "", stage); err != nil {
 			return err
+		}
+		if strings.TrimSpace(sourceEvent) == "" {
+			sourceEvent = cause.EventType
 		}
 		return pc.applyWorkflowGateIntents(txctx, entityID, "", stage, sourceEvent)
 	})

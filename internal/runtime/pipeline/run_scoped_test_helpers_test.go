@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/google/uuid"
 )
@@ -57,6 +58,25 @@ func testPipelineCoordinatorRunContext(t *testing.T, pc *PipelineCoordinator) co
 		return testWorkflowStoreRunContext(t, pc.workflowStore)
 	}
 	return testPipelineRunContextNoSeed()
+}
+
+func testWorkflowStateTransitionContext(ctx context.Context, entityID, eventType string) context.Context {
+	evt := eventtest.RootIngress(
+		uuid.NewString(), events.EventType(strings.TrimSpace(eventType)), "test", "", []byte(`{}`), 0,
+		runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
+	)
+	return runtimecorrelation.WithInboundEvent(ctx, evt)
+}
+
+func testPersistedWorkflowStateTransitionContext(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, entityID, eventType string) context.Context {
+	t.Helper()
+	transitionCtx := testWorkflowStateTransitionContext(ctx, entityID, eventType)
+	evt, ok := runtimecorrelation.InboundEventFromContext(transitionCtx)
+	if !ok {
+		t.Fatal("test workflow transition context has no inbound event")
+	}
+	seedExactOnceEvent(t, store, ctx, evt)
+	return transitionCtx
 }
 
 func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Event, nodeID string) {

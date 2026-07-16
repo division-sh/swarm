@@ -140,7 +140,24 @@ func forkGateActivationState(raw map[string]any, forkRunID, flowInstance, entity
 	return out, bindings, nil
 }
 
-func forkAttemptGenerationTimer(row runForkTimerReconstructionRow, forkRunID string) (runForkTimerReconstructionRow, error) {
+func forkAttemptGenerationTimer(row runForkTimerReconstructionRow, forkRunID, forkEventID string) (runForkTimerReconstructionRow, error) {
+	if strings.HasPrefix(strings.TrimSpace(row.TimerName), timeridentity.WorkflowTimerActivationTaskPrefix()) {
+		ref, ok := timeridentity.ParseWorkflowTimerActivationTaskID(row.TimerName)
+		if !ok || ref.ActivationID != strings.TrimSpace(row.TimerID) {
+			return row, fmt.Errorf("fork workflow timer activation identity is invalid")
+		}
+		if ref.Generation.Valid() {
+			forked, err := loopruntime.ForkGeneration(ref.Generation, forkRunID, row.EntityID)
+			if err != nil {
+				return row, fmt.Errorf("fork workflow timer loop generation: %w", err)
+			}
+			ref.Generation = forked
+		}
+		ref.ActivationID = timeridentity.WorkflowTimerForkActivationID(ref.ActivationID, forkRunID, forkEventID)
+		row.ForkTimerID = ref.ActivationID
+		row.TimerName = ref.TaskID()
+		return row, nil
+	}
 	payload := map[string]any{}
 	if err := json.Unmarshal(row.FirePayload, &payload); err != nil {
 		return row, err

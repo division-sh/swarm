@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
@@ -26,35 +27,51 @@ func (s *PostgresStore) ClaimSchedule(ctx context.Context, sc runtimepipeline.Sc
 	sc.NormalizeRunID()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
+	sc.NormalizeTimerID()
 	key := scheduleClaimLockKey(sc)
 
 	s.scheduleClaimMu.Lock()
 	defer s.scheduleClaimMu.Unlock()
 
 	if _, ok := s.scheduleClaimKeys[key]; ok {
-		if strings.TrimSpace(sc.RunID) == "" {
-			return true, nil
-		}
 		conn := s.scheduleClaimConn
 		if conn == nil {
 			delete(s.scheduleClaimKeys, key)
-		} else if err := storerunlifecycle.RequireActive(ctx, conn, sc.RunID, storerunlifecycle.DialectPostgres); err != nil {
-			if !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+		} else if strings.TrimSpace(sc.RunID) != "" {
+			if err := storerunlifecycle.RequireActive(ctx, conn, sc.RunID, storerunlifecycle.DialectPostgres); err != nil {
+				if !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+					return false, err
+				}
+				if _, unlockErr := conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key); unlockErr != nil {
+					_ = s.closeScheduleClaimConnLocked()
+					return false, fmt.Errorf("release terminal-run schedule ownership: %w", unlockErr)
+				}
+				delete(s.scheduleClaimKeys, key)
+				if len(s.scheduleClaimKeys) == 0 {
+					if closeErr := s.closeScheduleClaimConnLocked(); closeErr != nil {
+						return false, closeErr
+					}
+				}
+				return false, nil
+			}
+		}
+		if conn != nil {
+			active, err := scheduleActiveOnConn(ctx, conn, sc)
+			if err != nil {
 				return false, err
 			}
-			if _, unlockErr := conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key); unlockErr != nil {
-				_ = s.closeScheduleClaimConnLocked()
-				return false, fmt.Errorf("release terminal-run schedule ownership: %w", unlockErr)
+			if active {
+				return true, nil
+			}
+			if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key); err != nil {
+				return false, fmt.Errorf("release inactive schedule ownership: %w", err)
 			}
 			delete(s.scheduleClaimKeys, key)
 			if len(s.scheduleClaimKeys) == 0 {
-				if closeErr := s.closeScheduleClaimConnLocked(); closeErr != nil {
-					return false, closeErr
+				if err := s.closeScheduleClaimConnLocked(); err != nil {
+					return false, err
 				}
 			}
-			return false, nil
-		} else {
-			return true, nil
 		}
 	}
 	conn, err := s.ensureScheduleClaimConnLocked(ctx)
@@ -109,6 +126,7 @@ func (s *PostgresStore) ReleaseSchedule(ctx context.Context, sc runtimepipeline.
 	sc.NormalizeRunID()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
+	sc.NormalizeTimerID()
 	key := scheduleClaimLockKey(sc)
 
 	s.scheduleClaimMu.Lock()
@@ -132,11 +150,24 @@ func (s *PostgresStore) ReleaseSchedule(ctx context.Context, sc runtimepipeline.
 }
 
 func (s *PostgresStore) CancelScheduleExactTerminal(ctx context.Context, sc runtimepipeline.Schedule) error {
+	if sc.EffectiveTimerID() != "" || timeridentity.IsWorkflowTimerActivationTaskID(sc.TaskID) {
+		return fmt.Errorf("workflow timer cancellation must be owned by WorkflowTimerLifecycle")
+	}
+	if _, ok := timeridentity.ParseWorkflowTimerOccurrenceTaskID(sc.TaskID); ok {
+		return fmt.Errorf("workflow timer occurrence cancellation must be owned by WorkflowTimerLifecycle")
+	}
 	return s.applyScheduleTerminalTransition(ctx, sc, s.cancelScheduleExactSpec, true)
 }
 
 func (s *PostgresStore) CompleteScheduleFireExact(ctx context.Context, sc runtimepipeline.Schedule) error {
-	release := strings.EqualFold(strings.TrimSpace(sc.Mode), "once")
+	if sc.EffectiveTimerID() != "" {
+		return fmt.Errorf("workflow timer completion must be owned by WorkflowTimerLifecycle")
+	}
+	recurring, err := s.persistedScheduleRecurring(ctx, sc)
+	if err != nil {
+		return err
+	}
+	release := !recurring
 	return s.applyScheduleTerminalTransition(ctx, sc, s.MarkScheduleFiredExact, release)
 }
 
@@ -189,6 +220,15 @@ func (s *PostgresStore) applyScheduleTerminalTransition(
 	if !release {
 		return nil
 	}
+	if _, activeTx := runtimepipeline.PipelineSQLTxFromContext(ctx); activeTx {
+		postCommitCtx := runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx))
+		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
+			_ = s.ReleaseSchedule(postCommitCtx, sc)
+		}) {
+			return fmt.Errorf("schedule claim release requires post-commit ownership")
+		}
+		return nil
+	}
 	if err := s.ReleaseSchedule(ctx, sc); err != nil {
 		return &runtimepipeline.ScheduleTerminalError{
 			Stage:             "release_claim",
@@ -201,6 +241,34 @@ func (s *PostgresStore) applyScheduleTerminalTransition(
 
 func scheduleActiveOnConn(ctx context.Context, conn *sql.Conn, sc runtimepipeline.Schedule) (bool, error) {
 	var active bool
+	if sc.EffectiveTimerID() != "" {
+		occurrence, ok := timeridentity.ParseWorkflowTimerOccurrenceTaskID(sc.TaskID)
+		if !ok || occurrence.Activation.ActivationID != sc.EffectiveTimerID() {
+			return false, fmt.Errorf("workflow timer claim identity is invalid")
+		}
+		err := conn.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM timers t
+				LEFT JOIN runs run ON run.run_id = t.run_id
+				WHERE t.timer_id = $1::uuid
+				  AND t.timer_name = $2
+				  AND t.run_id = $3::uuid
+				  AND t.owner_agent = $4
+				  AND t.fire_event = $5
+				  AND t.entity_id = $6::uuid
+				  AND t.flow_instance = $7
+				  AND t.fire_at = $8
+				  AND t.status = 'active'
+				  AND run.status IN ('running', 'paused')
+			)
+		`, sc.TimerID, occurrence.Activation.TaskID(), sc.RunID, sc.AgentID, sc.EventType,
+			sc.EntityID, sc.FlowInstance, occurrence.DueAt).Scan(&active)
+		if err != nil {
+			return false, fmt.Errorf("check active workflow timer ownership target: %w", err)
+		}
+		return active, nil
+	}
 	err := conn.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT EXISTS (
 			SELECT 1
@@ -212,12 +280,50 @@ func scheduleActiveOnConn(ctx context.Context, conn *sql.Conn, sc runtimepipelin
 			  AND t.entity_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
 			  AND t.flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
 			  AND COALESCE(t.fire_payload->>'__schedule_task_id', '') = $6
+			  AND t.timer_name NOT LIKE $7
 			  AND t.status = 'active'
 			  AND (t.run_id IS NULL OR run.status IN ('running', 'paused'))
 		)
-	`), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID)).Scan(&active)
+	`), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix()+"%").Scan(&active)
 	if err != nil {
 		return false, fmt.Errorf("check active schedule ownership target: %w", err)
 	}
 	return active, nil
+}
+
+func (s *PostgresStore) persistedScheduleRecurring(ctx context.Context, sc runtimepipeline.Schedule) (bool, error) {
+	sc = scheduleWithContextRunID(ctx, sc)
+	sc.NormalizeRunID()
+	sc.NormalizeEntityID()
+	sc.NormalizeFlowInstance()
+	queryer := scheduleRecurringQueryer(s.DB)
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		queryer = tx
+	}
+	var recurring bool
+	err := queryer.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT recurring
+		FROM timers
+		WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
+		  AND owner_agent = $2
+		  AND fire_event = $3
+		  AND entity_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
+		  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
+		  AND %s = $6
+		  AND timer_name NOT LIKE $7
+		  AND status = 'active'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix()+"%").Scan(&recurring)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("schedule completion target is missing")
+	}
+	if err != nil {
+		return false, fmt.Errorf("load schedule recurrence: %w", err)
+	}
+	return recurring, nil
+}
+
+type scheduleRecurringQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }

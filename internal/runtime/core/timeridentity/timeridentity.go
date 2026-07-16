@@ -2,12 +2,15 @@ package timeridentity
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/google/uuid"
 )
 
 type TriggerKind string
@@ -26,13 +29,176 @@ type Trigger struct {
 type TimerHandleKind string
 
 const (
-	TimerHandleWorkflowTimer TimerHandleKind = "workflow_timer"
-	TimerHandleJoinTimeout   TimerHandleKind = "join_timeout"
-	TimerHandleJoinComplete  TimerHandleKind = "join_complete"
-	timerHandlePayloadKey                    = "timer_handle"
-	joinTimeoutTaskPrefix                    = "join_timeout:"
-	joinCompleteTaskPrefix                   = "join_complete:"
+	TimerHandleWorkflowTimer          TimerHandleKind = "workflow_timer"
+	TimerHandleJoinTimeout            TimerHandleKind = "join_timeout"
+	TimerHandleJoinComplete           TimerHandleKind = "join_complete"
+	timerHandlePayloadKey                             = "timer_handle"
+	joinTimeoutTaskPrefix                             = "join_timeout:"
+	joinCompleteTaskPrefix                            = "join_complete:"
+	workflowTimerActivationTaskPrefix                 = "workflow_timer:v1:"
+	workflowTimerOccurrenceTaskPrefix                 = "workflow_timer_occurrence:v1:"
 )
+
+var workflowTimerIdentityNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.workflow-timer.identity.v1"))
+
+// WorkflowTimerActivationRef is the typed durable identity stored in
+// timers.timer_name. It is deliberately independent from fire_payload.
+type WorkflowTimerActivationRef struct {
+	ActivationID string                       `json:"activation_id"`
+	Declaration  string                       `json:"declaration"`
+	Generation   attemptgeneration.Generation `json:"generation,omitempty"`
+}
+
+func (r WorkflowTimerActivationRef) Normalize() WorkflowTimerActivationRef {
+	r.ActivationID = strings.TrimSpace(r.ActivationID)
+	r.Declaration = strings.TrimSpace(r.Declaration)
+	r.Generation = r.Generation.Normalize()
+	return r
+}
+
+func (r WorkflowTimerActivationRef) Valid() bool {
+	r = r.Normalize()
+	if r.ActivationID == "" || r.Declaration == "" {
+		return false
+	}
+	_, err := uuid.Parse(r.ActivationID)
+	return err == nil
+}
+
+func (r WorkflowTimerActivationRef) TaskID() string {
+	r = r.Normalize()
+	if !r.Valid() {
+		return ""
+	}
+	raw, err := json.Marshal(r)
+	if err != nil {
+		return ""
+	}
+	return workflowTimerActivationTaskPrefix + base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func ParseWorkflowTimerActivationTaskID(raw string) (WorkflowTimerActivationRef, bool) {
+	if raw != strings.TrimSpace(raw) {
+		return WorkflowTimerActivationRef{}, false
+	}
+	if !strings.HasPrefix(raw, workflowTimerActivationTaskPrefix) {
+		return WorkflowTimerActivationRef{}, false
+	}
+	encoded := strings.TrimPrefix(raw, workflowTimerActivationTaskPrefix)
+	payload, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return WorkflowTimerActivationRef{}, false
+	}
+	var ref WorkflowTimerActivationRef
+	if err := decodeStrictJSON(payload, &ref); err != nil {
+		return WorkflowTimerActivationRef{}, false
+	}
+	ref = ref.Normalize()
+	return ref, ref.Valid() && ref.TaskID() == raw
+}
+
+func IsWorkflowTimerActivationTaskID(raw string) bool {
+	_, ok := ParseWorkflowTimerActivationTaskID(raw)
+	return ok
+}
+
+func WorkflowTimerActivationTaskPrefix() string {
+	return workflowTimerActivationTaskPrefix
+}
+
+// WorkflowTimerOccurrenceRef identifies one persisted due coordinate. The
+// same coordinate always yields the same event ID; advancing recurrence
+// produces a different occurrence without changing activation identity.
+type WorkflowTimerOccurrenceRef struct {
+	Activation WorkflowTimerActivationRef `json:"activation"`
+	DueAt      time.Time                  `json:"due_at"`
+}
+
+func (r WorkflowTimerOccurrenceRef) Normalize() WorkflowTimerOccurrenceRef {
+	r.Activation = r.Activation.Normalize()
+	if !r.DueAt.IsZero() {
+		r.DueAt = r.DueAt.UTC()
+	}
+	return r
+}
+
+func (r WorkflowTimerOccurrenceRef) Valid() bool {
+	r = r.Normalize()
+	return r.Activation.Valid() && !r.DueAt.IsZero()
+}
+
+func (r WorkflowTimerOccurrenceRef) TaskID() string {
+	r = r.Normalize()
+	if !r.Valid() {
+		return ""
+	}
+	raw, err := json.Marshal(r)
+	if err != nil {
+		return ""
+	}
+	return workflowTimerOccurrenceTaskPrefix + base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func ParseWorkflowTimerOccurrenceTaskID(raw string) (WorkflowTimerOccurrenceRef, bool) {
+	if raw != strings.TrimSpace(raw) {
+		return WorkflowTimerOccurrenceRef{}, false
+	}
+	if !strings.HasPrefix(raw, workflowTimerOccurrenceTaskPrefix) {
+		return WorkflowTimerOccurrenceRef{}, false
+	}
+	encoded := strings.TrimPrefix(raw, workflowTimerOccurrenceTaskPrefix)
+	payload, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return WorkflowTimerOccurrenceRef{}, false
+	}
+	var ref WorkflowTimerOccurrenceRef
+	if err := decodeStrictJSON(payload, &ref); err != nil {
+		return WorkflowTimerOccurrenceRef{}, false
+	}
+	ref = ref.Normalize()
+	return ref, ref.Valid() && ref.TaskID() == raw
+}
+
+func WorkflowTimerActivationID(parts ...string) string {
+	normalized := make([]string, len(parts))
+	for i, part := range parts {
+		normalized[i] = strings.TrimSpace(part)
+	}
+	return uuid.NewSHA1(workflowTimerIdentityNamespace, []byte("activation\x00"+strings.Join(normalized, "\x00"))).String()
+}
+
+func WorkflowTimerForkActivationID(sourceActivationID, forkRunID, forkEventID string) string {
+	return uuid.NewSHA1(workflowTimerIdentityNamespace, []byte(strings.Join([]string{
+		"fork",
+		strings.TrimSpace(sourceActivationID),
+		strings.TrimSpace(forkRunID),
+		strings.TrimSpace(forkEventID),
+	}, "\x00"))).String()
+}
+
+func WorkflowTimerOccurrenceEventID(ref WorkflowTimerOccurrenceRef) string {
+	ref = ref.Normalize()
+	if !ref.Valid() {
+		return ""
+	}
+	return uuid.NewSHA1(workflowTimerIdentityNamespace, []byte(strings.Join([]string{
+		"occurrence",
+		ref.Activation.ActivationID,
+		ref.DueAt.Format(time.RFC3339Nano),
+	}, "\x00"))).String()
+}
+
+func decodeStrictJSON(raw []byte, target any) error {
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return fmt.Errorf("unexpected trailing JSON")
+	}
+	return nil
+}
 
 type TimerHandle struct {
 	Kind       TimerHandleKind

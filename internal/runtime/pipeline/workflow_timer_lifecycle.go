@@ -8,7 +8,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -16,193 +15,59 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func (pc *PipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string) error {
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
-		return nil
-	}
-	source := pc.SemanticSource()
-	if source == nil {
-		return nil
-	}
-	entityID = strings.TrimSpace(entityID)
-	currentStage = strings.TrimSpace(currentStage)
-	nextStage = strings.TrimSpace(nextStage)
-	sourceEvent = strings.TrimSpace(sourceEvent)
-	if entityID == "" || nextStage == "" || currentStage == nextStage {
-		return nil
-	}
-	now := time.Now().UTC()
-	toSchedule := make([]Schedule, 0, 2)
-	toCancel := make([]Schedule, 0, 2)
-	if err := pc.workflowStore.MutateE(ctx, entityID, func(instance *WorkflowInstance) error {
-		if instance.TimerState == nil {
-			instance.TimerState = []WorkflowTimerState{}
-		}
-		for i := range instance.TimerState {
-			timerState := &instance.TimerState[i]
-			if timerState.Cancelled || timerState.Fired {
-				continue
-			}
-			timer, ok := source.WorkflowTimerByID(timerState.TimerID)
-			if ok && timer.Recurring && workflowTimerConnectedToLoop(source, timer) {
-				return fmt.Errorf("recurring timer %s is connected to a bounded loop", timer.ID)
-			}
-			if ok && workflowTimerLeavesBoundedLoop(source, timer) {
-				return fmt.Errorf("timer %s cannot advance directly outside its bounded loop", timer.ID)
-			}
-			if !ok || !workflowTimerShouldCancelOnTransition(timer, currentStage, nextStage, sourceEvent) {
-				continue
-			}
-			timerState.Cancelled = true
-			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, instance.StorageRef, timerState.FiresAt, workflowTimerPolicy(source, timer.FlowID), timerState.Generation))
-		}
-		generation, _, err := workflowLoopGenerationForStage(source, instance, nextStage)
-		if err != nil {
-			return err
-		}
-		for _, timer := range source.WorkflowTimers() {
-			if !workflowTimerShouldStartOnTransition(timer, nextStage, sourceEvent) {
-				continue
-			}
-			if timer.Recurring && workflowTimerConnectedToLoop(source, timer) {
-				return fmt.Errorf("recurring timer %s is connected to a bounded loop", timer.ID)
-			}
-			if workflowTimerLeavesBoundedLoop(source, timer) {
-				return fmt.Errorf("timer %s cannot advance directly outside its bounded loop", timer.ID)
-			}
-			if workflowTimerStateActiveForGeneration(instance.TimerState, timer.ID, generation) {
-				continue
-			}
-			fireAt, ok := workflowTimerFireAt(timer, now, workflowTimerPolicy(source, timer.FlowID))
-			if !ok {
-				continue
-			}
-			handle := timeridentity.WorkflowTimerHandle(timer.ID)
-			handle.Generation = generation
-			instance.TimerState = append(instance.TimerState, WorkflowTimerState{
-				TimerID:    strings.TrimSpace(timer.ID),
-				TaskID:     handle.TaskID(),
-				EventType:  strings.TrimSpace(timer.Event),
-				CreatedAt:  now,
-				FiresAt:    fireAt,
-				StartedBy:  "state:" + nextStage,
-				Recurring:  timer.Recurring,
-				Generation: generation,
-			})
-			toSchedule = append(toSchedule, workflowTimerSchedule(timer, entityID, instance.StorageRef, fireAt, workflowTimerPolicy(source, timer.FlowID), generation))
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	for _, sc := range toCancel {
-		if err := pc.persistWorkflowTimerCancellation(ctx, scheduleWithRunIDFromContext(ctx, sc)); err != nil {
-			return err
-		}
-	}
-	for _, sc := range toSchedule {
-		if err := pc.persistWorkflowTimerSchedule(ctx, scheduleWithRunIDFromContext(ctx, sc)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (pc *PipelineCoordinator) armWorkflowCurrentStageTimers(ctx context.Context, entityID, sourceEvent string) error {
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
-		return nil
-	}
-	entityID = strings.TrimSpace(entityID)
-	if entityID == "" {
-		return nil
-	}
-	instance, ok, err := pc.workflowStore.Load(ctx, entityID)
-	if err != nil || !ok {
-		return err
-	}
-	stage := strings.TrimSpace(instance.CurrentState)
-	if stage == "" {
-		return nil
-	}
-	if strings.TrimSpace(sourceEvent) == "" {
-		sourceEvent = "state:" + stage
-	}
-	return pc.applyWorkflowTimerIntents(ctx, entityID, "", stage, sourceEvent)
-}
-
-func (pc *PipelineCoordinator) ArmFlowInstanceInitialStageTimers(ctx context.Context, entityID string) error {
-	return pc.armWorkflowCurrentStageTimers(ctx, strings.TrimSpace(entityID), "")
-}
-
-// ArmFlowInstanceInitialStageLifecycle materializes every stage-owned durable
-// intent for a newly created flow instance inside the caller's mutation.
+// ArmFlowInstanceInitialStageLifecycle materializes all stage-owned durable
+// intents in the flow-instance creation mutation.
 func (pc *PipelineCoordinator) ArmFlowInstanceInitialStageLifecycle(ctx context.Context, entityID string) error {
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
-		return nil
-	}
-	entityID = strings.TrimSpace(entityID)
-	instance, ok, err := pc.workflowStore.Load(ctx, entityID)
-	if err != nil || !ok {
-		return err
-	}
-	stage := strings.TrimSpace(instance.CurrentState)
-	if stage == "" {
-		return nil
-	}
-	sourceEvent := "state:" + stage
-	if err := pc.applyWorkflowTimerIntents(ctx, entityID, "", stage, sourceEvent); err != nil {
-		return err
-	}
-	return pc.applyWorkflowGateIntents(ctx, entityID, "", stage, sourceEvent)
+	return pc.armWorkflowCurrentStageLifecycle(ctx, strings.TrimSpace(entityID), "")
 }
 
-func (pc *PipelineCoordinator) reconcileWorkflowStageTimers(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string) error {
-	if err := pc.applyWorkflowTimerIntents(ctx, entityID, currentStage, nextStage, sourceEvent); err != nil {
-		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_projection_failed", "", sourceEvent, runtimeWorkflowID, entityID, map[string]any{
-			"stage":         strings.TrimSpace(nextStage),
-			"current_stage": strings.TrimSpace(currentStage),
-			"source_event":  strings.TrimSpace(sourceEvent),
-		}, err)
-		return err
+func workflowTimerInitialCause(instance WorkflowInstance, stage string) (workflowTimerCause, error) {
+	occurredAt := instance.CreatedAt
+	if occurredAt.IsZero() {
+		occurredAt = instance.EnteredStageAt
 	}
-	return nil
+	cause := workflowTimerCause{
+		Kind:       workflowTimerCauseInitial,
+		EventType:  "state:" + strings.TrimSpace(stage),
+		OccurredAt: occurredAt,
+		ToState:    strings.TrimSpace(stage),
+	}
+	cause = cause.normalized()
+	if err := cause.validateForActivation(); err != nil {
+		return workflowTimerCause{}, err
+	}
+	return cause, nil
 }
 
 func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context, evt events.Event) (bool, bool, error) {
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || pc.workflowTimers == nil {
 		return false, false, nil
+	}
+	activation, occurrence, recognized, err := pc.workflowTimers.AuthorizeAcceptedEvent(ctx, evt)
+	if err != nil || !recognized {
+		return recognized, false, err
 	}
 	source := pc.SemanticSource()
 	if source == nil {
-		return false, false, nil
+		return true, false, fmt.Errorf("workflow timer event requires semantic source")
 	}
-	timerID := ""
-	if handle, ok := timeridentity.ParseTimerHandle(parsePayloadMap(evt.Payload())); ok && handle.Kind == timeridentity.TimerHandleWorkflowTimer {
-		timerID = strings.TrimSpace(handle.TimerID)
+	timer, ok := source.WorkflowTimerByID(activation.Ref.Declaration)
+	if !ok {
+		return true, false, fmt.Errorf("workflow timer declaration %s is unavailable", activation.Ref.Declaration)
 	}
-	if timerID == "" {
-		timerID = strings.TrimSpace(evt.TaskID())
+	if err := validateWorkflowTimerTopology(source, timer); err != nil {
+		return true, false, err
 	}
-	if timerID == "" {
-		return false, false, nil
+	if !timer.StageOwned {
+		return true, true, nil
 	}
-	timer, ok := source.WorkflowTimerByID(timerID)
-	if !ok || !timer.StageOwned {
-		return false, false, nil
-	}
-	if timer.Recurring && workflowTimerConnectedToLoop(source, timer) {
-		return true, false, fmt.Errorf("recurring timer %s is connected to a bounded loop", timer.ID)
-	}
-	if workflowTimerLeavesBoundedLoop(source, timer) {
-		return true, false, fmt.Errorf("timer %s cannot advance directly outside its bounded loop", timer.ID)
-	}
+
 	entityID := workflowEventEntityID(evt)
 	if entityID == "" {
-		return true, false, fmt.Errorf("stage timer %s fired without entity_id", timerID)
+		return true, false, fmt.Errorf("stage timer %s fired without entity_id", timer.ID)
 	}
-	fired := false
-	var lateBy time.Duration
-	err := pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+	applied := false
+	err = pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
 		currentStage := ""
 		nextStage := strings.TrimSpace(timer.AdvancesTo)
 		if err := pc.workflowStore.MutateE(txctx, entityID, func(instance *WorkflowInstance) error {
@@ -210,201 +75,78 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 			if currentStage != strings.TrimSpace(timer.Stage) {
 				return nil
 			}
-			generation := attemptgeneration.Generation{}
-			if handle, ok := timeridentity.ParseTimerHandle(parsePayloadMap(evt.Payload())); ok {
-				generation = handle.Generation
-			}
-			if current, generationErr := workflowLoopGenerationCurrent(instance, generation, timer.Stage); generationErr != nil {
+			if current, generationErr := workflowLoopGenerationCurrent(instance, activation.Ref.Generation, timer.Stage); generationErr != nil {
 				return generationErr
 			} else if !current {
-				for i := range instance.TimerState {
-					state := &instance.TimerState[i]
-					if state.TimerID == timerID && state.Generation.Equal(generation) && !state.Fired {
-						state.Cancelled = true
-					}
-				}
 				return nil
 			}
-			for i := range instance.TimerState {
-				state := &instance.TimerState[i]
-				if strings.TrimSpace(state.TimerID) != timerID || state.Cancelled || state.Fired || (generation.Valid() && !state.Generation.Equal(generation)) {
-					continue
-				}
-				state.Fired = true
-				if !state.FiresAt.IsZero() {
-					firedAt := evt.CreatedAt()
-					if firedAt.IsZero() {
-						firedAt = time.Now().UTC()
+			if nextStage != "" {
+				if generation := activation.Ref.Generation.Normalize(); generation.Valid() {
+					carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+					if err != nil {
+						return err
 					}
-					if firedAt.After(state.FiresAt) {
-						lateBy = firedAt.Sub(state.FiresAt)
+					loopActivation, found, err := loopruntime.Load(carrier.StateBuckets, generation.FlowID, generation.LoopID)
+					if err != nil {
+						return err
 					}
-				}
-				if nextStage != "" {
-					if generation.Valid() {
-						carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
-						if err != nil {
-							return err
-						}
-						activation, ok, err := loopruntime.Load(carrier.StateBuckets, generation.FlowID, generation.LoopID)
-						if err != nil {
-							return err
-						}
-						if !ok || !activation.Generation().Equal(generation) {
-							return fmt.Errorf("timer %s loop generation is no longer authoritative", timerID)
-						}
-						firedAt := evt.CreatedAt()
-						if firedAt.IsZero() {
-							firedAt = time.Now().UTC()
-						}
-						if err := activation.AdvanceWithin(nextStage, evt.ID(), firedAt); err != nil {
-							return err
-						}
-						if err := loopruntime.Store(carrier.StateBuckets, activation); err != nil {
-							return err
-						}
-						instance.StateBuckets = carrier.PersistedStateBuckets()
+					if !found || !loopActivation.Generation().Equal(generation) {
+						return fmt.Errorf("timer %s loop generation is no longer authoritative", timer.ID)
 					}
-					instance.CurrentState = nextStage
-					instance.EnteredStageAt = time.Now().UTC()
-					instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(pc.WorkflowDefinition(), currentStage, nextStage, "timer:"+timerID))
+					if err := loopActivation.AdvanceWithin(nextStage, evt.ID(), evt.CreatedAt()); err != nil {
+						return err
+					}
+					if err := loopruntime.Store(carrier.StateBuckets, loopActivation); err != nil {
+						return err
+					}
+					instance.StateBuckets = carrier.PersistedStateBuckets()
 				}
-				fired = true
-				return nil
+				instance.CurrentState = nextStage
+				instance.EnteredStageAt = evt.CreatedAt().UTC()
+				instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(
+					pc.WorkflowDefinition(), currentStage, nextStage, evt.ID(), string(evt.Type()), evt.CreatedAt(),
+				))
 			}
+			applied = true
 			return nil
 		}); err != nil {
 			return err
 		}
-		if fired && nextStage != "" {
-			if err := pc.applyWorkflowTimerIntents(txctx, entityID, currentStage, nextStage, "timer:"+timerID); err != nil {
-				return err
-			}
-			if err := pc.applyWorkflowJoinIntents(txctx, entityID, currentStage, nextStage); err != nil {
-				return err
-			}
-			if err := pc.applyWorkflowGateIntents(txctx, entityID, currentStage, nextStage, "timer:"+timerID); err != nil {
-				return err
-			}
-			return pc.maybeDeactivateTerminalFlowInstance(txctx, entityID, nextStage)
+		if !applied || nextStage == "" {
+			return nil
 		}
-		return nil
-	})
-	if err != nil {
-		return true, fired, err
-	}
-	if fired && lateBy > time.Minute {
-		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_fired_late", strings.TrimSpace(evt.ID()), strings.TrimSpace(string(evt.Type())), runtimeWorkflowID, entityID, map[string]any{
-			"timer_id": strings.TrimSpace(timerID),
-			"stage":    strings.TrimSpace(timer.Stage),
-			"late_by":  lateBy.String(),
-		}, nil)
-	}
-	return true, fired, nil
-}
-
-func (pc *PipelineCoordinator) reconcileWorkflowEventTimers(ctx context.Context, entityID, sourceEvent string) {
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
-		return
-	}
-	source := pc.SemanticSource()
-	if source == nil {
-		return
-	}
-	entityID = strings.TrimSpace(entityID)
-	sourceEvent = strings.TrimSpace(sourceEvent)
-	if entityID == "" || sourceEvent == "" {
-		return
-	}
-	if _, ok, err := pc.workflowStore.Load(ctx, entityID); err != nil {
-		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_event_timer_load_failed", "", sourceEvent, runtimeWorkflowID, entityID, map[string]any{
-			"source_event": sourceEvent,
-		}, err)
-		return
-	} else if !ok {
-		return
-	}
-	now := time.Now().UTC()
-	toSchedule := make([]Schedule, 0, 1)
-	toCancel := make([]Schedule, 0, 1)
-	if err := pc.workflowStore.MutateE(ctx, entityID, func(instance *WorkflowInstance) error {
-		if instance.TimerState == nil {
-			instance.TimerState = []WorkflowTimerState{}
+		cause := workflowTimerCause{
+			Kind:         workflowTimerCauseTransition,
+			EventID:      evt.ID(),
+			EventType:    strings.TrimSpace(string(evt.Type())),
+			OccurredAt:   evt.CreatedAt(),
+			TransitionID: workflowTransitionIdentity(pc.WorkflowDefinition(), currentStage, nextStage, string(evt.Type())),
+			FromState:    currentStage,
+			ToState:      nextStage,
 		}
-		for i := range instance.TimerState {
-			timerState := &instance.TimerState[i]
-			if timerState.Cancelled || timerState.Fired {
-				continue
-			}
-			timer, ok := source.WorkflowTimerByID(timerState.TimerID)
-			if ok && timer.Recurring && workflowTimerConnectedToLoop(source, timer) {
-				return fmt.Errorf("recurring timer %s is connected to a bounded loop", timer.ID)
-			}
-			if ok && workflowTimerLeavesBoundedLoop(source, timer) {
-				return fmt.Errorf("timer %s cannot advance directly outside its bounded loop", timer.ID)
-			}
-			if !ok || timer.StageOwned {
-				continue
-			}
-			cancelTrigger, ok := workflowTimerCancelTrigger(timer)
-			if !ok || !workflowTimerLifecycleMatches(cancelTrigger, "", sourceEvent) {
-				continue
-			}
-			timerState.Cancelled = true
-			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, instance.StorageRef, timerState.FiresAt, workflowTimerPolicy(source, timer.FlowID), timerState.Generation))
-		}
-		generation, _, err := workflowLoopGenerationForStage(source, instance, instance.CurrentState)
-		if err != nil {
+		if err := pc.workflowTimers.Reconcile(txctx, entityID, currentStage, nextStage, cause); err != nil {
 			return err
 		}
-		for _, timer := range source.WorkflowTimers() {
-			if timer.StageOwned {
-				continue
-			}
-			startTrigger, ok := workflowTimerStartTrigger(timer)
-			if !ok || !workflowTimerLifecycleMatches(startTrigger, "", sourceEvent) {
-				continue
-			}
-			if timer.Recurring && workflowTimerConnectedToLoop(source, timer) {
-				return fmt.Errorf("recurring timer %s is connected to a bounded loop", timer.ID)
-			}
-			if workflowTimerLeavesBoundedLoop(source, timer) {
-				return fmt.Errorf("timer %s cannot advance directly outside its bounded loop", timer.ID)
-			}
-			if workflowTimerStateActiveForGeneration(instance.TimerState, timer.ID, generation) {
-				continue
-			}
-			fireAt, ok := workflowTimerFireAt(timer, now, workflowTimerPolicy(source, timer.FlowID))
-			if !ok {
-				continue
-			}
-			handle := timeridentity.WorkflowTimerHandle(timer.ID)
-			handle.Generation = generation
-			instance.TimerState = append(instance.TimerState, WorkflowTimerState{
-				TimerID:    strings.TrimSpace(timer.ID),
-				TaskID:     handle.TaskID(),
-				EventType:  strings.TrimSpace(timer.Event),
-				CreatedAt:  now,
-				FiresAt:    fireAt,
-				StartedBy:  "event:" + sourceEvent,
-				Recurring:  timer.Recurring,
-				Generation: generation,
-			})
-			toSchedule = append(toSchedule, workflowTimerSchedule(timer, entityID, instance.StorageRef, fireAt, workflowTimerPolicy(source, timer.FlowID), generation))
+		if err := pc.applyWorkflowJoinIntents(txctx, entityID, currentStage, nextStage); err != nil {
+			return err
 		}
-		return nil
-	}); err != nil {
-		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_event_timer_projection_failed", "", sourceEvent, runtimeWorkflowID, entityID, map[string]any{
-			"source_event": sourceEvent,
-		}, err)
-		return
+		if err := pc.applyWorkflowGateIntents(txctx, entityID, currentStage, nextStage, string(evt.Type())); err != nil {
+			return err
+		}
+		return pc.maybeDeactivateTerminalFlowInstance(txctx, entityID, nextStage)
+	})
+	if err != nil {
+		return true, applied, err
 	}
-	for _, sc := range toCancel {
-		pc.cancelWorkflowTimerSchedule(ctx, scheduleWithRunIDFromContext(ctx, sc))
+	if lateBy := evt.CreatedAt().Sub(occurrence.DueAt); applied && lateBy > time.Minute {
+		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_fired_late", evt.ID(), string(evt.Type()), runtimeWorkflowID, entityID, map[string]any{
+			"activation_id": activation.Ref.ActivationID,
+			"timer_id":      timer.ID,
+			"stage":         timer.Stage,
+			"late_by":       lateBy.String(),
+		}, nil)
 	}
-	for _, sc := range toSchedule {
-		pc.registerWorkflowTimerSchedule(ctx, scheduleWithRunIDFromContext(ctx, sc))
-	}
+	return true, applied, nil
 }
 
 func workflowTimerLifecycleMatches(trigger timeridentity.Trigger, stage, sourceEvent string) bool {
@@ -420,9 +162,10 @@ func workflowTimerShouldCancelOnTransition(timer runtimecontracts.WorkflowTimerC
 	return ok && workflowTimerLifecycleMatches(cancelTrigger, nextStage, sourceEvent)
 }
 
-func workflowTimerShouldStartOnTransition(timer runtimecontracts.WorkflowTimerContract, nextStage, sourceEvent string) bool {
+func workflowTimerShouldStartOnTransition(timer runtimecontracts.WorkflowTimerContract, currentStage, nextStage, sourceEvent string) bool {
 	if timer.StageOwned {
-		return strings.TrimSpace(timer.Stage) != "" && strings.TrimSpace(timer.Stage) == strings.TrimSpace(nextStage)
+		stage := strings.TrimSpace(timer.Stage)
+		return stage != "" && strings.TrimSpace(currentStage) != strings.TrimSpace(nextStage) && stage == strings.TrimSpace(nextStage)
 	}
 	startTrigger, ok := workflowTimerStartTrigger(timer)
 	return ok && workflowTimerLifecycleMatches(startTrigger, nextStage, sourceEvent)
@@ -439,31 +182,6 @@ func scheduleWithRunIDFromContext(ctx context.Context, sc Schedule) Schedule {
 	}
 	sc.NormalizeRunID()
 	return sc
-}
-
-func workflowTimerStateActive(items []WorkflowTimerState, timerID string) bool {
-	return workflowTimerStateActiveForGeneration(items, timerID, attemptgeneration.Generation{})
-}
-
-func workflowTimerStateActiveForGeneration(items []WorkflowTimerState, timerID string, generation attemptgeneration.Generation) bool {
-	timerID = strings.TrimSpace(timerID)
-	if timerID == "" {
-		return false
-	}
-	for _, item := range items {
-		if strings.TrimSpace(item.TimerID) == timerID && !item.Cancelled && !item.Fired && (!generation.Valid() || item.Generation.Equal(generation)) {
-			return true
-		}
-	}
-	return false
-}
-
-func workflowTimerFireAt(timer runtimecontracts.WorkflowTimerContract, now time.Time, policy map[string]any) (time.Time, bool) {
-	interval := workflowTimerDuration(timer, policy)
-	if interval <= 0 {
-		return time.Time{}, false
-	}
-	return now.Add(interval), true
 }
 
 func workflowTimerDuration(timer runtimecontracts.WorkflowTimerContract, policy map[string]any) time.Duration {
@@ -485,8 +203,7 @@ func workflowTimerRenderedDelay(delay string, policy map[string]any) string {
 		if len(match) != 2 {
 			return token
 		}
-		key := strings.TrimSpace(match[1])
-		value, ok := workflowExpressionPolicyValue(policy, key)
+		value, ok := workflowExpressionPolicyValue(policy, strings.TrimSpace(match[1]))
 		if !ok || value == nil {
 			return token
 		}
@@ -499,35 +216,6 @@ func workflowTimerPolicy(source semanticview.Source, flowID string) map[string]a
 		return nil
 	}
 	return policyDocumentToMap(source.ResolvedPolicyForFlow(strings.TrimSpace(flowID)))
-}
-
-func workflowTimerSchedule(timer runtimecontracts.WorkflowTimerContract, entityID, flowInstance string, fireAt time.Time, policy map[string]any, generations ...attemptgeneration.Generation) Schedule {
-	handle := timeridentity.WorkflowTimerHandle(timer.ID)
-	if len(generations) > 0 {
-		handle.Generation = generations[0].Normalize()
-	}
-	payload := handle.PayloadMetadata()
-	if generation := handle.Generation.Normalize(); generation.Valid() {
-		payload[generation.RevisionField] = generation.RevisionID
-	}
-	sc := Schedule{
-		AgentID:      strings.TrimSpace(timer.Owner),
-		EventType:    strings.TrimSpace(timer.Event),
-		Mode:         "once",
-		At:           fireAt,
-		EntityID:     strings.TrimSpace(entityID),
-		FlowInstance: strings.Trim(strings.TrimSpace(flowInstance), "/"),
-		TaskID:       handle.TaskID(),
-		Payload:      mustJSON(payload),
-	}
-	if timer.Recurring {
-		if cronSpec, ok := workflowTimerRecurringSpec(timer, policy); ok {
-			sc.Mode = "cron"
-			sc.Cron = cronSpec
-			sc.At = time.Time{}
-		}
-	}
-	return sc
 }
 
 func workflowTimerConnectedToLoop(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract) bool {
@@ -605,131 +293,4 @@ func workflowTimerStartTrigger(timer runtimecontracts.WorkflowTimerContract) (ti
 func workflowTimerCancelTrigger(timer runtimecontracts.WorkflowTimerContract) (timeridentity.Trigger, bool) {
 	trigger, err := timeridentity.ParseCancelTrigger(timer.CancelOn)
 	return trigger, err == nil && trigger.Valid()
-}
-
-func workflowTimerRecurringSpec(timer runtimecontracts.WorkflowTimerContract, policy map[string]any) (string, bool) {
-	if delay := workflowTimerRenderedDelay(timer.Delay, policy); delay != "" {
-		if interval, ok := timeridentity.ParseDelayDuration(delay); ok {
-			return "@every " + interval.String(), true
-		}
-	}
-	return "", false
-}
-
-func (pc *PipelineCoordinator) registerWorkflowTimerSchedule(ctx context.Context, sc Schedule) {
-	if pc == nil {
-		return
-	}
-	if pc.timerScheduleStore != nil {
-		if err := pc.timerScheduleStore.UpsertSchedule(ctx, sc); err != nil {
-			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_persist_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
-				"task_id": strings.TrimSpace(sc.TaskID),
-				"mode":    strings.TrimSpace(sc.Mode),
-			}, err)
-			return
-		}
-	}
-	if pc.timerScheduler != nil {
-		register := func(registerCtx context.Context) {
-			if _, err := ClaimAndRegisterSchedule(registerCtx, pc.timerScheduleStore, pc.timerScheduler, sc); err != nil {
-				pc.logRuntimeWarn(registerCtx, runtimeWorkflowID, "workflow_timer_register_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
-					"task_id": strings.TrimSpace(sc.TaskID),
-					"mode":    strings.TrimSpace(sc.Mode),
-				}, err)
-			}
-		}
-		if !queuePipelinePostCommitAction(ctx, func() { register(withoutSQLTxContext(ctx)) }) {
-			register(ctx)
-		}
-	}
-}
-
-func (pc *PipelineCoordinator) cancelWorkflowTimerSchedule(ctx context.Context, sc Schedule) {
-	if pc == nil {
-		return
-	}
-	if pc.timerScheduleStore != nil {
-		if err := pc.timerScheduleStore.CancelScheduleExactTerminal(ctx, sc); err != nil {
-			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_cancel_persist_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
-				"task_id": strings.TrimSpace(sc.TaskID),
-				"mode":    strings.TrimSpace(sc.Mode),
-			}, err)
-			if !TerminalTransitionApplied(err) {
-				return
-			}
-		}
-	}
-	if pc.timerScheduler != nil {
-		cancel := func() {
-			if err := pc.timerScheduler.CancelExact(sc); err != nil {
-				pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_cancel_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
-					"task_id": strings.TrimSpace(sc.TaskID),
-					"mode":    strings.TrimSpace(sc.Mode),
-				}, err)
-			}
-		}
-		if !queuePipelinePostCommitAction(ctx, cancel) {
-			cancel()
-		}
-	}
-}
-
-func (pc *PipelineCoordinator) persistWorkflowTimerSchedule(ctx context.Context, sc Schedule) error {
-	if pc == nil {
-		return nil
-	}
-	if pc.timerScheduleStore != nil {
-		if err := pc.timerScheduleStore.UpsertSchedule(ctx, sc); err != nil {
-			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_persist_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
-				"task_id": strings.TrimSpace(sc.TaskID),
-				"mode":    strings.TrimSpace(sc.Mode),
-			}, err)
-			return err
-		}
-	}
-	if pc.timerScheduler != nil {
-		register := func(registerCtx context.Context) {
-			if _, err := ClaimAndRegisterSchedule(registerCtx, pc.timerScheduleStore, pc.timerScheduler, sc); err != nil {
-				pc.logRuntimeWarn(registerCtx, runtimeWorkflowID, "workflow_timer_register_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
-					"task_id": strings.TrimSpace(sc.TaskID),
-					"mode":    strings.TrimSpace(sc.Mode),
-				}, err)
-			}
-		}
-		if !queuePipelinePostCommitAction(ctx, func() { register(withoutSQLTxContext(ctx)) }) {
-			register(ctx)
-		}
-	}
-	return nil
-}
-
-func (pc *PipelineCoordinator) persistWorkflowTimerCancellation(ctx context.Context, sc Schedule) error {
-	if pc == nil {
-		return nil
-	}
-	if pc.timerScheduleStore != nil {
-		if err := pc.timerScheduleStore.CancelScheduleExactTerminal(ctx, sc); err != nil {
-			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_cancel_persist_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
-				"task_id": strings.TrimSpace(sc.TaskID),
-				"mode":    strings.TrimSpace(sc.Mode),
-			}, err)
-			if !TerminalTransitionApplied(err) {
-				return err
-			}
-		}
-	}
-	if pc.timerScheduler != nil {
-		cancel := func() {
-			if err := pc.timerScheduler.CancelExact(sc); err != nil {
-				pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_cancel_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
-					"task_id": strings.TrimSpace(sc.TaskID),
-					"mode":    strings.TrimSpace(sc.Mode),
-				}, err)
-			}
-		}
-		if !queuePipelinePostCommitAction(ctx, cancel) {
-			cancel()
-		}
-	}
-	return nil
 }

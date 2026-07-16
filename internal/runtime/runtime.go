@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"os"
 	"regexp"
@@ -961,6 +960,17 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		callbackCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		callbackCtx = events.WithDeliveryContext(callbackCtx, sc.Context)
+		if rt.Pipeline != nil && rt.Pipeline.IsWorkflowTimerSchedule(sc) {
+			outcome, err := rt.Pipeline.FireWorkflowTimer(callbackCtx, sc)
+			if err != nil && rt.Logger != nil {
+				handleRuntimeLogPersistenceError("scheduler", "workflow_timer_fire_failed", rt.Logger.Error(callbackCtx, "scheduler", "workflow_timer_fire_failed", map[string]any{
+					"timer_id": sc.EffectiveTimerID(),
+					"task_id":  sc.TaskID,
+					"outcome":  outcome,
+				}, err))
+			}
+			return
+		}
 		if err := rt.Bus.Publish(callbackCtx, scheduledEvent(sc)); err != nil {
 			if rt.Logger != nil {
 				handleRuntimeLogPersistenceError("scheduler", "publish_failed", rt.Logger.Error(callbackCtx, "scheduler", "publish_failed", map[string]any{
@@ -1465,9 +1475,10 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		startupRecoveryDecision.ScheduleReplayCount = timerReplayCount
 		startupRecoveryDecision.ScheduleSkipCount = timerSkipCount
 		startupRecoveryDecision.ScheduleDropCount = timerDropCount
-		if err := ensureLifecycleWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline); err != nil {
-			if rt.Logger != nil {
-				handleRuntimeLogPersistenceError("scheduler", "ensure_lifecycle_failed", rt.Logger.Error(ctx, "scheduler", "ensure_lifecycle_failed", nil, err))
+		if rt.Pipeline != nil {
+			if err := rt.Pipeline.RestoreWorkflowTimers(ctx); err != nil {
+				rt.emitBootProgress(10, "schedule_restoration", "FAILED", err.Error())
+				return fmt.Errorf("restore workflow timers: %w", err)
 			}
 		}
 		if err := ensureBootWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline, schedules); err != nil {
@@ -2087,6 +2098,7 @@ func normalizeScheduleIdentity(sc *runtimepipeline.Schedule) {
 	sc.NormalizeRunID()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
+	sc.NormalizeTimerID()
 }
 
 func bootWorkflowTimerSchedule(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract, now time.Time) (runtimepipeline.Schedule, bool) {
@@ -2122,72 +2134,6 @@ func bootWorkflowTimerSchedule(source semanticview.Source, timer runtimecontract
 		sc.At = time.Time{}
 	}
 	return sc, true
-}
-
-func ensureLifecycleWorkflowSchedules(ctx context.Context, store runtimepipeline.SchedulePersistence, scheduler *runtimepipeline.Scheduler, workflow runtimepipeline.WorkflowRuntime) error {
-	if store == nil || workflow == nil {
-		return nil
-	}
-	if strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)) == "" {
-		return nil
-	}
-	source := workflow.SemanticSource()
-	if source == nil {
-		return nil
-	}
-	instanceStore := workflow.WorkflowInstanceStore()
-	if instanceStore == nil || !instanceStore.Enabled() {
-		return nil
-	}
-	instances, err := instanceStore.List(ctx)
-	if err != nil {
-		return err
-	}
-	for _, instance := range instances {
-		instanceIdentity := runtimepipeline.StoredFlowInstance(source, instance)
-		entityID := strings.TrimSpace(instanceIdentity.EntityID)
-		if entityID == "" {
-			continue
-		}
-		for _, timerState := range instance.TimerState {
-			if timerState.Cancelled || timerState.Fired {
-				continue
-			}
-			timerID := strings.TrimSpace(timerState.TimerID)
-			if timerID == "" {
-				continue
-			}
-			timer, ok := source.WorkflowTimerByID(timerID)
-			if !ok || timer.Recurring {
-				continue
-			}
-			owner := strings.TrimSpace(timer.Owner)
-			eventType := strings.TrimSpace(timer.Event)
-			if owner == "" || eventType == "" {
-				continue
-			}
-			sc := runtimepipeline.Schedule{
-				RunID:        runtimecorrelation.RunIDFromContext(ctx),
-				AgentID:      owner,
-				EventType:    eventType,
-				Mode:         "once",
-				At:           timerState.FiresAt,
-				EntityID:     entityID,
-				FlowInstance: strings.TrimSpace(instance.StorageRef),
-				TaskID:       timeridentity.WorkflowTimerHandle(timerID).TaskID(),
-				Payload:      workflowTimerPayload(timer),
-			}
-			if err := store.UpsertSchedule(ctx, sc); err != nil {
-				return err
-			}
-			if scheduler != nil {
-				if _, err := runtimepipeline.ClaimAndRegisterSchedule(ctx, store, scheduler, sc); err != nil {
-					log.Printf("rehydrate lifecycle schedule failed agent=%s event=%s err=%v", sc.AgentID, sc.EventType, err)
-				}
-			}
-		}
-	}
-	return nil
 }
 
 func bootWorkflowTimerDuration(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract) time.Duration {

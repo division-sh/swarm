@@ -2,9 +2,12 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
+
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
 func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, entityID string) WorkflowState {
@@ -39,6 +42,13 @@ func (pc *PipelineCoordinator) updateEntityState(ctx context.Context, entityID, 
 	if entityID == "" || nextState == "" {
 		return nil
 	}
+	inbound, hasInbound := runtimecorrelation.InboundEventFromContext(ctx)
+	if !hasInbound || strings.TrimSpace(inbound.ID()) == "" || inbound.CreatedAt().IsZero() {
+		return fmt.Errorf("workflow state transition requires exact inbound event identity")
+	}
+	if sourceEvent == "" {
+		sourceEvent = strings.TrimSpace(string(inbound.Type()))
+	}
 	source := pc.SemanticSource()
 	return pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
 		currentState := ""
@@ -62,15 +72,24 @@ func (pc *PipelineCoordinator) updateEntityState(ctx context.Context, entityID, 
 			instance.CurrentState = nextState
 			instance.EnteredStageAt = enteredStateAt
 			if currentState != "" && currentState != nextState {
-				instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(pc.WorkflowDefinition(), currentState, nextState, sourceEvent))
+				instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(pc.WorkflowDefinition(), currentState, nextState, inbound.ID(), sourceEvent, inbound.CreatedAt()))
 			} else if currentState == "" && len(instance.TransitionHistory) == 0 {
-				instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(pc.WorkflowDefinition(), "", nextState, sourceEvent))
+				instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(pc.WorkflowDefinition(), "", nextState, inbound.ID(), sourceEvent, inbound.CreatedAt()))
 			}
 		}); err != nil {
 			return err
 		}
 		pc.notifyTestEntityStateUpdated(entityID, nextState)
-		if err := pc.reconcileWorkflowStageTimers(txctx, entityID, currentState, nextState, sourceEvent); err != nil {
+		cause := workflowTimerCause{
+			Kind:         workflowTimerCauseTransition,
+			EventID:      inbound.ID(),
+			EventType:    sourceEvent,
+			OccurredAt:   inbound.CreatedAt(),
+			TransitionID: workflowTransitionIdentity(pc.WorkflowDefinition(), currentState, nextState, sourceEvent),
+			FromState:    currentState,
+			ToState:      nextState,
+		}
+		if err := pc.workflowTimers.Reconcile(txctx, entityID, currentState, nextState, cause); err != nil {
 			return err
 		}
 		if err := pc.applyWorkflowJoinIntents(txctx, entityID, currentState, nextState); err != nil {
@@ -183,26 +202,35 @@ func (pc *PipelineCoordinator) lockWorkflowEntity(entityID string) func() {
 	return lock.Unlock
 }
 
-func workflowTransitionRecord(workflow *WorkflowDefinition, fromState, toState, sourceEvent string) WorkflowTransitionRecord {
+func workflowTransitionRecord(workflow *WorkflowDefinition, fromState, toState, sourceEventID, sourceEventType string, firedAt time.Time) WorkflowTransitionRecord {
 	fromState = strings.TrimSpace(string(NormalizeWorkflowStateID(fromState)))
 	toState = strings.TrimSpace(string(NormalizeWorkflowStateID(toState)))
-	sourceEvent = strings.TrimSpace(sourceEvent)
+	sourceEventID = strings.TrimSpace(sourceEventID)
+	sourceEventType = strings.TrimSpace(sourceEventType)
+	if firedAt.IsZero() {
+		firedAt = time.Now().UTC()
+	}
 	state := WorkflowState{Stage: NormalizeWorkflowStateID(fromState)}
 	transition, ok := WorkflowStateTransition(workflow, state.Stage, NormalizeWorkflowStateID(toState))
 	record := WorkflowTransitionRecord{
 		From:            fromState,
 		To:              toState,
+		TriggerEventID:  sourceEventID,
 		GuardsEvaluated: nil,
-		FiredAt:         time.Now().UTC(),
+		FiredAt:         firedAt.UTC(),
 	}
 	if ok {
 		record.TransitionID = strings.TrimSpace(transition.Name)
 		record.GuardsEvaluated = append([]string{}, transition.GuardIDs...)
 	} else {
 		record.TransitionID = firstNonEmptyString(
-			sourceEvent,
+			sourceEventType,
 			"legacy_"+strings.ReplaceAll(fromState, "-", "_")+"_to_"+strings.ReplaceAll(toState, "-", "_"),
 		)
 	}
 	return record
+}
+
+func workflowTransitionIdentity(workflow *WorkflowDefinition, fromState, toState, sourceEventType string) string {
+	return workflowTransitionRecord(workflow, fromState, toState, "", sourceEventType, time.Unix(0, 0)).TransitionID
 }

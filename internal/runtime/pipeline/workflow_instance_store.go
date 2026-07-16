@@ -12,18 +12,14 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
-
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
-	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
-	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
 
@@ -51,7 +47,6 @@ type WorkflowInstance struct {
 	EnteredStageAt    time.Time
 	TransitionHistory []WorkflowTransitionRecord
 	StateBuckets      map[string]any
-	TimerState        []WorkflowTimerState
 	Metadata          map[string]any
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
@@ -64,72 +59,6 @@ type WorkflowTransitionRecord struct {
 	TriggerEventID  string    `json:"trigger_event_id"`
 	FiredAt         time.Time `json:"fired_at"`
 	GuardsEvaluated []string  `json:"guards_evaluated"`
-}
-
-type WorkflowTimerState struct {
-	TimerID    string                       `json:"timer_id"`
-	TaskID     string                       `json:"task_id,omitempty"`
-	EventType  string                       `json:"event_type,omitempty"`
-	CreatedAt  time.Time                    `json:"created_at"`
-	FiresAt    time.Time                    `json:"fires_at"`
-	StartedBy  string                       `json:"started_by,omitempty"`
-	Recurring  bool                         `json:"recurring,omitempty"`
-	Cancelled  bool                         `json:"cancelled,omitempty"`
-	Fired      bool                         `json:"fired,omitempty"`
-	Generation attemptgeneration.Generation `json:"loop_generation,omitempty"`
-}
-
-func workflowTimerStatePayload(timer WorkflowTimerState) ([]byte, error) {
-	payload := map[string]any{
-		"started_by": strings.TrimSpace(timer.StartedBy),
-		"timer_id":   strings.TrimSpace(timer.TimerID),
-	}
-	if generation := timer.Generation.Normalize(); generation.Valid() {
-		payload[attemptgeneration.PayloadKey] = generation.PayloadValue()
-	}
-	return json.Marshal(payload)
-}
-
-func decodeWorkflowTimerStatePayload(raw any, timer *WorkflowTimerState) error {
-	if timer == nil {
-		return fmt.Errorf("workflow timer state is nil")
-	}
-	var encoded []byte
-	switch typed := raw.(type) {
-	case nil:
-	case []byte:
-		encoded = typed
-	case string:
-		encoded = []byte(typed)
-	default:
-		value, err := json.Marshal(typed)
-		if err != nil {
-			return err
-		}
-		encoded = value
-	}
-	payload := map[string]any{}
-	if len(encoded) > 0 {
-		if err := json.Unmarshal(encoded, &payload); err != nil {
-			return fmt.Errorf("decode workflow timer payload: %w", err)
-		}
-	}
-	timer.StartedBy = strings.TrimSpace(asString(payload["started_by"]))
-	timer.TimerID = strings.TrimSpace(asString(payload["timer_id"]))
-	if timer.TimerID == "" {
-		timer.TimerID = strings.TrimSpace(timer.TaskID)
-	}
-	if generation, ok := attemptgeneration.FromPayload(payload); ok {
-		timer.Generation = generation
-	}
-	return nil
-}
-
-func workflowTimerStateTaskID(timer WorkflowTimerState) string {
-	if taskID := strings.TrimSpace(timer.TaskID); taskID != "" {
-		return taskID
-	}
-	return strings.TrimSpace(timer.TimerID)
 }
 
 type workflowInstancePersistedProjection struct {
@@ -198,10 +127,6 @@ const (
 	workflowStoreDialectPostgres workflowStoreDialect = "postgres"
 	workflowStoreDialectSQLite   workflowStoreDialect = "sqlite"
 )
-
-var workflowInstancePathNamespace = uuid.MustParse("5e7507c8-bd4f-46e0-a098-b016dc31df23")
-
-const workflowInstanceTimerOwnerNode = "workflow_instance_store"
 
 var errSQLiteWorkflowInstanceStoreRuntimeMutationRunnerRequired = errors.New("sqlite workflow instance store requires runtime mutation runner")
 
@@ -730,11 +655,6 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 	}
 	item.StorageRef = persistedIdentity.StorageRef
 	item.InstanceID = persistedIdentity.InstanceID
-	timers, err := s.loadWorkflowTimersSpec(ctx, runID, keys[0])
-	if err != nil {
-		return WorkflowInstance{}, false, err
-	}
-	item.TimerState = timers
 	item.TransitionHistory = append([]WorkflowTransitionRecord{}, projection.Control.TransitionHistory...)
 	if item.StateBuckets == nil {
 		item.StateBuckets = map[string]any{}
@@ -901,11 +821,6 @@ func (s *WorkflowInstanceStore) querySpec(ctx context.Context, runID, where stri
 		item.StorageRef = persistedIdentity.StorageRef
 		item.InstanceID = persistedIdentity.InstanceID
 		item.TransitionHistory = append([]WorkflowTransitionRecord{}, projection.Control.TransitionHistory...)
-		timers, err := s.loadWorkflowTimersSpec(ctx, runID, persistedIdentity.RowID())
-		if err != nil {
-			return nil, err
-		}
-		item.TimerState = timers
 		if item.StateBuckets == nil {
 			item.StateBuckets = map[string]any{}
 		}
@@ -1069,46 +984,6 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 	}); err != nil {
 		return err
 	}
-	if err := declarePipelineRunForkRevisionChange(ctx, runID, runforkrevision.FamilyTimers); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM timers
-		WHERE run_id = $1::uuid
-		  AND entity_id = $2::uuid
-		  AND flow_instance = $3
-		  AND owner_node = $4
-		  AND owner_agent IS NULL
-	`, runID, rowID, storageRef, workflowInstanceTimerOwnerNode); err != nil {
-		return err
-	}
-	for _, timer := range instance.TimerState {
-		payloadJSON, err := workflowTimerStatePayload(timer)
-		if err != nil {
-			return err
-		}
-		status := "active"
-		if timer.Fired {
-			status = "fired"
-		} else if timer.Cancelled {
-			status = "cancelled"
-		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO timers (
-				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-				fire_at, recurring, owner_node, task_type, status, created_at
-			)
-			VALUES (
-				$1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7::jsonb,
-				$8, $9, $10, $11, $12, $13
-			)
-		`, workflowInstanceTimerRowID(runID, workflowTimerStateTaskID(timer), rowID), runID, workflowTimerStateTaskID(timer), rowID, storageRef,
-			strings.TrimSpace(timer.EventType), jsonOrDefault(payloadJSON, "{}"), timer.FiresAt, timer.Recurring,
-			workflowInstanceTimerOwnerNode, workflowInstanceTimerTaskType(timer), status, workflowTimeOrNow(timer.CreatedAt),
-		); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -1219,31 +1094,6 @@ func (s *WorkflowInstanceStore) createSpec(ctx context.Context, rowID, storageRe
 		HandlerStep: "create",
 	}); err != nil {
 		return err
-	}
-	for _, timer := range instance.TimerState {
-		payloadJSON, err := workflowTimerStatePayload(timer)
-		if err != nil {
-			return err
-		}
-		status := "active"
-		if timer.Cancelled {
-			status = "cancelled"
-		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO timers (
-				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-				fire_at, recurring, owner_node, task_type, status, created_at
-			)
-			VALUES (
-				$1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7::jsonb,
-				$8, $9, $10, $11, $12, $13
-			)
-		`, workflowInstanceTimerRowID(runID, workflowTimerStateTaskID(timer), rowID), runID, workflowTimerStateTaskID(timer), rowID, storageRef,
-			strings.TrimSpace(timer.EventType), jsonOrDefault(payloadJSON, "{}"), timer.FiresAt, timer.Recurring,
-			workflowInstanceTimerOwnerNode, workflowInstanceTimerTaskType(timer), status, workflowTimeOrNow(timer.CreatedAt),
-		); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -1412,54 +1262,6 @@ func loadTrackedEntityStateProjection(ctx context.Context, tx *sql.Tx, runID, en
 		Gates:        workflowBoolGatesAsMap(gates),
 		Accumulator:  accumulator,
 	}, nil
-}
-
-func (s *WorkflowInstanceStore) loadWorkflowTimersSpec(ctx context.Context, runID, entityID string) ([]WorkflowTimerState, error) {
-	rows, err := dbQueryContext(ctx, s.db, `
-		SELECT
-			timer_name,
-			fire_event,
-			created_at,
-			fire_at,
-			fire_payload,
-			recurring,
-			status
-		FROM timers
-		WHERE run_id = $1::uuid
-		  AND entity_id = $2::uuid
-		  AND owner_node = $3
-		  AND owner_agent IS NULL
-		ORDER BY created_at ASC, timer_name ASC
-	`, runID, entityID, workflowInstanceTimerOwnerNode)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := make([]WorkflowTimerState, 0, 4)
-	for rows.Next() {
-		var timer WorkflowTimerState
-		var payloadRaw any
-		var status string
-		if err := rows.Scan(
-			&timer.TaskID,
-			&timer.EventType,
-			&timer.CreatedAt,
-			&timer.FiresAt,
-			&payloadRaw,
-			&timer.Recurring,
-			&status,
-		); err != nil {
-			return nil, err
-		}
-		if err := decodeWorkflowTimerStatePayload(payloadRaw, &timer); err != nil {
-			return nil, err
-		}
-		status = strings.TrimSpace(status)
-		timer.Cancelled = status == "cancelled"
-		timer.Fired = status == "fired"
-		out = append(out, timer)
-	}
-	return out, rows.Err()
 }
 
 func decodeWorkflowInstancePersistedProjection(
@@ -1789,24 +1591,6 @@ func workflowInstanceMode(storageRef string) string {
 		return "template"
 	}
 	return "static"
-}
-
-func workflowInstanceTimerRowID(runID, timerID, entityID string) string {
-	return uuid.NewSHA1(workflowInstancePathNamespace, []byte(strings.TrimSpace(runID)+":"+strings.TrimSpace(entityID)+":"+strings.TrimSpace(timerID))).String()
-}
-
-func workflowInstanceTimerTaskType(timer WorkflowTimerState) string {
-	if timer.Recurring {
-		return "scheduled_task"
-	}
-	return "timer"
-}
-
-func workflowTimeOrNow(v time.Time) time.Time {
-	if v.IsZero() {
-		return time.Now().UTC()
-	}
-	return v.UTC()
 }
 
 func workflowInstanceLookupKeys(ref string) []string {

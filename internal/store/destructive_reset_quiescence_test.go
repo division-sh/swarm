@@ -199,6 +199,7 @@ func TestPostgresStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecoverableW
 	nodePending := seedDestructiveResetEvent(t, ctx, pg, runID, "serve.node.pending")
 	terminalRunPending := seedDestructiveResetEvent(t, ctx, pg, terminalRunID, "serve.terminal.pending")
 	activeSessionID := uuid.NewString()
+	timerID := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, retry_count, reason_code, created_at, delivered_at
@@ -210,6 +211,12 @@ func TestPostgresStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecoverableW
 			($6::uuid, $8::uuid, 'agent', 'agent-a', 'pending', NULL, 0, 'matched_agent_subscription', now(), NULL)
 	`, runID, agentPending, agentInProgress, agentRetryableFailed, nodePending, terminalRunID, activeSessionID, terminalRunPending); err != nil {
 		t.Fatalf("seed deliveries: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status)
+		VALUES ($1::uuid, $2, $3::uuid, 'timer.fire', $4, 'active')
+	`, timerID, aggregateWorkflowTimerTaskID(timerID), runID, now.Add(time.Hour)); err != nil {
+		t.Fatalf("seed canonical workflow timer: %v", err)
 	}
 
 	result, err := pg.ApplyServeAbandonActiveRunQuiescence(ctx, now)
@@ -224,6 +231,13 @@ func TestPostgresStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecoverableW
 	}
 	if len(result.Deliveries) != 4 || result.PipelineReceiptCount != 4 {
 		t.Fatalf("deliveries=%d pipeline_receipts=%d, want 4/4", len(result.Deliveries), result.PipelineReceiptCount)
+	}
+	var timerStatus string
+	if err := pg.DB.QueryRowContext(ctx, `SELECT status FROM timers WHERE timer_id = $1::uuid`, timerID).Scan(&timerStatus); err != nil {
+		t.Fatalf("load canonical workflow timer: %v", err)
+	}
+	if timerStatus != "cancelled" {
+		t.Fatalf("canonical workflow timer status = %q, want cancelled", timerStatus)
 	}
 
 	var runStatus, controlStatus, reason, controlledBy string
@@ -299,6 +313,7 @@ func TestSQLiteRuntimeStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecover
 	nodePending := seedSQLiteServeAbandonEvent(t, ctx, store, runID, "serve.node.pending", now)
 	terminalRunPending := seedSQLiteServeAbandonEvent(t, ctx, store, terminalRunID, "serve.terminal.pending", now)
 	activeSessionID := uuid.NewString()
+	timerID := uuid.NewString()
 	if _, err := store.DB.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, retry_count, reason_code, created_at, delivered_at
@@ -317,6 +332,12 @@ func TestSQLiteRuntimeStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecover
 		uuid.NewString(), terminalRunID, terminalRunPending, now); err != nil {
 		t.Fatalf("seed sqlite deliveries: %v", err)
 	}
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status)
+		VALUES (?, ?, ?, 'timer.fire', ?, 'active')
+	`, timerID, aggregateWorkflowTimerTaskID(timerID), runID, now.Add(time.Hour)); err != nil {
+		t.Fatalf("seed canonical sqlite workflow timer: %v", err)
+	}
 
 	result, err := store.ApplyServeAbandonActiveRunQuiescence(ctx, now)
 	if err != nil {
@@ -330,6 +351,13 @@ func TestSQLiteRuntimeStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecover
 	}
 	if len(result.Deliveries) != 4 || result.PipelineReceiptCount != 4 {
 		t.Fatalf("deliveries=%d pipeline_receipts=%d, want 4/4", len(result.Deliveries), result.PipelineReceiptCount)
+	}
+	var timerStatus string
+	if err := store.DB.QueryRowContext(ctx, `SELECT status FROM timers WHERE timer_id = ?`, timerID).Scan(&timerStatus); err != nil {
+		t.Fatalf("load canonical sqlite workflow timer: %v", err)
+	}
+	if timerStatus != "cancelled" {
+		t.Fatalf("canonical sqlite workflow timer status = %q, want cancelled", timerStatus)
 	}
 	assertSQLiteServeAbandonRun(t, ctx, store, runID)
 	assertSQLiteServeAbandonRun(t, ctx, store, pausedRunID)

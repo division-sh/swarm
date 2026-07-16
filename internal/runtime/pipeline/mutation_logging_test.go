@@ -39,7 +39,9 @@ func TestUpdateEntityState_LogsMutationRowForStateTransition(t *testing.T) {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	if err := pc.updateEntityState(testPipelineCoordinatorRunContext(t, pc), entityID, "done", "flow.transitioned"); err != nil {
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	transitionCtx := testPersistedWorkflowStateTransitionContext(t, pc.workflowStore, ctx, entityID, "flow.transitioned")
+	if err := pc.updateEntityState(transitionCtx, entityID, "done", "flow.transitioned"); err != nil {
 		t.Fatalf("updateEntityState: %v", err)
 	}
 
@@ -290,7 +292,9 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 		dropEntityMutationsTable(t, db)
 
-		err := pc.updateEntityState(testPipelineCoordinatorRunContext(t, pc), entityID, "done", "flow.transitioned")
+		ctx := testPipelineCoordinatorRunContext(t, pc)
+		transitionCtx := testPersistedWorkflowStateTransitionContext(t, pc.workflowStore, ctx, entityID, "flow.transitioned")
+		err := pc.updateEntityState(transitionCtx, entityID, "done", "flow.transitioned")
 		if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
 			t.Fatalf("updateEntityState err = %v, want entity_mutations failure", err)
 		}
