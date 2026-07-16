@@ -7752,14 +7752,20 @@ tool_model:
       deterministic_inhabitation: >
         Connector response roots are objects. Omitted schema type has the existing object meaning. Objects materialize only required
         declared properties in deterministic key order and invent no additional properties. Arrays materialize empty because the
-        admitted ToolInputSchema model has no minimum-item constraint. Enum-bearing values choose the first authored typed literal;
-        otherwise strings use empty text, booleans false, numbers zero clamped to inclusive bounds, integers the deterministic integer
-        nearest zero within inclusive bounds, and null values null. Optional properties, examples, defaults, and provider-semantic
-        values are not invented.
+        admitted ToolInputSchema model has no minimum-item constraint. Non-empty enum-bearing values choose the first authored typed
+        literal; otherwise strings use empty text, booleans false, numbers zero clamped to inclusive bounds, integers the deterministic
+        integer nearest zero within inclusive bounds, and null values null. Optional properties, examples, defaults, and provider-
+        semantic values are not invented.
+      canonical_enum_projection: >
+        Provider-visible tool definitions and runtime output-schema admission consume one recursive ToolInputSchema projection for
+        typed enum literals, including nested properties, array items, and additional-property schemas. Omitted enum and explicitly
+        authored empty enum retain distinct presence semantics. Runtime admission compares enum members as typed canonical JSON values;
+        stringification, case folding, and a provider-only or validator-only enum interpreter are forbidden.
       failure_policy: >
-        Unknown types, required names without declared property schemas, non-JSON enum literals, enum/type mismatch, non-finite or
-        contradictory bounds, integer intervals without an inhabitant, or canonical post-generation output-schema validation failure
-        reject the entire source compilation with exact tool and schema-path evidence. No partial plan or best-effort value survives.
+        Unknown types, required names without declared property schemas, an explicitly authored empty enum, non-JSON enum literals,
+        enum/type mismatch, non-finite or contradictory bounds, integer intervals without an inhabitant, or canonical post-generation
+        output-schema validation failure reject the entire source compilation with exact tool and schema-path evidence. No partial plan
+        or best-effort value survives.
       source_binding: >
         Workflow validation and ordinary RuntimeDeps construction consume the plan compiled from their effective source. Both selected-
         contract source loaders apply connector-pack imports, compile the plan, and bind it to LoadedSelectedContractSource before the

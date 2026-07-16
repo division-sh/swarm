@@ -89,6 +89,21 @@ func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministicall
 }
 
 func TestCompileMockResponsePlanFailsClosedWithExactSchemaPath(t *testing.T) {
+	var explicitEmptyEnum runtimecontracts.ToolInputSchema
+	if err := yaml.Unmarshal([]byte(`
+type: object
+properties:
+  status:
+    type: string
+    enum: []
+required: [status]
+`), &explicitEmptyEnum); err != nil {
+		t.Fatalf("unmarshal explicit empty enum schema: %v", err)
+	}
+	if explicitEmptyEnum.Properties["status"].Enum == nil {
+		t.Fatal("explicit empty enum lost authored presence")
+	}
+
 	tests := []struct {
 		name   string
 		schema runtimecontracts.ToolInputSchema
@@ -130,6 +145,11 @@ func TestCompileMockResponsePlanFailsClosedWithExactSchemaPath(t *testing.T) {
 				Required:   []string{"value"},
 			},
 			want: "output_schema.properties.value: bounds contain no integer",
+		},
+		{
+			name:   "explicit empty enum has no inhabitant",
+			schema: explicitEmptyEnum,
+			want:   "output_schema.properties.status.enum: explicitly declared enum must contain at least one value",
 		},
 	}
 

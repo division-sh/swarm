@@ -40,7 +40,7 @@ func TestCanonicalAcceptanceSchemaRetainsSemanticsAndDropsPresentation(t *testin
 	}
 	properties := got["properties"].(map[string]any)
 	code := properties["code"].(map[string]any)
-	if code["pattern"] != "^[a-z]+$" || code["format"] != "uuid" || code["minLength"] != 2 || code["maxLength"] != 12 || !reflect.DeepEqual(code["enum"], []string{"", "alpha", "beta"}) {
+	if code["pattern"] != "^[a-z]+$" || code["format"] != "uuid" || code["minLength"] != 2 || code["maxLength"] != 12 || !reflect.DeepEqual(code["enum"], []any{"", "alpha", "beta"}) {
 		t.Fatalf("canonical code constraints = %#v", code)
 	}
 	if _, ok := code["description"]; ok {

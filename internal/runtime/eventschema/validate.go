@@ -1,6 +1,7 @@
 package eventschema
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 	"github.com/google/uuid"
 )
@@ -47,11 +49,7 @@ func CanonicalAcceptanceSchema(schema map[string]any) map[string]any {
 	}
 	if raw, ok := schema["enum"]; ok {
 		if values, ok := asArray(raw); ok {
-			normalized := make([]string, 0, len(values))
-			for _, value := range values {
-				normalized = append(normalized, strings.TrimSpace(asString(value)))
-			}
-			out["enum"] = uniqueSortedStrings(normalized, true)
+			out["enum"] = canonicalEnumValues(values)
 		}
 	}
 	if value := strings.TrimSpace(asString(schema["format"])); value == "date-time" || value == "uuid" {
@@ -116,6 +114,33 @@ func uniqueSortedStrings(values []string, preserveEmpty bool) []string {
 		out = append(out, value)
 	}
 	sort.Strings(out)
+	return out
+}
+
+func canonicalEnumValues(values []any) []any {
+	byCanonical := make(map[string]any, len(values))
+	keys := make([]string, 0, len(values))
+	for _, value := range values {
+		raw, err := canonicaljson.Bytes(value)
+		if err != nil {
+			continue
+		}
+		key := string(raw)
+		if _, exists := byCanonical[key]; exists {
+			continue
+		}
+		var normalized any
+		if err := canonicaljson.DecodeInto(raw, &normalized); err != nil {
+			continue
+		}
+		byCanonical[key] = normalized
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]any, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, byCanonical[key])
+	}
 	return out
 }
 
@@ -366,22 +391,17 @@ func validateStringFormat(path string, schema map[string]any, value string) erro
 }
 
 func valueInEnum(value any, enumRaw any) bool {
-	enum, ok := enumRaw.([]any)
+	enum, ok := asArray(enumRaw)
 	if !ok {
-		switch t := enumRaw.(type) {
-		case []string:
-			for _, v := range t {
-				if strings.TrimSpace(asString(value)) == strings.TrimSpace(v) {
-					return true
-				}
-			}
-			return false
-		default:
-			return true
-		}
+		return false
 	}
-	for _, v := range enum {
-		if strings.TrimSpace(asString(value)) == strings.TrimSpace(asString(v)) {
+	want, err := canonicaljson.Bytes(value)
+	if err != nil {
+		return false
+	}
+	for _, candidate := range enum {
+		got, err := canonicaljson.Bytes(candidate)
+		if err == nil && bytes.Equal(want, got) {
 			return true
 		}
 	}
