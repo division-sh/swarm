@@ -67,14 +67,23 @@ type ConnectRoutePlanEndpoint struct {
 	Carries       []string
 }
 
-// ConnectSourceEndpointMatchesEvent is the canonical source-side identity
-// matcher for lowered connect plans.
+// ConnectSourceEndpointMatches is the canonical source-side identity matcher
+// for lowered connect plans.
+func ConnectSourceEndpointMatches(endpoint ConnectRoutePlanEndpoint, eventType, flowInstance string) bool {
+	return connectSourceEndpointMatches(endpoint, eventType, flowInstance, nil)
+}
+
 func ConnectSourceEndpointMatchesEvent(endpoint ConnectRoutePlanEndpoint, evt events.Event) bool {
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
+	return connectSourceEndpointMatches(endpoint, string(evt.Type()), evt.FlowInstance(), connectSourceEventRouteKeys(evt))
+}
+
+func connectSourceEndpointMatches(endpoint ConnectRoutePlanEndpoint, eventType, flowInstance string, routeKeys []string) bool {
+	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
+	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
 	if eventType == "" {
 		return false
 	}
-	if endpoint.Root && !connectSourceFlowInstanceMatchesPath(evt.FlowInstance(), "") {
+	if endpoint.Root && !connectSourceFlowInstanceMatchesPath(flowInstance, "") {
 		return false
 	}
 	sourceLocal := strings.Trim(strings.TrimSpace(endpoint.Event), "/")
@@ -93,13 +102,12 @@ func ConnectSourceEndpointMatchesEvent(endpoint ConnectRoutePlanEndpoint, evt ev
 		}
 	}
 	if sourceLocal != "" && eventType == sourceLocal {
-		return connectSourceFlowInstanceMatchesPath(evt.FlowInstance(), sourcePath)
+		return connectSourceFlowInstanceMatchesPath(flowInstance, sourcePath)
 	}
-	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
 	if flowInstance != "" && sourceLocal != "" && eventType == flowInstance+"/"+sourceLocal {
 		return connectSourceFlowInstanceMatchesPath(flowInstance, sourcePath)
 	}
-	for _, key := range connectSourceEventRouteKeys(evt) {
+	for _, key := range routeKeys {
 		key = strings.Trim(strings.TrimSpace(key), "/")
 		if key != "" && (key == sourceResolved || key == sourceScoped) {
 			return true
