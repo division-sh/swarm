@@ -6,8 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -251,33 +249,6 @@ def handle(input):
 		assertComputeModuleCode(t, err, computemodule.CodePythonException)
 	case <-time.After(20 * time.Second):
 		t.Fatalf("time.sleep used host timer instead of deterministic denial")
-	}
-}
-
-func TestExtractArtifactIgnoresPredictableStaleCache(t *testing.T) {
-	digestHex := strings.TrimPrefix(InterpreterDigest, "sha256:")
-	predictable := filepath.Join(os.TempDir(), "swarm-"+Interpreter+"-"+digestHex[:16])
-	if err := os.MkdirAll(predictable, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(predictable) })
-	if err := os.WriteFile(filepath.Join(predictable, pythonWasmPath), []byte("poisoned"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	dir, err := extractArtifact()
-	if err != nil {
-		t.Fatalf("extractArtifact: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	if dir == predictable {
-		t.Fatalf("extractArtifact reused predictable stale cache %s", dir)
-	}
-	raw, err := os.ReadFile(filepath.Join(dir, pythonWasmPath))
-	if err != nil {
-		t.Fatalf("read extracted python.wasm: %v", err)
-	}
-	if string(raw) == "poisoned" {
-		t.Fatalf("extractArtifact returned stale poisoned python.wasm")
 	}
 }
 

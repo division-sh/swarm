@@ -1,16 +1,13 @@
 package pythonmodule
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"embed"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,8 +27,6 @@ const (
 	HarnessABI          = "swarm-python-json-v1"
 	artifactZipPath     = "testdata/python-3.13.14-wasi_sdk-24.zip"
 	pythonWasmPath      = "python.wasm"
-	artifactCachePerm   = 0o755
-	artifactFilePerm    = 0o644
 	wasmPageSize        = 64 * 1024
 	defaultValidateFuel = 2_000_000_000
 	wasiErrnoSuccess    = int32(0)
@@ -39,14 +34,7 @@ const (
 	wasiErrnoNotSup     = int32(58)
 )
 
-//go:embed testdata/python-3.13.14-wasi_sdk-24.zip
-var artifactFS embed.FS
-
 var (
-	artifactOnce sync.Once
-	artifactDir  string
-	artifactErr  error
-
 	interpreterModuleOnce       sync.Once
 	serializedInterpreterModule []byte
 	interpreterModuleErr        error
@@ -425,75 +413,6 @@ func validateRequestShape(req Request) error {
 		return &computemodule.Error{Code: computemodule.CodeOutputSize, ModuleID: req.ModuleID, RowID: req.RowID, Limit: req.OutputBytes, Actual: 0, Err: fmt.Errorf("output byte limit is required")}
 	}
 	return nil
-}
-
-func materializedArtifactDir() (string, error) {
-	artifactOnce.Do(func() {
-		artifactDir, artifactErr = extractArtifact()
-	})
-	return artifactDir, artifactErr
-}
-
-func extractArtifact() (string, error) {
-	raw, err := artifactFS.ReadFile(artifactZipPath)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(raw)
-	actual := "sha256:" + hex.EncodeToString(sum[:])
-	if actual != InterpreterDigest {
-		return "", fmt.Errorf("embedded CPython-WASI artifact digest %s does not match declared %s", actual, InterpreterDigest)
-	}
-	dir, err := os.MkdirTemp("", "swarm-"+Interpreter+"-")
-	if err != nil {
-		return "", err
-	}
-	success := false
-	defer func() {
-		if !success {
-			_ = os.RemoveAll(dir)
-		}
-	}()
-	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
-	if err != nil {
-		return "", err
-	}
-	for _, file := range reader.File {
-		name := filepath.Clean(filepath.FromSlash(file.Name))
-		if name == "." || name == "" || strings.HasPrefix(name, ".."+string(filepath.Separator)) || filepath.IsAbs(name) {
-			return "", fmt.Errorf("embedded CPython-WASI artifact contains unsafe path %q", file.Name)
-		}
-		target := filepath.Join(dir, name)
-		if file.FileInfo().IsDir() {
-			if err := os.MkdirAll(target, artifactCachePerm); err != nil {
-				return "", err
-			}
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(target), artifactCachePerm); err != nil {
-			return "", err
-		}
-		src, err := file.Open()
-		if err != nil {
-			return "", err
-		}
-		dst, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, artifactFilePerm)
-		if err != nil {
-			src.Close()
-			return "", err
-		}
-		_, copyErr := io.Copy(dst, src)
-		closeErr := dst.Close()
-		src.Close()
-		if copyErr != nil {
-			return "", copyErr
-		}
-		if closeErr != nil {
-			return "", closeErr
-		}
-	}
-	success = true
-	return dir, nil
 }
 
 func embeddedSnapshotDigest() string {
