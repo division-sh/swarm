@@ -42,7 +42,13 @@ func eventSchemaFromCatalogEntry(eventType string, entry EventCatalogEntry, type
 			continue
 		}
 		field := entry.Payload.Properties[fieldName]
-		prop, typeDescription := eventSchemaForTypeRef(field.Type, types, map[string]struct{}{})
+		var prop map[string]any
+		typeDescription := ""
+		if field.ExactSchema != nil {
+			prop = ToolInputSchemaJSONSchema(CloneToolInputSchema(*field.ExactSchema))
+		} else {
+			prop, typeDescription = eventSchemaForTypeRef(field.Type, types, map[string]struct{}{})
+		}
 		description := strings.TrimSpace(field.Description)
 		if description == "" {
 			description = typeDescription
@@ -52,7 +58,9 @@ func eventSchemaFromCatalogEntry(eventType string, entry EventCatalogEntry, type
 		if description != "" {
 			prop["description"] = description
 		}
-		applySchemaRefinements(prop, field.Refinements)
+		if field.ExactSchema == nil {
+			applySchemaRefinements(prop, field.Refinements)
+		}
 		if strings.TrimSpace(field.Citation.Criteria) != "" || len(field.Citation.AllowedClasses) > 0 {
 			citations[fieldName] = CriteriaCitation{
 				Criteria:       strings.TrimSpace(field.Citation.Criteria),

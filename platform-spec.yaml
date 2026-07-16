@@ -8187,6 +8187,11 @@ tool_model:
       accepted_trigger_inventory: internal/providertriggers.CatalogSnapshot
       normalized_trigger_field_schema: internal/providertriggers.NormalizedEventFieldProjection.Schema
       accepted_connector_inventory: internal/providerconnectors.PackRegistry
+      semantic_schema_admission: internal/runtime/contracts.ValidateToolInputSchema
+      semantic_schema_projection: internal/runtime/contracts.ToolInputSchemaJSONSchema
+      semantic_schema_clone: internal/runtime/contracts.CloneToolInputSchema
+      normalized_event_exact_schema_carrier: internal/runtime/contracts.EventFieldSpec.ExactSchema
+      runtime_schema_acceptance: internal/runtime/eventschema
       structural_compiler: internal/packs.CompileChannelInventory
       directional_assignability_and_cardinality: internal/packs channel relation owner
       semantic_source_capabilities: internal/runtime/semanticview.SourceCapability
@@ -8210,7 +8215,16 @@ tool_model:
       details inside the coordinator and never enter an agent-visible or authored generic tool registry. Semantic-source
       wrappers are capability-transparent: consumers recursively unwrap through one owner for trigger import generation,
       target-free authority, connector import generation, and connector provenance instead of asserting only the outer
-      wrapper.
+      wrapper. ToolInputSchema is one closed recursive semantic schema vocabulary. Its shared validator runs at YAML decode
+      and at typed interface, trigger, channel, and connector acceptance before any descriptor becomes available. It rejects
+      missing or unsupported types, malformed or inapplicable constraints, invalid regular expressions, non-finite,
+      negative-zero, unsafe, or impossible numeric bounds, malformed arrays and objects, invalid required/property keys,
+      malformed schema-valued additionalProperties, and enum values that do not satisfy their recursively declared schema.
+      Projection to runtime JSON Schema preserves exact property names, required names, patterns, typed enum values, and
+      schema-valued additionalProperties; it never trims, stringifies, or widens them. Normalized trigger catalogs retain the
+      complete exact ToolInputSchema through imported event catalogs and runtime registry construction. All descriptor,
+      admission-plan, compiled-plan, and event-catalog copies consume the one recursive schema clone owner, including YAML
+      enum node content and aliases.
     opaque_reference_slots:
       exact:
       - destination
@@ -8250,6 +8264,8 @@ tool_model:
       - reject caller-supplied provider context, ambient values, defaults, functions, concatenation, conditions, or partial mappings
       - validate connector output first, then apply the compiled channel output projection, then validate the satisfier-bound opaque result
       - require every normalized trigger field to declare one post-conversion schema; normalization admits against that schema and the accepted trigger owner exports the same schema to the recursive event-mapping relation
+      - recursively admit every interface, trigger, channel, and connector ToolInputSchema through one shared owner at YAML and typed boundaries; no accepted descriptor may bypass it
+      - preserve exact typed enum, pattern, property, required, array/object, and schema-valued additionalProperties semantics through trigger catalog, runtime registry, directional compilation, generation hashing, validation, and readback
       - reserve platform.channel_activity.* for generation-pinned private targets and reject any authored or imported tool in that namespace during load/boot validation
       selected_constraints: >
         Runtime authoring limits are the intersection of interface invariants and the selected connector schemas for deliver

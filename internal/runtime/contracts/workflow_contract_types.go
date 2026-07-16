@@ -1073,6 +1073,7 @@ type EventFieldSpec struct {
 	Description string            `yaml:"description"`
 	Refinements SchemaRefinements `yaml:"-"`
 	Citation    CriteriaCitation  `yaml:"citation"`
+	ExactSchema *ToolInputSchema  `yaml:"-" json:"-"`
 }
 type CriteriaCitation struct {
 	Criteria       string   `yaml:"criteria"`

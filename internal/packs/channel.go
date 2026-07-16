@@ -104,6 +104,11 @@ func validateInterfaceDefinition(identity string, definition runtimecontracts.Pa
 	if len(definition.Schemas) == 0 || len(definition.Operations) == 0 || len(definition.Events) == 0 {
 		return fmt.Errorf("platform interface %q requires schemas, operations, and events", identity)
 	}
+	for name, schema := range definition.Schemas {
+		if err := runtimecontracts.ValidateToolInputSchema(schema); err != nil {
+			return fmt.Errorf("platform interface %q schema %q: %w", identity, name, err)
+		}
+	}
 	for name, operation := range definition.Operations {
 		if runtimecontracts.NormalizeActivityEffectClass(operation.EffectClass) != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 			return fmt.Errorf("platform interface %q operation %q must use non_idempotent_write", identity, name)
@@ -339,6 +344,11 @@ func validateChannelManifest(packID string, manifest ChannelManifest) error {
 	}
 	if len(manifest.OpaqueTypes) == 0 || len(manifest.Operations) == 0 || len(manifest.Events) == 0 {
 		return fmt.Errorf("channel pack %q requires opaque_types, operations, and events", packID)
+	}
+	for name, schema := range manifest.OpaqueTypes {
+		if err := runtimecontracts.ValidateToolInputSchema(schema); err != nil {
+			return fmt.Errorf("channel pack %q opaque type %q: %w", packID, name, err)
+		}
 	}
 	for name, binding := range manifest.Operations {
 		if strings.TrimSpace(name) == "" || strings.TrimSpace(binding.Tool) == "" {
@@ -849,6 +859,12 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 	if err != nil {
 		return SatisfactionPlan{}, err
 	}
+	if err := validateAcceptedTriggerDescriptor(trigger); err != nil {
+		return SatisfactionPlan{}, err
+	}
+	if err := validateAcceptedConnectorDescriptor(connector); err != nil {
+		return SatisfactionPlan{}, err
+	}
 	provider := strings.TrimSpace(channel.Manifest.Provider)
 	if provider != strings.TrimSpace(trigger.Provider) || provider != strings.TrimSpace(connector.Provider) {
 		return SatisfactionPlan{}, fmt.Errorf("channel pack %q provider %q does not match trigger %q and connector %q providers", channel.Envelope.ID, provider, trigger.Provider, connector.Provider)
@@ -857,6 +873,9 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 		return SatisfactionPlan{}, err
 	}
 	for name, schema := range channel.Manifest.OpaqueTypes {
+		if err := runtimecontracts.ValidateToolInputSchema(schema); err != nil {
+			return SatisfactionPlan{}, fmt.Errorf("channel opaque type %s: %w", name, err)
+		}
 		if err := validateOpaqueSchema("channel opaque type "+name, schema); err != nil {
 			return SatisfactionPlan{}, err
 		}
@@ -912,6 +931,29 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 		plan.Events[name] = CompiledChannelEvent{Name: name, Event: strings.TrimSpace(binding.Event), Fields: cloneChannelStringMap(binding.Fields), Descriptor: cloneTriggerEvent(descriptor)}
 	}
 	return plan.Clone(), nil
+}
+
+func validateAcceptedTriggerDescriptor(trigger TriggerPackDescriptor) error {
+	for eventName, event := range trigger.Events {
+		for fieldName, field := range event.Fields {
+			if err := runtimecontracts.ValidateToolInputSchema(field.Schema); err != nil {
+				return fmt.Errorf("accepted trigger %q event %q field %q schema: %w", trigger.Identity.ID, eventName, fieldName, err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateAcceptedConnectorDescriptor(connector ConnectorPackDescriptor) error {
+	for toolName, tool := range connector.Tools {
+		if err := runtimecontracts.ValidateToolInputSchema(tool.InputSchema); err != nil {
+			return fmt.Errorf("accepted connector %q tool %q input schema: %w", connector.Identity.ID, toolName, err)
+		}
+		if err := runtimecontracts.ValidateToolInputSchema(tool.OutputSchema); err != nil {
+			return fmt.Errorf("accepted connector %q tool %q output schema: %w", connector.Identity.ID, toolName, err)
+		}
+	}
+	return nil
 }
 
 type selectedChannelConstraint struct {
@@ -1671,32 +1713,7 @@ func cloneSchemaMap(in map[string]runtimecontracts.ToolInputSchema) map[string]r
 }
 
 func cloneSchema(in runtimecontracts.ToolInputSchema) runtimecontracts.ToolInputSchema {
-	out := in
-	out.Properties = cloneSchemaMap(in.Properties)
-	out.Required = append([]string(nil), in.Required...)
-	out.Enum = make([]runtimecontracts.SchemaLiteral, len(in.Enum))
-	for index, literal := range in.Enum {
-		out.Enum[index] = runtimecontracts.SchemaLiteral{Node: cloneChannelYAMLNode(literal.Node)}
-	}
-	if in.Items != nil {
-		items := cloneSchema(*in.Items)
-		out.Items = &items
-	}
-	if in.AdditionalProperties.Allowed != nil {
-		allowed := *in.AdditionalProperties.Allowed
-		out.AdditionalProperties.Allowed = &allowed
-	}
-	if in.AdditionalProperties.Schema != nil {
-		schema := cloneSchema(*in.AdditionalProperties.Schema)
-		out.AdditionalProperties.Schema = &schema
-	}
-	out.Minimum = cloneFloatPointer(in.Minimum)
-	out.Maximum = cloneFloatPointer(in.Maximum)
-	out.MinLength = cloneIntPointer(in.MinLength)
-	out.MaxLength = cloneIntPointer(in.MaxLength)
-	out.MinItems = cloneIntPointer(in.MinItems)
-	out.MaxItems = cloneIntPointer(in.MaxItems)
-	return out
+	return runtimecontracts.CloneToolInputSchema(in)
 }
 
 func cloneMappingMap(in map[string]ChannelMapping) map[string]ChannelMapping {

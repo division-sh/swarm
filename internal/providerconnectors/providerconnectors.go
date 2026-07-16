@@ -204,6 +204,12 @@ func validateTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error 
 			errs = append(errs, fmt.Errorf("%s must declare http.url", context))
 		}
 	}
+	if err := runtimecontracts.ValidateToolInputSchema(tool.InputSchema); err != nil {
+		errs = append(errs, fmt.Errorf("%s input_schema: %w", context, err))
+	}
+	if err := runtimecontracts.ValidateToolInputSchema(tool.OutputSchema); err != nil {
+		errs = append(errs, fmt.Errorf("%s output_schema: %w", context, err))
+	}
 	effectClass := runtimecontracts.NormalizeActivityEffectClass(tool.EffectClass)
 	if effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 		errs = append(errs, fmt.Errorf("%s effect_class must be non_idempotent_write for the Stage 1 connector proof", context))

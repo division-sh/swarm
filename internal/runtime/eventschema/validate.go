@@ -55,10 +55,11 @@ func CanonicalAcceptanceSchema(schema map[string]any) map[string]any {
 	if value := strings.TrimSpace(asString(schema["format"])); value == "date-time" || value == "uuid" {
 		out["format"] = value
 	}
-	for _, key := range []string{"pattern", "x-swarm-equalTo"} {
-		if value := strings.TrimSpace(asString(schema[key])); value != "" {
-			out[key] = value
-		}
+	if value, ok := schema["pattern"].(string); ok && value != "" {
+		out["pattern"] = value
+	}
+	if value := strings.TrimSpace(asString(schema["x-swarm-equalTo"])); value != "" {
+		out["x-swarm-equalTo"] = value
 	}
 	for _, key := range []string{"minLength", "maxLength", "minItems", "maxItems"} {
 		if raw, exists := schema[key]; exists {
@@ -78,7 +79,7 @@ func CanonicalAcceptanceSchema(schema map[string]any) map[string]any {
 			}
 		}
 	}
-	required := uniqueSortedStrings(requiredList(schema["required"]), false)
+	required := uniqueSortedStrings(exactRequiredList(schema["required"]), false)
 	if len(required) > 0 {
 		out["required"] = required
 	}
@@ -95,7 +96,14 @@ func CanonicalAcceptanceSchema(schema map[string]any) map[string]any {
 	}
 	_, hasAdditionalProperties := schema["additionalProperties"]
 	if strings.TrimSpace(asString(schema["type"])) == "object" || len(properties) > 0 || len(required) > 0 || hasAdditionalProperties {
-		out["additionalProperties"] = schemaAdditionalProps(schema["additionalProperties"])
+		switch additional := schema["additionalProperties"].(type) {
+		case map[string]any:
+			out["additionalProperties"] = CanonicalAcceptanceSchema(additional)
+		case bool:
+			out["additionalProperties"] = additional
+		default:
+			out["additionalProperties"] = true
+		}
 	}
 	return out
 }
@@ -148,17 +156,23 @@ func validateSchemaObject(path string, schema map[string]any, payload map[string
 	if schemaType := strings.TrimSpace(asString(schema["type"])); schemaType != "" && schemaType != "object" {
 		return nil
 	}
-	required := requiredList(schema["required"])
+	required := exactRequiredList(schema["required"])
 	for _, key := range required {
 		if _, ok := payload[key]; !ok {
 			return fmt.Errorf("schema validation failed: %s.%s is required", path, key)
 		}
 	}
 	props := schemaProperties(schema["properties"])
-	allowAdditional := schemaAdditionalProps(schema["additionalProperties"])
+	allowAdditional, additionalSchema := schemaAdditionalProperties(schema["additionalProperties"])
 	for k, v := range payload {
 		propSchema, known := props[k]
 		if !known {
+			if additionalSchema != nil {
+				if err := validateValue(path+"."+k, additionalSchema, v); err != nil {
+					return err
+				}
+				continue
+			}
 			if allowAdditional {
 				continue
 			}
@@ -196,7 +210,7 @@ func validateValue(path string, schema map[string]any, value any) error {
 	if st == "" {
 		props := schemaProperties(schema["properties"])
 		switch {
-		case len(props) > 0 || len(requiredList(schema["required"])) > 0:
+		case len(props) > 0 || len(exactRequiredList(schema["required"])) > 0:
 			st = "object"
 		case schema["items"] != nil:
 			st = "array"
@@ -275,7 +289,7 @@ func validateValue(path string, schema map[string]any, value any) error {
 }
 
 func validateStringRefinements(path string, schema map[string]any, value string) error {
-	if pattern := strings.TrimSpace(asString(schema["pattern"])); pattern != "" {
+	if pattern, ok := schema["pattern"].(string); ok && pattern != "" {
 		compiled, err := regexp.Compile(pattern)
 		if err != nil {
 			return fmt.Errorf("schema validation failed: %s has invalid pattern refinement", path)
@@ -358,8 +372,35 @@ func schemaProperties(raw any) map[string]map[string]any {
 	return runtimesharedjson.SchemaProperties(raw)
 }
 
-func schemaAdditionalProps(raw any) bool { return runtimesharedjson.SchemaAdditionalProps(raw) }
-func requiredList(raw any) []string      { return runtimesharedjson.RequiredList(raw) }
+func exactRequiredList(raw any) []string {
+	switch typed := raw.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, value := range typed {
+			if text, ok := value.(string); ok {
+				out = append(out, text)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func schemaAdditionalProperties(raw any) (bool, map[string]any) {
+	switch typed := raw.(type) {
+	case nil:
+		return true, nil
+	case bool:
+		return typed, nil
+	case map[string]any:
+		return true, typed
+	default:
+		return false, nil
+	}
+}
 
 func schemaAllowsNull(schema map[string]any) bool {
 	if schema == nil {

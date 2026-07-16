@@ -12,7 +12,156 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/yamlsource"
+	"gopkg.in/yaml.v3"
 )
+
+func TestChannelSchemaAdmissionRejectsRecursiveMalformedSchemasAtEveryTypedBoundary(t *testing.T) {
+	tests := []struct {
+		name   string
+		schema runtimecontracts.ToolInputSchema
+		want   string
+	}{
+		{name: "scalar regex", schema: runtimecontracts.ToolInputSchema{Type: "string", Pattern: "["}, want: "pattern is invalid"},
+		{name: "object required", schema: runtimecontracts.ToolInputSchema{Type: "object", Required: []string{"missing"}}, want: "is not declared"},
+		{name: "array items", schema: runtimecontracts.ToolInputSchema{Type: "array"}, want: "array requires items"},
+		{name: "typed enum", schema: runtimecontracts.ToolInputSchema{Type: "integer", Enum: []runtimecontracts.SchemaLiteral{{Node: yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "one"}}}}, want: "must be integer"},
+		{name: "additional properties schema", schema: runtimecontracts.ToolInputSchema{Type: "object", AdditionalProperties: runtimecontracts.ToolAdditionalProperties{Schema: &runtimecontracts.ToolInputSchema{Type: "array"}}}, want: "array requires items"},
+	}
+	boundaries := []struct {
+		name  string
+		admit func(*testing.T, runtimecontracts.ToolInputSchema) error
+	}{
+		{name: "yaml", admit: func(_ *testing.T, schema runtimecontracts.ToolInputSchema) error {
+			raw, err := yaml.Marshal(schema)
+			if err != nil {
+				return err
+			}
+			var decoded runtimecontracts.ToolInputSchema
+			return yaml.Unmarshal(raw, &decoded)
+		}},
+		{name: "interface", admit: func(t *testing.T, schema runtimecontracts.ToolInputSchema) error {
+			spec := loadChannelPlatformSpec(t)
+			versions := spec.Interfaces["swarm.hitl-channel"]
+			definition := versions["v1"]
+			definition.Schemas["presentation"] = schema
+			versions["v1"] = definition
+			spec.Interfaces["swarm.hitl-channel"] = versions
+			_, err := packs.NewInterfaceRegistry(spec)
+			return err
+		}},
+		{name: "trigger", admit: func(t *testing.T, schema runtimecontracts.ToolInputSchema) error {
+			registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
+			event := trigger.Events["inbound.telegram.text_message"]
+			field := event.Fields["external_account_reference"]
+			field.Schema = schema
+			event.Fields["external_account_reference"] = field
+			trigger.Events["inbound.telegram.text_message"] = event
+			_, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+			return err
+		}},
+		{name: "channel", admit: func(t *testing.T, schema runtimecontracts.ToolInputSchema) error {
+			registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
+			channel.Manifest.OpaqueTypes["external_account_reference"] = schema
+			_, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+			return err
+		}},
+		{name: "connector", admit: func(t *testing.T, schema runtimecontracts.ToolInputSchema) error {
+			registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
+			tool := connector.Tools["telegram.send_interactive"]
+			tool.InputSchema = schema
+			connector.Tools["telegram.send_interactive"] = tool
+			_, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+			return err
+		}},
+	}
+	for _, tc := range tests {
+		for _, boundary := range boundaries {
+			t.Run(tc.name+"/"+boundary.name, func(t *testing.T) {
+				if err := boundary.admit(t, runtimecontracts.CloneToolInputSchema(tc.schema)); err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("admission error = %v, want %q", err, tc.want)
+				}
+			})
+		}
+	}
+}
+
+func TestChannelCompilerPreservesExactEnumAndPinsItInGeneration(t *testing.T) {
+	var exact runtimecontracts.ToolInputSchema
+	if err := yaml.Unmarshal([]byte(`
+type: string
+minLength: 1
+pattern: ' approved $'
+enum: [' approved ']
+`), &exact); err != nil {
+		t.Fatalf("decode exact schema: %v", err)
+	}
+	compile := func(t *testing.T, schema runtimecontracts.ToolInputSchema) packs.SatisfactionPlan {
+		registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
+		channel.Manifest.OpaqueTypes["external_account_reference"] = schema
+		for _, eventName := range []string{"inbound.telegram.text_message", "inbound.telegram.callback_action"} {
+			event := trigger.Events[eventName]
+			field := event.Fields["external_account_reference"]
+			field.Schema = schema
+			event.Fields["external_account_reference"] = field
+			trigger.Events[eventName] = event
+		}
+		plan, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+		if err != nil {
+			t.Fatalf("CompileChannel: %v", err)
+		}
+		return plan
+	}
+	original := compile(t, exact)
+	for _, eventName := range []string{"text", "action"} {
+		eventSchema := original.Events[eventName].Descriptor.Fields["external_account_reference"].Schema
+		if eventSchema.Pattern != " approved $" || channelSchemaEnumText(t, eventSchema) != " approved " {
+			t.Fatalf("%s exact schema = %#v", eventName, eventSchema)
+		}
+	}
+	originalGeneration, err := original.GenerationID()
+	if err != nil {
+		t.Fatalf("original GenerationID: %v", err)
+	}
+	changed := runtimecontracts.CloneToolInputSchema(exact)
+	channelSchemaEnumScalar(t, &changed.Enum[0].Node).Value = " accepted "
+	changed.Pattern = " accepted $"
+	changedGeneration, err := compile(t, changed).GenerationID()
+	if err != nil {
+		t.Fatalf("changed GenerationID: %v", err)
+	}
+	if changedGeneration == originalGeneration {
+		t.Fatal("exact enum/pattern change did not change compiled generation")
+	}
+}
+
+func channelSchemaEnumText(t *testing.T, schema runtimecontracts.ToolInputSchema) string {
+	t.Helper()
+	var value string
+	if err := schema.Enum[0].Node.Decode(&value); err != nil {
+		t.Fatalf("decode schema enum: %v", err)
+	}
+	return value
+}
+
+func channelSchemaEnumScalar(t *testing.T, node *yaml.Node) *yaml.Node {
+	t.Helper()
+	if node == nil {
+		t.Fatal("schema enum node is nil")
+	}
+	if node.Kind == yaml.ScalarNode {
+		return node
+	}
+	for _, child := range node.Content {
+		if child != nil {
+			return channelSchemaEnumScalar(t, child)
+		}
+	}
+	if node.Alias != nil {
+		return channelSchemaEnumScalar(t, node.Alias)
+	}
+	t.Fatalf("schema enum node kind %d has no scalar", node.Kind)
+	return nil
+}
 
 func TestTelegramChannelPackCompilesThroughAcceptedProductionInventories(t *testing.T) {
 	plan := loadTelegramChannelPlan(t)
@@ -624,6 +773,16 @@ func loadTelegramChannelCompilerInputs(t *testing.T) (*packs.InterfaceRegistry, 
 
 func loadChannelInterfaceRegistry(t *testing.T) *packs.InterfaceRegistry {
 	t.Helper()
+	spec := loadChannelPlatformSpec(t)
+	registry, err := packs.NewInterfaceRegistry(spec)
+	if err != nil {
+		t.Fatalf("NewInterfaceRegistry: %v", err)
+	}
+	return registry
+}
+
+func loadChannelPlatformSpec(t *testing.T) runtimecontracts.PlatformSpecDocument {
+	t.Helper()
 	repo := filepath.Clean(filepath.Join("..", ".."))
 	snapshot, err := yamlsource.LoadFile(filepath.Join(repo, "platform-spec.yaml"))
 	if err != nil {
@@ -633,11 +792,7 @@ func loadChannelInterfaceRegistry(t *testing.T) *packs.InterfaceRegistry {
 	if err := snapshot.Decode(&spec); err != nil {
 		t.Fatalf("decode platform spec: %v", err)
 	}
-	registry, err := packs.NewInterfaceRegistry(spec)
-	if err != nil {
-		t.Fatalf("NewInterfaceRegistry: %v", err)
-	}
-	return registry
+	return spec
 }
 
 func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescriptor, packs.ConnectorPackDescriptor) {
