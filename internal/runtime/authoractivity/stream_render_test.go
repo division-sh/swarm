@@ -269,7 +269,7 @@ func TestHumanSubjectsDoNotExposeInternalEntityEventOrActivityIDs(t *testing.T) 
 	dead.Projection = Projection{SubjectType: "event", SubjectID: internalID, EventType: "message.received"}
 	dead.Failure = testFailure(t)
 	activity := occurrenceFromDraft(testDraft(KindActivityLifecycle, "failed", base.Add(2*time.Second)), 3)
-	activity.Projection = Projection{SubjectType: "activity", SubjectID: internalID, Activity: "normalize-message"}
+	activity.Projection = Projection{SubjectType: "activity", SubjectID: internalID, Activity: "normalize-message", ExecutionMode: "live"}
 	activity.Failure = testFailure(t)
 	platform := occurrenceFromDraft(testDraft(KindPlatformSignal, "event_quarantined", base.Add(3*time.Second)), 4)
 	platform.Projection = Projection{SubjectType: "entity", SubjectID: internalID, EventType: "message.received"}
