@@ -490,7 +490,7 @@ func (l *WorkflowTimerLifecycle) Fire(ctx context.Context, schedule Schedule) (W
 		evt := events.NewRuntimeControlEvent(
 			eventID,
 			events.EventType(activation.EventType),
-			activation.OwnerAgent,
+			events.AgentProducer(activation.OwnerAgent),
 			occurrence.TaskID(),
 			json.RawMessage(append([]byte(nil), activation.Payload...)),
 			0,
@@ -584,7 +584,8 @@ func (l *WorkflowTimerLifecycle) AuthorizeAcceptedEvent(ctx context.Context, evt
 	if evt.ID() != timeridentity.WorkflowTimerOccurrenceEventID(occurrence) ||
 		evt.RunID() != activation.RunID || workflowEventEntityID(evt) != activation.EntityID ||
 		strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != activation.FlowInstance ||
-		strings.TrimSpace(string(evt.Type())) != activation.EventType || evt.SourceAgent() != activation.OwnerAgent ||
+		strings.TrimSpace(string(evt.Type())) != activation.EventType ||
+		!evt.Producer().Equal(events.AgentProducer(activation.OwnerAgent)) ||
 		!workflowTimerJSONEqual(evt.Payload(), activation.Payload) {
 		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("accepted workflow timer event does not match canonical activation")
 	}
