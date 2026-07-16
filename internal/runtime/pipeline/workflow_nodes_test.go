@@ -342,9 +342,75 @@ func TestWorkflowNodeConnectedInputEventHandlerResolution_ConsumesLoweredPackage
 		t.Fatalf("producer event %q must differ from receiver event %q for this proof", producerEvent, receiverEvent)
 	}
 
-	resolved := workflowNodeConnectedInputEventHandlerResolution(source, "child-relay", producerEvent)
+	evt := eventtest.RootIngress("", events.EventType(producerEvent), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	resolved := workflowNodeConnectedInputEventHandlerResolution(source, "child-relay", evt)
 	if !resolved.Matched || resolved.HandlerEventKey != "micro.done" {
 		t.Fatalf("package-root connect handler resolution = %#v, want child-relay micro.done", resolved)
+	}
+}
+
+func TestWorkflowNodeConnectedInputHandlerMatchesConcreteTemplateProducer(t *testing.T) {
+	producer := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: "template",
+			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{
+				Name: "deploy_done", Event: "deploy.done",
+			}}}},
+		},
+		Path: "producer",
+	}
+	receiver := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "receiver", Flow: "receiver"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{
+				Name: "deploy_requested", Event: "deploy.requested",
+			}}}},
+		},
+		Path: "receiver",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"receiver-node": {
+				ID:           "receiver-node",
+				SubscribesTo: []string{"deploy.requested"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"deploy.requested": {},
+				},
+			},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, receiver}}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{
+				"producer": {{Name: "deploy_done", Event: "deploy.done"}},
+			},
+			FlowInputEventPins: map[string][]runtimecontracts.FlowInputEventPin{
+				"receiver": {{Name: "deploy_requested", Event: "deploy.requested"}},
+			},
+			CompositionConnects: []runtimecontracts.FlowPackageConnect{{
+				SourceFile: "package.yaml", SourceLine: 1, From: "producer.deploy_done", To: "receiver.deploy_requested",
+			}},
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"receiver-node": {"deploy.requested": {}},
+			},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"producer": &root.Children[0],
+				"receiver": &root.Children[1],
+			},
+		},
+	})
+	evt := eventtest.RootIngress("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+		FlowInstance: "receiver",
+		Source:       events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "producer-entity"},
+		Target:       events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: "receiver-entity"},
+	}, time.Unix(1, 0).UTC())
+
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "receiver-node", evt)
+	if !resolved.Matched || resolved.HandlerEventKey != "deploy.requested" {
+		t.Fatalf("concrete template connect handler resolution = %#v, want receiver deploy.requested", resolved)
 	}
 }
 

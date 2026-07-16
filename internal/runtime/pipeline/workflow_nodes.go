@@ -176,7 +176,7 @@ func workflowNodeEventHandlerResolutionForDelivery(source semanticview.Source, n
 	if resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeID, rawEventType); resolved.Matched {
 		return resolved
 	}
-	if resolved := workflowNodeConnectedInputEventHandlerResolution(source, nodeID, rawEventType); resolved.Matched {
+	if resolved := workflowNodeConnectedInputEventHandlerResolution(source, nodeID, evt); resolved.Matched {
 		return resolved
 	}
 	localizedEventType := workflowNodeConcreteInstanceLocalEventType(source, nodeID, evt)
@@ -250,7 +250,7 @@ func workflowNodeMatchedHandlerEventKey(source semanticview.Source, nodeID, even
 	return eventType
 }
 
-func workflowNodeConnectedInputEventHandlerResolution(source semanticview.Source, nodeID, rawEventType string) workflowNodeEventHandlerResolution {
+func workflowNodeConnectedInputEventHandlerResolution(source semanticview.Source, nodeID string, evt events.Event) workflowNodeEventHandlerResolution {
 	if source == nil {
 		return workflowNodeEventHandlerResolution{}
 	}
@@ -269,7 +269,7 @@ func workflowNodeConnectedInputEventHandlerResolution(source semanticview.Source
 			if strings.TrimSpace(plan.Receiver.FlowID) != flowID || strings.TrimSpace(plan.Receiver.Pin) != strings.TrimSpace(inputPin.PinName()) {
 				continue
 			}
-			if eventidentity.Normalize(plan.Source.ResolvedEvent) == eventidentity.Normalize(rawEventType) {
+			if runtimepinrouting.ConnectSourceEndpointMatchesEvent(plan.Source, evt) {
 				return resolved
 			}
 		}

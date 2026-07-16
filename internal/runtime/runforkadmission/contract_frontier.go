@@ -64,7 +64,8 @@ func AdmitContractFrontier(req ContractFrontierRequest) (store.RunForkContractFr
 	frontier, lineageOnly := runForkFrontierEvents(req.Plan.PendingWork)
 	for i := range frontier {
 		eventName := frontier[i].EventName
-		routeKeys, connectOwned := contractFrontierRouteKeys(eventName, frontier[i].SourceFlowInstances, connectPlans)
+		effectiveFlowInstances := contractFrontierEffectiveFlowInstances(req.Source, eventName, frontier[i].SourceFlowInstances)
+		routeKeys, connectOwned := contractFrontierRouteKeys(eventName, effectiveFlowInstances, connectPlans)
 		frontier[i].RuntimeEventOwners = sortedUnique(req.Source.RuntimeEventOwners(eventName))
 		frontier[i].WorkflowNodeSubscribers = workflowNodeSubscribers(workflowNodes, routeKeys...)
 		frontier[i].DerivedRecipients = contractFrontierRecipients(resolveContractFrontierRoutes(routeTable, routeKeys, connectOwned))
@@ -233,16 +234,27 @@ func contractFrontierFlowInstanceRoutes(source semanticview.Source, pending []st
 }
 
 func contractFrontierFlowInstances(source semanticview.Source, item store.RunForkPendingWork) []string {
-	seen := map[string]struct{}{}
-	add := func(value string) {
-		value = strings.Trim(strings.TrimSpace(value), "/")
-		if value != "" && isContractFrontierTemplateInstancePath(source, value) {
-			seen[value] = struct{}{}
+	out := make([]string, 0, 1)
+	for _, instancePath := range contractFrontierEffectiveFlowInstances(source, item.EventName, []string{item.FlowInstance}) {
+		if isContractFrontierTemplateInstancePath(source, instancePath) {
+			out = append(out, instancePath)
 		}
 	}
-	add(item.FlowInstance)
-	add(inferContractFrontierFlowInstanceFromEvent(source, item.EventName))
-	return sortedSet(seen)
+	return out
+}
+
+func contractFrontierEffectiveFlowInstances(source semanticview.Source, eventName string, persisted []string) []string {
+	explicit := map[string]struct{}{}
+	for _, instancePath := range persisted {
+		addString(explicit, strings.Trim(strings.TrimSpace(instancePath), "/"))
+	}
+	if len(explicit) > 0 {
+		return sortedSet(explicit)
+	}
+	if inferred := inferContractFrontierFlowInstanceFromEvent(source, eventName); inferred != "" {
+		return []string{inferred}
+	}
+	return nil
 }
 
 func isContractFrontierTemplateInstancePath(source semanticview.Source, instancePath string) bool {

@@ -5,7 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
@@ -14,6 +17,52 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 )
+
+func TestConnectSourceEndpointMatchesEventUsesImmutableSourceAcrossTargetProjection(t *testing.T) {
+	endpoint := ConnectRoutePlanEndpoint{
+		FlowID:        "producer",
+		FlowPath:      "producer",
+		Event:         "deploy.done",
+		ResolvedEvent: "producer/deploy.done",
+	}
+	source := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "producer-entity"}
+	for _, tc := range []struct {
+		name   string
+		target events.RouteIdentity
+	}{
+		{name: "root receiver", target: events.RouteIdentity{EntityID: "root-entity"}},
+		{name: "different template target", target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/inst-9", EntityID: "consumer-entity"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evt := eventtest.RootIngress("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+				FlowInstance: tc.target.FlowInstance,
+				Source:       source,
+				Target:       tc.target,
+			}, time.Unix(1, 0).UTC())
+			if !ConnectSourceEndpointMatchesEvent(endpoint, evt) {
+				t.Fatalf("source endpoint did not match immutable producer route; envelope = %#v", evt.NormalizedEnvelope())
+			}
+		})
+	}
+}
+
+func TestConnectSourceEndpointMatchesEventRejectsTargetIdentityAsSource(t *testing.T) {
+	endpoint := ConnectRoutePlanEndpoint{
+		FlowID:        "consumer",
+		FlowPath:      "consumer",
+		Event:         "deploy.done",
+		ResolvedEvent: "consumer/deploy.done",
+	}
+	target := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/inst-9", EntityID: "consumer-entity"}
+	evt := eventtest.RootIngress("", "deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+		FlowInstance: target.FlowInstance,
+		Source:       events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "producer-entity"},
+		Target:       target,
+	}, time.Unix(1, 0).UTC())
+	if ConnectSourceEndpointMatchesEvent(endpoint, evt) {
+		t.Fatalf("consumer target matched as producer source; envelope = %#v", evt.NormalizedEnvelope())
+	}
+}
 
 func TestLowerTargetFreeInputRoutePlans_RejectsHarnessSource(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)

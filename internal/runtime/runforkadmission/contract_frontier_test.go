@@ -103,6 +103,27 @@ func TestAdmitContractFrontier_ConnectMatchesConcreteTemplateSourceEndpoint(t *t
 	}
 }
 
+func TestAdmitContractFrontier_ConnectInfersTemplateIdentityWhenPersistedIdentityIsAbsent(t *testing.T) {
+	plan := testRunForkPlan("producer/inst-1/scan.requested", store.RunForkPendingClassificationPending, "node", "source-node")
+	source := testContractFrontierTemplateConnectSource()
+
+	admission, err := AdmitContractFrontier(ContractFrontierRequest{
+		Plan:              plan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+	})
+	if err != nil {
+		t.Fatalf("AdmitContractFrontier: %v", err)
+	}
+	event := admission.FrontierEvents[0]
+	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].SubscriberID != "consumer-node" {
+		t.Fatalf("derived recipients = %#v, want consumer-node through inferred producer identity", event.DerivedRecipients)
+	}
+	if hasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved) {
+		t.Fatalf("blockers = %#v, want inferred template source connect to resolve", admission.UnsupportedBlockers)
+	}
+}
+
 func TestAdmitContractFrontier_ConnectRejectsUnrelatedTemplateSameLeaf(t *testing.T) {
 	plan := testRunForkPlan("unrelated/inst-1/scan.requested", store.RunForkPendingClassificationPending, "node", "source-node")
 	plan.PendingWork[0].FlowInstance = "unrelated/inst-1"
