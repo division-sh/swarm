@@ -542,23 +542,33 @@ seam_families:
       - internal/runtime/bootverify/workflow_composition_connect_checks_test.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/pipeline/coordinator.go
       - internal/runtime/pipeline/workflow_nodes.go
       - internal/runtime/pipeline/workflow_nodes_test.go
+      - internal/runtime/pipeline/workflow_node_delivery_authority_test.go
       - internal/runtime/testfixtures/canonicalrouting/negative.go
+      - internal/runtime/testfixtures/canonicalrouting/legacy_instance_routes.go
+      - internal/runtime/testfixtures/canonicalrouting/remaining_variants.go
     search_dimensions: [connect_route_plan, delivery_route_model, route_plan]
     invalid_authority:
       - distinct receiver pins collapsing onto one event x subscriber delivery identity
       - DeliveryRoute normalization silently erasing receiver-local identity
       - workflow execution selecting the first source-matching receiver handler
+      - receiver-pin admission after template lifecycle or reply-context mutation
+      - interception converting connected-input resolution failure into passthrough
       - adding receiver pin to the durable delivery or receipt identity
     notes: >
       Routing topology classifies a source edge that reaches the same normalized
-      subscriber and target through distinct receiver-local events as hard
-      invalid. EventBus repeats the invariant before delivery normalization, and
-      workflow execution requires exactly one connected-input handler candidate.
-      Duplicate same-edge declarations remain idempotent; distinct subscribers
-      and distinct targets remain legal fanout under the existing one event x
-      subscriber durable model.
+      subscriber and target through distinct receiver pins or receiver-local
+      events as hard invalid. EventBus previews every matched runtime-resolved
+      plan on request-local route state, admits the complete pin/event plus
+      durable-delivery-identity set before lifecycle or reply mutation, and then
+      repeats the invariant before delivery normalization. Workflow execution
+      requires exactly one connected-input handler candidate and propagates
+      ambiguity through public delivery interception without passthrough or
+      receipt settlement. Duplicate same-edge declarations remain idempotent;
+      distinct subscribers and distinct targets remain legal fanout under the
+      existing one event x subscriber durable model.
   - id: import_boundary_pin_interface_adaptation
     layer: route_plan_consumers
     classification: valid_consumer

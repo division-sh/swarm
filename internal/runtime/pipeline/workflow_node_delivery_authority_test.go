@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -73,6 +75,77 @@ func TestPipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutGenericAu
 		t.Fatalf("target runtime logs = %#v, want no false delivery_authority_missing log", bus.runtimeLogEntries())
 	}
 	assertDeliveryAuthorityReceiptCount(t, db, evt.ID(), route.SubscriberID, 1)
+}
+
+func TestPipelineCoordinatorInterceptDeliveryRouteRejectsAmbiguousConnectedInputReplayWithoutReceiptOrHandler(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	source := testWorkflowNodeConnectedInputCollisionSource()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("connected-input collision source has no contract bundle")
+	}
+	bus := &recordingPipelineBus{}
+	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+		Module: &previewWorkflowModule{
+			bundle: bundle,
+			workflowNodes: []WorkflowNode{{
+				ID:            "receiver-node",
+				Subscriptions: []events.EventType{"deploy.accepted", "deploy.audited"},
+			}},
+		},
+		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+	})
+	testPipelineCoordinatorRunContext(t, pc)
+
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	target := events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: entityID}
+	evt := eventtest.RootIngress(eventID, "producer/deploy.done", "producer", "", []byte(`{}`), 0, testPipelineRunID, "", events.EventEnvelope{
+		Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"},
+		Target: target,
+	}, time.Now().UTC())
+	ctx := testAuthorActivityContext(context.Background())
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (execution_mode,
+			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
+			produced_by, produced_by_type, created_at
+		) VALUES ('live',
+			$1::uuid, $2::uuid, $3, $4::uuid, $5, 'entity', '{}'::jsonb,
+			'producer', 'node', now()
+		)
+	`, eventID, testPipelineRunID, string(evt.Type()), entityID, target.FlowInstance); err != nil {
+		t.Fatalf("seed ambiguous connected-input event: %v", err)
+	}
+	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "receiver-node", Target: target}
+	seedDeliveryAuthorityNodeDeliveryForTarget(t, db, eventID, route.SubscriberID, target)
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		passthrough, deferred, err := pc.InterceptDeliveryRoute(ctx, evt, route)
+		if err == nil || !strings.Contains(err.Error(), "multiple connected input events") {
+			t.Fatalf("attempt %d InterceptDeliveryRoute error = %v, want explicit receiver-pin ambiguity", attempt, err)
+		}
+		if passthrough {
+			t.Fatalf("attempt %d passthrough = true, want fail-closed interception", attempt)
+		}
+		if len(deferred) != 0 {
+			t.Fatalf("attempt %d deferred events = %#v, want none", attempt, deferred)
+		}
+	}
+	assertDeliveryAuthorityReceiptCount(t, db, eventID, route.SubscriberID, 0)
+	var status string
+	if err := db.QueryRowContext(ctx, `
+		SELECT status
+		FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, eventID, route.SubscriberID).Scan(&status); err != nil {
+		t.Fatalf("load ambiguous connected-input delivery: %v", err)
+	}
+	if status != "pending" {
+		t.Fatalf("delivery status = %q, want pending after rejected replay", status)
+	}
+	if got := bus.publishedCount(); got != 0 {
+		t.Fatalf("published handler events = %d, want zero", got)
+	}
 }
 
 func TestPipelineCoordinatorInterceptReplayScopeMarkerDoesNotAuthorizeConcreteNode(t *testing.T) {

@@ -24,11 +24,29 @@ const (
 	LegacyInstanceAdapterInvalidTarget
 )
 
+type LegacyInstanceSecondPin uint8
+
+const (
+	LegacyInstanceNoSecondPin LegacyInstanceSecondPin = iota
+	LegacyInstanceSecondPinSameEvent
+	LegacyInstanceSecondPinDistinctEvent
+	LegacyInstanceSecondPinDuplicateEdge
+)
+
+type LegacyInstanceConsumer uint8
+
+const (
+	LegacyInstanceNodeConsumer LegacyInstanceConsumer = iota
+	LegacyInstanceAgentConsumer
+	LegacyInstanceNodeAndAgentConsumer
+)
+
 type LegacyInstanceRouteOptions struct {
-	Missing  LegacyInstancePolicy
-	Conflict LegacyInstancePolicy
-	Adapter  LegacyInstanceAdapter
-	MultiPin bool
+	Missing   LegacyInstancePolicy
+	Conflict  LegacyInstancePolicy
+	Adapter   LegacyInstanceAdapter
+	SecondPin LegacyInstanceSecondPin
+	Consumer  LegacyInstanceConsumer
 }
 
 // CopyLegacyInstanceRoute derives the closed #1738 instance-policy matrix from
@@ -55,9 +73,21 @@ func CopyLegacyInstanceRoute(t testing.TB, opts LegacyInstanceRouteOptions) stri
 	}
 	secondConnect := ""
 	secondPin := ""
-	if opts.MultiPin {
+	secondEventSchema := ""
+	secondHandler := ""
+	if opts.SecondPin == LegacyInstanceSecondPinDuplicateEdge {
+		secondConnect = "  - from: producer.deploy_done\n    to: consumer.deploy_completed\n"
+	} else if opts.SecondPin != LegacyInstanceNoSecondPin {
 		secondConnect = "  - from: producer.deploy_done\n    to: consumer.deploy_audited\n"
-		secondPin = "      - name: deploy_audited\n        event: deploy.done\n"
+		secondEvent := "deploy.done"
+		if opts.SecondPin == LegacyInstanceSecondPinDistinctEvent {
+			secondEvent = "deploy.audited"
+			secondEventSchema = "deploy.audited:\n  " + producerKey + ": string\n"
+			secondHandler = "    " + secondEvent + ": {}\n"
+		} else if opts.SecondPin != LegacyInstanceSecondPinSameEvent {
+			t.Fatalf("unsupported legacy instance second pin %d", opts.SecondPin)
+		}
+		secondPin = "      - name: deploy_audited\n        event: " + secondEvent + "\n"
 	}
 
 	writeClosedVariantFile(t, root, "package.yaml", `name: legacy-instance-route
@@ -96,6 +126,20 @@ pins:
 	if conflict != "" {
 		policy += "  on_conflict: " + conflict + "\n"
 	}
+	consumerNodes := "consumer-node:\n  id: consumer-node-{instance_id}\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n" + secondHandler
+	consumerAgents := "{}\n"
+	if opts.Consumer == LegacyInstanceAgentConsumer || opts.Consumer == LegacyInstanceNodeAndAgentConsumer {
+		subscriptions := "deploy.done"
+		if opts.SecondPin == LegacyInstanceSecondPinDistinctEvent {
+			subscriptions += ", deploy.audited"
+		}
+		if opts.Consumer == LegacyInstanceAgentConsumer {
+			consumerNodes = "{}\n"
+		}
+		consumerAgents = "consumer-agent:\n  id: consumer-agent-{instance_id}\n  model: regular\n  subscriptions: [" + subscriptions + "]\n"
+	} else if opts.Consumer != LegacyInstanceNodeConsumer {
+		t.Fatalf("unsupported legacy instance consumer %d", opts.Consumer)
+	}
 	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
 mode: template
 instance:
@@ -106,9 +150,10 @@ instance:
       - name: deploy_completed
         event: deploy.done
 `+secondPin,
-		"deploy.done:\n  "+producerKey+": string\n",
+		"deploy.done:\n  "+producerKey+": string\n"+secondEventSchema,
 		"deployment:\n  vertical_id:\n    type: string\n",
-		"consumer-node:\n  id: consumer-node-{instance_id}\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n")
+		consumerNodes)
+	writeClosedVariantFile(t, root, "flows/consumer/agents.yaml", consumerAgents)
 	return root
 }
 

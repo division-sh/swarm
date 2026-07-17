@@ -352,7 +352,6 @@ flows:
   - {id: consumer, flow: consumer, mode: template}
 connect:
   - {from: producer.deploy_done, to: consumer.deploy_completed}
-  - {from: producer.deploy_done, to: consumer.deploy_audited}
 `,
 		"schema.yaml": "name: test\n", "policy.yaml": "{}\n", "tools.yaml": "{}\n", "agents.yaml": "{}\n", "events.yaml": "{}\n", "nodes.yaml": "{}\n",
 		"flows/producer/schema.yaml": `name: producer
@@ -373,7 +372,6 @@ pins:
   inputs:
     events:
       - {name: deploy_completed, event: deploy.done}
-      - {name: deploy_audited, event: deploy.done}
 `,
 		"flows/consumer/policy.yaml": "{}\n", "flows/consumer/agents.yaml": "{}\n", "flows/consumer/events.yaml": "deploy.done:\n  vertical_id: string\n",
 		"flows/consumer/entities.yaml": "deployment:\n  vertical_id:\n    type: string\n",
