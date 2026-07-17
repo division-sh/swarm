@@ -478,6 +478,123 @@ func TestBuildEmptyTopologyUsesStableEmptyCollections(t *testing.T) {
 	}
 }
 
+func TestConnectReceiverPinCollisionIssuesRespectDurableDeliveryIdentity(t *testing.T) {
+	connect := func(inputID, to, event, location string) Edge {
+		return Edge{
+			Scope:      DeliveryScopeInterFlowConnect,
+			Event:      EventIdentity{Canonical: "producer/work.ready"},
+			Consumer:   Endpoint{ID: inputID, Event: EventIdentity{Canonical: event}},
+			Boundary:   &Boundary{PackageKey: ".", From: "producer.work_ready", To: to, AuthoredLocation: location},
+			Resolution: &Resolution{Mode: string(pinrouting.ConnectResolutionStatic)},
+		}
+	}
+	consumer := func(inputID string, kind semanticview.EventEndpointKind, subscriberID, target string) Edge {
+		endpoint := Endpoint{Kind: kind, FlowPath: target}
+		if kind == semanticview.EventEndpointAgent {
+			endpoint.AgentID = subscriberID
+		} else {
+			endpoint.Kind = semanticview.EventEndpointNodeHandler
+			endpoint.NodeID = subscriberID
+		}
+		return Edge{Scope: DeliveryScopeTypedPubSub, Producer: Endpoint{ID: inputID}, Consumer: endpoint}
+	}
+
+	for _, tc := range []struct {
+		name  string
+		edges []Edge
+		want  int
+	}{
+		{
+			name: "same node and target through distinct receiver pins",
+			edges: []Edge{
+				connect("input-a", "consumer.work_accepted", "consumer/work.accepted", "package.yaml:10"),
+				connect("input-b", "consumer.work_audited", "consumer/work.audited", "package.yaml:12"),
+				consumer("input-a", semanticview.EventEndpointNodeHandler, "consumer-node", "consumer"),
+				consumer("input-b", semanticview.EventEndpointNodeHandler, "consumer-node", "consumer"),
+			},
+			want: 1,
+		},
+		{
+			name: "same root agent through distinct receiver pins",
+			edges: []Edge{
+				connect("input-a", ".work_accepted", "work.accepted", "package.yaml:10"),
+				connect("input-b", ".work_audited", "work.audited", "package.yaml:12"),
+				consumer("input-a", semanticview.EventEndpointAgent, "root-agent", ""),
+				consumer("input-b", semanticview.EventEndpointAgent, "root-agent", ""),
+			},
+			want: 1,
+		},
+		{
+			name: "duplicate same edge is idempotent",
+			edges: []Edge{
+				connect("input-a", "consumer.work_accepted", "consumer/work.accepted", "package.yaml:10"),
+				connect("input-a", "consumer.work_accepted", "consumer/work.accepted", "package.yaml:12"),
+				consumer("input-a", semanticview.EventEndpointNodeHandler, "consumer-node", "consumer"),
+			},
+		},
+		{
+			name: "different subscribers are legal fanout",
+			edges: []Edge{
+				connect("input-a", "consumer.work_accepted", "consumer/work.accepted", "package.yaml:10"),
+				connect("input-b", "consumer.work_audited", "consumer/work.audited", "package.yaml:12"),
+				consumer("input-a", semanticview.EventEndpointNodeHandler, "accept-node", "consumer"),
+				consumer("input-b", semanticview.EventEndpointNodeHandler, "audit-node", "consumer"),
+			},
+		},
+		{
+			name: "same subscriber at different targets is legal fanout",
+			edges: []Edge{
+				connect("input-a", "alpha.work_accepted", "alpha/work.accepted", "package.yaml:10"),
+				connect("input-b", "beta.work_audited", "beta/work.audited", "package.yaml:12"),
+				consumer("input-a", semanticview.EventEndpointNodeHandler, "worker-node", "alpha"),
+				consumer("input-b", semanticview.EventEndpointNodeHandler, "worker-node", "beta"),
+			},
+		},
+		{
+			name: "mixed legal and colliding fanout reports collision",
+			edges: []Edge{
+				connect("input-a", "consumer.work_accepted", "consumer/work.accepted", "package.yaml:10"),
+				connect("input-b", "consumer.work_audited", "consumer/work.audited", "package.yaml:12"),
+				consumer("input-a", semanticview.EventEndpointNodeHandler, "consumer-node", "consumer"),
+				consumer("input-b", semanticview.EventEndpointNodeHandler, "consumer-node", "consumer"),
+				consumer("input-a", semanticview.EventEndpointAgent, "legal-agent", "consumer"),
+			},
+			want: 1,
+		},
+		{
+			name: "runtime-resolved targets remain guarded at materialization",
+			edges: []Edge{
+				func() Edge {
+					edge := connect("input-a", "consumer.work_accepted", "consumer/work.accepted", "package.yaml:10")
+					edge.RequiresRuntimeResolution = true
+					edge.Resolution.Mode = runtimecontracts.FlowInputResolutionModeSelect
+					return edge
+				}(),
+				func() Edge {
+					edge := connect("input-b", "consumer.work_audited", "consumer/work.audited", "package.yaml:12")
+					edge.RequiresRuntimeResolution = true
+					edge.Resolution.Mode = runtimecontracts.FlowInputResolutionModeSelect
+					return edge
+				}(),
+				consumer("input-a", semanticview.EventEndpointNodeHandler, "consumer-node", "consumer"),
+				consumer("input-b", semanticview.EventEndpointNodeHandler, "consumer-node", "consumer"),
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			issues := connectReceiverPinCollisionIssues(tc.edges)
+			if len(issues) != tc.want {
+				t.Fatalf("collision issues = %#v, want %d", issues, tc.want)
+			}
+			for _, issue := range issues {
+				if issue.Failure != FailureConnectReceiverPinCollision || !strings.Contains(issue.Remediation, "One event x subscriber") {
+					t.Fatalf("collision issue = %#v", issue)
+				}
+			}
+		})
+	}
+}
+
 func firstInterFlowEdge(t *testing.T, topology Topology) Edge {
 	t.Helper()
 	for _, edge := range topology.Edges {

@@ -5,6 +5,27 @@ import (
 	"testing"
 )
 
+// ApplyCompositionConnectReceiverPinCollisionMutation creates two distinct
+// receiver-local edges that collapse onto one durable event x subscriber row.
+func ApplyCompositionConnectReceiverPinCollisionMutation(t testing.TB, root string) {
+	t.Helper()
+	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
+		"        target: entity.vertical_id\n",
+		"        target: entity.vertical_id\n  - from: producer.deploy_done\n    to: consumer.deploy_audited\n    adapter: deploy_done_to_audited\n    map:\n      vertical_id:\n        source: payload.vertical_id\n        target: entity.vertical_id\n")
+	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "schema.yaml"),
+		"          cardinality: one\n",
+		"          cardinality: one\n      - name: deploy_audited\n        event: deploy.audited\n        address:\n          by: vertical_id\n          source: payload.vertical_id\n          target: entity.vertical_id\n          cardinality: one\n")
+	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "events.yaml"),
+		"deploy.completed:\n  vertical_id: string\n",
+		"deploy.completed:\n  vertical_id: string\ndeploy.audited:\n  vertical_id: string\n")
+	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"),
+		"  subscribes_to: [deploy.completed]\n",
+		"  subscribes_to: [deploy.completed, deploy.audited]\n")
+	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"),
+		"      advances_to: done\n",
+		"      advances_to: done\n    deploy.audited:\n      create_entity: true\n      advances_to: done\n")
+}
+
 // ApplyRetiredConnectDeliveryOneMutation creates the single deterministic
 // retired spelling accepted by the migration command and rejected by loaders.
 func ApplyRetiredConnectDeliveryOneMutation(t testing.TB, root string) {

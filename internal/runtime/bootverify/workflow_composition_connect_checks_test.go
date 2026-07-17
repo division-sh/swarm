@@ -28,6 +28,19 @@ func TestRun_AllowsParentCompositionConnectAsVerifyRouteProof(t *testing.T) {
 	}
 }
 
+func TestRun_RejectsSameSubscriberThroughDistinctReceiverPins(t *testing.T) {
+	root := canonicalrouting.CopyCompositionConnect(t, canonicalrouting.CompositionConnectValid)
+	canonicalrouting.ApplyCompositionConnectReceiverPinCollisionMutation(t, root)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Errors(), "composition_connect_validation", "multiple receiver pins") ||
+		!reportContains(report.Errors(), "composition_connect_validation", "deploy.completed") ||
+		!reportContains(report.Errors(), "composition_connect_validation", "deploy.audited") {
+		t.Fatalf("receiver-pin collision findings = %#v", report.Errors())
+	}
+}
+
 func TestRun_AllowsRootProducerCompositionConnectAsRouteProof(t *testing.T) {
 	root := writeRootCompositionConnectBootverifyFixture(t)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))

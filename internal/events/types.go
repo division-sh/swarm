@@ -1021,16 +1021,7 @@ func NormalizeDeliveryRoutes(in []DeliveryRoute) []DeliveryRoute {
 		if route.SubscriberType == "" || route.SubscriberID == "" {
 			continue
 		}
-		target := route.Target
-		key := strings.Join([]string{
-			route.SubscriberType,
-			route.SubscriberID,
-			target.FlowID,
-			target.FlowInstance,
-			target.EntityID,
-			route.Context.ReplyContextID(),
-			route.PayloadProjection.Fingerprint(),
-		}, "\x00")
+		key := deliveryRouteIdentityKey(route)
 		if _, ok := seen[key]; ok {
 			continue
 		}
@@ -1038,6 +1029,32 @@ func NormalizeDeliveryRoutes(in []DeliveryRoute) []DeliveryRoute {
 		out = append(out, route)
 	}
 	return out
+}
+
+// SameDeliveryRouteIdentity reports whether two routes collapse to one durable
+// event-delivery row. Receiver-local pin identity is deliberately not part of
+// that model.
+func SameDeliveryRouteIdentity(left, right DeliveryRoute) bool {
+	left = left.Normalized()
+	right = right.Normalized()
+	if left.SubscriberType == "" || left.SubscriberID == "" || right.SubscriberType == "" || right.SubscriberID == "" {
+		return false
+	}
+	return deliveryRouteIdentityKey(left) == deliveryRouteIdentityKey(right)
+}
+
+func deliveryRouteIdentityKey(route DeliveryRoute) string {
+	route = route.Normalized()
+	target := route.Target
+	return strings.Join([]string{
+		route.SubscriberType,
+		route.SubscriberID,
+		target.FlowID,
+		target.FlowInstance,
+		target.EntityID,
+		route.Context.ReplyContextID(),
+		route.PayloadProjection.Fingerprint(),
+	}, "\x00")
 }
 
 func ValidateDeliveryRouteProjections(in []DeliveryRoute) error {

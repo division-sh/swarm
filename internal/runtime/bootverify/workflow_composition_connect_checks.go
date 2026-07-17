@@ -22,6 +22,23 @@ func checkCompositionConnectValidation(c *checkerContext) []Finding {
 	for _, connect := range c.source.CompositionConnects() {
 		findings = append(findings, validateCompositionConnect(c.source, connect)...)
 	}
+	for _, issue := range routingtopology.Build(c.source).Issues {
+		if strings.TrimSpace(issue.Failure) != routingtopology.FailureConnectReceiverPinCollision {
+			continue
+		}
+		findings = append(findings, Finding{
+			CheckID:     "composition_connect_validation",
+			Severity:    "error",
+			Location:    strings.TrimSpace(issue.Location),
+			Message:     strings.TrimSpace(issue.Message),
+			Remediation: strings.TrimSpace(issue.Remediation),
+			Evidence: []string{
+				"classification: " + routingtopology.FailureConnectReceiverPinCollision,
+				"source: " + strings.TrimSpace(issue.From),
+				"subscriber: " + strings.TrimSpace(issue.To),
+			},
+		})
+	}
 	return findings
 }
 

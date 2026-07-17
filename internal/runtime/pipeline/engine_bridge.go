@@ -74,6 +74,9 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 	)
 	for _, owner := range owners {
 		resolved := workflowNodeEventHandlerResolutionForDelivery(source, owner, evt)
+		if resolved.Failure != "" {
+			return contractHandlerExecutionResult{}, fmt.Errorf("resolve workflow handler for node %s: %s", strings.TrimSpace(owner), resolved.Failure)
+		}
 		if !resolved.Matched {
 			continue
 		}

@@ -101,6 +101,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 			"connect_route_plans_count": len(matched),
 		},
 	}
+	receiverPinFacts := make([]connectReceiverPinFact, 0, len(matched))
 	for _, plan := range matched {
 		if plan.ReplyResolution != nil && plan.ReplyResolution.Role == runtimepinrouting.ConnectReplyRoleResponse {
 			routes, subscribers, failure, detail, err := r.materializeReplyResponse(ctx, evt, plan, values)
@@ -112,6 +113,12 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 				for key, value := range detail {
 					out.ExtraDetail[key] = value
 				}
+				return out, nil
+			}
+			if previous, current, collision := admitConnectReceiverPinFacts(&receiverPinFacts, routes, plan.Receiver.Event); collision {
+				out.Failure = connectRoutePlanTargetFailure(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid)
+				out.ExtraDetail["connect_route_plan_failure"] = string(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid)
+				out.ExtraDetail["connect_route_plan_receiver_pin_collision"] = []string{previous, current}
 				return out, nil
 			}
 			out.ReplyContextConsumed = true
@@ -168,6 +175,12 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 			out.ExtraDetail["connect_route_plan_receiver_event"] = plan.Receiver.ResolvedEvent
 			return out, nil
 		}
+		if previous, current, collision := admitConnectReceiverPinFacts(&receiverPinFacts, routes, plan.Receiver.Event); collision {
+			out.Failure = connectRoutePlanTargetFailure(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid)
+			out.ExtraDetail["connect_route_plan_failure"] = string(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid)
+			out.ExtraDetail["connect_route_plan_receiver_pin_collision"] = []string{previous, current}
+			return out, nil
+		}
 		out.DeliveryIntents = append(out.DeliveryIntents, routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerConnectRoutePlan)...)
 		out.LiveRecipients = append(out.LiveRecipients, connectRoutePlanLiveRecipients(routes)...)
 		out.RoutedRecipients = append(out.RoutedRecipients, subscribers...)
@@ -176,6 +189,31 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 	out.DeliveryIntents = normalizeRoutePlanDeliveryIntents(out.DeliveryIntents)
 	out.RoutedRecipients = dedupeSubscribers(out.RoutedRecipients)
 	return out, nil
+}
+
+type connectReceiverPinFact struct {
+	route              events.DeliveryRoute
+	receiverLocalEvent string
+}
+
+func admitConnectReceiverPinFacts(admitted *[]connectReceiverPinFact, routes []events.DeliveryRoute, receiverLocalEvent string) (string, string, bool) {
+	receiverLocalEvent = eventidentity.Normalize(receiverLocalEvent)
+	if admitted == nil || receiverLocalEvent == "" {
+		return "", "", false
+	}
+	for _, route := range routes {
+		route = route.Normalized()
+		if route.SubscriberType == "" || route.SubscriberID == "" {
+			continue
+		}
+		for _, previous := range *admitted {
+			if events.SameDeliveryRouteIdentity(previous.route, route) && previous.receiverLocalEvent != receiverLocalEvent {
+				return previous.receiverLocalEvent, receiverLocalEvent, true
+			}
+		}
+		*admitted = append(*admitted, connectReceiverPinFact{route: route, receiverLocalEvent: receiverLocalEvent})
+	}
+	return "", "", false
 }
 
 func (r connectRoutePlanResolver) materializeReplyRequest(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, routes []events.DeliveryRoute, values map[string]string) ([]events.DeliveryRoute, error) {

@@ -3,6 +3,7 @@ package routingtopology
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,6 +16,8 @@ import (
 const (
 	SchemaVersion   = "routing-topology/v1"
 	SourceAuthority = "projection_only_existing_contract_owners"
+
+	FailureConnectReceiverPinCollision = "connect_receiver_pin_delivery_collision"
 )
 
 type DeliveryScope string
@@ -221,7 +224,7 @@ func Build(source semanticview.Source) Topology {
 	builder.addTypedPubSubRelations(relations)
 	builder.addBoundaryExposures()
 	builder.addConnectEdges(plans)
-	return Topology{
+	topology := Topology{
 		SchemaVersion:     SchemaVersion,
 		ProjectionOnly:    true,
 		SourceAuthority:   SourceAuthority,
@@ -234,6 +237,147 @@ func Build(source semanticview.Source) Topology {
 		Edges:             builder.sortedEdges(),
 		Issues:            issueViews(planIssues, builder.relationIssues),
 	}
+	topology.Issues = append(topology.Issues, connectReceiverPinCollisionIssues(topology.Edges)...)
+	sort.SliceStable(topology.Issues, func(i, j int) bool { return topology.Issues[i].ID < topology.Issues[j].ID })
+	return topology
+}
+
+type connectReceiverPinDeliveryFact struct {
+	sourceKey        string
+	subscriberType   string
+	subscriberID     string
+	targetKey        string
+	receiverLocalKey string
+	receiverLabel    string
+	authoredLocation string
+}
+
+func connectReceiverPinCollisionIssues(edges []Edge) []Issue {
+	typedConsumers := make(map[string][]Edge)
+	for _, edge := range edges {
+		if edge.Scope == DeliveryScopeTypedPubSub {
+			typedConsumers[edge.Producer.ID] = append(typedConsumers[edge.Producer.ID], edge)
+		}
+	}
+
+	type collision struct {
+		fact   connectReceiverPinDeliveryFact
+		locals map[string]string
+	}
+	byDelivery := make(map[string]*collision)
+	for _, edge := range edges {
+		if edge.Scope != DeliveryScopeInterFlowConnect || edge.Boundary == nil {
+			continue
+		}
+		for _, local := range typedConsumers[edge.Consumer.ID] {
+			fact, ok := connectReceiverPinFact(edge, local)
+			if !ok {
+				continue
+			}
+			key := strings.Join([]string{fact.sourceKey, fact.subscriberType, fact.subscriberID, fact.targetKey}, "\x00")
+			entry := byDelivery[key]
+			if entry == nil {
+				entry = &collision{fact: fact, locals: map[string]string{}}
+				byDelivery[key] = entry
+			}
+			entry.locals[fact.receiverLocalKey] = fact.receiverLabel
+		}
+	}
+
+	keys := make([]string, 0, len(byDelivery))
+	for key, entry := range byDelivery {
+		if len(entry.locals) > 1 {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	issues := make([]Issue, 0, len(keys))
+	for _, key := range keys {
+		entry := byDelivery[key]
+		locals := make([]string, 0, len(entry.locals))
+		for _, label := range entry.locals {
+			locals = append(locals, label)
+		}
+		sort.Strings(locals)
+		message := fmt.Sprintf(
+			"source event %s reaches %s %s at target %s through multiple receiver pins: %s",
+			entry.fact.sourceKey,
+			entry.fact.subscriberType,
+			entry.fact.subscriberID,
+			entry.fact.targetKey,
+			strings.Join(locals, ", "),
+		)
+		issue := Issue{
+			CheckID:          FailureConnectReceiverPinCollision,
+			Severity:         "error",
+			Failure:          FailureConnectReceiverPinCollision,
+			Location:         entry.fact.targetKey,
+			From:             entry.fact.sourceKey,
+			To:               entry.fact.subscriberType + ":" + entry.fact.subscriberID,
+			Detail:           message,
+			Message:          message,
+			Remediation:      "Route the source event to distinct subscribers or targets, or consolidate the receiver pins behind one handler. One event x subscriber cannot select multiple receiver-local handlers.",
+			AuthoredLocation: entry.fact.authoredLocation,
+		}
+		issue.ID = issueID(issue)
+		issues = append(issues, issue)
+	}
+	return issues
+}
+
+func connectReceiverPinFact(connect Edge, local Edge) (connectReceiverPinDeliveryFact, bool) {
+	subscriberType := ""
+	subscriberID := ""
+	switch local.Consumer.Kind {
+	case semanticview.EventEndpointNodeHandler:
+		subscriberType = "node"
+		subscriberID = strings.TrimSpace(local.Consumer.NodeID)
+	case semanticview.EventEndpointAgent:
+		subscriberType = "agent"
+		subscriberID = strings.TrimSpace(local.Consumer.AgentID)
+	default:
+		return connectReceiverPinDeliveryFact{}, false
+	}
+	if subscriberID == "" {
+		return connectReceiverPinDeliveryFact{}, false
+	}
+	sourceKey := strings.Join([]string{
+		strings.TrimSpace(connect.Boundary.PackageKey),
+		strings.TrimSpace(connect.Boundary.From),
+		strings.TrimSpace(connect.Event.Canonical),
+	}, ":")
+	targetKey, targetProven := connectReceiverPinStaticTargetKey(connect, local)
+	if !targetProven {
+		return connectReceiverPinDeliveryFact{}, false
+	}
+	receiverLocalKey := strings.Join([]string{
+		strings.TrimSpace(connect.Boundary.To),
+		strings.TrimSpace(connect.Consumer.Event.Canonical),
+	}, "\x00")
+	receiverLabel := strings.TrimSpace(connect.Boundary.To)
+	if eventName := strings.TrimSpace(connect.Consumer.Event.Canonical); eventName != "" {
+		receiverLabel += " (" + eventName + ")"
+	}
+	return connectReceiverPinDeliveryFact{
+		sourceKey:        sourceKey,
+		subscriberType:   subscriberType,
+		subscriberID:     subscriberID,
+		targetKey:        targetKey,
+		receiverLocalKey: receiverLocalKey,
+		receiverLabel:    receiverLabel,
+		authoredLocation: strings.TrimSpace(connect.Boundary.AuthoredLocation),
+	}, true
+}
+
+func connectReceiverPinStaticTargetKey(connect Edge, local Edge) (string, bool) {
+	targetKey := strings.Trim(strings.TrimSpace(local.Consumer.FlowPath), "/")
+	if targetKey == "" {
+		return "<global-root>", true
+	}
+	if connect.RequiresRuntimeResolution || connect.Resolution == nil || strings.TrimSpace(connect.Resolution.Mode) != string(pinrouting.ConnectResolutionStatic) {
+		return "", false
+	}
+	return targetKey, true
 }
 
 func rootInputSourceViews(source semanticview.Source) []RootInputSource {

@@ -531,6 +531,34 @@ seam_families:
       static/root rows while classifying the event fail-closed when any sibling
       receiver still requires runtime resolution. Dynamic resolution remains
       separately tracked and is not implemented here.
+  - id: connect_receiver_pin_delivery_collision
+    layer: route_plan_authority
+    classification: canonical_owner
+    paths:
+      - platform-spec.yaml
+      - internal/runtime/routingtopology/topology.go
+      - internal/runtime/routingtopology/topology_test.go
+      - internal/runtime/bootverify/workflow_composition_connect_checks.go
+      - internal/runtime/bootverify/workflow_composition_connect_checks_test.go
+      - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/pipeline/workflow_nodes.go
+      - internal/runtime/pipeline/workflow_nodes_test.go
+      - internal/runtime/testfixtures/canonicalrouting/negative.go
+    search_dimensions: [connect_route_plan, delivery_route_model, route_plan]
+    invalid_authority:
+      - distinct receiver pins collapsing onto one event x subscriber delivery identity
+      - DeliveryRoute normalization silently erasing receiver-local identity
+      - workflow execution selecting the first source-matching receiver handler
+      - adding receiver pin to the durable delivery or receipt identity
+    notes: >
+      Routing topology classifies a source edge that reaches the same normalized
+      subscriber and target through distinct receiver-local events as hard
+      invalid. EventBus repeats the invariant before delivery normalization, and
+      workflow execution requires exactly one connected-input handler candidate.
+      Duplicate same-edge declarations remain idempotent; distinct subscribers
+      and distinct targets remain legal fanout under the existing one event x
+      subscriber durable model.
   - id: import_boundary_pin_interface_adaptation
     layer: route_plan_consumers
     classification: valid_consumer

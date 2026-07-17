@@ -10111,6 +10111,25 @@ flow_model:
           reply: >
             Receiver `resolution.mode: reply` lowers through typed paired-edge request lineage;
             missing or ambiguous lineage fails closed.
+        receiver_pin_delivery_collision:
+          owner: routing topology over lowered ConnectRoutePlan edges and resolved typed receiver consumers
+          rule: >
+            The durable delivery and receipt model owns exactly one lifecycle row per event x normalized subscriber.
+            Therefore one source event MUST NOT reach the same normalized subscriber and target through more than one
+            distinct receiver input pin or receiver-local event. Verify and boot MUST reject that composition with
+            `connect_receiver_pin_delivery_collision`; duplicate declarations of the same edge remain idempotent, and
+            fan-out to distinct subscribers or distinct targets remains valid.
+          runtime_invariant: >
+            Connect-route materialization MUST compare receiver-local identity before DeliveryRoute or
+            RoutePlanDeliveryIntent normalization can erase it. Distinct receiver-local facts mapping to the same
+            subscriber, target, delivery context, and payload projection MUST fail closed with
+            `delivery_topology_invalid`, persist no delivery row, and execute no handler. Runtime MUST NOT add receiver
+            pin to durable delivery identity, choose the first handler, or reconstruct the missing fact during retry or
+            replay.
+          handler_resolution: >
+            Connected-input workflow handler resolution MUST produce exactly one receiver-local handler candidate.
+            Zero or multiple candidates are explicit failures; execution MUST NOT select the first source-matching
+            input handler.
         implementation_slice_1827_connect_delivery_reply_retirement:
           status: merge_bearing_aggressive_retirement
           canonical_code_owner: internal/runtime/contracts.FlowPackageConnect + internal/runtime/core/pinrouting.ConnectRoutePlan
