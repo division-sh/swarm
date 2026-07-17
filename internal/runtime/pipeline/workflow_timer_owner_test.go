@@ -168,12 +168,13 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
+			runID := runtimecorrelation.RunIDFromContext(ctx)
 			entityID := uuid.NewString()
 			createdAt := canonicalWorkflowTimerTime(time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC))
 			if err := store.Upsert(ctx, WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "workflow-timer-owner-test",
 				WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
-				CreatedAt: createdAt, Metadata: map[string]any{"run_id": runtimecorrelation.RunIDFromContext(ctx)},
+				CreatedAt: createdAt, Metadata: map[string]any{"run_id": runID},
 			}); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
@@ -194,53 +195,66 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 			if len(active) != 1 || active[0].Ref.Declaration != "waiting.state_entry" {
 				t.Fatalf("initial active timers = %#v, want waiting.state_entry", active)
 			}
-			if outcome, err := pc.FireWorkflowTimer(ctx, active[0].schedule()); err != nil || outcome != WorkflowTimerFireCommitted {
-				t.Fatalf("fire state-entry timer outcome=%q err=%v", outcome, err)
+			stateTimer := active[0]
+			execute := func(eventType string, eventAt time.Time) {
+				t.Helper()
+				eventID := uuid.NewString()
+				payload := []byte(`{}`)
+				evt := eventtest.RootIngress(
+					eventID, events.EventType(eventType), "operator", "", payload, 0,
+					runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), eventAt,
+				)
+				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runID, entityID, payload, eventAt)
+				result, err := pc.executeNodeContractHandler(ctx, "observer", runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
+					Event: evt, State: pc.currentWorkflowState(ctx, entityID),
+				}, false)
+				if err != nil {
+					t.Fatalf("execute %s event-only handler: %v", eventType, err)
+				}
+				if !result.Handled {
+					t.Fatalf("%s event-only handler was not handled", eventType)
+				}
 			}
 
 			armedAt := canonicalWorkflowTimerTime(createdAt.Add(time.Minute))
-			if err := store.RunPipelineMutation(ctx, func(txctx context.Context) error {
-				return pc.workflowTimers.Reconcile(txctx, entityID, "waiting", "", workflowTimerCause{
-					Kind: workflowTimerCauseEvent, EventID: uuid.NewString(), EventType: "timer.arm",
-					OccurredAt: armedAt, FromState: "waiting",
-				})
-			}); err != nil {
-				t.Fatalf("activate event timer: %v", err)
-			}
+			execute("timer.arm", armedAt)
 			active = listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
-			if len(active) != 1 || active[0].Ref.Declaration != "waiting.event_armed" {
-				t.Fatalf("event-armed timers = %#v, want waiting.event_armed", active)
+			if len(active) != 2 {
+				t.Fatalf("timers after event activation = %#v, want active state-entry and event timers", active)
 			}
 
-			unrelated := eventtest.RootIngress(
-				uuid.NewString(), "work.noted", "operator", "", []byte(`{}`), 0,
-				runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-				armedAt.Add(time.Minute),
-			)
-			result, err := pc.executeNodeContractHandler(ctx, "observer", runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
-				Event: unrelated,
-				State: WorkflowState{EntityID: entityID, Stage: "waiting"},
-			}, false)
-			if err != nil {
-				t.Fatalf("execute event-only handler: %v", err)
-			}
-			if !result.Handled {
-				t.Fatal("event-only handler was not handled")
-			}
+			execute("work.noted", armedAt.Add(time.Minute))
 
 			all := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, false)
 			if len(all) != 2 {
 				t.Fatalf("timers after event-only handler = %#v, want two original activations", all)
 			}
-			statusByDeclaration := make(map[string]string, len(all))
+			activationByDeclaration := make(map[string]WorkflowTimerActivation, len(all))
 			for _, activation := range all {
-				statusByDeclaration[activation.Ref.Declaration] = activation.Status
+				activationByDeclaration[activation.Ref.Declaration] = activation
 			}
-			if got := statusByDeclaration["waiting.state_entry"]; got != workflowTimerStatusFired {
-				t.Fatalf("state-entry timer status = %q, want fired without re-arm", got)
+			persistedStateTimer := activationByDeclaration["waiting.state_entry"]
+			if persistedStateTimer.Ref != stateTimer.Ref || persistedStateTimer.Status != workflowTimerStatusActive {
+				t.Fatalf("state-entry timer after event-only handlers = %#v, want original active activation %#v", persistedStateTimer, stateTimer.Ref)
 			}
-			if got := statusByDeclaration["waiting.event_armed"]; got != workflowTimerStatusActive {
+			if got := activationByDeclaration["waiting.event_armed"].Status; got != workflowTimerStatusActive {
 				t.Fatalf("event-armed timer status = %q, want active without state-trigger cancellation", got)
+			}
+
+			if outcome, err := pc.FireWorkflowTimer(ctx, stateTimer.schedule()); err != nil || outcome != WorkflowTimerFireCommitted {
+				t.Fatalf("fire preserved state-entry timer outcome=%q err=%v", outcome, err)
+			}
+			if got := bus.publishedCount(); got != 1 {
+				t.Fatalf("published timer events = %d, want 1", got)
+			}
+			if got, want := bus.publishedEvent(0).ID(), timeridentity.WorkflowTimerOccurrenceEventID(stateTimer.occurrence()); got != want {
+				t.Fatalf("preserved timer event id = %q, want %q", got, want)
+			}
+			if got := loadWorkflowTimerOwnerActivation(t, store, ctx, stateTimer.Ref.ActivationID).Status; got != workflowTimerStatusFired {
+				t.Fatalf("state-entry timer status after fire = %q, want fired", got)
+			}
+			if got := loadWorkflowTimerOwnerActivation(t, store, ctx, activationByDeclaration["waiting.event_armed"].Ref.ActivationID).Status; got != workflowTimerStatusActive {
+				t.Fatalf("event-armed timer status after state timer fire = %q, want active", got)
 			}
 		})
 	}
@@ -1303,7 +1317,7 @@ func workflowTimerEventOnlyStateTriggerBundle() *runtimecontracts.WorkflowContra
 		Name: "workflow-timer-owner-test", Version: "1.0.0", InitialStage: "waiting",
 		Timers: []runtimecontracts.WorkflowTimerContract{
 			{
-				ID: "waiting.state_entry", Owner: "runtime", Event: "timer.state_entry",
+				ID: "waiting.state_entry", Stage: "waiting", StageOwned: true, Owner: "runtime", Event: "timer.state_entry",
 				StartOn: "state:waiting", Delay: "1h",
 			},
 			{
