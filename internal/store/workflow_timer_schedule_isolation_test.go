@@ -137,8 +137,16 @@ func TestGenericScheduleStoreCannotInterpretWorkflowTimerRows(t *testing.T) {
 	}
 }
 
-func TestGenericScheduleStoreRejectsReservedWorkflowTimerPrefixOnBothStores(t *testing.T) {
+func TestGenericScheduleStoreRejectsReservedWorkflowTimerIdentityOnBothStores(t *testing.T) {
 	reserved := timeridentity.WorkflowTimerActivationTaskPrefix() + "malformed"
+	activation := timeridentity.WorkflowTimerActivationRef{
+		ActivationID: uuid.NewString(),
+		Declaration:  "waiting.timeout",
+	}.Normalize()
+	occurrence := timeridentity.WorkflowTimerOccurrenceRef{
+		Activation: activation,
+		DueAt:      time.Now().UTC().Truncate(time.Microsecond),
+	}.Normalize()
 	for _, tc := range selectedScheduleStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			store, db, ctx := tc.open(t)
@@ -146,17 +154,20 @@ func TestGenericScheduleStoreRejectsReservedWorkflowTimerPrefixOnBothStores(t *t
 				name      string
 				taskID    string
 				eventType string
+				wantError string
 			}{
-				{name: "task_id", taskID: reserved, eventType: "generic.tick"},
-				{name: "event_type_fallback", eventType: reserved},
+				{name: "reserved_task_id", taskID: reserved, eventType: "generic.tick", wantError: "reserved workflow timer prefix"},
+				{name: "reserved_event_type_fallback", eventType: reserved, wantError: "reserved workflow timer prefix"},
+				{name: "trimmed_activation_task_id", taskID: "  " + activation.TaskID() + "  ", eventType: "generic.tick", wantError: "reserved workflow timer prefix"},
+				{name: "trimmed_occurrence_task_id", taskID: "\t" + occurrence.TaskID() + "\n", eventType: "generic.tick", wantError: "workflow timer occurrences must be persisted"},
 			} {
 				t.Run(test.name, func(t *testing.T) {
 					err := store.UpsertSchedule(ctx, runtimepipeline.Schedule{
 						AgentID: "generic", EventType: test.eventType, TaskID: test.taskID,
 						Mode: "once", At: time.Now().UTC().Add(time.Hour),
 					})
-					if err == nil || !strings.Contains(err.Error(), "reserved workflow timer prefix") {
-						t.Fatalf("UpsertSchedule error = %v, want reserved-prefix refusal", err)
+					if err == nil || !strings.Contains(err.Error(), test.wantError) {
+						t.Fatalf("UpsertSchedule error = %v, want %q refusal", err, test.wantError)
 					}
 					var rows int
 					if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM timers`).Scan(&rows); err != nil {

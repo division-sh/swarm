@@ -6258,7 +6258,8 @@ engine:
       identity or publish stale timer work. Store queries classify this discriminator by its literal prefix; SQL wildcard
       semantics must not classify similarly spelled generic schedule names as workflow timer rows or exclude them from generic
       schedule ownership. The literal discriminator prefix is reserved, and generic schedule writers reject any computed timer
-      name in that namespace before persistence, including names derived from an event-type fallback.
+      name in that namespace before persistence, including names derived from an event-type fallback. Generic writers also
+      trim and reject any task ID that normalizes to a valid typed workflow occurrence identity.
     - 2. The platform renders delay once at activation and inserts exactly one canonical row in the same selected workflow
       mutation as the triggering state/event effect. The engine owns one fail-closed handled-outcome classification consumed
       by both public handler mapping and timer-intent production; an unhandled event produces no start or cancellation intent.
