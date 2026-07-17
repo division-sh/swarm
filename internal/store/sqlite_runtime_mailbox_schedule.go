@@ -221,6 +221,10 @@ func (s *SQLiteRuntimeStore) UpsertSchedule(ctx context.Context, sc runtimepipel
 	if _, ok := timeridentity.ParseWorkflowTimerOccurrenceTaskID(sc.TaskID); ok {
 		return fmt.Errorf("workflow timer occurrences must be persisted by WorkflowTimerLifecycle")
 	}
+	timerName, err := genericScheduleTimerName(sc)
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(sc.Mode) == "" {
 		sc.Mode = "once"
 	}
@@ -246,10 +250,6 @@ func (s *SQLiteRuntimeStore) UpsertSchedule(ctx context.Context, sc runtimepipel
 		if sc.EntityID == "" {
 			taskType = "global_recurring"
 		}
-	}
-	timerName := strings.TrimSpace(sc.TaskID)
-	if timerName == "" {
-		timerName = strings.TrimSpace(sc.EventType)
 	}
 	if err := s.runRuntimeMutation(ctx, "sqlite schedule upsert", func(txctx context.Context, tx *sql.Tx) error {
 		if strings.TrimSpace(sc.RunID) != "" {
