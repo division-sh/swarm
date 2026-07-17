@@ -6255,7 +6255,9 @@ engine:
       as a new state entry, stage exit, or state-trigger match. Existing stage-owned timers remain active across event-only
       handling unless an exact event cancellation trigger applies. Exact replay within one generation keeps the activation
       identity, while loop supersession cancels the prior activation before a later generation can mint its distinct activation
-      identity or publish stale timer work.
+      identity or publish stale timer work. Store queries classify this discriminator by its literal prefix; SQL wildcard
+      semantics must not classify similarly spelled generic schedule names as workflow timer rows or exclude them from generic
+      schedule ownership.
     - 2. The platform renders delay once at activation and inserts exactly one canonical row in the same selected workflow
       mutation as the triggering state/event effect. The engine owns one fail-closed handled-outcome classification consumed
       by both public handler mapping and timer-intent production; an unhandled event produces no start or cancellation intent.

@@ -202,9 +202,9 @@ func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeli
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
 			  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
 			  AND %s = $6
-			  AND timer_name NOT LIKE $7
+			  AND strpos(timer_name, $7) <> 1
 			  AND status = 'active'
-		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix()+"%"); err != nil {
+		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix()); err != nil {
 			return fmt.Errorf("deactivate previous timer: %w", err)
 		}
 
@@ -256,9 +256,9 @@ func (s *PostgresStore) cancelScheduleSpec(ctx context.Context, runID, agentID, 
 			WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
 			  AND owner_agent = $2
 			  AND fire_event = $3
-			  AND timer_name NOT LIKE $4
+			  AND strpos(timer_name, $4) <> 1
 			  AND status = 'active'
-		`, runID, agentID, eventType, timeridentity.WorkflowTimerActivationTaskPrefix()+"%")
+		`, runID, agentID, eventType, timeridentity.WorkflowTimerActivationTaskPrefix())
 		return scheduleMutationChanged(result, err)
 	})
 }
@@ -274,9 +274,9 @@ func (s *PostgresStore) cancelScheduleExactSpec(ctx context.Context, sc runtimep
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
 			  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
 			  AND %s = $6
-			  AND timer_name NOT LIKE $7
+			  AND strpos(timer_name, $7) <> 1
 			  AND status = 'active'
-		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix()+"%")
+		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix())
 		return scheduleMutationChanged(result, err)
 	})
 }
@@ -299,10 +299,10 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 		LEFT JOIN runs run ON run.run_id = t.run_id
 		WHERE t.status = 'active'
 		  AND t.owner_agent IS NOT NULL
-		  AND t.timer_name NOT LIKE $1
+		  AND strpos(t.timer_name, $1) <> 1
 		  AND (t.run_id IS NULL OR run.status IN ('running', 'paused'))
 		ORDER BY t.created_at ASC
-	`, timeridentity.WorkflowTimerActivationTaskPrefix()+"%")
+	`, timeridentity.WorkflowTimerActivationTaskPrefix())
 	if err != nil {
 		return nil, fmt.Errorf("query active timers: %w", err)
 	}
@@ -360,9 +360,9 @@ func (s *PostgresStore) markScheduleFiredSpec(ctx context.Context, sc runtimepip
 			WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
 			  AND owner_agent = $2
 			  AND fire_event = $3
-			  AND timer_name NOT LIKE $4
+			  AND strpos(timer_name, $4) <> 1
 			  AND status = 'active'
-		`, sc.RunID, sc.AgentID, sc.EventType, timeridentity.WorkflowTimerActivationTaskPrefix()+"%")
+		`, sc.RunID, sc.AgentID, sc.EventType, timeridentity.WorkflowTimerActivationTaskPrefix())
 		return scheduleMutationChanged(result, err)
 	})
 }
@@ -379,9 +379,9 @@ func (s *PostgresStore) markScheduleFiredExactSpec(ctx context.Context, sc runti
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
 			  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
 			  AND %s = $6
-			  AND timer_name NOT LIKE $7
+			  AND strpos(timer_name, $7) <> 1
 			  AND status = 'active'
-		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix()+"%")
+		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix())
 		return scheduleMutationChanged(result, err)
 	})
 }

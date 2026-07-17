@@ -280,11 +280,11 @@ func scheduleActiveOnConn(ctx context.Context, conn *sql.Conn, sc runtimepipelin
 			  AND t.entity_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
 			  AND t.flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
 			  AND COALESCE(t.fire_payload->>'__schedule_task_id', '') = $6
-			  AND t.timer_name NOT LIKE $7
+			  AND strpos(t.timer_name, $7) <> 1
 			  AND t.status = 'active'
 			  AND (t.run_id IS NULL OR run.status IN ('running', 'paused'))
 		)
-	`), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix()+"%").Scan(&active)
+	`), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix()).Scan(&active)
 	if err != nil {
 		return false, fmt.Errorf("check active schedule ownership target: %w", err)
 	}
@@ -310,11 +310,11 @@ func (s *PostgresStore) persistedScheduleRecurring(ctx context.Context, sc runti
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
 		  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
 		  AND %s = $6
-		  AND timer_name NOT LIKE $7
+		  AND strpos(timer_name, $7) <> 1
 		  AND status = 'active'
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix()+"%").Scan(&recurring)
+	`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix()).Scan(&recurring)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, fmt.Errorf("schedule completion target is missing")
 	}

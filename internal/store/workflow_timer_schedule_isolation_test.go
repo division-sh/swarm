@@ -56,8 +56,8 @@ func TestGenericScheduleStoreCannotInterpretWorkflowTimerRows(t *testing.T) {
 				Declaration:  "waiting.timeout",
 			}.Normalize()
 			fireAt := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
-			genericTaskID := "payload-key-collision"
-			payload := json.RawMessage(`{"__schedule_task_id":"payload-key-collision","business":true}`)
+			genericTaskID := "workflowXtimer:v1:payload-key-collision"
+			payload := json.RawMessage(`{"__schedule_task_id":"workflowXtimer:v1:payload-key-collision","business":true}`)
 
 			switch store.(type) {
 			case *SQLiteRuntimeStore:
@@ -126,6 +126,10 @@ func TestGenericScheduleStoreCannotInterpretWorkflowTimerRows(t *testing.T) {
 			}
 			if err := store.CancelScheduleExactTerminal(ctx, generic); err != nil {
 				t.Fatalf("terminalize generic schedule: %v", err)
+			}
+			active, err = store.LoadActiveSchedules(ctx)
+			if err != nil || len(active) != 0 {
+				t.Fatalf("generic load after exact cancellation = %#v, err=%v; want no active rows", active, err)
 			}
 			assertWorkflowTimerRowStatus(t, db, store, activationID, "active")
 		})
