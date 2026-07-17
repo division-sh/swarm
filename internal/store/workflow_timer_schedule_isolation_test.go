@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -132,6 +133,40 @@ func TestGenericScheduleStoreCannotInterpretWorkflowTimerRows(t *testing.T) {
 				t.Fatalf("generic load after exact cancellation = %#v, err=%v; want no active rows", active, err)
 			}
 			assertWorkflowTimerRowStatus(t, db, store, activationID, "active")
+		})
+	}
+}
+
+func TestGenericScheduleStoreRejectsReservedWorkflowTimerPrefixOnBothStores(t *testing.T) {
+	reserved := timeridentity.WorkflowTimerActivationTaskPrefix() + "malformed"
+	for _, tc := range selectedScheduleStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, db, ctx := tc.open(t)
+			for _, test := range []struct {
+				name      string
+				taskID    string
+				eventType string
+			}{
+				{name: "task_id", taskID: reserved, eventType: "generic.tick"},
+				{name: "event_type_fallback", eventType: reserved},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					err := store.UpsertSchedule(ctx, runtimepipeline.Schedule{
+						AgentID: "generic", EventType: test.eventType, TaskID: test.taskID,
+						Mode: "once", At: time.Now().UTC().Add(time.Hour),
+					})
+					if err == nil || !strings.Contains(err.Error(), "reserved workflow timer prefix") {
+						t.Fatalf("UpsertSchedule error = %v, want reserved-prefix refusal", err)
+					}
+					var rows int
+					if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM timers`).Scan(&rows); err != nil {
+						t.Fatalf("count timers after refused insert: %v", err)
+					}
+					if rows != 0 {
+						t.Fatalf("persisted timers after refused insert = %d, want 0", rows)
+					}
+				})
+			}
 		})
 	}
 }

@@ -30,6 +30,9 @@ func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.S
 	if _, ok := timeridentity.ParseWorkflowTimerOccurrenceTaskID(sc.TaskID); ok {
 		return fmt.Errorf("workflow timer occurrences must be persisted by WorkflowTimerLifecycle")
 	}
+	if _, err := genericScheduleTimerName(sc); err != nil {
+		return err
+	}
 	if strings.TrimSpace(sc.Mode) == "" {
 		sc.Mode = "once"
 	}
@@ -184,6 +187,17 @@ func scheduleWithContextRunID(ctx context.Context, sc runtimepipeline.Schedule) 
 	return sc
 }
 
+func genericScheduleTimerName(sc runtimepipeline.Schedule) (string, error) {
+	timerName := strings.TrimSpace(sc.TaskID)
+	if timerName == "" {
+		timerName = strings.TrimSpace(sc.EventType)
+	}
+	if strings.HasPrefix(timerName, timeridentity.WorkflowTimerActivationTaskPrefix()) {
+		return "", fmt.Errorf("generic schedule timer name %q uses reserved workflow timer prefix", timerName)
+	}
+	return timerName, nil
+}
+
 func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeline.Schedule) error {
 	return s.runScheduleTransaction(ctx, "timer", func(tx *sql.Tx) error {
 		if strings.TrimSpace(sc.RunID) != "" {
@@ -220,11 +234,11 @@ func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeli
 				taskType = "global_recurring"
 			}
 		}
-		timerName := strings.TrimSpace(sc.TaskID)
-		if timerName == "" {
-			timerName = strings.TrimSpace(sc.EventType)
+		timerName, err := genericScheduleTimerName(sc)
+		if err != nil {
+			return err
 		}
-		_, err := tx.ExecContext(ctx, `
+		_, err = tx.ExecContext(ctx, `
 			INSERT INTO timers (
 			run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
 			fire_at, recurring, recurrence_cron, recurrence_interval,
