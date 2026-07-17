@@ -816,6 +816,15 @@ func AuthorActivityEventDescriptors(source semanticview.Source) ([]runtimeauthor
 			return nil, err
 		}
 	}
+	for _, timer := range source.WorkflowTimers() {
+		if !timer.StageOwned || strings.TrimSpace(timer.Event) != runtimecontracts.WorkflowStageTimerInternalEvent {
+			continue
+		}
+		if err := add(runtimecontracts.WorkflowStageTimerInternalEvent, runtimecontracts.EventCatalogEntry{}, runtimeauthoractivity.StoryDifferent); err != nil {
+			return nil, err
+		}
+		break
+	}
 	descriptors := make([]runtimeauthoractivity.EventDescriptor, 0, len(byName))
 	for _, descriptor := range byName {
 		descriptors = append(descriptors, descriptor)

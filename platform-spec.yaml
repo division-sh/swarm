@@ -6289,10 +6289,12 @@ engine:
       canonical occurrence transition.
     crash_recovery: >
       Restart restores only active typed workflow rows for active runs and registers their exact persisted occurrence
-      coordinates once. Overdue coordinates fire late by contract and retain deterministic occurrence identity. The runtime
-      does not reconstruct timers from workflow-instance state, handlers, declarations, or logs. A database containing obsolete
-      workflow-instance-owned timer rows is unsupported pre-1.0 state and startup refuses it; recreate the database rather than
-      migrating, converting, or dual-reading those rows.
+      coordinates once. A runtime that adopts an already-active standing run after startup performs the same run-scoped exact-row
+      registration only after the standing reconciliation mutation commits; it does not wait for another process restart.
+      Overdue coordinates fire late by contract and retain deterministic occurrence identity. The runtime does not reconstruct
+      timers from workflow-instance state, handlers, declarations, or logs. A database containing obsolete workflow-instance-owned
+      timer rows is unsupported pre-1.0 state and startup refuses it; recreate the database rather than migrating, converting, or
+      dual-reading those rows.
     replay_and_fork: >
       Replay observes canonical persisted timer facts. Fork copies eligible canonical rows under the existing run-fork
       transaction, preserves business payload and due coordinate, and deterministically remints activation identity and any
