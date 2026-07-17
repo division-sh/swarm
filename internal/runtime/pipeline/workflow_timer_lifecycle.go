@@ -156,7 +156,8 @@ func workflowTimerLifecycleMatches(trigger timeridentity.Trigger, stage, sourceE
 func workflowTimerShouldCancelOnTransition(timer runtimecontracts.WorkflowTimerContract, currentStage, nextStage, sourceEvent string) bool {
 	if timer.StageOwned {
 		stage := strings.TrimSpace(timer.Stage)
-		return stage != "" && strings.TrimSpace(currentStage) == stage && strings.TrimSpace(nextStage) != stage
+		target := strings.TrimSpace(nextStage)
+		return stage != "" && target != "" && strings.TrimSpace(currentStage) == stage && target != stage
 	}
 	cancelTrigger, ok := workflowTimerCancelTrigger(timer)
 	return ok && workflowTimerLifecycleMatches(cancelTrigger, nextStage, sourceEvent)

@@ -6252,8 +6252,10 @@ engine:
       activation facts against the existing row and converges on its current active, fired, or cancelled state without
       reinsertion, resurrection, or conflict on mutable completion fields. A transition cause derives loop generation from
       its persisted target stage; an event-only cause derives it from the persisted current stage without treating that stage
-      as a new state entry. Exact replay within one generation keeps the activation identity, while loop supersession cancels
-      the prior activation before a later generation can mint its distinct activation identity or publish stale timer work.
+      as a new state entry, stage exit, or state-trigger match. Existing stage-owned timers remain active across event-only
+      handling unless an exact event cancellation trigger applies. Exact replay within one generation keeps the activation
+      identity, while loop supersession cancels the prior activation before a later generation can mint its distinct activation
+      identity or publish stale timer work.
     - 2. The platform renders delay once at activation and inserts exactly one canonical row in the same selected workflow
       mutation as the triggering state/event effect. The engine owns one fail-closed handled-outcome classification consumed
       by both public handler mapping and timer-intent production; an unhandled event produces no start or cancellation intent.
