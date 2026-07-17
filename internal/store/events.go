@@ -183,6 +183,9 @@ func (s *PostgresStore) AppendEventOutcome(ctx context.Context, evt events.Event
 }
 
 func (s *PostgresStore) BeginEventTx(ctx context.Context) (*sql.Tx, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, err
+	}
 	return s.DB.BeginTx(ctx, nil)
 }
 
@@ -407,6 +410,9 @@ func (s *PostgresStore) InsertEventDeliveries(ctx context.Context, eventID strin
 }
 
 func (s *PostgresStore) InsertEventDeliveriesTx(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
 	if len(agentIDs) == 0 {
 		return nil
 	}
@@ -435,6 +441,9 @@ func (s *PostgresStore) UpsertCommittedReplayScopeTx(
 	eventID string,
 	scope runtimereplayclaim.CommittedReplayScope,
 ) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
 	if tx == nil {
 		return s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 			return s.UpsertCommittedReplayScopeTx(txctx, tx, eventID, scope)
@@ -476,6 +485,9 @@ func (s *PostgresStore) HasProcessedPipelineReceipt(ctx context.Context, eventID
 }
 
 func (s *PostgresStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status string, failure *runtimefailures.Envelope) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
 	if tx == nil {
 		return s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 			return s.UpsertPipelineReceiptTx(txctx, tx, eventID, status, failure)
@@ -1013,6 +1025,9 @@ func (s *PostgresStore) InsertEventDeliveriesWithTargets(ctx context.Context, ev
 }
 
 func (s *PostgresStore) InsertEventDeliveriesWithTargetsTx(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
 	if tx == nil {
 		return s.InsertEventDeliveriesWithTargets(ctx, eventID, agentIDs, deliveryTargets)
 	}
@@ -1024,6 +1039,9 @@ func (s *PostgresStore) InsertEventDeliveryRoutes(ctx context.Context, eventID s
 }
 
 func (s *PostgresStore) InsertEventDeliveryRoutesTx(ctx context.Context, tx *sql.Tx, eventID string, deliveryRoutes []events.DeliveryRoute) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
 	if tx == nil {
 		return s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 			return s.InsertEventDeliveryRoutesTx(txctx, tx, eventID, deliveryRoutes)

@@ -49,6 +49,9 @@ func (s *PostgresStore) runPostgresRuntimeMutation(ctx context.Context, fn func(
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("postgres store is required")
 	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -93,6 +96,9 @@ func (s *SQLiteRuntimeStore) runRuntimeMutation(ctx context.Context, label strin
 	}
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("sqlite runtime store is required")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
 	}
 	if ctx == nil {
 		ctx = context.Background()

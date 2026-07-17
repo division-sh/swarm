@@ -133,6 +133,9 @@ func (s *SQLiteRuntimeStore) BeginEventTx(ctx context.Context) (*sql.Tx, error) 
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("sqlite runtime store is required")
 	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, err
+	}
 	return s.DB.BeginTx(ctx, nil)
 }
 
@@ -277,6 +280,9 @@ func (s *SQLiteRuntimeStore) InsertEventDeliveries(ctx context.Context, eventID 
 }
 
 func (s *SQLiteRuntimeStore) InsertEventDeliveriesTx(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" || len(agentIDs) == 0 {
 		return nil

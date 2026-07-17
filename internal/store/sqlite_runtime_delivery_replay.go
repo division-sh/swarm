@@ -52,6 +52,9 @@ func (s *SQLiteRuntimeStore) HasProcessedPipelineReceipt(ctx context.Context, ev
 }
 
 func (s *SQLiteRuntimeStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status string, failure *runtimefailures.Envelope) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return nil
@@ -125,6 +128,9 @@ func (s *SQLiteRuntimeStore) InsertEventDeliveriesWithTargets(ctx context.Contex
 }
 
 func (s *SQLiteRuntimeStore) InsertEventDeliveriesWithTargetsTx(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
 	routes := make([]events.DeliveryRoute, 0, len(agentIDs))
 	for _, agentID := range agentIDs {
 		agentID = strings.TrimSpace(agentID)
@@ -145,6 +151,9 @@ func (s *SQLiteRuntimeStore) InsertEventDeliveryRoutes(ctx context.Context, even
 }
 
 func (s *SQLiteRuntimeStore) InsertEventDeliveryRoutesTx(ctx context.Context, tx *sql.Tx, eventID string, deliveryRoutes []events.DeliveryRoute) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
 	eventID = strings.TrimSpace(eventID)
 	if err := events.ValidateDeliveryRouteProjections(deliveryRoutes); err != nil {
 		return err
@@ -152,9 +161,6 @@ func (s *SQLiteRuntimeStore) InsertEventDeliveryRoutesTx(ctx context.Context, tx
 	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
 	if eventID == "" || len(deliveryRoutes) == 0 {
 		return nil
-	}
-	if err := s.requireCurrentSchema(); err != nil {
-		return err
 	}
 	ownedTx := tx == nil
 	if ownedTx {
@@ -288,6 +294,9 @@ func (s *SQLiteRuntimeStore) UpsertCommittedReplayScope(ctx context.Context, eve
 }
 
 func (s *SQLiteRuntimeStore) UpsertCommittedReplayScopeTx(ctx context.Context, tx *sql.Tx, eventID string, scope runtimereplayclaim.CommittedReplayScope) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return nil
