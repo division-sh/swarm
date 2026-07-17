@@ -42,10 +42,6 @@ type selectedStartupRecoveryStore interface {
 	runtimestartuprecovery.PreservationCleanupStore
 }
 
-type selectedSchemaCapabilityBinder interface {
-	BindSchemaCapabilities(context.Context) (store.StoreSchemaCapabilities, error)
-}
-
 type selectedAPICapabilities struct {
 	Database                  apiv1.Pinger
 	Runs                      apiv1.RunReadStore
@@ -166,11 +162,6 @@ func (f selectedRuntimeStoreFacade) runBundleAvailabilityStore() selectedRunBund
 
 func (f selectedRuntimeStoreFacade) startupRecoveryStore() selectedStartupRecoveryStore {
 	return f.stores.StartupRecoveryStore
-}
-
-func (f selectedRuntimeStoreFacade) schemaCapabilityBinder() selectedSchemaCapabilityBinder {
-	binder, _ := f.stores.SchemaBootstrapper.(selectedSchemaCapabilityBinder)
-	return binder
 }
 
 func (f selectedRuntimeStoreFacade) runStalledReader() runStalledReadStore {

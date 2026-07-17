@@ -265,7 +265,7 @@ func TestReplyResolutionConformance_DurableRestartRoutesOverlappingRequestsOnBot
 			setup: func(t *testing.T) durableReplyConformanceStore {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				return &store.PostgresStore{DB: db}
+				return storetest.AdmitPostgresRuntimeStore(t, db)
 			},
 		},
 		{
@@ -370,7 +370,7 @@ func TestReplyResolutionConformance_DurableExplicitCorrelationFailsClosedOnBothB
 			setup: func(t *testing.T) durableReplyConformanceStore {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				return &store.PostgresStore{DB: db}
+				return storetest.AdmitPostgresRuntimeStore(t, db)
 			},
 		},
 		{
@@ -465,7 +465,7 @@ func TestReplyResolutionConformance_TypedHumanTaskPreservesReplyAuthorityAcrossR
 			setup: func(t *testing.T) durableReplyConformanceStore {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				return &store.PostgresStore{DB: db}
+				return storetest.AdmitPostgresRuntimeStore(t, db)
 			},
 		},
 		{
@@ -718,7 +718,6 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 	}
 	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
 		Module: module, WorkflowStore: workflowStore, DecisionCards: cards,
-		EventReceiptsCapability: func(context.Context) (bool, error) { return true, nil },
 	})
 	eb.SetInterceptors(coordinator)
 	eb.RegisterRuntimeActiveAgentDescriptor(bus.ActiveAgentDescriptor{AgentID: "provider-agent"})

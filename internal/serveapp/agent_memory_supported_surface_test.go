@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -193,9 +194,7 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 		oldBuildStores := buildStoresForServe
 		oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
-			if _, bindErr := runtimePG.BindSchemaCapabilities(ctx); bindErr != nil {
-				return storeBundle{}, bindErr
-			}
+			storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 			return selectedPostgresStoreBundle(runtimePG, cfg), nil
 		}
 		cliapp.ConfiguredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {

@@ -810,7 +810,7 @@ func (pc *PipelineCoordinator) BackgroundNodesWithReceiptStore(bus systemNodeBus
 			continue
 		}
 		if executor := pc.backgroundWorkflowExecutor(strings.TrimSpace(node.ID)); executor != nil {
-			if bg := newBackgroundWorkflowNodeWithReceiptStoreAndRetryBase(executor, bus, db, receiptStore, pc.eventReceiptsCapability, retryBase); bg != nil {
+			if bg := newBackgroundWorkflowNodeWithReceiptStoreAndRetryBase(executor, bus, db, receiptStore, retryBase); bg != nil {
 				bg.SetTestLifecycleProbe(pc.testLifecycleProbe)
 				out = append(out, bg)
 			}
@@ -1202,11 +1202,7 @@ func (pc *PipelineCoordinator) workflowNodeEventProcessed(ctx context.Context, n
 }
 
 func (pc *PipelineCoordinator) eventReceiptsAvailable(ctx context.Context) bool {
-	if pc == nil || pc.eventReceiptsCapability == nil {
-		return false
-	}
-	ok, err := pc.eventReceiptsCapability(ctx)
-	return err == nil && ok
+	return pc != nil && pc.workflowStore != nil
 }
 
 func (pc *PipelineCoordinator) convergeWorkflowNodeNormalRunCompletion(ctx context.Context, nodeID string, evt events.Event) {

@@ -200,16 +200,8 @@ func (recordingSchemaBootstrapper) BootstrapSchema(context.Context, store.Schema
 	return nil
 }
 
-func (recordingSchemaBootstrapper) ResolveSchemaCapabilities(context.Context) (store.StoreSchemaCapabilities, error) {
-	return store.StoreSchemaCapabilities{}, nil
-}
-
 func (c *capturingSchemaBootstrapper) BootstrapSchema(_ context.Context, request store.SchemaBootstrapRequest) error {
 	c.plans = append([]store.SchemaTableDDL{}, request.PlatformPlans...)
 	c.plans = append(c.plans, request.StatePlans...)
 	return nil
-}
-
-func (c *capturingSchemaBootstrapper) ResolveSchemaCapabilities(context.Context) (store.StoreSchemaCapabilities, error) {
-	return store.StoreSchemaCapabilities{}, nil
 }

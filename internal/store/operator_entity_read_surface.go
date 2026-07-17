@@ -74,66 +74,16 @@ type entityAggregateGroup struct {
 
 var entityAggregateFieldPattern = regexp.MustCompile(`^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$`)
 
-func (s *PostgresStore) requireOperatorEntityCapabilities(ctx context.Context) error {
-	if s == nil || s.DB == nil {
-		return fmt.Errorf("postgres store is required")
-	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	switch {
-	case caps.EntityState != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("entity_state", caps.EntityState)
-	case !caps.EntityRunID:
-		return fmt.Errorf("operator entity read surface requires canonical entity_state.run_id")
-	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
-		return err
-	}
-	required := []string{
-		"run_id", "entity_id", "flow_instance", "entity_type", "slug", "name",
-		"current_state", "gates", "fields", "accumulator", "revision",
-		"created_at", "updated_at",
-	}
-	if !catalog.hasColumns("entity_state", required...) {
-		return fmt.Errorf("operator entity read surface requires entity_state columns %v", required)
-	}
-	return nil
+func (s *PostgresStore) requireOperatorEntityAccess() error {
+	return s.requireCurrentSchema()
 }
 
-func (s *SQLiteRuntimeStore) requireOperatorEntityCapabilities(ctx context.Context) error {
-	if s == nil || s.DB == nil {
-		return fmt.Errorf("sqlite runtime store is required")
-	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	switch {
-	case caps.EntityState != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("entity_state", caps.EntityState)
-	case !caps.EntityRunID:
-		return fmt.Errorf("operator entity read surface requires canonical entity_state.run_id")
-	}
-	catalog, err := loadSQLiteSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
-		return err
-	}
-	required := []string{
-		"run_id", "entity_id", "flow_instance", "entity_type", "slug", "name",
-		"current_state", "gates", "fields", "accumulator", "revision",
-		"created_at", "updated_at",
-	}
-	if !catalog.hasColumns("entity_state", required...) {
-		return fmt.Errorf("operator entity read surface requires entity_state columns %v", required)
-	}
-	return nil
+func (s *SQLiteRuntimeStore) requireOperatorEntityAccess() error {
+	return s.requireCurrentSchema()
 }
 
 func (s *PostgresStore) ListOperatorEntities(ctx context.Context, opts OperatorEntityListOptions) (OperatorEntityListResult, error) {
-	if err := s.requireOperatorEntityCapabilities(ctx); err != nil {
+	if err := s.requireOperatorEntityAccess(); err != nil {
 		return OperatorEntityListResult{}, err
 	}
 	opts, err := defaultOperatorEntityListOptions(opts)
@@ -257,7 +207,7 @@ func (s *PostgresStore) ListOperatorEntities(ctx context.Context, opts OperatorE
 }
 
 func (s *SQLiteRuntimeStore) ListOperatorEntities(ctx context.Context, opts OperatorEntityListOptions) (OperatorEntityListResult, error) {
-	if err := s.requireOperatorEntityCapabilities(ctx); err != nil {
+	if err := s.requireOperatorEntityAccess(); err != nil {
 		return OperatorEntityListResult{}, err
 	}
 	opts, err := defaultOperatorEntityListOptions(opts)
@@ -372,7 +322,7 @@ func (s *SQLiteRuntimeStore) ListOperatorEntities(ctx context.Context, opts Oper
 }
 
 func (s *PostgresStore) LoadOperatorEntity(ctx context.Context, entityID, runID string) (OperatorEntityFull, error) {
-	if err := s.requireOperatorEntityCapabilities(ctx); err != nil {
+	if err := s.requireOperatorEntityAccess(); err != nil {
 		return OperatorEntityFull{}, err
 	}
 	entityID = strings.TrimSpace(entityID)
@@ -422,7 +372,7 @@ func (s *PostgresStore) LoadOperatorEntity(ctx context.Context, entityID, runID 
 }
 
 func (s *SQLiteRuntimeStore) LoadOperatorEntity(ctx context.Context, entityID, runID string) (OperatorEntityFull, error) {
-	if err := s.requireOperatorEntityCapabilities(ctx); err != nil {
+	if err := s.requireOperatorEntityAccess(); err != nil {
 		return OperatorEntityFull{}, err
 	}
 	entityID = strings.TrimSpace(entityID)
@@ -472,7 +422,7 @@ func (s *SQLiteRuntimeStore) LoadOperatorEntity(ctx context.Context, entityID, r
 }
 
 func (s *PostgresStore) AggregateOperatorEntities(ctx context.Context, opts OperatorEntityAggregateOptions) (OperatorEntityAggregateResult, error) {
-	if err := s.requireOperatorEntityCapabilities(ctx); err != nil {
+	if err := s.requireOperatorEntityAccess(); err != nil {
 		return OperatorEntityAggregateResult{}, err
 	}
 	opts, err := defaultOperatorEntityAggregateOptions(opts)
@@ -527,7 +477,7 @@ func (s *PostgresStore) AggregateOperatorEntities(ctx context.Context, opts Oper
 }
 
 func (s *SQLiteRuntimeStore) AggregateOperatorEntities(ctx context.Context, opts OperatorEntityAggregateOptions) (OperatorEntityAggregateResult, error) {
-	if err := s.requireOperatorEntityCapabilities(ctx); err != nil {
+	if err := s.requireOperatorEntityAccess(); err != nil {
 		return OperatorEntityAggregateResult{}, err
 	}
 	opts, err := defaultOperatorEntityAggregateOptions(opts)

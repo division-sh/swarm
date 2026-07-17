@@ -11,25 +11,25 @@ import (
 )
 
 type SQLConversationReader struct {
-	capSource schemaCapabilitySource
-	owner     *store.OperatorAgentConversationReadSurface
+	owner dashboardConversationReadOwner
 }
 
-func NewSQLConversationReader(db *sql.DB, capSource schemaCapabilitySource) *SQLConversationReader {
-	if db == nil {
+type dashboardConversationReadOwner interface {
+	ListOperatorConversations(context.Context, store.OperatorConversationListOptions) (store.OperatorConversationListResult, error)
+	ListOperatorConversationTurns(context.Context, store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error)
+	LoadOperatorPublicConversationTurn(context.Context, string, string) (store.OperatorPublicConversationTurnDetail, error)
+}
+
+func NewSQLConversationReader(db *sql.DB, source any) *SQLConversationReader {
+	owner, ok := source.(dashboardConversationReadOwner)
+	if db == nil || !ok || owner == nil {
 		return nil
 	}
-	return &SQLConversationReader{
-		capSource: capSource,
-		owner:     store.NewOperatorConversationReadSurface(db, capSource),
-	}
+	return &SQLConversationReader{owner: owner}
 }
 
 func (r *SQLConversationReader) ListOperatorConversations(ctx context.Context, opts store.OperatorConversationListOptions) (store.OperatorConversationListResult, error) {
 	if r == nil || r.owner == nil {
-		if _, err := r.resolveCapabilities(ctx); err != nil {
-			return store.OperatorConversationListResult{}, err
-		}
 		return store.OperatorConversationListResult{}, errors.New("conversation reader is not configured")
 	}
 	return r.owner.ListOperatorConversations(ctx, opts)
@@ -37,9 +37,6 @@ func (r *SQLConversationReader) ListOperatorConversations(ctx context.Context, o
 
 func (r *SQLConversationReader) ListOperatorConversationTurns(ctx context.Context, opts store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error) {
 	if r == nil || r.owner == nil {
-		if _, err := r.resolveCapabilities(ctx); err != nil {
-			return store.OperatorConversationTurnListResult{}, err
-		}
 		return store.OperatorConversationTurnListResult{}, errors.New("conversation reader is not configured with the canonical turn owner")
 	}
 	return r.owner.ListOperatorConversationTurns(ctx, opts)
@@ -47,19 +44,9 @@ func (r *SQLConversationReader) ListOperatorConversationTurns(ctx context.Contex
 
 func (r *SQLConversationReader) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (store.OperatorPublicConversationTurnDetail, error) {
 	if r == nil || r.owner == nil {
-		if _, err := r.resolveCapabilities(ctx); err != nil {
-			return store.OperatorPublicConversationTurnDetail{}, err
-		}
 		return store.OperatorPublicConversationTurnDetail{}, errors.New("conversation reader is not configured with the canonical exact-turn owner")
 	}
 	return r.owner.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
-}
-
-func (r *SQLConversationReader) resolveCapabilities(ctx context.Context) (store.StoreSchemaCapabilities, error) {
-	if r == nil || r.capSource == nil {
-		return store.StoreSchemaCapabilities{}, missingDashboardCapabilityOwner("conversation reader")
-	}
-	return r.capSource.ResolveSchemaCapabilities(ctx)
 }
 
 func conversationSummaryFromOperator(item store.OperatorConversationSummary) ConversationSummary {

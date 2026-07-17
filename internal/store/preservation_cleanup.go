@@ -43,11 +43,7 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 	if s == nil || s.DB == nil {
 		return preservationcleanup.Result{}, fmt.Errorf("postgres store is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return preservationcleanup.Result{}, err
-	}
-	if err := requirePreservationCleanupCapabilities(caps); err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return preservationcleanup.Result{}, err
 	}
 	now := req.RequestedAt.UTC()
@@ -220,31 +216,6 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 	}
 	committed = true
 	return out, nil
-}
-
-func requirePreservationCleanupCapabilities(caps StoreSchemaCapabilities) error {
-	if !caps.Events.HasRuns || !caps.Events.RunTerminalFields || !caps.Events.RunBundleSource {
-		return fmt.Errorf("unavailable bundle preservation cleanup requires runs terminal fields and bundle_source")
-	}
-	if caps.Events.Deliveries != SchemaFlavorCanonical || !caps.Events.DeliveryRunID {
-		if caps.Events.Deliveries != SchemaFlavorCanonical {
-			return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-		}
-		return fmt.Errorf("unavailable bundle preservation cleanup requires canonical event_deliveries.run_id")
-	}
-	if caps.Events.Receipts != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
-	}
-	if caps.Conversations.Sessions != SchemaFlavorCanonical || !caps.Conversations.SessionRunID {
-		if caps.Conversations.Sessions != SchemaFlavorCanonical {
-			return unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
-		}
-		return fmt.Errorf("unavailable bundle preservation cleanup requires canonical agent_sessions.run_id")
-	}
-	if caps.Schedules != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("timers/schedules", caps.Schedules)
-	}
-	return nil
 }
 
 func lockUnavailableBundlePreservationRunsTx(ctx context.Context, tx *sql.Tx, runIDs []string) ([]preservationCleanupRunTarget, error) {

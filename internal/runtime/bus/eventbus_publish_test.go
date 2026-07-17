@@ -56,7 +56,7 @@ func eventBusTestRunContext(t *testing.T, db *sql.DB) context.Context {
 
 func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
@@ -117,7 +117,7 @@ type eventBusExactDuplicateState struct {
 
 func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	if _, err := newScopedTestEventBus(pg); err != nil {
 		t.Fatalf("register author activity catalog: %v", err)
 	}
@@ -267,7 +267,7 @@ func exactDuplicateEventBusEvent(runID string) events.Event {
 
 func TestEventBusRejectsDiagnosticDirectEventsThroughEveryPublishOwnerPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	assertEventBusDiagnosticDirectRefusal(t, pg, pg.RunEventMutation, func(eventID string) (int, error) {
 		var count int
 		err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, eventID).Scan(&count)
@@ -450,7 +450,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	module := newFixtureWorkflowModule(t, bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := eventBusTestRunContext(t, db)
 	instanceRoute := runtimeflowidentity.DeriveRoute("account", "one")
 	if _, err := db.ExecContext(ctx, `
@@ -480,8 +480,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:                  module,
-		EventReceiptsCapability: pg.CanonicalEventReceiptsCapability,
+		Module: module,
 	})
 	if pc == nil {
 		t.Fatal("expected pipeline coordinator")
@@ -941,7 +940,7 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 	t.Cleanup(cleanup)
 
 	ctx := eventBusTestRunContext(t, db)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	failing := &failStandalonePipelineReceiptOnceStore{
 		PostgresStore: pg,
 		err:           errors.New("simulated post-commit receipt failure"),
@@ -1006,7 +1005,7 @@ func TestEventBusPublishTransactionalPostCommitCompletionFailureIsRecoverable(t 
 	t.Cleanup(cleanup)
 
 	ctx := eventBusTestRunContext(t, db)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	failing := &failNormalRunCompletionStore{
 		PostgresStore: pg,
 		err:           errors.New("simulated normal-run completion failure"),
@@ -1818,7 +1817,7 @@ func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	ctx := eventBusTestRunContext(t, db)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	const eventID = "11111111-1111-1111-1111-111111111136"
 	const agentID = "agent-acknowledged-publish"
 	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
@@ -1915,7 +1914,7 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 			open: func(t *testing.T) (runtimebus.EventStore, runtimebus.EventStore, *sql.DB, string) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				return &store.PostgresStore{DB: db}, &store.PostgresStore{DB: db}, db, "$1::uuid"
+				return storetest.AdmitPostgresRuntimeStore(t, db), storetest.AdmitPostgresRuntimeStore(t, db), db, "$1::uuid"
 			},
 		},
 	} {
@@ -2056,7 +2055,7 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 		t.Run(form, func(t *testing.T) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
-			pg := &store.PostgresStore{DB: db}
+			pg := storetest.AdmitPostgresRuntimeStore(t, db)
 			db.SetMaxOpenConns(poolSize)
 			db.SetMaxIdleConns(poolSize)
 
@@ -2151,7 +2150,7 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 		t.Run(surface, func(t *testing.T) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
-			seedStore := &store.PostgresStore{DB: db}
+			seedStore := storetest.AdmitPostgresRuntimeStore(t, db)
 			if _, err := newScopedTestEventBus(seedStore); err != nil {
 				t.Fatalf("prepare replay seed author activity catalog: %v", err)
 			}
@@ -2177,7 +2176,7 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 			errs := make(chan error, poolSize)
 			for i := 0; i < poolSize; i++ {
 				selected := &replayClaimBarrierStore{
-					PostgresStore: &store.PostgresStore{DB: db}, eventID: eventIDs[i], claimed: claimed, release: release,
+					PostgresStore: storetest.AdmitPostgresRuntimeStore(t, db), eventID: eventIDs[i], claimed: claimed, release: release,
 				}
 				bus, err := newScopedTestEventBus(selected)
 				if err != nil {
@@ -2325,7 +2324,7 @@ func TestEventBusPublishTransactional_RunsInterceptorsAfterCommit(t *testing.T) 
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	ctx := eventBusTestRunContext(t, db)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eventID := "11111111-1111-1111-1111-111111111111"
 	agentID := "agent-post-commit-publish"
 	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
@@ -2370,7 +2369,7 @@ func TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecord
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	ctx := eventBusTestRunContext(t, db)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eventID := "11111111-1111-1111-1111-111111111112"
 	wantErr := errors.New("post-commit interceptor failure")
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
@@ -2418,7 +2417,7 @@ func TestEventBusPublishInMutationRunsInterceptorsAfterMutationCommit(t *testing
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	ctx := eventBusTestRunContext(t, db)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eventID := "11111111-1111-1111-1111-111111111112"
 	called := make(chan struct{}, 1)
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
@@ -2471,7 +2470,7 @@ func TestEventBusPublishInMutationRunsInterceptorsAfterMutationCommit(t *testing
 
 func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2604,7 +2603,7 @@ func TestEventBusPublishInMutationSQLiteRecordsTargetFailureDeadLetter(t *testin
 
 func TestEventBusPublish_ClassifiesCanonicalRunBundleSourceThroughRunLifecycleOwner(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	runID := uuid.NewString()
 	fingerprint := "sha256:3333333333333333333333333333333333333333333333333333333333333333"
 	sourceFact := runtimecorrelation.BundleSourceFact{
@@ -2638,7 +2637,7 @@ func TestEventBusPublish_ClassifiesCanonicalRunBundleSourceThroughRunLifecycleOw
 
 func TestEventBusPublishDirect_StampsBundleSourceFactOnRunRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	runID := uuid.NewString()
 	sourceFact := runtimecorrelation.BundleSourceFact{
 		BundleHash:        "bundle-v1:sha256:4444444444444444444444444444444444444444444444444444444444444444",
@@ -2680,7 +2679,7 @@ func TestEventBusPublishDirect_StampsBundleSourceFactOnRunRow(t *testing.T) {
 
 func TestEventBusPublishDeferred_RunsInterceptorsAfterDeferredEventCommit(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eventID := "22222222-2222-2222-2222-222222222222"
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
 		Interceptors: []runtimebus.EventInterceptor{deferredEventVisibleInterceptor{
@@ -2767,7 +2766,7 @@ func TestPrepareInboundDeliveryBatchRollsBackAllDerivedEventsWithCallerMutation(
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				ctx := eventBusTestRunContext(t, db)
-				pg := &store.PostgresStore{DB: db}
+				pg := storetest.AdmitPostgresRuntimeStore(t, db)
 				return ctx, db, pg, pg
 			},
 			count: countPostgresInboundBatchRows,
@@ -2923,7 +2922,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersis
 	t.Cleanup(cleanup)
 
 	ctx := testAuthorActivityContext(context.Background())
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eb, err := newScopedTestEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -2989,7 +2988,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 	t.Cleanup(cleanup)
 
 	ctx := testAuthorActivityContext(context.Background())
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eb, err := newScopedTestEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -3102,7 +3101,7 @@ func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	ctx := eventBusTestRunContext(t, db)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eb, err := newScopedTestEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -3310,7 +3309,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	var pc *runtimepipeline.PipelineCoordinator
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),
@@ -3325,8 +3324,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:                  module,
-		EventReceiptsCapability: pg.CanonicalEventReceiptsCapability,
+		Module: module,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -3448,7 +3446,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	ctx := eventBusTestRunContext(t, db)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	module, bundle := mixedNodeRouteWorkflowModule(t)
 	const eventType = "child/child.start"
 	const rootEntityID = "11111111-1111-1111-1111-222222222222"
@@ -3483,8 +3481,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:                  module,
-		EventReceiptsCapability: pg.CanonicalEventReceiptsCapability,
+		Module: module,
 	})
 	if _, ok := any(pc).(runtimebus.DeliveryRouteInterceptor); !ok {
 		t.Fatal("PipelineCoordinator does not implement DeliveryRouteInterceptor")
@@ -3715,7 +3712,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	var pc *runtimepipeline.PipelineCoordinator
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),
@@ -3730,8 +3727,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:                  module,
-		EventReceiptsCapability: pg.CanonicalEventReceiptsCapability,
+		Module: module,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -3984,7 +3980,7 @@ func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	var pc *runtimepipeline.PipelineCoordinator
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),
@@ -3999,8 +3995,7 @@ func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:                  module,
-		EventReceiptsCapability: pg.CanonicalEventReceiptsCapability,
+		Module: module,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")

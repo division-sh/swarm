@@ -29,7 +29,7 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 			var mark func(context.Context, string, string, time.Time) error
 			if backend == "postgres" {
 				_, db, _ = testutil.StartPostgres(t)
-				pg := &PostgresStore{DB: db}
+				pg := admitTestPostgresStore(t, db)
 				if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, now); err != nil {
 					t.Fatal(err)
 				}
@@ -71,7 +71,7 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 
 func TestRunForkSourceFreezeCommitsCoupledLifecycleDecisionAndActivityOutcome(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityBundleSourceContext()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	lineage := seedRunForkSourceFreezePair(t, db, "running", RunForkMaterializedStatus, now)
@@ -158,7 +158,7 @@ func TestRunForkSourceFreezeCommitsCoupledLifecycleDecisionAndActivityOutcome(t 
 
 func TestRunForkSourceFreezeRollbackLeavesNoPartialOutcome(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityBundleSourceContext()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	lineage := seedRunForkSourceFreezePair(t, db, "running", "completed", now)
@@ -393,7 +393,7 @@ func seedRunForkFreezeExternalEffectAuthority(t *testing.T, ctx context.Context,
 		AgentID: agentID, SessionID: sessionID, Memory: agentmemory.PlatformDefault(), FlowInstance: "freeze/effect",
 	}
 	capabilitySurface := managedCompletionTestSurface(t, authority, "test")
-	if err := (&PostgresStore{DB: db}).SaveManagedCapabilitySurface(ctx, capabilitySurface); err != nil {
+	if err := (admitTestPostgresStore(t, db)).SaveManagedCapabilitySurface(ctx, capabilitySurface); err != nil {
 		t.Fatalf("seed source-freeze external-effect capability surface: %v", err)
 	}
 	capabilityPlanFingerprint, err := capabilitySurface.PlanFingerprint()

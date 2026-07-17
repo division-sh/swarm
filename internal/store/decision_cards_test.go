@@ -1356,8 +1356,15 @@ func decisionCardTestStore(t *testing.T, backend string) (decisioncard.Store, st
 			t.Fatalf("NewSQLiteRuntimeStore: %v", err)
 		}
 		t.Cleanup(func() { _ = store.Close() })
-		if err := store.EnsureSchemaTables(ctx, plans); err != nil {
-			t.Fatalf("EnsureSchemaTables sqlite: %v", err)
+		if err := store.BootstrapSchema(ctx, SchemaBootstrapRequest{
+			PlatformPlans: plans,
+			Origin: RuntimeStoreOrigin{
+				SwarmVersion:    "decision-card-test",
+				PlatformVersion: spec.Platform.Version,
+				CreatedAt:       time.Now().UTC(),
+			},
+		}); err != nil {
+			t.Fatalf("BootstrapSchema sqlite: %v", err)
 		}
 		registerTestAuthorActivityCatalog(t, store)
 		if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
@@ -1366,10 +1373,7 @@ func decisionCardTestStore(t *testing.T, backend string) (decisioncard.Store, st
 		return store, runID
 	case "postgres":
 		_, db, _ := testutil.StartPostgres(t)
-		store := &PostgresStore{DB: db}
-		if err := store.EnsureSchemaTables(ctx, plans); err != nil {
-			t.Fatalf("EnsureSchemaTables postgres: %v", err)
-		}
+		store := newTestPostgresStore(t, db)
 		registerTestAuthorActivityCatalog(t, store)
 		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 			t.Fatalf("insert postgres run: %v", err)

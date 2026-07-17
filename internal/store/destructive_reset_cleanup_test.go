@@ -23,6 +23,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := testAuthorActivityContext()
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
@@ -115,6 +116,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := testAuthorActivityContext()
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
@@ -166,6 +168,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RejectsExecutingDirectiveAut
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := testAuthorActivityContext()
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
@@ -209,6 +212,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RetainsTerminalDirectiveAuth
 			if err != nil {
 				t.Fatalf("NewPostgresStore: %v", err)
 			}
+			bootstrapTestPostgresStore(t, pg)
 			t.Cleanup(func() { _ = pg.DB.Close() })
 			ctx := testAuthorActivityContext()
 			seed := seedDestructiveResetCleanupRows(t, ctx, pg)
@@ -275,6 +279,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_IncludeBundlesDeletesBundleC
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := testAuthorActivityContext()
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
@@ -317,6 +322,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_ExcludeBundlesPreservesBundl
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := testAuthorActivityContext()
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
@@ -359,6 +365,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunIncludeBundlesCountsWi
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := testAuthorActivityContext()
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
@@ -395,6 +402,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_IncludeBundlesRejectsOutOfPl
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := testAuthorActivityContext()
 	seedDestructiveResetBundleRows(t, ctx, pg)
@@ -439,6 +447,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DoesNotDeleteRunsCreatedAfte
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := testAuthorActivityContext()
 	seedDestructiveResetCleanupRows(t, ctx, pg)
@@ -496,6 +505,7 @@ func TestPostgresStore_DestructiveResetPlanCapturesManagedContainersBeforeCleanu
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := testAuthorActivityContext()
 	seedDestructiveResetCleanupRows(t, ctx, pg)
@@ -548,6 +558,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
@@ -737,6 +748,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := testAuthorActivityContext()
 	cleanupRunID := uuid.NewString()
@@ -864,6 +876,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RollsBackOnUnknownForeignKey
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
@@ -914,6 +927,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RequiresAppliedQuiescence(t 
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
 	now := time.Date(2026, 5, 16, 18, 50, 0, 0, time.UTC)
@@ -938,6 +952,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RejectsStaleQuiescenceEnvelo
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
 	now := time.Date(2026, 5, 16, 18, 55, 0, 0, time.UTC)
@@ -976,6 +991,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RequiresPlannedCleanupRunSet
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
 	now := time.Date(2026, 5, 16, 19, 0, 0, 0, time.UTC)

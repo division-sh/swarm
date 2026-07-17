@@ -74,7 +74,7 @@ func (s *PostgresStore) LoadOperatorAgentUsage(ctx context.Context, agentID stri
 	if err := validateOperatorAgentUsageWindow(opts); err != nil {
 		return OperatorAgentUsage{}, err
 	}
-	if err := s.requireAgentUsageCapabilities(ctx); err != nil {
+	if err := s.requireAgentUsageAccess(); err != nil {
 		return OperatorAgentUsage{}, err
 	}
 	if err := s.ensureAgentUsageAgentExists(ctx, agentID); err != nil {
@@ -95,7 +95,7 @@ func (s *SQLiteRuntimeStore) LoadOperatorAgentUsage(ctx context.Context, agentID
 	if err := validateOperatorAgentUsageWindow(opts); err != nil {
 		return OperatorAgentUsage{}, err
 	}
-	if err := s.requireAgentUsageCapabilities(ctx); err != nil {
+	if err := s.requireAgentUsageAccess(); err != nil {
 		return OperatorAgentUsage{}, err
 	}
 	if err := s.ensureAgentUsageAgentExists(ctx, agentID); err != nil {
@@ -154,70 +154,12 @@ func addOperatorAgentUsageTotals(a, b OperatorAgentUsageTotals) OperatorAgentUsa
 	}
 }
 
-func (s *PostgresStore) requireAgentUsageCapabilities(ctx context.Context) error {
-	if s == nil || s.DB == nil {
-		return fmt.Errorf("operator agent usage read owner requires postgres store")
-	}
-	caps, err := s.ResolveSchemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	if caps.Agents != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("agents", caps.Agents)
-	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
-		return err
-	}
-	required := map[string][]string{
-		"agents": {
-			"agent_id", "status",
-		},
-		"spend_ledger": {
-			"agent_id", "execution_mode", "model", "input_tokens", "output_tokens", "cost_usd",
-			"invocation_type", "usage_accounting", "model_alias", "backend_profile",
-			"provider", "transport", "resolved_model", "created_at",
-		},
-	}
-	for table, columns := range required {
-		if !catalog.hasColumns(table, columns...) {
-			return fmt.Errorf("agent usage read owner requires canonical %s columns: %s", table, strings.Join(columns, ", "))
-		}
-	}
-	return nil
+func (s *PostgresStore) requireAgentUsageAccess() error {
+	return s.requireCurrentSchema()
 }
 
-func (s *SQLiteRuntimeStore) requireAgentUsageCapabilities(ctx context.Context) error {
-	if s == nil || s.DB == nil {
-		return fmt.Errorf("operator agent usage read owner requires sqlite runtime store")
-	}
-	caps, err := s.ResolveSchemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	if caps.Agents != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("agents", caps.Agents)
-	}
-	catalog, err := loadSQLiteSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
-		return err
-	}
-	required := map[string][]string{
-		"agents": {
-			"agent_id", "status",
-		},
-		"spend_ledger": {
-			"agent_id", "execution_mode", "model", "input_tokens", "output_tokens", "cost_usd",
-			"invocation_type", "usage_accounting", "model_alias", "backend_profile",
-			"provider", "transport", "resolved_model", "created_at",
-		},
-	}
-	for table, columns := range required {
-		if !catalog.hasColumns(table, columns...) {
-			return fmt.Errorf("agent usage read owner requires canonical %s columns: %s", table, strings.Join(columns, ", "))
-		}
-	}
-	return nil
+func (s *SQLiteRuntimeStore) requireAgentUsageAccess() error {
+	return s.requireCurrentSchema()
 }
 
 func (s *PostgresStore) ensureAgentUsageAgentExists(ctx context.Context, agentID string) error {

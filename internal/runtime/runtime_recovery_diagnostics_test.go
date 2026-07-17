@@ -165,29 +165,25 @@ func (startupManagerReplayRuntimeAgent) OnEvent(_ context.Context, evt events.Ev
 	}
 }
 
-type startupRecoveryCapabilityEventStore struct{}
+type startupRecoveryMinimalEventStore struct{}
 
-func (startupRecoveryCapabilityEventStore) RegisterAuthorActivityEventCatalog(scope runtimeauthoractivity.Scope, descriptors []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {
+func (startupRecoveryMinimalEventStore) RegisterAuthorActivityEventCatalog(scope runtimeauthoractivity.Scope, descriptors []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {
 	return runtimeauthoractivity.NewEventCatalogRegistry().Register(scope, descriptors)
 }
 
-func (startupRecoveryCapabilityEventStore) CanonicalRuntimeLogCapability(context.Context) (bool, bool, error) {
-	return true, true, nil
-}
-
-func (startupRecoveryCapabilityEventStore) AppendEvent(context.Context, events.Event) error {
+func (startupRecoveryMinimalEventStore) AppendEvent(context.Context, events.Event) error {
 	return nil
 }
 
-func (startupRecoveryCapabilityEventStore) InsertEventDeliveries(context.Context, string, []string) error {
+func (startupRecoveryMinimalEventStore) InsertEventDeliveries(context.Context, string, []string) error {
 	return nil
 }
 
-func (startupRecoveryCapabilityEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
+func (startupRecoveryMinimalEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return nil, nil
 }
 
-func (startupRecoveryCapabilityEventStore) SupportsPersistedReplay() bool { return false }
+func (startupRecoveryMinimalEventStore) SupportsPersistedReplay() bool { return false }
 
 type startupRecoveryEventStore struct {
 	missing  []events.PersistedReplayEvent
@@ -197,10 +193,6 @@ type startupRecoveryEventStore struct {
 
 func (startupRecoveryEventStore) RegisterAuthorActivityEventCatalog(scope runtimeauthoractivity.Scope, descriptors []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {
 	return runtimeauthoractivity.NewEventCatalogRegistry().Register(scope, descriptors)
-}
-
-func (startupRecoveryEventStore) CanonicalRuntimeLogCapability(context.Context) (bool, bool, error) {
-	return true, true, nil
 }
 
 func (startupRecoveryEventStore) AppendEvent(context.Context, events.Event) error { return nil }
@@ -420,8 +412,8 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
-		EventStore:      startupRecoveryCapabilityEventStore{},
+		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
+		EventStore:      startupRecoveryMinimalEventStore{},
 		ManagerStore:    &recoveryGuardManagerStore{},
 		ScheduleStore:   scheduleStore,
 	}, Options: RuntimeOptions{
@@ -478,7 +470,7 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
+		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
 		EventStore:      eventStore,
 		ManagerStore:    managerStore,
 	}, Options: RuntimeOptions{
@@ -555,8 +547,8 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
-		EventStore:      startupRecoveryCapabilityEventStore{},
+		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
+		EventStore:      startupRecoveryMinimalEventStore{},
 		ManagerStore:    &recoveryGuardManagerStore{},
 		ScheduleStore:   scheduleStore,
 	}, Options: RuntimeOptions{
@@ -644,8 +636,8 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
-		EventStore:      startupRecoveryCapabilityEventStore{},
+		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
+		EventStore:      startupRecoveryMinimalEventStore{},
 		ManagerStore:    &recoveryGuardManagerStore{},
 		ScheduleStore:   scheduleStore,
 	}, Options: RuntimeOptions{
@@ -767,8 +759,8 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
-		EventStore:      startupRecoveryCapabilityEventStore{},
+		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
+		EventStore:      startupRecoveryMinimalEventStore{},
 		ManagerStore:    managerStore,
 	}, Options: RuntimeOptions{
 		SelfCheck:      false,
@@ -868,7 +860,7 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
+		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
 		EventStore:      eventStore,
 		ManagerStore:    &recoveryGuardManagerStore{},
 	}, Options: RuntimeOptions{
@@ -918,8 +910,8 @@ func TestRuntimeStart_RecoveryInspectionFailureDoesNotBlockRecoveryEnabledStartu
 	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
-		EventStore:      startupRecoveryCapabilityEventStore{},
+		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
+		EventStore:      startupRecoveryMinimalEventStore{},
 		ManagerStore:    startupRecoveryManagerStore{loadErr: errors.New("load agents failed")},
 	}, Options: RuntimeOptions{
 		SelfCheck:      false,
@@ -994,8 +986,8 @@ func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndD
 	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
-		EventStore:      startupRecoveryCapabilityEventStore{},
+		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
+		EventStore:      startupRecoveryMinimalEventStore{},
 		ManagerStore:    managerStore,
 		ScheduleStore:   scheduleStore,
 	}, Options: RuntimeOptions{

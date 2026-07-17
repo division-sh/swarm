@@ -38,7 +38,7 @@ func TestCompletionProviderHeadSettlementSQLite(t *testing.T) {
 
 func TestCompletionProviderHeadSettlementPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	proveCompletionProviderHeadSettlement(t, newCompletionSettlementFixture(t, &PostgresStore{DB: db}, db, false))
+	proveCompletionProviderHeadSettlement(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
 }
 
 func proveCompletionProviderHeadSettlement(t *testing.T, fixture completionSettlementFixture) {
@@ -61,7 +61,7 @@ func TestCompletionProviderHeadConflictCommitsUncertaintySQLite(t *testing.T) {
 
 func TestCompletionProviderHeadConflictCommitsUncertaintyPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	proveCompletionProviderHeadConflictCommitsUncertainty(t, newCompletionSettlementFixture(t, &PostgresStore{DB: db}, db, false))
+	proveCompletionProviderHeadConflictCommitsUncertainty(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
 }
 
 func proveCompletionProviderHeadConflictCommitsUncertainty(t *testing.T, fixture completionSettlementFixture) {
@@ -98,7 +98,7 @@ func TestCompletionProviderHeadStaleAuthorityCannotSettleSQLite(t *testing.T) {
 
 func TestCompletionProviderHeadStaleAuthorityCannotSettlePostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	proveCompletionProviderHeadStaleAuthorityCannotSettle(t, newCompletionSettlementFixture(t, &PostgresStore{DB: db}, db, false))
+	proveCompletionProviderHeadStaleAuthorityCannotSettle(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
 }
 
 func TestCompletionPrelaunchFailureDoesNotSpendSQLite(t *testing.T) {
@@ -108,7 +108,7 @@ func TestCompletionPrelaunchFailureDoesNotSpendSQLite(t *testing.T) {
 
 func TestCompletionPrelaunchFailureDoesNotSpendPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	proveCompletionPrelaunchFailureDoesNotSpend(t, newCompletionSettlementFixture(t, &PostgresStore{DB: db}, db, false))
+	proveCompletionPrelaunchFailureDoesNotSpend(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
 }
 
 func proveCompletionPrelaunchFailureDoesNotSpend(t *testing.T, fixture completionSettlementFixture) {
@@ -139,7 +139,7 @@ func TestCompletionRecoveryPreservesLiveOrdinaryAuthoritySQLite(t *testing.T) {
 
 func TestCompletionRecoveryPreservesLiveOrdinaryAuthorityPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t, newCompletionSettlementFixture(t, &PostgresStore{DB: db}, db, false))
+	proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
 }
 
 func TestCompletionAttemptHeartbeatFencesRecoverySQLite(t *testing.T) {
@@ -149,7 +149,7 @@ func TestCompletionAttemptHeartbeatFencesRecoverySQLite(t *testing.T) {
 
 func TestCompletionAttemptHeartbeatFencesRecoveryPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	proveCompletionAttemptHeartbeatFencesRecovery(t, newCompletionSettlementFixture(t, &PostgresStore{DB: db}, db, false))
+	proveCompletionAttemptHeartbeatFencesRecovery(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
 }
 
 func proveCompletionAttemptHeartbeatFencesRecovery(t *testing.T, fixture completionSettlementFixture) {

@@ -95,10 +95,6 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	`, runID, entityID, time.Now().UTC(), time.Now().UTC(), time.Now().UTC()); err != nil {
 		t.Fatalf("seed sqlite entity_state: %v", err)
 	}
-	if err := store.EnsureEntitySchema(ctx, entityID); err != nil {
-		t.Fatalf("EnsureEntitySchema: %v", err)
-	}
-
 	itemID, err := store.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		EventID:   evtID,
 		EntityID:  entityID,
@@ -2166,8 +2162,15 @@ func newBootstrappedSQLiteRuntimeStoreForPath(t *testing.T, dbPath string) *SQLi
 			t.Fatalf("close sqlite runtime store: %v", err)
 		}
 	})
-	if err := store.EnsureSchemaTables(testAuthorActivityContext(), plans); err != nil {
-		t.Fatalf("EnsureSchemaTables: %v", err)
+	if err := store.BootstrapSchema(testAuthorActivityContext(), SchemaBootstrapRequest{
+		PlatformPlans: plans,
+		Origin: RuntimeStoreOrigin{
+			SwarmVersion:    "sqlite-runtime-test",
+			PlatformVersion: spec.Platform.Version,
+			CreatedAt:       time.Now().UTC(),
+		},
+	}); err != nil {
+		t.Fatalf("BootstrapSchema: %v", err)
 	}
 	if _, err := os.Stat(dbPath); err != nil {
 		t.Fatalf("sqlite runtime store did not create file-backed db at %s: %v", dbPath, err)

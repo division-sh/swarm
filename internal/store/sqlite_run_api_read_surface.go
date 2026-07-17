@@ -14,31 +14,12 @@ import (
 	"github.com/google/uuid"
 )
 
-func (s *SQLiteRuntimeStore) requireRunHeaderCapabilities(ctx context.Context) error {
-	if s == nil || s.DB == nil {
-		return fmt.Errorf("sqlite runtime store is required")
-	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	if caps.Events.Log != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("events", caps.Events.Log)
-	}
-	if !caps.Events.LogRunID {
-		return fmt.Errorf("run api read surface requires canonical events.run_id")
-	}
-	if caps.EntityState != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("entity_state", caps.EntityState)
-	}
-	if !caps.EntityRunID {
-		return fmt.Errorf("run api read surface requires canonical entity_state.run_id")
-	}
-	return nil
+func (s *SQLiteRuntimeStore) requireRunHeaderAccess() error {
+	return s.requireCurrentSchema()
 }
 
 func (s *SQLiteRuntimeStore) LoadRunHeader(ctx context.Context, runID string) (RunHeader, error) {
-	if err := s.requireRunHeaderCapabilities(ctx); err != nil {
+	if err := s.requireRunHeaderAccess(); err != nil {
 		return RunHeader{}, err
 	}
 	runID = strings.TrimSpace(runID)
@@ -65,7 +46,7 @@ WHERE r.run_id = ?
 }
 
 func (s *SQLiteRuntimeStore) ListRunHeaders(ctx context.Context, opts RunHeaderListOptions) ([]RunHeader, string, error) {
-	if err := s.requireRunHeaderCapabilities(ctx); err != nil {
+	if err := s.requireRunHeaderAccess(); err != nil {
 		return nil, "", err
 	}
 	opts = defaultRunHeaderListOptions(opts)

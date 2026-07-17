@@ -37,7 +37,7 @@ func TestSQLiteInboundPublicationOperationCommitsRetriesAndRollsBackAtomically(t
 func TestPostgresInboundPublicationOperationCommitsRetriesAndRollsBackAtomically(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	store := &PostgresStore{DB: db}
+	store := admitTestPostgresStore(t, db)
 	store.SetEventPayloadValidator(currentPlatformPayloadValidatorForStoreTest(t))
 	runInboundPublicationOperationProof(t, db, false, store, runtimepipeline.NewWorkflowInstanceStore(db))
 }

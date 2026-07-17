@@ -48,11 +48,6 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		t.Fatalf("seed entity state: %v", err)
 	}
 
-	// Ensure entity schema.
-	if err := pg.EnsureEntitySchema(ctx, entityID); err != nil {
-		t.Fatalf("ensure schema: %v", err)
-	}
-
 	// Upsert agent + load agents.
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{

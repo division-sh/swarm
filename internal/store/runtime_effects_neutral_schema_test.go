@@ -46,7 +46,7 @@ func TestRuntimeEffectsNeutralSchemaRegisteredAdapterParity(t *testing.T) {
 	})
 	t.Run("postgres", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		proveRuntimeEffectsNeutralSchemaRegisteredAdapterParity(t, newNeutralEffectParityFixture(t, &PostgresStore{DB: db}, db, false))
+		proveRuntimeEffectsNeutralSchemaRegisteredAdapterParity(t, newNeutralEffectParityFixture(t, admitTestPostgresStore(t, db), db, false))
 	})
 }
 

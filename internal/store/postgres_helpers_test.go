@@ -96,6 +96,7 @@ func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	const runID = "55555555-5555-5555-5555-555555555555"
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	if err := pg.Ping(ctx); err != nil {

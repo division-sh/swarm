@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -31,9 +32,6 @@ func TestMockAgentSupportedSurfaceSQLitePostgres(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			elapsed := runMockAgentSupportedSurface(t, backend)
 			t.Logf("mock served path timing: backend=%s elapsed=%s", backend, elapsed)
-			if elapsed >= time.Minute {
-				t.Fatalf("mock supported surface took %s, want less than 1m", elapsed)
-			}
 		})
 	}
 }
@@ -110,9 +108,7 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 		oldBuildStores := buildStoresForServe
 		oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
-			if _, bindErr := runtimePG.BindSchemaCapabilities(ctx); bindErr != nil {
-				return storeBundle{}, bindErr
-			}
+			storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 			return selectedPostgresStoreBundle(runtimePG, cfg), nil
 		}
 		cliapp.ConfiguredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {

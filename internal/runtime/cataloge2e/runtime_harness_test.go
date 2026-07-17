@@ -20,6 +20,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -172,7 +173,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	cfg.LLM.Backend = "anthropic"
 	llmRuntime := newScriptedLLMRuntime()
 	loadAgentFixtures(t, fixtureRoot, llmRuntime)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	pg.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
 
 	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), catalogRuntimeRunID))

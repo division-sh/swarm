@@ -31,7 +31,7 @@ func TestSelectedContractWorkflowTimerForkRestoresAndExecutesThroughHandler(t *t
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
-			pg := &PostgresStore{DB: db}
+			pg := admitTestPostgresStore(t, db)
 			ctx := testAuthorActivityContext()
 			sourceRunID := uuid.NewString()
 			entityID := runtimepipeline.FlowInstanceEntityID("flow-a/1")
@@ -125,7 +125,6 @@ func TestSelectedContractWorkflowTimerForkRestoresAndExecutesThroughHandler(t *t
 			coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 				Module: selectedContractWorkflowTimerModule{source: source}, WorkflowStore: workflowStore,
 				TimerScheduler: scheduler, TimerScheduleStore: pg,
-				EventReceiptsCapability: func(context.Context) (bool, error) { return true, nil },
 			})
 			interceptor := &selectedContractWorkflowTimerInterceptor{
 				delegate: coordinator, store: workflowStore, results: make(chan selectedContractWorkflowTimerInterceptResult, 2),

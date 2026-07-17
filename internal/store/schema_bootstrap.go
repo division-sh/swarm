@@ -88,5 +88,4 @@ func (r SchemaBootstrapRequest) validate() error {
 
 type SchemaBootstrapper interface {
 	BootstrapSchema(context.Context, SchemaBootstrapRequest) error
-	ResolveSchemaCapabilities(context.Context) (StoreSchemaCapabilities, error)
 }

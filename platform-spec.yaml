@@ -4804,20 +4804,21 @@ engine:
   runtime_store_schema_dialect_bootstrap:
     promoted_by: '#1085'
     parent_tracker: '#1066'
-    canonical_owner: internal/store schema dialect bootstrap and capability owner
+    canonical_owner: internal/store backend schema admission and bootstrap owner
     description: >
       Runtime store schema bootstrap is owned by one backend dialect boundary after the #1084 backend selector resolves a
       typed backend. Platform table intent remains authored in platform_tables.tables, but executable DDL is backend
-      specific. SQLite support at this layer means deterministic file-backed schema creation and schema capability
-      detection only; it does not mean the runtime may execute all store methods on SQLite.
+      specific. Each selected store starts in a private unaccepted state. The backend compatibility inspector validates
+      the actual catalog before mutation; successful canonical platform bootstrap atomically marks that concrete store
+      current. Runtime SQL is unavailable before that transition and executes only the current schema afterward.
     dialects:
       postgres:
         status: active_supported_runtime_bootstrap
-        owner: internal/store.PostgresStore.EnsureSchemaTables and Postgres schema capability binding
+        owner: internal/store.PostgresStore.BootstrapSchema and PostgreSQL compatibility inspection
         rules:
         - Postgres remains authoritative when the canonical backend selector resolves to postgres.
-        - Postgres bootstrap may use pgcrypto, Postgres compatibility migrations, Postgres DDL execution, and Postgres
-          catalog inspection.
+        - Postgres bootstrap may use pgcrypto, Postgres DDL execution, and Postgres catalog inspection. It does not
+          migrate, adopt, repair, or bind capabilities for an existing selected store.
       sqlite:
         status: explicit_local_runtime_schema_bootstrap
         owner: internal/store.SQLiteSchemaStore and SQLite dialect translation
@@ -4834,12 +4835,13 @@ engine:
     covered_schema_inputs:
     - platform_tables.tables
     - generated node-state tables from system node state_schema
-    schema_capabilities:
-      owner: backend-specific schema catalog readers feeding StoreSchemaCapabilities
+    schema_admission:
+      owner: private backend store state with unaccepted and current variants
       rule: >
-        Capability detection must inspect the selected backend's catalog. Postgres may use information_schema/pg_catalog;
-        SQLite must use SQLite catalog/PRAGMA inspection. Runtime readers may consume capability results, but runtime SQL
-        portability remains split until #1086/#1087.
+        Catalog interpretation belongs only to backend compatibility inspection during bootstrap. There is no runtime
+        schema flavor DTO, capability cache, bind/resolve API, lazy binding, or per-reader catalog interpretation. Direct
+        runtime/store calls on an unaccepted concrete store fail before SQL. Successful platform bootstrap marks the same
+        store current; all runtime consumers then issue the canonical SQL unconditionally.
     split_boundaries:
     - "Core runtime store method portability is promoted by #1086."
     - "Explicit SQLite local-runtime session locking, event delivery/replay, and trace/read model semantics are promoted under #1087 child closeout."
@@ -11127,7 +11129,7 @@ agent_directive_operation_model:
     persisted_invariants:
       failure: state IN ('failed', 'indeterminate') if and only if one valid platform.failure/v1 envelope is present
       response: state IN ('executed', 'succeeded') if and only if one durable response is present
-      legacy_flat_error_columns: forbidden; hard migration recognizes only the two closed recovery producers and removes all three columns
+      legacy_flat_error_columns: forbidden; any selected store containing those columns fails canonical schema admission unchanged
     immediate_uncertainty: >
       heartbeat shutdown and post-effect persistence errors return response-local indeterminate copies with canonical
       uncertainty envelopes. They do not claim a durable transition. A generic persistence error preserves only the
@@ -11220,8 +11222,8 @@ platform_tables:
       - Runtime-owned persisted facts that describe running or historical execution must carry an exact run_id, event lineage, or fork/source run lineage before destructive reset may delete them.
       - agent_directive_operations is retained replay/outcome authority rather than ordinary run history. Cleanup must fail closed while prepared, executing, executed, indeterminate, or unexpired succeeded/failed rows exist for a planned run; it may remove succeeded/failed rows only after expires_at.
       - Agent lifecycle operations, transition facts, diagnostic outbox rows, and external-effect operation/attempt evidence are replay, reconciliation, and no-redispatch authority. They survive destructive reset with the preserved agent registry.
-      - Generated node-state tables and legacy/future product optimization tables remain split-preserved until a separate
-        owner gives them exact run-scoped identity. Normal runtime boot does not create generated typed entity tables.
+      - Generated node-state tables remain split-preserved under their contract-owned identity. Runtime boot may create a
+        missing generated node-state table only after platform-schema acceptance.
       - Schema, auth/idempotency-like, operator/system, product config, topology, global timers, mailbox, and spend/cost audit state must survive this internal cleanup slice unless a later gate defines an exact run-scoped owner.
       - "The bundle catalog is request-scoped by `runtime.nuke.include_bundles`: `false` preserves `bundles`; `true` deletes `bundles` only inside the destructive-reset cleanup transaction after serializing persisted run creation and failing closed if any persisted bundle-source run remains outside the cleanup plan."
       - Apply executes in one database transaction, reports per-table dry-run/apply counts, rolls back on any SQL/FK/order error, and produces no successful result unless the transaction commits.
@@ -11295,7 +11297,6 @@ platform_tables:
         - mailbox
         - spend_ledger
         - generated node-state tables from GenerateNodeStateTableDDLs
-        - legacy/future contract-driven product optimization tables
   author_activity_story:
     owner: author_activity_order and author_activity_occurrences in the selected store, consumed through the typed AuthorActivity registry
     purpose: >-
@@ -12011,8 +12012,9 @@ platform_tables:
         permissions_bundle is resolved at boot into the persisted permissions array rather than being stored directly.
         llm_backend stores the backend profile id owned by llm_provider_selection_config_authority. Active runtime profiles
         are anthropic (Anthropic API transport), claude_cli (Claude CLI transport), openai_compatible (Chat Completions-compatible
-        HTTP transport), and openai_responses (native OpenAI Responses API transport); legacy api and cli_test persisted rows are migration/backfill inputs only and are not valid new
-        config/operator inputs. mock is the active credentialless in-process Python performance runtime; local remains a reserved persisted profile id and is not an active runtime. This value is provider-selection
+        HTTP transport), and openai_responses (native OpenAI Responses API transport); persisted api and cli_test values are
+        invalid selected-store state and are not migrated, backfilled, or valid config/operator inputs. mock is the active
+        credentialless in-process Python performance runtime; local remains a reserved persisted profile id and is not an active runtime. This value is provider-selection
         deployment truth, not provider identity alone and not transport mode alone. This is a deployment/agent property.'
       ddl: "CREATE TABLE agents (\n    agent_id          TEXT PRIMARY KEY,\n    flow_instance     TEXT,\n    role        \
         \      TEXT NOT NULL,\n    model             TEXT NOT NULL,\n    llm_backend       TEXT NOT NULL DEFAULT 'anthropic' CHECK\
@@ -12728,11 +12730,9 @@ platform_tables:
           derive or write completed from local quiescence and MUST leave a waiting decision run running without a
           synthetic failure.
         immutability: A repeated terminal write is idempotent only when status and canonical failure match exactly. Conflicting failure evidence or terminal status fails closed.
-        migration:
-          failed_rows: Migrate only a strictly valid platform.failure/v1 value. Empty or prose-only evidence aborts with status, count, and run IDs; no text heuristic exists.
-          cancelled_rows: Never map to failure. A legacy value migrates only when it is a closed preservation reason and exactly matches an existing stopped run_control_state.reason; missing or conflicting evidence aborts.
-          other_rows: running, paused, completed, and forked rows with failure or legacy error evidence abort.
-          removal: runs.error_summary is dropped from both stores and every interface/readback. No alias, fallback, compatibility reader, or dual-write survives.
+        selected_store_admission:
+          rule: The current runs shape contains only the typed failure envelope. A selected store containing legacy terminal-evidence columns or another non-current runs shape fails canonical schema admission unchanged.
+          forbidden: [row conversion, text inference, backfill, compatibility reader, dual write]
       terminal_event_identity:
         owner: internal/runtime/failures.SemanticFingerprint consumed by Builder run debug projection
         fields:
@@ -12755,9 +12755,10 @@ platform_tables:
       bundle_hash: 'Nullable canonical bundle identity for the run. Values use the
         multi_bundle_persistence.bundle_identity format and intentionally have no database foreign key
         to bundles.bundle_hash so historical audit identity survives bundle deletion.'
-      bundle_source: 'Required bundle availability/source classifier. Existing rows are legacy; current
-        writers without a gate-approved canonical v1 source fact write legacy with bundle_hash NULL.
-        Later multi-bundle children own persisted/ephemeral/deleted source stamping.'
+      bundle_source: 'Required bundle availability/source classifier. Current writers without a gate-approved
+        canonical v1 source fact write legacy with bundle_hash NULL. This is current runtime provenance, not an
+        admission fallback or migration of an old selected store. Later multi-bundle children own
+        persisted/ephemeral/deleted source stamping.'
       bundle_fingerprint: 'Legacy pre-multi-bundle compatibility column. It is not the canonical run
         bundle identity after #1013 and must not be copied into bundle_hash. Remaining public/code
         migration is tracked by #1001; reader migration is tracked by #1014.'
@@ -12793,9 +12794,8 @@ platform_tables:
       ddl: "CREATE TABLE runtime_store_metadata (\n    id                INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),\n    swarm_version\
         \     TEXT NOT NULL,\n    platform_version  TEXT NOT NULL,\n    created_at        TIMESTAMPTZ NOT NULL\n);"
   notes:
-    product_tables: Product-specific tables (entity fields, custom state) are generated from entities.yaml plus the shared
-      type system.
-      Those are contract-driven, not listed here.
+    product_tables: Product-specific typed entity tables are not runtime-store schema inputs. Entity contracts shape
+      entity_state values and validation; they do not generate product DDL or per-entity SQL schemas.
     migrations: 'Pre-1.0 selected stores are not migrated or adopted at boot. Boot derives the complete required platform
       shape from this specification, probes the actual selected-backend catalog before persistent mutation, and accepts only
       a fresh empty namespace or an exactly compatible store carrying immutable runtime_store_metadata origin evidence.
@@ -12884,18 +12884,15 @@ platform_tables:
       inspected before any persistent schema or data mutation. A non-empty un-stamped store is not adopted. A stamped store
       is accepted only when every required table, column type, nullability, default, key, reference, check, and index derived
       from the current platform plans is compatible. Existing compatible platform schema is not rerun through CREATE, ALTER,
-      UPDATE, DROP, backfill, rebuild, or repair paths except for the explicit obsolete
-      decision_card_lifecycle_outbox cutoff below. Incompatible stores fail closed; pre-1.0 continuity and managed
-      migrations remain deferred under issue #995.
-    obsolete_decision_card_lifecycle_outbox_cutoff: >
-      Inside each backend's serialized schema-bootstrap transaction, immediately after the PostgreSQL advisory lock or
-      SQLite BEGIN IMMEDIATE and before any other bootstrap mutation, inspect only whether
-      decision_card_lifecycle_outbox exists and whether it is empty. Fresh databases omit the table. An existing empty
-      table is dropped transactionally. Any populated table is an unsupported pre-1.0 database and refuses startup before
-      runtime initialization: SQLite instructs the operator to recreate the configured database file or select a fresh
-      empty database; PostgreSQL instructs the operator to provision or select a fresh empty database. Both diagnostics
-      name the obsolete table and state that existing database state is not migrated. Row payload/status and related
-      event, delivery, receipt, route, or replay history are never inspected, preserved, converted, settled, or dispatched.
+      UPDATE, DROP, backfill, rebuild, or repair paths. Incompatible stores fail closed; pre-1.0 continuity and managed
+      migrations are unsupported.
+    retired_platform_tables:
+      tables: [schema_version, decision_card_lifecycle_outbox, agent_external_effect_operations, agent_external_effect_attempts, schedules]
+      rule: >
+        Presence of any retired platform table makes either selected backend incompatible before persistent mutation,
+        including an empty table. Bootstrap does not inspect rows, drop the table, migrate, export, purge, adopt, repair,
+        or bind a reduced capability set. The backend-specific diagnostic names every detected retired table and directs
+        the operator to select or create a fresh store.
     fresh_bootstrap: >
       Fresh platform creation is backend-serialized and atomically commits the complete platform schema plus exactly one
       immutable runtime_store_metadata row. Failed or concurrent creation cannot leave a successful stamp over partial DDL.
@@ -12904,21 +12901,14 @@ platform_tables:
       existing incompatible tables fail before node-state mutation through the same typed backend-specific compatibility
       diagnostic, including selected-store target, running and stored origin evidence, exact drift, and fresh-store remediation.
   test_bootstrap:
-    description: After legacy SQL deletion, normal runtime/test bootstrap creates only platform tables plus generated
-      node-state tables. Product-specific typed entity table DDL is explicit future/legacy optimization-test input, not
-      normal boot input.
+    description: Normal runtime/test bootstrap creates only platform tables plus generated node-state tables.
     sources:
       platform_tables: All tables from platform_tables.tables in platform-spec.yaml. Always created.
       node_state_tables: Generated from node state_schema in the flow contracts loaded for the test. Optional — only if the
         test uses generated node-local state tables.
-      product_optimization_tables: Optional explicit future/legacy test-only DDL generated from entities.yaml plus
-        types.yaml. Not created by production boot or generic test bootstrap.
     generic_store_tests: Generic store tests (postgres_smoke_test.go, etc.) bootstrap using platform_tables only. They create
       entities in entity_state, events in events, sessions in agent_sessions. No product contracts needed. No legacy SQL files.
       No migrations/ directory.
-    product_integration_tests: Tests that explicitly exercise future/legacy product optimization tables may load product
-      contracts and generate DDL from entities.yaml plus types.yaml. These tables are not normal runtime boot artifacts and
-      are not supported entity current-state read authority.
     bootstrap_function: BootstrapPlatformTables(spec PlatformSpec) — reads platform_tables.tables, generates DDL, executes.
       Called by both production boot and test setup. Single code path.
   credentials_policy:
@@ -14311,10 +14301,9 @@ multi_bundle_persistence:
       foreign_key_policy: >
         runs.bundle_hash intentionally has no database foreign key to bundles.bundle_hash. Deleting a bundle row must not
         cascade into historical run rows; resume/fork admission consumes bundle_source and current bundle row presence.
-      migration_policy: >
-        Existing rows start as bundle_source=legacy with bundle_hash NULL unless a separately gated migration can prove a
-        persisted bundle hash. Migration must be aggressive and fail closed for unknown owners rather than inventing hashes
-        from stale filesystem paths.
+      selected_store_admission: >
+        Current runtime writes without canonical source provenance use bundle_source=legacy with bundle_hash NULL. Existing
+        non-current runs shapes are not backfilled or interpreted; canonical selected-store admission rejects them unchanged.
   resume_and_recovery:
     resume_eligibility:
       persisted_bundle_present:
@@ -30222,7 +30211,7 @@ agent_lifecycle_authority:
   destructive_cleanup_quiescence:
     bundle_force: bundle.delete force closes admission for the selected loaded bundle runtime and awaits successful AgentManager shutdown before preservation/session cleanup. Shutdown failure blocks cleanup; dry-run and non-force remain non-destructive at this boundary.
     runtime_nuke: Apply-mode runtime.nuke closes admission and awaits successful shutdown of every relevant loaded runtime context before session cleanup, including when bundle catalog rows are retained. Idempotent response replay does not repeat runtime shutdown.
-    other_ordering: Startup preservation cleanup completes before runtime contexts start; manager ResetAll runs only after lifecycle shutdown; fork discard runs only after the fork-local runtime has shut down. Compatibility migration/backfill remains test-only unless separately reclassified.
+    other_ordering: Startup preservation cleanup completes before runtime contexts start; manager ResetAll runs only after lifecycle shutdown; fork discard runs only after the fork-local runtime has shut down. Selected-store compatibility migration and backfill paths do not exist.
   forbidden:
     - direct lifecycle map writes outside the coordinator
     - parallel AgentManager agent/config execution maps or map-read-then-token-refresh execution
@@ -30279,7 +30268,7 @@ managed_agent_capability_surface:
     managed_effects: Every normal-agent, selected-contract-fork, or startup-probe managed effect attempt other than the separately owned forkchat sandbox persists its exact capability_surface_id. The logical operation persists the authority-independent capability_plan_fingerprint, so an eligible retry may bind a new preallocated turn surface but cannot widen or otherwise replace the callable plan. Forkchat attempts carry neither value.
   persistence:
     rule: agent_turns references exactly one provider-turn capability_surface_id. PostgreSQL and SQLite persist the same typed value and identity. Flat available_tools, mcp_servers, mcp_tools_listed, mcp_tools_visible, compatibility views, dual writes, tolerant readers, and reconstruction from transcripts are forbidden.
-    migration: A legacy non-empty turn table without exact canonical surfaces is not safely inferable and migration fails closed. Empty legacy schemas may be upgraded destructively. Preserved immutable capability evidence severs nullable run references before destructive run cleanup rather than being deleted or relabelled.
+    migration: Any non-current selected-store shape fails closed before runtime access. Empty or populated legacy tables are not upgraded, migrated, adopted, or interpreted as capability evidence.
   proof:
     required: [API adapter delivery parity, Claude CLI startup and first-turn evidence, MCP tools/list and tools/call authorization, executor and relay denial, normal startup ordering, replacement handoff ordering, selected-fork preflight ordering, selected-fork non-completion effect binding, PostgreSQL and SQLite typed persistence parity, forkchat non-interference]
 
@@ -30394,7 +30383,7 @@ llm_completion_execution_authority:
   migration:
     old_tables: [agent_external_effect_operations, agent_external_effect_attempts]
     new_tables: [runtime_external_effect_operations, runtime_external_effect_attempts]
-    rule: Existing rows migrate transactionally as normal_agent authority. All readers/writers/recovery/capability catalogs move in the same version. Compatibility views, dual writes, tolerant fallback readers, and legacy table ownership are forbidden.
+    rule: Presence of either old table makes the selected store incompatible. Existing rows are not migrated or read. Fresh stores contain only the current tables; compatibility views, dual writes, tolerant fallback readers, and legacy table ownership are forbidden.
   forbidden:
     - nil completion authority in a production RuntimeFactory
     - DifferentOwner for provider completion execution

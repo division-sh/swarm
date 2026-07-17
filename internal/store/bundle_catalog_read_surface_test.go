@@ -11,7 +11,7 @@ import (
 
 func TestBundleCatalogReadSurfaceListGetAgentsAndCursor(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
 	olderHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
@@ -121,7 +121,7 @@ agents:
 
 func TestBundleCatalogReadSurfaceMissingCursorAndMalformedProjection(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
 	missingHash := "bundle-v1:sha256:9999999999999999999999999999999999999999999999999999999999999999"
@@ -150,7 +150,7 @@ func TestBundleCatalogReadSurfaceMissingCursorAndMalformedProjection(t *testing.
 
 func TestBundleCatalogWriteSurfaceUpsertsAndRejectsHashCollision(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	bundleHash := "bundle-v1:sha256:5555555555555555555555555555555555555555555555555555555555555555"
 	req := BundleCatalogUpsert{
@@ -196,7 +196,7 @@ func TestBundleCatalogWriteSurfaceUpsertsAndRejectsHashCollision(t *testing.T) {
 
 func TestBundleCatalogUpsertRegistersDuplicatesConflictsAndDoesNotRestoreDeletedRuns(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
 	bundleHash := "bundle-v1:sha256:4444444444444444444444444444444444444444444444444444444444444444"

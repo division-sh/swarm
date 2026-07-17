@@ -71,7 +71,6 @@ func GeneratePlatformTableDDLs(spec runtimecontracts.PlatformSpecDocument) ([]Ta
 		if err != nil {
 			return nil, fmt.Errorf("platform spec table %s: %w", declaredName, err)
 		}
-		statements = stripDeprecatedEntitySubjectDDL(declaredName, statements)
 		tableName := declaredName
 		for _, statement := range statements {
 			if parsedTable := ExtractTableName(statement); parsedTable != "" {
@@ -323,47 +322,6 @@ func normalizeCreateTable(statement string) (string, []string, error) {
 	}
 	normalizedTable := fmt.Sprintf("%s (\n    %s\n)", statement[:start], strings.Join(kept, ",\n    "))
 	return normalizedTable, indexStatements, nil
-}
-
-func stripDeprecatedEntitySubjectDDL(declaredName string, statements []string) []string {
-	if strings.TrimSpace(declaredName) != "entity_state" {
-		return statements
-	}
-	filtered := make([]string, 0, len(statements))
-	for _, statement := range statements {
-		normalized := strings.ToLower(statement)
-		if strings.Contains(normalized, "idx_entity_subject") {
-			continue
-		}
-		if ExtractTableName(statement) == "entity_state" {
-			statement = stripCreateTableColumn(statement, "subject_id")
-		}
-		filtered = append(filtered, statement)
-	}
-	return filtered
-}
-
-func stripCreateTableColumn(statement, columnName string) string {
-	start := strings.Index(statement, "(")
-	end := strings.LastIndex(statement, ")")
-	if start < 0 || end <= start {
-		return statement
-	}
-	body := statement[start+1 : end]
-	lines := strings.Split(body, "\n")
-	kept := make([]string, 0, len(lines))
-	for _, rawLine := range lines {
-		trimmed := strings.TrimSpace(strings.TrimSuffix(rawLine, ","))
-		if trimmed == "" {
-			continue
-		}
-		identifier := strings.Trim(strings.Fields(trimmed)[0], `"`)
-		if identifier == columnName {
-			continue
-		}
-		kept = append(kept, trimmed)
-	}
-	return fmt.Sprintf("%s(\n    %s\n)%s", statement[:start], strings.Join(kept, ",\n    "), statement[end+1:])
 }
 
 func ensureIfNotExists(statement, prefix string) string {

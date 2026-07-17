@@ -3,11 +3,13 @@ package store
 import (
 	"context"
 	"database/sql"
+	"reflect"
 	"sort"
 	"testing"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
@@ -88,7 +90,25 @@ func registerTestAuthorActivityCatalogForContext(t *testing.T, target testAuthor
 
 func newTestPostgresStore(t *testing.T, db *sql.DB) *PostgresStore {
 	t.Helper()
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	registerTestAuthorActivityCatalog(t, pg)
 	return pg
+}
+
+func admitTestPostgresStore(t testing.TB, db *sql.DB) *PostgresStore {
+	t.Helper()
+	pg := &PostgresStore{DB: db}
+	bootstrapTestPostgresStore(t, pg)
+	return pg
+}
+
+func bootstrapTestPostgresStore(t testing.TB, pg *PostgresStore) {
+	t.Helper()
+	if err := pg.BootstrapSchema(context.Background(), canonicalSchemaBootstrapTestRequest(t)); err != nil {
+		t.Fatalf("BootstrapSchema: %v", err)
+	}
+}
+
+func failureEnvelopesEqual(got, want runtimefailures.Envelope) bool {
+	return reflect.DeepEqual(got, want)
 }

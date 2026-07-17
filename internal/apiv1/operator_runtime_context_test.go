@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/runbundle"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -558,7 +559,7 @@ type operatorRuntimeContextFixture struct {
 func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixture {
 	t.Helper()
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := testAuthorActivityContext(context.Background())
 	seedOperatorBundleDeleteBundle(t, ctx, db, runStartTestBundleHash)
 	seedOperatorBundleDeleteBundle(t, ctx, db, runtimeContextTestBundleHashB)

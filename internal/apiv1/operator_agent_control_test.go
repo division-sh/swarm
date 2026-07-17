@@ -15,7 +15,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	"github.com/division-sh/swarm/internal/store"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -271,7 +270,7 @@ func TestOperatorAgentSendDirectiveRunTargetErrors(t *testing.T) {
 func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	bus, err := newScopedAPITestEventBus(t, pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -321,7 +320,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeBundleSource(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	bootFingerprint := "sha256:4444444444444444444444444444444444444444444444444444444444444444"
 	bootFact := runtimecorrelation.BundleSourceFact{
 		BundleHash: "bundle-v1:" + bootFingerprint, BundleSource: storerunlifecycle.BundleSourceEphemeral, BundleFingerprint: bootFingerprint,

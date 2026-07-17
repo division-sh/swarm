@@ -48,7 +48,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				return &store.PostgresStore{DB: db}, db
+				return storetest.AdmitPostgresRuntimeStore(t, db), db
 			},
 		},
 		{
@@ -277,9 +277,6 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 		Module:            module,
 		InstanceActivator: manager.ActivateFlowInstance,
 		WorkflowStore:     workflowStore,
-		EventReceiptsCapability: func(context.Context) (bool, error) {
-			return true, nil
-		},
 		TestEngineEmitNow: engineNow,
 	})
 	return notifyAllChildrenRuntime{bus: eventBus, manager: manager}

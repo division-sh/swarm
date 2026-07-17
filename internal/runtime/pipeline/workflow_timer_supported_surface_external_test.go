@@ -319,7 +319,6 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
 				Module: module, WorkflowStore: selected.workflowStore,
 				TimerScheduler: scheduler, TimerScheduleStore: scheduleStore,
-				EventReceiptsCapability: func(context.Context) (bool, error) { return true, nil },
 			})
 			bus.SetInterceptors(coordinator)
 
@@ -348,7 +347,6 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
 				Module: module, WorkflowStore: selected.workflowStore,
 				TimerScheduler: scheduler, TimerScheduleStore: scheduleStore,
-				EventReceiptsCapability: func(context.Context) (bool, error) { return true, nil },
 			})
 			bus.SetInterceptors(coordinator)
 			runCtx, cancelRun := context.WithCancel(ctx)
@@ -443,7 +441,6 @@ func TestRecurringWorkflowTimerRegistersNextOccurrenceWhenPostgresReleaseInitial
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
 		Module: gateRecoveryModule{source: source}, WorkflowStore: selected.workflowStore,
 		TimerScheduler: scheduler, TimerScheduleStore: scheduleStore,
-		EventReceiptsCapability: func(context.Context) (bool, error) { return true, nil },
 	})
 	bus.SetInterceptors(coordinator)
 	t.Cleanup(func() {

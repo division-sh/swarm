@@ -45,14 +45,10 @@ func (s *SQLiteRuntimeStore) MarkRunTerminal(ctx context.Context, runID, status 
 	if s == nil || s.DB == nil {
 		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("sqlite runtime store is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err
 	}
-	if !caps.Events.RunTerminalFields {
-		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run terminal persistence requires canonical runs.failure and ended_at")
-	}
-	status, err = canonicalRunTerminalStatus(status)
+	status, err := canonicalRunTerminalStatus(status)
 	if err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err
 	}
@@ -120,12 +116,8 @@ func (s *SQLiteRuntimeStore) ConvergeNormalRunCompletion(ctx context.Context, ev
 	if len(workflowTerminals) == 0 && len(flowTerminals) == 0 {
 		return nil
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
-	}
-	if !normalRunCompletionSupported(caps) {
-		return nil
 	}
 	return s.runAuthorActivityMutation(ctx, "sqlite normal run completion", func(txctx context.Context, tx *sql.Tx) error {
 		candidate, found, err := sqliteNormalRunCompletionCandidateTx(txctx, tx, eventID)

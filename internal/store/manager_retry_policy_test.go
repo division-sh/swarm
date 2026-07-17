@@ -16,6 +16,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -1129,6 +1130,7 @@ func newTestPostgresStore(t *testing.T) (*store.PostgresStore, func()) {
 		_ = pg.DB.Close()
 		t.Fatalf("ping app db: %v", err)
 	}
+	storetest.BootstrapPostgresRuntimeStore(t, pg)
 	registerExternalTestAuthorActivityCatalog(t, pg)
 	return pg, func() {
 		_ = pg.DB.Close()

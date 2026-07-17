@@ -21,7 +21,7 @@ func (s *PostgresStore) PlanBundleDelete(ctx context.Context, req bundledelete.R
 	if bundleHash == "" {
 		return bundledelete.Plan{}, fmt.Errorf("%w: bundle_hash is required", bundledelete.ErrInvalidRequest)
 	}
-	if err := s.requireBundleDeletePlanningCapabilities(ctx); err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return bundledelete.Plan{}, err
 	}
 	var exists bool
@@ -97,7 +97,7 @@ func (s *PostgresStore) ApplyBundleDeleteFinalMutation(ctx context.Context, req 
 	if bundleHash == "" {
 		return bundledelete.FinalMutationResult{}, fmt.Errorf("%w: bundle_hash is required", bundledelete.ErrInvalidRequest)
 	}
-	if err := s.requireBundleDeleteFinalMutationCapabilities(ctx); err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return bundledelete.FinalMutationResult{}, err
 	}
 	now := req.RequestedAt.UTC()
@@ -188,39 +188,6 @@ func (s *PostgresStore) ApplyBundleDeleteFinalMutation(ctx context.Context, req 
 	}
 	committed = true
 	return result, nil
-}
-
-func (s *PostgresStore) requireBundleDeletePlanningCapabilities(ctx context.Context) error {
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
-		return err
-	}
-	if !catalog.hasColumns("bundles", "bundle_hash") {
-		return fmt.Errorf("bundle delete requires bundles.bundle_hash")
-	}
-	caps := detectStoreSchemaCapabilities(catalog)
-	if err := requirePreservationCleanupCapabilities(caps); err != nil {
-		return err
-	}
-	if !caps.Events.RunBundleHash || !caps.Events.RunBundleSource {
-		return fmt.Errorf("bundle delete requires runs.bundle_hash and runs.bundle_source")
-	}
-	return nil
-}
-
-func (s *PostgresStore) requireBundleDeleteFinalMutationCapabilities(ctx context.Context) error {
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
-		return err
-	}
-	if !catalog.hasColumns("bundles", "bundle_hash") {
-		return fmt.Errorf("bundle delete requires bundles.bundle_hash")
-	}
-	caps := detectStoreSchemaCapabilities(catalog)
-	if !caps.Events.RunBundleHash || !caps.Events.RunBundleSource {
-		return fmt.Errorf("bundle delete requires runs.bundle_hash and runs.bundle_source")
-	}
-	return nil
 }
 
 func (s *PostgresStore) planBundleDeleteDeliveries(ctx context.Context, runIDs []string) ([]bundledelete.DeliveryRef, error) {

@@ -57,43 +57,8 @@ func defaultRunHeaderListOptions(opts RunHeaderListOptions) RunHeaderListOptions
 	return opts
 }
 
-func (s *PostgresStore) requireRunHeaderCapabilities(ctx context.Context) error {
-	if s == nil || s.DB == nil {
-		return fmt.Errorf("postgres store is required")
-	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	if caps.Events.Log != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("events", caps.Events.Log)
-	}
-	if !caps.Events.LogRunID {
-		return fmt.Errorf("run api read surface requires canonical events.run_id")
-	}
-	if caps.EntityState != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("entity_state", caps.EntityState)
-	}
-	if !caps.EntityRunID {
-		return fmt.Errorf("run api read surface requires canonical entity_state.run_id")
-	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
-		return err
-	}
-	required := map[string][]string{
-		"runs":              {"run_id", "status", "bundle_hash", "trigger_event_id", "trigger_event_type", "forked_from_run_id", "continued_as_run_id", "entity_count", "event_count", "failure", "started_at", "ended_at"},
-		"run_control_state": {"run_id", "reason"},
-		"events":            {"run_id", "event_id", "event_name", "created_at"},
-		"entity_state":      {"run_id", "entity_id"},
-	}
-	for tableName, columns := range required {
-		if catalog.hasColumns(tableName, columns...) {
-			continue
-		}
-		return fmt.Errorf("run api read surface requires %s columns %v", tableName, columns)
-	}
-	return nil
+func (s *PostgresStore) requireRunHeaderAccess() error {
+	return s.requireCurrentSchema()
 }
 
 func (s *PostgresStore) LoadRunHeader(ctx context.Context, runID string) (RunHeader, error) {
@@ -107,7 +72,7 @@ func (s *PostgresStore) LoadRunHeader(ctx context.Context, runID string) (RunHea
 	if _, err := uuid.Parse(runID); err != nil {
 		return RunHeader{}, ErrRunNotFound
 	}
-	if err := s.requireRunHeaderCapabilities(ctx); err != nil {
+	if err := s.requireRunHeaderAccess(); err != nil {
 		return RunHeader{}, err
 	}
 	row := s.DB.QueryRowContext(ctx, runHeaderSelectSQL()+`
@@ -130,7 +95,7 @@ func (s *PostgresStore) ListRunHeaders(ctx context.Context, opts RunHeaderListOp
 	if s == nil || s.DB == nil {
 		return nil, "", fmt.Errorf("postgres store is required")
 	}
-	if err := s.requireRunHeaderCapabilities(ctx); err != nil {
+	if err := s.requireRunHeaderAccess(); err != nil {
 		return nil, "", err
 	}
 	opts = defaultRunHeaderListOptions(opts)

@@ -133,7 +133,7 @@ func newCompleteEventDispatchFixture(t *testing.T, backend string, decisionOblig
 	case "postgres":
 		_, postgresDB, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
-		postgres := &store.PostgresStore{DB: postgresDB}
+		postgres := storetest.AdmitPostgresRuntimeStore(t, postgresDB)
 		selected, db = postgres, postgresDB
 	default:
 		t.Fatalf("unsupported backend %q", backend)

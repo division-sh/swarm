@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
@@ -402,7 +403,7 @@ func newPostgresHumanTaskToolStoreForTest(t *testing.T) *store.PostgresStore {
 	t.Helper()
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	return &store.PostgresStore{DB: db}
+	return storetest.AdmitPostgresRuntimeStore(t, db)
 }
 
 func newSQLiteRuntimeToolStoreForTest(t *testing.T) *store.SQLiteRuntimeStore {

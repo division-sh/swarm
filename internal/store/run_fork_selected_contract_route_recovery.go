@@ -54,56 +54,15 @@ type RunForkSelectedContractRouteRecovery struct {
 	CreatedAt                    time.Time                `json:"created_at"`
 }
 
-func RequireRunForkSelectedContractRouteRecoveryCapabilities(caps StoreSchemaCapabilities, catalog schemaColumnCatalog) error {
-	_ = caps
-	required := []string{
-		"recovery_id",
-		"fork_run_id",
-		"source_run_id",
-		"fork_event_id",
-		"owner",
-		"runtime_recovery_owner",
-		"mode",
-		"contracts_root",
-		"bundle_hash",
-		"workflow_name",
-		"workflow_version",
-		"route_topology_owner",
-		"dynamic_topology_owner",
-		"recipient_planning_owner",
-		"frontier_evidence_fingerprint",
-		"route_topology_fingerprint",
-		"recipient_planning_fingerprint",
-		"static_route_event_count",
-		"dynamic_topology_proof_count",
-		"recipient_plan_event_count",
-		"route_topology",
-		"recipient_planning",
-		"created_at",
-	}
-	if catalog.hasColumns(runForkSelectedContractRouteRecoveryTable, required...) {
-		return nil
-	}
-	return fmt.Errorf("selected-contract route recovery requires %s columns %v", runForkSelectedContractRouteRecoveryTable, required)
-}
-
-func (s *PostgresStore) requireRunForkSelectedContractRouteRecoveryCapabilities(ctx context.Context) error {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
-		return err
-	}
-	return RequireRunForkSelectedContractRouteRecoveryCapabilities(caps, catalog)
+func (s *PostgresStore) requireRunForkSelectedContractRouteRecoveryAccess() error {
+	return s.requireCurrentSchema()
 }
 
 func (s *PostgresStore) RecordRunForkSelectedContractRouteRecovery(ctx context.Context, req RunForkSelectedContractRouteRecoveryRequest) (RunForkSelectedContractRouteRecovery, error) {
 	if s == nil || s.DB == nil {
 		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("postgres store is required")
 	}
-	if err := s.requireRunForkSelectedContractRouteRecoveryCapabilities(ctx); err != nil {
+	if err := s.requireRunForkSelectedContractRouteRecoveryAccess(); err != nil {
 		return RunForkSelectedContractRouteRecovery{}, err
 	}
 	record, err := normalizeRunForkSelectedContractRouteRecovery(req, time.Now().UTC())
@@ -234,7 +193,7 @@ func (s *PostgresStore) LoadRunForkSelectedContractRouteRecovery(ctx context.Con
 	if _, err := uuid.Parse(forkRunID); err != nil {
 		return RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("fork run_id must be a UUID: %w", err)
 	}
-	if err := s.requireRunForkSelectedContractRouteRecoveryCapabilities(ctx); err != nil {
+	if err := s.requireRunForkSelectedContractRouteRecoveryAccess(); err != nil {
 		return RunForkSelectedContractRouteRecovery{}, false, err
 	}
 	record, err := loadRunForkSelectedContractRouteRecovery(ctx, s.DB, `WHERE fork_run_id = $1::uuid`, forkRunID)
@@ -251,7 +210,7 @@ func (s *PostgresStore) ListRunForkSelectedContractRouteRecoveries(ctx context.C
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
-	if err := s.requireRunForkSelectedContractRouteRecoveryCapabilities(ctx); err != nil {
+	if err := s.requireRunForkSelectedContractRouteRecoveryAccess(); err != nil {
 		return nil, err
 	}
 	rows, err := s.DB.QueryContext(ctx, runForkSelectedContractRouteRecoverySelect()+`

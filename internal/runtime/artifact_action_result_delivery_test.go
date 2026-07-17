@@ -14,7 +14,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -52,7 +52,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			ctx := seedRuntimeTestRun(t, db)
-			pg := &store.PostgresStore{DB: db}
+			pg := storetest.AdmitPostgresRuntimeStore(t, db)
 			bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -75,9 +75,6 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 						}
 					}
 					return nil
-				},
-				EventReceiptsCapability: func(context.Context) (bool, error) {
-					return true, nil
 				},
 			})
 			subscribed := make(chan struct{}, 1)
@@ -213,7 +210,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			ctx := seedRuntimeTestRun(t, db)
-			pg := &store.PostgresStore{DB: db}
+			pg := storetest.AdmitPostgresRuntimeStore(t, db)
 			bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -236,9 +233,6 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 						}
 					}
 					return nil
-				},
-				EventReceiptsCapability: func(context.Context) (bool, error) {
-					return true, nil
 				},
 			})
 			subscribed := make(chan struct{}, 1)

@@ -680,9 +680,6 @@ func classifyRuntimeWriterCallSites(sites []runtimeWriterCallSite) ([]runtimeWri
 }
 
 func classifyRuntimeWriterCallSite(site runtimeWriterCallSite) (runtimeWriterClassification, string, bool) {
-	if site.Path == "internal/store/failure_schema_migration.go" {
-		return classDifferentConcept, "boot-time canonical failure schema migration owns its isolated transaction", true
-	}
 	if strings.HasPrefix(site.Path, "internal/runtime/authoractivity/") {
 		return classConsumesCanonical, "canonical author activity transaction, persistence, and read owner", true
 	}
@@ -941,17 +938,10 @@ func runtimeWriterRules() []runtimeWriterRule {
 		},
 		{
 			name:           "sqlite schema bootstrap",
-			path:           rx(`^internal/store/(sqlite_schema|sqlite_schema_bootstrap|obsolete_schema_cutoff|agent_lifecycle_schema|completion_schema_migration|platformschema/platformschema)\.go$`),
+			path:           rx(`^internal/store/(sqlite_schema|sqlite_schema_bootstrap|platformschema/platformschema)\.go$`),
 			kinds:          allPrimitiveKinds(),
 			classification: classDifferentConcept,
 			reason:         "schema/bootstrap owns dialect DDL and PRAGMA behavior, split from selected runtime mutation writers",
-		},
-		{
-			name:           "schema capability reads",
-			path:           rx(`^internal/store/schema_capabilities\.go$`),
-			kinds:          kinds(primitiveRead),
-			classification: classDifferentConcept,
-			reason:         "schema capability reader; not mutation authority",
 		},
 		{
 			name:           "api idempotency postgres helper",

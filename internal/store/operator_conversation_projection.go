@@ -235,14 +235,10 @@ func (s conversationForkStore) loadOperatorConversationSummary(ctx context.Conte
 	if sessionID == "" {
 		return OperatorConversationSummary{}, ErrSessionNotFound
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return OperatorConversationSummary{}, err
 	}
-	if caps.Conversations.Turns != SchemaFlavorCanonical {
-		return OperatorConversationSummary{}, unsupportedSchemaCapability("agent_turns", caps.Conversations.Turns)
-	}
-	sources := s.conversationQuerySources(caps)
+	sources := s.conversationQuerySources()
 	if len(sources) == 0 {
 		return OperatorConversationSummary{}, ErrSessionNotFound
 	}
@@ -273,18 +269,22 @@ func (s conversationForkStore) loadOperatorConversationSummary(ctx context.Conte
 	} else if err != nil {
 		return OperatorConversationSummary{}, operatorConversationReadQueryError("load conversation summary", err)
 	}
-	if item.StartedAt, err = requiredConversationTime(startedAtRaw, "started_at"); err != nil {
+	startedAt, err := requiredConversationTime(startedAtRaw, "started_at")
+	if err != nil {
 		return OperatorConversationSummary{}, err
 	}
+	item.StartedAt = startedAt
 	if endedAt, valid, scanErr := sqliteTimeValue(endedAtRaw); scanErr != nil {
 		return OperatorConversationSummary{}, fmt.Errorf("decode conversation ended_at: %w", scanErr)
 	} else if valid {
 		endedAt = endedAt.UTC()
 		item.EndedAt = &endedAt
 	}
-	if item.UpdatedAt, err = requiredConversationTime(updatedAtRaw, "updated_at"); err != nil {
+	updatedAt, err := requiredConversationTime(updatedAtRaw, "updated_at")
+	if err != nil {
 		return OperatorConversationSummary{}, err
 	}
+	item.UpdatedAt = updatedAt
 	runtimeState, err := DecodeConversationRuntimeStateDescriptor(runtimeStateRaw)
 	if err != nil {
 		return OperatorConversationSummary{}, fmt.Errorf("decode conversation runtime_state: %w", err)
@@ -318,17 +318,10 @@ func requiredConversationTime(raw any, field string) (time.Time, error) {
 }
 
 func (s conversationForkStore) listOperatorConversationTurns(ctx context.Context, opts OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error) {
-	if err := s.requirePublicConversationProjectionCapabilities(ctx); err != nil {
+	if err := s.requirePublicConversationProjectionAccess(); err != nil {
 		return OperatorConversationTurnListResult{}, err
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return OperatorConversationTurnListResult{}, err
-	}
-	runIDProjection := "''"
-	if caps.Conversations.TurnRunID {
-		runIDProjection = "COALESCE(CAST(run_id AS TEXT), '')"
-	}
+	runIDProjection := "COALESCE(CAST(run_id AS TEXT), '')"
 	opts, cursor, err := normalizeOperatorConversationTurnListOptions(opts)
 	if err != nil {
 		return OperatorConversationTurnListResult{}, err
@@ -408,17 +401,10 @@ func (s conversationForkStore) listOperatorConversationTurns(ctx context.Context
 }
 
 func (s conversationForkStore) loadOperatorConversationTurn(ctx context.Context, sessionID, turnID string) (OperatorPublicConversationTurnDetail, error) {
-	if err := s.requirePublicConversationProjectionCapabilities(ctx); err != nil {
+	if err := s.requirePublicConversationProjectionAccess(); err != nil {
 		return OperatorPublicConversationTurnDetail{}, err
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return OperatorPublicConversationTurnDetail{}, err
-	}
-	runIDProjection := "''"
-	if caps.Conversations.TurnRunID {
-		runIDProjection = "COALESCE(CAST(run_id AS TEXT), '')"
-	}
+	runIDProjection := "COALESCE(CAST(run_id AS TEXT), '')"
 	sessionID = strings.TrimSpace(sessionID)
 	turnID = strings.TrimSpace(turnID)
 	if sessionID == "" {
@@ -467,18 +453,8 @@ func (s conversationForkStore) loadOperatorConversationTurn(ctx context.Context,
 	return OperatorPublicConversationTurnDetail{Session: summary, Turn: turn}, nil
 }
 
-func (s conversationForkStore) requirePublicConversationProjectionCapabilities(ctx context.Context) error {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	if caps.Conversations.Turns != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("agent_turns", caps.Conversations.Turns)
-	}
-	if !caps.Conversations.TurnBlocks {
-		return errors.New("operator public conversation turn owner requires canonical agent_turns.turn_blocks")
-	}
-	return nil
+func (s conversationForkStore) requirePublicConversationProjectionAccess() error {
+	return s.requireCurrentSchema()
 }
 
 func (s conversationForkStore) resolveConversationTurnCoordinateByID(ctx context.Context, sessionID, turnID string) (ConversationForkPointDescriptor, error) {

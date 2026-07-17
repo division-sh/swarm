@@ -34,6 +34,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_CoversEveryCurrentStateLa
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
 	ctx := testAuthorActivityContext()
@@ -103,6 +104,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalLiveLifecycl
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
 	ctx := testAuthorActivityContext()
@@ -156,6 +158,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalTerminalLife
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
 	ctx := testAuthorActivityContext()

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -13,96 +14,116 @@ import (
 
 	"github.com/division-sh/swarm/internal/platform"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/store/platformschema"
 	"github.com/division-sh/swarm/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
 
-func TestSchemaBootstrapObsoleteDecisionCardLifecycleOutboxCutoff(t *testing.T) {
-	request := canonicalSchemaBootstrapTestRequest(t)
+func TestSchemaBootstrapRejectsEveryRetiredPlatformTableUnchanged(t *testing.T) {
+	for _, backend := range []SchemaDialect{SchemaDialectSQLite, SchemaDialectPostgres} {
+		for _, table := range platformschema.RetiredPlatformTables() {
+			for _, populated := range []bool{false, true} {
+				name := string(backend) + "/" + string(table) + "/empty"
+				if populated {
+					name = string(backend) + "/" + string(table) + "/populated"
+				}
+				t.Run(name, func(t *testing.T) {
+					assertRetiredPlatformTableRejectedUnchanged(t, backend, table, populated)
+				})
+			}
+		}
+	}
+}
 
-	t.Run("sqlite", func(t *testing.T) {
-		store, err := NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "obsolete-cutoff.db"))
+func TestRetiredPlatformTableRegistryIsExact(t *testing.T) {
+	want := []platformschema.RetiredPlatformTable{
+		"schema_version",
+		"decision_card_lifecycle_outbox",
+		"agent_external_effect_operations",
+		"agent_external_effect_attempts",
+		"schedules",
+	}
+	if got := platformschema.RetiredPlatformTables(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("retired platform table registry = %v, want %v", got, want)
+	}
+}
+
+func assertRetiredPlatformTableRejectedUnchanged(t *testing.T, backend SchemaDialect, table platformschema.RetiredPlatformTable, populated bool) {
+	t.Helper()
+	ctx := context.Background()
+	request := canonicalSchemaBootstrapTestRequest(t)
+	request.StatePlans = generatedProbeStatePlans()
+	var db *sql.DB
+	var bootstrap func(context.Context, SchemaBootstrapRequest) error
+	var runtimeProbe func() error
+	if backend == SchemaDialectSQLite {
+		path := filepath.Join(t.TempDir(), "retired.db")
+		accepted, err := NewSQLiteRuntimeStore(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _ = store.Close() })
-		assertObsoleteDecisionCardLifecycleOutboxCutoff(t, SchemaDialectSQLite, store.DB, request, store.BootstrapSchema)
-	})
-
-	t.Run("postgres", func(t *testing.T) {
-		_, db, cleanup := testutil.StartPostgres(t)
+		if err := accepted.BootstrapSchema(ctx, SchemaBootstrapRequest{PlatformPlans: request.PlatformPlans, Origin: request.Origin}); err != nil {
+			t.Fatalf("canonical bootstrap: %v", err)
+		}
+		t.Cleanup(func() { _ = accepted.Close() })
+		db = accepted.DB
+		unaccepted, err := NewSQLiteRuntimeStore(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = unaccepted.Close() })
+		bootstrap = unaccepted.BootstrapSchema
+		runtimeProbe = func() error {
+			_, err := unaccepted.ListActiveAgentDescriptors(ctx)
+			return err
+		}
+	} else {
+		_, postgresDB, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
-		store := &PostgresStore{DB: db}
-		assertObsoleteDecisionCardLifecycleOutboxCutoff(t, SchemaDialectPostgres, db, request, store.BootstrapSchema)
-	})
-}
-
-func assertObsoleteDecisionCardLifecycleOutboxCutoff(
-	t *testing.T,
-	backend SchemaDialect,
-	db *sql.DB,
-	request SchemaBootstrapRequest,
-	bootstrap func(context.Context, SchemaBootstrapRequest) error,
-) {
-	t.Helper()
-	ctx := context.Background()
-	if err := bootstrap(ctx, request); err != nil {
-		t.Fatalf("canonical bootstrap: %v", err)
+		accepted := &PostgresStore{DB: postgresDB}
+		if err := accepted.BootstrapSchema(ctx, SchemaBootstrapRequest{PlatformPlans: request.PlatformPlans, Origin: request.Origin}); err != nil {
+			t.Fatalf("canonical bootstrap: %v", err)
+		}
+		db = postgresDB
+		unaccepted := &PostgresStore{DB: postgresDB}
+		bootstrap = unaccepted.BootstrapSchema
+		runtimeProbe = func() error {
+			_, err := unaccepted.ListActiveAgentDescriptors(ctx)
+			return err
+		}
 	}
-	assertObsoleteDecisionCardLifecycleOutboxExists(t, backend, db, false)
 
-	if _, err := db.ExecContext(ctx, `CREATE TABLE decision_card_lifecycle_outbox (status TEXT NOT NULL)`); err != nil {
+	identifier := string(table)
+	if _, err := db.ExecContext(ctx, `CREATE TABLE `+identifier+` (marker TEXT)`); err != nil {
 		t.Fatal(err)
 	}
-	if err := bootstrap(ctx, request); err != nil {
-		t.Fatalf("drop empty obsolete table: %v", err)
+	wantRows := 0
+	if populated {
+		if _, err := db.ExecContext(ctx, `INSERT INTO `+identifier+` (marker) VALUES ('preserve-me')`); err != nil {
+			t.Fatal(err)
+		}
+		wantRows = 1
 	}
-	assertObsoleteDecisionCardLifecycleOutboxExists(t, backend, db, false)
-
-	for _, status := range []string{"pending", "completed", "malformed"} {
-		t.Run("nonempty_"+status, func(t *testing.T) {
-			if _, err := db.ExecContext(ctx, `CREATE TABLE decision_card_lifecycle_outbox (status TEXT NOT NULL)`); err != nil {
-				t.Fatal(err)
-			}
-			placeholder := "?"
-			if backend == SchemaDialectPostgres {
-				placeholder = "$1"
-			}
-			if _, err := db.ExecContext(ctx, `INSERT INTO decision_card_lifecycle_outbox (status) VALUES (`+placeholder+`)`, status); err != nil {
-				t.Fatal(err)
-			}
-			blocked := request
-			blocked.StatePlans = generatedProbeStatePlans()
-			err := bootstrap(ctx, blocked)
-			want := "unsupported pre-1.0 PostgreSQL database: obsolete table decision_card_lifecycle_outbox contains legacy rows; provision or select a fresh empty database; existing database state is not migrated"
-			if backend == SchemaDialectSQLite {
-				want = "unsupported pre-1.0 SQLite database: obsolete table decision_card_lifecycle_outbox contains legacy rows; recreate the configured SQLite database file or select a fresh empty database; existing database state is not migrated"
-			}
-			if err == nil || err.Error() != want {
-				t.Fatalf("populated obsolete table bootstrap error = %v, want %q", err, want)
-			}
-			assertObsoleteDecisionCardLifecycleOutboxExists(t, backend, db, true)
-			assertSchemaTableExists(t, backend, db, "generated_probe_state", false)
-			if _, err := db.ExecContext(ctx, `DROP TABLE decision_card_lifecycle_outbox`); err != nil {
-				t.Fatal(err)
-			}
-		})
+	err := bootstrap(ctx, request)
+	var incompatible *SchemaCompatibilityError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("bootstrap error = %v, want SchemaCompatibilityError", err)
 	}
-}
-
-func assertObsoleteDecisionCardLifecycleOutboxExists(t *testing.T, backend SchemaDialect, db *sql.DB, want bool) {
-	t.Helper()
-	assertSchemaTableExists(t, backend, db, obsoleteDecisionCardLifecycleOutbox, want)
-	if !want {
-		return
+	if drift := strings.Join(incompatible.Drift, "; "); !strings.Contains(drift, "retired platform table "+identifier+" exists") {
+		t.Fatalf("bootstrap drift = %v, want retired table evidence", incompatible.Drift)
 	}
-	var rows int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM decision_card_lifecycle_outbox`).Scan(&rows); err != nil {
+	if err := runtimeProbe(); err == nil || !strings.Contains(err.Error(), "schema is unaccepted") {
+		t.Fatalf("runtime probe after rejected bootstrap = %v, want unaccepted admission failure", err)
+	}
+	assertSchemaTableExists(t, backend, db, identifier, true)
+	var gotRows int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+identifier).Scan(&gotRows); err != nil {
 		t.Fatal(err)
 	}
-	if rows != 1 {
-		t.Fatalf("obsolete table rows = %d, want 1", rows)
+	if gotRows != wantRows {
+		t.Fatalf("retired table rows = %d, want %d", gotRows, wantRows)
 	}
+	assertSchemaTableExists(t, backend, db, "generated_probe_state", false)
 }
 
 func assertSchemaTableExists(t *testing.T, backend SchemaDialect, db *sql.DB, table string, want bool) {
@@ -117,6 +138,245 @@ func assertSchemaTableExists(t *testing.T, backend SchemaDialect, db *sql.DB, ta
 	}
 	if exists != want {
 		t.Fatalf("table %s exists = %t, want %t", table, exists, want)
+	}
+}
+
+func TestSchemaBootstrapRejectsLegacyPlatformShapesUnchanged(t *testing.T) {
+	type legacyShape struct {
+		name      string
+		table     string
+		postgres  []string
+		sqlite    []string
+		populated bool
+	}
+	cases := []legacyShape{
+		{name: "delivery_last_error", table: "event_deliveries", postgres: []string{`ALTER TABLE event_deliveries ADD COLUMN last_error TEXT`}, sqlite: []string{`ALTER TABLE event_deliveries ADD COLUMN last_error TEXT`}},
+		{name: "receipt_without_failure", table: "event_receipts", postgres: []string{`ALTER TABLE event_receipts DROP COLUMN failure`}, sqlite: []string{`ALTER TABLE event_receipts DROP COLUMN failure`}},
+		{name: "dead_letter_flat_failure", table: "dead_letters", postgres: []string{`ALTER TABLE dead_letters ADD COLUMN failure_type TEXT`}, sqlite: []string{`ALTER TABLE dead_letters ADD COLUMN failure_type TEXT`}},
+		{name: "activity_error", table: "activity_attempts", postgres: []string{`ALTER TABLE activity_attempts ADD COLUMN error TEXT`}, sqlite: []string{`ALTER TABLE activity_attempts ADD COLUMN error TEXT`}},
+		{name: "event_without_source_route", table: "events", postgres: []string{`DROP INDEX idx_events_source_route`, `ALTER TABLE events DROP COLUMN source_route`}, sqlite: []string{`DROP INDEX idx_events_source_route`, `ALTER TABLE events DROP COLUMN source_route`}},
+		{name: "run_error_summary", table: "runs", postgres: []string{`ALTER TABLE runs ADD COLUMN error_summary TEXT`}, sqlite: []string{`ALTER TABLE runs ADD COLUMN error_summary TEXT`}},
+		{name: "directive_flat_error", table: "agent_directive_operations", postgres: []string{`ALTER TABLE agent_directive_operations ADD COLUMN error_code TEXT`}, sqlite: []string{`ALTER TABLE agent_directive_operations ADD COLUMN error_code TEXT`}},
+		{name: "mailbox_without_deferred_until", table: "mailbox", postgres: []string{`ALTER TABLE mailbox DROP COLUMN deferred_until`}, sqlite: []string{`ALTER TABLE mailbox DROP COLUMN deferred_until`}},
+		{name: "reply_without_activity_reference", table: "activity_attempts", postgres: []string{`ALTER TABLE activity_attempts DROP COLUMN reply_context_id`}, sqlite: []string{`ALTER TABLE activity_attempts DROP COLUMN reply_context_id`}},
+		{name: "agents_empty", table: "agents", postgres: legacyPostgresAgentsShape(false), sqlite: legacySQLiteAgentsShape(false)},
+		{name: "agents_populated", table: "agents", postgres: legacyPostgresAgentsShape(true), sqlite: legacySQLiteAgentsShape(true), populated: true},
+		{name: "agent_turns_empty", table: "agent_turns", postgres: legacyPostgresAgentTurnsShape(false), sqlite: legacySQLiteAgentTurnsShape(false)},
+		{name: "agent_turns_populated", table: "agent_turns", postgres: legacyPostgresAgentTurnsShape(true), sqlite: legacySQLiteAgentTurnsShape(true), populated: true},
+		{name: "entity_state_empty", table: "entity_state", postgres: []string{`ALTER TABLE entity_state ADD COLUMN subject_id TEXT`}, sqlite: []string{`ALTER TABLE entity_state ADD COLUMN subject_id TEXT`}},
+		{name: "entity_state_populated", table: "entity_state", postgres: legacyPostgresEntityStateShape(), sqlite: legacySQLiteEntityStateShape(), populated: true},
+	}
+
+	for _, backend := range []SchemaDialect{SchemaDialectSQLite, SchemaDialectPostgres} {
+		for _, tc := range cases {
+			t.Run(string(backend)+"/"+tc.name, func(t *testing.T) {
+				request := canonicalSchemaBootstrapTestRequest(t)
+				db, bootstrap := legacyShapeTestStore(t, backend, request)
+				statements := tc.postgres
+				if backend == SchemaDialectSQLite {
+					statements = tc.sqlite
+				}
+				for _, statement := range statements {
+					if _, err := db.ExecContext(testAuthorActivityContext(), statement); err != nil {
+						t.Fatalf("apply legacy shape statement %q: %v", statement, err)
+					}
+				}
+				beforeColumns := selectedStoreTableColumns(t, backend, db, tc.table)
+				beforeRows := selectedStoreTableRowCount(t, db, tc.table)
+				if tc.populated && beforeRows == 0 {
+					t.Fatalf("legacy shape %s was not populated", tc.name)
+				}
+
+				err := bootstrap(testAuthorActivityContext(), request)
+				var incompatible *SchemaCompatibilityError
+				if !errors.As(err, &incompatible) {
+					t.Fatalf("bootstrap error = %v, want SchemaCompatibilityError", err)
+				}
+				afterColumns := selectedStoreTableColumns(t, backend, db, tc.table)
+				if !reflect.DeepEqual(afterColumns, beforeColumns) {
+					t.Fatalf("legacy %s columns changed during rejected bootstrap: before=%v after=%v", tc.table, beforeColumns, afterColumns)
+				}
+				if afterRows := selectedStoreTableRowCount(t, db, tc.table); afterRows != beforeRows {
+					t.Fatalf("legacy %s rows changed during rejected bootstrap: before=%d after=%d", tc.table, beforeRows, afterRows)
+				}
+			})
+		}
+	}
+}
+
+func TestSchemaBootstrapAcceptsUnrelatedTablesUnchanged(t *testing.T) {
+	for _, backend := range []SchemaDialect{SchemaDialectSQLite, SchemaDialectPostgres} {
+		t.Run(string(backend), func(t *testing.T) {
+			request := canonicalSchemaBootstrapTestRequest(t)
+			db, bootstrap := legacyShapeTestStore(t, backend, request)
+			if _, err := db.ExecContext(testAuthorActivityContext(), `CREATE TABLE product_probe (id TEXT PRIMARY KEY, value TEXT NOT NULL)`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(testAuthorActivityContext(), `INSERT INTO product_probe (id, value) VALUES ('kept', 'unchanged')`); err != nil {
+				t.Fatal(err)
+			}
+			if err := bootstrap(testAuthorActivityContext(), request); err != nil {
+				t.Fatalf("bootstrap with unrelated table: %v", err)
+			}
+			var value string
+			if err := db.QueryRowContext(testAuthorActivityContext(), `SELECT value FROM product_probe WHERE id = 'kept'`).Scan(&value); err != nil {
+				t.Fatal(err)
+			}
+			if value != "unchanged" {
+				t.Fatalf("unrelated table value = %q, want unchanged", value)
+			}
+		})
+	}
+}
+
+func TestSchemaBootstrapRejectsUnstampedStoresUnchanged(t *testing.T) {
+	for _, backend := range []SchemaDialect{SchemaDialectSQLite, SchemaDialectPostgres} {
+		t.Run(string(backend), func(t *testing.T) {
+			request := canonicalSchemaBootstrapTestRequest(t)
+			var db *sql.DB
+			var bootstrap func(context.Context, SchemaBootstrapRequest) error
+			if backend == SchemaDialectSQLite {
+				store, err := NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "unstamped.db"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = store.Close() })
+				db, bootstrap = store.DB, store.BootstrapSchema
+			} else {
+				_, postgresDB, cleanup := testutil.StartEmptyPostgres(t)
+				t.Cleanup(cleanup)
+				store := &PostgresStore{DB: postgresDB}
+				db, bootstrap = postgresDB, store.BootstrapSchema
+			}
+			if _, err := db.ExecContext(testAuthorActivityContext(), `CREATE TABLE product_probe (id TEXT PRIMARY KEY)`); err != nil {
+				t.Fatal(err)
+			}
+			if err := bootstrap(testAuthorActivityContext(), request); err == nil {
+				t.Fatal("unstamped non-empty store bootstrap error = nil")
+			}
+			assertSchemaTableExists(t, backend, db, "product_probe", true)
+			assertSchemaTableExists(t, backend, db, RuntimeStoreMetadataTable, false)
+		})
+	}
+}
+
+func legacyShapeTestStore(t *testing.T, backend SchemaDialect, request SchemaBootstrapRequest) (*sql.DB, func(context.Context, SchemaBootstrapRequest) error) {
+	t.Helper()
+	if backend == SchemaDialectSQLite {
+		path := filepath.Join(t.TempDir(), "legacy-shape.db")
+		accepted, err := NewSQLiteRuntimeStore(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = accepted.Close() })
+		if err := accepted.BootstrapSchema(testAuthorActivityContext(), request); err != nil {
+			t.Fatalf("bootstrap canonical SQLite store: %v", err)
+		}
+		candidate, err := NewSQLiteRuntimeStore(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = candidate.Close() })
+		return accepted.DB, candidate.BootstrapSchema
+	}
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	accepted := &PostgresStore{DB: db}
+	if err := accepted.BootstrapSchema(testAuthorActivityContext(), request); err != nil {
+		t.Fatalf("bootstrap canonical PostgreSQL store: %v", err)
+	}
+	candidate := &PostgresStore{DB: db}
+	return db, candidate.BootstrapSchema
+}
+
+func selectedStoreTableColumns(t *testing.T, backend SchemaDialect, db *sql.DB, table string) map[string]bool {
+	t.Helper()
+	if backend == SchemaDialectSQLite {
+		return sqliteColumnSet(t, testAuthorActivityContext(), db, table)
+	}
+	rows, err := db.QueryContext(testAuthorActivityContext(), `
+		SELECT column_name
+		FROM information_schema.columns
+		WHERE table_schema = current_schema() AND table_name = $1
+	`, table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var column string
+		if err := rows.Scan(&column); err != nil {
+			t.Fatal(err)
+		}
+		columns[column] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return columns
+}
+
+func selectedStoreTableRowCount(t *testing.T, db *sql.DB, table string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(testAuthorActivityContext(), `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+func legacyPostgresAgentsShape(populated bool) []string {
+	statements := []string{
+		`DROP TABLE agents CASCADE`,
+		`CREATE TABLE agents (agent_id TEXT PRIMARY KEY, role TEXT NOT NULL, model_tier TEXT, llm_backend TEXT NOT NULL, config JSONB NOT NULL DEFAULT '{}'::jsonb, status TEXT)`,
+	}
+	if populated {
+		statements = append(statements, `INSERT INTO agents (agent_id, role, model_tier, llm_backend, status) VALUES ('legacy-agent', 'reviewer', 'sonnet', 'api', 'active')`)
+	}
+	return statements
+}
+
+func legacySQLiteAgentsShape(populated bool) []string {
+	statements := []string{
+		`DROP TABLE agents`,
+		`CREATE TABLE agents (agent_id TEXT PRIMARY KEY, role TEXT NOT NULL, model_tier TEXT, llm_backend TEXT NOT NULL, config TEXT NOT NULL DEFAULT '{}', status TEXT)`,
+	}
+	if populated {
+		statements = append(statements, `INSERT INTO agents (agent_id, role, model_tier, llm_backend, status) VALUES ('legacy-agent', 'reviewer', 'sonnet', 'api', 'active')`)
+	}
+	return statements
+}
+
+func legacyPostgresAgentTurnsShape(populated bool) []string {
+	statements := []string{`DROP TABLE agent_turns`, `CREATE TABLE agent_turns (turn_id UUID PRIMARY KEY, error TEXT)`}
+	if populated {
+		statements = append(statements, `INSERT INTO agent_turns (turn_id, error) VALUES ('00000000-0000-0000-0000-000000002055'::uuid, 'opaque provider failure')`)
+	}
+	return statements
+}
+
+func legacySQLiteAgentTurnsShape(populated bool) []string {
+	statements := []string{`DROP TABLE agent_turns`, `CREATE TABLE agent_turns (turn_id TEXT PRIMARY KEY, error TEXT)`}
+	if populated {
+		statements = append(statements, `INSERT INTO agent_turns (turn_id, error) VALUES ('00000000-0000-0000-0000-000000002055', 'opaque provider failure')`)
+	}
+	return statements
+}
+
+func legacyPostgresEntityStateShape() []string {
+	return []string{
+		`ALTER TABLE entity_state ADD COLUMN subject_id TEXT`,
+		`INSERT INTO runs (run_id, status) VALUES ('00000000-0000-0000-0000-000000002055'::uuid, 'running')`,
+		`INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state, subject_id) VALUES ('00000000-0000-0000-0000-000000002055'::uuid, '00000000-0000-0000-0000-000000002056'::uuid, 'legacy/one', 'active', 'subject-1')`,
+	}
+}
+
+func legacySQLiteEntityStateShape() []string {
+	return []string{
+		`ALTER TABLE entity_state ADD COLUMN subject_id TEXT`,
+		`INSERT INTO runs (run_id, status) VALUES ('00000000-0000-0000-0000-000000002055', 'running')`,
+		`INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state, subject_id) VALUES ('00000000-0000-0000-0000-000000002055', '00000000-0000-0000-0000-000000002056', 'legacy/one', 'active', 'subject-1')`,
 	}
 }
 
@@ -227,6 +487,9 @@ func TestPostgresSchemaBootstrapAcceptsCanonicalTemplateAndRejectsDrift(t *testi
 	if err := store.BootstrapSchema(testAuthorActivityContext(), request); err != nil {
 		t.Fatalf("compatible template boot: %v", err)
 	}
+	if err := store.BootstrapSchema(testAuthorActivityContext(), request); err != nil {
+		t.Fatalf("repeated compatible template boot: %v", err)
+	}
 	if _, err := db.Exec(`ALTER TABLE timers ADD COLUMN drift_probe TEXT`); err != nil {
 		t.Fatal(err)
 	}
@@ -310,6 +573,43 @@ func assertStageOnlyDecisionCardColumns(t testing.TB, columns map[string]bool) {
 	if !columns["flow_instance"] || !columns["stage_activation_id"] || columns["anchor_kind"] || columns["anchor"] {
 		t.Fatalf("decision-card columns are not the stage-only fixture: %#v", columns)
 	}
+}
+
+func sqliteColumnSet(t testing.TB, ctx context.Context, db *sql.DB, table string) map[string]bool {
+	t.Helper()
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
+	if err != nil {
+		t.Fatalf("inspect SQLite table %s: %v", table, err)
+	}
+	defer rows.Close()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, kind string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatalf("scan SQLite table %s: %v", table, err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("inspect SQLite table %s: %v", table, err)
+	}
+	return columns
+}
+
+func postgresColumnExists(t testing.TB, ctx context.Context, db *sql.DB, table, column string) bool {
+	t.Helper()
+	var exists bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2
+		)
+	`, table, column).Scan(&exists); err != nil {
+		t.Fatalf("inspect PostgreSQL column %s.%s: %v", table, column, err)
+	}
+	return exists
 }
 
 func stageOnlyDecisionCardSchemaRequest(t testing.TB) SchemaBootstrapRequest {
@@ -616,6 +916,9 @@ func TestSQLiteSchemaBootstrapCreatesThenValidatesGeneratedState(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(testAuthorActivityContext(), request), SchemaDialectSQLite, store.path, request.Origin, storedOrigin, "generated state table generated_probe_state:", "drift_probe")
+	if !sqliteColumnSet(t, testAuthorActivityContext(), store.DB, "generated_probe_state")["drift_probe"] {
+		t.Fatal("rejected SQLite generated-state bootstrap mutated the incompatible table")
+	}
 }
 
 func TestPostgresSchemaBootstrapCreatesThenValidatesGeneratedState(t *testing.T) {
@@ -639,6 +942,9 @@ func TestPostgresSchemaBootstrapCreatesThenValidatesGeneratedState(t *testing.T)
 		t.Fatal(err)
 	}
 	assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(testAuthorActivityContext(), request), SchemaDialectPostgres, target, request.Origin, storedOrigin, "generated state table generated_probe_state:", "drift_probe")
+	if !postgresColumnExists(t, testAuthorActivityContext(), db, "generated_probe_state", "drift_probe") {
+		t.Fatal("rejected PostgreSQL generated-state bootstrap mutated the incompatible table")
+	}
 }
 
 func assertSchemaCompatibilityDiagnostic(t *testing.T, err error, backend SchemaDialect, target string, current RuntimeStoreOrigin, wantOrigin *RuntimeStoreOrigin, wantDrift ...string) {

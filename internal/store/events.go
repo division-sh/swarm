@@ -192,6 +192,9 @@ func (s *PostgresStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt event
 }
 
 func (s *PostgresStore) AppendEventTxOutcome(ctx context.Context, tx *sql.Tx, evt events.Event) (runtimebus.EventAppendOutcome, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
 	if tx == nil {
 		outcome := runtimebus.EventAppendOutcomeUnknown
 		err := s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
@@ -204,25 +207,16 @@ func (s *PostgresStore) AppendEventTxOutcome(ctx context.Context, tx *sql.Tx, ev
 	if err := validateDiagnosticDirectOwner(ctx, evt); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
 	outcome := runtimebus.EventAppendOutcomeUnknown
-	err = withEventStoreRetry(ctx, tx, func() error {
+	err := withEventStoreRetry(ctx, tx, func() error {
 		outcome = runtimebus.EventAppendOutcomeUnknown
 		var err error
-		evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, caps, chooseRowQueryer(s.DB, tx), evt))
+		evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, chooseRowQueryer(s.DB, tx), evt))
 		if err != nil {
 			return err
 		}
-		switch caps.Events.Log {
-		case SchemaFlavorCanonical:
-			outcome, err = s.appendEventSpec(ctx, caps, tx, evt)
-			return err
-		default:
-			return unsupportedSchemaCapability("events", caps.Events.Log)
-		}
+		outcome, err = s.appendEventSpec(ctx, tx, evt)
+		return err
 	})
 	return outcome, err
 }
@@ -236,23 +230,15 @@ func (s *PostgresStore) PersistEventWithDeliveriesOutcome(ctx context.Context, e
 	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	caps, err := s.schemaCapabilities(ctx)
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
+	var err error
+	evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, chooseRowQueryer(s.DB, nil), evt))
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, caps, chooseRowQueryer(s.DB, nil), evt))
-	if err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	switch {
-	case caps.Events.Log == SchemaFlavorCanonical && caps.Events.Deliveries == SchemaFlavorCanonical:
-		return s.persistEventWithDeliveriesSpec(ctx, caps, evt, agentIDs)
-	case caps.Events.Log != SchemaFlavorCanonical:
-		return runtimebus.EventAppendOutcomeUnknown, unsupportedSchemaCapability("events", caps.Events.Log)
-	case caps.Events.Deliveries != SchemaFlavorCanonical:
-		return runtimebus.EventAppendOutcomeUnknown, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	}
-	return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("unsupported event delivery persistence capability combination")
+	return s.persistEventWithDeliveriesSpec(ctx, evt, agentIDs)
 }
 
 func (s *PostgresStore) PersistEventWithDeliveriesAndScope(
@@ -274,23 +260,15 @@ func (s *PostgresStore) PersistEventWithDeliveriesAndScopeOutcome(
 	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	caps, err := s.schemaCapabilities(ctx)
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
+	var err error
+	evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, chooseRowQueryer(s.DB, nil), evt))
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, caps, chooseRowQueryer(s.DB, nil), evt))
-	if err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	switch {
-	case caps.Events.Log == SchemaFlavorCanonical && caps.Events.Deliveries == SchemaFlavorCanonical:
-		return s.persistEventWithDeliveriesAndScopeSpec(ctx, caps, evt, agentIDs, scope)
-	case caps.Events.Log != SchemaFlavorCanonical:
-		return runtimebus.EventAppendOutcomeUnknown, unsupportedSchemaCapability("events", caps.Events.Log)
-	case caps.Events.Deliveries != SchemaFlavorCanonical:
-		return runtimebus.EventAppendOutcomeUnknown, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	}
-	return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("unsupported event delivery/scope persistence capability combination")
+	return s.persistEventWithDeliveriesAndScopeSpec(ctx, evt, agentIDs, scope)
 }
 
 func (s *PostgresStore) PersistEventWithDeliveryRoutesAndScope(
@@ -314,23 +292,15 @@ func (s *PostgresStore) PersistEventWithDeliveryRoutesAndScopeOutcome(
 	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	caps, err := s.schemaCapabilities(ctx)
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
+	var err error
+	evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, chooseRowQueryer(s.DB, nil), evt))
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, caps, chooseRowQueryer(s.DB, nil), evt))
-	if err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	switch {
-	case caps.Events.Log == SchemaFlavorCanonical && caps.Events.Deliveries == SchemaFlavorCanonical:
-		return s.persistEventWithDeliveryRoutesAndScopeSpec(ctx, caps, evt, agentIDs, deliveryTargets, scope)
-	case caps.Events.Log != SchemaFlavorCanonical:
-		return runtimebus.EventAppendOutcomeUnknown, unsupportedSchemaCapability("events", caps.Events.Log)
-	case caps.Events.Deliveries != SchemaFlavorCanonical:
-		return runtimebus.EventAppendOutcomeUnknown, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	}
-	return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("unsupported event route persistence capability combination")
+	return s.persistEventWithDeliveryRoutesAndScopeSpec(ctx, evt, agentIDs, deliveryTargets, scope)
 }
 
 func (s *PostgresStore) PersistEventWithDeliveryRouteSetAndScope(
@@ -352,26 +322,18 @@ func (s *PostgresStore) PersistEventWithDeliveryRouteSetAndScopeOutcome(
 	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	caps, err := s.schemaCapabilities(ctx)
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
+	var err error
+	evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, chooseRowQueryer(s.DB, nil), evt))
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, caps, chooseRowQueryer(s.DB, nil), evt))
-	if err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	switch {
-	case caps.Events.Log == SchemaFlavorCanonical && caps.Events.Deliveries == SchemaFlavorCanonical:
-		return s.persistEventWithDeliveryRouteSetAndScopeSpec(ctx, caps, evt, deliveryRoutes, scope)
-	case caps.Events.Log != SchemaFlavorCanonical:
-		return runtimebus.EventAppendOutcomeUnknown, unsupportedSchemaCapability("events", caps.Events.Log)
-	case caps.Events.Deliveries != SchemaFlavorCanonical:
-		return runtimebus.EventAppendOutcomeUnknown, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	}
-	return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("unsupported event route-set persistence capability combination")
+	return s.persistEventWithDeliveryRouteSetAndScopeSpec(ctx, evt, deliveryRoutes, scope)
 }
 
-func (s *PostgresStore) eventPersistenceAdmissionOptions(ctx context.Context, caps StoreSchemaCapabilities, q rowQueryer, evt events.Event) events.AdmissionOptions {
+func (s *PostgresStore) eventPersistenceAdmissionOptions(ctx context.Context, q rowQueryer, evt events.Event) events.AdmissionOptions {
 	runID := strings.TrimSpace(evt.RunID())
 	if runID == "" {
 		if lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx); ok {
@@ -392,7 +354,7 @@ func (s *PostgresStore) eventPersistenceAdmissionOptions(ctx context.Context, ca
 		}
 	}
 	if runID == "" && parentID != "" {
-		if foundRunID := lookupEventRunID(ctx, caps, q, parentID); foundRunID != "" {
+		if foundRunID := lookupEventRunID(ctx, q, parentID); foundRunID != "" {
 			runID = foundRunID
 		}
 	}
@@ -456,19 +418,7 @@ func (s *PostgresStore) InsertEventDeliveriesTx(ctx context.Context, tx *sql.Tx,
 	if err := requireActiveRunForEvent(ctx, tx, eventID, storerunlifecycle.DialectPostgres); err != nil {
 		return err
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	switch {
-	case caps.Events.Deliveries == SchemaFlavorCanonical && caps.Events.Log == SchemaFlavorCanonical:
-		return s.insertEventDeliveriesSpec(ctx, caps, tx, eventID, agentIDs)
-	case caps.Events.Deliveries != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	case caps.Events.Log != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("events", caps.Events.Log)
-	}
-	return nil
+	return s.insertEventDeliveriesSpec(ctx, tx, eventID, agentIDs)
 }
 
 func (s *PostgresStore) UpsertCommittedReplayScope(
@@ -493,19 +443,7 @@ func (s *PostgresStore) UpsertCommittedReplayScopeTx(
 	if err := requireActiveRunForEvent(ctx, tx, eventID, storerunlifecycle.DialectPostgres); err != nil {
 		return err
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	switch {
-	case caps.Events.Deliveries == SchemaFlavorCanonical && caps.Events.Log == SchemaFlavorCanonical:
-		return s.upsertCommittedReplayScopeSpec(ctx, caps, tx, eventID, scope)
-	case caps.Events.Deliveries != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	case caps.Events.Log != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("events", caps.Events.Log)
-	}
-	return nil
+	return s.upsertCommittedReplayScopeSpec(ctx, tx, eventID, scope)
 }
 
 func (s *PostgresStore) UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
@@ -517,15 +455,11 @@ func (s *PostgresStore) HasProcessedPipelineReceipt(ctx context.Context, eventID
 	if eventID == "" {
 		return false, nil
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return false, err
 	}
-	if caps.Events.Receipts != SchemaFlavorCanonical {
-		return false, unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
-	}
 	var processed bool
-	err = eventReadQueryerFromContext(ctx, s.DB).QueryRowContext(ctx, `
+	err := eventReadQueryerFromContext(ctx, s.DB).QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM event_receipts
 			WHERE event_id = $1::uuid
@@ -547,14 +481,8 @@ func (s *PostgresStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx,
 			return s.UpsertPipelineReceiptTx(txctx, tx, eventID, status, failure)
 		})
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := requireActiveRunForPipelineReceipt(ctx, tx, eventID, storerunlifecycle.DialectPostgres); err != nil {
 		return err
-	}
-	if caps.Events.LogRunID {
-		if err := requireActiveRunForPipelineReceipt(ctx, tx, eventID, storerunlifecycle.DialectPostgres); err != nil {
-			return err
-		}
 	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
@@ -567,18 +495,11 @@ func (s *PostgresStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx,
 	if failure != nil && status == "processed" {
 		status = "error"
 	}
-	if caps.Events.Receipts != SchemaFlavorCanonical || caps.Events.Log != SchemaFlavorCanonical {
-		if caps.Events.Receipts != SchemaFlavorCanonical {
-			return unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
-		}
-		return unsupportedSchemaCapability("events", caps.Events.Log)
-	}
 	return s.upsertPipelineReceiptSpec(ctx, tx, eventID, status, failure)
 }
 
 func (s *PostgresStore) ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
 	if limit <= 0 {
@@ -587,18 +508,11 @@ func (s *PostgresStore) ListEventsMissingPipelineReceipt(ctx context.Context, si
 	if since.IsZero() {
 		since = time.Now().Add(-24 * time.Hour)
 	}
-	if caps.Events.Receipts != SchemaFlavorCanonical || caps.Events.Log != SchemaFlavorCanonical {
-		if caps.Events.Receipts != SchemaFlavorCanonical {
-			return nil, unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
-		}
-		return nil, unsupportedSchemaCapability("events", caps.Events.Log)
-	}
-	return s.listEventsMissingPipelineReceiptSpec(ctx, caps, since, limit)
+	return s.listEventsMissingPipelineReceiptSpec(ctx, since, limit)
 }
 
 func (s *PostgresStore) ListEventsMissingPipelineReceiptForRun(ctx context.Context, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
 	runID = nullUUIDString(runID)
@@ -611,21 +525,11 @@ func (s *PostgresStore) ListEventsMissingPipelineReceiptForRun(ctx context.Conte
 	if since.IsZero() {
 		since = time.Now().Add(-24 * time.Hour)
 	}
-	if caps.Events.Receipts != SchemaFlavorCanonical || caps.Events.Log != SchemaFlavorCanonical {
-		if caps.Events.Receipts != SchemaFlavorCanonical {
-			return nil, unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
-		}
-		return nil, unsupportedSchemaCapability("events", caps.Events.Log)
-	}
-	if !caps.Events.LogRunID {
-		return nil, fmt.Errorf("list missing pipeline receipts by run requires canonical events.run_id")
-	}
-	return s.listEventsMissingPipelineReceiptForRunSpec(ctx, caps, runID, since, limit)
+	return s.listEventsMissingPipelineReceiptForRunSpec(ctx, runID, since, limit)
 }
 
 func (s *PostgresStore) ListEventsWithPendingDeliveriesForRun(ctx context.Context, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
 	runID = nullUUIDString(runID)
@@ -638,32 +542,16 @@ func (s *PostgresStore) ListEventsWithPendingDeliveriesForRun(ctx context.Contex
 	if since.IsZero() {
 		since = time.Now().Add(-24 * time.Hour)
 	}
-	if caps.Events.Deliveries != SchemaFlavorCanonical || caps.Events.Log != SchemaFlavorCanonical {
-		if caps.Events.Deliveries != SchemaFlavorCanonical {
-			return nil, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-		}
-		return nil, unsupportedSchemaCapability("events", caps.Events.Log)
-	}
-	if !caps.Events.LogRunID {
-		return nil, fmt.Errorf("list pending run deliveries requires canonical events.run_id")
-	}
-	return s.listEventsWithPendingDeliveriesForRunSpec(ctx, caps, runID, since, limit)
+	return s.listEventsWithPendingDeliveriesForRunSpec(ctx, runID, since, limit)
 }
 
 func (s *PostgresStore) ClaimPipelineReplay(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, false, err
 	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return nil, false, fmt.Errorf("event_id is required")
-	}
-	if caps.Events.Receipts != SchemaFlavorCanonical || caps.Events.Log != SchemaFlavorCanonical {
-		if caps.Events.Receipts != SchemaFlavorCanonical {
-			return nil, false, unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
-		}
-		return nil, false, unsupportedSchemaCapability("events", caps.Events.Log)
 	}
 	lease, claimed, err := acquireAdvisoryLockLease(ctx, s.DB, replayClaimLockKey(eventID))
 	if err != nil || !claimed {
@@ -683,22 +571,6 @@ func (s *PostgresStore) ClaimPipelineReplay(ctx context.Context, eventID string)
 			  AND r.event_id IS NULL
 		)
 	`
-	if !caps.Events.LogRunID {
-		// The recovery capability probe must still claim the old row so it can
-		// quarantine it with the canonical missing-run-identity failure.
-		pendingQuery = `
-			SELECT EXISTS (
-				SELECT 1
-				FROM events e
-				LEFT JOIN event_receipts r
-					ON r.event_id = e.event_id
-					AND r.subscriber_type = 'platform'
-					AND r.subscriber_id = 'pipeline'
-				WHERE e.event_id = $1::uuid
-				  AND r.event_id IS NULL
-			)
-		`
-	}
 	var pending bool
 	err = lease.conn.QueryRowContext(ctx, pendingQuery, eventID).Scan(&pending)
 	if err != nil {
@@ -743,8 +615,7 @@ func (s *PostgresStore) ClaimPipelineSettlement(ctx context.Context, eventID str
 }
 
 func (s *PostgresStore) EventExists(ctx context.Context, eventID string) (bool, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return false, err
 	}
 	eventID = strings.TrimSpace(eventID)
@@ -753,11 +624,6 @@ func (s *PostgresStore) EventExists(ctx context.Context, eventID string) (bool, 
 	}
 	var exists bool
 	query := `SELECT EXISTS(SELECT 1 FROM events WHERE event_id = $1::uuid)`
-	switch caps.Events.Log {
-	case SchemaFlavorCanonical:
-	default:
-		return false, unsupportedSchemaCapability("events", caps.Events.Log)
-	}
 	if err := eventReadQueryerFromContext(ctx, s.DB).QueryRowContext(ctx, query, eventID).Scan(&exists); err != nil {
 		return false, fmt.Errorf("event exists lookup: %w", err)
 	}
@@ -765,8 +631,7 @@ func (s *PostgresStore) EventExists(ctx context.Context, eventID string) (bool, 
 }
 
 func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
 	eventID = strings.TrimSpace(eventID)
@@ -780,11 +645,6 @@ func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID
 		  AND subscriber_type = 'agent'
 		ORDER BY subscriber_id ASC
 	`
-	switch caps.Events.Deliveries {
-	case SchemaFlavorCanonical:
-	default:
-		return nil, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	}
 	rows, err := eventReadQueryerFromContext(ctx, s.DB).QueryContext(ctx, query, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("list event delivery recipients: %w", err)
@@ -809,18 +669,11 @@ func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID
 }
 
 func (s *PostgresStore) ListEventDeliveryTargets(ctx context.Context, eventID string) (map[string]events.RouteIdentity, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
-		return nil, nil
-	}
-	if caps.Events.Deliveries != SchemaFlavorCanonical {
-		return nil, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	}
-	if !caps.Events.DeliveryTargetRoute {
 		return nil, nil
 	}
 	rows, err := eventReadQueryerFromContext(ctx, s.DB).QueryContext(ctx, `
@@ -857,19 +710,12 @@ func (s *PostgresStore) ListEventDeliveryTargets(ctx context.Context, eventID st
 }
 
 func (s *PostgresStore) ListEventDeliveryRoutes(ctx context.Context, eventID string) ([]events.DeliveryRoute, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return nil, nil
-	}
-	if caps.Events.Deliveries != SchemaFlavorCanonical {
-		return nil, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	}
-	if !caps.Events.DeliveryTargetRoute || !caps.Events.DeliveryContext || !caps.Events.DeliveryPayloadProjection {
-		return nil, fmt.Errorf("event_deliveries requires delivery_target_route, delivery_context, and delivery_payload_projection")
 	}
 	rows, err := eventReadQueryerFromContext(ctx, s.DB).QueryContext(ctx, `
 		SELECT subscriber_type, subscriber_id,
@@ -914,21 +760,15 @@ func (s *PostgresStore) LoadCommittedReplayScope(
 	ctx context.Context,
 	eventID string,
 ) (runtimereplayclaim.CommittedReplayScope, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return "", err
 	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return "", runtimereplayclaim.ErrMissingCommittedReplayScope
 	}
-	switch caps.Events.Deliveries {
-	case SchemaFlavorCanonical:
-	default:
-		return "", unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	}
 	var reasonCode string
-	err = eventReadQueryerFromContext(ctx, s.DB).QueryRowContext(ctx, `
+	err := eventReadQueryerFromContext(ctx, s.DB).QueryRowContext(ctx, `
 		SELECT COALESCE(reason_code, '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
@@ -950,16 +790,13 @@ func (s *PostgresStore) LoadCommittedReplayScope(
 	return scope, nil
 }
 
-func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, evt events.Event) (runtimebus.EventAppendOutcome, error) {
+func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, evt events.Event) (runtimebus.EventAppendOutcome, error) {
 	if err := runtimeauthoractivity.Require(ctx); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	wantIdentity := eventStorageEnvelope(evt)
 	if err := s.validateEventPayload(ctx, wantIdentity.EventName, wantIdentity.Payload); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	if !caps.Events.LogRunID || !caps.Events.LogTaskID || !caps.Events.LogRouteIdentity {
-		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("canonical events run_id/task_id/route columns are required")
 	}
 	queryer := chooseRowQueryer(s.DB, tx)
 	existingIdentity, found, err := loadPostgresEventIdentity(ctx, queryer, wantIdentity.EventID)
@@ -981,9 +818,9 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 	}
 	var ensureErr error
 	if evt.AdmissionClass() == events.EventAdmissionDiagnosticDirect && evt.Type() == events.EventTypePlatformRuntimeLog {
-		ensureErr = s.ensureRuntimeLogRunRow(ctx, caps, tx, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName)
+		ensureErr = s.ensureRuntimeLogRunRow(ctx, tx, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName)
 	} else {
-		ensureErr = s.ensureRunRow(ctx, caps, tx, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName)
+		ensureErr = s.ensureRunRow(ctx, tx, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName)
 	}
 	if ensureErr != nil {
 		if errors.Is(ensureErr, storerunlifecycle.ErrRunNotActive) {
@@ -1037,12 +874,8 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 		}
 		return runtimebus.EventAppendExactDuplicate, nil
 	}
-	if caps.Events.LogRunID {
-		if caps.Events.RunCounterColumns && runLifecycleEntityStateCountSource(caps) {
-			if err := storerunlifecycle.SyncCounts(ctx, chooseExecQueryer(s.DB, tx), wantIdentity.RunID); err != nil {
-				return runtimebus.EventAppendOutcomeUnknown, err
-			}
-		}
+	if err := storerunlifecycle.SyncCounts(ctx, chooseExecQueryer(s.DB, tx), wantIdentity.RunID); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	if err := recordPersistedEventAuthorActivity(ctx, s, evt, wantIdentity.ProducedBy, wantIdentity.ProducedByType); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
@@ -1050,61 +883,57 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 	return runtimebus.EventAppendInserted, nil
 }
 
-func (s *PostgresStore) persistEventWithDeliveriesSpec(ctx context.Context, caps StoreSchemaCapabilities, evt events.Event, agentIDs []string) (runtimebus.EventAppendOutcome, error) {
-	return s.persistEventAtomicSpec(ctx, caps, evt, func(txctx context.Context, tx *sql.Tx) error {
-		return s.insertEventDeliveriesSpec(txctx, caps, tx, evt.ID(), agentIDs)
+func (s *PostgresStore) persistEventWithDeliveriesSpec(ctx context.Context, evt events.Event, agentIDs []string) (runtimebus.EventAppendOutcome, error) {
+	return s.persistEventAtomicSpec(ctx, evt, func(txctx context.Context, tx *sql.Tx) error {
+		return s.insertEventDeliveriesSpec(txctx, tx, evt.ID(), agentIDs)
 	})
 }
 
 func (s *PostgresStore) persistEventWithDeliveriesAndScopeSpec(
 	ctx context.Context,
-	caps StoreSchemaCapabilities,
 	evt events.Event,
 	agentIDs []string,
 	scope runtimereplayclaim.CommittedReplayScope,
 ) (runtimebus.EventAppendOutcome, error) {
-	return s.persistEventAtomicSpec(ctx, caps, evt, func(txctx context.Context, tx *sql.Tx) error {
-		if err := s.insertEventDeliveriesSpec(txctx, caps, tx, evt.ID(), agentIDs); err != nil {
+	return s.persistEventAtomicSpec(ctx, evt, func(txctx context.Context, tx *sql.Tx) error {
+		if err := s.insertEventDeliveriesSpec(txctx, tx, evt.ID(), agentIDs); err != nil {
 			return err
 		}
-		return s.upsertCommittedReplayScopeSpec(txctx, caps, tx, evt.ID(), scope)
+		return s.upsertCommittedReplayScopeSpec(txctx, tx, evt.ID(), scope)
 	})
 }
 
 func (s *PostgresStore) persistEventWithDeliveryRoutesAndScopeSpec(
 	ctx context.Context,
-	caps StoreSchemaCapabilities,
 	evt events.Event,
 	agentIDs []string,
 	deliveryTargets map[string]events.RouteIdentity,
 	scope runtimereplayclaim.CommittedReplayScope,
 ) (runtimebus.EventAppendOutcome, error) {
-	return s.persistEventAtomicSpec(ctx, caps, evt, func(txctx context.Context, tx *sql.Tx) error {
-		if err := s.insertEventDeliveriesWithTargetsSpec(txctx, caps, tx, evt.ID(), agentIDs, deliveryTargets); err != nil {
+	return s.persistEventAtomicSpec(ctx, evt, func(txctx context.Context, tx *sql.Tx) error {
+		if err := s.insertEventDeliveriesWithTargetsSpec(txctx, tx, evt.ID(), agentIDs, deliveryTargets); err != nil {
 			return err
 		}
-		return s.upsertCommittedReplayScopeSpec(txctx, caps, tx, evt.ID(), scope)
+		return s.upsertCommittedReplayScopeSpec(txctx, tx, evt.ID(), scope)
 	})
 }
 
 func (s *PostgresStore) persistEventWithDeliveryRouteSetAndScopeSpec(
 	ctx context.Context,
-	caps StoreSchemaCapabilities,
 	evt events.Event,
 	deliveryRoutes []events.DeliveryRoute,
 	scope runtimereplayclaim.CommittedReplayScope,
 ) (runtimebus.EventAppendOutcome, error) {
-	return s.persistEventAtomicSpec(ctx, caps, evt, func(txctx context.Context, tx *sql.Tx) error {
-		if err := s.insertEventDeliveryRoutesSpec(txctx, caps, tx, evt.ID(), deliveryRoutes); err != nil {
+	return s.persistEventAtomicSpec(ctx, evt, func(txctx context.Context, tx *sql.Tx) error {
+		if err := s.insertEventDeliveryRoutesSpec(txctx, tx, evt.ID(), deliveryRoutes); err != nil {
 			return err
 		}
-		return s.upsertCommittedReplayScopeSpec(txctx, caps, tx, evt.ID(), scope)
+		return s.upsertCommittedReplayScopeSpec(txctx, tx, evt.ID(), scope)
 	})
 }
 
 func (s *PostgresStore) persistEventAtomicSpec(
 	ctx context.Context,
-	caps StoreSchemaCapabilities,
 	evt events.Event,
 	persistSideEffects func(context.Context, *sql.Tx) error,
 ) (runtimebus.EventAppendOutcome, error) {
@@ -1112,7 +941,7 @@ func (s *PostgresStore) persistEventAtomicSpec(
 	err := withEventStoreRetry(ctx, nil, func() error {
 		outcome = runtimebus.EventAppendOutcomeUnknown
 		return s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			appendOutcome, err := s.appendEventSpec(txctx, caps, tx, evt)
+			appendOutcome, err := s.appendEventSpec(txctx, tx, evt)
 			if err != nil {
 				return err
 			}
@@ -1173,8 +1002,8 @@ func isTransientEventStoreConnectionError(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "bad connection")
 }
 
-func (s *PostgresStore) insertEventDeliveriesSpec(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, eventID string, agentIDs []string) error {
-	return s.insertEventDeliveriesWithTargetsSpec(ctx, caps, tx, eventID, agentIDs, nil)
+func (s *PostgresStore) insertEventDeliveriesSpec(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string) error {
+	return s.insertEventDeliveriesWithTargetsSpec(ctx, tx, eventID, agentIDs, nil)
 }
 
 func (s *PostgresStore) InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error {
@@ -1187,16 +1016,7 @@ func (s *PostgresStore) InsertEventDeliveriesWithTargetsTx(ctx context.Context, 
 	if tx == nil {
 		return s.InsertEventDeliveriesWithTargets(ctx, eventID, agentIDs, deliveryTargets)
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	switch caps.Events.Deliveries {
-	case SchemaFlavorCanonical:
-		return s.insertEventDeliveriesWithTargetsSpec(ctx, caps, tx, eventID, agentIDs, deliveryTargets)
-	default:
-		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	}
+	return s.insertEventDeliveriesWithTargetsSpec(ctx, tx, eventID, agentIDs, deliveryTargets)
 }
 
 func (s *PostgresStore) InsertEventDeliveryRoutes(ctx context.Context, eventID string, deliveryRoutes []events.DeliveryRoute) error {
@@ -1212,19 +1032,10 @@ func (s *PostgresStore) InsertEventDeliveryRoutesTx(ctx context.Context, tx *sql
 	if err := requireActiveRunForEvent(ctx, tx, eventID, storerunlifecycle.DialectPostgres); err != nil {
 		return err
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	switch caps.Events.Deliveries {
-	case SchemaFlavorCanonical:
-		return s.insertEventDeliveryRoutesSpec(ctx, caps, tx, eventID, deliveryRoutes)
-	default:
-		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	}
+	return s.insertEventDeliveryRoutesSpec(ctx, tx, eventID, deliveryRoutes)
 }
 
-func (s *PostgresStore) insertEventDeliveryRoutesSpec(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, eventID string, deliveryRoutes []events.DeliveryRoute) error {
+func (s *PostgresStore) insertEventDeliveryRoutesSpec(ctx context.Context, tx *sql.Tx, eventID string, deliveryRoutes []events.DeliveryRoute) error {
 	if err := events.ValidateDeliveryRouteProjections(deliveryRoutes); err != nil {
 		return err
 	}
@@ -1236,19 +1047,7 @@ func (s *PostgresStore) insertEventDeliveryRoutesSpec(ctx context.Context, caps 
 	if tx != nil {
 		execFn = tx.ExecContext
 	}
-	if !caps.Events.DeliveryTargetRoute || !caps.Events.DeliveryContext || !caps.Events.DeliveryPayloadProjection {
-		return fmt.Errorf("event_deliveries requires delivery_target_route, delivery_context, and delivery_payload_projection")
-	}
 	q := `
-		INSERT INTO event_deliveries (
-			event_id, subscriber_type, subscriber_id, reason_code,
-			delivery_target_route, delivery_context, delivery_payload_projection, created_at
-		)
-		VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, now())
-		ON CONFLICT DO NOTHING
-	`
-	if caps.Events.DeliveryRunID {
-		q = `
 			INSERT INTO event_deliveries (
 				run_id, event_id, subscriber_type, subscriber_id, reason_code,
 				delivery_target_route, delivery_context, delivery_payload_projection, created_at
@@ -1258,7 +1057,6 @@ func (s *PostgresStore) insertEventDeliveryRoutesSpec(ctx context.Context, caps 
 			WHERE e.event_id = $1::uuid
 			ON CONFLICT DO NOTHING
 		`
-	}
 	for _, route := range deliveryRoutes {
 		route = route.Normalized()
 		if route.SubscriberType == "" || route.SubscriberID == "" {
@@ -1336,42 +1134,18 @@ func deliveryRouteReasonCode(route events.DeliveryRoute) string {
 	}
 }
 
-func (s *PostgresStore) insertEventDeliveriesWithTargetsSpec(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error {
+func (s *PostgresStore) insertEventDeliveriesWithTargetsSpec(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error {
 	execFn := s.DB.ExecContext
 	if tx != nil {
 		execFn = tx.ExecContext
 	}
 	q := `
-		INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, reason_code, created_at)
-		VALUES ($1::uuid, 'agent', $2, 'matched_agent_subscription', now())
-		ON CONFLICT DO NOTHING
-	`
-	withTarget := caps.Events.DeliveryTargetRoute
-	if withTarget {
-		q = `
-			INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, reason_code, delivery_target_route, created_at)
-			VALUES ($1::uuid, 'agent', $2, 'matched_agent_subscription', $3::jsonb, now())
-			ON CONFLICT DO NOTHING
-		`
-	}
-	if caps.Events.DeliveryRunID {
-		q = `
-			INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, reason_code, created_at)
-			SELECT e.run_id, e.event_id, 'agent', $2, 'matched_agent_subscription', now()
-			FROM events e
-			WHERE e.event_id = $1::uuid
-			ON CONFLICT DO NOTHING
-		`
-		if withTarget {
-			q = `
 				INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, reason_code, delivery_target_route, created_at)
 				SELECT e.run_id, e.event_id, 'agent', $2, 'matched_agent_subscription', $3::jsonb, now()
 				FROM events e
 				WHERE e.event_id = $1::uuid
 				ON CONFLICT DO NOTHING
 			`
-		}
-	}
 	seen := make(map[string]struct{}, len(agentIDs))
 	for _, agentID := range agentIDs {
 		agentID = strings.TrimSpace(agentID)
@@ -1383,11 +1157,7 @@ func (s *PostgresStore) insertEventDeliveriesWithTargetsSpec(ctx context.Context
 		}
 		seen[agentID] = struct{}{}
 		args := []any{eventID, agentID}
-		if withTarget {
-			args = append(args, string(routeIdentityJSON(deliveryTargets[agentID])))
-		} else if target := deliveryTargets[agentID]; !target.Empty() {
-			return fmt.Errorf("event_deliveries.delivery_target_route required for target-routed delivery")
-		}
+		args = append(args, string(routeIdentityJSON(deliveryTargets[agentID])))
 		if _, err := execFn(ctx, q, args...); err != nil {
 			return fmt.Errorf("insert event delivery (agent=%s): %w", agentID, err)
 		}
@@ -1397,7 +1167,6 @@ func (s *PostgresStore) insertEventDeliveriesWithTargetsSpec(ctx context.Context
 
 func (s *PostgresStore) upsertCommittedReplayScopeSpec(
 	ctx context.Context,
-	caps StoreSchemaCapabilities,
 	tx *sql.Tx,
 	eventID string,
 	scope runtimereplayclaim.CommittedReplayScope,
@@ -1434,13 +1203,6 @@ func (s *PostgresStore) upsertCommittedReplayScopeSpec(
 		return nil
 	}
 	q := `
-		INSERT INTO event_deliveries (
-			event_id, subscriber_type, subscriber_id, status, reason_code, delivered_at, created_at
-		)
-		VALUES ($1::uuid, $2, $3, 'delivered', $4, now(), now())
-	`
-	if caps.Events.DeliveryRunID {
-		q = `
 			INSERT INTO event_deliveries (
 				run_id, event_id, subscriber_type, subscriber_id, status, reason_code, delivered_at, created_at
 			)
@@ -1449,7 +1211,6 @@ func (s *PostgresStore) upsertCommittedReplayScopeSpec(
 			FROM events e
 			WHERE e.event_id = $1::uuid
 		`
-	}
 	if _, err := execFn(ctx, q, eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, reasonCode); err != nil {
 		return fmt.Errorf("insert committed replay scope: %w", err)
 	}
@@ -1526,19 +1287,11 @@ func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.T
 	return nil
 }
 
-func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context, caps StoreSchemaCapabilities, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
+func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
 	runIDExpr := `COALESCE(e.run_id::text, '')`
 	runJoin := `LEFT JOIN runs run ON run.run_id = e.run_id`
 	runAdmission := `AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))`
-	if !caps.Events.LogRunID {
-		runIDExpr = `''`
-		runJoin = ``
-		runAdmission = ``
-	}
-	routeSelect := ` '{}'::jsonb, '{}'::jsonb, '[]'::jsonb`
-	if caps.Events.LogRouteIdentity {
-		routeSelect = `COALESCE(e.source_route, '{}'::jsonb), COALESCE(e.target_route, '{}'::jsonb), COALESCE(e.target_set, '[]'::jsonb)`
-	}
+	routeSelect := `COALESCE(e.source_route, '{}'::jsonb), COALESCE(e.target_route, '{}'::jsonb), COALESCE(e.target_set, '[]'::jsonb)`
 	exclusionArgs := diagnosticDirectReplayEventArgs()
 	limitPlaceholder := 2 + len(exclusionArgs)
 	args := append([]any{since}, exclusionArgs...)
@@ -1601,9 +1354,7 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 			return nil, err
 		}
 		record := events.PersistedReplayEvent{Event: evt}
-		if !caps.Events.LogRunID {
-			record.ReplayFailure = replayAdmissionFailure("missing_run_id_schema_capability")
-		} else if strings.TrimSpace(evt.RunID()) == "" {
+		if strings.TrimSpace(evt.RunID()) == "" {
 			record.ReplayFailure = replayAdmissionFailure("missing_canonical_run_id")
 		}
 		out = append(out, record)
@@ -1614,11 +1365,8 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 	return out, nil
 }
 
-func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.Context, caps StoreSchemaCapabilities, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
-	routeSelect := ` '{}'::jsonb, '{}'::jsonb, '[]'::jsonb`
-	if caps.Events.LogRouteIdentity {
-		routeSelect = `COALESCE(e.source_route, '{}'::jsonb), COALESCE(e.target_route, '{}'::jsonb), COALESCE(e.target_set, '[]'::jsonb)`
-	}
+func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.Context, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
+	routeSelect := `COALESCE(e.source_route, '{}'::jsonb), COALESCE(e.target_route, '{}'::jsonb), COALESCE(e.target_set, '[]'::jsonb)`
 	exclusionArgs := diagnosticDirectReplayEventArgs()
 	limitPlaceholder := 3 + len(exclusionArgs)
 	args := append([]any{runID, since}, exclusionArgs...)
@@ -1693,11 +1441,8 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 	return out, nil
 }
 
-func (s *PostgresStore) listEventsWithPendingDeliveriesForRunSpec(ctx context.Context, caps StoreSchemaCapabilities, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
-	routeSelect := ` '{}'::jsonb, '{}'::jsonb, '[]'::jsonb`
-	if caps.Events.LogRouteIdentity {
-		routeSelect = `COALESCE(e.source_route, '{}'::jsonb), COALESCE(e.target_route, '{}'::jsonb), COALESCE(e.target_set, '[]'::jsonb)`
-	}
+func (s *PostgresStore) listEventsWithPendingDeliveriesForRunSpec(ctx context.Context, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
+	routeSelect := `COALESCE(e.source_route, '{}'::jsonb), COALESCE(e.target_route, '{}'::jsonb), COALESCE(e.target_set, '[]'::jsonb)`
 	exclusionArgs := diagnosticDirectReplayEventArgs()
 	limitPlaceholder := 3 + len(exclusionArgs)
 	args := append([]any{runID, since}, exclusionArgs...)
@@ -1784,9 +1529,9 @@ func chooseExecQueryer(db *sql.DB, tx *sql.Tx) execQueryer {
 	return db
 }
 
-func lookupEventRunID(ctx context.Context, caps StoreSchemaCapabilities, q rowQueryer, eventID string) string {
+func lookupEventRunID(ctx context.Context, q rowQueryer, eventID string) string {
 	eventID = strings.TrimSpace(eventID)
-	if q == nil || eventID == "" || caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogRunID {
+	if q == nil || eventID == "" {
 		return ""
 	}
 	var runID string
@@ -1801,12 +1546,12 @@ func lookupEventRunID(ctx context.Context, caps StoreSchemaCapabilities, q rowQu
 	return strings.TrimSpace(runID)
 }
 
-func (s *PostgresStore) ensureRunRow(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, runID, triggerEventID, triggerEventType string) error {
+func (s *PostgresStore) ensureRunRow(ctx context.Context, tx *sql.Tx, runID, triggerEventID, triggerEventType string) error {
 	runID = nullUUIDString(runID)
-	if runID == "" || !caps.Events.HasRuns {
+	if runID == "" {
 		return nil
 	}
-	opts := runLifecycleOptions(caps)
+	opts := runLifecycleOptions()
 	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
 		opts.BundleHash = fact.BundleHash
 		opts.BundleSource = fact.BundleSource
@@ -1818,9 +1563,9 @@ func (s *PostgresStore) ensureRunRow(ctx context.Context, caps StoreSchemaCapabi
 	return storerunlifecycle.EnsureActive(ctx, chooseExecQueryer(s.DB, tx), runID, triggerEventID, triggerEventType, opts)
 }
 
-func (s *PostgresStore) ensureRuntimeLogRunRow(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, runID, triggerEventID, triggerEventType string) error {
+func (s *PostgresStore) ensureRuntimeLogRunRow(ctx context.Context, tx *sql.Tx, runID, triggerEventID, triggerEventType string) error {
 	runID = nullUUIDString(runID)
-	if runID == "" || !caps.Events.HasRuns {
+	if runID == "" {
 		return nil
 	}
 	return storerunlifecycle.RequirePresent(ctx, chooseExecQueryer(s.DB, tx), runID)
@@ -1831,11 +1576,10 @@ func canonicalRunTerminalStatus(raw string) (string, error) {
 }
 
 func (s *PostgresStore) LoadRunLifecycleSnapshot(ctx context.Context, runID string) (runtimebus.RunLifecycleSnapshot, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err
 	}
-	snap, err := storerunlifecycle.LoadSnapshot(ctx, s.DB, nullUUIDString(runID), runLifecycleOptions(caps))
+	snap, err := storerunlifecycle.LoadSnapshot(ctx, s.DB, nullUUIDString(runID), runLifecycleOptions())
 	if err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err
 	}
@@ -1851,20 +1595,14 @@ func (s *PostgresStore) LoadRunLifecycleSnapshot(ctx context.Context, runID stri
 }
 
 func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status string, failure *runtimefailures.Envelope, endedAt time.Time) (runtimebus.RunLifecycleSnapshot, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err
 	}
 	runID = nullUUIDString(runID)
 	if runID == "" {
 		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run_id is required")
 	}
-	if !caps.Events.HasRuns {
-		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("runs table is required")
-	}
-	if !caps.Events.RunTerminalFields {
-		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run terminal persistence requires canonical runs.failure and ended_at")
-	}
+	var err error
 	status, err = canonicalRunTerminalStatus(status)
 	if err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err
@@ -1878,7 +1616,7 @@ func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status strin
 	var snap storerunlifecycle.Snapshot
 	err = s.runAuthorActivityMutation(ctx, "postgres mark run terminal", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		snap, err = storerunlifecycle.MarkTerminal(txctx, tx, runID, status, failure, endedAt, runLifecycleOptions(caps))
+		snap, err = storerunlifecycle.MarkTerminal(txctx, tx, runID, status, failure, endedAt, runLifecycleOptions())
 		if err != nil {
 			return err
 		}
@@ -1899,31 +1637,26 @@ func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status strin
 }
 
 func (s *PostgresStore) ConvergeStandaloneRuntimePlatformRun(ctx context.Context, evt events.Event) error {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
 	return s.runAuthorActivityMutation(ctx, "postgres standalone platform run convergence", func(txctx context.Context, tx *sql.Tx) error {
-		return s.convergeStandaloneRuntimePlatformRunByEventID(txctx, tx, caps, strings.TrimSpace(evt.ID()))
+		return s.convergeStandaloneRuntimePlatformRunByEventID(txctx, tx, strings.TrimSpace(evt.ID()))
 	})
 }
 
-func runLifecycleOptions(caps StoreSchemaCapabilities) storerunlifecycle.EnsureActiveOptions {
+func runLifecycleOptions() storerunlifecycle.EnsureActiveOptions {
 	return storerunlifecycle.EnsureActiveOptions{
-		HasStartedAtCol:         caps.Events.RunStartedAt,
-		HasTriggerCols:          caps.Events.RunTriggerColumns,
-		HasCounterCols:          caps.Events.RunCounterColumns,
-		HasEntityStateCountSrc:  runLifecycleEntityStateCountSource(caps),
+		HasStartedAtCol:         true,
+		HasTriggerCols:          true,
+		HasCounterCols:          true,
+		HasEntityStateCountSrc:  true,
 		RequireEntityStateCount: true,
-		HasTerminalCols:         caps.Events.RunTerminalFields,
-		HasBundleHashCol:        caps.Events.RunBundleHash,
-		HasBundleSourceCol:      caps.Events.RunBundleSource,
-		HasBundleFingerprintCol: caps.Events.RunBundleFingerprint,
+		HasTerminalCols:         true,
+		HasBundleHashCol:        true,
+		HasBundleSourceCol:      true,
+		HasBundleFingerprintCol: true,
 	}
-}
-
-func runLifecycleEntityStateCountSource(caps StoreSchemaCapabilities) bool {
-	return caps.EntityState == SchemaFlavorCanonical && caps.EntityRunID
 }
 
 type standaloneRuntimePlatformRunRecord struct {
@@ -2028,11 +1761,10 @@ func isStandaloneRuntimePlatformRunRecord(rec standaloneRuntimePlatformRunRecord
 func (s *PostgresStore) convergeStandaloneRuntimePlatformRunByEventID(
 	ctx context.Context,
 	db storerunlifecycle.DBTX,
-	caps StoreSchemaCapabilities,
 	eventID string,
 ) error {
 	eventID = sanitizeOptionalUUID(eventID)
-	if db == nil || eventID == "" || !caps.Events.HasRuns || caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogRunID {
+	if db == nil || eventID == "" {
 		return nil
 	}
 	rec, found, err := loadStandaloneRuntimePlatformRunRecord(ctx, db, eventID)
@@ -2052,7 +1784,7 @@ func (s *PostgresStore) convergeStandaloneRuntimePlatformRunByEventID(
 	if active {
 		return nil
 	}
-	_, err = storerunlifecycle.MarkTerminal(ctx, db, rec.RunID, "completed", nil, time.Now().UTC(), runLifecycleOptions(caps))
+	_, err = storerunlifecycle.MarkTerminal(ctx, db, rec.RunID, "completed", nil, time.Now().UTC(), runLifecycleOptions())
 	if err != nil {
 		return fmt.Errorf("converge standalone runtime platform run: %w", err)
 	}

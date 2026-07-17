@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -43,7 +44,7 @@ func runStartTestEventBusOptions(source semanticview.Source) runtimebus.EventBus
 
 func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -113,7 +114,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 
 func TestOperatorRunStartHandlersUseActiveEphemeralBundleScopeForCreateNewWork(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -135,7 +136,7 @@ func TestOperatorRunStartHandlersUseActiveEphemeralBundleScopeForCreateNewWork(t
 
 func TestOperatorRunStartHandlersRequireBundleScopeForCreateNewWorkWithoutActiveRuntimeFact(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	handler := runStartTestHandler(t, pg, missingRunStartBundleScopePublisher{}, source)
 	runID := uuid.NewString()
@@ -162,7 +163,7 @@ func TestOperatorRunStartHandlersRequireBundleScopeForCreateNewWorkWithoutActive
 
 func TestOperatorRunStartHandlersAcceptCanonicalBundleHashForCreateNewWork(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -180,7 +181,7 @@ func TestOperatorRunStartHandlersAcceptCanonicalBundleHashForCreateNewWork(t *te
 
 func TestOperatorRunStartRejectsFlowScopedEventName(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(flowScopedEventPublishTestBundle())
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -207,7 +208,7 @@ func TestOperatorRunStartRejectsFlowScopedEventName(t *testing.T) {
 func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	t.Run("non-routable bundle hash", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -228,7 +229,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("existing run bundle mismatch", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -260,7 +261,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("invalid canonical bundle hash", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -281,7 +282,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("invalid canonical bundle hash", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -302,7 +303,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("canonical and legacy bundle params conflict", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -323,7 +324,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("undeclared event", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -355,7 +356,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("declared but unroutable root input", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		const eventName = "scan.unroutable_requested"
 		bundle := runStartTestBundle(eventName)
 		bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{
@@ -394,7 +395,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("payload validation", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 			ContractBundle:   source,
@@ -424,7 +425,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("invalid caller run id", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -455,7 +456,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("payload entity id is not envelope authority", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -492,7 +493,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("publish failure", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		handler := runStartTestHandler(t, pg, failingRunStartPublisher{err: errors.New("simulated run.start publish failure")}, source)
 		runID := uuid.NewString()
@@ -514,7 +515,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("post-validation invalid event type is a publish contradiction", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		handler := runStartTestHandler(t, pg, failingRunStartPublisher{err: runtimebus.ErrInvalidEventType}, source)
 		runID := uuid.NewString()
@@ -575,7 +576,7 @@ func TestInvalidEventTypeMappersSeparateRootInputFromCatalogFailures(t *testing.
 
 func TestOperatorRunStartHandlersLeaveSplitControlMethodsUnavailable(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {

@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -355,7 +356,7 @@ func TestOperatorBundleDeleteBlocksPostDeleteNewWorkFromPersistedRuntimeSource(t
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
-			pg := &store.PostgresStore{DB: db}
+			pg := storetest.AdmitPostgresRuntimeStore(t, db)
 			ctx := context.Background()
 			seedOperatorBundleDeleteBundle(t, ctx, db, runStartTestBundleHash)
 			source := semanticview.Wrap(runStartTestBundle("scan.requested"))

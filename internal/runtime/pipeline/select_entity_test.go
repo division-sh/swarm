@@ -478,7 +478,6 @@ func TestBackgroundWorkflowNodeSelectOrCreateEntityDuplicateSameEventIsReceiptId
 	t.Cleanup(cleanup)
 
 	pc, _ := newSelectOrCreateEntityTestCoordinator(t, db)
-	pc.eventReceiptsCapability = eventReceiptsCapabilityStub{enabled: true}.resolve
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	evt := seedSelectEntitySpendEvent(t, db, ctx, map[string]any{"vertical_id": "vertical-1", "amount_usd": 42})
 	runner := newSelectEntityBackgroundNode(t, pc, pc.SemanticSource(), db)
@@ -552,7 +551,6 @@ func TestBackgroundWorkflowNodeSelectEntityDuplicateSameEventIsReceiptIdempotent
 	t.Cleanup(cleanup)
 
 	pc, source := newSelectEntityTestCoordinator(t, db)
-	pc.eventReceiptsCapability = eventReceiptsCapabilityStub{enabled: true}.resolve
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	budgetEntityID := seedSelectEntityBudget(t, pc.workflowStore, ctx, source, "vertical-1", 0)
 	evt := seedSelectEntitySpendEvent(t, db, ctx, map[string]any{"vertical_id": "vertical-1", "amount_usd": 42})
@@ -829,7 +827,7 @@ func newSelectEntityBackgroundNode(t *testing.T, pc *PipelineCoordinator, source
 	if executor == nil {
 		t.Fatal("expected treasury-orchestrator node executor")
 	}
-	runner := newBackgroundWorkflowNodeWithRetryBase(executor, &recordingPipelineBus{}, db, pc.eventReceiptsCapability, 0)
+	runner := newBackgroundWorkflowNodeWithRetryBase(executor, &recordingPipelineBus{}, db, 0)
 	if runner == nil {
 		t.Fatal("expected treasury-orchestrator background runner")
 	}

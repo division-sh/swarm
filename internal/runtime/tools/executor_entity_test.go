@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -1286,7 +1287,7 @@ accounts:
   status: text
 `)
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	stateEventID := uuid.NewString()
@@ -1385,7 +1386,7 @@ accounts:
   status: text
 `)
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	stateEventID := uuid.NewString()
@@ -2248,7 +2249,7 @@ foreign:
 	_, db, _ := testutil.StartPostgres(t)
 	ensureEntityToolTestRun(t, db)
 	bus := &entityToolRuntimeLogBus{}
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	exec := runtimetools.NewExecutorWithOptions(bus, nil, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
 		WorkflowSource:                 semanticview.Wrap(bundle),
@@ -2776,7 +2777,7 @@ func newEntityToolTestHarnessWithBundleAndLegacyAccess(t *testing.T, actor model
 	t.Helper()
 	_, db, _ := testutil.StartPostgres(t)
 	ensureEntityToolTestRun(t, db)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID)
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,

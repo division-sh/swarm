@@ -99,11 +99,7 @@ func (s *SQLiteRuntimeStore) CreateOperatorConversationFork(ctx context.Context,
 }
 
 func (s conversationForkStore) createOperatorConversationFork(ctx context.Context, req ConversationForkCreateRequest) (OperatorConversationForkSession, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return OperatorConversationForkSession{}, err
-	}
-	if err := requireConversationForkLifecycleCapabilities(caps); err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return OperatorConversationForkSession{}, err
 	}
 	now := req.Now.UTC()
@@ -114,7 +110,7 @@ func (s conversationForkStore) createOperatorConversationFork(ctx context.Contex
 	if createdBy == "" {
 		return OperatorConversationForkSession{}, &EntityReadParamError{Field: "created_by", Reason: "is required"}
 	}
-	source, err := s.loadConversationForkSource(ctx, caps, req.SourceSessionID)
+	source, err := s.loadConversationForkSource(ctx, req.SourceSessionID)
 	if err != nil {
 		return OperatorConversationForkSession{}, err
 	}
@@ -168,14 +164,10 @@ func (s *SQLiteRuntimeStore) ListOperatorConversationForks(ctx context.Context, 
 }
 
 func (s conversationForkStore) listOperatorConversationForks(ctx context.Context, opts ConversationForkListOptions) (ConversationForkListResult, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return ConversationForkListResult{}, err
 	}
-	if err := requireConversationForkLifecycleCapabilities(caps); err != nil {
-		return ConversationForkListResult{}, err
-	}
-	opts, err = defaultConversationForkListOptions(opts)
+	opts, err := defaultConversationForkListOptions(opts)
 	if err != nil {
 		return ConversationForkListResult{}, err
 	}
@@ -269,11 +261,7 @@ func (s *SQLiteRuntimeStore) LoadOperatorConversationFork(ctx context.Context, f
 }
 
 func (s conversationForkStore) loadOperatorConversationFork(ctx context.Context, forkID string) (OperatorConversationForkSession, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return OperatorConversationForkSession{}, err
-	}
-	if err := requireConversationForkLifecycleCapabilities(caps); err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return OperatorConversationForkSession{}, err
 	}
 	id, err := normalizeUUIDParam(forkID, "fork_id")
@@ -295,9 +283,6 @@ func (s conversationForkStore) loadOperatorConversationFork(ctx context.Context,
 	}
 	if err != nil {
 		return OperatorConversationForkSession{}, err
-	}
-	if caps.Conversations.ForkTurns != SchemaFlavorCanonical {
-		return OperatorConversationForkSession{}, fmt.Errorf("store: conversation_fork_turns schema is unavailable")
 	}
 	turns, err := loadConversationForkTurns(ctx, s, s.db, item.ForkID)
 	if err != nil {
@@ -324,11 +309,7 @@ func (s *SQLiteRuntimeStore) DeleteOperatorConversationFork(ctx context.Context,
 }
 
 func (s conversationForkStore) deleteOperatorConversationFork(ctx context.Context, forkID string, now time.Time) (ConversationForkDeleteResult, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return ConversationForkDeleteResult{}, err
-	}
-	if err := requireConversationForkLifecycleCapabilities(caps); err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return ConversationForkDeleteResult{}, err
 	}
 	id, err := normalizeUUIDParam(forkID, "fork_id")
@@ -369,19 +350,6 @@ func (s conversationForkStore) deleteOperatorConversationFork(ctx context.Contex
 	return result, err
 }
 
-func requireConversationForkLifecycleCapabilities(caps StoreSchemaCapabilities) error {
-	if caps.Conversations.Forks != SchemaFlavorCanonical {
-		return fmt.Errorf("store: conversation_forks schema is unavailable")
-	}
-	if caps.Conversations.Turns != SchemaFlavorCanonical {
-		return fmt.Errorf("store: conversation fork lifecycle requires canonical agent_turns")
-	}
-	if caps.Conversations.Sessions != SchemaFlavorCanonical && caps.Conversations.Audits != SchemaFlavorCanonical {
-		return fmt.Errorf("store: conversation fork lifecycle requires canonical conversation source")
-	}
-	return nil
-}
-
 func defaultConversationForkListOptions(opts ConversationForkListOptions) (ConversationForkListOptions, error) {
 	if opts.Limit <= 0 {
 		opts.Limit = 50
@@ -398,12 +366,12 @@ func defaultConversationForkListOptions(opts ConversationForkListOptions) (Conve
 	return opts, nil
 }
 
-func (s conversationForkStore) loadConversationForkSource(ctx context.Context, caps StoreSchemaCapabilities, sourceSessionID string) (conversationForkSource, error) {
+func (s conversationForkStore) loadConversationForkSource(ctx context.Context, sourceSessionID string) (conversationForkSource, error) {
 	sessionID, err := normalizeUUIDParam(sourceSessionID, "source_session_id")
 	if err != nil {
 		return conversationForkSource{}, err
 	}
-	sources := s.conversationQuerySources(caps)
+	sources := s.conversationQuerySources()
 	if len(sources) == 0 {
 		return conversationForkSource{}, ErrSessionNotFound
 	}

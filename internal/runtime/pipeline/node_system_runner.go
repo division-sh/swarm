@@ -41,28 +41,23 @@ type systemNodeRunner struct {
 	retryLimit int
 	backoffFn  func(int) time.Duration
 
-	subscriptionsFn         func() []events.EventType
-	handleFn                func(context.Context, events.Event) error
-	overrideHandle          func(context.Context, events.Event) error
-	subscribeHookMu         sync.Mutex
-	onSubscribeHooks        []func()
-	eventReceiptsCapability func(context.Context) (bool, error)
-	testLifecycleProbe      runtimelifecycleprobe.Observer
-
-	receiptsMu      sync.Mutex
-	receiptsChecked bool
-	receiptsEnabled bool
+	subscriptionsFn    func() []events.EventType
+	handleFn           func(context.Context, events.Event) error
+	overrideHandle     func(context.Context, events.Event) error
+	subscribeHookMu    sync.Mutex
+	onSubscribeHooks   []func()
+	testLifecycleProbe runtimelifecycleprobe.Observer
 }
 
-func newSystemNodeRunner(nodeID string, bus systemNodeBus, db *sql.DB, subscriptionsFn func() []events.EventType, handleFn func(context.Context, events.Event) error, eventReceiptsCapability ...func(context.Context) (bool, error)) *systemNodeRunner {
-	return newSystemNodeRunnerWithRetryBase(nodeID, bus, db, subscriptionsFn, handleFn, 0, eventReceiptsCapability...)
+func newSystemNodeRunner(nodeID string, bus systemNodeBus, db *sql.DB, subscriptionsFn func() []events.EventType, handleFn func(context.Context, events.Event) error) *systemNodeRunner {
+	return newSystemNodeRunnerWithRetryBase(nodeID, bus, db, subscriptionsFn, handleFn, 0)
 }
 
-func newSystemNodeRunnerWithRetryBase(nodeID string, bus systemNodeBus, db *sql.DB, subscriptionsFn func() []events.EventType, handleFn func(context.Context, events.Event) error, retryBase time.Duration, eventReceiptsCapability ...func(context.Context) (bool, error)) *systemNodeRunner {
-	return newSystemNodeRunnerWithReceiptStoreAndRetryBase(nodeID, bus, db, NewWorkflowInstanceStore(db), subscriptionsFn, handleFn, retryBase, eventReceiptsCapability...)
+func newSystemNodeRunnerWithRetryBase(nodeID string, bus systemNodeBus, db *sql.DB, subscriptionsFn func() []events.EventType, handleFn func(context.Context, events.Event) error, retryBase time.Duration) *systemNodeRunner {
+	return newSystemNodeRunnerWithReceiptStoreAndRetryBase(nodeID, bus, db, NewWorkflowInstanceStore(db), subscriptionsFn, handleFn, retryBase)
 }
 
-func newSystemNodeRunnerWithReceiptStoreAndRetryBase(nodeID string, bus systemNodeBus, db *sql.DB, receiptStore SystemNodeReceiptPersistence, subscriptionsFn func() []events.EventType, handleFn func(context.Context, events.Event) error, retryBase time.Duration, eventReceiptsCapability ...func(context.Context) (bool, error)) *systemNodeRunner {
+func newSystemNodeRunnerWithReceiptStoreAndRetryBase(nodeID string, bus systemNodeBus, db *sql.DB, receiptStore SystemNodeReceiptPersistence, subscriptionsFn func() []events.EventType, handleFn func(context.Context, events.Event) error, retryBase time.Duration) *systemNodeRunner {
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" || bus == nil || handleFn == nil {
 		return nil
@@ -70,20 +65,15 @@ func newSystemNodeRunnerWithReceiptStoreAndRetryBase(nodeID string, bus systemNo
 	if retryBase <= 0 {
 		retryBase = time.Second
 	}
-	var receiptsCapability func(context.Context) (bool, error)
-	if len(eventReceiptsCapability) > 0 {
-		receiptsCapability = eventReceiptsCapability[0]
-	}
 	return &systemNodeRunner{
-		nodeID:                  nodeID,
-		bus:                     bus,
-		db:                      db,
-		receiptStore:            receiptStore,
-		retryLimit:              DefaultSystemNodeRetryLimit,
-		backoffFn:               func(attempt int) time.Duration { return defaultSystemNodeBackoff(retryBase, attempt) },
-		subscriptionsFn:         subscriptionsFn,
-		handleFn:                handleFn,
-		eventReceiptsCapability: receiptsCapability,
+		nodeID:          nodeID,
+		bus:             bus,
+		db:              db,
+		receiptStore:    receiptStore,
+		retryLimit:      DefaultSystemNodeRetryLimit,
+		backoffFn:       func(attempt int) time.Duration { return defaultSystemNodeBackoff(retryBase, attempt) },
+		subscriptionsFn: subscriptionsFn,
+		handleFn:        handleFn,
 	}
 }
 
@@ -1368,23 +1358,7 @@ func (n *systemNodeRunner) isActiveRunQuiesced(ctx context.Context, evt events.E
 }
 
 func (n *systemNodeRunner) eventReceiptsAvailable(ctx context.Context) bool {
-	if n == nil || n.receiptStore == nil {
-		return false
-	}
-	n.receiptsMu.Lock()
-	defer n.receiptsMu.Unlock()
-	if n.receiptsChecked {
-		return n.receiptsEnabled
-	}
-	enabled := false
-	if n.eventReceiptsCapability != nil {
-		if ok, err := n.eventReceiptsCapability(ctx); err == nil {
-			enabled = ok
-		}
-	}
-	n.receiptsChecked = true
-	n.receiptsEnabled = enabled
-	return n.receiptsEnabled
+	return n != nil && n.receiptStore != nil
 }
 
 func (n *systemNodeRunner) String() string {

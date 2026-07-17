@@ -196,9 +196,6 @@ func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *WorkflowInstanceSt
 		WorkflowStore:       store,
 		TimerScheduleStore:  &recordingScheduleStore{},
 		MailboxMaterializer: &recordingMailboxWriteMaterializer{},
-		EventReceiptsCapability: func(context.Context) (bool, error) {
-			return true, nil
-		},
 		Module: &previewWorkflowModule{
 			bundle:        bundle,
 			workflowNodes: nodes,

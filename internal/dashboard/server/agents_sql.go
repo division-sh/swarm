@@ -5,31 +5,34 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
-	"time"
 
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store"
 )
 
 type SQLAgentReader struct {
-	source *dashboardAgentReadSource
-	owner  *store.OperatorAgentConversationReadSurface
+	owner dashboardAgentReadOwner
+}
+
+type dashboardAgentReadOwner interface {
+	LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error)
+	ListOperatorAgents(context.Context, store.OperatorAgentListOptions) (store.OperatorAgentListResult, error)
+	LoadOperatorAgent(context.Context, string) (store.OperatorAgentDetail, error)
 }
 
 func NewSQLAgentReader(db *sql.DB, source any, turnLimit int) *SQLAgentReader {
-	adapter := &dashboardAgentReadSource{source: source}
-	owner := store.NewOperatorAgentConversationReadSurface(db, adapter, turnLimit)
-	if owner == nil {
+	owner, ok := source.(dashboardAgentReadOwner)
+	if db == nil || !ok || owner == nil {
 		return nil
 	}
-	return &SQLAgentReader{source: adapter, owner: owner}
+	return &SQLAgentReader{owner: owner}
 }
 
 func (r *SQLAgentReader) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
-	if r == nil || r.source == nil {
+	if r == nil || r.owner == nil {
 		return nil, nil
 	}
-	return r.source.LoadAgents(ctx)
+	return r.owner.LoadAgents(ctx)
 }
 
 func (r *SQLAgentReader) ListOperatorAgents(ctx context.Context, opts store.OperatorAgentListOptions) (store.OperatorAgentListResult, error) {
@@ -67,85 +70,4 @@ func (r *SQLAgentReader) GetGenericAgent(ctx context.Context, id string) (generi
 		return genericAgent{}, false, err
 	}
 	return genericAgentFromOperatorSummary(item.Agent), true, nil
-}
-
-type dashboardAgentReadSource struct {
-	source any
-}
-
-type dashboardLoadAgentsSource interface {
-	LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error)
-}
-
-type pendingAgentDeliveryFactSource interface {
-	ListPendingAgentDeliveryFacts(ctx context.Context, agentIDs []string, since time.Time) (map[string]store.PendingAgentDeliveryFacts, error)
-}
-
-type pendingAgentDeliveryDetailSource interface {
-	ListPendingAgentDeliveryDetails(ctx context.Context, opts store.PendingAgentDeliveryListOptions) (store.PendingAgentDeliveryPage, error)
-}
-
-type agentLifecycleFactSource interface {
-	ListAgentDeliveryLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]store.AgentDeliveryLifecycleFacts, error)
-}
-
-type operatorConversationTurnListSource interface {
-	ListOperatorConversationTurns(context.Context, store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error)
-	LoadOperatorPublicConversationTurn(context.Context, string, string) (store.OperatorPublicConversationTurnDetail, error)
-}
-
-func (s *dashboardAgentReadSource) ListOperatorConversationTurns(ctx context.Context, opts store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error) {
-	source, ok := s.source.(operatorConversationTurnListSource)
-	if !ok || source == nil {
-		return store.OperatorConversationTurnListResult{}, errors.New("dashboard agent reader requires the canonical turn owner")
-	}
-	return source.ListOperatorConversationTurns(ctx, opts)
-}
-
-func (s *dashboardAgentReadSource) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (store.OperatorPublicConversationTurnDetail, error) {
-	source, ok := s.source.(operatorConversationTurnListSource)
-	if !ok || source == nil {
-		return store.OperatorPublicConversationTurnDetail{}, errors.New("dashboard agent reader requires the canonical exact-turn owner")
-	}
-	return source.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
-}
-
-func (s *dashboardAgentReadSource) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
-	source, ok := s.source.(dashboardLoadAgentsSource)
-	if !ok || source == nil {
-		return nil, nil
-	}
-	return source.LoadAgents(ctx)
-}
-
-func (s *dashboardAgentReadSource) ResolveSchemaCapabilities(ctx context.Context) (store.StoreSchemaCapabilities, error) {
-	source, ok := s.source.(schemaCapabilitySource)
-	if !ok || source == nil {
-		return store.StoreSchemaCapabilities{}, missingDashboardCapabilityOwner("agent reader")
-	}
-	return source.ResolveSchemaCapabilities(ctx)
-}
-
-func (s *dashboardAgentReadSource) ListPendingAgentDeliveryFacts(ctx context.Context, agentIDs []string, since time.Time) (map[string]store.PendingAgentDeliveryFacts, error) {
-	source, ok := s.source.(pendingAgentDeliveryFactSource)
-	if !ok || source == nil {
-		return nil, errors.New("missing pending agent delivery fact source")
-	}
-	return source.ListPendingAgentDeliveryFacts(ctx, agentIDs, since)
-}
-
-func (s *dashboardAgentReadSource) ListPendingAgentDeliveryDetails(ctx context.Context, opts store.PendingAgentDeliveryListOptions) (store.PendingAgentDeliveryPage, error) {
-	source, ok := s.source.(pendingAgentDeliveryDetailSource)
-	if !ok || source == nil {
-		return store.PendingAgentDeliveryPage{}, errors.New("missing pending agent delivery detail source")
-	}
-	return source.ListPendingAgentDeliveryDetails(ctx, opts)
-}
-
-func (s *dashboardAgentReadSource) ListAgentDeliveryLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]store.AgentDeliveryLifecycleFacts, error) {
-	source, ok := s.source.(agentLifecycleFactSource)
-	if !ok || source == nil {
-		return nil, errors.New("missing agent lifecycle fact source")
-	}
-	return source.ListAgentDeliveryLifecycleFacts(ctx, agentIDs)
 }

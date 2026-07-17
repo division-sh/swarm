@@ -11,31 +11,10 @@ import (
 	"time"
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
-
-type stubObservabilityCaps struct {
-	caps store.StoreSchemaCapabilities
-}
-
-func (s stubObservabilityCaps) ResolveSchemaCapabilities(context.Context) (store.StoreSchemaCapabilities, error) {
-	return s.caps, nil
-}
-
-func canonicalObservabilityCaps() store.StoreSchemaCapabilities {
-	return store.StoreSchemaCapabilities{
-		Events: store.EventSchemaCapabilities{
-			Log:           store.SchemaFlavorCanonical,
-			Deliveries:    store.SchemaFlavorCanonical,
-			Receipts:      store.SchemaFlavorCanonical,
-			LogRunID:      true,
-			DeliveryRunID: true,
-		},
-	}
-}
 
 func canonicalRuntimeLogTestPayload(t *testing.T, component, action, code, message, agentID string) string {
 	t.Helper()
@@ -67,7 +46,7 @@ func canonicalRuntimeLogTestPayload(t *testing.T, component, action, code, messa
 
 func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: canonicalObservabilityCaps()})
+	reader := NewSQLObservabilityReader(db, storetest.AdmitPostgresRuntimeStore(t, db))
 	ctx := context.Background()
 
 	runID := uuid.NewString()
@@ -146,7 +125,7 @@ func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *tes
 
 func TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: canonicalObservabilityCaps()})
+	reader := NewSQLObservabilityReader(db, storetest.AdmitPostgresRuntimeStore(t, db))
 	ctx := context.Background()
 
 	runID := uuid.NewString()
@@ -210,7 +189,7 @@ func TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity(t *tes
 
 func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: canonicalObservabilityCaps()})
+	reader := NewSQLObservabilityReader(db, storetest.AdmitPostgresRuntimeStore(t, db))
 	ctx := context.Background()
 
 	runID := uuid.NewString()
@@ -266,7 +245,7 @@ func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T)
 
 func TestSQLObservabilityReader_EventIdentityDoesNotPromotePayloadEntity(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: canonicalObservabilityCaps()})
+	reader := NewSQLObservabilityReader(db, storetest.AdmitPostgresRuntimeStore(t, db))
 	ctx := context.Background()
 
 	runID := uuid.NewString()
@@ -379,7 +358,7 @@ func TestHandler_EventDetailIncludesDeliveryLifecycle(t *testing.T) {
 
 func TestSQLObservabilityReader_ListRuntimeLogs_ProjectsDeliveryLifecycleFields(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: canonicalObservabilityCaps()})
+	reader := NewSQLObservabilityReader(db, storetest.AdmitPostgresRuntimeStore(t, db))
 	ctx := context.Background()
 
 	insertRuntimeLog := func(eventID, state, prev, reason, terminal string, retryCount int, createdAt time.Time) {
@@ -435,7 +414,7 @@ func TestSQLObservabilityReader_ListRuntimeLogs_ProjectsDeliveryLifecycleFields(
 
 func TestSQLObservabilityReader_ListRuntimeLogs_FailsClosedOnMalformedCanonicalPayload(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: canonicalObservabilityCaps()})
+	reader := NewSQLObservabilityReader(db, storetest.AdmitPostgresRuntimeStore(t, db))
 	ctx := context.Background()
 
 	payload := `{
@@ -461,7 +440,7 @@ func TestSQLObservabilityReader_ListRuntimeLogs_FailsClosedOnMalformedCanonicalP
 
 func TestSQLObservabilityReader_ListIncidents_UsesCanonicalRuntimeLogPayloads(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: canonicalObservabilityCaps()})
+	reader := NewSQLObservabilityReader(db, storetest.AdmitPostgresRuntimeStore(t, db))
 	ctx := context.Background()
 
 	insertRuntimeLog := func(component, action, agentID string, createdAt time.Time) {
@@ -505,7 +484,7 @@ func TestSQLObservabilityReader_ListIncidents_UsesCanonicalRuntimeLogPayloads(t 
 
 func TestSQLObservabilityReader_ListIncidents_FailsClosedOnMissingCanonicalComponent(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: canonicalObservabilityCaps()})
+	reader := NewSQLObservabilityReader(db, storetest.AdmitPostgresRuntimeStore(t, db))
 	ctx := context.Background()
 
 	payload := canonicalRuntimeLogTestPayload(t, "", "request_failed", "retry_exhausted", "incomplete runtime incident", "")
@@ -527,7 +506,7 @@ func TestSQLObservabilityReader_ListIncidents_FailsClosedOnMissingCanonicalCompo
 
 func TestSQLObservabilityReader_ListIncidents_IgnoresErrorLogsWithoutCanonicalFailure(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: canonicalObservabilityCaps()})
+	reader := NewSQLObservabilityReader(db, storetest.AdmitPostgresRuntimeStore(t, db))
 	ctx := context.Background()
 
 	payload := `{
@@ -559,7 +538,7 @@ func TestSQLObservabilityReader_ListIncidents_IgnoresErrorLogsWithoutCanonicalFa
 
 func TestSQLObservabilityReader_ListIncidents_SortsByRawLastSeenBeforeLimit(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: canonicalObservabilityCaps()})
+	reader := NewSQLObservabilityReader(db, storetest.AdmitPostgresRuntimeStore(t, db))
 	ctx := context.Background()
 
 	base := time.Now().UTC().Truncate(time.Second)
@@ -589,85 +568,5 @@ func TestSQLObservabilityReader_ListIncidents_SortsByRawLastSeenBeforeLimit(t *t
 	}
 	if rows[0].Code != "newer_code" {
 		t.Fatalf("incident code = %#v, want newer_code", rows[0].Code)
-	}
-}
-
-func TestSQLObservabilityReader_ListEvents_FailsClosedWithoutCapabilityOwner(t *testing.T) {
-	db := storetest.StartSQLiteRuntimeStore(t).DB
-	reader := NewSQLObservabilityReader(db, nil)
-
-	if _, err := reader.ListEvents(context.Background(), EventFilter{}, 10); err == nil || !strings.Contains(err.Error(), "observability reader requires explicit schema capability owner") {
-		t.Fatalf("expected missing capability owner error, got %v", err)
-	}
-}
-
-func TestSQLObservabilityReader_GetEvent_FailsClosedWithoutCapabilityOwner(t *testing.T) {
-	db := storetest.StartSQLiteRuntimeStore(t).DB
-	reader := NewSQLObservabilityReader(db, nil)
-
-	if _, _, err := reader.GetEvent(context.Background(), "evt-1"); err == nil || !strings.Contains(err.Error(), "observability reader requires explicit schema capability owner") {
-		t.Fatalf("expected missing capability owner error, got %v", err)
-	}
-}
-
-func TestSQLObservabilityReader_ListRuntimeLogs_FailsClosedWithoutCapabilityOwner(t *testing.T) {
-	db := storetest.StartSQLiteRuntimeStore(t).DB
-	reader := NewSQLObservabilityReader(db, nil)
-
-	if _, err := reader.ListRuntimeLogs(context.Background(), RuntimeLogFilter{}, 10); err == nil || !strings.Contains(err.Error(), "observability reader requires explicit schema capability owner") {
-		t.Fatalf("expected missing capability owner error, got %v", err)
-	}
-}
-
-func TestSQLObservabilityReader_ListIncidents_FailsClosedWithoutCapabilityOwner(t *testing.T) {
-	db := storetest.StartSQLiteRuntimeStore(t).DB
-	reader := NewSQLObservabilityReader(db, nil)
-
-	if _, err := reader.ListIncidents(context.Background(), IncidentFilter{SinceHours: 24}); err == nil || !strings.Contains(err.Error(), "observability reader requires explicit schema capability owner") {
-		t.Fatalf("expected missing capability owner error, got %v", err)
-	}
-}
-
-func TestSQLObservabilityReader_ListEvents_FailsClosedWithoutCanonicalEventSurface(t *testing.T) {
-	db := storetest.StartSQLiteRuntimeStore(t).DB
-	caps := canonicalObservabilityCaps()
-	caps.Events.Deliveries = store.SchemaFlavorLegacy
-	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: caps})
-
-	if _, err := reader.ListEvents(context.Background(), EventFilter{}, 10); err == nil || !strings.Contains(err.Error(), "event_deliveries schema is unsupported") {
-		t.Fatalf("expected event_deliveries capability error, got %v", err)
-	}
-}
-
-func TestSQLObservabilityReader_GetEvent_FailsClosedWhenCapabilityOwnerReportsUnavailableEventSurface(t *testing.T) {
-	db := storetest.StartSQLiteRuntimeStore(t).DB
-	caps := canonicalObservabilityCaps()
-	caps.Events.Deliveries = store.SchemaFlavorUnavailable
-	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: caps})
-
-	if _, _, err := reader.GetEvent(context.Background(), "evt-1"); err == nil || !strings.Contains(err.Error(), "event_deliveries schema is unavailable") {
-		t.Fatalf("expected unavailable event_deliveries capability error, got %v", err)
-	}
-}
-
-func TestSQLObservabilityReader_ListRuntimeLogs_FailsClosedWithoutCanonicalRuntimeLogSurface(t *testing.T) {
-	db := storetest.StartSQLiteRuntimeStore(t).DB
-	caps := canonicalObservabilityCaps()
-	caps.Events.Log = store.SchemaFlavorLegacy
-	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: caps})
-
-	if _, err := reader.ListRuntimeLogs(context.Background(), RuntimeLogFilter{}, 10); err == nil || !strings.Contains(err.Error(), "events schema is unsupported") {
-		t.Fatalf("expected events capability error, got %v", err)
-	}
-}
-
-func TestSQLObservabilityReader_ListIncidents_FailsClosedWhenCapabilityOwnerReportsUnavailableRuntimeLogSurface(t *testing.T) {
-	db := storetest.StartSQLiteRuntimeStore(t).DB
-	caps := canonicalObservabilityCaps()
-	caps.Events.Log = store.SchemaFlavorUnavailable
-	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: caps})
-
-	if _, err := reader.ListIncidents(context.Background(), IncidentFilter{SinceHours: 24}); err == nil || !strings.Contains(err.Error(), "events schema is unavailable") {
-		t.Fatalf("expected unavailable events capability error, got %v", err)
 	}
 }

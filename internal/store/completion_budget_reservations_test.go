@@ -189,17 +189,13 @@ func newCompletionBudgetRaceFixture(t *testing.T, sqlite bool) completionBudgetR
 	t.Helper()
 	if sqlite {
 		primary := newBootstrappedSQLiteRuntimeStoreForTest(t)
-		secondary, err := NewSQLiteRuntimeStore(primary.SQLiteSchemaStore.path)
-		if err != nil {
-			t.Fatalf("open independent SQLite completion budget handle: %v", err)
-		}
-		t.Cleanup(func() { _ = secondary.Close() })
+		secondary := newBootstrappedSQLiteRuntimeStoreForPath(t, primary.SQLiteSchemaStore.path)
 		normal := newCompletionSettlementFixture(t, primary, primary.DB, true)
 		return completionBudgetRaceFixture{primary: primary, secondary: secondary, db: primary.DB, sqlite: true, normal: normal}
 	}
 	_, db, _ := testutil.StartPostgres(t)
-	primary := &PostgresStore{DB: db}
-	secondary := &PostgresStore{DB: db}
+	primary := admitTestPostgresStore(t, db)
+	secondary := admitTestPostgresStore(t, db)
 	normal := newCompletionSettlementFixture(t, primary, db, false)
 	return completionBudgetRaceFixture{primary: primary, secondary: secondary, db: db, normal: normal}
 }
@@ -290,7 +286,7 @@ func proveCompletionBudgetSettlementAccounting(t *testing.T, sqlite bool, exactn
 		fixture = newCompletionSettlementFixture(t, store, store.DB, true)
 	} else {
 		_, db, _ := testutil.StartPostgres(t)
-		fixture = newCompletionSettlementFixture(t, &PostgresStore{DB: db}, db, false)
+		fixture = newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false)
 	}
 	authority := fixture.authority
 	authority.BudgetScopes = append([]runtimeeffects.BudgetAdmissionScope(nil), scopes...)

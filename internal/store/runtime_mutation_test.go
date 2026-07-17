@@ -240,7 +240,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationPostCommitCanReenterRuntimeMutatio
 func TestPostgresStore_RunEventTransactionSerializesStoryCommitOrder(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	store := &PostgresStore{DB: db}
+	store := admitTestPostgresStore(t, db)
 	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 5*time.Second)
 	defer cancel()
 

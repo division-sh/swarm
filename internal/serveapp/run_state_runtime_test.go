@@ -19,6 +19,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -150,7 +151,7 @@ func waitRunStatusEventSettlement(t *testing.T, db *sql.DB, runID string, wantEv
 
 func TestRunState_UsesDurableCompletedRunState(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eb, err := runtimebus.NewEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -187,7 +188,7 @@ func TestRunState_UsesDurableCompletedRunState(t *testing.T) {
 
 func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eb, err := runtimebus.NewEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -308,7 +309,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 
 func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eb, err := runtimebus.NewEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)

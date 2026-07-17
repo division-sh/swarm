@@ -33,6 +33,7 @@ import (
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -458,7 +459,7 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 		return claudeAttemptProofBackend{name: name, store: sqliteStore, db: sqliteStore.DB, sessions: sqliteStore}
 	case "postgres":
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		pg.SetSessionLockTTL(time.Minute)
 		return claudeAttemptProofBackend{name: name, store: pg, db: db, sessions: pg}
 	default:

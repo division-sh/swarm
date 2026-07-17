@@ -140,9 +140,6 @@ func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowSto
 				UpdatedAt: time.Now().UTC(),
 			})
 		},
-		EventReceiptsCapability: func(context.Context) (bool, error) {
-			return true, nil
-		},
 		Module: &previewWorkflowModule{
 			bundle: bundle,
 			workflow: NewWorkflowDefinition("root", []WorkflowStage{

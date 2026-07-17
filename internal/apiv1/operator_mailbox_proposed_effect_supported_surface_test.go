@@ -43,7 +43,7 @@ func TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores(t *t
 			open: func(t *testing.T) (any, *sql.DB) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				return &store.PostgresStore{DB: db}, db
+				return storetest.AdmitPostgresRuntimeStore(t, db), db
 			},
 		},
 	} {
@@ -184,8 +184,8 @@ func newProposedEffectMailboxHandler(
 	}
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		Module: newRunCompletionSystemNodeModule(t, source), WorkflowStore: workflowStore,
-		DecisionCards: cards, EventReceiptsCapability: eventReceiptsCapability(persistence),
-		BundleHash: fact.BundleHash,
+		DecisionCards: cards,
+		BundleHash:    fact.BundleHash,
 	})
 	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: "workflow-runtime"})
 	bus.Subscribe("workflow-runtime", events.EventType("mailbox.card_decided"), events.EventType("platform.activity_requested"))

@@ -58,21 +58,8 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 	if s == nil || s.DB == nil {
 		return runtimerunquiescence.Result{}, fmt.Errorf("postgres store is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return runtimerunquiescence.Result{}, err
-	}
-	if !caps.Events.HasRuns {
-		return runtimerunquiescence.Result{}, fmt.Errorf("runs table is required")
-	}
-	if caps.Events.Deliveries != SchemaFlavorCanonical || !caps.Events.DeliveryRunID {
-		if caps.Events.Deliveries != SchemaFlavorCanonical {
-			return runtimerunquiescence.Result{}, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-		}
-		return runtimerunquiescence.Result{}, fmt.Errorf("active run quiescence requires canonical event_deliveries.run_id")
-	}
-	if caps.Events.Receipts != SchemaFlavorCanonical {
-		return runtimerunquiescence.Result{}, unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
 	}
 	now := req.RequestedAt.UTC()
 	if now.IsZero() {
@@ -202,7 +189,7 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 		if err := supersedeDecisionCardsForRun(ctx, tx, run.RunID, "run_quiesced", now, false, true); err != nil {
 			return runtimerunquiescence.Result{}, err
 		}
-		opts := runLifecycleOptions(caps)
+		opts := runLifecycleOptions()
 		opts.BundleHash = run.BundleHash
 		if _, err := storerunlifecycle.MarkTerminal(ctx, tx, run.RunID, "cancelled", nil, now, opts); err != nil {
 			return runtimerunquiescence.Result{}, fmt.Errorf("mark active run quiescence run terminal: %w", err)
@@ -237,21 +224,8 @@ func (s *SQLiteRuntimeStore) ApplyActiveRunQuiescence(ctx context.Context, req r
 	if s == nil || s.DB == nil {
 		return runtimerunquiescence.Result{}, fmt.Errorf("sqlite runtime store is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return runtimerunquiescence.Result{}, err
-	}
-	if !caps.Events.HasRuns {
-		return runtimerunquiescence.Result{}, fmt.Errorf("runs table is required")
-	}
-	if caps.Events.Deliveries != SchemaFlavorCanonical || !caps.Events.DeliveryRunID {
-		if caps.Events.Deliveries != SchemaFlavorCanonical {
-			return runtimerunquiescence.Result{}, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-		}
-		return runtimerunquiescence.Result{}, fmt.Errorf("active run quiescence requires canonical event_deliveries.run_id")
-	}
-	if caps.Events.Receipts != SchemaFlavorCanonical {
-		return runtimerunquiescence.Result{}, unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
 	}
 	now := req.RequestedAt.UTC()
 	if now.IsZero() {

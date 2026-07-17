@@ -23,8 +23,7 @@ func (s *PostgresStore) InsertMailboxItem(ctx context.Context, item runtimetools
 	if s == nil || s.DB == nil {
 		return "", fmt.Errorf("postgres store is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(item.Type) == "" {
@@ -48,13 +47,10 @@ func (s *PostgresStore) InsertMailboxItem(ctx context.Context, item runtimetools
 	if strings.TrimSpace(item.ReplyContextID) == "" {
 		item.ReplyContextID = events.DeliveryContextFromContext(ctx).ReplyContextID()
 	}
-	if caps.Mailbox == SchemaFlavorCanonical {
-		if err := s.insertMailboxItemSpec(ctx, item); err != nil {
-			return "", err
-		}
-		return item.ID, nil
+	if err := s.insertMailboxItemSpec(ctx, item); err != nil {
+		return "", err
 	}
-	return "", unsupportedSchemaCapability("mailbox", caps.Mailbox)
+	return item.ID, nil
 }
 
 func validateGenericMailboxNotice(itemType string, raw []byte) error {
@@ -69,8 +65,7 @@ func (s *PostgresStore) ListMailboxItems(ctx context.Context, status string, lim
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
 	if limit <= 0 {
@@ -82,18 +77,14 @@ func (s *PostgresStore) ListMailboxItems(ctx context.Context, status string, lim
 	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
 		return nil, err
 	}
-	if caps.Mailbox == SchemaFlavorCanonical {
-		return s.listMailboxItemsSpec(ctx, status, limit)
-	}
-	return nil, unsupportedSchemaCapability("mailbox", caps.Mailbox)
+	return s.listMailboxItemsSpec(ctx, status, limit)
 }
 
 func (s *PostgresStore) CountMailboxItems(ctx context.Context, status string) (int, error) {
 	if s == nil || s.DB == nil {
 		return 0, fmt.Errorf("postgres store is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return 0, err
 	}
 	if strings.TrimSpace(status) == "" {
@@ -103,21 +94,17 @@ func (s *PostgresStore) CountMailboxItems(ctx context.Context, status string) (i
 		return 0, err
 	}
 	var n int
-	if caps.Mailbox == SchemaFlavorCanonical {
-		if err := s.countMailboxItemsSpec(ctx, status, &n); err != nil {
-			return 0, err
-		}
-		return n, nil
+	if err := s.countMailboxItemsSpec(ctx, status, &n); err != nil {
+		return 0, err
 	}
-	return 0, unsupportedSchemaCapability("mailbox", caps.Mailbox)
+	return n, nil
 }
 
 func (s *PostgresStore) GetMailboxItem(ctx context.Context, id string) (runtimetools.MailboxItem, error) {
 	if s == nil || s.DB == nil {
 		return runtimetools.MailboxItem{}, fmt.Errorf("postgres store is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return runtimetools.MailboxItem{}, err
 	}
 	if strings.TrimSpace(id) == "" {
@@ -126,35 +113,27 @@ func (s *PostgresStore) GetMailboxItem(ctx context.Context, id string) (runtimet
 	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
 		return runtimetools.MailboxItem{}, err
 	}
-	if caps.Mailbox == SchemaFlavorCanonical {
-		return s.getMailboxItemSpec(ctx, id)
-	}
-	return runtimetools.MailboxItem{}, unsupportedSchemaCapability("mailbox", caps.Mailbox)
+	return s.getMailboxItemSpec(ctx, id)
 }
 
 func (s *PostgresStore) ExpireMailboxItems(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
 	if limit <= 0 {
 		limit = 200
 	}
-	if caps.Mailbox == SchemaFlavorCanonical {
-		return s.expireMailboxItemsSpec(ctx, limit)
-	}
-	return nil, unsupportedSchemaCapability("mailbox", caps.Mailbox)
+	return s.expireMailboxItemsSpec(ctx, limit)
 }
 
 func (s *PostgresStore) ListUnnotifiedCriticalMailboxItems(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
 	if limit <= 0 {
@@ -163,10 +142,7 @@ func (s *PostgresStore) ListUnnotifiedCriticalMailboxItems(ctx context.Context, 
 	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
 		return nil, err
 	}
-	if caps.Mailbox == SchemaFlavorCanonical {
-		return s.listUnnotifiedCriticalMailboxItemsSpec(ctx, limit)
-	}
-	return nil, unsupportedSchemaCapability("mailbox", caps.Mailbox)
+	return s.listUnnotifiedCriticalMailboxItemsSpec(ctx, limit)
 }
 
 func coalesceMailboxEntityID(item runtimetools.MailboxItem) string {
@@ -177,17 +153,13 @@ func (s *PostgresStore) MarkMailboxItemNotified(ctx context.Context, id string) 
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("postgres store is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(id) == "" {
 		return fmt.Errorf("mailbox id is required")
 	}
-	if caps.Mailbox == SchemaFlavorCanonical {
-		return s.markMailboxItemNotifiedSpec(ctx, id)
-	}
-	return unsupportedSchemaCapability("mailbox", caps.Mailbox)
+	return s.markMailboxItemNotifiedSpec(ctx, id)
 }
 
 func (s *PostgresStore) insertMailboxItemSpec(ctx context.Context, item runtimetools.MailboxItem) error {

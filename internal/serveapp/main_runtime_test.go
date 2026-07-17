@@ -63,6 +63,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -436,7 +437,7 @@ func TestRunServeRuntimeJoinsEarlyStartupAndStoreCleanupFailure(t *testing.T) {
 
 func TestServeBundleMatchAdmissionRejectsActiveAvailabilityConflicts(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := context.Background()
 	bootFingerprint := "sha256:1111111111111111111111111111111111111111111111111111111111111111"
 	persistedMissingRunID := uuid.NewString()
@@ -484,7 +485,7 @@ func TestServeBundleMatchAdmissionRejectsActiveAvailabilityConflicts(t *testing.
 
 func TestServeBundleMatchAdmissionAllowsPersistedPresentAndDisabled(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := context.Background()
 	bootFingerprint := "sha256:1111111111111111111111111111111111111111111111111111111111111111"
 	persistedHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
@@ -521,7 +522,7 @@ func TestServeBundleMatchAdmissionAllowsPersistedPresentAndDisabled(t *testing.T
 
 func TestServeBundleMatchAdmissionRejectsDifferentPersistedActiveRunInDBLoadedMode(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := context.Background()
 	pinnedHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
 	otherHash := "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
@@ -570,11 +571,9 @@ func TestServeBundleMatchAdmissionRejectsDifferentPersistedActiveRunInDBLoadedMo
 
 func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := context.Background()
-	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
-		t.Fatalf("BindSchemaCapabilities: %v", err)
-	}
+	storetest.BootstrapPostgresRuntimeStore(t, pg)
 	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier12-runtime-tools", "test-flow-data-access"))
 	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
 	if err != nil {
@@ -648,6 +647,7 @@ func TestRunServeRuntimeDBLoadedUsesEmbeddedSpecBeforeCatalogRead(t *testing.T) 
 	_, _, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
+	storetest.BootstrapPostgresRuntimeStore(t, pg)
 	ctx := context.Background()
 	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
 	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
@@ -843,6 +843,7 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
+	storetest.BootstrapPostgresRuntimeStore(t, pg)
 	ctx := context.Background()
 	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
 	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
@@ -1017,7 +1018,7 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 }
 
 func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
-	endpoint, db, bundleHash, _ := startServedJoinProofRuntime(t)
+	endpoint, db, bundleHash, _, _ := startServedJoinProofRuntime(t)
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name":      "order.started",
 		"bundle_hash":     bundleHash,
@@ -1078,7 +1079,7 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 }
 
 func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) {
-	endpoint, db, bundleHash, rt := startServedJoinProofRuntime(t)
+	endpoint, db, bundleHash, rt, pg := startServedJoinProofRuntime(t)
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name": "order.started", "bundle_hash": bundleHash,
 		"payload":         map[string]any{"expected": []any{"a", "b"}, "dispatch_id": "dispatch-1"},
@@ -1107,7 +1108,7 @@ func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) 
 	}
 	waitServedRunDeliveryQuiescence(t, db, initial.RunID)
 	forkEventID := seedServedJoinForkFrontier(t, db, initial.RunID, entityID, arrival.EventID)
-	if _, err := (&store.PostgresStore{DB: db}).PlanRunFork(context.Background(), store.RunForkPlanRequest{
+	if _, err := pg.PlanRunFork(context.Background(), store.RunForkPlanRequest{
 		SourceRunID: initial.RunID,
 		At:          forkEventID,
 	}); err != nil {
@@ -1217,6 +1218,7 @@ func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetI
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
+	storetest.BootstrapPostgresRuntimeStore(t, pg)
 	ctx := context.Background()
 	sourceBundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
 	sourceProjection, err := runtimecontracts.BuildBundleCatalogProjection(sourceBundle)
@@ -1870,6 +1872,8 @@ type servedControlProofRuntime struct {
 	BundleHash string
 	Probe      *lifecycletest.Probe
 	Runtime    *runtimepkg.Runtime
+	Postgres   *store.PostgresStore
+	SQLite     *store.SQLiteRuntimeStore
 }
 
 func servedControlProofAuthorActivityContext(t *testing.T, rt servedControlProofRuntime) context.Context {
@@ -1916,10 +1920,12 @@ func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, bac
 			buildStoresForServe = oldBuildStores
 		})
 		var servedDB *sql.DB
+		var servedSQLite *store.SQLiteRuntimeStore
 		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
 			stores, err := oldBuildStores(ctx, selection, cfg)
 			if err == nil {
 				servedDB = stores.SQLDB
+				servedSQLite, _ = stores.EventStore.(*store.SQLiteRuntimeStore)
 				stores = wrapServedDirectiveFaultStore(t, stores, faults)
 			}
 			return stores, err
@@ -1941,9 +1947,9 @@ func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, bac
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for live-agent served parity proof")
 		}
-		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, SQLite: servedSQLite}
 	case servedparity.BackendExplicitPostgres:
-		_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
 		})
 		if faults != nil {
@@ -1975,7 +1981,7 @@ func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, bac
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 			TestLLMRuntime:          llm,
 		})
-		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Postgres: pg}
 	default:
 		t.Fatalf("unknown live-agent served parity backend %q", backend)
 		return servedControlProofRuntime{}
@@ -2017,10 +2023,12 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 			buildStoresForServe = oldBuildStores
 		})
 		var servedDB *sql.DB
+		var servedSQLite *store.SQLiteRuntimeStore
 		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
 			stores, err := oldBuildStores(ctx, selection, cfg)
 			if err == nil {
 				servedDB = stores.SQLDB
+				servedSQLite, _ = stores.EventStore.(*store.SQLiteRuntimeStore)
 			}
 			return stores, err
 		}
@@ -2040,9 +2048,9 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for control served parity proof")
 		}
-		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt, SQLite: servedSQLite}
 	case servedparity.BackendExplicitPostgres:
-		_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
 		})
 		contractsPath := fixture(t)
@@ -2062,7 +2070,7 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 			TestLifecycleProbe:      probe,
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		})
-		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt, Postgres: pg}
 	default:
 		t.Fatalf("unknown served control backend %q", backend)
 		return servedControlProofRuntime{}
@@ -2167,10 +2175,14 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 		oldBuildStores := buildStoresForServe
 		t.Cleanup(func() { buildStoresForServe = oldBuildStores })
 		var servedDB *sql.DB
+		var servedPostgres *store.PostgresStore
+		var servedSQLite *store.SQLiteRuntimeStore
 		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
 			stores, err := oldBuildStores(ctx, selection, cfg)
 			if err == nil {
 				servedDB = stores.SQLDB
+				servedPostgres, _ = stores.EventStore.(*store.PostgresStore)
+				servedSQLite, _ = stores.EventStore.(*store.SQLiteRuntimeStore)
 			}
 			return stores, err
 		}
@@ -2189,7 +2201,10 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 		if servedDB == nil {
 			t.Fatal("served conversation fork SQLDB is required")
 		}
-		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, BundleHash: servedEventPublishFixtureBundleHash(t, contractsPath), Runtime: rt}
+		return servedControlProofRuntime{
+			Endpoint: endpoint, DB: servedDB, BundleHash: servedEventPublishFixtureBundleHash(t, contractsPath), Runtime: rt,
+			Postgres: servedPostgres, SQLite: servedSQLite,
+		}
 	}
 
 	var rt servedControlProofRuntime
@@ -2272,7 +2287,7 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 	if err := rt.Runtime.WaitForQuiescence(waitCtx); err != nil {
 		t.Fatalf("wait for %s conversation fork source quiescence: %v", rt.Backend, err)
 	}
-	fixture := seedServedConversationForkSource(t, rt.DB, rt.Backend, initial.RunID)
+	fixture := seedServedConversationForkSource(t, rt, initial.RunID)
 	keyPrefix := "issue-1997-" + rt.Backend + "-" + fixture.SessionID
 
 	create := func(selector map[string]any, key string) struct {
@@ -2465,8 +2480,10 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 	}
 }
 
-func seedServedConversationForkSource(t *testing.T, db *sql.DB, backend, runID string) servedConversationForkSource {
+func seedServedConversationForkSource(t *testing.T, rt servedConversationForkProofRuntime, runID string) servedConversationForkSource {
 	t.Helper()
+	db := rt.DB
+	backend := rt.Backend
 	now := time.Now().UTC().Truncate(time.Second)
 	fixture := servedConversationForkSource{
 		RunID: runID, AgentID: "fork-source-agent", SessionID: uuid.NewString(),
@@ -2478,9 +2495,15 @@ func seedServedConversationForkSource(t *testing.T, db *sql.DB, backend, runID s
 	var capabilityStore managedcapabilities.Persistence
 	switch backend {
 	case "postgres":
-		capabilityStore = &store.PostgresStore{DB: db}
+		if rt.Postgres == nil {
+			t.Fatal("accepted Postgres store owner is required")
+		}
+		capabilityStore = rt.Postgres
 	case "sqlite":
-		capabilityStore = &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: db}}
+		if rt.SQLite == nil {
+			t.Fatal("accepted SQLite store owner is required")
+		}
+		capabilityStore = rt.SQLite
 	default:
 		t.Fatalf("unknown conversation fork proof backend %q", backend)
 	}
@@ -3214,16 +3237,15 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	var workflow *runtimepipeline.WorkflowInstanceStore
 	var seedEvent func(context.Context, events.Event) error
 	var insertNotice func(context.Context, runtimetools.MailboxItem) (string, error)
-	var eventCatalog interface {
-		RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
-	}
 	switch rt.Backend {
 	case "postgres":
 		if _, err := rt.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'running', $2, $3, $4)`, runID, bundleHash, bundleFact.BundleSource, now); err != nil {
 			t.Fatalf("seed postgres decision-card run: %v", err)
 		}
-		pg := &store.PostgresStore{DB: rt.DB}
-		eventCatalog = pg
+		pg := rt.Postgres
+		if pg == nil {
+			t.Fatal("accepted Postgres store owner is required")
+		}
 		cards, workflow, insertNotice = pg, runtimepipeline.NewWorkflowInstanceStore(rt.DB), pg.InsertMailboxItem
 		seedEvent = func(ctx context.Context, evt events.Event) error {
 			return pg.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
@@ -3240,8 +3262,10 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		if _, err := rt.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES (?, 'running', ?, ?, ?)`, runID, bundleHash, bundleFact.BundleSource, now); err != nil {
 			t.Fatalf("seed sqlite decision-card run: %v", err)
 		}
-		sqlite := &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: rt.DB}}
-		eventCatalog = sqlite
+		sqlite := rt.SQLite
+		if sqlite == nil {
+			t.Fatal("accepted SQLite store owner is required")
+		}
 		cards = sqlite
 		workflow = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(rt.DB, sqlite)
 		insertNotice = sqlite.InsertMailboxItem
@@ -3259,18 +3283,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	default:
 		t.Fatalf("unknown decision-card proof backend %q", rt.Backend)
 	}
-	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
-	if !ok {
-		t.Fatal("decision-card fixture author activity scope is unavailable")
-	}
-	lease, err := eventCatalog.RegisterAuthorActivityEventCatalog(scope, []runtimeauthoractivity.EventDescriptor{{
-		EventType: "review.requested", Disposition: runtimeauthoractivity.StoryDifferent,
-	}})
-	if err != nil {
-		t.Fatalf("register decision-card fixture event descriptor: %v", err)
-	}
-	t.Cleanup(lease.Release)
-	evt := eventtest.RootIngress(sourceEventID, "review.requested", "", "", json.RawMessage(`{"review":true}`), 0, runID, "",
+	evt := eventtest.RootIngress(sourceEventID, "item.received", "", "", json.RawMessage(`{"item_id":"review"}`), 0, runID, "",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "root"), now)
 	if err := seedEvent(ctx, evt); err != nil {
 		t.Fatalf("seed decision-card source event: %v", err)
@@ -4657,10 +4670,16 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 	var workflow *runtimepipeline.WorkflowInstanceStore
 	switch rt.Backend {
 	case "postgres":
-		cards = &store.PostgresStore{DB: rt.DB}
+		if rt.Postgres == nil {
+			t.Fatal("accepted Postgres store owner is required")
+		}
+		cards = rt.Postgres
 		workflow = runtimepipeline.NewWorkflowInstanceStore(rt.DB)
 	case "sqlite":
-		sqlite := &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: rt.DB}}
+		sqlite := rt.SQLite
+		if sqlite == nil {
+			t.Fatal("accepted SQLite store owner is required")
+		}
 		cards = sqlite
 		workflow = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(rt.DB, sqlite)
 	default:
@@ -4735,10 +4754,16 @@ func requireServedTerminalDecisionCardStateChangeOnly(t *testing.T, rt servedCon
 	var workflow *runtimepipeline.WorkflowInstanceStore
 	switch rt.Backend {
 	case "postgres":
-		cards = &store.PostgresStore{DB: rt.DB}
+		if rt.Postgres == nil {
+			t.Fatal("accepted Postgres store owner is required")
+		}
+		cards = rt.Postgres
 		workflow = runtimepipeline.NewWorkflowInstanceStore(rt.DB)
 	case "sqlite":
-		sqlite := &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: rt.DB}}
+		sqlite := rt.SQLite
+		if sqlite == nil {
+			t.Fatal("accepted SQLite store owner is required")
+		}
 		cards = sqlite
 		workflow = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(rt.DB, sqlite)
 	default:
@@ -4959,7 +4984,7 @@ func writeServedTestSetupFixture(t *testing.T) string {
 	return canonicalrouting.CopyServedTestSetup(t)
 }
 
-func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string, *runtimepkg.Runtime) {
+func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string, *runtimepkg.Runtime, *store.PostgresStore) {
 	t.Helper()
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
@@ -4979,7 +5004,7 @@ func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string, *runtim
 		Verbose:                 true,
 		TestOutboxSweeperConfig: servedJoinProofOutboxSweeperConfig(),
 	})
-	return endpoint, db, bundleHash, rt
+	return endpoint, db, bundleHash, rt, pg
 }
 
 func servedJoinProofOutboxSweeperConfig() runtimebus.OutboxSweeperConfig {
@@ -7605,9 +7630,7 @@ func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFac
 	}
 	t.Cleanup(func() { _ = runtimePG.DB.Close() })
 	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
-		if _, err := runtimePG.BindSchemaCapabilities(ctx); err != nil {
-			return storeBundle{}, err
-		}
+		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 		return selectedPostgresStoreBundle(runtimePG, cfg), nil
 	}
 	cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ *sql.DB, _ *config.Config, _ string, _ semanticview.Source, mountSources cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
@@ -7766,7 +7789,7 @@ func assertServeRuntimeUnavailableBundleRunOrphaned(t *testing.T, ctx context.Co
 
 func TestPrepareServeBundleSourcePersistsCatalogForContractsServe(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := context.Background()
 	bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier12-runtime-tools/test-flow-data-access")
 	identity, err := runtimecontracts.BootBundleIdentity(bundle)
@@ -7792,7 +7815,7 @@ func TestPrepareServeBundleSourcePersistsCatalogForContractsServe(t *testing.T) 
 
 func TestPrepareServeBundleSourceDevStampsEphemeralWithoutCatalogRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := context.Background()
 	bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier12-runtime-tools/test-flow-data-access")
 	identity, err := runtimecontracts.BootBundleIdentity(bundle)
@@ -8023,9 +8046,7 @@ func seedServeRuntimeBundleCatalogFromBundle(t *testing.T, ctx context.Context, 
 	if pg == nil {
 		t.Fatal("postgres store is required")
 	}
-	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
-		t.Fatalf("BindSchemaCapabilities: %v", err)
-	}
+	storetest.BootstrapPostgresRuntimeStore(t, pg)
 	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
 	if err != nil {
 		t.Fatalf("BuildBundleCatalogProjection(%s): %v", label, err)
@@ -8844,9 +8865,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
-		if _, err := runtimePG.BindSchemaCapabilities(ctx); err != nil {
-			return storeBundle{}, err
-		}
+		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 		return selectedPostgresStoreBundle(runtimePG, cfg), nil
 	}
 	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {

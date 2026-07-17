@@ -74,10 +74,6 @@ type Stores struct {
 	RuntimeIngressStore runtimeingress.Store
 }
 
-type eventReceiptSchemaCapabilityProvider interface {
-	CanonicalEventReceiptsCapability(context.Context) (bool, error)
-}
-
 type RuntimeOptions struct {
 	SelfCheck                        bool
 	WorkspaceLifecycle               workspace.Lifecycle
@@ -124,7 +120,6 @@ type validatedRuntimeDeps struct {
 	ProviderCredentialResolver llm.ProviderCredentialResolver
 	Authority                  runtimeauthority.Provider
 	EmitRegistry               *runtimetools.EmitRegistry
-	EventReceiptCapability     func(context.Context) (bool, error)
 	TrimmedBundleFingerprint   string
 	BundleSourceFact           runtimecorrelation.BundleSourceFact
 }
@@ -736,7 +731,6 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 		ProviderCredentialResolver: providerCredentialResolver,
 		Authority:                  authorityProvider,
 		EmitRegistry:               emitRegistry,
-		EventReceiptCapability:     canonicalEventReceiptCapabilities(stores),
 		TrimmedBundleFingerprint:   strings.TrimSpace(opts.BundleFingerprint),
 		BundleSourceFact:           opts.BundleSourceFact.Normalized(),
 	}, nil
@@ -1031,17 +1025,16 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 				}
 				return managerRef.DeactivateFlowInstanceModel(ctx, req)
 			},
-			TimerScheduler:          rt.Scheduler,
-			TimerScheduleStore:      stores.ScheduleStore,
-			MailboxMaterializer:     stores.MailboxMaterializer,
-			DecisionCards:           stores.DecisionCards,
-			EventReceiptsCapability: boot.EventReceiptCapability,
-			Credentials:             rt.Credentials,
-			ManagedCredentials:      rt.ManagedCredentials,
-			MockConnectorResponses:  boot.MockConnectorResponses,
-			ChannelActivityTools:    channelActivityTools,
-			ArtifactRoot:            artifactRoot,
-			BundleHash:              opts.BundleSourceFact.BundleHash,
+			TimerScheduler:         rt.Scheduler,
+			TimerScheduleStore:     stores.ScheduleStore,
+			MailboxMaterializer:    stores.MailboxMaterializer,
+			DecisionCards:          stores.DecisionCards,
+			Credentials:            rt.Credentials,
+			ManagedCredentials:     rt.ManagedCredentials,
+			MockConnectorResponses: boot.MockConnectorResponses,
+			ChannelActivityTools:   channelActivityTools,
+			ArtifactRoot:           artifactRoot,
+			BundleHash:             opts.BundleSourceFact.BundleHash,
 			DecisionCardCadence: decisioncard.CadencePolicy{
 				FirstReminderDelay: rt.Config.Runtime.DecisionCardFirstReminder,
 				UrgencyDelay:       rt.Config.Runtime.DecisionCardUrgency,
@@ -1247,22 +1240,6 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	}
 
 	return rt, nil
-}
-
-func canonicalEventReceiptCapabilities(stores Stores) func(context.Context) (bool, error) {
-	candidates := []any{
-		stores.EventStore,
-		stores.ManagerStore,
-		stores.ScheduleStore,
-		stores.MailboxStore,
-		stores.InboundStore,
-	}
-	for _, candidate := range candidates {
-		if provider, ok := candidate.(eventReceiptSchemaCapabilityProvider); ok && provider != nil {
-			return provider.CanonicalEventReceiptsCapability
-		}
-	}
-	return nil
 }
 
 func scheduleEventPayload(sc runtimepipeline.Schedule) []byte {

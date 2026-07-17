@@ -139,37 +139,20 @@ type dashboardObservabilityReadOwner interface {
 }
 
 type SQLObservabilityReader struct {
-	capSource schemaCapabilitySource
-	owner     dashboardObservabilityReadOwner
+	owner dashboardObservabilityReadOwner
 }
 
-func NewSQLObservabilityReader(db *sql.DB, capSource schemaCapabilitySource) *SQLObservabilityReader {
-	if db == nil {
+func NewSQLObservabilityReader(db *sql.DB, source any) *SQLObservabilityReader {
+	owner, ok := source.(dashboardObservabilityReadOwner)
+	if db == nil || !ok || owner == nil {
 		return nil
 	}
-	return &SQLObservabilityReader{
-		capSource: capSource,
-		owner:     store.NewOperatorObservabilityReadSurface(db, capSource),
-	}
-}
-
-func (r *SQLObservabilityReader) resolveCapabilities(ctx context.Context) (store.StoreSchemaCapabilities, error) {
-	if r == nil || r.capSource == nil {
-		return store.StoreSchemaCapabilities{}, missingDashboardCapabilityOwner("observability reader")
-	}
-	return r.capSource.ResolveSchemaCapabilities(ctx)
+	return &SQLObservabilityReader{owner: owner}
 }
 
 func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFilter, limit int) ([]eventRecord, error) {
 	if r == nil {
 		return []eventRecord{}, nil
-	}
-	caps, err := r.resolveCapabilities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := requireObservabilityEventCapabilities(caps); err != nil {
-		return nil, err
 	}
 	if r.owner == nil {
 		return []eventRecord{}, nil
@@ -200,13 +183,6 @@ func (r *SQLObservabilityReader) GetEvent(ctx context.Context, id string) (event
 	if r == nil {
 		return eventRecord{}, false, nil
 	}
-	caps, err := r.resolveCapabilities(ctx)
-	if err != nil {
-		return eventRecord{}, false, err
-	}
-	if err := requireObservabilityEventCapabilities(caps); err != nil {
-		return eventRecord{}, false, err
-	}
 	if r.owner == nil {
 		return eventRecord{}, false, nil
 	}
@@ -227,13 +203,6 @@ func (r *SQLObservabilityReader) GetEvent(ctx context.Context, id string) (event
 func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter RuntimeLogFilter, limit int) ([]runtimeLogRecord, error) {
 	if r == nil {
 		return []runtimeLogRecord{}, nil
-	}
-	caps, err := r.resolveCapabilities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := requireObservabilityRuntimeLogCapabilities(caps); err != nil {
-		return nil, err
 	}
 	if r.owner == nil {
 		return []runtimeLogRecord{}, nil
@@ -262,13 +231,6 @@ func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter Run
 func (r *SQLObservabilityReader) ListIncidents(ctx context.Context, filter IncidentFilter) ([]incidentRecord, error) {
 	if r == nil {
 		return []incidentRecord{}, nil
-	}
-	caps, err := r.resolveCapabilities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := requireObservabilityRuntimeLogCapabilities(caps); err != nil {
-		return nil, err
 	}
 	if r.owner == nil {
 		return []incidentRecord{}, nil

@@ -44,11 +44,7 @@ func (s *SQLiteRuntimeStore) ListOperatorConversations(ctx context.Context, opts
 }
 
 func (s *SQLiteRuntimeStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]AgentDeliveryLifecycleFacts, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := RequireCanonicalAgentLifecycleCapabilities(caps); err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
 	normalized := normalizePendingAgentIDs(agentIDs)
@@ -119,7 +115,7 @@ func (s *SQLiteRuntimeStore) listSQLiteAgentLifecycleRecords(ctx context.Context
 }
 
 func (r *sqliteOperatorAgentConversationReadSurface) ListOperatorAgents(ctx context.Context, opts OperatorAgentListOptions) (OperatorAgentListResult, error) {
-	if err := r.requireAgentCapabilities(ctx); err != nil {
+	if err := r.requireAgentAccess(); err != nil {
 		return OperatorAgentListResult{}, err
 	}
 	opts.Flow = strings.Trim(strings.TrimSpace(opts.Flow), "/")
@@ -199,24 +195,14 @@ func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorAgentDiagnosis(
 }
 
 func (r *sqliteOperatorAgentConversationReadSurface) ListOperatorConversations(ctx context.Context, opts OperatorConversationListOptions) (OperatorConversationListResult, error) {
-	if err := r.requireConversationCapabilities(ctx); err != nil {
+	if err := r.requireConversationAccess(); err != nil {
 		return OperatorConversationListResult{}, err
 	}
 	opts, err := defaultOperatorConversationListOptions(opts)
 	if err != nil {
 		return OperatorConversationListResult{}, err
 	}
-	caps, err := r.resolveConversationCapabilities(ctx)
-	if err != nil {
-		return OperatorConversationListResult{}, err
-	}
-	if opts.RunID != "" && !caps.Conversations.SessionRunID && !caps.Conversations.AuditRunID {
-		return OperatorConversationListResult{}, operatorConversationRunIDCapabilityError("run_id filtering requires agent_sessions.run_id or agent_conversation_audits.run_id")
-	}
-	sources := sqliteOperatorConversationQuerySources(caps)
-	if len(sources) == 0 {
-		return OperatorConversationListResult{Conversations: []OperatorConversationSummary{}}, nil
-	}
+	sources := sqliteOperatorConversationQuerySources()
 	args := make([]any, 0, 8)
 	where := []string{"1=1"}
 	if opts.AgentID != "" {
@@ -303,51 +289,18 @@ func (r *sqliteOperatorAgentConversationReadSurface) ListOperatorConversations(c
 	return OperatorConversationListResult{Conversations: conversations, NextCursor: nextCursor}, nil
 }
 
-func (r *sqliteOperatorAgentConversationReadSurface) requireAgentCapabilities(ctx context.Context) error {
+func (r *sqliteOperatorAgentConversationReadSurface) requireAgentAccess() error {
 	if r == nil || r.db == nil || r.store == nil {
 		return fmt.Errorf("operator agent read surface requires sqlite store")
 	}
-	caps, err := r.resolveConversationCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	if caps.Conversations.Turns != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("agent_turns", caps.Conversations.Turns)
-	}
-	if !caps.Conversations.TurnBlocks {
-		return errors.New("operator agent read surface requires canonical agent_turns.turn_blocks")
-	}
-	return RequireCanonicalPendingAgentDeliveryCapabilities(caps)
+	return r.store.requireCurrentSchema()
 }
 
-func (r *sqliteOperatorAgentConversationReadSurface) requireConversationCapabilities(ctx context.Context) error {
+func (r *sqliteOperatorAgentConversationReadSurface) requireConversationAccess() error {
 	if r == nil || r.db == nil || r.store == nil {
 		return fmt.Errorf("operator conversation read surface requires sqlite store")
 	}
-	caps, err := r.resolveConversationCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	if caps.Conversations.Sessions != SchemaFlavorCanonical && caps.Conversations.Audits != SchemaFlavorCanonical {
-		if caps.Conversations.Audits != SchemaFlavorUnavailable {
-			return unsupportedSchemaCapability("agent_conversation_audits", caps.Conversations.Audits)
-		}
-		return unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
-	}
-	if caps.Conversations.Turns != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("agent_turns", caps.Conversations.Turns)
-	}
-	if !caps.Conversations.TurnBlocks {
-		return errors.New("operator conversation read surface requires canonical agent_turns.turn_blocks")
-	}
-	return nil
-}
-
-func (r *sqliteOperatorAgentConversationReadSurface) resolveConversationCapabilities(ctx context.Context) (StoreSchemaCapabilities, error) {
-	if r == nil || r.store == nil {
-		return StoreSchemaCapabilities{}, fmt.Errorf("operator conversation read surface requires sqlite schema capabilities")
-	}
-	return r.store.ResolveSchemaCapabilities(ctx)
+	return r.store.requireCurrentSchema()
 }
 
 func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx context.Context) (map[string]operatorAgentProjection, error) {
@@ -505,18 +458,12 @@ func scanSQLiteOperatorConversationSummary(scanner operatorRowScanner) (Operator
 	return item, nil
 }
 
-func sqliteOperatorConversationQuerySources(caps StoreSchemaCapabilities) []string {
-	sources := []string{}
-	if caps.Conversations.Sessions == SchemaFlavorCanonical {
-		sessionRunID := "''"
-		if caps.Conversations.SessionRunID {
-			sessionRunID = "COALESCE(run_id, '')"
-		}
-		sources = append(sources, fmt.Sprintf(`
+func sqliteOperatorConversationQuerySources() []string {
+	return []string{`
 			SELECT
 				session_id AS session_id,
 				agent_id,
-				%s AS run_id,
+				COALESCE(run_id, '') AS run_id,
 				'live_session' AS kind,
 				flow_instance,
 				memory_enabled,
@@ -532,18 +479,11 @@ func sqliteOperatorConversationQuerySources(caps StoreSchemaCapabilities) []stri
 				created_at
 			FROM agent_sessions
 			WHERE status IN ('active', 'terminated') AND memory_enabled = 1
-		`, sessionRunID))
-	}
-	if caps.Conversations.Audits == SchemaFlavorCanonical {
-		auditRunID := "''"
-		if caps.Conversations.AuditRunID {
-			auditRunID = "COALESCE(run_id, '')"
-		}
-		sources = append(sources, fmt.Sprintf(`
+		`, `
 			SELECT
 				session_id AS session_id,
 				agent_id,
-				%s AS run_id,
+				COALESCE(run_id, '') AS run_id,
 				'turn_audit' AS kind,
 				COALESCE(flow_instance, '') AS flow_instance,
 				memory_enabled,
@@ -559,9 +499,7 @@ func sqliteOperatorConversationQuerySources(caps StoreSchemaCapabilities) []stri
 				created_at
 			FROM agent_conversation_audits
 			WHERE status = 'active'
-		`, auditRunID))
-	}
-	return sources
+		`}
 }
 
 func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, agentID string, opts OperatorAgentDeliveryDiagnosticsOptions) (OperatorAgentDeliveryDiagnostics, error) {
@@ -569,7 +507,7 @@ func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryDi
 	if agentID == "" {
 		return OperatorAgentDeliveryDiagnostics{}, ErrAgentNotFound
 	}
-	if err := r.requireAgentDeliveryDiagnosticsCapabilities(ctx); err != nil {
+	if err := r.requireAgentDeliveryDiagnosticsAccess(); err != nil {
 		return OperatorAgentDeliveryDiagnostics{}, err
 	}
 	if err := r.ensureAgentDeliveryDiagnosticsAgentExists(ctx, agentID); err != nil {
@@ -609,40 +547,11 @@ func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryDi
 	return result, nil
 }
 
-func (r *sqliteOperatorAgentConversationReadSurface) requireAgentDeliveryDiagnosticsCapabilities(ctx context.Context) error {
+func (r *sqliteOperatorAgentConversationReadSurface) requireAgentDeliveryDiagnosticsAccess() error {
 	if r == nil || r.db == nil {
 		return fmt.Errorf("operator agent delivery diagnostics read owner requires sqlite store")
 	}
-	caps, err := r.resolveConversationCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	switch {
-	case caps.Agents != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("agents", caps.Agents)
-	case caps.Events.Log != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("events", caps.Events.Log)
-	case !caps.Events.LogRunID:
-		return fmt.Errorf("agent delivery diagnostics read owner requires canonical events.run_id")
-	case caps.Events.Deliveries != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	}
-	catalog, err := loadSQLiteSchemaColumnCatalog(ctx, r.db)
-	if err != nil {
-		return err
-	}
-	required := map[string][]string{
-		"agents":           {"agent_id", "status"},
-		"events":           {"event_id", "run_id", "event_name", "entity_id", "created_at"},
-		"event_deliveries": {"delivery_id", "event_id", "subscriber_type", "subscriber_id", "status", "retry_count", "reason_code", "failure", "delivered_at", "created_at"},
-		"dead_letters":     {"dead_letter_id", "original_event_id", "failure", "retry_count", "chain_depth", "handler_node", "created_at"},
-	}
-	for table, columns := range required {
-		if !catalog.hasColumns(table, columns...) {
-			return fmt.Errorf("agent delivery diagnostics read owner requires canonical %s columns: %s", table, strings.Join(columns, ", "))
-		}
-	}
-	return nil
+	return r.store.requireCurrentSchema()
 }
 
 func (r *sqliteOperatorAgentConversationReadSurface) ensureAgentDeliveryDiagnosticsAgentExists(ctx context.Context, agentID string) error {

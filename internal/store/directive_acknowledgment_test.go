@@ -189,7 +189,7 @@ func forEachDirectiveAmbiguityBackend(t *testing.T, run func(*testing.T, directi
 	t.Run("postgres", func(t *testing.T) {
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
-		store := &PostgresStore{DB: db}
+		store := admitTestPostgresStore(t, db)
 		run(t, directiveAmbiguityBackend{name: "postgres", store: store, db: db})
 	})
 }

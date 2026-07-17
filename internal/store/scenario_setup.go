@@ -53,8 +53,7 @@ func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req ScenarioS
 		return ScenarioSetupResult{}, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return ScenarioSetupResult{}, err
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -71,7 +70,7 @@ func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req ScenarioS
 	if err != nil {
 		return ScenarioSetupResult{}, err
 	}
-	if err := s.ensureRunRow(ctx, caps, tx, req.RunID, "", "test.setup_entities"); err != nil {
+	if err := s.ensureRunRow(ctx, tx, req.RunID, "", "test.setup_entities"); err != nil {
 		return ScenarioSetupResult{}, err
 	}
 	for _, entity := range req.Entities {

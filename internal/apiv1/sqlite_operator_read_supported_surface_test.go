@@ -3,7 +3,6 @@ package apiv1
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -88,59 +87,6 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 				t.Fatalf("%s sqlite error = %#v", tc.method, resp.Error)
 			}
 		})
-	}
-}
-
-func TestSQLiteConversationProjectionRejectsLegacyTurnsWithoutTurnBlocks(t *testing.T) {
-	ctx := context.Background()
-	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
-	if _, err := sqliteStore.DB.ExecContext(ctx, `ALTER TABLE agent_turns DROP COLUMN turn_blocks`); err != nil {
-		t.Fatalf("drop optional turn_blocks column: %v", err)
-	}
-	if _, err := sqliteStore.BindSchemaCapabilities(ctx); err != nil {
-		t.Fatalf("refresh sqlite schema capabilities: %v", err)
-	}
-	agentID := "agent-legacy-turns"
-	sessionID := uuid.NewString()
-	runID := uuid.NewString()
-	base := time.Date(2026, 7, 7, 13, 0, 0, 0, time.UTC)
-
-	seedSQLiteAgentUsageAgent(t, ctx, sqliteStore, agentID)
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, base.Add(-time.Hour)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
-			conversation, turn_count, runtime_state, status, created_at, updated_at
-		) VALUES (
-			?, ?, ?, 'flow/legacy-turns', 1, 'authored',
-			'[{"role":"assistant","content":"ready"}]', 1, '{}', 'active', ?, ?
-		)
-	`, sessionID, runID, agentID, base.Add(-5*time.Minute), base); err != nil {
-		t.Fatalf("seed sqlite session: %v", err)
-	}
-	turnID := uuid.NewString()
-	capabilitySurfaceID := seedSQLiteOperatorReadCapabilitySurface(t, ctx, sqliteStore, runID, turnID, sessionID, agentID, "session")
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
-			emitted_events,
-			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, execution_mode, created_at
-		) VALUES (
-			?, ?, ?, ?, 'flow/legacy-turns', 1, 'authored', NULL,
-			?, 'operator.read', 'task-legacy-turns', ?, '[]',
-			'[]',
-			'{}', '{}', 1, 10, 0, NULL, 'live', ?
-		)
-	`, turnID, runID, agentID, sessionID, uuid.NewString(), capabilitySurfaceID, base); err != nil {
-		t.Fatalf("seed sqlite legacy turn: %v", err)
-	}
-
-	_, err := sqliteStore.ListOperatorConversationTurns(ctx, storepkg.OperatorConversationTurnListOptions{SessionID: sessionID})
-	if err == nil || !strings.Contains(err.Error(), "canonical agent_turns.turn_blocks") {
-		t.Fatalf("ListOperatorConversationTurns error = %v, want canonical turn_blocks requirement", err)
 	}
 }
 

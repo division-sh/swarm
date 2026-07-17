@@ -48,8 +48,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, store *Pos
 		return result, nil
 	}
 
-	caps, err := store.schemaCapabilities(ctx)
-	if err != nil {
+	if err := store.requireCurrentSchema(); err != nil {
 		return result, err
 	}
 	sourceEvents := map[string]events.Event{}
@@ -76,7 +75,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, store *Pos
 			if err != nil {
 				return result, err
 			}
-			outcome, err := store.appendEventSpec(ctx, caps, tx, replayed)
+			outcome, err := store.appendEventSpec(ctx, tx, replayed)
 			if err != nil {
 				return result, err
 			}

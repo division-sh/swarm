@@ -13,7 +13,7 @@ import (
 
 func TestPostgresStore_APIIdempotencyReplaysAndConflicts(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	s := &PostgresStore{DB: db}
+	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
 	req := APIIdempotencyRequest{

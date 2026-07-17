@@ -102,8 +102,7 @@ func newTemplateFlowPilotPipelineCoordinator(t *testing.T, db *sql.DB, bundle *r
 			guardRegistry:  NewContractGuardRegistry(source),
 			actionRegistry: NewContractActionRegistry(source),
 		},
-		WorkflowStore:           workflowStore,
-		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+		WorkflowStore: workflowStore,
 	})
 	return pc, workflowStore
 }

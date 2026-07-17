@@ -2,6 +2,7 @@ package storetest
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,18 +24,7 @@ func StartSQLiteRuntimeStore(t testing.TB) *store.SQLiteRuntimeStore {
 func StartSQLiteRuntimeStoreWithContext(t testing.TB, ctx context.Context) *store.SQLiteRuntimeStore {
 	t.Helper()
 
-	var platformSpec runtimecontracts.PlatformSpecDocument
-	source, err := yamlsource.Load(platform.PlatformSpecYAML())
-	if err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
-	if err := source.Decode(&platformSpec); err != nil {
-		t.Fatalf("unmarshal platform spec: %v", err)
-	}
-	plans, err := store.GeneratePlatformTableDDLs(platformSpec)
-	if err != nil {
-		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
-	}
+	platformSpec, plans := canonicalPlatformPlans(t)
 	dbPath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 	sqliteStore, err := store.NewSQLiteRuntimeStore(dbPath)
 	if err != nil {
@@ -59,4 +49,47 @@ func StartSQLiteRuntimeStoreWithContext(t testing.TB, ctx context.Context) *stor
 		t.Fatalf("sqlite runtime store did not create file-backed db at %s: %v", dbPath, err)
 	}
 	return sqliteStore
+}
+
+// AdmitPostgresRuntimeStore runs the production bootstrap against a canonical
+// PostgreSQL test database and returns the admitted store object.
+func AdmitPostgresRuntimeStore(t testing.TB, db *sql.DB) *store.PostgresStore {
+	t.Helper()
+	postgresStore := &store.PostgresStore{DB: db}
+	BootstrapPostgresRuntimeStore(t, postgresStore)
+	return postgresStore
+}
+
+// BootstrapPostgresRuntimeStore admits an existing PostgreSQL store through
+// the same production bootstrap used at serve startup.
+func BootstrapPostgresRuntimeStore(t testing.TB, postgresStore *store.PostgresStore) {
+	t.Helper()
+	platformSpec, plans := canonicalPlatformPlans(t)
+	if err := postgresStore.BootstrapSchema(context.Background(), store.SchemaBootstrapRequest{
+		PlatformPlans: plans,
+		Origin: store.RuntimeStoreOrigin{
+			SwarmVersion:    "storetest",
+			PlatformVersion: platformSpec.Platform.Version,
+			CreatedAt:       time.Now().UTC(),
+		},
+	}); err != nil {
+		t.Fatalf("BootstrapSchema: %v", err)
+	}
+}
+
+func canonicalPlatformPlans(t testing.TB) (runtimecontracts.PlatformSpecDocument, []store.SchemaTableDDL) {
+	t.Helper()
+	var platformSpec runtimecontracts.PlatformSpecDocument
+	source, err := yamlsource.Load(platform.PlatformSpecYAML())
+	if err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	if err := source.Decode(&platformSpec); err != nil {
+		t.Fatalf("unmarshal platform spec: %v", err)
+	}
+	plans, err := store.GeneratePlatformTableDDLs(platformSpec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	return platformSpec, plans
 }

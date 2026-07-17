@@ -118,7 +118,7 @@ func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *test
 			t.Parallel()
 
 			_, db, _ := testutil.StartPostgres(t)
-			pg := &PostgresStore{DB: db}
+			pg := admitTestPostgresStore(t, db)
 			ctx := testAuthorActivityContext()
 
 			if _, err := db.ExecContext(ctx, `

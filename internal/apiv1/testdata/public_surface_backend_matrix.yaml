@@ -434,7 +434,7 @@ operator_read_api_parity_ledger:
       - {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}
       - {kind: go_test, name: TestOperatorAgentReadSurfaceListAgentsDoesNotDeriveStatusFromActiveLease, backends: [explicit_postgres]}
       - {kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface, backends: [default_sqlite]}
-      - {kind: go_test, name: TestOperatorConversationQuerySourcesRunIDCapabilityMatrix}
+      - {kind: go_test, name: TestOperatorConversationQuerySourcesAlwaysProjectRunID}
       - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
   - method: conversation.list_turns
     classification: dual_backend_api_proof

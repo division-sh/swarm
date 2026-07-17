@@ -19,14 +19,13 @@ import (
 )
 
 type fakeConversationCapabilitySource struct {
-	caps    StoreSchemaCapabilities
 	turns   map[string][]OperatorPublicConversationTurn
 	turnErr error
 	err     error
 }
 
-func (s fakeConversationCapabilitySource) ResolveSchemaCapabilities(context.Context) (StoreSchemaCapabilities, error) {
-	return s.caps, s.err
+func (s fakeConversationCapabilitySource) requireCurrentSchema() error {
+	return s.err
 }
 
 func (s fakeConversationCapabilitySource) ListOperatorConversationTurns(_ context.Context, opts OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error) {
@@ -51,7 +50,6 @@ func (s fakeConversationCapabilitySource) LoadOperatorPublicConversationTurn(_ c
 }
 
 type fakeAgentConversationReadSource struct {
-	caps      StoreSchemaCapabilities
 	agents    []runtimemanager.PersistedAgent
 	pending   map[string]PendingAgentDeliveryFacts
 	details   map[string]PendingAgentDeliveryPage
@@ -62,8 +60,8 @@ type fakeAgentConversationReadSource struct {
 	detailErr error
 }
 
-func (s fakeAgentConversationReadSource) ResolveSchemaCapabilities(context.Context) (StoreSchemaCapabilities, error) {
-	return s.caps, s.err
+func (s fakeAgentConversationReadSource) requireCurrentSchema() error {
+	return s.err
 }
 
 func (s fakeAgentConversationReadSource) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
@@ -180,139 +178,27 @@ func TestOperatorAgentSummaryPublishesCanonicalMemoryFacts(t *testing.T) {
 	}
 }
 
-func canonicalAgentConversationReadCaps() StoreSchemaCapabilities {
-	return StoreSchemaCapabilities{
-		Events: EventSchemaCapabilities{
-			Log:        SchemaFlavorCanonical,
-			Deliveries: SchemaFlavorCanonical,
-			Receipts:   SchemaFlavorCanonical,
-		},
-		Conversations: ConversationSchemaCapabilities{
-			Sessions:     SchemaFlavorCanonical,
-			Turns:        SchemaFlavorCanonical,
-			TurnBlocks:   true,
-			SessionRunID: true,
-		},
-	}
-}
-
 func operatorAgentProjectionColumns() []string {
 	return []string{
 		"agent_id", "status", "session_id", "session_started_at", "turn_count", "lease_holder", "lease_expires_at", "runtime_state", "pending_count", "oldest_pending_age_sec",
 	}
 }
 
-func TestCanonicalStatelessConversationVisibilitySourceProjectsRunIDByCapability(t *testing.T) {
-	withRunID := CanonicalStatelessConversationVisibilitySourceSQL(ConversationSchemaCapabilities{
-		Audits:     SchemaFlavorCanonical,
-		AuditRunID: true,
-	})
-	if !strings.Contains(withRunID, "COALESCE(run_id::text, '') AS run_id") {
-		t.Fatalf("audit run_id projection missing from canonical source:\n%s", withRunID)
-	}
-
-	withoutRunID := CanonicalStatelessConversationVisibilitySourceSQL(ConversationSchemaCapabilities{
-		Audits: SchemaFlavorCanonical,
-	})
-	if !strings.Contains(withoutRunID, "'' AS run_id") {
-		t.Fatalf("audit no-run_id projection missing stable blank run_id:\n%s", withoutRunID)
-	}
-	if strings.Contains(withoutRunID, "COALESCE(run_id::text") {
-		t.Fatalf("audit no-run_id projection referenced missing run_id column:\n%s", withoutRunID)
+func TestCanonicalStatelessConversationVisibilitySourceProjectsRunID(t *testing.T) {
+	source := CanonicalStatelessConversationVisibilitySourceSQL()
+	if !strings.Contains(source, "COALESCE(run_id::text, '') AS run_id") {
+		t.Fatalf("audit run_id projection missing from canonical source:\n%s", source)
 	}
 }
 
-func TestOperatorConversationQuerySourcesRunIDCapabilityMatrix(t *testing.T) {
-	tests := []struct {
-		name         string
-		sessionRunID bool
-		auditRunID   bool
-	}{
-		{name: "both", sessionRunID: true, auditRunID: true},
-		{name: "session only", sessionRunID: true},
-		{name: "audit only", auditRunID: true},
-		{name: "neither"},
+func TestOperatorConversationQuerySourcesAlwaysProjectRunID(t *testing.T) {
+	sources := operatorConversationQuerySources()
+	if len(sources) != 2 {
+		t.Fatalf("source count = %d, want 2", len(sources))
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			sources := operatorConversationQuerySources(StoreSchemaCapabilities{
-				Conversations: ConversationSchemaCapabilities{
-					Sessions:     SchemaFlavorCanonical,
-					Audits:       SchemaFlavorCanonical,
-					Turns:        SchemaFlavorCanonical,
-					SessionRunID: tc.sessionRunID,
-					AuditRunID:   tc.auditRunID,
-				},
-			})
-			if len(sources) != 2 {
-				t.Fatalf("source count = %d, want 2", len(sources))
-			}
-			for _, source := range sources {
-				switch {
-				case strings.Contains(source, "'live_session' AS kind"):
-					assertRunIDSourceProjection(t, source, tc.sessionRunID)
-				case strings.Contains(source, "'turn_audit' AS kind"):
-					assertRunIDSourceProjection(t, source, tc.auditRunID)
-				default:
-					t.Fatalf("unknown conversation source:\n%s", source)
-				}
-			}
-		})
-	}
-}
-
-func assertRunIDSourceProjection(t *testing.T, source string, hasRunID bool) {
-	t.Helper()
-	if hasRunID {
+	for _, source := range sources {
 		if !strings.Contains(source, "COALESCE(run_id::text, '') AS run_id") {
-			t.Fatalf("run_id-capable source did not project run_id:\n%s", source)
-		}
-		return
-	}
-	if !strings.Contains(source, "'' AS run_id") {
-		t.Fatalf("non-run_id source did not project stable blank run_id:\n%s", source)
-	}
-}
-
-func TestOperatorConversationReadSurfaceListRejectsRunIDFilterWithoutRunIDCapability(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	reader := NewOperatorConversationReadSurface(db, fakeConversationCapabilitySource{caps: StoreSchemaCapabilities{
-		Conversations: ConversationSchemaCapabilities{
-			Sessions:   SchemaFlavorCanonical,
-			Audits:     SchemaFlavorCanonical,
-			Turns:      SchemaFlavorCanonical,
-			TurnBlocks: true,
-		},
-	}})
-
-	_, err = reader.ListOperatorConversations(testAuthorActivityContext(), OperatorConversationListOptions{
-		RunID: "11111111-1111-1111-1111-111111111111",
-	})
-	if !errors.Is(err, ErrOperatorConversationRunIDCapability) {
-		t.Fatalf("ListOperatorConversations err = %v, want ErrOperatorConversationRunIDCapability", err)
-	}
-	if strings.Contains(strings.ToLower(err.Error()), "pq:") || strings.Contains(strings.ToLower(err.Error()), `column "run_id"`) {
-		t.Fatalf("capability error leaked driver detail: %v", err)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("expectations: %v", err)
-	}
-}
-
-func TestOperatorConversationReadSurfaceSanitizesRunIDProjectionDriverError(t *testing.T) {
-	err := operatorConversationReadQueryError("load operator conversation", errors.New(`pq: column "run_id" does not exist at position 46:14 (42703)`))
-	if !errors.Is(err, ErrOperatorConversationRunIDCapability) {
-		t.Fatalf("sanitized err = %v, want ErrOperatorConversationRunIDCapability", err)
-	}
-	lower := strings.ToLower(err.Error())
-	for _, forbidden := range []string{"pq:", `column "run_id"`, "42703", "position"} {
-		if strings.Contains(lower, forbidden) {
-			t.Fatalf("sanitized err leaked %q: %v", forbidden, err)
+			t.Fatalf("canonical source did not project run_id:\n%s", source)
 		}
 	}
 }
@@ -342,12 +228,6 @@ func TestOperatorConversationReadSurfaceListUsesCanonicalProjection(t *testing.T
 	runID := "11111111-1111-1111-1111-111111111111"
 	now := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
 	reader := NewOperatorConversationReadSurface(db, fakeConversationCapabilitySource{
-		caps: StoreSchemaCapabilities{Conversations: ConversationSchemaCapabilities{
-			Sessions:     SchemaFlavorCanonical,
-			Turns:        SchemaFlavorCanonical,
-			TurnBlocks:   true,
-			SessionRunID: true,
-		}},
 		turns: map[string][]OperatorPublicConversationTurn{
 			"sess-1": {{TurnID: "turn-1", TaskID: "task-1", ParseOK: true, Activity: []OperatorConversationActivity{}}},
 		},
@@ -395,7 +275,6 @@ func TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs(t *testing.
 	turnCompletedAt := time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC)
 	turnFailure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassConnectorFailure, "model_error", "llm-runtime", "turn", nil), "llm-runtime", "turn")
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
-		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
 		turns: map[string][]OperatorPublicConversationTurn{
 			sessionID: {{
@@ -442,7 +321,6 @@ func TestOperatorAgentReadSurfaceListAgentsDoesNotDeriveStatusFromActiveLease(t 
 	defer db.Close()
 
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
-		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
 		pending: map[string]PendingAgentDeliveryFacts{
 			"agent-1": {},
@@ -499,7 +377,6 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 	agent := testOperatorAgent("agent-1")
 	agent.Config.EntityID = configuredEntityID
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
-		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{agent},
 		pending: map[string]PendingAgentDeliveryFacts{
 			"agent-1": {PendingCount: 99, OldestPendingAgeSec: 999},
@@ -589,13 +466,9 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 }
 
 func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOwner(t *testing.T) {
-	dsn, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	pg, err := NewPostgresStore(dsn)
-	if err != nil {
-		t.Fatalf("NewPostgresStore: %v", err)
-	}
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	pg := newTestPostgresStore(t, db)
 
 	ctx := testAuthorActivityContext()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
@@ -723,13 +596,9 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 }
 
 func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testing.T) {
-	dsn, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	pg, err := NewPostgresStore(dsn)
-	if err != nil {
-		t.Fatalf("NewPostgresStore: %v", err)
-	}
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	pg := newTestPostgresStore(t, db)
 
 	ctx := testAuthorActivityContext()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
@@ -936,13 +805,9 @@ func seedOperatorAgentUsageAgent(t *testing.T, ctx context.Context, store *SQLit
 }
 
 func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsDoesNotRequireConversationOwners(t *testing.T) {
-	dsn, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	pg, err := NewPostgresStore(dsn)
-	if err != nil {
-		t.Fatalf("NewPostgresStore: %v", err)
-	}
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	pg := newTestPostgresStore(t, db)
 
 	ctx := testAuthorActivityContext()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
@@ -961,16 +826,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsDoesNotRequireConve
 		t.Fatalf("UpsertAgent: %v", err)
 	}
 
-	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
-		caps: StoreSchemaCapabilities{
-			Agents: SchemaFlavorCanonical,
-			Events: EventSchemaCapabilities{
-				Log:        SchemaFlavorCanonical,
-				LogRunID:   true,
-				Deliveries: SchemaFlavorCanonical,
-			},
-		},
-	}, 0)
+	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{}, 0)
 
 	result, err := reader.LoadOperatorAgentDeliveryDiagnostics(ctx, "agent-1", OperatorAgentDeliveryDiagnosticsOptions{})
 	if err != nil {
@@ -988,13 +844,9 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsDoesNotRequireConve
 }
 
 func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T) {
-	dsn, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	pg, err := NewPostgresStore(dsn)
-	if err != nil {
-		t.Fatalf("NewPostgresStore: %v", err)
-	}
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	pg := newTestPostgresStore(t, db)
 
 	ctx := testAuthorActivityContext()
 	for _, agent := range []struct {
@@ -1439,13 +1291,9 @@ func assertAgentDeliveryLifecycleRows(t *testing.T, got []OperatorAgentDeliveryL
 }
 
 func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsFailsClosedOnDeadLetterMismatch(t *testing.T) {
-	dsn, db, cleanup := testutil.StartPostgres(t)
+	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	pg, err := NewPostgresStore(dsn)
-	if err != nil {
-		t.Fatalf("NewPostgresStore: %v", err)
-	}
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	pg := newTestPostgresStore(t, db)
 
 	ctx := testAuthorActivityContext()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
@@ -1485,7 +1333,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsFailsClosedOnDeadLe
 		t.Fatalf("seed delivery: %v", err)
 	}
 
-	_, err = pg.LoadOperatorAgentDeliveryDiagnostics(ctx, "agent-1", OperatorAgentDeliveryDiagnosticsOptions{})
+	_, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, "agent-1", OperatorAgentDeliveryDiagnosticsOptions{})
 	if err == nil {
 		t.Fatal("LoadOperatorAgentDeliveryDiagnostics returned success for dead_letter delivery without record")
 	}
@@ -1502,7 +1350,6 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsAbsentLifecycle(t *testi
 	defer db.Close()
 
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
-		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
 	}, 0)
 
@@ -1646,7 +1493,6 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisDoesNotDeriveStatusFromActive
 	defer db.Close()
 
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
-		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
 		lifecycle: map[string]AgentDeliveryLifecycleFacts{
 			"agent-1": {},
@@ -1680,7 +1526,6 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsActiveWithoutLatestTurn(
 	defer db.Close()
 
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
-		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
 	}, 0)
 
@@ -1712,7 +1557,6 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsEmptyActiveOptionalRefs(
 
 	turnID := "22222222-2222-2222-2222-222222222222"
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
-		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
 		turns: map[string][]OperatorPublicConversationTurn{
 			"sess-1": {{TurnID: turnID, CompletedAt: time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC), ParseOK: true, Activity: []OperatorConversationActivity{}}},
@@ -1746,7 +1590,6 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedRuntime
 	defer db.Close()
 
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
-		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
 	}, 0)
 
@@ -1771,7 +1614,6 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedLifecyc
 	defer db.Close()
 
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
-		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
 		lifecycle: map[string]AgentDeliveryLifecycleFacts{
 			"agent-1": {CurrentState: "blocked", BlockingLayer: "session_execution"},
@@ -1791,52 +1633,6 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedLifecyc
 	}
 }
 
-func TestOperatorAgentReadSurfaceLoadAgentDiagnosisPropagatesCapabilityFailure(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	caps := canonicalAgentConversationReadCaps()
-	caps.Events.Log = SchemaFlavorLegacy
-	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
-		caps:   caps,
-		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
-	}, 0)
-
-	_, err = reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{})
-	if err == nil || !strings.Contains(err.Error(), "events schema is unsupported") {
-		t.Fatalf("LoadOperatorAgentDiagnosis err = %v, want events capability failure", err)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("expectations: %v", err)
-	}
-}
-
-func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedWithoutCanonicalTurns(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	caps := canonicalAgentConversationReadCaps()
-	caps.Conversations.Turns = SchemaFlavorUnavailable
-	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
-		caps:   caps,
-		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
-	}, 0)
-
-	_, err = reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{})
-	if err == nil || !strings.Contains(err.Error(), "agent_turns schema is unavailable") {
-		t.Fatalf("LoadOperatorAgentDiagnosis err = %v, want agent_turns capability failure", err)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("expectations: %v", err)
-	}
-}
-
 func loadAgentDiagnosisWithLatestTurn(t *testing.T, turnID, taskID, entityID string, parseOK bool, turnBlocks []byte) (OperatorAgentDiagnosis, error) {
 	t.Helper()
 	db, mock, err := sqlmock.New()
@@ -1846,7 +1642,6 @@ func loadAgentDiagnosisWithLatestTurn(t *testing.T, turnID, taskID, entityID str
 	defer db.Close()
 
 	source := fakeAgentConversationReadSource{
-		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
 	}
 

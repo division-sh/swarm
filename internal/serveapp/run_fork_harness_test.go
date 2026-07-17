@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -104,6 +105,39 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	}
 	storeFacade := stores.facade()
 	defer storeFacade.close()
+	resolvedPlatformSpecPath := cliapp.ResolvePath(repo, *platformSpecPath)
+	if strings.TrimSpace(*platformSpecPath) == defaultPlatformSpecPath {
+		if _, statErr := os.Stat(resolvedPlatformSpecPath); statErr != nil {
+			resolvedPlatformSpecPath = cliapp.ResolvePath(cliapp.RepoRoot(), defaultPlatformSpecPath)
+		}
+	}
+	platformSpec, err := loadServePlatformSpecDocument(resolvedPlatformSpecPath)
+	if err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "fork failed: load platform spec: %v\n", err)
+		}
+		return 1
+	}
+	platformPlans, err := store.GeneratePlatformTableDDLs(platformSpec)
+	if err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "fork failed: generate platform schema: %v\n", err)
+		}
+		return 1
+	}
+	bootstrapRequest, err := schemaBootstrapRequest(platformSpec, platformPlans, nil)
+	if err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "fork failed: prepare platform schema bootstrap: %v\n", err)
+		}
+		return 1
+	}
+	if err := ensureServeSchemaTables(ctx, stores, bootstrapRequest); err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "fork failed: bootstrap platform schema: %v\n", err)
+		}
+		return 1
+	}
 	ctx = runForkRuntimeOwnerContext(ctx)
 	runForkOwner, ok := storeFacade.runForkRuntimeOwner()
 	if !ok {
@@ -118,7 +152,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			ConfirmSourceFreeze: *confirmSourceFreeze,
 			SourceLoader: runtimerunforkexecution.ContractBundleSourceLoader{
 				RepoRoot:         repo,
-				PlatformSpecPath: cliapp.ResolvePath(repo, *platformSpecPath),
+				PlatformSpecPath: resolvedPlatformSpecPath,
 			},
 		})
 		if err != nil {
@@ -288,7 +322,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			At:          strings.TrimSpace(*at),
 			SourceLoader: runtimerunforkexecution.ContractBundleSourceLoader{
 				RepoRoot:         repo,
-				PlatformSpecPath: cliapp.ResolvePath(repo, *platformSpecPath),
+				PlatformSpecPath: resolvedPlatformSpecPath,
 			},
 			ContractSelection: runtimerunforkadmission.SelectedContractSelection(source, contractsRoot),
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{

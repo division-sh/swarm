@@ -50,7 +50,7 @@ func TestLifecycleSubordinateTransactionSQLite(t *testing.T) {
 
 func TestLifecycleSubordinateTransactionPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	proveLifecycleSubordinateTransaction(t, &PostgresStore{DB: db}, db, false)
+	proveLifecycleSubordinateTransaction(t, admitTestPostgresStore(t, db), db, false)
 }
 
 func TestLifecycleReconfigureOccurrenceIdentitySQLite(t *testing.T) {
@@ -60,7 +60,7 @@ func TestLifecycleReconfigureOccurrenceIdentitySQLite(t *testing.T) {
 
 func TestLifecycleReconfigureOccurrenceIdentityPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	proveLifecycleReconfigureOccurrenceIdentity(t, &PostgresStore{DB: db}, db, false)
+	proveLifecycleReconfigureOccurrenceIdentity(t, admitTestPostgresStore(t, db), db, false)
 }
 
 func TestLifecycleConcurrentPartialReconfigureSQLite(t *testing.T) {
@@ -70,7 +70,7 @@ func TestLifecycleConcurrentPartialReconfigureSQLite(t *testing.T) {
 
 func TestLifecycleConcurrentPartialReconfigurePostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	proveLifecycleConcurrentPartialReconfigure(t, &PostgresStore{DB: db}, db, false)
+	proveLifecycleConcurrentPartialReconfigure(t, admitTestPostgresStore(t, db), db, false)
 }
 
 func proveLifecycleConcurrentPartialReconfigure(t *testing.T, store lifecycleOccurrenceStore, db *sql.DB, sqlite bool) {

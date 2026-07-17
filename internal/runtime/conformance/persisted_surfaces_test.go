@@ -41,6 +41,7 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	runtimeworkspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -86,7 +87,7 @@ func conformanceProviderCredentialResolver(t testing.TB, key, value string) runt
 
 func acquireLiveConversationSession(t *testing.T, ctx context.Context, db *sql.DB, identity agentmemory.Identity) string {
 	t.Helper()
-	registry := &store.PostgresStore{DB: db}
+	registry := storetest.AdmitPostgresRuntimeStore(t, db)
 	registry.SetSessionLockTTL(30 * time.Second)
 	ctx = runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
 	lease, err := registry.Acquire(ctx, identity, "test-owner")
@@ -102,7 +103,7 @@ func acquireLiveConversationSession(t *testing.T, ctx context.Context, db *sql.D
 func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *testing.T) {
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(context.Background()), runtimeeffects.ExecutionModeLive)
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 
 	requireCanonicalConversationSurface(t, ctx, pg)
 	seedConformanceAgent(t, ctx, pg, "agent-1")
@@ -174,7 +175,7 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 
 	requireCanonicalConversationSurface(t, ctx, pg)
 	lifecycleToken := seedConformanceRunningAgent(t, ctx, pg, "agent-1")
@@ -245,7 +246,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	registerDifferentTestAuthorActivityCatalog(t, pg, "review.requested")
 
 	requireCanonicalConversationSurface(t, ctx, pg)
@@ -414,7 +415,7 @@ func TestCLISessionFailureDoesNotRotateFromStderrProse(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	registerDifferentTestAuthorActivityCatalog(t, pg, "review.requested")
 
 	requireCanonicalConversationSurface(t, ctx, pg)
@@ -574,7 +575,7 @@ func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testing.T) {
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(context.Background()), runtimeeffects.ExecutionModeLive)
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 
 	requireCanonicalConversationSurface(t, ctx, pg)
 	seedConformanceAgent(t, ctx, pg, "agent-1")
@@ -632,7 +633,7 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
@@ -876,10 +877,6 @@ func (s conformanceTimerRecoveryEventStore) RegisterAuthorActivityEventCatalog(s
 	return s.store.RegisterAuthorActivityEventCatalog(scope, descriptors)
 }
 
-func (conformanceTimerRecoveryEventStore) CanonicalRuntimeLogCapability(context.Context) (bool, bool, error) {
-	return true, true, nil
-}
-
 func (conformanceTimerRecoveryEventStore) AppendEvent(context.Context, events.Event) error {
 	return nil
 }
@@ -909,10 +906,6 @@ type conformanceRecoveryReplayLease struct{}
 func (conformanceRecoveryReplayLease) Key() string                   { return "conformance-replay" }
 func (conformanceRecoveryReplayLease) Refresh(context.Context) error { return nil }
 func (conformanceRecoveryReplayLease) Release(context.Context) error { return nil }
-
-func (s conformanceRecoveryFailureEventStore) CanonicalRuntimeLogCapability(context.Context) (bool, bool, error) {
-	return true, true, nil
-}
 
 func (s conformanceRecoveryFailureEventStore) AppendEvent(ctx context.Context, evt events.Event) error {
 	return s.store.AppendEvent(ctx, evt)
@@ -1052,7 +1045,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
 	if err := pg.UpsertSchedule(ctx, runtimepipeline.Schedule{
@@ -1140,7 +1133,7 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	module := loadConformanceRuntimeWorkflowModule(t)
@@ -1226,7 +1219,7 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
@@ -1383,7 +1376,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	seedConformanceAgent(t, ctx, pg, "agent-1")
@@ -1512,7 +1505,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	module := loadConformanceRuntimeWorkflowModule(t)
@@ -1647,7 +1640,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	registerDifferentTestAuthorActivityCatalog(t, pg, "system.parent", "system.recover.replay", "system.recover.skip")
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
@@ -1785,7 +1778,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProjection(t *testing.T) {
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(context.Background()), runtimeeffects.ExecutionModeLive)
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 
 	requireCanonicalConversationSurface(t, ctx, pg)
 	seedConformanceAgent(t, ctx, pg, "agent-1")
@@ -1984,30 +1977,14 @@ func TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField(t *test
 
 func requireCanonicalConversationSurface(t *testing.T, ctx context.Context, pg *store.PostgresStore) {
 	t.Helper()
-	caps, err := pg.BindSchemaCapabilities(ctx)
-	if err != nil {
-		t.Fatalf("BindSchemaCapabilities: %v", err)
-	}
-	if caps.Conversations.Turns != store.SchemaFlavorCanonical {
-		t.Fatalf("agent_turns capability = %s, want canonical", caps.Conversations.Turns)
-	}
-	if !caps.Conversations.TurnBlocks {
-		t.Fatal("agent_turns.turn_blocks capability is missing; canonical turn-summary surface is not enforceable")
-	}
-	if caps.Conversations.Audits != store.SchemaFlavorCanonical {
-		t.Fatalf("agent_conversation_audits capability = %s, want canonical", caps.Conversations.Audits)
-	}
+	storetest.BootstrapPostgresRuntimeStore(t, pg)
+	requireTableColumns(t, ctx, pg.DB, "agent_turns", "turn_id", "turn_blocks")
+	requireTableColumns(t, ctx, pg.DB, "agent_conversation_audits", "session_id")
 }
 
 func requireCanonicalRuntimeLogSurface(t *testing.T, ctx context.Context, pg *store.PostgresStore) {
 	t.Helper()
-	caps, err := pg.BindSchemaCapabilities(ctx)
-	if err != nil {
-		t.Fatalf("BindSchemaCapabilities: %v", err)
-	}
-	if caps.Events.Log != store.SchemaFlavorCanonical {
-		t.Fatalf("events capability = %s, want canonical", caps.Events.Log)
-	}
+	storetest.BootstrapPostgresRuntimeStore(t, pg)
 	requireTableColumns(t, ctx, pg.DB, "events", "event_id", "event_name", "payload", "scope", "created_at")
 }
 
@@ -2236,7 +2213,7 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
 		HumanTaskStore:                 pg,

@@ -545,49 +545,6 @@ func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing
 	}
 }
 
-func TestRecoveryManager_FailsClosedOnMissingRunIDSchemaCapability(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	if _, err := db.ExecContext(ctx, `ALTER TABLE events DROP COLUMN run_id`); err != nil {
-		t.Fatalf("drop events.run_id: %v", err)
-	}
-
-	pg := newRecoveryTestPostgresStore(t, db)
-	bus, err := runtimebus.NewEventBus(pg)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	capture := &recoveryCapturePublisher{inner: bus}
-
-	eventID := uuid.NewString()
-	parentID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
-			event_id, event_name, task_id, entity_id, flow_instance,
-			source_route, target_route, target_set, scope, payload,
-			execution_mode, chain_depth, produced_by, produced_by_type,
-			source_event_id, created_at
-		)
-		VALUES (
-			$1::uuid, 'system.recover.no-run-id', '', NULL, '',
-			'{}'::jsonb, '{}'::jsonb, '[]'::jsonb, 'global', '{"ok":true}'::jsonb,
-			'live', 0, 'runtime', 'platform', $2::uuid, $3
-		)
-	`, eventID, parentID, time.Now().Add(-time.Minute).UTC()); err != nil {
-		t.Fatalf("seed event without run_id schema capability: %v", err)
-	}
-
-	rm := runtimepipeline.NewRecoveryManagerWith(pg, capture)
-	if err := rm.Recover(ctx); err == nil || !strings.Contains(err.Error(), "events schema is unsupported") {
-		t.Fatalf("Recover error = %v, want unsupported events schema", err)
-	}
-	if len(capture.direct) != 0 {
-		t.Fatalf("direct replayed events = %#v, want none", capture.direct)
-	}
-}
-
 func TestRecoveryManager_ClaimsReplayOwnershipUnderOverlap(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)

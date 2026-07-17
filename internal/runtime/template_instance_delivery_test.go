@@ -42,7 +42,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	ctx := seedRuntimeTestRun(t, db)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -50,9 +50,6 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		Module: module,
-		EventReceiptsCapability: func(context.Context) (bool, error) {
-			return true, nil
-		},
 	})
 	subscribed := make(chan struct{}, 1)
 	pc.SetTestSubscribeHook(func() { subscribed <- struct{}{} })
@@ -116,7 +113,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	ctx := seedRuntimeTestRun(t, db)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -173,7 +170,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	ctx := seedRuntimeTestRun(t, db)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -194,9 +191,6 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 			return activationErr
 		},
 		WorkflowStore: workflowStore,
-		EventReceiptsCapability: func(context.Context) (bool, error) {
-			return true, nil
-		},
 	})
 	bus.SetInterceptors(pc)
 
@@ -274,7 +268,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	ctx := seedRuntimeTestRun(t, db)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	proofStore := routeMaterializationDBProofStore{pg: pg}
 	bus, err := newScopedTestEventBus(t, proofStore, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
@@ -290,9 +284,6 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 		Module:            module,
 		InstanceActivator: manager.ActivateFlowInstance,
 		WorkflowStore:     workflowStore,
-		EventReceiptsCapability: func(context.Context) (bool, error) {
-			return true, nil
-		},
 	})
 	bus.SetInterceptors(pc)
 
@@ -349,7 +340,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	ctx := seedRuntimeTestRun(t, db)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	proofStore := &failingDeliveryRouteStore{PostgresStore: pg}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	var manager *runtimemanager.AgentManager
@@ -430,7 +421,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	ctx := seedRuntimeTestRun(t, db)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	var pc *runtimepipeline.PipelineCoordinator
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
@@ -454,9 +445,6 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		Module:            module,
 		InstanceActivator: manager.ActivateFlowInstance,
 		WorkflowStore:     workflowStore,
-		EventReceiptsCapability: func(context.Context) (bool, error) {
-			return true, nil
-		},
 	})
 	subscribed := make(chan struct{}, 1)
 	pc.SetTestSubscribeHook(func() { subscribed <- struct{}{} })
@@ -559,7 +547,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	ctx := seedRuntimeTestRun(t, db)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -574,9 +562,6 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		Module:            module,
 		InstanceActivator: manager.ActivateFlowInstance,
 		WorkflowStore:     workflowStore,
-		EventReceiptsCapability: func(context.Context) (bool, error) {
-			return true, nil
-		},
 	})
 	subscribed := make(chan struct{}, 1)
 	pc.SetTestSubscribeHook(func() { subscribed <- struct{}{} })
@@ -900,7 +885,7 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 				t.Cleanup(cleanup)
 				ctx := seedRuntimeTestRun(t, db)
 				return ctx, db, &providerRollbackPostgresStore{
-					PostgresStore: &store.PostgresStore{DB: db},
+					PostgresStore: storetest.AdmitPostgresRuntimeStore(t, db),
 					proof:         &providerRollbackProof{checkpoint: checkpoint},
 				}
 			},

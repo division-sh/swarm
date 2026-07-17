@@ -13,15 +13,8 @@ import (
 )
 
 func (s *SQLiteRuntimeStore) LoadRunBundleAvailability(ctx context.Context, runID string) (runbundle.Availability, error) {
-	if s == nil || s.DB == nil {
-		return runbundle.Availability{}, fmt.Errorf("sqlite runtime store is required")
-	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return runbundle.Availability{}, err
-	}
-	if !caps.Events.HasRuns || !caps.Events.RunBundleHash || !caps.Events.RunBundleSource {
-		return runbundle.Availability{}, fmt.Errorf("run bundle availability requires runs.bundle_hash and runs.bundle_source")
 	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
@@ -31,7 +24,7 @@ func (s *SQLiteRuntimeStore) LoadRunBundleAvailability(ctx context.Context, runI
 		return runbundle.Availability{}, ErrRunNotFound
 	}
 	var availability runbundle.Availability
-	err = s.DB.QueryRowContext(ctx, `
+	err := s.DB.QueryRowContext(ctx, `
 		SELECT
 			run_id,
 			COALESCE(status, ''),

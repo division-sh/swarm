@@ -89,8 +89,7 @@ func (*recordingSchedulePersistence) CompleteScheduleFireExact(context.Context, 
 
 func newTimerLifecycleCoordinator(bus Bus, db *sql.DB, module WorkflowModule, store SchedulePersistence) *PipelineCoordinator {
 	opts := PipelineCoordinatorOptions{
-		Module:                  module,
-		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+		Module: module,
 	}
 	if store != nil {
 		opts.TimerScheduler = NewScheduler()
@@ -206,8 +205,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
-		Module:                  module,
-		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+		Module: module,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -282,8 +280,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	t.Cleanup(cleanup)
 
 	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
-		Module:                  module,
-		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+		Module: module,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -388,8 +385,7 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 
 	bus := &recordingPipelineBus{}
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module:                  module,
-		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+		Module: module,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -447,8 +443,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 
 	bus := &recordingPipelineBus{}
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module:                  module,
-		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+		Module: module,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -539,8 +534,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRo
 
 	bus := &recordingPipelineBus{}
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module:                  module,
-		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+		Module: module,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -630,8 +624,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDo
 
 	bus := &recordingPipelineBus{}
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module:                  module,
-		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+		Module: module,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")

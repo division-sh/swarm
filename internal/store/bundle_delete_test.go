@@ -27,6 +27,7 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
 	ctx := testAuthorActivityContext()
@@ -126,6 +127,7 @@ func TestPostgresStore_BundleDeleteFinalMutationFailsBeforeDeletingWithActiveRun
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
 	ctx := testAuthorActivityContext()
@@ -152,6 +154,7 @@ func TestPostgresStore_BundleDeleteFinalMutationMarksOnlyNonActivePersistedRunsD
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
 	ctx := testAuthorActivityContext()
@@ -200,6 +203,7 @@ func TestPostgresStore_BundleDeleteFinalMutationSerializesConcurrentRunCreation(
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
 	ctx := testAuthorActivityContext()
@@ -262,6 +266,7 @@ func TestPostgresStore_BundleDeleteFinalMutationBlocksPostDeletePersistedSourceR
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
 	ctx := testAuthorActivityContext()

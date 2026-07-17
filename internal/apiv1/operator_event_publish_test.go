@@ -35,7 +35,7 @@ import (
 
 func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -113,7 +113,7 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 
 func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
@@ -285,7 +285,7 @@ func TestOperatorEventPublishSQLitePayloadFailureLeavesNoIdempotencyCompletionOr
 
 func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(flowScopedEventPublishTestBundle())
 	canonicalEventName := "repo-scaffold/repo_scaffold.repo_commit_succeeded"
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
@@ -345,7 +345,7 @@ func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 
 func TestOperatorEventPublishRootEventNameWinsOverFlowLeafAliases(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(rootAndAmbiguousFlowScopedEventPublishTestBundle())
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -374,7 +374,7 @@ func TestOperatorEventPublishRootEventNameWinsOverFlowLeafAliases(t *testing.T) 
 func TestOperatorEventPublishFlowScopedEventNameFailuresFailClosed(t *testing.T) {
 	t.Run("unknown flow scoped event", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(flowScopedEventPublishTestBundle())
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -399,7 +399,7 @@ func TestOperatorEventPublishFlowScopedEventNameFailuresFailClosed(t *testing.T)
 
 	t.Run("ambiguous unscoped leaf", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(ambiguousFlowScopedEventPublishTestBundle())
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -425,7 +425,7 @@ func TestOperatorEventPublishFlowScopedEventNameFailuresFailClosed(t *testing.T)
 
 func TestOperatorEventPublishHandlersRequireCanonicalBundleHashForCreateNewWork(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -445,7 +445,7 @@ func TestOperatorEventPublishHandlersRequireCanonicalBundleHashForCreateNewWork(
 
 func TestOperatorEventPublishPostgresUsesPublisherScopeWithPlainRequestContext(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -544,7 +544,7 @@ func rpcCallWithPlainRequestContext(t *testing.T, handler *Handler, body string)
 
 func TestOperatorEventPublishPersistsIdempotencyBeforeReadbackFailure(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -618,7 +618,7 @@ func TestOperatorEventPublishPersistsIdempotencyBeforeReadbackFailure(t *testing
 
 func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	failing := &failStandalonePipelineReceiptOnceStore{
 		PostgresStore: pg,
 		err:           errors.New("simulated post-commit receipt failure"),
@@ -679,7 +679,7 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 
 func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	failing := &failNormalRunCompletionStore{
 		PostgresStore: pg,
 		err:           errors.New("simulated normal-run completion failure"),
@@ -738,7 +738,7 @@ func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(
 
 func TestOperatorEventPublishPreCommitFailureFailsClosedWithDeclaredError(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	failing := &failCommittedReplayScopeStore{
 		PostgresStore: pg,
 		err:           errors.New("simulated pre-commit replay scope failure"),
@@ -776,7 +776,7 @@ func TestOperatorEventPublishPreCommitFailureFailsClosedWithDeclaredError(t *tes
 
 func TestOperatorEventPublishFailsClosedWithoutDurableAckPublisher(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	publisher := &legacyOnlyEventPublisher{}
 	handler := eventPublishTestHandlerWithStores(t, pg, pg, pg, publisher, source)
@@ -805,7 +805,7 @@ func TestOperatorEventPublishFailsClosedWithoutDurableAckPublisher(t *testing.T)
 
 func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -883,7 +883,7 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 
 func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersistence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(eventPublishFollowUpTestBundle())
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -966,7 +966,7 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 func TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonicalTarget(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(eventPublishTargetRouteTestBundle())
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -1025,7 +1025,7 @@ func TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonical
 func TestOperatorEventPublishRootEventTemplateInputNameCollisionPayloadEntityIDDoesNotSelectTarget(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(eventPublishRootTemplateCollisionTestBundle())
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -1081,7 +1081,7 @@ func TestOperatorEventPublishRootEventTemplateInputNameCollisionPayloadEntityIDD
 func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePersistence(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(eventPublishTargetRouteTestBundle())
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -1185,7 +1185,7 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 func TestOperatorEventPublishExplicitRunRequiresRecipientPlanCheckerBeforePersistence(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(eventPublishFollowUpTestBundle())
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -1282,7 +1282,7 @@ func TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun(t *testing
 
 func TestOperatorEventPublishRejectsCallerEntityIDForCreateEntityBeforePersistence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(eventPublishCreateEntityTestBundle())
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -1356,7 +1356,7 @@ func TestOperatorEventPublishSQLiteRejectsCallerEntityIDForCreateEntityBeforePer
 
 func TestOperatorEventPublishSourceEventIDValidatesSameRunLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -1404,7 +1404,7 @@ func TestOperatorEventPublishSourceEventIDValidatesSameRunLineage(t *testing.T) 
 
 func TestOperatorEventPublishSourceEventIDRejectsInvalidLineageBeforePersistence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -1517,7 +1517,7 @@ func TestOperatorEventPublishSourceEventIDRejectsInvalidLineageBeforePersistence
 func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 	t.Run("non-routable bundle hash", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -1537,7 +1537,7 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("invalid canonical bundle hash", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -1557,7 +1557,7 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("canonical and legacy bundle params conflict", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -1577,7 +1577,7 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("undeclared event", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -1597,7 +1597,7 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("payload validation", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 			ContractBundle:   source,
@@ -1626,7 +1626,7 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("invalid run id", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
+		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -1645,7 +1645,7 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 func TestOperatorEventPublishQueuesWhileRuntimePaused(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {

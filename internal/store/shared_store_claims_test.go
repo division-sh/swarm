@@ -15,7 +15,7 @@ import (
 func TestPostgresPublicationClaimRetainsBorrowedConnectionAfterOriginalOwnerReturns(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	store := &PostgresStore{DB: db}
+	store := admitTestPostgresStore(t, db)
 
 	for _, withParentClaim := range []bool{false, true} {
 		name := "transaction_owned_connection"

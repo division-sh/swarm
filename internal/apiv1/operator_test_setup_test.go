@@ -13,13 +13,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(testSetupValidationBundle(t))
 	handler := testSetupHandler(t, pg, source)
 	runID := uuid.NewString()
@@ -190,7 +191,7 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
-			pg := &store.PostgresStore{DB: db}
+			pg := storetest.AdmitPostgresRuntimeStore(t, db)
 			handler := testSetupHandler(t, pg, semanticview.Wrap(testSetupValidationBundle(t)))
 			entity := validTestSetupEntity(uuid.NewString(), "waiting", "seeded", true)
 			tc.edit(entity)

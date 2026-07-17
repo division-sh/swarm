@@ -130,9 +130,6 @@ func TestPostgresRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	pg := newTestPostgresStore(t, db)
-	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
-		t.Fatalf("BindSchemaCapabilities: %v", err)
-	}
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, started_at)
@@ -306,9 +303,6 @@ func TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage(t *testing.T)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContextForBundle("bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111")
 	registerTestAuthorActivityCatalogForContext(t, pg, ctx)
-	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
-		t.Fatalf("BindSchemaCapabilities: %v", err)
-	}
 
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
@@ -374,9 +368,6 @@ func TestPostgresRuntimeLogPersistenceReusesAmbientEventTransaction(t *testing.T
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	pg := newTestPostgresStore(t, db)
-	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
-		t.Fatalf("BindSchemaCapabilities: %v", err)
-	}
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)

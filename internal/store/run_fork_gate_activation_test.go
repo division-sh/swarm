@@ -39,7 +39,7 @@ func TestMaterializeRunForkDecisionCardsCreatesForkLocalPendingAuthority(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	cardStore := &PostgresStore{DB: db}
+	cardStore := admitTestPostgresStore(t, db)
 	if err := cardStore.CreateDecisionCard(ctx, sourceCard); err != nil {
 		t.Fatalf("create source card: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestMaterializeRunForkDecisionCardsPreservesCommittedSemanticFields(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	cardStore := &PostgresStore{DB: db}
+	cardStore := admitTestPostgresStore(t, db)
 	if err := cardStore.CreateDecisionCard(ctx, sourceCard); err != nil {
 		t.Fatalf("create source card: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $3), ($2::uuid, 'running', $3)`, sourceRunID, forkRunID, now); err != nil {
 		t.Fatal(err)
 	}
-	cards := &PostgresStore{DB: db}
+	cards := admitTestPostgresStore(t, db)
 	sourceCard, sourceContinuation := newProposedEffectTestCard(t, sourceRunID, now, attemptgeneration.Generation{})
 	if err := cards.CreateProposedEffectCard(ctx, sourceCard, sourceContinuation); err != nil {
 		t.Fatal(err)
@@ -222,7 +222,7 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 			if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $3), ($2::uuid, 'running', $3)`, sourceRunID, forkRunID, now); err != nil {
 				t.Fatal(err)
 			}
-			cards := &PostgresStore{DB: db}
+			cards := admitTestPostgresStore(t, db)
 			card, continuation := newProposedEffectTestCard(t, sourceRunID, now, attemptgeneration.Generation{})
 			if err := cards.CreateProposedEffectCard(ctx, card, continuation); err != nil {
 				t.Fatal(err)

@@ -354,16 +354,15 @@ func selectedContractPipelineCoordinatorOptions(
 	instanceActivator runtimepipeline.FlowInstanceActivator,
 ) runtimepipeline.PipelineCoordinatorOptions {
 	return runtimepipeline.PipelineCoordinatorOptions{
-		Module:                  loaded.Module,
-		WorkflowStore:           workflowStore,
-		InstanceActivator:       instanceActivator,
-		MailboxMaterializer:     store,
-		DecisionCards:           store,
-		EventReceiptsCapability: store.CanonicalEventReceiptsCapability,
-		Credentials:             agentRuntime.Credentials,
-		ManagedCredentials:      agentRuntime.ManagedCredentials,
-		MockConnectorResponses:  loaded.MockConnectorResponses,
-		BundleHash:              loaded.BundleHash,
+		Module:                 loaded.Module,
+		WorkflowStore:          workflowStore,
+		InstanceActivator:      instanceActivator,
+		MailboxMaterializer:    store,
+		DecisionCards:          store,
+		Credentials:            agentRuntime.Credentials,
+		ManagedCredentials:     agentRuntime.ManagedCredentials,
+		MockConnectorResponses: loaded.MockConnectorResponses,
+		BundleHash:             loaded.BundleHash,
 	}
 }
 

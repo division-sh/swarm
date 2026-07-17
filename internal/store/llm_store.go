@@ -25,21 +25,8 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 	if err != nil {
 		return err
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
-	}
-	if caps.Conversations.Turns != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("agent_turns", caps.Conversations.Turns)
-	}
-	if caps.Conversations.CapabilitySurfaces != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("managed_agent_capability_surfaces", caps.Conversations.CapabilitySurfaces)
-	}
-	if plan.Enabled && caps.Conversations.Sessions != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
-	}
-	if !plan.Enabled && caps.Conversations.Audits != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("agent_conversation_audits", caps.Conversations.Audits)
 	}
 
 	return s.runAuthorActivityMutation(ctx, "postgres append agent turn", func(txctx context.Context, tx *sql.Tx) error {
@@ -83,9 +70,6 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		latencyMS := int(rec.Latency / time.Millisecond)
 		if latencyMS < 0 {
 			latencyMS = 0
-		}
-		if !caps.Conversations.TurnRunID || !caps.Conversations.TurnBlocks {
-			return fmt.Errorf("agent turn persistence requires canonical run_id and turn_blocks schema")
 		}
 		surface, err := insertManagedCapabilitySurfacePostgres(ctx, tx, capabilitySurfacePayload)
 		if err != nil {
@@ -164,12 +148,8 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	if err != nil {
 		return err
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
-	}
-	if caps.Conversations.Sessions != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
 	}
 	messages, state, err := conversationPayloads(rec)
 	if err != nil {

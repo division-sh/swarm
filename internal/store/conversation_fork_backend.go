@@ -19,9 +19,10 @@ const (
 )
 
 type conversationForkStore struct {
-	db      *sql.DB
-	dialect conversationForkDialect
-	sqlite  *SQLiteRuntimeStore
+	db        *sql.DB
+	dialect   conversationForkDialect
+	sqlite    *SQLiteRuntimeStore
+	admission schemaAdmissionOwner
 }
 
 type conversationForkQueryer interface {
@@ -49,28 +50,21 @@ func postgresConversationForkStore(s *PostgresStore) (conversationForkStore, err
 	if s == nil || s.DB == nil {
 		return conversationForkStore{}, fmt.Errorf("postgres store is required")
 	}
-	return conversationForkStore{db: s.DB, dialect: conversationForkPostgres}, nil
+	return conversationForkStore{db: s.DB, dialect: conversationForkPostgres, admission: s}, nil
 }
 
 func sqliteConversationForkStore(s *SQLiteRuntimeStore) (conversationForkStore, error) {
 	if s == nil || s.DB == nil {
 		return conversationForkStore{}, fmt.Errorf("sqlite runtime store is required")
 	}
-	return conversationForkStore{db: s.DB, dialect: conversationForkSQLite, sqlite: s}, nil
+	return conversationForkStore{db: s.DB, dialect: conversationForkSQLite, sqlite: s, admission: s}, nil
 }
 
-func (s conversationForkStore) schemaCapabilities(ctx context.Context) (StoreSchemaCapabilities, error) {
-	if s.dialect == conversationForkSQLite {
-		return s.sqlite.ResolveSchemaCapabilities(ctx)
+func (s conversationForkStore) requireCurrentSchema() error {
+	if s.admission == nil {
+		return fmt.Errorf("conversation fork store requires accepted schema ownership")
 	}
-	return (&PostgresStore{DB: s.db}).schemaCapabilities(ctx)
-}
-
-func (s conversationForkStore) schemaColumnCatalog(ctx context.Context) (schemaColumnCatalog, error) {
-	if s.dialect == conversationForkSQLite {
-		return loadSQLiteSchemaColumnCatalog(ctx, s.db)
-	}
-	return loadSchemaColumnCatalog(ctx, s.db)
+	return s.admission.requireCurrentSchema()
 }
 
 func (s conversationForkStore) bind(query string) string {
@@ -117,11 +111,11 @@ func (s conversationForkStore) currentLeaseSQL() string {
 	return sqliteCurrentLeaseSQL
 }
 
-func (s conversationForkStore) conversationQuerySources(caps StoreSchemaCapabilities) []string {
+func (s conversationForkStore) conversationQuerySources() []string {
 	if s.dialect == conversationForkSQLite {
-		return sqliteOperatorConversationQuerySources(caps)
+		return sqliteOperatorConversationQuerySources()
 	}
-	return operatorConversationQuerySources(caps)
+	return operatorConversationQuerySources()
 }
 
 func (s conversationForkStore) runMutation(ctx context.Context, serializable bool, fn func(context.Context, *sql.Tx) error) error {

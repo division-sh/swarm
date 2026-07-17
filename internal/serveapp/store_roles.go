@@ -28,8 +28,6 @@ import (
 // sessions, but those wrappers are validated by selectedStoreBundleRoleLedger.
 type selectedConcreteRuntimeStore interface {
 	apiv1.Pinger
-	selectedSchemaCapabilityBinder
-
 	runtime.RuntimeLogPersistence
 	store.SchemaBootstrapper
 	runtimebus.EventStore

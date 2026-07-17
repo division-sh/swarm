@@ -17,7 +17,6 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -49,7 +48,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 			start: func(t *testing.T) (budgetRecoveryParityStore, *sql.DB, bool) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				return &store.PostgresStore{DB: db}, db, true
+				return storetest.AdmitPostgresRuntimeStore(t, db), db, true
 			},
 		},
 	}

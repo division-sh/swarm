@@ -302,7 +302,7 @@ search_dimensions:
     required_paths:
       - platform-spec.yaml
       - internal/store/event_receipt_store.go
-      - internal/store/sqlite_schema.go
+      - internal/store/sqlite_runtime_delivery_replay.go
       - internal/serveapp/main_runtime_test.go
     canonical_layer: completion_evidence_non_authority
   - id: settlement_backfill

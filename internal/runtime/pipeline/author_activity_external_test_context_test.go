@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
@@ -129,7 +130,7 @@ func testAuthorActivityEventDescriptors(t *testing.T, opts runtimebus.EventBusOp
 
 func newRecoveryTestPostgresStore(t *testing.T, db *sql.DB) *store.PostgresStore {
 	t.Helper()
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	descriptors := make([]runtimeauthoractivity.EventDescriptor, 0, len(recoveryTestEventTypes))
 	for _, eventType := range recoveryTestEventTypes {
 		descriptors = append(descriptors, runtimeauthoractivity.EventDescriptor{
