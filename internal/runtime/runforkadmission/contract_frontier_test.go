@@ -586,6 +586,51 @@ func testContractFrontierTemplateConnectSource() semanticview.Source {
 	return testContractFrontierConnectSource("template")
 }
 
+func testContractFrontierRootConnectSource() semanticview.Source {
+	consumer := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{
+					Events:    []string{"root.ready"},
+					EventPins: []runtimecontracts.FlowInputEventPin{{Name: "ready", Event: "root.ready"}},
+				},
+			},
+		},
+		Path: "consumer",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"consumer-node": {ID: "consumer-node", SubscribesTo: []string{"root.ready"}},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{consumer}}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{
+					Events:    []string{"root.ready"},
+					EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "root_ready", Event: "root.ready"}},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"root.ready": {}},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name: "test-workflow", Version: "v-test",
+			FlowInputs: map[string][]string{"consumer": {"root.ready"}},
+			FlowInputEventPins: map[string][]runtimecontracts.FlowInputEventPin{
+				"consumer": {{Name: "ready", Event: "root.ready"}},
+			},
+			CompositionConnects: []runtimecontracts.FlowPackageConnect{{
+				SourceFile: "package.yaml", SourceLine: 1, From: ".root_ready", To: "consumer.ready",
+			}},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"consumer": consumer.Schema},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{"consumer": &root.Children[0]},
+		},
+	})
+}
+
 func testContractFrontierConnectSource(producerMode string) semanticview.Source {
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},

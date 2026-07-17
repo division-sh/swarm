@@ -52,14 +52,15 @@ type RunForkPlan struct {
 }
 
 type RunForkPoint struct {
-	Input          string    `json:"input"`
-	EventID        string    `json:"event_id"`
-	EventName      string    `json:"event_name,omitempty"`
-	SourceEventID  string    `json:"source_event_id,omitempty"`
-	ProducedBy     string    `json:"produced_by,omitempty"`
-	ProducedByType string    `json:"produced_by_type,omitempty"`
-	Timestamp      time.Time `json:"timestamp"`
-	Revision       int64     `json:"revision"`
+	Input          string               `json:"input"`
+	EventID        string               `json:"event_id"`
+	EventName      string               `json:"event_name,omitempty"`
+	SourceEventID  string               `json:"source_event_id,omitempty"`
+	ProducedBy     string               `json:"produced_by,omitempty"`
+	ProducedByType string               `json:"produced_by_type,omitempty"`
+	SourceRoute    events.RouteIdentity `json:"source_route,omitempty"`
+	Timestamp      time.Time            `json:"timestamp"`
+	Revision       int64                `json:"revision"`
 }
 
 const (
@@ -221,6 +222,10 @@ func (s *PostgresStore) PlanRunFork(ctx context.Context, req RunForkPlanRequest)
 	if err != nil {
 		return RunForkPlan{}, err
 	}
+	forkEvent, err := runForkPointRevisionEvent(snapshot, cursor)
+	if err != nil {
+		return RunForkPlan{}, err
+	}
 	plan.historicalSnapshot = snapshot
 	plan.ForkPoint = RunForkPoint{
 		Input:          at,
@@ -229,6 +234,7 @@ func (s *PostgresStore) PlanRunFork(ctx context.Context, req RunForkPlanRequest)
 		SourceEventID:  cursor.SourceEventID,
 		ProducedBy:     cursor.ProducedBy,
 		ProducedByType: cursor.ProducedByType,
+		SourceRoute:    forkEvent.SourceRoute.Normalized(),
 		Timestamp:      cursor.CreatedAt,
 		Revision:       cursor.Revision,
 	}
@@ -262,6 +268,23 @@ func (s *PostgresStore) PlanRunFork(ctx context.Context, req RunForkPlanRequest)
 	plan.UnsupportedBlockerCount = len(plan.UnsupportedBlockers)
 	plan.ExecutionReady = plan.ReplayResumeAdmission.StateOnlyExecutionReady || plan.ReplayResumeAdmission.DeliveryEventReplayReady
 	return plan, nil
+}
+
+func runForkPointRevisionEvent(snapshot *runForkRevisionSnapshot, cursor runForkEventCursor) (runForkRevisionEvent, error) {
+	if snapshot == nil || snapshot.Revision != cursor.Revision {
+		return runForkRevisionEvent{}, fmt.Errorf("fork point event %s is not backed by fixed revision %d", strings.TrimSpace(cursor.EventID), cursor.Revision)
+	}
+	eventID := strings.TrimSpace(cursor.EventID)
+	for _, event := range snapshot.Events {
+		if strings.TrimSpace(event.EventID) != eventID {
+			continue
+		}
+		if event.FirstRevision != cursor.Revision {
+			return runForkRevisionEvent{}, fmt.Errorf("fork point event %s first revision is %d, want %d", eventID, event.FirstRevision, cursor.Revision)
+		}
+		return event, nil
+	}
+	return runForkRevisionEvent{}, fmt.Errorf("fork point event %s is absent from fixed revision %d", eventID, cursor.Revision)
 }
 
 func loadRunForkSourceSummary(ctx context.Context, q rowQueryer, plan *RunForkPlan) error {

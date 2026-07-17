@@ -138,7 +138,7 @@ func selectedRouteHistoryEventEvidence(plan store.RunForkPlan, frontier store.Ru
 		}
 		seen[key] = selectedRouteHistoryEvent{sourceEventID: sourceEventID, eventName: eventName, sourceRoute: sourceRoute}
 	}
-	add(plan.ForkPoint.EventID, plan.ForkPoint.EventName, events.RouteIdentity{})
+	add(plan.ForkPoint.EventID, plan.ForkPoint.EventName, plan.ForkPoint.SourceRoute)
 	for _, item := range plan.PendingWork {
 		if strings.TrimSpace(item.Classification) == store.RunForkPendingClassificationDeliveredCompleted {
 			add(item.EventID, item.EventName, item.SourceRoute)
@@ -185,6 +185,7 @@ func selectedRouteHistoryDynamicFlowInstances(source semanticview.Source, plan s
 			seen[value] = struct{}{}
 		}
 	}
+	add(plan.ForkPoint.SourceRoute.Normalized().FlowInstance)
 	for _, item := range plan.PendingWork {
 		add(item.SourceRoute.Normalized().FlowInstance)
 	}
