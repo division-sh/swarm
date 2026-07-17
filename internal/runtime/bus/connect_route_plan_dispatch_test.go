@@ -1519,6 +1519,82 @@ func TestEventBusPublish_ConnectRoutePlanCreatesTemplateInstanceOnMissingCreate(
 	}
 }
 
+func TestEventBusPublish_ConnectRoutePlanPreviewCreateFeedsLaterSelect(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	fixtureRoot := canonicalrouting.CopyTemplateCreateThenSelectSameEvent(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	store := &connectRoutePlanLifecycleStore{
+		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+			targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		},
+	}
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle:            semanticview.Wrap(bundle),
+		TemplateInstanceActivator: store.Activate,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store.bus = eb
+	evt := eventtest.RootIngress(uuid.NewString(),
+		events.EventType("producer/account.setup"), "", "", json.RawMessage(`{"account_id":"acct-preview"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 2 {
+		t.Fatalf("preflight failure/routes = %q/%#v, want create and later-select routes", preflight.TargetFailure, preflight.DeliveryRoutes)
+	}
+	if len(store.activations) != 0 {
+		t.Fatalf("preflight activations = %#v, want request-local preview only", store.activations)
+	}
+	previewTarget := preflight.DeliveryRoutes[0].Target.Normalized()
+	for _, route := range preflight.DeliveryRoutes {
+		if route.Target.Normalized() != previewTarget {
+			t.Fatalf("preflight route target = %#v, want shared preview-created target %#v", route.Target, previewTarget)
+		}
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(store.activations) != 1 {
+		t.Fatalf("activations = %#v, want one create followed by select", store.activations)
+	}
+	activation := store.activations[0]
+	wantTarget := events.RouteIdentity{
+		FlowID:       "account",
+		FlowInstance: activation.Instance.InstancePath,
+		EntityID:     activation.Instance.EntityID,
+	}.Normalized()
+	routes := store.routes[evt.ID()]
+	if len(routes) != 2 {
+		t.Fatalf("persisted routes = %#v, want two distinct consumers", routes)
+	}
+	wantSubscribers := map[string]bool{
+		"account-setup-node-" + activation.Instance.InstanceID: false,
+		"account-ready-node-" + activation.Instance.InstanceID: false,
+	}
+	for _, route := range routes {
+		if route.Target.Normalized() != wantTarget {
+			t.Fatalf("persisted route target = %#v, want %#v", route.Target, wantTarget)
+		}
+		if _, ok := wantSubscribers[route.SubscriberID]; !ok {
+			t.Fatalf("persisted subscriber = %q, want one of %#v", route.SubscriberID, wantSubscribers)
+		}
+		wantSubscribers[route.SubscriberID] = true
+	}
+	for subscriber, found := range wantSubscribers {
+		if !found {
+			t.Fatalf("persisted routes = %#v, missing subscriber %s", routes, subscriber)
+		}
+	}
+}
+
 func TestCommittedReplayReusesPersistedSyntheticCarryWithoutReminting(t *testing.T) {
 	source := connectRoutePlanCreateResolutionSource(t, runtimecontracts.FlowInputResolutionMintUUID)
 	store := &connectRoutePlanLifecycleStore{

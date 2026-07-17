@@ -31,6 +31,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -435,6 +436,106 @@ func newFixtureWorkflowModule(t *testing.T, bundle *runtimecontracts.WorkflowCon
 		workflowNodes:  workflowNodes,
 		guardRegistry:  runtimepipeline.NewContractGuardRegistry(source),
 		actionRegistry: runtimepipeline.NewContractActionRegistry(source),
+	}
+}
+
+func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	fixtureRoot := canonicalrouting.CopyTemplateSelectAgentOnlyWithUnrelatedNode(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
+	module := newFixtureWorkflowModule(t, bundle)
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg := &store.PostgresStore{DB: db}
+	ctx := eventBusTestRunContext(t, db)
+	instanceRoute := runtimeflowidentity.DeriveRoute("account", "one")
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES ($1, 'account', 'template', '{}'::jsonb, 'active', NOW())
+	`, instanceRoute.InstancePath); err != nil {
+		t.Fatalf("seed account flow instance: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
+		VALUES ($1::uuid, $2::uuid, $3, 'account', 'active', '{"account_id":"acct-agent"}'::jsonb, NOW(), NOW())
+	`, runtimeflowidentity.EntityID(instanceRoute.InstancePath), eventBusTestRunID, instanceRoute.InstancePath); err != nil {
+		t.Fatalf("seed account entity state: %v", err)
+	}
+
+	var pc *runtimepipeline.PipelineCoordinator
+	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
+		ContractBundle: source,
+		InterceptorProvider: func() []runtimebus.EventInterceptor {
+			if pc == nil {
+				return nil
+			}
+			return []runtimebus.EventInterceptor{pc}
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:                  module,
+		EventReceiptsCapability: pg.CanonicalEventReceiptsCapability,
+	})
+	if pc == nil {
+		t.Fatal("expected pipeline coordinator")
+	}
+	if err := eb.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: instanceRoute}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+	agentID := "account-agent-one"
+	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{
+		AgentID:       agentID,
+		FlowID:        "account",
+		FlowPath:      instanceRoute.InstancePath,
+		Subscriptions: []string{"account.ready"},
+	})
+	if err != nil {
+		t.Fatalf("AdmitFlowOwnedAgentSubscriptions: %v", err)
+	}
+	agentEvents := eb.SubscribeAgent(admission.CarrierOnly())
+	if agentEvents == nil {
+		t.Fatal("agent carrier admission returned no channel")
+	}
+	defer eb.Unsubscribe(agentID)
+
+	evt := eventtest.RootIngress(uuid.NewString(), events.EventType("producer/account.ready"), "producer", "", json.RawMessage(`{"account_id":"acct-agent"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	plan, err := eb.CheckPublishRecipientPlan(ctx, evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if plan.TargetFailure != "" || len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].SubscriberType != "agent" || plan.DeliveryRoutes[0].SubscriberID != agentID {
+		t.Fatalf("preflight failure/routes = %q/%#v, want agent-only connect route", plan.TargetFailure, plan.DeliveryRoutes)
+	}
+	if err := eb.Publish(ctx, evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	select {
+	case delivered := <-agentEvents:
+		if delivered.ID() != evt.ID() {
+			t.Fatalf("delivered event = %q, want %q", delivered.ID(), evt.ID())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for agent-only connect delivery")
+	}
+	var nodeDeliveries int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'account-setup-node-one'
+	`, evt.ID()).Scan(&nodeDeliveries); err != nil {
+		t.Fatalf("count node deliveries: %v", err)
+	}
+	if nodeDeliveries != 0 {
+		t.Fatalf("node deliveries = %d, want none without node route authority", nodeDeliveries)
 	}
 }
 

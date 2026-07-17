@@ -164,6 +164,14 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 		if err := r.installTemplateInstanceLifecyclePreview(ctx, decision); err != nil {
 			return connectRoutePlanDispatch{}, err
 		}
+		if strings.TrimSpace(decision.Action) == templateInstanceLifecycleActionPreviewCreate {
+			descriptors = append(descriptors, runtimepinrouting.Descriptor{
+				ID:            strings.TrimSpace(decision.InstanceID),
+				EntityID:      strings.TrimSpace(decision.EntityID),
+				FlowInstance:  strings.Trim(strings.TrimSpace(decision.InstancePath), "/"),
+				AddressFields: decision.ActivationVariables(),
+			})
+		}
 		routes, subscribers, err := r.deliveryRoutesForMaterialization(ctx, plan, materialized, decision)
 		if err != nil {
 			return connectRoutePlanDispatch{}, err

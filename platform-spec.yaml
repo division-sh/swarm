@@ -10130,14 +10130,19 @@ flow_model:
             Runtime-resolved connect plans MUST preview every matched plan without lifecycle activation, reply-context
             creation or claim, delivery persistence, or handler execution; it MUST admit the complete transient
             receiver pin/event and durable-delivery-identity set before any of those mutations may begin. Preview route
-            materialization is request-local and cannot install or remove live route-table state. Exact replay of one
-            pin/event/delivery fact is idempotent; a different pin or local event converging on the same durable delivery
-            identity is a hard conflict.
+            materialization is request-local and cannot install or remove live route-table state. A preview-created
+            template instance MUST also become request-local descriptor evidence for every later matched plan, so a later
+            select may consume the same prospective instance exactly as the real pass consumes the newly persisted
+            descriptor. Exact replay of one pin/event/delivery fact is idempotent; a different pin or local event converging
+            on the same durable delivery identity is a hard conflict.
           handler_resolution: >
             Connected-input workflow handler resolution MUST produce exactly one receiver-local handler candidate.
             Zero or multiple candidates are explicit failures propagated through delivery policy and interception;
             stale or replayed invalid delivery routes MUST return the failure without passthrough, receipt settlement,
-            or handler execution. Execution MUST NOT select the first source-matching input handler.
+            or handler execution. These failures apply only when a typed node DeliveryRoute or committed node delivery
+            authority selects that node. Agent-only connect delivery and events without node authority MUST NOT turn an
+            unrelated receiver-flow node into a handler candidate or abort the agent delivery. Execution MUST NOT select
+            the first source-matching input handler.
         implementation_slice_1827_connect_delivery_reply_retirement:
           status: merge_bearing_aggressive_retirement
           canonical_code_owner: internal/runtime/contracts.FlowPackageConnect + internal/runtime/core/pinrouting.ConnectRoutePlan
@@ -10569,9 +10574,11 @@ flow_model:
           - EventBus publish/preflight for select-or-create reuses exactly one existing receiver instance
           - EventBus publish/preflight for select-or-create creates exactly one missing receiver instance through the canonical lifecycle path
           - concurrent same-key select-or-create deliveries converge on one receiver instance or fail closed without duplicate key ownership
+          - one matched event may preview-create a template instance on an earlier plan and select that same request-local descriptor on a later plan without preflight mutation
           - ambiguous select-or-create target failures fail closed with receiver/key/value/remediation detail and no activation
           - same committed select-or-create event replay reuses persisted delivery route/scope and does not reselect or recreate after descriptor drift
           - standalone #1828 `template-select-or-create` conformance fixture verifies and materializes through the canonical select-or-create route plan
+          - an agent-only connect route with an unrelated receiver-flow node delivers to the selected agent without synthesizing node authority or a connected-input handler failure
           - route-plan lowering records fan-in stream metadata, required singleton/window/dedup_by, singular target delivery, and no new target kind
           - bootverify rejects fan-in receiver handler redeclaration of accumulate.dedup_by or accumulate.window
           - EventBus publish/preflight for fan-in stream routes multiple source contributions to the same explicit singleton/coordinator receiver route

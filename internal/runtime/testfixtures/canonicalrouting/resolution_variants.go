@@ -51,6 +51,56 @@ func CopyTemplateSelectOrCreatePilot(t testing.TB) string {
 	return root
 }
 
+// CopyTemplateCreateThenSelectSameEvent proves that one event may create a
+// template instance and then select that request-local instance on a later edge.
+func CopyTemplateCreateThenSelectSameEvent(t testing.TB) string {
+	t.Helper()
+	root := CopyExample(t, TemplateSelectExisting)
+	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
+		"    to: account.account_setup\n",
+		"    to: account.account_create\n")
+	applyClosedReplacement(t, filepath.Join(root, "flows/account/schema.yaml"),
+		"      - name: account_setup\n",
+		"      - name: account_create\n")
+	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
+		"  - from: producer.account_ready\n    to: account.account_ready\n",
+		"  - from: producer.account_setup\n    to: account.account_ready\n")
+	writeClosedVariantFile(t, root, "flows/account/nodes.yaml", `account-setup-node:
+  id: account-setup-node-{instance_id}
+  execution_type: system_node
+  subscribes_to: [account.setup]
+  event_handlers:
+    account.setup: {}
+account-ready-node:
+  id: account-ready-node-{instance_id}
+  execution_type: system_node
+  subscribes_to: [account.ready]
+  event_handlers:
+    account.ready: {}
+`)
+	return root
+}
+
+// CopyTemplateSelectAgentOnlyWithUnrelatedNode proves that a connect-selected
+// agent delivery does not imply delivery authority for another node in the flow.
+func CopyTemplateSelectAgentOnlyWithUnrelatedNode(t testing.TB) string {
+	t.Helper()
+	root := CopyExample(t, TemplateSelectExisting)
+	writeClosedVariantFile(t, root, "flows/account/nodes.yaml", `account-setup-node:
+  id: account-setup-node-{instance_id}
+  execution_type: system_node
+  subscribes_to: [account.setup]
+  event_handlers:
+    account.setup: {}
+`)
+	writeClosedVariantFile(t, root, "flows/account/agents.yaml", `account-agent:
+  id: account-agent-{instance_id}
+  model: regular
+  subscriptions: [account.ready]
+`)
+	return root
+}
+
 func applyTemplateSelectOrCreateAccumulation(t testing.TB, root, terminalState string) {
 	t.Helper()
 	producerEvents := filepath.Join(root, "flows", "producer", "events.yaml")
