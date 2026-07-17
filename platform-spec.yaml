@@ -6250,7 +6250,10 @@ engine:
       causal identity. `timers.timer_name` carries the versioned typed activation discriminator; `fire_payload` carries
       business input only and is never interpreted as lifecycle identity. Replaying that exact cause compares immutable
       activation facts against the existing row and converges on its current active, fired, or cancelled state without
-      reinsertion, resurrection, or conflict on mutable completion fields.
+      reinsertion, resurrection, or conflict on mutable completion fields. A transition cause derives loop generation from
+      its persisted target stage; an event-only cause derives it from the persisted current stage without treating that stage
+      as a new state entry. Exact replay within one generation keeps the activation identity, while loop supersession cancels
+      the prior activation before a later generation can mint its distinct activation identity or publish stale timer work.
     - 2. The platform renders delay once at activation and inserts exactly one canonical row in the same selected workflow
       mutation as the triggering state/event effect. The row's persisted `fire_at` is the executable occurrence coordinate.
       Policy/config changes do not rewrite an active coordinate without an explicit reschedule operation.
