@@ -2430,10 +2430,9 @@ func (e *Executor) buildTimerIntents(frame *executionFrame) ([]TimerIntent, erro
 		}
 		return nil, nil
 	}
-	toState := strings.TrimSpace(frame.result.NextState)
-	if toState == "" {
-		toState = strings.TrimSpace(frame.result.CurrentState)
-	}
+	// An event handled in-place is not a state entry. Only the persisted state
+	// mutation carries transition intent into timer reconciliation.
+	toState := strings.TrimSpace(frame.result.StateMutation.NextState)
 	return []TimerIntent{
 		{
 			Operation:        TimerReconcile,
