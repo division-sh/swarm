@@ -27,6 +27,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
@@ -779,6 +780,165 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						t.Fatalf("shutdown restored predecessor: %v", err)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testing.T) {
+	type backend struct {
+		name string
+		open func(*testing.T) storeBundle
+	}
+	backends := []backend{
+		{
+			name: "sqlite",
+			open: func(t *testing.T) storeBundle {
+				stores, err := buildStores(context.Background(), storebackend.Selection{
+					Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "runtime.sqlite"),
+				}, &config.Config{})
+				if err != nil {
+					t.Fatalf("build SQLite stores: %v", err)
+				}
+				t.Cleanup(func() { _ = stores.SQLDB.Close() })
+				return stores
+			},
+		},
+		{
+			name: "postgres",
+			open: func(t *testing.T) storeBundle {
+				dsn, _, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				selected, err := store.NewPostgresStore(dsn)
+				if err != nil {
+					t.Fatalf("NewPostgresStore: %v", err)
+				}
+				t.Cleanup(func() { _ = selected.DB.Close() })
+				return selectedPostgresStoreBundle(selected, &config.Config{})
+			},
+		},
+	}
+
+	for _, backend := range backends {
+		backend := backend
+		t.Run(backend.name, func(t *testing.T) {
+			contractsRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+			schemaPath := filepath.Join(contractsRoot, "flows", "telegram-ingress", "schema.yaml")
+			rawSchema, err := os.ReadFile(schemaPath)
+			if err != nil {
+				t.Fatalf("read standing schema: %v", err)
+			}
+			withTimer := strings.Replace(string(rawSchema), "  active:\n    initial: true\n    gate:", "  active:\n    initial: true\n    timers:\n      - after: 2s\n        advances_to: done\n    gate:", 1)
+			if withTimer == string(rawSchema) {
+				t.Fatal("standing initial-stage timer insertion point not found")
+			}
+			writeStandingCandidateFile(t, schemaPath, withTimer)
+
+			repoRoot := cliapp.RepoRoot()
+			module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRoot, contractsRoot, cliapp.ResolvePath(repoRoot, defaultPlatformSpecPath))
+			if err != nil {
+				t.Fatalf("load standing workflow module: %v", err)
+			}
+			stores := backend.open(t)
+			if _, err := initializeStateStores(context.Background(), stores, bundle); err != nil {
+				t.Fatalf("initialize state stores: %v", err)
+			}
+			bundleHash, err := runtimecontracts.BundleHash(bundle)
+			if err != nil {
+				t.Fatalf("BundleHash: %v", err)
+			}
+			fact := runtimecorrelation.BundleSourceFact{
+				BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral,
+			}
+			credentials, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatalf("NewFileStore: %v", err)
+			}
+			for key, value := range map[string]string{
+				"telegram_bot_token": "bot-token", "webhook_signing.telegram": "telegram-secret",
+			} {
+				if err := credentials.Set(context.Background(), key, value); err != nil {
+					t.Fatalf("set credential %s: %v", key, err)
+				}
+			}
+			newRuntime := func(instanceID string) *runtimepkg.Runtime {
+				rt, err := runtimepkg.NewRuntime(context.Background(), runtimepkg.RuntimeDeps{
+					Config: &config.Config{}, Stores: stores.runtimeStores(),
+					Options: runtimepkg.RuntimeOptions{
+						WorkflowModule: module, LLMRuntime: runtimellm.NoopRuntime{},
+						Credentials: credentials, ProviderCredentials: credentials,
+						ProviderTriggerCatalog: testProviderTriggerCatalog(t),
+						RuntimeInstanceID:      instanceID, BundleSourceFact: fact,
+					},
+				})
+				if err != nil {
+					t.Fatalf("NewRuntime(%s): %v", instanceID, err)
+				}
+				return rt
+			}
+
+			candidate := newRuntime("22222222-2222-2222-2222-222222222222")
+			if err := candidate.PrepareAuthorActivityCatalog(); err != nil {
+				t.Fatalf("prepare standing replacement candidate author activity: %v", err)
+			}
+			if err := candidate.Start(context.Background()); err != nil {
+				t.Fatalf("start standing replacement candidate: %v", err)
+			}
+			t.Cleanup(func() {
+				_ = candidate.ShutdownWithOptions(runtimepkg.ShutdownOptions{Grace: 5 * time.Second})
+			})
+
+			predecessor := newRuntime("11111111-1111-1111-1111-111111111111")
+			_, initial, err := predecessor.EnsureStandingTargets(context.Background())
+			if err != nil {
+				t.Fatalf("create standing target: %v", err)
+			}
+			if len(initial) != 1 || !initial[0].Created || initial[0].EffectiveState != "active" {
+				t.Fatalf("initial standing activation = %#v", initial)
+			}
+			if err := predecessor.QuiesceForReplacement(runtimepkg.ShutdownOptions{Grace: 5 * time.Second}); err != nil {
+				t.Fatalf("quiesce standing predecessor: %v", err)
+			}
+
+			var timerEvent, timerStatus string
+			var fireAt any
+			if err := stores.SQLDB.QueryRowContext(context.Background(), `SELECT fire_event, status, fire_at FROM timers`).Scan(&timerEvent, &timerStatus, &fireAt); err != nil {
+				t.Fatalf("load standing workflow timer: %v", err)
+			}
+			if timerStatus != "active" {
+				t.Fatalf("initial standing workflow timer status = %q, want active", timerStatus)
+			}
+
+			_, adopted, err := candidate.EnsureStandingReplacementTargets(context.Background(), predecessor)
+			if err != nil {
+				t.Fatalf("adopt standing replacement: %v", err)
+			}
+			if len(adopted) != 1 || adopted[0].Created || adopted[0].RunID != initial[0].RunID {
+				t.Fatalf("adopted standing activation = %#v, want existing run %s", adopted, initial[0].RunID)
+			}
+			deadline := time.Now().Add(8 * time.Second)
+			for time.Now().Before(deadline) {
+				if err := stores.SQLDB.QueryRowContext(context.Background(), `SELECT status FROM timers`).Scan(&timerStatus); err != nil {
+					t.Fatalf("reload standing workflow timer: %v", err)
+				}
+				if timerStatus == "fired" {
+					break
+				}
+				time.Sleep(25 * time.Millisecond)
+			}
+			if timerStatus != "fired" {
+				t.Fatalf("adopted standing workflow timer status = %q at %s (due %v), want fired", timerStatus, time.Now().UTC(), fireAt)
+			}
+			query := `SELECT COUNT(*) FROM events WHERE event_name = ?`
+			if backend.name == "postgres" {
+				query = `SELECT COUNT(*) FROM events WHERE event_name = $1`
+			}
+			var events int
+			if err := stores.SQLDB.QueryRowContext(context.Background(), query, timerEvent).Scan(&events); err != nil {
+				t.Fatalf("count adopted standing timer events: %v", err)
+			}
+			if events != 1 {
+				t.Fatalf("adopted standing timer events = %d, want 1", events)
 			}
 		})
 	}

@@ -384,7 +384,11 @@ func resolveStandingInputEndpointWithCensus(source semanticview.Source, census s
 }
 
 func (rt *Runtime) EnsureStandingTargets(ctx context.Context) ([]StandingTarget, []StandingActivation, error) {
-	return rt.ensureStandingTargets(ctx, "")
+	targets, activations, err := rt.ensureStandingTargets(ctx, "")
+	if err == nil {
+		err = rt.restoreAdoptedStandingWorkflowTimers(ctx, activations)
+	}
+	return targets, activations, err
 }
 
 func (rt *Runtime) EnsureStandingServiceTargets(ctx context.Context, serviceID string) ([]StandingTarget, []StandingActivation, error) {
@@ -392,7 +396,11 @@ func (rt *Runtime) EnsureStandingServiceTargets(ctx context.Context, serviceID s
 	if serviceID == "" {
 		return nil, nil, fmt.Errorf("standing service_id is required")
 	}
-	return rt.ensureStandingTargets(ctx, serviceID)
+	targets, activations, err := rt.ensureStandingTargets(ctx, serviceID)
+	if err == nil {
+		err = rt.restoreAdoptedStandingWorkflowTimers(ctx, activations)
+	}
+	return targets, activations, err
 }
 
 // EnsureStandingReplacementTargets atomically reconciles a hot replacement's
@@ -431,9 +439,12 @@ func (rt *Runtime) EnsureStandingReplacementTargets(ctx context.Context, predece
 		if _, err := owner.ReconcileStandingServiceReplacement(txctx, previous, candidates); err != nil {
 			return err
 		}
-		targets, activations, err = rt.EnsureStandingTargets(txctx)
+		targets, activations, err = rt.ensureStandingTargets(txctx, "")
 		return err
 	})
+	if err == nil {
+		err = rt.restoreAdoptedStandingWorkflowTimers(ctx, activations)
+	}
 	return targets, activations, err
 }
 
@@ -546,6 +557,30 @@ func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) 
 		}
 	}
 	return targets, activations, nil
+}
+
+func (rt *Runtime) restoreAdoptedStandingWorkflowTimers(ctx context.Context, activations []StandingActivation) error {
+	if rt == nil || rt.Pipeline == nil {
+		return nil
+	}
+	fact := rt.Options.BundleSourceFact.Normalized()
+	restored := make(map[string]struct{}, len(activations))
+	for _, activation := range activations {
+		runID := strings.TrimSpace(activation.RunID)
+		if activation.Created || activation.EffectiveState != "active" || runID == "" {
+			continue
+		}
+		if _, ok := restored[runID]; ok {
+			continue
+		}
+		restored[runID] = struct{}{}
+		runCtx := runtimecorrelation.WithRunID(ctx, runID)
+		runCtx = runtimecorrelation.WithBundleSourceFact(runCtx, fact)
+		if err := rt.Pipeline.RestoreWorkflowTimers(runCtx); err != nil {
+			return fmt.Errorf("restore adopted standing run %s workflow timers: %w", runID, err)
+		}
+	}
+	return nil
 }
 
 // PlanStandingTargets resolves all process-visible identities without mutating
