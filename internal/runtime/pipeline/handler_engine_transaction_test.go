@@ -2211,7 +2211,7 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 	}); err != nil {
 		t.Fatalf("seed grandchild instance: %v", err)
 	}
-	if consume, handled := pc.workflowNodeInterceptPolicy(testAuthorActivityContext(context.Background()), "child/grandchild/micro.done", eventtest.RootIngress(
+	if consume, handled, err := pc.workflowNodeInterceptPolicy(testAuthorActivityContext(context.Background()), "child/grandchild/micro.done", eventtest.RootIngress(
 		"",
 		events.EventType("child/grandchild/micro.done"),
 		"",
@@ -2222,8 +2222,8 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, grandchildEntityID),
 		time.Time{},
-	)); !handled {
-		t.Fatalf("workflowNodeInterceptPolicy handled = %v, consume = %v, want handled", handled, consume)
+	)); err != nil || !handled {
+		t.Fatalf("workflowNodeInterceptPolicy handled = %v, consume = %v, err = %v, want handled", handled, consume, err)
 	}
 
 	evt := eventtest.RootIngress(

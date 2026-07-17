@@ -10120,16 +10120,24 @@ flow_model:
             `connect_receiver_pin_delivery_collision`; duplicate declarations of the same edge remain idempotent, and
             fan-out to distinct subscribers or distinct targets remains valid.
           runtime_invariant: >
-            Connect-route materialization MUST compare receiver-local identity before DeliveryRoute or
-            RoutePlanDeliveryIntent normalization can erase it. Distinct receiver-local facts mapping to the same
-            subscriber, target, delivery context, and payload projection MUST fail closed with
-            `delivery_topology_invalid`, persist no delivery row, and execute no handler. Runtime MUST NOT add receiver
-            pin to durable delivery identity, choose the first handler, or reconstruct the missing fact during retry or
-            replay.
+            Connect-route materialization MUST preserve the normalized receiver input pin and receiver-local event as
+            one transient routing fact, then compare that fact before DeliveryRoute or RoutePlanDeliveryIntent
+            normalization can erase it. Distinct receiver pin/event facts mapping to the same subscriber, target,
+            delivery context, and payload projection MUST fail closed with `delivery_topology_invalid`, persist no
+            delivery row, and execute no handler. Runtime MUST NOT add receiver pin to durable delivery identity,
+            choose the first handler, or reconstruct the missing fact during retry or replay.
+          pre_mutation_admission: >
+            Runtime-resolved connect plans MUST preview every matched plan without lifecycle activation, reply-context
+            creation or claim, delivery persistence, or handler execution; it MUST admit the complete transient
+            receiver pin/event and durable-delivery-identity set before any of those mutations may begin. Preview route
+            materialization is request-local and cannot install or remove live route-table state. Exact replay of one
+            pin/event/delivery fact is idempotent; a different pin or local event converging on the same durable delivery
+            identity is a hard conflict.
           handler_resolution: >
             Connected-input workflow handler resolution MUST produce exactly one receiver-local handler candidate.
-            Zero or multiple candidates are explicit failures; execution MUST NOT select the first source-matching
-            input handler.
+            Zero or multiple candidates are explicit failures propagated through delivery policy and interception;
+            stale or replayed invalid delivery routes MUST return the failure without passthrough, receipt settlement,
+            or handler execution. Execution MUST NOT select the first source-matching input handler.
         implementation_slice_1827_connect_delivery_reply_retirement:
           status: merge_bearing_aggressive_retirement
           canonical_code_owner: internal/runtime/contracts.FlowPackageConnect + internal/runtime/core/pinrouting.ConnectRoutePlan

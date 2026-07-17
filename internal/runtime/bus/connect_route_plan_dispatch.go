@@ -21,6 +21,12 @@ import (
 
 type connectRoutePlanDescriptorLoader func(context.Context) ([]runtimepinrouting.Descriptor, error)
 
+type connectRoutePlanPreviewRoutesKey struct{}
+
+type connectRoutePlanPreviewRoutes struct {
+	table *RouteTable
+}
+
 type connectRoutePlanResolver struct {
 	source          semanticview.Source
 	routeTable      *RouteTable
@@ -95,6 +101,16 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		return connectRoutePlanDispatch{}, err
 	}
 	values := connectRoutePlanMatchValues(evt)
+	previewCtx := withTemplateInstanceLifecyclePreview(ctx)
+	previewCtx = context.WithValue(previewCtx, connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{})
+	preview, err := r.planMatched(previewCtx, evt, matched, descriptors, values)
+	if err != nil || preview.Failure != "" || templateInstanceLifecyclePreview(ctx) {
+		return preview, err
+	}
+	return r.planMatched(ctx, evt, matched, descriptors, values)
+}
+
+func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Event, matched []runtimepinrouting.ConnectRoutePlan, descriptors []runtimepinrouting.Descriptor, values map[string]string) (connectRoutePlanDispatch, error) {
 	out := connectRoutePlanDispatch{
 		Matched: true,
 		ExtraDetail: map[string]any{
@@ -102,6 +118,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		},
 	}
 	receiverPinFacts := make([]connectReceiverPinFact, 0, len(matched))
+	replyContextConsumed := false
 	for _, plan := range matched {
 		if plan.ReplyResolution != nil && plan.ReplyResolution.Role == runtimepinrouting.ConnectReplyRoleResponse {
 			routes, subscribers, failure, detail, err := r.materializeReplyResponse(ctx, evt, plan, values)
@@ -115,13 +132,13 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 				}
 				return out, nil
 			}
-			if previous, current, collision := admitConnectReceiverPinFacts(&receiverPinFacts, routes, plan.Receiver.Event); collision {
+			if previous, current, collision := admitConnectReceiverPinFacts(&receiverPinFacts, routes, plan.Receiver.Pin, plan.Receiver.Event); collision {
 				out.Failure = connectRoutePlanTargetFailure(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid)
 				out.ExtraDetail["connect_route_plan_failure"] = string(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid)
 				out.ExtraDetail["connect_route_plan_receiver_pin_collision"] = []string{previous, current}
 				return out, nil
 			}
-			out.ReplyContextConsumed = true
+			replyContextConsumed = true
 			out.DeliveryIntents = append(out.DeliveryIntents, routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerConnectRoutePlan)...)
 			out.LiveRecipients = append(out.LiveRecipients, connectRoutePlanLiveRecipients(routes)...)
 			out.RoutedRecipients = append(out.RoutedRecipients, subscribers...)
@@ -144,8 +161,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		if !decision.Empty() {
 			out.ExtraDetail["connect_route_plan_template_instance_lifecycle"] = decision.Detail()
 		}
-		cleanupPreview, err := r.installTemplateInstanceLifecyclePreview(decision)
-		if err != nil {
+		if err := r.installTemplateInstanceLifecyclePreview(ctx, decision); err != nil {
 			return connectRoutePlanDispatch{}, err
 		}
 		routes, subscribers, err := r.deliveryRoutesForMaterialization(ctx, plan, materialized, decision)
@@ -157,9 +173,6 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 			if err != nil {
 				return connectRoutePlanDispatch{}, err
 			}
-		}
-		if cleanupPreview != nil {
-			cleanupPreview()
 		}
 		if strings.TrimSpace(decision.Action) == templateInstanceLifecycleActionCreated {
 			refreshed, err := r.descriptorsForPlans(ctx, matched)
@@ -175,7 +188,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 			out.ExtraDetail["connect_route_plan_receiver_event"] = plan.Receiver.ResolvedEvent
 			return out, nil
 		}
-		if previous, current, collision := admitConnectReceiverPinFacts(&receiverPinFacts, routes, plan.Receiver.Event); collision {
+		if previous, current, collision := admitConnectReceiverPinFacts(&receiverPinFacts, routes, plan.Receiver.Pin, plan.Receiver.Event); collision {
 			out.Failure = connectRoutePlanTargetFailure(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid)
 			out.ExtraDetail["connect_route_plan_failure"] = string(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid)
 			out.ExtraDetail["connect_route_plan_receiver_pin_collision"] = []string{previous, current}
@@ -188,30 +201,35 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 	out.LiveRecipients = normalizeRoutePlanLiveRecipients(out.LiveRecipients)
 	out.DeliveryIntents = normalizeRoutePlanDeliveryIntents(out.DeliveryIntents)
 	out.RoutedRecipients = dedupeSubscribers(out.RoutedRecipients)
+	out.ReplyContextConsumed = replyContextConsumed
 	return out, nil
 }
 
 type connectReceiverPinFact struct {
 	route              events.DeliveryRoute
+	receiverPin        string
 	receiverLocalEvent string
 }
 
-func admitConnectReceiverPinFacts(admitted *[]connectReceiverPinFact, routes []events.DeliveryRoute, receiverLocalEvent string) (string, string, bool) {
+func admitConnectReceiverPinFacts(admitted *[]connectReceiverPinFact, routes []events.DeliveryRoute, receiverPin, receiverLocalEvent string) (string, string, bool) {
+	receiverPin = strings.TrimSpace(receiverPin)
 	receiverLocalEvent = eventidentity.Normalize(receiverLocalEvent)
-	if admitted == nil || receiverLocalEvent == "" {
+	if admitted == nil || receiverPin == "" || receiverLocalEvent == "" {
 		return "", "", false
 	}
+	currentIdentity := receiverPin + ":" + receiverLocalEvent
 	for _, route := range routes {
 		route = route.Normalized()
 		if route.SubscriberType == "" || route.SubscriberID == "" {
 			continue
 		}
 		for _, previous := range *admitted {
-			if events.SameDeliveryRouteIdentity(previous.route, route) && previous.receiverLocalEvent != receiverLocalEvent {
-				return previous.receiverLocalEvent, receiverLocalEvent, true
+			previousIdentity := previous.receiverPin + ":" + previous.receiverLocalEvent
+			if events.SameDeliveryRouteIdentity(previous.route, route) && previousIdentity != currentIdentity {
+				return previousIdentity, currentIdentity, true
 			}
 		}
-		*admitted = append(*admitted, connectReceiverPinFact{route: route, receiverLocalEvent: receiverLocalEvent})
+		*admitted = append(*admitted, connectReceiverPinFact{route: route, receiverPin: receiverPin, receiverLocalEvent: receiverLocalEvent})
 	}
 	return "", "", false
 }
@@ -377,29 +395,38 @@ func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Contex
 	}), TemplateInstanceLifecycleDecision{}, nil
 }
 
-func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(decision TemplateInstanceLifecycleDecision) (func(), error) {
+func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(ctx context.Context, decision TemplateInstanceLifecycleDecision) error {
 	if strings.TrimSpace(decision.Action) != templateInstanceLifecycleActionPreviewCreate {
-		return nil, nil
+		return nil
 	}
-	if r.routeTable == nil {
-		return nil, nil
+	var preview *connectRoutePlanPreviewRoutes
+	if ctx != nil {
+		preview, _ = ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes)
+	}
+	if preview == nil {
+		return errors.New("connect route planning preview table is required before lifecycle materialization")
+	}
+	if preview.table == nil {
+		table, err := DeriveRouteTable(r.source)
+		if err != nil {
+			return fmt.Errorf("derive connect route planning preview table: %w", err)
+		}
+		preview.table = table
 	}
 	identity := decision.Route()
 	if !identity.Valid() {
-		return nil, nil
+		return nil
 	}
-	if len(r.routeTable.MaterializedRoutes(identity)) > 0 {
-		return nil, nil
+	if len(preview.table.MaterializedRoutes(identity)) > 0 {
+		return nil
 	}
-	if err := r.routeTable.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
+	if err := preview.table.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
 		Identity:            identity,
 		ActivationVariables: decision.ActivationVariables(),
 	}); err != nil {
-		return nil, err
+		return err
 	}
-	return func() {
-		_ = r.routeTable.RemoveFlowInstanceRoute(identity)
-	}, nil
+	return nil
 }
 
 func (r connectRoutePlanResolver) matchedPlans(ctx context.Context, evt events.Event) []runtimepinrouting.ConnectRoutePlan {
@@ -488,6 +515,11 @@ func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(ctx context.Co
 	tables := []*RouteTable{r.routeTable}
 	if staged := transactionRouteTableFromContext(ctx); staged != nil && staged != r.routeTable {
 		tables = append(tables, staged)
+	}
+	if ctx != nil {
+		if preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview != nil && preview.table != nil {
+			tables = append(tables, preview.table)
+		}
 	}
 	if len(tables) == 0 {
 		return nil

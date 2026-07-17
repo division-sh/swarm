@@ -312,7 +312,10 @@ func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) 
 	if stageTimer && (!firedStageTimer || eventType == runtimecontracts.WorkflowStageTimerInternalEvent) {
 		return false, nil, nil
 	}
-	consume, handled := pc.interceptPolicy(ctx, eventType, evt)
+	consume, handled, err := pc.interceptPolicy(ctx, eventType, evt)
+	if err != nil {
+		return false, nil, err
+	}
 	if !handled {
 		return true, nil, nil
 	}
@@ -345,9 +348,9 @@ func (pc *PipelineCoordinator) InterceptDeliveryRoute(ctx context.Context, evt e
 	return pc.Intercept(withWorkflowNodeDeliveryRoute(ctx, route), evt)
 }
 
-func (pc *PipelineCoordinator) interceptPolicy(ctx context.Context, eventType string, evt events.Event) (consume bool, handled bool) {
+func (pc *PipelineCoordinator) interceptPolicy(ctx context.Context, eventType string, evt events.Event) (consume bool, handled bool, err error) {
 	if strings.TrimSpace(eventType) == "" {
-		return false, false
+		return false, false, nil
 	}
 	return pc.workflowNodeInterceptPolicy(ctx, eventType, evt)
 }

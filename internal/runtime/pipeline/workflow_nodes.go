@@ -114,14 +114,17 @@ func workflowNodeEventPolicy(nodes []WorkflowNode, nodeID, eventType string) (Wo
 	return WorkflowEventPolicy{}, false
 }
 
-func workflowNodePolicyForDelivery(source semanticview.Source, node WorkflowNode, evt events.Event) (WorkflowEventPolicy, bool) {
+func workflowNodePolicyForDelivery(source semanticview.Source, node WorkflowNode, evt events.Event) (WorkflowEventPolicy, bool, error) {
 	eventType := strings.TrimSpace(string(evt.Type()))
 	if policy, ok := workflowNodePolicyForEventType(node.Policies, eventType); ok {
-		return policy, true
+		return policy, true, nil
 	}
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, strings.TrimSpace(node.ID), evt)
+	if resolved.Failure != "" {
+		return WorkflowEventPolicy{}, false, fmt.Errorf("resolve workflow handler for node %s: %s", strings.TrimSpace(node.ID), resolved.Failure)
+	}
 	if !resolved.Matched {
-		return WorkflowEventPolicy{}, false
+		return WorkflowEventPolicy{}, false, nil
 	}
 	candidates := []string{resolved.HandlerEventKey}
 	if source != nil {
@@ -129,10 +132,10 @@ func workflowNodePolicyForDelivery(source semanticview.Source, node WorkflowNode
 	}
 	for _, candidate := range candidates {
 		if policy, ok := workflowNodePolicyForEventType(node.Policies, candidate); ok {
-			return policy, true
+			return policy, true, nil
 		}
 	}
-	return deriveWorkflowEventPolicy(source, resolved.HandlerEventKey, strings.TrimSpace(resolved.Handler.AdvancesTo) != ""), true
+	return deriveWorkflowEventPolicy(source, resolved.HandlerEventKey, strings.TrimSpace(resolved.Handler.AdvancesTo) != ""), true, nil
 }
 
 func workflowNodePolicyForEventType(policies map[string]WorkflowEventPolicy, eventType string) (WorkflowEventPolicy, bool) {
@@ -894,7 +897,7 @@ func (pc *PipelineCoordinator) workflowNodeExecutors() []workflowNodeExecutor {
 	return out
 }
 
-func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, eventType string, evt events.Event) (bool, bool) {
+func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, eventType string, evt events.Event) (bool, bool, error) {
 	eventType = strings.TrimSpace(eventType)
 	source := pc.SemanticSource()
 	for _, node := range pc.WorkflowNodes() {
@@ -905,7 +908,11 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, 
 			policy WorkflowEventPolicy
 			ok     bool
 		)
-		policy, ok = workflowNodePolicyForDelivery(source, node, evt)
+		var err error
+		policy, ok, err = workflowNodePolicyForDelivery(source, node, evt)
+		if err != nil {
+			return false, true, err
+		}
 		if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
 			if ref, _, refOK := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); refOK && ref.NodeID == strings.TrimSpace(node.ID) {
 				if node.Policies != nil {
@@ -917,10 +924,10 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, 
 			if policy.RequireEntity && workflowEventEntityID(evt) == "" {
 				continue
 			}
-			return policy.Consume, true
+			return policy.Consume, true, nil
 		}
 	}
-	return false, false
+	return false, false, nil
 }
 
 func (pc *PipelineCoordinator) dispatchWorkflowNodeEvent(ctx context.Context, evt events.Event) bool {

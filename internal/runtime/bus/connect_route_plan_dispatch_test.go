@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
@@ -72,6 +73,47 @@ type connectRoutePlanLifecycleStore struct {
 type connectRoutePlanConcurrentLifecycleStore struct {
 	*connectRoutePlanLifecycleStore
 	mu sync.Mutex
+}
+
+type connectRoutePlanNodeInterceptor struct {
+	mu    sync.Mutex
+	count int
+}
+
+type connectRoutePlanReplyMutationStore struct {
+	creates int
+	claims  int
+}
+
+func (s *connectRoutePlanReplyMutationStore) CreateReplyContext(context.Context, runtimereplycontext.Record) error {
+	s.creates++
+	return nil
+}
+
+func (*connectRoutePlanReplyMutationStore) LoadReplyContext(context.Context, string) (runtimereplycontext.Record, error) {
+	return runtimereplycontext.Record{}, runtimereplycontext.ErrNotFound
+}
+
+func (s *connectRoutePlanReplyMutationStore) ClaimReplyContext(context.Context, string, string) (runtimereplycontext.Record, runtimereplycontext.ClaimOutcome, error) {
+	s.claims++
+	return runtimereplycontext.Record{}, runtimereplycontext.ClaimAccepted, nil
+}
+
+func (*connectRoutePlanNodeInterceptor) Intercept(context.Context, events.Event) (bool, []events.Event, error) {
+	return true, nil, nil
+}
+
+func (i *connectRoutePlanNodeInterceptor) InterceptDeliveryRoute(context.Context, events.Event, events.DeliveryRoute) (bool, []events.Event, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.count++
+	return false, nil, nil
+}
+
+func (i *connectRoutePlanNodeInterceptor) Count() int {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.count
 }
 
 type targetRouteMemoryEventMutation struct {
@@ -209,21 +251,24 @@ func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplica
 		name   string
 		first  events.DeliveryRoute
 		second events.DeliveryRoute
+		pinA   string
+		pinB   string
 		localA string
 		localB string
 		want   bool
 	}{
-		{name: "duplicate same edge", first: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, second: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, localA: "work.accepted", localB: "work.accepted"},
-		{name: "different subscriber", first: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "accept", Target: targetA}, second: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "audit", Target: targetA}, localA: "work.accepted", localB: "work.audited"},
-		{name: "different target", first: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, second: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetB}, localA: "work.accepted", localB: "work.audited"},
-		{name: "same delivery identity", first: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, second: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, localA: "work.accepted", localB: "work.audited", want: true},
+		{name: "duplicate same edge", first: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, second: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, pinA: "work_accepted", pinB: "work_accepted", localA: "work.accepted", localB: "work.accepted"},
+		{name: "different subscriber", first: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "accept", Target: targetA}, second: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "audit", Target: targetA}, pinA: "work_accepted", pinB: "work_audited", localA: "work.accepted", localB: "work.audited"},
+		{name: "different target", first: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, second: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetB}, pinA: "work_accepted", pinB: "work_audited", localA: "work.accepted", localB: "work.audited"},
+		{name: "distinct local events", first: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, second: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, pinA: "work_accepted", pinB: "work_audited", localA: "work.accepted", localB: "work.audited", want: true},
+		{name: "distinct pins same local event", first: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, second: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, pinA: "work_primary", pinB: "work_secondary", localA: "work.accepted", localB: "work.accepted", want: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var admitted []connectReceiverPinFact
-			if _, _, collision := admitConnectReceiverPinFacts(&admitted, []events.DeliveryRoute{tc.first}, tc.localA); collision {
+			if _, _, collision := admitConnectReceiverPinFacts(&admitted, []events.DeliveryRoute{tc.first}, tc.pinA, tc.localA); collision {
 				t.Fatal("first fact collided")
 			}
-			_, _, got := admitConnectReceiverPinFacts(&admitted, []events.DeliveryRoute{tc.second}, tc.localB)
+			_, _, got := admitConnectReceiverPinFacts(&admitted, []events.DeliveryRoute{tc.second}, tc.pinB, tc.localB)
 			if got != tc.want {
 				t.Fatalf("collision = %v, want %v", got, tc.want)
 			}
@@ -275,6 +320,118 @@ func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplica
 				t.Fatalf("persisted routes = %#v, want %d", routes, tc.wantRoutes)
 			}
 		})
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanAddressCollisionRejectsRuntimeResolvedNodeAgentAndMixedFanout(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		subscriberType string
+		distinctEvents bool
+		mixed          bool
+	}{
+		{name: "node/same local event", subscriberType: "node"},
+		{name: "node/distinct local events", subscriberType: "node", distinctEvents: true},
+		{name: "agent/same local event", subscriberType: "agent"},
+		{name: "agent/distinct local events", subscriberType: "agent", distinctEvents: true},
+		{name: "mixed legal and colliding recipients", subscriberType: "node", distinctEvents: true, mixed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := connectReceiverPinAddressCollisionSource(tc.subscriberType, tc.distinctEvents, tc.mixed)
+			interceptor := &connectRoutePlanNodeInterceptor{}
+			store := &connectRoutePlanDescriptorStore{
+				targetRouteMemoryStore: newTargetRouteMemoryStore(),
+				flowInstances: []ActiveFlowInstanceDescriptor{{
+					InstanceID:    "one",
+					EntityID:      "ent-1",
+					FlowInstance:  "consumer/one",
+					AddressFields: map[string]string{"entity.vertical_id": "v-1"},
+				}},
+			}
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Interceptors: []EventInterceptor{interceptor}})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "one")}); err != nil {
+				t.Fatalf("AddFlowInstanceRoute: %v", err)
+			}
+			var agentEvents <-chan events.Event
+			if tc.subscriberType == "agent" {
+				if tc.distinctEvents {
+					agentEvents = eb.SubscribeAgent(testAgentSubscriptionAdmission(t, "receiver-one", "work.accepted", "work.audited"))
+				} else {
+					agentEvents = eb.SubscribeAgent(testAgentSubscriptionAdmission(t, "receiver-one", "work.accepted"))
+				}
+			} else if tc.mixed {
+				agentEvents = eb.SubscribeAgent(testAgentSubscriptionAdmission(t, "legal-agent-one", "work.accepted"))
+			}
+			eventID := uuid.NewString()
+			evt := eventtest.RootIngress(eventID, "producer/work.ready", "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+			preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+			if err != nil {
+				t.Fatalf("CheckPublishRecipientPlan: %v", err)
+			}
+			if got, want := preflight.TargetFailure, string(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid); got != want {
+				t.Fatalf("preflight target failure = %q, want %q; routes=%#v", got, want, preflight.DeliveryRoutes)
+			}
+			if len(preflight.DeliveryRoutes) != 0 {
+				t.Fatalf("preflight delivery routes = %#v, want none", preflight.DeliveryRoutes)
+			}
+			if err := eb.Publish(context.Background(), evt); err != nil {
+				t.Fatalf("Publish: %v", err)
+			}
+			if len(store.routes[eventID]) != 0 {
+				t.Fatalf("persisted delivery routes = %#v, want none", store.routes[eventID])
+			}
+			if got := interceptor.Count(); got != 0 {
+				t.Fatalf("node handler interceptions = %d, want none", got)
+			}
+			if agentEvents != nil {
+				select {
+				case delivered := <-agentEvents:
+					t.Fatalf("agent delivery = %#v, want none", delivered)
+				default:
+				}
+			}
+			if len(store.flowInstances) != 1 {
+				t.Fatalf("flow instance descriptors = %#v, want unchanged existing target", store.flowInstances)
+			}
+		})
+	}
+}
+
+func TestConnectRoutePlanReceiverPinCollisionFailsBeforeReplyContextMutation(t *testing.T) {
+	source := connectReceiverPinCollisionSource("static", false, "node", false)
+	routeTable, err := DeriveRouteTable(source)
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	replyStore := &connectRoutePlanReplyMutationStore{}
+	resolver := newConnectRoutePlanResolver(source, routeTable, nil, nil, replyStore)
+	for i := range resolver.plans {
+		resolver.plans[i].ReplyResolution = &runtimepinrouting.ConnectRoutePlanReplyResolution{
+			Role:             runtimepinrouting.ConnectReplyRoleRequest,
+			RequesterFlowID:  "producer",
+			RequestOutputPin: "work_ready",
+			ReplyInputPin:    "work_reply",
+			ProviderFlowID:   "consumer",
+			ProviderInputPin: resolver.plans[i].Receiver.Pin,
+		}
+	}
+	evt := eventtest.RootIngress(uuid.NewString(), "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+		Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: "producer-entity"},
+	}, time.Now().UTC())
+
+	dispatch, err := resolver.Plan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if got, want := dispatch.Failure, connectRoutePlanTargetFailure(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid); got != want {
+		t.Fatalf("dispatch failure = %q, want %q", got, want)
+	}
+	if replyStore.creates != 0 || replyStore.claims != 0 || dispatch.ReplyContextConsumed {
+		t.Fatalf("reply mutations = create:%d claim:%d consumed:%v, want none", replyStore.creates, replyStore.claims, dispatch.ReplyContextConsumed)
 	}
 }
 
@@ -353,6 +510,50 @@ func connectReceiverPinLegalSource(shape string) semanticview.Source {
 		{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Name: "work_ready", Event: "work.ready"}}},
 		{id: "consumer", mode: "static", inputs: inputs, nodes: nodes},
 	}, connects))
+}
+
+func connectReceiverPinAddressCollisionSource(subscriberType string, distinctEvents, mixed bool) semanticview.Source {
+	secondEvent := "work.accepted"
+	if distinctEvents {
+		secondEvent = "work.audited"
+	}
+	inputs := []runtimecontracts.FlowInputEventPin{
+		{Name: "work_primary", Event: "work.accepted", Address: &runtimecontracts.FlowInputPinAddress{By: "vertical_id", Source: "payload.vertical_id", Target: "entity.vertical_id", Cardinality: "one"}},
+		{Name: "work_secondary", Event: secondEvent, Address: &runtimecontracts.FlowInputPinAddress{By: "vertical_id", Source: "payload.vertical_id", Target: "entity.vertical_id", Cardinality: "one"}},
+	}
+	consumer := connectRoutePlanTestFlow{
+		id: "consumer", mode: "template", inputs: inputs,
+		entityFields: map[string]runtimecontracts.EntityFieldDecl{"vertical_id": {Type: "string", Indexed: true}},
+	}
+	subscriptions := []string{"work.accepted"}
+	if distinctEvents {
+		subscriptions = append(subscriptions, secondEvent)
+	}
+	if subscriberType == "agent" {
+		consumer.agents = map[string]runtimecontracts.AgentRegistryEntry{
+			"receiver": {ID: "receiver-{instance_id}", Subscriptions: subscriptions},
+		}
+	} else {
+		handlers := map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": {}}
+		if distinctEvents {
+			handlers[secondEvent] = runtimecontracts.SystemNodeEventHandler{}
+		}
+		consumer.nodes = map[string]runtimecontracts.SystemNodeContract{
+			"receiver": {ID: "receiver-{instance_id}", EventHandlers: handlers},
+		}
+		if mixed {
+			consumer.agents = map[string]runtimecontracts.AgentRegistryEntry{
+				"legal-agent": {ID: "legal-agent-{instance_id}", Subscriptions: []string{"work.accepted"}},
+			}
+		}
+	}
+	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+		{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Name: "work_ready", Event: "work.ready"}}},
+		consumer,
+	}, []runtimecontracts.FlowPackageConnect{
+		{From: "producer.work_ready", To: "consumer.work_primary"},
+		{From: "producer.work_ready", To: "consumer.work_secondary"},
+	}))
 }
 
 func (s *connectRoutePlanMutationStore) RunEventMutation(ctx context.Context, fn func(EventMutation) error) error {
@@ -963,6 +1164,7 @@ func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 
 func TestEventBusPublish_ConnectRoutePlanPersistsTargetSetFanout(t *testing.T) {
 	source := connectRoutePlanFanoutSource()
+	interceptor := &connectRoutePlanNodeInterceptor{}
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		flowInstances: []ActiveFlowInstanceDescriptor{
@@ -971,7 +1173,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTargetSetFanout(t *testing.T) {
 			{InstanceID: "gamma", EntityID: "team-b", FlowInstance: "worker/gamma"},
 		},
 	}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Interceptors: []EventInterceptor{interceptor}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -993,6 +1195,13 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTargetSetFanout(t *testing.T) {
 	wantAlpha := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker-alpha", Target: events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/alpha", EntityID: "team-a"}}
 	wantBeta := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker-beta", Target: events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/beta", EntityID: "team-a"}}
 
+	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if preflight.TargetFailure != "" || !deliveryRoutesContain(preflight.DeliveryRoutes, wantAlpha) || !deliveryRoutesContain(preflight.DeliveryRoutes, wantBeta) || len(preflight.DeliveryRoutes) != 2 {
+		t.Fatalf("preflight = failure:%q routes:%#v, want two distinct legal targets", preflight.TargetFailure, preflight.DeliveryRoutes)
+	}
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -1005,6 +1214,9 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTargetSetFanout(t *testing.T) {
 	}
 	if len(routes) != 2 {
 		t.Fatalf("persisted delivery routes = %#v, want exactly two team-a fanout routes", routes)
+	}
+	if got := interceptor.Count(); got != 2 {
+		t.Fatalf("node handler interceptions = %d, want two distinct-target executions", got)
 	}
 }
 
@@ -1936,42 +2148,145 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameK
 	}
 }
 
-func TestEventBusPublish_ConnectRoutePlanLifecycleCreateRefreshesDescriptorsForLaterPlans(t *testing.T) {
-	source := connectRoutePlanInstanceKeyMultiInputSourceWithPolicy(t, "create", "reuse")
-	store := &connectRoutePlanLifecycleStore{
-		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
-			targetRouteMemoryStore: newTargetRouteMemoryStore(),
-		},
-	}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
-	})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	store.bus = eb
-	evt := eventtest.RootIngress(uuid.NewString(),
-		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+func TestEventBusPublish_ConnectRoutePlanLifecycleCollisionFailsBeforeActivation(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		secondPin canonicalrouting.LegacyInstanceSecondPin
+		consumer  canonicalrouting.LegacyInstanceConsumer
+	}{
+		{name: "node/same local event", secondPin: canonicalrouting.LegacyInstanceSecondPinSameEvent, consumer: canonicalrouting.LegacyInstanceNodeConsumer},
+		{name: "node/distinct local events", secondPin: canonicalrouting.LegacyInstanceSecondPinDistinctEvent, consumer: canonicalrouting.LegacyInstanceNodeConsumer},
+		{name: "agent/same local event", secondPin: canonicalrouting.LegacyInstanceSecondPinSameEvent, consumer: canonicalrouting.LegacyInstanceAgentConsumer},
+		{name: "agent/distinct local events", secondPin: canonicalrouting.LegacyInstanceSecondPinDistinctEvent, consumer: canonicalrouting.LegacyInstanceAgentConsumer},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := connectRoutePlanInstanceKeyMultiInputSourceWithPolicy(t, "create", "reuse", tc.secondPin, tc.consumer)
+			store := &connectRoutePlanLifecycleStore{
+				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+					targetRouteMemoryStore: newTargetRouteMemoryStore(),
+				},
+			}
+			eb, err := newScopedTestEventBus(store, EventBusOptions{
+				ContractBundle:            source,
+				TemplateInstanceActivator: store.Activate,
+			})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			store.bus = eb
+			evt := eventtest.RootIngress(uuid.NewString(),
+				events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	if err := eb.Publish(context.Background(), evt); err != nil {
-		t.Fatalf("Publish: %v", err)
+			preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+			if err != nil {
+				t.Fatalf("CheckPublishRecipientPlan: %v", err)
+			}
+			if got, want := preflight.TargetFailure, string(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid); got != want {
+				t.Fatalf("preflight target failure = %q, want %q; plan=%#v", got, want, preflight)
+			}
+			if len(preflight.DeliveryRoutes) != 0 {
+				t.Fatalf("preflight delivery routes = %#v, want none", preflight.DeliveryRoutes)
+			}
+			if err := eb.Publish(context.Background(), evt); err != nil {
+				t.Fatalf("Publish: %v", err)
+			}
+			if len(store.activations) != 0 {
+				t.Fatalf("activations = %#v, want none before rejecting receiver-pin collision", store.activations)
+			}
+			if len(store.flowInstances) != 0 {
+				t.Fatalf("flow instance descriptors = %#v, want none", store.flowInstances)
+			}
+			if len(store.routes[evt.ID()]) != 0 {
+				t.Fatalf("persisted delivery routes = %#v, want none", store.routes[evt.ID()])
+			}
+			eb.RouteTable().mu.RLock()
+			materialized := len(eb.RouteTable().instanceOwners)
+			eb.RouteTable().mu.RUnlock()
+			if materialized != 0 {
+				t.Fatalf("materialized route owners = %d, want none", materialized)
+			}
+		})
 	}
-	if len(store.activations) != 1 {
-		t.Fatalf("activations = %d, want exactly one lifecycle create for both connect plans", len(store.activations))
-	}
-	activation := store.activations[0]
-	want := events.DeliveryRoute{
-		SubscriberType: "node",
-		SubscriberID:   "consumer-node-" + activation.Instance.InstanceID,
-		Target: events.RouteIdentity{
-			FlowID:       "consumer",
-			FlowInstance: activation.Instance.InstancePath,
-			EntityID:     activation.Instance.EntityID,
-		},
-	}
-	if !deliveryRoutesContain(store.routes[evt.ID()], want) || len(store.routes[evt.ID()]) != 1 {
-		t.Fatalf("persisted delivery routes = %#v, want one deduplicated route %#v", store.routes[evt.ID()], want)
+}
+
+func TestEventBusPublish_ConnectRoutePlanLifecycleAdmissionPreservesDuplicateEdgeAndDistinctSubscriber(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		secondPin  canonicalrouting.LegacyInstanceSecondPin
+		consumer   canonicalrouting.LegacyInstanceConsumer
+		wantRoutes int
+		wantNodes  int
+		wantAgent  bool
+	}{
+		{name: "duplicate identical edge", secondPin: canonicalrouting.LegacyInstanceSecondPinDuplicateEdge, consumer: canonicalrouting.LegacyInstanceNodeConsumer, wantRoutes: 1, wantNodes: 1},
+		{name: "distinct node and agent subscribers", consumer: canonicalrouting.LegacyInstanceNodeAndAgentConsumer, wantRoutes: 2, wantAgent: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := connectRoutePlanInstanceKeyMultiInputSourceWithPolicy(t, "create", "reuse", tc.secondPin, tc.consumer)
+			store := &connectRoutePlanLifecycleStore{
+				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+					targetRouteMemoryStore: newTargetRouteMemoryStore(),
+				},
+			}
+			interceptor := &connectRoutePlanNodeInterceptor{}
+			opts := EventBusOptions{
+				ContractBundle:            source,
+				TemplateInstanceActivator: store.Activate,
+			}
+			if !tc.wantAgent {
+				opts.Interceptors = []EventInterceptor{interceptor}
+			}
+			eb, err := newScopedTestEventBus(store, opts)
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			store.bus = eb
+			evt := eventtest.RootIngress(uuid.NewString(), "producer/deploy.done", "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+			preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+			if err != nil {
+				t.Fatalf("CheckPublishRecipientPlan: %v", err)
+			}
+			if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != tc.wantRoutes {
+				t.Fatalf("preflight = failure:%q routes:%#v, want %d legal routes", preflight.TargetFailure, preflight.DeliveryRoutes, tc.wantRoutes)
+			}
+			var agentEvents <-chan events.Event
+			if tc.wantAgent {
+				var agentID string
+				for _, route := range preflight.DeliveryRoutes {
+					if route.SubscriberType == "agent" {
+						agentID = route.SubscriberID
+						break
+					}
+				}
+				if agentID == "" {
+					t.Fatalf("preflight routes = %#v, want agent subscriber", preflight.DeliveryRoutes)
+				}
+				agentEvents = eb.SubscribeAgent(testAgentSubscriptionAdmission(t, agentID, "deploy.done"))
+			}
+			if err := eb.Publish(context.Background(), evt); err != nil {
+				t.Fatalf("Publish: %v", err)
+			}
+			if len(store.activations) != 1 || len(store.flowInstances) != 1 {
+				t.Fatalf("activations/descriptors = %d/%d, want one admitted lifecycle instance", len(store.activations), len(store.flowInstances))
+			}
+			if routes := store.routes[evt.ID()]; len(routes) != tc.wantRoutes {
+				t.Fatalf("persisted routes = %#v, want %d", routes, tc.wantRoutes)
+			}
+			if got := interceptor.Count(); got != tc.wantNodes {
+				t.Fatalf("node handler interceptions = %d, want %d", got, tc.wantNodes)
+			}
+			if agentEvents != nil {
+				select {
+				case delivered := <-agentEvents:
+					if delivered.ID() != evt.ID() {
+						t.Fatalf("agent delivered event = %s, want %s", delivered.ID(), evt.ID())
+					}
+				case <-time.After(time.Second):
+					t.Fatal("timed out waiting for admitted agent delivery")
+				}
+			}
+		})
 	}
 }
 
@@ -3023,14 +3338,14 @@ func connectRoutePlanInstanceKeySourceWithPolicyLines(t testing.TB, policyLines 
 	return semanticview.Wrap(bundle)
 }
 
-func connectRoutePlanInstanceKeyMultiInputSourceWithPolicy(t testing.TB, onMissing, onConflict string) semanticview.Source {
+func connectRoutePlanInstanceKeyMultiInputSourceWithPolicy(t testing.TB, onMissing, onConflict string, secondPin canonicalrouting.LegacyInstanceSecondPin, consumer canonicalrouting.LegacyInstanceConsumer) semanticview.Source {
 	t.Helper()
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
 	}
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
-	root := writeConnectRoutePlanInstanceKeyMultiInputFixtureWithPolicy(t, onMissing, onConflict)
+	root := writeConnectRoutePlanInstanceKeyMultiInputFixtureWithPolicy(t, onMissing, onConflict, secondPin, consumer)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
@@ -3157,12 +3472,13 @@ func writeConnectRoutePlanInstanceKeyFixtureWithPolicyLines(t testing.TB, policy
 	})
 }
 
-func writeConnectRoutePlanInstanceKeyMultiInputFixtureWithPolicy(t testing.TB, onMissing, onConflict string) string {
+func writeConnectRoutePlanInstanceKeyMultiInputFixtureWithPolicy(t testing.TB, onMissing, onConflict string, secondPin canonicalrouting.LegacyInstanceSecondPin, consumer canonicalrouting.LegacyInstanceConsumer) string {
 	t.Helper()
 	return canonicalrouting.CopyLegacyInstanceRoute(t, canonicalrouting.LegacyInstanceRouteOptions{
-		Missing:  legacyInstancePolicy(t, onMissing),
-		Conflict: legacyInstancePolicy(t, onConflict),
-		MultiPin: true,
+		Missing:   legacyInstancePolicy(t, onMissing),
+		Conflict:  legacyInstancePolicy(t, onConflict),
+		SecondPin: secondPin,
+		Consumer:  consumer,
 	})
 }
 
