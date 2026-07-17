@@ -302,9 +302,9 @@ func (s *SQLiteRuntimeStore) cancelSQLiteScheduleExact(ctx context.Context, sc r
 			  AND COALESCE(entity_id, '') = COALESCE(?, '')
 			  AND COALESCE(flow_instance, '') = COALESCE(?, '')
 			  AND COALESCE(json_extract(fire_payload, '$.__schedule_task_id'), '') = ?
-			  AND timer_name NOT LIKE ?
+			  AND instr(timer_name, ?) <> 1
 			  AND status = 'active'
-		`, sqliteNullUUID(sc.RunID), sc.AgentID, sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix()+"%")
+		`, sqliteNullUUID(sc.RunID), sc.AgentID, sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix())
 		return err
 	}); err != nil {
 		return fmt.Errorf("cancel sqlite timer exact: %w", err)
@@ -326,10 +326,10 @@ func (s *SQLiteRuntimeStore) LoadActiveSchedules(ctx context.Context) ([]runtime
 		LEFT JOIN runs run ON run.run_id = t.run_id
 		WHERE t.status = 'active'
 		  AND COALESCE(t.owner_agent, '') <> ''
-		  AND t.timer_name NOT LIKE ?
+		  AND instr(t.timer_name, ?) <> 1
 		  AND (t.run_id IS NULL OR run.status IN ('running', 'paused'))
 		ORDER BY t.fire_at ASC
-	`, timeridentity.WorkflowTimerActivationTaskPrefix()+"%")
+	`, timeridentity.WorkflowTimerActivationTaskPrefix())
 	if err != nil {
 		return nil, fmt.Errorf("load sqlite active schedules: %w", err)
 	}
@@ -387,9 +387,9 @@ func (s *SQLiteRuntimeStore) MarkScheduleFiredExact(ctx context.Context, sc runt
 			  AND COALESCE(entity_id, '') = COALESCE(?, '')
 			  AND COALESCE(flow_instance, '') = COALESCE(?, '')
 			  AND COALESCE(json_extract(fire_payload, '$.__schedule_task_id'), '') = ?
-			  AND timer_name NOT LIKE ?
+			  AND instr(timer_name, ?) <> 1
 			  AND status = 'active'
-		`, time.Now().UTC(), sqliteNullUUID(sc.RunID), sc.AgentID, sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix()+"%")
+		`, time.Now().UTC(), sqliteNullUUID(sc.RunID), sc.AgentID, sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix())
 		return err
 	}); err != nil {
 		return fmt.Errorf("mark sqlite timer fired exact: %w", err)
@@ -456,11 +456,11 @@ func (s *SQLiteRuntimeStore) ClaimSchedule(ctx context.Context, sc runtimepipeli
 			  AND COALESCE(t.entity_id, '') = COALESCE(?, '')
 			  AND COALESCE(t.flow_instance, '') = COALESCE(?, '')
 			  AND COALESCE(json_extract(t.fire_payload, '$.__schedule_task_id'), '') = ?
-			  AND t.timer_name NOT LIKE ?
+			  AND instr(t.timer_name, ?) <> 1
 			  AND t.status = 'active'
 			  AND (t.run_id IS NULL OR run.status IN ('running', 'paused'))
 		)
-	`, sqliteNullUUID(sc.RunID), sc.AgentID, sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix()+"%").Scan(&active)
+	`, sqliteNullUUID(sc.RunID), sc.AgentID, sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix()).Scan(&active)
 	if err != nil {
 		return false, fmt.Errorf("claim sqlite schedule ownership: %w", err)
 	}

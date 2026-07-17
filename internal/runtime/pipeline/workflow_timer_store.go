@@ -299,9 +299,9 @@ func (s *WorkflowInstanceStore) listWorkflowTimerActivations(ctx context.Context
 	query := workflowTimerActivationSelect(true, s.isSQLite())
 	runID = strings.TrimSpace(runID)
 	entityID = strings.TrimSpace(entityID)
-	args := []any{runID, entityID, timeridentity.WorkflowTimerActivationTaskPrefix() + "%"}
+	args := []any{runID, entityID, timeridentity.WorkflowTimerActivationTaskPrefix()}
 	if s.isSQLite() {
-		args = []any{runID, runID, entityID, entityID, timeridentity.WorkflowTimerActivationTaskPrefix() + "%"}
+		args = []any{runID, runID, entityID, entityID, timeridentity.WorkflowTimerActivationTaskPrefix()}
 	}
 	if activeOnly {
 		query += " AND t.status = 'active'"
@@ -342,11 +342,11 @@ func workflowTimerActivationSelect(list bool, sqlite bool) string {
 	}
 	if list {
 		if sqlite {
-			where = "(? = '' OR t.run_id = ?) AND (? = '' OR t.entity_id = ?) AND t.timer_name LIKE ? AND run.status IN ('running', 'paused')"
+			where = "(? = '' OR t.run_id = ?) AND (? = '' OR t.entity_id = ?) AND instr(t.timer_name, ?) = 1 AND run.status IN ('running', 'paused')"
 			// Duplicate run/entity arguments are expanded by the caller below.
 			return workflowTimerSelectColumns() + " WHERE " + where
 		}
-		where = "(NULLIF($1, '') IS NULL OR t.run_id = NULLIF($1, '')::uuid) AND (NULLIF($2, '') IS NULL OR t.entity_id = NULLIF($2, '')::uuid) AND t.timer_name LIKE $3 AND run.status IN ('running', 'paused')"
+		where = "(NULLIF($1, '') IS NULL OR t.run_id = NULLIF($1, '')::uuid) AND (NULLIF($2, '') IS NULL OR t.entity_id = NULLIF($2, '')::uuid) AND strpos(t.timer_name, $3) = 1 AND run.status IN ('running', 'paused')"
 	}
 	return workflowTimerSelectColumns() + " WHERE " + where
 }

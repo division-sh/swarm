@@ -592,6 +592,32 @@ func TestWorkflowTimerLifecycleListsScopeWildcardsOnBothStores(t *testing.T) {
 			store, ctx := tc.open(t)
 			_, entityID, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, &recordingPipelineBus{}, false)
 			runID := runtimecorrelation.RunIDFromContext(ctx)
+			lookalikeID := uuid.NewString()
+			lookalikeTaskID := "workflowXtimer:v1:generic"
+			if store.isSQLite() {
+				_, err := store.db.ExecContext(ctx, `
+					INSERT INTO timers (
+						timer_id, run_id, timer_name, entity_id, flow_instance, fire_event,
+						fire_payload, fire_at, recurring, owner_agent, task_type, status, created_at
+					) VALUES (?, ?, ?, ?, 'generic', 'generic.tick', '{}', ?, false, 'generic', 'timer', 'active', ?)
+				`, lookalikeID, runID, lookalikeTaskID, entityID, activation.FireAt, activation.CreatedAt)
+				if err != nil {
+					t.Fatalf("insert SQLite generic prefix lookalike: %v", err)
+				}
+			} else {
+				_, err := store.db.ExecContext(ctx, `
+					INSERT INTO timers (
+						timer_id, run_id, timer_name, entity_id, flow_instance, fire_event,
+						fire_payload, fire_at, recurring, owner_agent, task_type, status, created_at
+					) VALUES (
+						$1::uuid, $2::uuid, $3, $4::uuid, 'generic', 'generic.tick',
+						'{}'::jsonb, $5, false, 'generic', 'timer', 'active', $6
+					)
+				`, lookalikeID, runID, lookalikeTaskID, entityID, activation.FireAt, activation.CreatedAt)
+				if err != nil {
+					t.Fatalf("insert PostgreSQL generic prefix lookalike: %v", err)
+				}
+			}
 
 			for _, filter := range []struct {
 				name     string

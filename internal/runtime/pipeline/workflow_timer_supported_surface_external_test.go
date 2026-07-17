@@ -849,12 +849,12 @@ func workflowTimerPersistedEventID(t *testing.T, selected gateRecoveryStoreCase,
 
 func workflowTimerPersistedActivation(t *testing.T, selected gateRecoveryStoreCase, runID, entityID string) (timeridentity.WorkflowTimerActivationRef, string) {
 	t.Helper()
-	query := `SELECT timer_name, status FROM timers WHERE run_id = ? AND entity_id = ? AND timer_name LIKE 'workflow_timer:v1:%'`
+	query := `SELECT timer_name, status FROM timers WHERE run_id = ? AND entity_id = ? AND instr(timer_name, ?) = 1`
 	if selected.postgres {
-		query = `SELECT timer_name, status FROM timers WHERE run_id = $1::uuid AND entity_id = $2::uuid AND timer_name LIKE 'workflow_timer:v1:%'`
+		query = `SELECT timer_name, status FROM timers WHERE run_id = $1::uuid AND entity_id = $2::uuid AND strpos(timer_name, $3) = 1`
 	}
 	var taskID, status string
-	if err := selected.db.QueryRowContext(context.Background(), query, runID, entityID).Scan(&taskID, &status); err != nil {
+	if err := selected.db.QueryRowContext(context.Background(), query, runID, entityID, timeridentity.WorkflowTimerActivationTaskPrefix()).Scan(&taskID, &status); err != nil {
 		t.Fatalf("load persisted workflow timer activation: %v", err)
 	}
 	ref, ok := timeridentity.ParseWorkflowTimerActivationTaskID(taskID)
@@ -877,12 +877,12 @@ func workflowTimerServedLifecycleBundle(recurring bool) *runtimecontracts.Workfl
 
 func assertWorkflowTimerServedRows(t *testing.T, selected gateRecoveryStoreCase, runID, entityID, status string, want int) {
 	t.Helper()
-	query := `SELECT COUNT(*) FROM timers WHERE run_id = ? AND entity_id = ? AND timer_name LIKE 'workflow_timer:v1:%' AND status = ?`
+	query := `SELECT COUNT(*) FROM timers WHERE run_id = ? AND entity_id = ? AND instr(timer_name, ?) = 1 AND status = ?`
 	if selected.postgres {
-		query = `SELECT COUNT(*) FROM timers WHERE run_id = $1::uuid AND entity_id = $2::uuid AND timer_name LIKE 'workflow_timer:v1:%' AND status = $3`
+		query = `SELECT COUNT(*) FROM timers WHERE run_id = $1::uuid AND entity_id = $2::uuid AND strpos(timer_name, $3) = 1 AND status = $4`
 	}
 	var got int
-	if err := selected.db.QueryRowContext(context.Background(), query, runID, entityID, status).Scan(&got); err != nil {
+	if err := selected.db.QueryRowContext(context.Background(), query, runID, entityID, timeridentity.WorkflowTimerActivationTaskPrefix(), status).Scan(&got); err != nil {
 		t.Fatalf("count canonical workflow timers: %v", err)
 	}
 	if got != want {
