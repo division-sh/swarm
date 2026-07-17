@@ -911,6 +911,13 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, 
 		var err error
 		policy, ok, err = workflowNodePolicyForDelivery(source, node, evt)
 		if err != nil {
+			applies, authorityErr := pc.workflowNodeConnectedInputFailureApplies(ctx, strings.TrimSpace(node.ID), evt)
+			if authorityErr != nil {
+				return false, true, authorityErr
+			}
+			if !applies {
+				continue
+			}
 			return false, true, err
 		}
 		if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
@@ -928,6 +935,13 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, 
 		}
 	}
 	return false, false, nil
+}
+
+func (pc *PipelineCoordinator) workflowNodeConnectedInputFailureApplies(ctx context.Context, nodeID string, evt events.Event) (bool, error) {
+	if _, ok := workflowNodeDeliveryRoute(ctx); ok {
+		return true, nil
+	}
+	return pc.workflowNodeDeliveryAuthority(ctx, nodeID, evt)
 }
 
 func (pc *PipelineCoordinator) dispatchWorkflowNodeEvent(ctx context.Context, evt events.Event) bool {
@@ -1087,21 +1101,10 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryAuthorized(ctx context.Contex
 		return false
 	}
 	nodeID = strings.TrimSpace(nodeID)
-	if nodeID == "" {
-		return false
-	}
-	if !pc.eventReceiptsAvailable(ctx) {
-		return false
-	}
-	if pc.workflowStore == nil {
-		return false
-	}
 	eventID := strings.TrimSpace(evt.ID())
-	if eventID == "" {
-		return false
-	}
-	if target := systemNodeDeliveryTarget(evt); !target.Empty() {
-		ok, err := pc.workflowStore.SystemNodeDeliveryAuthorizedForTarget(ctx, nodeID, eventID, target, DefaultSystemNodeRetryLimit)
+	target := systemNodeDeliveryTarget(evt)
+	ok, err := pc.workflowNodeDeliveryAuthority(ctx, nodeID, evt)
+	if !target.Empty() {
 		if err != nil {
 			if logger, logOK := pc.bus.(systemNodeRuntimeLogger); logOK && logger != nil {
 				logger.LogRuntime(ctx, RuntimeLogEntry{
@@ -1132,7 +1135,6 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryAuthorized(ctx context.Contex
 		}
 		return ok
 	}
-	ok, err := pc.workflowStore.SystemNodeDeliveryAuthorized(ctx, nodeID, eventID, DefaultSystemNodeRetryLimit)
 	if err != nil {
 		if logger, logOK := pc.bus.(systemNodeRuntimeLogger); logOK && logger != nil {
 			logger.LogRuntime(ctx, RuntimeLogEntry{
@@ -1162,6 +1164,21 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryAuthorized(ctx context.Contex
 		}
 	}
 	return ok
+}
+
+func (pc *PipelineCoordinator) workflowNodeDeliveryAuthority(ctx context.Context, nodeID string, evt events.Event) (bool, error) {
+	if pc == nil || !pc.eventReceiptsAvailable(ctx) || pc.workflowStore == nil {
+		return false, nil
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	eventID := strings.TrimSpace(evt.ID())
+	if nodeID == "" || eventID == "" {
+		return false, nil
+	}
+	if target := systemNodeDeliveryTarget(evt); !target.Empty() {
+		return pc.workflowStore.SystemNodeDeliveryAuthorizedForTarget(ctx, nodeID, eventID, target, DefaultSystemNodeRetryLimit)
+	}
+	return pc.workflowStore.SystemNodeDeliveryAuthorized(ctx, nodeID, eventID, DefaultSystemNodeRetryLimit)
 }
 
 func (pc *PipelineCoordinator) workflowNodeEventProcessed(ctx context.Context, nodeID string, evt events.Event) bool {
