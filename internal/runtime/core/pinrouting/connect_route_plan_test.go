@@ -79,6 +79,80 @@ func TestConnectSourceEndpointMatchesEventRejectsConcreteInstanceWithoutSourceRo
 	}
 }
 
+func TestConnectSourceEndpointMatchesEventEnforcesRootSourceContextMatrix(t *testing.T) {
+	rootEndpoint := ConnectRoutePlanEndpoint{
+		Root:          true,
+		Mode:          "root",
+		Event:         "root.ready",
+		ResolvedEvent: "root.ready",
+	}
+	staticEndpoint := ConnectRoutePlanEndpoint{
+		FlowID:        "producer",
+		FlowPath:      "producer",
+		Mode:          "static",
+		Event:         "deploy.done",
+		ResolvedEvent: "producer/deploy.done",
+	}
+	templateEndpoint := staticEndpoint
+	templateEndpoint.Mode = "template"
+
+	tests := []struct {
+		name         string
+		endpoint     ConnectRoutePlanEndpoint
+		eventType    string
+		flowInstance string
+		source       events.RouteIdentity
+		target       events.RouteIdentity
+		want         bool
+	}{
+		{name: "empty root context", endpoint: rootEndpoint, eventType: "root.ready", want: true},
+		{name: "UUID root instance", endpoint: rootEndpoint, eventType: "root.ready", flowInstance: "11111111-1111-4111-8111-111111111111", want: true},
+		{name: "concrete child context without source", endpoint: rootEndpoint, eventType: "root.ready", flowInstance: "child/inst-1"},
+		{name: "static child context without source", endpoint: rootEndpoint, eventType: "root.ready", flowInstance: "child"},
+		{
+			name:      "entity-only root source projected to child target",
+			endpoint:  rootEndpoint,
+			eventType: "root.ready",
+			source:    events.RouteIdentity{EntityID: "root-entity"},
+			target:    events.RouteIdentity{FlowID: "child", FlowInstance: "child/inst-1", EntityID: "child-entity"},
+			want:      true,
+		},
+		{
+			name:         "explicit child source remains authoritative",
+			endpoint:     rootEndpoint,
+			eventType:    "root.ready",
+			flowInstance: "11111111-1111-4111-8111-111111111111",
+			source:       events.RouteIdentity{FlowID: "child", FlowInstance: "child/inst-1"},
+		},
+		{
+			name:      "static source control",
+			endpoint:  staticEndpoint,
+			eventType: "producer/deploy.done",
+			source:    events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"},
+			want:      true,
+		},
+		{
+			name:      "template source control",
+			endpoint:  templateEndpoint,
+			eventType: "producer/inst-1/deploy.done",
+			source:    events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"},
+			want:      true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			evt := eventtest.RootIngress("", events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+				FlowInstance: tc.flowInstance,
+				Source:       tc.source,
+				Target:       tc.target,
+			}, time.Unix(1, 0).UTC())
+			if got := ConnectSourceEndpointMatchesEvent(tc.endpoint, evt); got != tc.want {
+				t.Fatalf("ConnectSourceEndpointMatchesEvent = %v, want %v; envelope = %#v", got, tc.want, evt.NormalizedEnvelope())
+			}
+		})
+	}
+}
+
 func TestConnectSourceEndpointMatchesEnforcesProducerModeMatrix(t *testing.T) {
 	flowEndpoint := ConnectRoutePlanEndpoint{
 		FlowID:        "producer",

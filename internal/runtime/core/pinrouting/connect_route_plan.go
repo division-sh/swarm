@@ -106,7 +106,13 @@ func ConnectSourceEndpointMatches(endpoint ConnectRoutePlanEndpoint, eventType s
 }
 
 func ConnectSourceEndpointMatchesEvent(endpoint ConnectRoutePlanEndpoint, evt events.Event) bool {
-	return ConnectSourceEndpointMatches(endpoint, string(evt.Type()), evt.SourceRoute())
+	source := evt.SourceRoute().Normalized()
+	// Legacy flow context can describe a child target; it cannot stand in for
+	// missing producer provenance when selecting a package-root source.
+	if endpoint.Root && source.Empty() && runtimeflowidentity.SemanticScopeFromFlowInstanceRef(evt.FlowInstance()) != "" {
+		return false
+	}
+	return ConnectSourceEndpointMatches(endpoint, string(evt.Type()), source)
 }
 
 func connectSourceRouteMatchesEndpoint(endpoint ConnectRoutePlanEndpoint, source events.RouteIdentity) bool {

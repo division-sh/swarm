@@ -178,6 +178,30 @@ func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
 			}
 		})
 	}
+
+	rootSource := connectRoutePlanRootProducerStaticSource()
+	rootResolver := connectRoutePlanResolver{source: rootSource}
+	rootIssue := runtimepinrouting.ConnectRoutePlanIssue{
+		Failure: runtimepinrouting.ConnectFailureReceiverFlowMissing,
+		Connect: runtimecontracts.FlowPackageConnect{From: ".root_ready"},
+	}
+	for _, tc := range []struct {
+		name         string
+		flowInstance string
+		want         bool
+	}{
+		{name: "empty-source child context", flowInstance: "child/inst-1"},
+		{name: "UUID root context", flowInstance: "11111111-1111-4111-8111-111111111111", want: true},
+	} {
+		t.Run("issue/root/"+tc.name, func(t *testing.T) {
+			evt := eventtest.RootIngress("", "root.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+				FlowInstance: tc.flowInstance,
+			}, time.Unix(1, 0).UTC())
+			if got := rootResolver.connectIssueMatchesEvent(context.Background(), rootIssue, evt); got != tc.want {
+				t.Fatalf("connectIssueMatchesEvent = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(t *testing.T) {
@@ -953,10 +977,7 @@ func TestEventBusPublish_RootConnectRoutePlanDoesNotCaptureChildScopedSameNameEv
 		0,
 		"",
 		"",
-		events.EnvelopeForSourceRoute(
-			events.EnvelopeForFlowInstance(events.EventEnvelope{}, "consumer/inst-9"),
-			events.RouteIdentity{FlowID: "child", FlowInstance: "child"},
-		),
+		events.EnvelopeForFlowInstance(events.EventEnvelope{}, "child/inst-9"),
 		time.Now().UTC(),
 	)
 
@@ -987,6 +1008,13 @@ func TestEventBusPublish_RootConnectRoutePlanDoesNotCaptureChildScopedSameNameEv
 	}
 	if deliveryRoutesContain(plan.DeliveryRoutes, forbidden) {
 		t.Fatalf("preflight delivery routes = %#v, must not include root-connect receiver for child-scoped same-name event", plan.DeliveryRoutes)
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if routes := store.routes[eventID]; deliveryRoutesContain(routes, forbidden) {
+		t.Fatalf("persisted delivery routes = %#v, must not include root-connect receiver for child-scoped same-name event", routes)
 	}
 }
 

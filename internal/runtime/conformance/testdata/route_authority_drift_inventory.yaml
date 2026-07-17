@@ -488,6 +488,7 @@ seam_families:
       - executor state metadata overriding the admitted producer route
       - suffix or same-leaf event-name fallback
       - an empty fork-point source route recovered from event-name text or a delivery row
+      - a package-root source selected by local event name when source_route is empty and flow_instance identifies semantic child-flow context
     notes: >
       ConnectSourceEndpointMatches is the canonical producer endpoint matcher.
       It consumes the lowered producer Mode: template sources require exact
@@ -499,7 +500,12 @@ seam_families:
       fan-in/reply/fan-out runtime proofs consume the same owner. RunForkPoint
       carries the exact normalized source_route from the fixed revision so
       no-delivery selected history and dynamic instance evidence do not depend
-      on PendingWork or event-name reconstruction.
+      on PendingWork or event-name reconstruction. The event-aware wrapper also
+      fails closed before package-root matching when source_route is absent and
+      flow_instance identifies semantic child-flow context, while preserving
+      UUID root instances and explicit source-route precedence. The canonical
+      owner matrix, EventBus plan/preflight/publish, connect-issue matching, and
+      workflow connected-input localization prove that rule directly.
   - id: selected_contract_connect_receiver_policy
     layer: replay_recovery_consumers
     classification: valid_consumer

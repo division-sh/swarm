@@ -350,6 +350,31 @@ func TestWorkflowNodeConnectedInputEventHandlerResolution_ConsumesLoweredPackage
 	}
 }
 
+func TestWorkflowNodeConnectedInputEventHandlerResolution_RootSourceRejectsEmptySourceChildContext(t *testing.T) {
+	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
+	for _, tc := range []struct {
+		name         string
+		flowInstance string
+		wantMatched  bool
+	}{
+		{name: "child context", flowInstance: "child/inst-1"},
+		{name: "UUID root context", flowInstance: "11111111-1111-4111-8111-111111111111", wantMatched: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evt := eventtest.RootIngress("", "step.begin", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+				FlowInstance: tc.flowInstance,
+			}, time.Unix(1, 0).UTC())
+			resolved := workflowNodeConnectedInputEventHandlerResolution(source, "child-relay", evt)
+			if resolved.Matched != tc.wantMatched {
+				t.Fatalf("connected-input resolution = %#v, want matched %v", resolved, tc.wantMatched)
+			}
+			if tc.wantMatched && resolved.HandlerEventKey != "step.begin" {
+				t.Fatalf("connected-input handler = %q, want step.begin", resolved.HandlerEventKey)
+			}
+		})
+	}
+}
+
 func TestWorkflowNodeConnectedInputHandlerMatchesConcreteTemplateProducer(t *testing.T) {
 	source := testWorkflowNodeConnectedInputSource("template")
 	evt := eventtest.RootIngress("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
