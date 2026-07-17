@@ -586,6 +586,37 @@ func TestWorkflowTimerLifecycleRecurringAdvancesPersistedCoordinateOnBothStores(
 	}
 }
 
+func TestWorkflowTimerLifecycleListsScopeWildcardsOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			_, entityID, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, &recordingPipelineBus{}, false)
+			runID := runtimecorrelation.RunIDFromContext(ctx)
+
+			for _, filter := range []struct {
+				name     string
+				runID    string
+				entityID string
+			}{
+				{name: "exact", runID: runID, entityID: entityID},
+				{name: "run_wildcard", entityID: entityID},
+				{name: "entity_wildcard", runID: runID},
+				{name: "both_wildcards"},
+			} {
+				t.Run(filter.name, func(t *testing.T) {
+					activations, err := store.listWorkflowTimerActivations(ctx, filter.runID, filter.entityID, true)
+					if err != nil {
+						t.Fatalf("list workflow timer activations: %v", err)
+					}
+					if len(activations) != 1 || activations[0].Ref != activation.Ref {
+						t.Fatalf("listed activations = %#v, want exact activation %#v", activations, activation.Ref)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestWorkflowTimerLifecycleRollbackAndCancellationOnBothStores(t *testing.T) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
