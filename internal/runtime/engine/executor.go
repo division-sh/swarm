@@ -2421,6 +2421,9 @@ func (e *Executor) buildTimerIntents(frame *executionFrame) ([]TimerIntent, erro
 	if frame == nil {
 		return nil, fmt.Errorf("timer reconciliation requires an execution frame")
 	}
+	if !IsHandledOutcome(frame.result.Status) {
+		return nil, nil
+	}
 	eventID := strings.TrimSpace(frame.req.Event.ID())
 	eventType := strings.TrimSpace(string(frame.req.Event.Type()))
 	triggeredAt := frame.req.Event.CreatedAt()
