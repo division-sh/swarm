@@ -346,7 +346,7 @@ func workflowTimerActivationSelect(list bool, sqlite bool) string {
 			// Duplicate run/entity arguments are expanded by the caller below.
 			return workflowTimerSelectColumns() + " WHERE " + where
 		}
-		where = "($1 = '' OR t.run_id = $1::uuid) AND ($2 = '' OR t.entity_id = $2::uuid) AND t.timer_name LIKE $3 AND run.status IN ('running', 'paused')"
+		where = "(NULLIF($1, '') IS NULL OR t.run_id = NULLIF($1, '')::uuid) AND (NULLIF($2, '') IS NULL OR t.entity_id = NULLIF($2, '')::uuid) AND t.timer_name LIKE $3 AND run.status IN ('running', 'paused')"
 	}
 	return workflowTimerSelectColumns() + " WHERE " + where
 }
