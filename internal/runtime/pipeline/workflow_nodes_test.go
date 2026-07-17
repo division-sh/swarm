@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -391,6 +392,30 @@ func TestWorkflowNodeConnectedInputHandlerEnforcesProducerMode(t *testing.T) {
 	}
 }
 
+func TestWorkflowNodeConnectedInputHandlerRejectsAmbiguousReceiverPins(t *testing.T) {
+	source := testWorkflowNodeConnectedInputCollisionSource()
+	evt := eventtest.RootIngress("", "producer/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+		Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"},
+		Target: events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: "receiver-entity"},
+	}, time.Unix(1, 0).UTC())
+
+	resolved := workflowNodeConnectedInputEventHandlerResolution(source, "receiver-node", evt)
+	if resolved.Matched || !strings.Contains(resolved.Failure, "multiple connected input events") || !strings.Contains(resolved.Failure, "deploy.accepted") || !strings.Contains(resolved.Failure, "deploy.audited") {
+		t.Fatalf("ambiguous connected-input resolution = %#v", resolved)
+	}
+
+	node := NewNode(runtimecontracts.SystemNodeContract{
+		ID: "receiver-node",
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+			"deploy.accepted": {},
+			"deploy.audited":  {},
+		},
+	}, source, nil, nil).(*DeclarativeNode)
+	if _, err := node.HandleEvent(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "multiple connected input events") {
+		t.Fatalf("HandleEvent error = %v, want explicit receiver-pin ambiguity", err)
+	}
+}
+
 func testWorkflowNodeConnectedInputSource(producerMode string) semanticview.Source {
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
@@ -435,6 +460,57 @@ func testWorkflowNodeConnectedInputSource(producerMode string) semanticview.Sour
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				"receiver-node": {"deploy.requested": {}},
 			},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"producer": &root.Children[0],
+				"receiver": &root.Children[1],
+			},
+		},
+	})
+}
+
+func testWorkflowNodeConnectedInputCollisionSource() semanticview.Source {
+	producer := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: "static",
+			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "deploy_done", Event: "deploy.done"}}}},
+		},
+		Path: "producer",
+	}
+	receiverInputs := []runtimecontracts.FlowInputEventPin{
+		{Name: "deploy_accepted", Event: "deploy.accepted"},
+		{Name: "deploy_audited", Event: "deploy.audited"},
+	}
+	receiverHandlers := map[string]runtimecontracts.SystemNodeEventHandler{
+		"deploy.accepted": {},
+		"deploy.audited":  {},
+	}
+	receiver := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "receiver", Flow: "receiver"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: "static",
+			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: receiverInputs}},
+		},
+		Path: "receiver",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"receiver-node": {ID: "receiver-node", EventHandlers: receiverHandlers},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, receiver}}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{
+				"producer": {{Name: "deploy_done", Event: "deploy.done"}},
+			},
+			FlowInputEventPins: map[string][]runtimecontracts.FlowInputEventPin{"receiver": receiverInputs},
+			CompositionConnects: []runtimecontracts.FlowPackageConnect{
+				{SourceFile: "package.yaml", SourceLine: 1, From: "producer.deploy_done", To: "receiver.deploy_accepted"},
+				{SourceFile: "package.yaml", SourceLine: 2, From: "producer.deploy_done", To: "receiver.deploy_audited"},
+			},
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{"receiver-node": receiverHandlers},
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,

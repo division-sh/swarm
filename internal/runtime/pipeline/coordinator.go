@@ -391,6 +391,9 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 		return false, nil
 	}
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, nodeID, evt)
+	if resolved.Failure != "" {
+		return false, fmt.Errorf("resolve workflow handler for node %s: %s", nodeID, resolved.Failure)
+	}
 	handler := resolved.Handler
 	handlerEventKey := resolved.HandlerEventKey
 	ok := resolved.Matched

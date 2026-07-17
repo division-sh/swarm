@@ -138,9 +138,221 @@ func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
 	}
 }
 
+func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(t *testing.T) {
+	for _, producerMode := range []string{"static", "template"} {
+		for _, rootReceiver := range []bool{false, true} {
+			for _, subscriberType := range []string{"node", "agent"} {
+				name := strings.Join([]string{producerMode, map[bool]string{false: "flow", true: "root"}[rootReceiver], subscriberType}, "/")
+				t.Run(name, func(t *testing.T) {
+					source := connectReceiverPinCollisionSource(producerMode, rootReceiver, subscriberType, false)
+					store := newTargetRouteMemoryStore()
+					routeTable, err := DeriveRouteTable(source)
+					if err != nil {
+						t.Fatalf("DeriveRouteTable: %v", err)
+					}
+					if rootReceiver {
+						for _, localEvent := range []string{"work.accepted", "work.audited"} {
+							routeTable.rootInputRoutes[localEvent] = appendUniqueRootInputSubscriber(routeTable.rootInputRoutes[localEvent], Subscriber{
+								ID: "receiver", Type: subscriberType, MatchPattern: localEvent, RouteSource: "root_input_project",
+							})
+						}
+						routeTable.rebuildLocked()
+					}
+					eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source, RouteTable: routeTable})
+					if err != nil {
+						t.Fatalf("NewEventBusWithOptions: %v", err)
+					}
+					if rootReceiver && subscriberType == "agent" {
+						if ch := eb.SubscribeAgent(testAgentSubscriptionAdmission(t, "receiver", "work.accepted", "work.audited")); ch == nil {
+							t.Fatal("install typed root-agent subscription")
+						}
+					}
+					eventType := events.EventType("producer/work.ready")
+					sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}
+					if producerMode == "template" {
+						eventType = "producer/inst-1/work.ready"
+						sourceRoute.FlowInstance = "producer/inst-1"
+					}
+					envelope := events.EventEnvelope{Source: sourceRoute}
+					if rootReceiver {
+						envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{EntityID: "root-entity"})
+					}
+					eventID := uuid.NewString()
+					evt := eventtest.RootIngress(eventID, eventType, "", "", []byte(`{}`), 0, "", "", envelope, time.Now().UTC())
+
+					plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+					if err != nil {
+						t.Fatalf("CheckPublishRecipientPlan: %v", err)
+					}
+					if got, want := plan.TargetFailure, string(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid); got != want {
+						t.Fatalf("target failure = %q, want %q; plan=%#v", got, want, plan)
+					}
+					if len(plan.DeliveryRoutes) != 0 {
+						t.Fatalf("delivery routes = %#v, want none", plan.DeliveryRoutes)
+					}
+					if err := eb.Publish(context.Background(), evt); err != nil {
+						t.Fatalf("Publish classified target failure: %v", err)
+					}
+					if routes := store.routes[eventID]; len(routes) != 0 {
+						t.Fatalf("persisted delivery routes = %#v, want none", routes)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplicateEdges(t *testing.T) {
+	targetA := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/a", EntityID: "a"}
+	targetB := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/b", EntityID: "b"}
+	for _, tc := range []struct {
+		name   string
+		first  events.DeliveryRoute
+		second events.DeliveryRoute
+		localA string
+		localB string
+		want   bool
+	}{
+		{name: "duplicate same edge", first: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, second: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, localA: "work.accepted", localB: "work.accepted"},
+		{name: "different subscriber", first: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "accept", Target: targetA}, second: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "audit", Target: targetA}, localA: "work.accepted", localB: "work.audited"},
+		{name: "different target", first: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, second: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetB}, localA: "work.accepted", localB: "work.audited"},
+		{name: "same delivery identity", first: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, second: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, localA: "work.accepted", localB: "work.audited", want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var admitted []connectReceiverPinFact
+			if _, _, collision := admitConnectReceiverPinFacts(&admitted, []events.DeliveryRoute{tc.first}, tc.localA); collision {
+				t.Fatal("first fact collided")
+			}
+			_, _, got := admitConnectReceiverPinFacts(&admitted, []events.DeliveryRoute{tc.second}, tc.localB)
+			if got != tc.want {
+				t.Fatalf("collision = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	source := connectReceiverPinCollisionSource("static", false, "node", true)
+	store := newTargetRouteMemoryStore()
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	evt := eventtest.RootIngress(uuid.NewString(), "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}}, time.Now().UTC())
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if got, want := plan.TargetFailure, string(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid); got != want {
+		t.Fatalf("mixed fanout target failure = %q, want %q", got, want)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		shape      string
+		wantRoutes int
+	}{
+		{name: "distinct subscribers", shape: "distinct_subscribers", wantRoutes: 2},
+		{name: "duplicate same edge", shape: "duplicate_edge", wantRoutes: 1},
+	} {
+		t.Run("public "+tc.name, func(t *testing.T) {
+			store := newTargetRouteMemoryStore()
+			eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: connectReceiverPinLegalSource(tc.shape)})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			eventID := uuid.NewString()
+			evt := eventtest.RootIngress(eventID, "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}}, time.Now().UTC())
+			plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+			if err != nil {
+				t.Fatalf("CheckPublishRecipientPlan: %v", err)
+			}
+			if plan.TargetFailure != "" || len(plan.DeliveryRoutes) != tc.wantRoutes {
+				t.Fatalf("preflight = failure:%q routes:%#v, want %d legal routes", plan.TargetFailure, plan.DeliveryRoutes, tc.wantRoutes)
+			}
+			if err := eb.Publish(context.Background(), evt); err != nil {
+				t.Fatalf("Publish: %v", err)
+			}
+			if routes := store.routes[eventID]; len(routes) != tc.wantRoutes {
+				t.Fatalf("persisted routes = %#v, want %d", routes, tc.wantRoutes)
+			}
+		})
+	}
+}
+
 func connectRoutePlanEndpointWithMode(endpoint runtimepinrouting.ConnectRoutePlanEndpoint, mode string) runtimepinrouting.ConnectRoutePlanEndpoint {
 	endpoint.Mode = mode
 	return endpoint
+}
+
+func connectReceiverPinCollisionSource(producerMode string, rootReceiver bool, subscriberType string, mixed bool) semanticview.Source {
+	inputs := []runtimecontracts.FlowInputEventPin{
+		{Name: "work_accepted", Event: "work.accepted"},
+		{Name: "work_audited", Event: "work.audited"},
+	}
+	producer := connectRoutePlanTestFlow{
+		id: "producer", mode: producerMode,
+		outputs: []runtimecontracts.FlowOutputEventPin{{Name: "work_ready", Event: "work.ready"}},
+	}
+	connects := []runtimecontracts.FlowPackageConnect{
+		{From: "producer.work_ready", To: "consumer.work_accepted"},
+		{From: "producer.work_ready", To: "consumer.work_audited"},
+	}
+	consumer := connectRoutePlanTestFlow{id: "consumer", mode: "static", inputs: inputs}
+	if subscriberType == "agent" {
+		consumer.agents = map[string]runtimecontracts.AgentRegistryEntry{
+			"receiver": {ID: "receiver", Subscriptions: []string{"work.accepted", "work.audited"}},
+		}
+	} else {
+		consumer.nodes = map[string]runtimecontracts.SystemNodeContract{
+			"receiver": {ID: "receiver", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": {}, "work.audited": {}}},
+		}
+		if mixed {
+			consumer.agents = map[string]runtimecontracts.AgentRegistryEntry{
+				"legal-agent": {ID: "legal-agent", Subscriptions: []string{"work.accepted"}},
+			}
+		}
+	}
+	bundle := connectRoutePlanTestBundle([]connectRoutePlanTestFlow{producer, consumer}, connects)
+	if !rootReceiver {
+		return semanticview.Wrap(bundle)
+	}
+	bundle.Semantics.CompositionConnects[0].To = ".work_accepted"
+	bundle.Semantics.CompositionConnects[1].To = ".work_audited"
+	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{Events: connectRoutePlanInputEvents(inputs), EventPins: inputs}}}
+	bundle.Semantics.FlowInputs[""] = connectRoutePlanInputEvents(inputs)
+	bundle.Semantics.FlowInputEventPins[""] = inputs
+	bundle.Nodes = consumer.nodes
+	bundle.Agents = consumer.agents
+	bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
+	for _, node := range consumer.nodes {
+		bundle.Semantics.NodeHandlers[node.ID] = node.EventHandlers
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func connectReceiverPinLegalSource(shape string) semanticview.Source {
+	inputs := []runtimecontracts.FlowInputEventPin{
+		{Name: "work_accepted", Event: "work.accepted"},
+		{Name: "work_audited", Event: "work.audited"},
+	}
+	connects := []runtimecontracts.FlowPackageConnect{
+		{From: "producer.work_ready", To: "consumer.work_accepted"},
+		{From: "producer.work_ready", To: "consumer.work_audited"},
+	}
+	nodes := map[string]runtimecontracts.SystemNodeContract{
+		"accept-node": {ID: "accept-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": {}}},
+		"audit-node":  {ID: "audit-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.audited": {}}},
+	}
+	if shape == "duplicate_edge" {
+		inputs = inputs[:1]
+		connects[1] = connects[0]
+		nodes = map[string]runtimecontracts.SystemNodeContract{
+			"accept-node": {ID: "accept-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": {}}},
+		}
+	}
+	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+		{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Name: "work_ready", Event: "work.ready"}}},
+		{id: "consumer", mode: "static", inputs: inputs, nodes: nodes},
+	}, connects))
 }
 
 func (s *connectRoutePlanMutationStore) RunEventMutation(ctx context.Context, fn func(EventMutation) error) error {

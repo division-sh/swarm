@@ -163,6 +163,7 @@ type workflowNodeEventHandlerResolution struct {
 	Handler         runtimecontracts.SystemNodeEventHandler
 	HandlerEventKey string
 	Matched         bool
+	Failure         string
 }
 
 func workflowNodeEventHandlerResolutionForDelivery(source semanticview.Source, nodeID string, evt events.Event) workflowNodeEventHandlerResolution {
@@ -173,10 +174,10 @@ func workflowNodeEventHandlerResolutionForDelivery(source semanticview.Source, n
 	if rawEventType == "" {
 		return workflowNodeEventHandlerResolution{}
 	}
-	if resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeID, rawEventType); resolved.Matched {
+	if resolved := workflowNodeConnectedInputEventHandlerResolution(source, nodeID, evt); resolved.Matched || resolved.Failure != "" {
 		return resolved
 	}
-	if resolved := workflowNodeConnectedInputEventHandlerResolution(source, nodeID, evt); resolved.Matched {
+	if resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeID, rawEventType); resolved.Matched {
 		return resolved
 	}
 	localizedEventType := workflowNodeConcreteInstanceLocalEventType(source, nodeID, evt)
@@ -260,19 +261,50 @@ func workflowNodeConnectedInputEventHandlerResolution(source semanticview.Source
 	}
 	flowID := strings.TrimSpace(contractSource.FlowID)
 	plans, _ := runtimepinrouting.LowerCompositionConnectRoutePlans(source)
+	candidates := map[string]workflowNodeEventHandlerResolution{}
+	matchedSourcePlan := false
 	for _, inputPin := range source.FlowInputEventPins(flowID) {
 		resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeID, inputPin.EventType())
-		if !resolved.Matched {
-			continue
-		}
 		for _, plan := range plans {
 			if strings.TrimSpace(plan.Receiver.FlowID) != flowID || strings.TrimSpace(plan.Receiver.Pin) != strings.TrimSpace(inputPin.PinName()) {
 				continue
 			}
 			if runtimepinrouting.ConnectSourceEndpointMatchesEvent(plan.Source, evt) {
-				return resolved
+				matchedSourcePlan = true
+				if resolved.Matched {
+					localEvent := eventidentity.Normalize(plan.Receiver.Event)
+					if localEvent == "" {
+						localEvent = eventidentity.Normalize(inputPin.EventType())
+					}
+					candidates[localEvent] = resolved
+				}
 			}
 		}
+	}
+	if len(candidates) == 1 {
+		for _, resolved := range candidates {
+			return resolved
+		}
+	}
+	if len(candidates) > 1 {
+		locals := make([]string, 0, len(candidates))
+		for localEvent := range candidates {
+			locals = append(locals, localEvent)
+		}
+		sort.Strings(locals)
+		return workflowNodeEventHandlerResolution{Failure: fmt.Sprintf(
+			"event %s reaches node %s through multiple connected input events: %s",
+			eventidentity.Normalize(string(evt.Type())),
+			strings.TrimSpace(nodeID),
+			strings.Join(locals, ", "),
+		)}
+	}
+	if matchedSourcePlan {
+		return workflowNodeEventHandlerResolution{Failure: fmt.Sprintf(
+			"event %s reaches node %s through a connected input with no matching handler",
+			eventidentity.Normalize(string(evt.Type())),
+			strings.TrimSpace(nodeID),
+		)}
 	}
 	return workflowNodeEventHandlerResolution{}
 }
