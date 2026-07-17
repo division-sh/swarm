@@ -10743,7 +10743,12 @@ flow_model:
             decision. Parent connect may symmetrically name a package-root receiver
             input pin with `to: .{root_input_pin_name}`. Nested package connects
             resolve that endpoint to the owning package root; top-level connects
-            resolve it to the global root.
+            resolve it to the global root. Runtime source-endpoint matching treats
+            the event envelope `source` route as authoritative. When that route is
+            absent, an event `flow_instance` that identifies semantic child-flow
+            ownership makes a package-root source match ambiguous and MUST fail
+            closed; a UUID root instance remains valid root context. Runtime MUST
+            NOT reconstruct source ownership from the event name or `flow_instance`.
           root_endpoint_syntax:
             producer: '`.{root_output_pin_name}` in connect.from names root schema.yaml pins.outputs.events only.'
             receiver: '`.{root_input_pin_name}` in connect.to names the owning package root schema.yaml pins.inputs.events only.'
@@ -10762,6 +10767,7 @@ flow_model:
           - bootverify accepts root outputs with root connect and no producer target/broadcast
           - bootverify rejects root producer target.flow/match and broadcast:true when root connect authority applies
           - EventBus persists delivery rows and subscribed replay scope from lowered root ConnectRoutePlan authority
+          - package-root source matching rejects absent source-route events carrying semantic child-flow context while retaining UUID root-instance and explicit root-source controls across planning, preflight, publish, connect-issue matching, and workflow connected-input localization
           - strict load, verify, lowering, execution, persistence/replay, and readback accept package-root receivers
           - nested package root receivers resolve to the owning ancestor package rather than the global root
           - existing loaded flow-scope connect/target/broadcast regressions remain covered
