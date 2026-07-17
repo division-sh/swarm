@@ -246,6 +246,106 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 	}
 }
 
+func TestWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			entityID := uuid.NewString()
+			createdAt := canonicalWorkflowTimerTime(time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC))
+			if err := store.Upsert(ctx, WorkflowInstance{
+				InstanceID: entityID, StorageRef: entityID, WorkflowName: "workflow-timer-owner-test",
+				WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
+				CreatedAt: createdAt, Metadata: map[string]any{"run_id": runtimecorrelation.RunIDFromContext(ctx)},
+			}); err != nil {
+				t.Fatalf("seed workflow instance: %v", err)
+			}
+			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+				Module:        &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowTimerHandledOutcomeBundle())},
+				WorkflowStore: store,
+			})
+			eventOffset := time.Duration(0)
+			execute := func(eventType string, payload []byte, handler runtimecontracts.SystemNodeEventHandler, wantHandled bool) {
+				t.Helper()
+				eventOffset++
+				if len(payload) == 0 {
+					payload = []byte(`{}`)
+				}
+				eventID := uuid.NewString()
+				eventAt := createdAt.Add(eventOffset * time.Minute)
+				evt := eventtest.RootIngress(
+					eventID, events.EventType(eventType), "operator", "", payload, 0,
+					runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+					eventAt,
+				)
+				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runtimecorrelation.RunIDFromContext(ctx), entityID, payload, eventAt)
+				result, err := pc.executeNodeContractHandler(ctx, "observer", handler, workflowTriggerContext{
+					Event: evt, State: pc.currentWorkflowState(ctx, entityID),
+				}, false)
+				if err != nil {
+					t.Fatalf("execute %s handler: %v", eventType, err)
+				}
+				if result.Handled != wantHandled {
+					t.Fatalf("%s handled = %v, want %v", eventType, result.Handled, wantHandled)
+				}
+			}
+			declarations := func(id string) []WorkflowTimerActivation {
+				t.Helper()
+				all := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, false)
+				matched := make([]WorkflowTimerActivation, 0, 1)
+				for _, activation := range all {
+					if activation.Ref.Declaration == id {
+						matched = append(matched, activation)
+					}
+				}
+				return matched
+			}
+			assertOneStatus := func(id, status string) {
+				t.Helper()
+				matched := declarations(id)
+				if len(matched) != 1 || matched[0].Status != status {
+					t.Fatalf("timer %s activations = %#v, want one %s", id, matched, status)
+				}
+			}
+
+			execute("accepted.start", nil, runtimecontracts.SystemNodeEventHandler{}, true)
+			assertOneStatus("accepted", workflowTimerStatusActive)
+			execute("accepted.cancel", nil, runtimecontracts.SystemNodeEventHandler{}, true)
+			assertOneStatus("accepted", workflowTimerStatusCancelled)
+
+			execute("reject.target", nil, runtimecontracts.SystemNodeEventHandler{}, true)
+			execute("guard.reject", nil, runtimecontracts.SystemNodeEventHandler{
+				Guard: &runtimecontracts.GuardSpec{Check: "false", OnFail: "reject"},
+			}, false)
+			if matched := declarations("reject.start"); len(matched) != 0 {
+				t.Fatalf("guard reject created timer: %#v", matched)
+			}
+			assertOneStatus("reject.target", workflowTimerStatusActive)
+
+			execute("discard.target", nil, runtimecontracts.SystemNodeEventHandler{}, true)
+			execute("guard.discard", nil, runtimecontracts.SystemNodeEventHandler{
+				Guard: &runtimecontracts.GuardSpec{Check: "false", OnFail: "discard"},
+			}, false)
+			if matched := declarations("discard.start"); len(matched) != 0 {
+				t.Fatalf("guard discard created timer: %#v", matched)
+			}
+			assertOneStatus("discard.target", workflowTimerStatusActive)
+
+			dedupHandler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{
+				Into: "items", From: "payload", DedupBy: "payload.item_id",
+			}}
+			execute("dedup.event", []byte(`{"item_id":"item-1"}`), dedupHandler, true)
+			assertOneStatus("dedup.start", workflowTimerStatusActive)
+			execute("dedup.reset", nil, runtimecontracts.SystemNodeEventHandler{}, true)
+			assertOneStatus("dedup.start", workflowTimerStatusCancelled)
+			execute("dedup.target", nil, runtimecontracts.SystemNodeEventHandler{}, true)
+			assertOneStatus("dedup.target", workflowTimerStatusActive)
+			execute("dedup.event", []byte(`{"item_id":"item-1"}`), dedupHandler, false)
+			assertOneStatus("dedup.start", workflowTimerStatusCancelled)
+			assertOneStatus("dedup.target", workflowTimerStatusActive)
+		})
+	}
+}
+
 func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *testing.T) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
@@ -290,7 +390,7 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 					payload, 0, runID, "",
 					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), eventAt,
 				)
-				persistWorkflowTimerLoopEvent(t, store, ctx, eventID, eventType, runID, entityID, payload, eventAt)
+				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runID, entityID, payload, eventAt)
 				result, err := pc.executeNodeContractHandler(ctx, "observer", handler, workflowTriggerContext{
 					Event: evt, State: pc.currentWorkflowState(ctx, entityID),
 				}, false)
@@ -1147,7 +1247,7 @@ func listWorkflowTimerOwnerActivations(t *testing.T, store *WorkflowInstanceStor
 	return activations
 }
 
-func persistWorkflowTimerLoopEvent(
+func persistWorkflowTimerEvent(
 	t *testing.T,
 	store *WorkflowInstanceStore,
 	ctx context.Context,
@@ -1226,5 +1326,25 @@ func workflowTimerLoopEventBundle() *runtimecontracts.WorkflowContractBundle {
 			ID: "waiting.event_armed", Owner: "runtime", Event: "timer.event_armed",
 			StartOn: "event:timer.arm", Delay: "1h",
 		}},
+	}}
+}
+
+func workflowTimerHandledOutcomeBundle() *runtimecontracts.WorkflowContractBundle {
+	timer := func(id, startOn, cancelOn string) runtimecontracts.WorkflowTimerContract {
+		return runtimecontracts.WorkflowTimerContract{
+			ID: id, Owner: "runtime", Event: "timer." + id, StartOn: startOn, CancelOn: cancelOn, Delay: "1h",
+		}
+	}
+	return &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+		Name: "workflow-timer-owner-test", Version: "1.0.0", InitialStage: "waiting",
+		Timers: []runtimecontracts.WorkflowTimerContract{
+			timer("accepted", "event:accepted.start", "event:accepted.cancel"),
+			timer("reject.start", "event:guard.reject", ""),
+			timer("reject.target", "event:reject.target", "event:guard.reject"),
+			timer("discard.start", "event:guard.discard", ""),
+			timer("discard.target", "event:discard.target", "event:guard.discard"),
+			timer("dedup.start", "event:dedup.event", "event:dedup.reset"),
+			timer("dedup.target", "event:dedup.target", "event:dedup.event"),
+		},
 	}}
 }

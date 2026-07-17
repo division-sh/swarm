@@ -394,12 +394,8 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		InterceptedEmits: append([]runtimeengine.EmitIntent(nil), result.DeadLetterIntents...),
 	})
 	flushCollectedPipelineEmitIntents(parentEventCollector, collectedIntents)
-	if result.Status == runtimeengine.OutcomeUnknown {
-		return &HandlerOutcome{Handled: false}, nil
-	}
-	handled := result.Status != runtimeengine.OutcomeRejected && result.Status != runtimeengine.OutcomeDiscarded
 	return &HandlerOutcome{
-		Handled:         handled,
+		Handled:         runtimeengine.IsHandledOutcome(result.Status),
 		ActionsExecuted: append([]string{}, result.ActionsExecuted...),
 	}, nil
 }

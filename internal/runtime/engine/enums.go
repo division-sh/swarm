@@ -21,6 +21,20 @@ const (
 	OutcomeFannedOut
 )
 
+// IsHandledOutcome is the engine's fail-closed authority for whether an
+// execution admitted its event. New statuses remain unhandled until they are
+// classified here.
+func IsHandledOutcome(status OutcomeStatus) bool {
+	switch status {
+	case OutcomeCompleted, OutcomeBlocked, OutcomeKilled, OutcomeEscalated, OutcomeWaiting, OutcomeFannedOut:
+		return true
+	case OutcomeUnknown, OutcomeDiscarded, OutcomeRejected:
+		return false
+	default:
+		return false
+	}
+}
+
 func (s OutcomeStatus) String() string {
 	switch s {
 	case OutcomeCompleted:

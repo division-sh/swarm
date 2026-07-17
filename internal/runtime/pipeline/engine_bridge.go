@@ -253,8 +253,9 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if collectLocally {
 		flushCollectedPipelineEmitIntents(parentEventCollector, collectedIntents)
 	}
+	handled := runtimeengine.IsHandledOutcome(result.Status)
 	if result.Status == runtimeengine.OutcomeUnknown {
-		return contractHandlerExecutionResult{Handled: false}, nil
+		return contractHandlerExecutionResult{Handled: handled}, nil
 	}
 	outcome := handlerOutcomeFromExecutionResult(result)
 	plan := handlerExecutionPlanFromNodeHandler(nodeID, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
@@ -276,7 +277,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		GuardsEvaluated:           append([]string{}, outcome.GuardsEvaluated...),
 		PreviewMetadata:           previewMetadata,
 		InitialValuesMaterialized: initialValuesMaterialized,
-		Handled:                   true,
+		Handled:                   handled,
 	}, nil
 }
 

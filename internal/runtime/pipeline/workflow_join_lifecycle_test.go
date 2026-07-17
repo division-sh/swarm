@@ -758,8 +758,8 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 
 			fire := eventtest.RootIngress("join-zero-after-exit", events.EventType(completion.EventType), "", completion.TaskID, completion.Payload, 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
 			result, err := pc.executeAuthoritativeNodeHandler(ctx, fire, workflowTriggerContext{Event: fire, State: pc.currentWorkflowState(ctx, entityID)})
-			if err != nil || !result.Handled {
-				t.Fatalf("late completion fire = handled:%v err:%v", result.Handled, err)
+			if err != nil || result.Handled {
+				t.Fatalf("late discarded completion fire = handled:%v err:%v, want unhandled", result.Handled, err)
 			}
 			instance, ok, err = store.Load(ctx, entityID)
 			if err != nil || !ok || instance.CurrentState != "dispatching" || len(instance.TransitionHistory) != 1 {

@@ -6230,7 +6230,7 @@ engine:
           primitive.
       trigger_forms:
         state: "state:<name> starts or cancels when an actual persisted transition enters the named state. Handling an event while already in that state is not a state entry."
-        event: "event:<name> starts or cancels when the named event fires for the entity"
+        event: "event:<name> starts or cancels only when the named event is admitted for the entity by an engine-handled outcome. Unknown, rejected, and discarded outcomes, including guard rejection/discard and deduplication discard, do not reconcile timers."
         boot: "start_on: boot starts a global schedule at platform boot. This form is only valid on start_on."
       invalid_forms:
       - "Unprefixed trigger values are boot errors. The platform does not infer state-vs-event intent from bare strings."
@@ -6255,8 +6255,10 @@ engine:
       as a new state entry. Exact replay within one generation keeps the activation identity, while loop supersession cancels
       the prior activation before a later generation can mint its distinct activation identity or publish stale timer work.
     - 2. The platform renders delay once at activation and inserts exactly one canonical row in the same selected workflow
-      mutation as the triggering state/event effect. The row's persisted `fire_at` is the executable occurrence coordinate.
-      Policy/config changes do not rewrite an active coordinate without an explicit reschedule operation.
+      mutation as the triggering state/event effect. The engine owns one fail-closed handled-outcome classification consumed
+      by both public handler mapping and timer-intent production; an unhandled event produces no start or cancellation intent.
+      The row's persisted `fire_at` is the executable occurrence coordinate. Policy/config changes do not rewrite an active
+      coordinate without an explicit reschedule operation.
     - 3. Leaving an owning stage, matching cancel_on, loop-generation supersession, run quiescence, or preservation cleanup
       may only monotonically cancel or delete the canonical row. Cancellation is in the same mutation as the causal lifecycle
       transition; the in-memory scheduler is updated only after commit.
