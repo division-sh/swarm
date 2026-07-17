@@ -13130,9 +13130,12 @@ run_model:
       read_contract: >-
         PlanRunFork resolves the event UUID to its first revision and reads all eleven families through one read-only
         repeatable-read PostgreSQL snapshot. Every generic and selected planning, readiness, materialization, and
-        historical activation replan consumes that projection. Missing, ambiguous, lineage-invalid, partially deleted,
-        or unrevisioned facts fail closed; old stores are unsupported and must be recreated. SQLite returns typed
-        unsupported for fork mutation and does not emulate this owner.
+        historical activation replan consumes that projection. RunForkPoint carries the exact selected event's
+        normalized revisioned source_route for both explicit event and implicit latest selection. Selected route-history
+        lookup and dynamic flow-instance accounting consume that typed fork-point fact even when no delivery row exists;
+        they MUST NOT recover it from an event name, current route state, receiver flow_instance, or a synthetic delivery.
+        Missing, ambiguous, lineage-invalid, partially deleted, or unrevisioned facts fail closed; old stores are unsupported
+        and must be recreated. SQLite returns typed unsupported for fork mutation and does not emulate this owner.
       route_projection: >-
         Global routing_rules are current unversioned state and are never queried as historical authority. The fixed
         projection emits not_applicable when no route-relevant source fact exists and unknown_unversioned otherwise.
@@ -13289,7 +13292,11 @@ run_model:
     selected_contract_route_admission: 'Selected-contract route/subscription reconstruction admission is a
       non-mutating prerequisite owned by runtime.run_fork.selected_contract_route_admission. It consumes
       runtime.run_fork.contract_frontier_admission for selected frontier work, consumes the fixed planner route state,
-      and consumes selected-source static route derivation through internal/runtime/bus.DeriveRouteTable. A planner
+      consumes the selected RunForkPoint source_route directly for historical event lookup and dynamic instance evidence
+      when the fork-point event has no delivery row, and consumes selected-source static route derivation through
+      internal/runtime/bus.DeriveRouteTable. Completed PendingWork for the same event remains deterministic duplicate
+      evidence and frontier PendingWork remains frontier-owned; neither is required to recover the fork-point source.
+      A planner
       unknown_unversioned state is carried as an unresolved requirement with SourceRouteFactsPresent=true; admission
       does not claim source route history and does not clear flow_route_history_unproven. It MUST NOT read or copy
       current/source routing_rules or flow_instance_routes as historical evidence,

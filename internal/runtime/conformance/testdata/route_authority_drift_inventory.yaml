@@ -472,9 +472,11 @@ seam_families:
       - internal/runtime/engine/executor_test.go
       - internal/runtime/tools/executor_emit.go
       - internal/runtime/tools/executor_emit_test.go
+      - internal/store/run_fork_planner.go
       - internal/runtime/runforkadmission/contract_frontier.go
       - internal/runtime/runforkadmission/contract_frontier_test.go
       - internal/runtime/runforkadmission/selected_route_history.go
+      - internal/runtime/runforkadmission/revision_source_route_test.go
       - internal/runtime/conformance/fan_in_stream_conformance_test.go
       - internal/runtime/conformance/reply_resolution_conformance_test.go
       - internal/runtime/conformance/notify_all_children_runtime_conformance_test.go
@@ -485,6 +487,7 @@ seam_families:
       - target-route identity substituted for producer identity
       - executor state metadata overriding the admitted producer route
       - suffix or same-leaf event-name fallback
+      - an empty fork-point source route recovered from event-name text or a delivery row
     notes: >
       ConnectSourceEndpointMatches is the canonical producer endpoint matcher.
       It consumes the lowered producer Mode: template sources require exact
@@ -493,7 +496,10 @@ seam_families:
       producer route when constructing output events. EventBus plans and issues,
       workflow-node connect localization, selected-contract frontier admission,
       route-history admission, agent-tool output construction, and supported
-      fan-in/reply/fan-out runtime proofs consume the same owner.
+      fan-in/reply/fan-out runtime proofs consume the same owner. RunForkPoint
+      carries the exact normalized source_route from the fixed revision so
+      no-delivery selected history and dynamic instance evidence do not depend
+      on PendingWork or event-name reconstruction.
   - id: selected_contract_connect_receiver_policy
     layer: replay_recovery_consumers
     classification: valid_consumer
@@ -1005,7 +1011,9 @@ seam_families:
       - internal/runtime/bus/committed_replay_scope.go
       - internal/runtime/bus/outbox.go
       - internal/runtime/bus/sweeper_test.go
+      - internal/store/run_fork_planner.go
       - internal/runtime/runforkadmission/selected_route_history.go
+      - internal/runtime/runforkadmission/revision_source_route_test.go
       - internal/runtime/runforkexecution/recipient_planning.go
       - internal/store/run_fork_delivery_event_replay.go
       - internal/store/run_fork_revision_projection.go
@@ -1016,13 +1024,16 @@ seam_families:
       - replay markers alone
       - source event_deliveries as fresh fork truth
       - current live subscriptions as recovery truth
+      - delivery-row presence as the only carrier of a fork-point source route
     notes: >
       Replay, recovery, and fork paths consume persisted RoutePlan output or an
       explicitly gated replay/fork owner. Source rows are lineage or blockers
       unless their owner produces fresh authority. Revision projection decodes
       event source_route once into typed emitter identity; top-level event
       flow_instance remains receiver or timer context and cannot supply source
-      connect authority.
+      connect authority. The exact selected revision event also stamps the
+      normalized identity on RunForkPoint, which route-history lookup and
+      dynamic-instance accounting consume whether or not PendingWork exists.
   - id: public_operator_readback_projection
     layer: public_projection_non_authority
     classification: non_authoritative_observer_projection
