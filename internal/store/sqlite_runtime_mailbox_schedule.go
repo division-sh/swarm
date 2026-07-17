@@ -215,11 +215,8 @@ func (s *SQLiteRuntimeStore) UpsertSchedule(ctx context.Context, sc runtimepipel
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
 		return fmt.Errorf("agent_id and event_type are required")
 	}
-	if sc.EffectiveTimerID() != "" || timeridentity.IsWorkflowTimerActivationTaskID(sc.TaskID) {
+	if sc.EffectiveTimerID() != "" {
 		return fmt.Errorf("workflow timer activations must be persisted by WorkflowTimerLifecycle")
-	}
-	if _, ok := timeridentity.ParseWorkflowTimerOccurrenceTaskID(sc.TaskID); ok {
-		return fmt.Errorf("workflow timer occurrences must be persisted by WorkflowTimerLifecycle")
 	}
 	timerName, err := genericScheduleTimerName(sc)
 	if err != nil {

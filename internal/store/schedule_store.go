@@ -24,11 +24,8 @@ func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.S
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
 		return fmt.Errorf("agent_id and event_type are required")
 	}
-	if sc.EffectiveTimerID() != "" || timeridentity.IsWorkflowTimerActivationTaskID(sc.TaskID) {
+	if sc.EffectiveTimerID() != "" {
 		return fmt.Errorf("workflow timer activations must be persisted by WorkflowTimerLifecycle")
-	}
-	if _, ok := timeridentity.ParseWorkflowTimerOccurrenceTaskID(sc.TaskID); ok {
-		return fmt.Errorf("workflow timer occurrences must be persisted by WorkflowTimerLifecycle")
 	}
 	if _, err := genericScheduleTimerName(sc); err != nil {
 		return err
@@ -188,7 +185,11 @@ func scheduleWithContextRunID(ctx context.Context, sc runtimepipeline.Schedule) 
 }
 
 func genericScheduleTimerName(sc runtimepipeline.Schedule) (string, error) {
-	timerName := strings.TrimSpace(sc.TaskID)
+	taskID := strings.TrimSpace(sc.TaskID)
+	if _, ok := timeridentity.ParseWorkflowTimerOccurrenceTaskID(taskID); ok {
+		return "", fmt.Errorf("workflow timer occurrences must be persisted by WorkflowTimerLifecycle")
+	}
+	timerName := taskID
 	if timerName == "" {
 		timerName = strings.TrimSpace(sc.EventType)
 	}
