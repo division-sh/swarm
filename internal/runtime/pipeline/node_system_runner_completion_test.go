@@ -64,7 +64,7 @@ func TestSystemNodeRunner_MarkProcessedSettlesNodeDeliveryAndTriggersNormalRunCo
 			t.Fatalf("mark entity terminal: %v", err)
 		}
 		return nil
-	}, func(context.Context) (bool, error) { return true, nil })
+	})
 
 	runner.ProcessEventForTest(ctx, eventtest.RootIngress(
 		eventID,
@@ -143,7 +143,7 @@ func TestSystemNodeRunner_TargetSetSameNodeSettlesEachTargetDelivery(t *testing.
 			t.Fatalf("target %s handler observed status = %q, want in_progress", target.FlowInstance, status)
 		}
 		return nil
-	}, func(context.Context) (bool, error) { return true, nil })
+	})
 
 	eventForTarget := func(target events.RouteIdentity) events.Event {
 		return eventtest.RootIngress(eventID,
@@ -203,7 +203,7 @@ func TestSystemNodeRunner_TargetSetSameNodeFailureKeepsSiblingPending(t *testing
 			return runtimefailures.New(runtimefailures.ClassConnectorFailure, "temporary_target_failure", "pipeline-test", "handle", nil)
 		}
 		return nil
-	}, func(context.Context) (bool, error) { return true, nil })
+	})
 	runner.SetRetryPolicyForTest(2, func(int) time.Duration {
 		targetOneDelivery := loadSystemNodeCompletionTargetDelivery(t, db, eventID, "task-handler", targetOne)
 		if targetOneDelivery.Status != "failed" || targetOneDelivery.Reason != "handler_failure" || targetOneDelivery.RetryCount != 1 || targetOneDelivery.Failure == nil {
@@ -249,7 +249,7 @@ func TestSystemNodeRunner_TargetSetSameNodeDeadLetterKeepsSiblingExecutable(t *t
 		return []events.EventType{"worker/work.assign"}
 	}, func(context.Context, events.Event) error {
 		return runtimefailures.New(runtimefailures.ClassConnectorFailure, "permanent_target_failure", "pipeline-test", "handle", nil)
-	}, func(context.Context) (bool, error) { return true, nil })
+	})
 	failingRunner.SetRetryPolicyForTest(1, func(int) time.Duration { return 0 })
 
 	eventForTarget := func(target events.RouteIdentity) events.Event {
@@ -271,7 +271,7 @@ func TestSystemNodeRunner_TargetSetSameNodeDeadLetterKeepsSiblingExecutable(t *t
 		return []events.EventType{"worker/work.assign"}
 	}, func(context.Context, events.Event) error {
 		return nil
-	}, func(context.Context) (bool, error) { return true, nil })
+	})
 	successRunner.ProcessEventForTest(ctx, eventForTarget(targetTwo))
 	if got := loadSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetTwo); got != "delivered" {
 		t.Fatalf("target two status after target one dead-letter = %q, want delivered", got)
@@ -383,7 +383,7 @@ func TestSystemNodeRunnerLifecycleProbeEmitsHandlerBoundaries(t *testing.T) {
 			t.Fatalf("mark entity terminal: %v", err)
 		}
 		return nil
-	}, func(context.Context) (bool, error) { return true, nil })
+	})
 	runner.SetTestLifecycleProbe(probe)
 
 	runner.ProcessEventForTest(ctx, eventtest.RootIngress(
@@ -468,7 +468,7 @@ func TestSystemNodeRunner_RetryableFailureWritesFailedBeforeRetry(t *testing.T) 
 			return runtimefailures.New(runtimefailures.ClassConnectorFailure, "temporary_node_failure", "pipeline-test", "handle", nil)
 		}
 		return nil
-	}, func(context.Context) (bool, error) { return true, nil })
+	})
 	runner.SetRetryPolicyForTest(2, func(int) time.Duration {
 		if err := db.QueryRowContext(ctx, `
 			SELECT COALESCE(status, ''), COALESCE(reason_code, ''), failure, COALESCE(retry_count, 0)
@@ -531,7 +531,7 @@ func TestSystemNodeRunner_RetryableFailureExhaustsConfiguredRetryLimit(t *testin
 	}, func(context.Context, events.Event) error {
 		attempts++
 		return runtimefailures.New(runtimefailures.ClassConnectorFailure, "temporary_node_failure", "pipeline-test", "handle", nil)
-	}, func(context.Context) (bool, error) { return true, nil })
+	})
 	runner.SetRetryPolicyForTest(DefaultSystemNodeRetryLimit, func(int) time.Duration { return 0 })
 
 	runner.ProcessEventForTest(ctx, eventtest.RootIngress(

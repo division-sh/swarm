@@ -51,7 +51,6 @@ type RuntimeLogger struct {
 // RuntimeLogPersistence owns backend-specific platform.runtime_log persistence
 // and lineage lookup while RuntimeLogger owns canonical payload construction.
 type RuntimeLogPersistence interface {
-	CanonicalRuntimeLogCapability(context.Context) (bool, bool, error)
 	RuntimeLogLineageParentEventID(ctx context.Context, runID, explicitParentEventID, subjectEventID string) (string, error)
 	PersistRuntimeLog(ctx context.Context, record RuntimeLogPersistenceRecord) error
 }
@@ -100,13 +99,8 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) error {
 	if l.persistence == nil {
 		return nil
 	}
-	enabled, hasRunID, err := l.persistence.CanonicalRuntimeLogCapability(withoutSQLTxContext(ctx))
-	if err != nil || !enabled {
-		return nil
-	}
-
 	detail := marshalJSONOrEmpty(e.Detail)
-	payload, err := logRuntimeEventSpec(withoutSQLTxContext(ctx), l.persistence, hasRunID, level.String(), component, action, e, detail)
+	payload, err := logRuntimeEventSpec(withoutSQLTxContext(ctx), l.persistence, true, level.String(), component, action, e, detail)
 	if err != nil {
 		return err
 	}

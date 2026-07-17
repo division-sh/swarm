@@ -167,7 +167,7 @@ func openPostgresAuthorActivityReceiptFixture(t *testing.T) authorActivityReceip
 	t.Helper()
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	store := &PostgresStore{DB: db}
+	store := admitTestPostgresStore(t, db)
 	registerTestAuthorActivityCatalog(t, store)
 	return authorActivityReceiptFixture{
 		store: store, db: db, dialect: runtimeauthoractivity.DialectPostgres,

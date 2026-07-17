@@ -13,7 +13,7 @@ import (
 func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -113,7 +113,7 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 func TestPostgresStore_RunControlContinueRequiresOperatorPauseOwner(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'paused')`, runID); err != nil {

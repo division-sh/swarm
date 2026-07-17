@@ -104,8 +104,7 @@ func newFinalFlowInstanceAuthoringPipelineCoordinator(t *testing.T, db *sql.DB, 
 			guardRegistry:  NewContractGuardRegistry(source),
 			actionRegistry: NewContractActionRegistry(source),
 		},
-		WorkflowStore:           workflowStore,
-		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+		WorkflowStore: workflowStore,
 	})
 	return pc, workflowStore
 }

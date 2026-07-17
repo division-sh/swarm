@@ -29,12 +29,8 @@ func (s *PostgresStore) ConvergeNormalRunCompletion(ctx context.Context, eventID
 	if len(workflowTerminals) == 0 && len(flowTerminals) == 0 {
 		return nil
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
-	}
-	if !normalRunCompletionSupported(caps) {
-		return nil
 	}
 	return withEventStoreRetry(ctx, nil, func() error {
 		return s.runAuthorActivityMutation(ctx, "postgres normal run completion", func(txctx context.Context, tx *sql.Tx) error {
@@ -58,37 +54,12 @@ func (s *PostgresStore) ConvergeNormalRunCompletion(ctx context.Context, eventID
 			if err != nil || !ready {
 				return err
 			}
-			if _, err := storerunlifecycle.MarkTerminal(txctx, tx, candidate.RunID, "completed", nil, time.Now().UTC(), runLifecycleOptions(caps)); err != nil {
+			if _, err := storerunlifecycle.MarkTerminal(txctx, tx, candidate.RunID, "completed", nil, time.Now().UTC(), runLifecycleOptions()); err != nil {
 				return fmt.Errorf("converge normal run completion: %w", err)
 			}
 			return nil
 		})
 	})
-}
-
-func normalRunCompletionSupported(caps StoreSchemaCapabilities) bool {
-	if !caps.Events.HasRuns || !caps.Events.RunTriggerColumns || !caps.Events.RunTerminalFields {
-		return false
-	}
-	if caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogRunID {
-		return false
-	}
-	if caps.EntityState != SchemaFlavorCanonical || !caps.EntityRunID {
-		return false
-	}
-	if caps.Events.Deliveries != SchemaFlavorCanonical || !caps.Events.DeliveryRunID {
-		return false
-	}
-	if caps.Events.Receipts != SchemaFlavorCanonical {
-		return false
-	}
-	if caps.Schedules != SchemaFlavorCanonical {
-		return false
-	}
-	if caps.Conversations.Sessions != SchemaFlavorCanonical || !caps.Conversations.SessionRunID {
-		return false
-	}
-	return true
 }
 
 func lockNormalRunCompletionCandidateTx(ctx context.Context, tx *sql.Tx, eventID string) (normalRunCompletionCandidate, bool, error) {

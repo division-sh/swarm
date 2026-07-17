@@ -49,7 +49,7 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 				t.Helper()
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				pg := &store.PostgresStore{DB: db}
+				pg := storetest.AdmitPostgresRuntimeStore(t, db)
 				probe := runtimelifecycleprobe.New()
 				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, context.Background(), pg, db, source, fact, pg, probe)
 				return handler, db, bus, probe
@@ -122,7 +122,7 @@ func TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends(t 
 				t.Helper()
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				pg := &store.PostgresStore{DB: db}
+				pg := storetest.AdmitPostgresRuntimeStore(t, db)
 				probe := runtimelifecycleprobe.New()
 				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, context.Background(), pg, db, source, fact, pg, probe)
 				return handler, db, bus, probe
@@ -211,12 +211,11 @@ func newMailboxWriteSupportedSurfaceHandler(
 		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, sqliteStore)
 	}
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:                  module,
-		WorkflowStore:           workflowStore,
-		MailboxMaterializer:     materializer,
-		EventReceiptsCapability: eventReceiptsCapability(persistence),
-		BundleHash:              fact.BundleHash,
-		TestLifecycleProbe:      probe,
+		Module:              module,
+		WorkflowStore:       workflowStore,
+		MailboxMaterializer: materializer,
+		BundleHash:          fact.BundleHash,
+		TestLifecycleProbe:  probe,
 	})
 	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: "workflow-runtime"})
 	bus.Subscribe("workflow-runtime", events.EventType("thing.created"))
@@ -478,16 +477,6 @@ func waitForMailboxWriteBusQuiescence(t *testing.T, bus *runtimebus.EventBus, de
 	if err := drainMailboxWriteBus(ctx, bus); err != nil {
 		t.Fatalf("%s bus drain: %v", description, err)
 	}
-}
-
-func eventReceiptsCapability(persistence any) func(context.Context) (bool, error) {
-	provider, ok := persistence.(interface {
-		CanonicalEventReceiptsCapability(context.Context) (bool, error)
-	})
-	if !ok || provider == nil {
-		return nil
-	}
-	return provider.CanonicalEventReceiptsCapability
 }
 
 func waitForMailboxWriteSupportedSurface(t *testing.T, handler *Handler, db *sql.DB, bus *runtimebus.EventBus, runID, eventID, backend string) {

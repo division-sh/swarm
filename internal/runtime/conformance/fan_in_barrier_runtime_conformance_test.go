@@ -79,7 +79,7 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			setup: func(t *testing.T) (fanInBarrierConformanceStore, *sql.DB) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				return &store.PostgresStore{DB: db}, db
+				return storetest.AdmitPostgresRuntimeStore(t, db), db
 			},
 		},
 		{
@@ -207,9 +207,6 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		Module:            module,
 		InstanceActivator: manager.ActivateFlowInstance,
 		WorkflowStore:     workflowStore,
-		EventReceiptsCapability: func(context.Context) (bool, error) {
-			return true, nil
-		},
 	})
 	return fanInBarrierRuntime{bus: eventBus, diagnostics: diagnosticBus, workflowStore: workflowStore}
 }

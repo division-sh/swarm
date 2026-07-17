@@ -16,13 +16,11 @@ import (
 )
 
 type DeferredPipelineTransition struct {
-	db         *sql.DB
-	input      PipelineTransitionInput
-	capability func(context.Context) (bool, error)
+	db    *sql.DB
+	input PipelineTransitionInput
 }
 
 type pipelineTransitionCollectorKey struct{}
-type pipelineTransitionCapabilityKey struct{}
 
 type PipelineTransitionInput struct {
 	EventID       string
@@ -39,21 +37,11 @@ type PipelineTransitionInput struct {
 	Duration      time.Duration
 }
 
-func RecordPipelineTransition(ctx context.Context, db *sql.DB, capability func(context.Context) (bool, error), in PipelineTransitionInput) error {
+func RecordPipelineTransition(ctx context.Context, db *sql.DB, in PipelineTransitionInput) error {
 	if db == nil {
 		return nil
 	}
 	ctx = withoutSQLTxContext(ctx)
-	if capability == nil {
-		return nil
-	}
-	enabled, err := capability(ctx)
-	if err != nil {
-		return err
-	}
-	if !enabled {
-		return nil
-	}
 	eventID := strings.TrimSpace(in.EventID)
 	pipelineID := strings.TrimSpace(in.PipelineID)
 	if _, err := uuid.Parse(eventID); err != nil {
@@ -91,25 +79,16 @@ func RecordPipelineTransition(ctx context.Context, db *sql.DB, capability func(c
 	return recordPipelineTransitionReceipt(ctx, db, eventID, handler, pipelineType, pipelineID, action, before, after, eventsEmitted, durationUS, in.DropReason, in.Failure)
 }
 
-func WithPipelineTransitionCollector(ctx context.Context, collector *[]DeferredPipelineTransition, capability func(context.Context) (bool, error)) context.Context {
+func WithPipelineTransitionCollector(ctx context.Context, collector *[]DeferredPipelineTransition) context.Context {
 	if collector == nil {
 		return ctx
 	}
-	ctx = context.WithValue(ctx, pipelineTransitionCollectorKey{}, collector)
-	if capability != nil {
-		ctx = context.WithValue(ctx, pipelineTransitionCapabilityKey{}, capability)
-	}
-	return ctx
+	return context.WithValue(ctx, pipelineTransitionCollectorKey{}, collector)
 }
 
 func AppendDeferredPipelineTransition(ctx context.Context, item DeferredPipelineTransition) bool {
 	if item.db == nil {
 		return false
-	}
-	if item.capability == nil {
-		if capability, ok := ctx.Value(pipelineTransitionCapabilityKey{}).(func(context.Context) (bool, error)); ok {
-			item.capability = capability
-		}
 	}
 	collector, ok := ctx.Value(pipelineTransitionCollectorKey{}).(*[]DeferredPipelineTransition)
 	if !ok || collector == nil {
@@ -121,7 +100,7 @@ func AppendDeferredPipelineTransition(ctx context.Context, item DeferredPipeline
 
 func FlushDeferredPipelineTransitions(ctx context.Context, deferred []DeferredPipelineTransition) {
 	for _, item := range deferred {
-		if err := RecordPipelineTransition(ctx, item.db, item.capability, item.input); err != nil {
+		if err := RecordPipelineTransition(ctx, item.db, item.input); err != nil {
 			processWarn("diagnostics", "failed to persist deferred pipeline transition event_id=%s event_type=%s pipeline_id=%s: %v", strings.TrimSpace(item.input.EventID), strings.TrimSpace(item.input.EventType), strings.TrimSpace(item.input.PipelineID), err)
 		}
 	}

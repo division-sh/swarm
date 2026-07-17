@@ -166,15 +166,7 @@ func (s conversationForkStore) prepareOperatorConversationForkChat(ctx context.C
 		now = time.Now().UTC()
 	}
 
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return ConversationForkChatPrepared{}, err
-	}
-	catalog, err := s.schemaColumnCatalog(ctx)
-	if err != nil {
-		return ConversationForkChatPrepared{}, err
-	}
-	if err := requireConversationForkChatCapabilities(caps, catalog); err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return ConversationForkChatPrepared{}, err
 	}
 
@@ -385,15 +377,7 @@ func (s conversationForkStore) recordOperatorConversationForkChat(ctx context.Co
 		now = time.Now().UTC()
 	}
 
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return ConversationForkChatResult{}, err
-	}
-	catalog, err := s.schemaColumnCatalog(ctx)
-	if err != nil {
-		return ConversationForkChatResult{}, err
-	}
-	if err := requireConversationForkChatCapabilities(caps, catalog); err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return ConversationForkChatResult{}, err
 	}
 
@@ -498,31 +482,6 @@ func completeConversationForkTurn(
 		TurnBlocks: conversationForkSandboxTurnBlocks(execution), ParseOK: true, CreatedAt: createdAt.Time,
 		AssistantVisibleOutput: execution.AssistantMessage,
 	}, nil
-}
-
-func requireConversationForkChatCapabilities(caps StoreSchemaCapabilities, catalog schemaColumnCatalog) error {
-	if err := requireConversationForkLifecycleCapabilities(caps); err != nil {
-		return err
-	}
-	if caps.Conversations.ForkSnapshots != SchemaFlavorCanonical {
-		return fmt.Errorf("store: conversation_fork_snapshots schema is unavailable")
-	}
-	if !catalog.hasColumns("conversation_fork_snapshots", "source_agent_config") {
-		return fmt.Errorf("store: conversation fork chat requires exact source_agent_config snapshot authority")
-	}
-	if caps.Conversations.ForkTurns != SchemaFlavorCanonical {
-		return fmt.Errorf("store: conversation_fork_turns schema is unavailable")
-	}
-	if !caps.Events.RunBundleHash || !catalog.hasColumns("runs", "run_id", "bundle_hash") {
-		return fmt.Errorf("store: conversation fork chat requires canonical runs.bundle_hash")
-	}
-	if caps.EntityState != SchemaFlavorCanonical || !caps.EntityRunID {
-		return fmt.Errorf("store: conversation fork chat requires canonical run-scoped entity_state")
-	}
-	if !catalog.hasColumns("entity_mutations", "mutation_id", "run_id", "entity_id", "field", "new_value", "created_at") {
-		return fmt.Errorf("store: conversation fork chat requires canonical entity_mutations")
-	}
-	return nil
 }
 
 func loadActiveConversationForkForChat(ctx context.Context, owner conversationForkStore, tx *sql.Tx, forkID string, now time.Time) (OperatorConversationForkSession, error) {

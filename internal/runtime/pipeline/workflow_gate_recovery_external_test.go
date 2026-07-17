@@ -324,8 +324,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			newCoordinator := func(bundleHash string) *runtimepipeline.PipelineCoordinator {
 				return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
 					Module: module, WorkflowStore: selected.workflowStore, DecisionCards: selected.cards, BundleHash: bundleHash,
-					Credentials:             credentials,
-					EventReceiptsCapability: func(context.Context) (bool, error) { return true, nil },
+					Credentials: credentials,
 				})
 			}
 			coordinator := newCoordinator(gateRecoveryBundle)
@@ -725,7 +724,6 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			}
 			coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
 				Module: module, WorkflowStore: selected.workflowStore, DecisionCards: selected.cards, BundleHash: gateRecoveryBundle,
-				EventReceiptsCapability: func(context.Context) (bool, error) { return true, nil },
 			})
 			bus.SetInterceptors(coordinator)
 
@@ -1561,7 +1559,7 @@ func openSQLiteGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 func openPostgresGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	selected := &store.PostgresStore{DB: db}
+	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	return gateRecoveryStoreCase{
 		name: "postgres", postgres: true, db: db, events: selected, cards: selected,
 		workflowStore: runtimepipeline.NewWorkflowInstanceStore(db),

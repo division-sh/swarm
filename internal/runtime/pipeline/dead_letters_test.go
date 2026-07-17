@@ -19,15 +19,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type eventReceiptsCapabilityStub struct {
-	enabled bool
-	err     error
-}
-
-func (s eventReceiptsCapabilityStub) resolve(context.Context) (bool, error) {
-	return s.enabled, s.err
-}
-
 type typedSystemNodeReceiptStore struct {
 	deliveryAuthorized bool
 	processed          bool
@@ -76,7 +67,7 @@ func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 	ctx := testPipelineRunContext(t, db)
 	runner := newSystemNodeRunner("node-a", deadLetterTestBus{}, db, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
 		return runtimefailures.New(runtimefailures.ClassConnectorFailure, "test_connector_failure", "pipeline-test", "handle", nil)
-	}, eventReceiptsCapabilityStub{enabled: true}.resolve)
+	})
 	runner.SetRetryPolicyForTest(2, func(int) time.Duration { return 0 })
 
 	evt := eventtest.RootIngress(uuid.NewString(),
@@ -176,8 +167,7 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
 	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
-		Module:                  module,
-		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+		Module: module,
 	})
 	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      entityID,
@@ -263,7 +253,7 @@ func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *test
 	runner := newSystemNodeRunnerWithReceiptStoreAndRetryBase("node-a", bus, nil, receipts, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
 		attempts++
 		return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "invalid_contract", "pipeline", "node_handle", nil)
-	}, 0, eventReceiptsCapabilityStub{enabled: true}.resolve)
+	}, 0)
 	runner.SetRetryPolicyForTest(5, func(int) time.Duration { return 0 })
 
 	evt := eventtest.RootIngress(uuid.NewString(),
@@ -298,50 +288,7 @@ func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *test
 	}
 }
 
-func TestSystemNodeRunner_FailsClosedWithoutCanonicalEventReceiptsCapability(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext(context.Background())
-	entityID := uuid.NewString()
-	evt := eventtest.RootIngress(
-		uuid.NewString(),
-		"source.evt",
-		"src",
-		"",
-		[]byte(`{"entity_id":"`+entityID+`"}`),
-		0,
-		"",
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-		time.Now().UTC(),
-	)
-
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ('live', $1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
-	`, evt.ID(), string(evt.Type()), entityID, string(evt.Payload())); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
-
-	attempts := 0
-	runner := newSystemNodeRunner("node-a", deadLetterTestBus{}, db, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
-		attempts++
-		return nil
-	}, eventReceiptsCapabilityStub{}.resolve)
-	runner.ProcessEventForTest(ctx, evt)
-
-	if attempts != 0 {
-		t.Fatalf("attempts = %d, want 0 without canonical capability", attempts)
-	}
-	var count int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid`, evt.ID()).Scan(&count); err != nil {
-		t.Fatalf("count event_receipts: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("event_receipts rows = %d, want 0 without canonical capability", count)
-	}
-}
-
-func TestSystemNodeRunner_UsesCanonicalEventReceiptsCapabilityForIdempotency(t *testing.T) {
+func TestSystemNodeRunner_UsesAdmittedEventReceiptsForIdempotency(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testAuthorActivityContext(context.Background())
 	entityID := uuid.NewString()
@@ -375,7 +322,7 @@ func TestSystemNodeRunner_UsesCanonicalEventReceiptsCapabilityForIdempotency(t *
 	runner := newSystemNodeRunner("node-a", deadLetterTestBus{}, db, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
 		attempts++
 		return nil
-	}, eventReceiptsCapabilityStub{enabled: true}.resolve)
+	})
 	runner.ProcessEventForTest(ctx, evt)
 	runner.ProcessEventForTest(ctx, evt)
 
@@ -420,7 +367,7 @@ func TestSystemNodeRunner_SkipsWithoutPersistedNodeDeliveryAuthority(t *testing.
 	runner := newSystemNodeRunner("node-a", bus, db, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
 		attempts++
 		return nil
-	}, eventReceiptsCapabilityStub{enabled: true}.resolve)
+	})
 	runner.ProcessEventForTest(ctx, evt)
 
 	if attempts != 0 {
@@ -452,7 +399,7 @@ func TestSystemNodeRunner_UsesTypedReceiptOwnerWithoutRawDB(t *testing.T) {
 	}, func(context.Context, events.Event) error {
 		attempts++
 		return nil
-	}, 0, eventReceiptsCapabilityStub{enabled: true}.resolve)
+	}, 0)
 	evt := eventtest.RootIngress(uuid.NewString(),
 		"source.evt", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -494,7 +441,6 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 				},
 			},
 		},
-		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
 	})
 	evt := eventtest.RootIngress(
 		uuid.NewString(),

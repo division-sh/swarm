@@ -47,7 +47,7 @@ func assertRunTestQuiescence(t *testing.T, got RunTestQuiescence, want RunTestQu
 
 func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
 	olderRunID := uuid.NewString()
@@ -110,7 +110,7 @@ func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T
 
 func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
 	targetRunID := uuid.NewString()
@@ -148,7 +148,7 @@ func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t
 
 func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMutations(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
 	targetRunID := uuid.NewString()
@@ -301,7 +301,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 
 func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
 	blockedRunID := uuid.NewString()
@@ -407,7 +407,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 
 func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
@@ -519,7 +519,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 
 func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWatermark(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
@@ -603,7 +603,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 
 func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessionDoesNotExist(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
@@ -684,22 +684,13 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 	}
 }
 
-func TestRunDebugTraceSessionSources_NullsMissingRunIDColumnsForCanonicalConversationVariants(t *testing.T) {
-	caps := StoreSchemaCapabilities{
-		Conversations: ConversationSchemaCapabilities{
-			Sessions:     SchemaFlavorCanonical,
-			Audits:       SchemaFlavorCanonical,
-			SessionRunID: false,
-			AuditRunID:   false,
-		},
+func TestRunDebugTraceSessionSourcesUseCanonicalRunIDColumns(t *testing.T) {
+	sql := runDebugTraceSessionSources()
+	if strings.Count(sql, "run_id") < 2 {
+		t.Fatalf("session source sql = %q, want canonical run_id projection for both sources", sql)
 	}
-
-	sql := runDebugTraceSessionSources(caps)
-	if strings.Contains(sql, "SELECT\n\t\t\t\tsession_id,\n\t\t\t\trun_id,") {
-		t.Fatalf("session source sql still selects raw run_id without capability guard:\n%s", sql)
-	}
-	if strings.Count(sql, "NULL::uuid") < 2 {
-		t.Fatalf("session source sql = %q, want NULL::uuid projection for both canonical variants", sql)
+	if strings.Contains(sql, "NULL::uuid") {
+		t.Fatalf("session source sql = %q, must not preserve missing-run_id fallback", sql)
 	}
 	if !strings.Contains(sql, "FROM agent_sessions") || !strings.Contains(sql, "FROM agent_conversation_audits") {
 		t.Fatalf("session source sql = %q, want both canonical conversation sources", sql)

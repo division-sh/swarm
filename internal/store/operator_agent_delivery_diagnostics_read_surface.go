@@ -99,7 +99,7 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryDiagnost
 	if agentID == "" {
 		return OperatorAgentDeliveryDiagnostics{}, ErrAgentNotFound
 	}
-	if err := r.requireAgentDeliveryDiagnosticsCapabilities(ctx); err != nil {
+	if err := r.requireAgentDeliveryDiagnosticsAccess(); err != nil {
 		return OperatorAgentDeliveryDiagnostics{}, err
 	}
 	if err := r.ensureAgentDeliveryDiagnosticsAgentExists(ctx, agentID); err != nil {
@@ -157,50 +157,11 @@ func defaultOperatorAgentDeliveryDiagnosticsOptions(opts OperatorAgentDeliveryDi
 	return opts
 }
 
-func (r *OperatorAgentConversationReadSurface) requireAgentDeliveryDiagnosticsCapabilities(ctx context.Context) error {
+func (r *OperatorAgentConversationReadSurface) requireAgentDeliveryDiagnosticsAccess() error {
 	if r == nil || r.db == nil {
 		return fmt.Errorf("operator agent delivery diagnostics read owner requires postgres store")
 	}
-	caps, err := r.resolveConversationCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	switch {
-	case caps.Agents != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("agents", caps.Agents)
-	case caps.Events.Log != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("events", caps.Events.Log)
-	case !caps.Events.LogRunID:
-		return fmt.Errorf("agent delivery diagnostics read owner requires canonical events.run_id")
-	case caps.Events.Deliveries != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	}
-	catalog, err := loadSchemaColumnCatalog(ctx, r.db)
-	if err != nil {
-		return err
-	}
-	required := map[string][]string{
-		"agents": {
-			"agent_id", "status",
-		},
-		"events": {
-			"event_id", "run_id", "event_name", "entity_id", "created_at",
-		},
-		"event_deliveries": {
-			"delivery_id", "event_id", "subscriber_type", "subscriber_id",
-			"status", "retry_count", "reason_code", "failure", "delivered_at", "created_at",
-		},
-		"dead_letters": {
-			"dead_letter_id", "original_event_id", "failure",
-			"retry_count", "chain_depth", "handler_node", "created_at",
-		},
-	}
-	for table, columns := range required {
-		if !catalog.hasColumns(table, columns...) {
-			return fmt.Errorf("agent delivery diagnostics read owner requires canonical %s columns: %s", table, strings.Join(columns, ", "))
-		}
-	}
-	return nil
+	return r.owner.requireCurrentSchema()
 }
 
 func (r *OperatorAgentConversationReadSurface) ensureAgentDeliveryDiagnosticsAgentExists(ctx context.Context, agentID string) error {

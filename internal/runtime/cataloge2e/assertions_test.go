@@ -10,7 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -20,7 +20,7 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	rootID := "11111111-1111-1111-1111-111111111111"
 	childID := "22222222-2222-2222-2222-222222222222"
 	grandchildID := "33333333-3333-3333-3333-333333333333"
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	registerTestAuthorActivityCatalog(t, pg, "root.started", "child.started", "grandchild.done")
 	ctx := catalogRuntimeContext()
 	if _, err := db.ExecContext(ctx, `
@@ -244,7 +244,7 @@ func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
 	`, catalogRuntimeRunID); err != nil {
 		t.Fatalf("seed catalog assertion run: %v", err)
 	}
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	registerTestAuthorActivityCatalog(t, pg, "score.requested")
 	return &runtimeHarness{
 		t:              t,

@@ -25,7 +25,7 @@ func TestLifecycleAndExternalEffectAuthoritySQLite(t *testing.T) {
 
 func TestLifecycleAndExternalEffectAuthorityPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	proveLifecycleAndExternalEffectAuthority(t, &PostgresStore{DB: db}, db, false)
+	proveLifecycleAndExternalEffectAuthority(t, admitTestPostgresStore(t, db), db, false)
 }
 
 func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffectStore, db *sql.DB, sqlite bool) {

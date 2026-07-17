@@ -76,12 +76,8 @@ func (s *PostgresStore) PersistRuntimeLog(ctx context.Context, record runtimepkg
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("postgres store is required")
 	}
-	enabled, _, err := s.CanonicalRuntimeLogCapability(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
-	}
-	if !enabled {
-		return unsupportedSchemaCapability("events", SchemaFlavorUnavailable)
 	}
 	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
 		return err
@@ -137,12 +133,8 @@ func (s *SQLiteRuntimeStore) PersistRuntimeLog(ctx context.Context, record runti
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("sqlite runtime store is required")
 	}
-	enabled, _, err := s.CanonicalRuntimeLogCapability(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
-	}
-	if !enabled {
-		return unsupportedSchemaCapability("events", SchemaFlavorUnavailable)
 	}
 	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
 		return err

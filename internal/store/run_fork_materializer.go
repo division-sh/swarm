@@ -48,44 +48,15 @@ type runForkEntityMetadata struct {
 	Name         string
 }
 
-func RequireRunForkMaterializerCapabilities(caps StoreSchemaCapabilities, catalog schemaColumnCatalog) error {
-	if err := RequireCanonicalRunForkPlannerCapabilities(caps, catalog); err != nil {
-		return err
-	}
-	required := map[string][]string{
-		"runs":         {"run_id", "status", "forked_from_run_id", "forked_from_event_id", "entity_count", "event_count", "started_at", "bundle_hash", "bundle_source"},
-		"entity_state": {"run_id", "entity_id", "flow_instance", "entity_type", "slug", "name", "current_state", "gates", "fields", "accumulator", "revision", "entered_state_at", "created_at", "updated_at"},
-	}
-	for tableName, columns := range required {
-		if catalog.hasColumns(tableName, columns...) {
-			continue
-		}
-		return fmt.Errorf("run fork materializer requires %s columns %v", tableName, columns)
-	}
-	return nil
-}
-
-func (s *PostgresStore) requireRunForkMaterializerCapabilities(ctx context.Context) error {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
-		return err
-	}
-	return RequireRunForkMaterializerCapabilities(caps, catalog)
+func (s *PostgresStore) requireRunForkMaterializerAccess() error {
+	return s.requireCurrentSchema()
 }
 
 func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req RunForkMaterializeRequest) (RunForkMaterialization, error) {
 	if s == nil || s.DB == nil {
 		return RunForkMaterialization{}, fmt.Errorf("postgres store is required")
 	}
-	if err := s.requireRunForkMaterializerCapabilities(ctx); err != nil {
-		return RunForkMaterialization{}, err
-	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
+	if err := s.requireRunForkMaterializerAccess(); err != nil {
 		return RunForkMaterialization{}, err
 	}
 	var selection *RunForkContractSelection
@@ -95,7 +66,7 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req RunForkMater
 			return RunForkMaterialization{}, err
 		}
 		selection = &normalized
-		if err := s.requireRunForkSelectedContractBindingCapabilities(ctx); err != nil {
+		if err := s.requireRunForkSelectedContractBindingAccess(); err != nil {
 			return RunForkMaterialization{}, err
 		}
 	}
@@ -157,7 +128,7 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req RunForkMater
 		return RunForkMaterialization{}, fmt.Errorf("resolve fork author activity scope: %w", err)
 	}
 	ctx = runtimeauthoractivity.WithScope(ctx, forkScope)
-	if err := insertRunForkRun(ctx, tx, catalog, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, identity); err != nil {
+	if err := insertRunForkRun(ctx, tx, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, identity); err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("insert fork run: %w", err)
 	}
 
@@ -222,7 +193,7 @@ type runForkBundleInsertIdentity struct {
 	BundleSource string
 }
 
-func insertRunForkRun(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, forkRunID, sourceRunID, forkEventID string, entityCount int, startedAt time.Time, identity runForkBundleInsertIdentity) error {
+func insertRunForkRun(ctx context.Context, tx *sql.Tx, forkRunID, sourceRunID, forkEventID string, entityCount int, startedAt time.Time, identity runForkBundleInsertIdentity) error {
 	bundleHash := strings.TrimSpace(identity.BundleHash)
 	bundleSource, err := storerunlifecycle.CanonicalBundleSource(identity.BundleSource)
 	if err != nil {
@@ -232,9 +203,9 @@ func insertRunForkRun(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatal
 		return fmt.Errorf("fork run requires canonical bundle_hash and non-legacy bundle_source")
 	}
 	opts := storerunlifecycle.InsertForkOptions{
-		HasBundleHashCol:        catalog.hasColumns("runs", "bundle_hash"),
-		HasBundleSourceCol:      catalog.hasColumns("runs", "bundle_source"),
-		HasBundleFingerprintCol: catalog.hasColumns("runs", "bundle_fingerprint"),
+		HasBundleHashCol:        true,
+		HasBundleSourceCol:      true,
+		HasBundleFingerprintCol: true,
 		BundleHash:              bundleHash,
 		BundleSource:            bundleSource,
 	}

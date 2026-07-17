@@ -18,9 +18,6 @@ func TestPostgresStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner(t *t
 	defer cleanup()
 	store := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
-	if _, err := store.BindSchemaCapabilities(ctx); err != nil {
-		t.Fatalf("BindSchemaCapabilities: %v", err)
-	}
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()

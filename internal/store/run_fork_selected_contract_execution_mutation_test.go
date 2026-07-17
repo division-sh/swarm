@@ -16,7 +16,7 @@ import (
 
 func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFrontier(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -74,7 +74,7 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 
 func TestSelectedContractExecutionMaterializationStampsPersistedBundleIdentity(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -113,7 +113,7 @@ func TestSelectedContractExecutionMaterializationStampsPersistedBundleIdentity(t
 
 func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -180,7 +180,7 @@ func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t 
 
 func TestSelectedContractExecutionMaterializationTreatsSourceConversationHistoryAsLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -254,7 +254,7 @@ func TestSelectedContractExecutionMaterializationTreatsSourceReplayScopeMarkersA
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
-			pg := &PostgresStore{DB: db}
+			pg := admitTestPostgresStore(t, db)
 			ctx := testAuthorActivityContext()
 			sourceRunID := uuid.NewString()
 			entityID := uuid.NewString()
@@ -301,7 +301,7 @@ func TestSelectedContractExecutionMaterializationTreatsSourceReplayScopeMarkersA
 
 func TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCouplingFailClosed(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -343,7 +343,7 @@ func TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCoupl
 
 func TestSelectedContractExecutionMaterializationAdmitsSameSourceDeliveryForkPointEmission(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -427,7 +427,7 @@ func TestSelectedContractExecutionMaterializationAdmitsSameSourceDeliveryForkPoi
 
 func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliveryFailClosed(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -502,7 +502,7 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 
 func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliveryWithoutConversationHistoryFailClosed(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -571,7 +571,7 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 
 func TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsActiveSessionCoupling(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -633,7 +633,7 @@ func TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsA
 
 func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailClosed(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -707,126 +707,9 @@ func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailC
 	}
 }
 
-func TestSelectedContractExecutionMaterializationPreflightsLineageCapability(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := testAuthorActivityContext()
-	sourceRunID := uuid.NewString()
-	entityID := uuid.NewString()
-	eventID := uuid.NewString()
-	at := time.Unix(1700002450, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
-	if _, err := db.ExecContext(ctx, `DROP TABLE run_fork_selected_contract_executions`); err != nil {
-		t.Fatalf("drop selected execution lineage table: %v", err)
-	}
-
-	_, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "run_fork_selected_contract_executions") {
-		t.Fatalf("materialization error = %v, want lineage capability failure", err)
-	}
-	var strayForks int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM runs
-		WHERE forked_from_run_id = $1::uuid
-	`, sourceRunID).Scan(&strayForks); err != nil {
-		t.Fatalf("count stray forks: %v", err)
-	}
-	if strayForks != 0 {
-		t.Fatalf("stray materialized forks = %d, want 0", strayForks)
-	}
-}
-
-func TestSelectedContractExecutionMaterializationPreflightsBranchDivergenceOwnerCapability(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := testAuthorActivityContext()
-	sourceRunID := uuid.NewString()
-	entityID := uuid.NewString()
-	eventID := uuid.NewString()
-	at := time.Unix(1700002475, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
-	if _, err := db.ExecContext(ctx, `ALTER TABLE run_fork_selected_contract_branch_divergences DROP COLUMN owner`); err != nil {
-		t.Fatalf("drop branch divergence owner column: %v", err)
-	}
-
-	_, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "run_fork_selected_contract_branch_divergences") || !strings.Contains(err.Error(), "owner") {
-		t.Fatalf("materialization error = %v, want branch divergence owner capability failure", err)
-	}
-	var strayForks int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM runs
-		WHERE forked_from_run_id = $1::uuid
-	`, sourceRunID).Scan(&strayForks); err != nil {
-		t.Fatalf("count stray forks: %v", err)
-	}
-	if strayForks != 0 {
-		t.Fatalf("stray materialized forks = %d, want 0", strayForks)
-	}
-}
-
-func TestSelectedContractExecutionMaterializationPreflightsRouteRecoveryCapability(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := testAuthorActivityContext()
-	sourceRunID := uuid.NewString()
-	entityID := uuid.NewString()
-	eventID := uuid.NewString()
-	at := time.Unix(1700002485, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
-	if _, err := db.ExecContext(ctx, `DROP TABLE run_fork_selected_contract_route_recoveries`); err != nil {
-		t.Fatalf("drop selected route recovery table: %v", err)
-	}
-
-	_, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "run_fork_selected_contract_route_recoveries") {
-		t.Fatalf("materialization error = %v, want route recovery capability failure", err)
-	}
-	var strayForks int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM runs
-		WHERE forked_from_run_id = $1::uuid
-	`, sourceRunID).Scan(&strayForks); err != nil {
-		t.Fatalf("count stray forks: %v", err)
-	}
-	if strayForks != 0 {
-		t.Fatalf("stray materialized forks = %d, want 0", strayForks)
-	}
-}
-
 func TestSelectedContractExecutionMaterializationReconstructsActiveTimer(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -997,7 +880,7 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
-			pg := &PostgresStore{DB: db}
+			pg := admitTestPostgresStore(t, db)
 			ctx := testAuthorActivityContext()
 			sourceRunID := uuid.NewString()
 			entityID := uuid.NewString()
@@ -1043,7 +926,7 @@ func TestSelectedContractTimerReconstructionFailsClosedForInvalidPayload(t *test
 
 func TestSelectedContractTimerReconstructionRemainsFixedWhenSourceTimerIsDeletedLater(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1075,11 +958,7 @@ func TestSelectedContractTimerReconstructionRemainsFixedWhenSourceTimerIsDeleted
 		t.Fatalf("delete timer after planning: %v", err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
-	catalog, err := pg.requireRunForkSelectedContractExecutionCapabilities(ctx)
-	if err != nil {
-		t.Fatalf("require selected contract capabilities: %v", err)
-	}
-	reconstruction, err := pg.planRunForkSelectedContractTimerReconstruction(ctx, catalog, plan)
+	reconstruction, err := pg.planRunForkSelectedContractTimerReconstruction(ctx, plan)
 	if err != nil {
 		t.Fatalf("reconstruct timer from original fixed snapshot: %v", err)
 	}
@@ -1090,7 +969,7 @@ func TestSelectedContractTimerReconstructionRemainsFixedWhenSourceTimerIsDeleted
 	if err != nil {
 		t.Fatalf("repeat PlanRunFork: %v", err)
 	}
-	repeated, err := pg.planRunForkSelectedContractTimerReconstruction(ctx, catalog, repeatedPlan)
+	repeated, err := pg.planRunForkSelectedContractTimerReconstruction(ctx, repeatedPlan)
 	if err != nil {
 		t.Fatalf("reconstruct timer from repeated fixed snapshot: %v", err)
 	}
@@ -1101,7 +980,7 @@ func TestSelectedContractTimerReconstructionRemainsFixedWhenSourceTimerIsDeleted
 
 func TestPostTSourceTimerActivatesAsSelectedBranchDivergence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1189,7 +1068,7 @@ func TestPostTSourceTimerActivatesAsSelectedBranchDivergence(t *testing.T) {
 
 func TestPostTSourceSessionDoesNotChangeFixedEventMaterialization(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1254,7 +1133,7 @@ func TestPostTSourceSessionDoesNotChangeFixedEventMaterialization(t *testing.T) 
 
 func TestPostTSourceConversationHistoryDoesNotChangeFixedEventMaterialization(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1287,7 +1166,7 @@ func TestPostTSourceConversationHistoryDoesNotChangeFixedEventMaterialization(t 
 
 func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1388,7 +1267,7 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 
 func TestSelectedContractActivation_IgnoresExcludedSourceSessionColumnChanges(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1477,7 +1356,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			seed: func(ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
 				turnID := uuid.NewString()
 				sessionID := uuid.NewString()
-				capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, &PostgresStore{DB: db}, sourceRunID, "agent-a", sessionID, turnID, "task", entityID)
+				capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, admitTestPostgresStore(t, db), sourceRunID, "agent-a", sessionID, turnID, "task", entityID)
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_turns (
 						turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
@@ -1492,7 +1371,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
-			pg := &PostgresStore{DB: db}
+			pg := admitTestPostgresStore(t, db)
 			ctx := testAuthorActivityContext()
 			sourceRunID := uuid.NewString()
 			entityID := uuid.NewString()
@@ -1552,7 +1431,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 
 func TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsBranchDivergence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1628,7 +1507,7 @@ func TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsB
 
 func TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1669,7 +1548,7 @@ func TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed(t
 
 func TestSelectedContractActivationRejectsPostRevisionSameEventReplayScopeMarker(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1712,7 +1591,7 @@ func TestSelectedContractActivationRejectsPostRevisionSameEventReplayScopeMarker
 
 func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1818,7 +1697,7 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 
 func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEvent(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1876,7 +1755,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEv
 
 func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1927,7 +1806,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *
 
 func TestSelectedContractActivationRejectsUncausedForkLocalRuntimePlatformControlEvent(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1976,7 +1855,7 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimePlatformContro
 
 func TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -2026,7 +1905,7 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic(
 
 func TestSelectedContractActivationRejectsUncausedForkLocalToolExecutorRuntimeLogDiagnostic(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -2076,7 +1955,7 @@ func TestSelectedContractActivationRejectsUncausedForkLocalToolExecutorRuntimeLo
 
 func TestSelectedContractActivationRejectsUnownedPlatformEventWithSelectedParent(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -2125,7 +2004,7 @@ func TestSelectedContractActivationRejectsUnownedPlatformEventWithSelectedParent
 
 func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -2183,7 +2062,7 @@ func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t 
 
 func TestSelectedContractExecutionMaterializationPreservesUnversionedRouteBlocker(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -2317,7 +2196,7 @@ func seedSelectedContractSourceConversationHistory(t *testing.T, db *sql.DB, sou
 	`, auditID, sourceRunID, entityID, at); err != nil {
 		t.Fatalf("seed source conversation audit: %v", err)
 	}
-	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, &PostgresStore{DB: db}, sourceRunID, "agent-a", sessionID, turnID, "session_per_entity", entityID)
+	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, admitTestPostgresStore(t, db), sourceRunID, "agent-a", sessionID, turnID, "session_per_entity", entityID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,

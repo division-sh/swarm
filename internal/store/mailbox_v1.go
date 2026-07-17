@@ -84,12 +84,8 @@ func (s *PostgresStore) ListV1MailboxItems(ctx context.Context, opts MailboxV1Li
 	if s == nil || s.DB == nil {
 		return nil, "", fmt.Errorf("postgres store is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, "", err
-	}
-	if caps.Mailbox != SchemaFlavorCanonical {
-		return nil, "", unsupportedSchemaCapability("mailbox", caps.Mailbox)
 	}
 	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
 		return nil, "", err
@@ -158,12 +154,8 @@ func (s *PostgresStore) GetV1MailboxItem(ctx context.Context, id string) (Mailbo
 	if s == nil || s.DB == nil {
 		return MailboxV1ItemDetail{}, fmt.Errorf("postgres store is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return MailboxV1ItemDetail{}, err
-	}
-	if caps.Mailbox != SchemaFlavorCanonical {
-		return MailboxV1ItemDetail{}, unsupportedSchemaCapability("mailbox", caps.Mailbox)
 	}
 	if strings.TrimSpace(id) == "" {
 		return MailboxV1ItemDetail{}, ErrMailboxV1NotFound

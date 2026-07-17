@@ -193,20 +193,20 @@ type observabilityPositionCursor struct {
 	LastSeen  string `json:"last_seen,omitempty"`
 }
 
-type OperatorObservabilityCapabilitySource interface {
-	ResolveSchemaCapabilities(ctx context.Context) (StoreSchemaCapabilities, error)
+type OperatorObservabilityReadOwner interface {
+	requireCurrentSchema() error
 }
 
 type OperatorObservabilityReadSurface struct {
-	db        *sql.DB
-	capSource OperatorObservabilityCapabilitySource
+	db    *sql.DB
+	owner OperatorObservabilityReadOwner
 }
 
-func NewOperatorObservabilityReadSurface(db *sql.DB, capSource OperatorObservabilityCapabilitySource) *OperatorObservabilityReadSurface {
-	if db == nil || capSource == nil {
+func NewOperatorObservabilityReadSurface(db *sql.DB, owner OperatorObservabilityReadOwner) *OperatorObservabilityReadSurface {
+	if db == nil || owner == nil {
 		return nil
 	}
-	return &OperatorObservabilityReadSurface{db: db, capSource: capSource}
+	return &OperatorObservabilityReadSurface{db: db, owner: owner}
 }
 
 func (s *PostgresStore) operatorObservabilityReadSurface() *OperatorObservabilityReadSurface {
@@ -232,59 +232,18 @@ func (s *PostgresStore) ListOperatorRuntimeIncidents(ctx context.Context, opts O
 	return s.operatorObservabilityReadSurface().ListOperatorRuntimeIncidents(ctx, opts)
 }
 
-func (r *OperatorObservabilityReadSurface) requireOperatorObservabilityCapabilities(ctx context.Context) error {
+func (r *OperatorObservabilityReadSurface) requireOperatorObservabilityAccess() error {
 	if r == nil || r.db == nil {
 		return fmt.Errorf("operator observability read surface is required")
 	}
-	if r.capSource == nil {
-		return fmt.Errorf("operator observability read surface requires schema capabilities")
+	if r.owner == nil {
+		return fmt.Errorf("operator observability read surface requires accepted store ownership")
 	}
-	caps, err := r.capSource.ResolveSchemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	switch {
-	case caps.Events.Log != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("events", caps.Events.Log)
-	case !caps.Events.LogRunID:
-		return fmt.Errorf("operator observability read surface requires canonical events.run_id")
-	case caps.Events.Deliveries != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	case !caps.Events.DeliveryRunID:
-		return fmt.Errorf("operator observability read surface requires canonical event_deliveries.run_id")
-	}
-	catalog, err := loadSchemaColumnCatalog(ctx, r.db)
-	if err != nil {
-		return err
-	}
-	required := map[string][]string{
-		"events": {
-			"event_id", "run_id", "event_name", "entity_id", "scope", "payload",
-			"produced_by", "produced_by_type", "source_event_id", "created_at",
-		},
-		"runs": {
-			"run_id", "bundle_hash",
-		},
-		"event_deliveries": {
-			"delivery_id", "run_id", "event_id", "subscriber_type", "subscriber_id",
-			"status", "retry_count", "reason_code", "failure", "active_session_id", "created_at", "started_at", "delivered_at",
-		},
-		"dead_letters": {
-			"dead_letter_id", "original_event_id", "failure",
-			"retry_count", "chain_depth", "handler_node", "created_at",
-		},
-	}
-	for tableName, columns := range required {
-		if catalog.hasColumns(tableName, columns...) {
-			continue
-		}
-		return fmt.Errorf("operator observability read surface requires %s columns %v", tableName, columns)
-	}
-	return nil
+	return r.owner.requireCurrentSchema()
 }
 
 func (r *OperatorObservabilityReadSurface) ListOperatorEvents(ctx context.Context, opts OperatorEventListOptions) (OperatorEventListResult, error) {
-	if err := r.requireOperatorObservabilityCapabilities(ctx); err != nil {
+	if err := r.requireOperatorObservabilityAccess(); err != nil {
 		return OperatorEventListResult{}, err
 	}
 	opts = defaultOperatorEventListOptions(opts)
@@ -427,7 +386,7 @@ func (r *OperatorObservabilityReadSurface) ListOperatorEvents(ctx context.Contex
 }
 
 func (r *OperatorObservabilityReadSurface) LoadOperatorEvent(ctx context.Context, eventID string) (OperatorEventFull, error) {
-	if err := r.requireOperatorObservabilityCapabilities(ctx); err != nil {
+	if err := r.requireOperatorObservabilityAccess(); err != nil {
 		return OperatorEventFull{}, err
 	}
 	eventID = strings.TrimSpace(eventID)
@@ -605,7 +564,7 @@ func (r *OperatorObservabilityReadSurface) loadOperatorEventDeadLetters(ctx cont
 }
 
 func (r *OperatorObservabilityReadSurface) ListOperatorRuntimeLogs(ctx context.Context, opts OperatorRuntimeLogListOptions) (OperatorRuntimeLogListResult, error) {
-	if err := r.requireOperatorObservabilityCapabilities(ctx); err != nil {
+	if err := r.requireOperatorObservabilityAccess(); err != nil {
 		return OperatorRuntimeLogListResult{}, err
 	}
 	opts = defaultOperatorRuntimeLogListOptions(opts)
@@ -717,7 +676,7 @@ func (r *OperatorObservabilityReadSurface) ListOperatorRuntimeLogs(ctx context.C
 }
 
 func (r *OperatorObservabilityReadSurface) ListOperatorRuntimeIncidents(ctx context.Context, opts OperatorRuntimeIncidentListOptions) (OperatorRuntimeIncidentListResult, error) {
-	if err := r.requireOperatorObservabilityCapabilities(ctx); err != nil {
+	if err := r.requireOperatorObservabilityAccess(); err != nil {
 		return OperatorRuntimeIncidentListResult{}, err
 	}
 	opts = defaultOperatorRuntimeIncidentListOptions(opts)

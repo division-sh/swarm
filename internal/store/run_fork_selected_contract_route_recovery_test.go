@@ -53,7 +53,7 @@ func TestNormalizeRunForkSelectedContractRouteRecoveryRejectsCurrentRouteOwner(t
 
 func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
@@ -108,7 +108,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence(t
 
 func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
@@ -170,7 +170,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection
 
 func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJSONB(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
@@ -229,7 +229,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJS
 
 func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBundleHashJSONB(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
@@ -297,7 +297,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 
 func TestRecordRunForkSelectedContractRouteRecoveryRejectsJSONBTamperDuringManagerRecovery(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()

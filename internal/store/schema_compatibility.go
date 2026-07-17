@@ -9,7 +9,19 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/division-sh/swarm/internal/store/platformschema"
 )
+
+func retiredPlatformTableDrift(objects map[string]struct{}) []string {
+	drift := make([]string, 0)
+	for _, table := range platformschema.RetiredPlatformTables() {
+		if _, exists := objects[string(table)]; exists {
+			drift = append(drift, fmt.Sprintf("retired platform table %s exists", table))
+		}
+	}
+	return drift
+}
 
 type schemaCompatibilityState string
 

@@ -20,8 +20,7 @@ import (
 )
 
 func (s *PostgresStore) MarkEventDeliveryInProgress(ctx context.Context, eventID, agentID, sessionID string) error {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
 	eventID = strings.TrimSpace(eventID)
@@ -30,17 +29,11 @@ func (s *PostgresStore) MarkEventDeliveryInProgress(ctx context.Context, eventID
 		return fmt.Errorf("mark event delivery in progress: eventID and agentID required")
 	}
 	sessionID = sanitizeOptionalUUID(sessionID)
-	switch caps.Events.Deliveries {
-	case SchemaFlavorCanonical:
-		return s.markEventDeliveryInProgressSpec(ctx, eventID, agentID, sessionID)
-	default:
-		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	}
+	return s.markEventDeliveryInProgressSpec(ctx, eventID, agentID, sessionID)
 }
 
 func (s *PostgresStore) UpsertEventReceipt(ctx context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, failure *runtimefailures.Envelope) error {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
 	eventID = strings.TrimSpace(eventID)
@@ -51,12 +44,7 @@ func (s *PostgresStore) UpsertEventReceipt(ctx context.Context, eventID, agentID
 	if status == "" {
 		return fmt.Errorf("upsert event receipt: status required")
 	}
-	switch caps.Events.Receipts {
-	case SchemaFlavorCanonical:
-		return s.upsertAgentReceiptSpec(ctx, caps, eventID, agentID, status, failure)
-	default:
-		return unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
-	}
+	return s.upsertAgentReceiptSpec(ctx, eventID, agentID, status, failure)
 }
 
 func (s *PostgresStore) ListPendingEventsForAgent(ctx context.Context, agentID string, since time.Time, limit int) ([]events.Event, error) {
@@ -91,8 +79,7 @@ func (s *PostgresStore) ListPendingSubscribedEvents(
 	since time.Time,
 	limit int,
 ) ([]events.Event, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
 	if agentID == "" || len(subscriptions) == 0 {
@@ -104,15 +91,11 @@ func (s *PostgresStore) ListPendingSubscribedEvents(
 	if since.IsZero() {
 		since = time.Now().Add(-30 * 24 * time.Hour)
 	}
-	if err := RequireCanonicalPendingAgentDeliveryCapabilities(caps); err != nil {
-		return nil, err
-	}
 	return s.listPendingSubscribedEventsSpec(ctx, agentID, subscriptions, since, limit)
 }
 
 func (s *PostgresStore) GetEventReceipt(ctx context.Context, eventID, agentID string) (runtimemanager.EventReceipt, bool, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return runtimemanager.EventReceipt{}, false, err
 	}
 	eventID = strings.TrimSpace(eventID)
@@ -120,12 +103,7 @@ func (s *PostgresStore) GetEventReceipt(ctx context.Context, eventID, agentID st
 	if eventID == "" || agentID == "" {
 		return runtimemanager.EventReceipt{}, false, fmt.Errorf("event_id and agent_id are required")
 	}
-	switch caps.Events.Receipts {
-	case SchemaFlavorCanonical:
-		return s.getEventReceiptSpec(ctx, eventID, agentID)
-	default:
-		return runtimemanager.EventReceipt{}, false, unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
-	}
+	return s.getEventReceiptSpec(ctx, eventID, agentID)
 }
 
 type agentReceiptWriteState struct {
@@ -159,7 +137,7 @@ type deliveryBackedTerminalTransitionRequest struct {
 
 // Receipts are outcome-only for an existing agent delivery. This write path must
 // never mint or repair delivery ownership from receipt state.
-func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, caps StoreSchemaCapabilities, eventID, agentID string, status runtimemanager.ReceiptStatus, failure *runtimefailures.Envelope) error {
+func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, failure *runtimefailures.Envelope) error {
 	if err := withEventStoreRetry(ctx, nil, func() error {
 		return s.runAuthorActivityMutation(ctx, "postgres upsert event receipt", func(txctx context.Context, tx *sql.Tx) error {
 			delivery, err := s.lockAgentDeliveryTx(txctx, tx, eventID, agentID)
@@ -205,7 +183,7 @@ func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, caps StoreSc
 					}
 				}
 			}
-			return s.convergeStandaloneRuntimePlatformRunByEventID(txctx, tx, caps, eventID)
+			return s.convergeStandaloneRuntimePlatformRunByEventID(txctx, tx, eventID)
 		})
 	}); err != nil {
 		return err

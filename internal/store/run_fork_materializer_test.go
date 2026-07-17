@@ -1656,7 +1656,7 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 			seed: func(ctx context.Context, db *sql.DB, forkRunID string, at time.Time) error {
 				turnID := uuid.NewString()
 				sessionID := uuid.NewString()
-				capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, &PostgresStore{DB: db}, forkRunID, "agent-a", sessionID, turnID, "session", "global")
+				capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, admitTestPostgresStore(t, db), forkRunID, "agent-a", sessionID, turnID, "session", "global")
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_turns (
 						turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, capability_surface_id, execution_mode, created_at

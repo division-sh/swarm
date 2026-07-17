@@ -426,7 +426,7 @@ func setupPostgresReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurf
 	t.Helper()
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	store := &PostgresStore{DB: db}
+	store := admitTestPostgresStore(t, db)
 	return store, func(ctx context.Context, runID string, eventIDs ...string) error {
 		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'running', $2, 'ephemeral', now())`, runID, authorActivityTestBundleHash); err != nil {
 			return err

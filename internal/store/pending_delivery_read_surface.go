@@ -132,19 +132,6 @@ func (r pendingAgentDeliveryRecord) pendingAgeSec(now time.Time) int {
 	return age
 }
 
-func RequireCanonicalPendingAgentDeliveryCapabilities(caps StoreSchemaCapabilities) error {
-	switch {
-	case caps.Events.Log != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("events", caps.Events.Log)
-	case caps.Events.Deliveries != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	case caps.Events.Receipts != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
-	default:
-		return nil
-	}
-}
-
 func pendingAgentDeliveryFactsFromRecords(records []pendingAgentDeliveryRecord, now time.Time) PendingAgentDeliveryFacts {
 	var facts PendingAgentDeliveryFacts
 	for _, record := range records {
@@ -178,11 +165,7 @@ func pendingEventsFromRecords(records []pendingAgentDeliveryRecord, now time.Tim
 }
 
 func (s *PostgresStore) ListPendingAgentDeliveryFacts(ctx context.Context, agentIDs []string, since time.Time) (map[string]PendingAgentDeliveryFacts, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := RequireCanonicalPendingAgentDeliveryCapabilities(caps); err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
 	normalized := normalizePendingAgentIDs(agentIDs)
@@ -228,11 +211,7 @@ func (s *PostgresStore) ListPendingAgentDeliveryDetails(ctx context.Context, opt
 		}
 		cursor = &decoded
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return PendingAgentDeliveryPage{}, err
-	}
-	if err := RequireCanonicalPendingAgentDeliveryCapabilities(caps); err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return PendingAgentDeliveryPage{}, err
 	}
 	records, err := s.listPendingAgentDeliveryRecordsSpec(ctx, []string{opts.AgentID}, opts.Since)

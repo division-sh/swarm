@@ -139,8 +139,7 @@ func newSingletonCoordinatorPilotPipelineCoordinator(t *testing.T, db *sql.DB, b
 			guardRegistry:  NewContractGuardRegistry(source),
 			actionRegistry: NewContractActionRegistry(source),
 		},
-		WorkflowStore:           workflowStore,
-		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+		WorkflowStore: workflowStore,
 	})
 	return pc, workflowStore
 }

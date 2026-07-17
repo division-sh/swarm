@@ -31,7 +31,7 @@ func TestRuntimeStartupAuthorityTransitionsPersistWithBackendParity(t *testing.T
 			name: "postgres",
 			store: func(t *testing.T) (startupAuthorityParityStore, *sql.DB) {
 				_, db, _ := testutil.StartPostgres(t)
-				return &PostgresStore{DB: db}, db
+				return admitTestPostgresStore(t, db), db
 			},
 		},
 		{
@@ -139,7 +139,7 @@ func TestRuntimeStartupAuthorityTransitionsPersistWithBackendParity(t *testing.T
 
 func TestPostgresStore_AcquireRuntimeStartupOwnership_DeniesCompetingOwner(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 
 	lease1, err := pg.AcquireRuntimeStartupOwnership(testAuthorActivityContext(), testStartupAcquireRequest("runtime-1"))
 	if err != nil {
@@ -158,7 +158,7 @@ func TestPostgresStore_AcquireRuntimeStartupOwnership_DeniesCompetingOwner(t *te
 
 func TestPostgresStore_AcquireRuntimeStartupOwnership_ReleaseAllowsSuccessor(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 
 	lease1, err := pg.AcquireRuntimeStartupOwnership(testAuthorActivityContext(), testStartupAcquireRequest("runtime-1"))
 	if err != nil {

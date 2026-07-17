@@ -60,36 +60,6 @@ type runForkActivationLineage struct {
 	SourceFlows       []string
 }
 
-func RequireRunForkActivationCapabilities(caps StoreSchemaCapabilities, catalog schemaColumnCatalog) error {
-	if err := RequireRunForkMaterializerCapabilities(caps, catalog); err != nil {
-		return err
-	}
-	required := map[string][]string{
-		"runs":                          {"run_id", "status", "forked_from_run_id", "forked_from_event_id", "continued_as_run_id", "ended_at"},
-		"entity_state":                  {"run_id", "entity_id", "flow_instance", "updated_at"},
-		runForkDeliveryEventReplayTable: {"fork_run_id", "source_run_id", "source_event_id", "source_delivery_id", "fork_event_id", "fork_delivery_id", "subscriber_type", "subscriber_id"},
-	}
-	for tableName, columns := range required {
-		if catalog.hasColumns(tableName, columns...) {
-			continue
-		}
-		return fmt.Errorf("run fork activation requires %s columns %v", tableName, columns)
-	}
-	return nil
-}
-
-func (s *PostgresStore) requireRunForkActivationCapabilities(ctx context.Context) (schemaColumnCatalog, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return schemaColumnCatalog{}, err
-	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
-		return schemaColumnCatalog{}, err
-	}
-	return catalog, RequireRunForkActivationCapabilities(caps, catalog)
-}
-
 func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivateRequest) (RunForkActivation, error) {
 	if s == nil || s.DB == nil {
 		return RunForkActivation{}, fmt.Errorf("postgres store is required")
@@ -101,8 +71,7 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 	if _, err := uuid.Parse(forkRunID); err != nil {
 		return RunForkActivation{}, fmt.Errorf("fork run_id must be a UUID: %w", err)
 	}
-	catalog, err := s.requireRunForkActivationCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return RunForkActivation{}, err
 	}
 
@@ -148,13 +117,11 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 	if len(lineage.EntityIDs) == 0 {
 		return result, fmt.Errorf("fork activation requires materialized fork entity_state rows")
 	}
-	if catalog.hasColumns(runForkSelectedContractBindingTable, "fork_run_id", "source_run_id", "fork_event_id", "mode", "contracts_root", "bundle_hash", "workflow_name", "workflow_version", "created_at") {
-		binding, err := loadRunForkSelectedContractBinding(ctx, tx, lineage.ForkRunID)
-		if err == nil {
-			result.SelectedContractBinding = &binding
-		} else if err != sql.ErrNoRows {
-			return result, fmt.Errorf("load selected contract binding: %w", err)
-		}
+	binding, err := loadRunForkSelectedContractBinding(ctx, tx, lineage.ForkRunID)
+	if err == nil {
+		result.SelectedContractBinding = &binding
+	} else if err != sql.ErrNoRows {
+		return result, fmt.Errorf("load selected contract binding: %w", err)
 	}
 
 	plan, err := s.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: lineage.SourceRunID, At: lineage.ForkEventID})
@@ -174,7 +141,7 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 		}
 		return result, err
 	}
-	if err := ensureRunForkActivationNoForkReplayState(ctx, tx, catalog, lineage.ForkRunID); err != nil {
+	if err := ensureRunForkActivationNoForkReplayState(ctx, tx, lineage.ForkRunID); err != nil {
 		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
 			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
 			result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
@@ -501,31 +468,16 @@ func runForkSourceAdvancedCode(family string) (string, bool) {
 	}
 }
 
-func ensureRunForkActivationNoForkReplayState(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, forkRunID string) error {
+func ensureRunForkActivationNoForkReplayState(ctx context.Context, tx *sql.Tx, forkRunID string) error {
 	checks := []struct {
 		code  string
 		query string
 	}{
 		{"fork_events_already_exist", `SELECT EXISTS (SELECT 1 FROM events WHERE run_id = $1::uuid)`},
 		{"fork_deliveries_already_exist", `SELECT EXISTS (SELECT 1 FROM event_deliveries WHERE run_id = $1::uuid)`},
-	}
-	if catalog.hasColumns("agent_sessions", "run_id") {
-		checks = append(checks, struct {
-			code  string
-			query string
-		}{"fork_sessions_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = $1::uuid)`})
-	}
-	if catalog.hasColumns("agent_conversation_audits", "run_id") {
-		checks = append(checks, struct {
-			code  string
-			query string
-		}{"fork_conversation_audits_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_conversation_audits WHERE run_id = $1::uuid)`})
-	}
-	if catalog.hasColumns("agent_turns", "run_id") {
-		checks = append(checks, struct {
-			code  string
-			query string
-		}{"fork_turns_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_turns WHERE run_id = $1::uuid)`})
+		{"fork_sessions_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = $1::uuid)`},
+		{"fork_conversation_audits_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_conversation_audits WHERE run_id = $1::uuid)`},
+		{"fork_turns_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_turns WHERE run_id = $1::uuid)`},
 	}
 	for _, check := range checks {
 		var exists bool

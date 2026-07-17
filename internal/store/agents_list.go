@@ -19,8 +19,7 @@ func (s *PostgresStore) ListActiveAgentDescriptors(ctx context.Context) ([]runti
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("db unavailable")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
 	query := `
@@ -32,11 +31,6 @@ func (s *PostgresStore) ListActiveAgentDescriptors(ctx context.Context) ([]runti
 		WHERE COALESCE(status, '') <> 'terminated'
 		ORDER BY agent_id ASC
 	`
-	switch caps.Agents {
-	case SchemaFlavorCanonical:
-	default:
-		return nil, unsupportedSchemaCapability("agents", caps.Agents)
-	}
 	var queryer interface {
 		QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	} = s.DB
@@ -70,8 +64,8 @@ func (s *PostgresStore) ListActiveAgentDescriptors(ctx context.Context) ([]runti
 // ListActiveAgentDescriptors gives SQLite the same transaction-visible
 // delivery-planning surface as PostgreSQL.
 func (s *SQLiteRuntimeStore) ListActiveAgentDescriptors(ctx context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
-	if s == nil || s.DB == nil {
-		return nil, fmt.Errorf("sqlite runtime store unavailable")
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, err
 	}
 	q := flowInstanceDescriptorQueryer(s.DB)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {

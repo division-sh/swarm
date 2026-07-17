@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -169,10 +170,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 			if err != nil {
 				return storeBundle{}, err
 			}
-			if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
-				_ = pg.DB.Close()
-				return storeBundle{}, err
-			}
+			storetest.BootstrapPostgresRuntimeStore(t, pg)
 			db = pg.DB
 			return selectedPostgresStoreBundle(pg, cfg), nil
 		}
@@ -601,9 +599,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	oldBuildStores := buildStoresForServe
 	oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
-		if _, err := runtimePG.BindSchemaCapabilities(ctx); err != nil {
-			return storeBundle{}, err
-		}
+		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 		return selectedPostgresStoreBundle(runtimePG, cfg), nil
 	}
 	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {

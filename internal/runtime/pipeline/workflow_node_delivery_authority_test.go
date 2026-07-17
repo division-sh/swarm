@@ -93,7 +93,6 @@ func TestPipelineCoordinatorInterceptDeliveryRouteRejectsAmbiguousConnectedInput
 				Subscriptions: []events.EventType{"deploy.accepted", "deploy.audited"},
 			}},
 		},
-		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
 	})
 	testPipelineCoordinatorRunContext(t, pc)
 
@@ -218,30 +217,6 @@ func TestPipelineCoordinatorInterceptTerminalNodeDeliveryDoesNotAuthorizeExecuti
 	}
 }
 
-func TestPipelineCoordinatorInterceptSkipsWhenCanonicalDeliveryAuthorityUnavailable(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext(context.Background())
-	pc, bus := newDeliveryAuthorityCoordinatorWithReceipts(t, db, false)
-	runCtx := testPipelineCoordinatorRunContext(t, pc)
-	evt := seedDeliveryAuthorityEvent(t, db, runCtx)
-	seedDeliveryAuthorityWorkflowInstance(t, pc, runCtx, evt.EntityID())
-	seedDeliveryAuthorityNodeDelivery(t, db, evt.ID(), "node-a")
-
-	postCommit := make([]func(), 0, 1)
-	ictx := WithPipelinePostCommitActions(ctx, &postCommit)
-	passthrough, _, err := pc.Intercept(ictx, evt)
-	if err != nil {
-		t.Fatalf("Intercept: %v", err)
-	}
-	if !passthrough {
-		t.Fatal("Intercept passthrough = false, want true when delivery authority owner is unavailable")
-	}
-	if got := bus.publishedCount(); got != 0 {
-		t.Fatalf("published events = %d, want 0 when delivery authority owner is unavailable", got)
-	}
-	assertDeliveryAuthorityReceiptCount(t, db, evt.ID(), "node-a", 0)
-}
-
 func TestPipelineCoordinatorInterceptSettlesAuthorizedNodeDelivery(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testAuthorActivityContext(context.Background())
@@ -275,11 +250,6 @@ func TestPipelineCoordinatorInterceptSettlesAuthorizedNodeDelivery(t *testing.T)
 }
 
 func newDeliveryAuthorityCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordinator, *recordingPipelineBus) {
-	t.Helper()
-	return newDeliveryAuthorityCoordinatorWithReceipts(t, db, true)
-}
-
-func newDeliveryAuthorityCoordinatorWithReceipts(t *testing.T, db *sql.DB, receiptsEnabled bool) (*PipelineCoordinator, *recordingPipelineBus) {
 	t.Helper()
 	bus := &recordingPipelineBus{}
 	bundle := &runtimecontracts.WorkflowContractBundle{
@@ -317,7 +287,6 @@ func newDeliveryAuthorityCoordinatorWithReceipts(t *testing.T, db *sql.DB, recei
 				},
 			}},
 		},
-		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: receiptsEnabled}.resolve,
 	})
 	return pc, bus
 }

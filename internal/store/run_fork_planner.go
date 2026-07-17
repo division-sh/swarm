@@ -134,57 +134,11 @@ type runForkSourceFacts struct {
 	SourceFlows   []string
 }
 
-func RequireCanonicalRunForkPlannerCapabilities(caps StoreSchemaCapabilities, catalog schemaColumnCatalog) error {
-	switch {
-	case !caps.Events.HasRuns:
-		return fmt.Errorf("run fork planner requires canonical runs table")
-	case caps.Events.Log != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("events", caps.Events.Log)
-	case !caps.Events.LogRunID:
-		return fmt.Errorf("run fork planner requires canonical events.run_id")
-	case caps.Events.Deliveries != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	case !caps.Events.DeliveryRunID:
-		return fmt.Errorf("run fork planner requires canonical event_deliveries.run_id")
-	case caps.Events.Receipts != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
-	}
-	required := map[string][]string{
-		"runs":             {"run_id", "status"},
-		"events":           {"event_id", "run_id", "event_name", "source_event_id", "produced_by", "produced_by_type", "created_at"},
-		"event_deliveries": {"delivery_id", "run_id", "event_id", "subscriber_type", "subscriber_id", "status", "retry_count", "reason_code", "active_session_id", "started_at", "delivered_at", "created_at"},
-		"event_receipts":   {"event_id", "subscriber_type", "subscriber_id", "outcome", "reason_code", "processed_at"},
-		"dead_letters":     {"original_event_id", "handler_node", "created_at"},
-		"entity_mutations": {"mutation_id", "run_id", "entity_id", "field", "new_value", "caused_by_event", "created_at"},
-		"reply_contexts":   {"reply_context_id", "run_id", "request_event_id", "state"},
-	}
-	for tableName, columns := range required {
-		if catalog.hasColumns(tableName, columns...) {
-			continue
-		}
-		return fmt.Errorf("run fork planner requires %s columns %v", tableName, columns)
-	}
-	return nil
-}
-
-func (s *PostgresStore) requireRunForkPlannerCapabilities(ctx context.Context) (schemaColumnCatalog, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return schemaColumnCatalog{}, err
-	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
-		return schemaColumnCatalog{}, err
-	}
-	return catalog, RequireCanonicalRunForkPlannerCapabilities(caps, catalog)
-}
-
 func (s *PostgresStore) PlanRunFork(ctx context.Context, req RunForkPlanRequest) (RunForkPlan, error) {
 	if s == nil || s.DB == nil {
 		return RunForkPlan{}, fmt.Errorf("postgres store is required")
 	}
-	_, err := s.requireRunForkPlannerCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return RunForkPlan{}, err
 	}
 	runID := strings.TrimSpace(req.SourceRunID)

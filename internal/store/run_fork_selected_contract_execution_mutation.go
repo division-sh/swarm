@@ -153,53 +153,21 @@ func equalTrimmedStrings(left, right []string) bool {
 	return true
 }
 
-func RequireRunForkSelectedContractExecutionCapabilities(caps StoreSchemaCapabilities, catalog schemaColumnCatalog) error {
-	if err := RequireRunForkActivationCapabilities(caps, catalog); err != nil {
-		return err
-	}
-	if err := RequireRunForkSelectedContractRouteRecoveryCapabilities(caps, catalog); err != nil {
-		return err
-	}
-	required := []struct {
-		table   string
-		columns []string
-	}{
-		{runForkSelectedContractExecutionLineageTable, []string{"fork_run_id", "source_run_id", "source_event_id", "fork_event_id", "event_name", "created_at"}},
-		{runForkSelectedContractBranchDivergenceTable, []string{"fork_run_id", "source_run_id", "fork_event_id", "owner", "policy", "source_run_status_at_activation", "source_run_status_after_activation", "source_frozen", "source_advanced_facts", "created_at"}},
-		{"activity_attempts", []string{"request_event_id", "run_id", "execution_mode", "source_event_id", "parent_event_id", "entity_id", "node_id", "handler_event_key", "activity_id", "tool", "effect_class", "attempt", "status", "success_event", "failure_event", "result_event_id", "result_event_type", "result_payload", "failure", "input_hash", "loop_generation", "loop_stage", "started_at", "completed_at", "updated_at"}},
-	}
-	for _, requirement := range required {
-		if catalog.hasColumns(requirement.table, requirement.columns...) {
-			continue
-		}
-		return fmt.Errorf("selected-contract fork execution requires %s columns %v", requirement.table, requirement.columns)
-	}
-	return nil
-}
-
-func (s *PostgresStore) requireRunForkSelectedContractExecutionCapabilities(ctx context.Context) (schemaColumnCatalog, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return schemaColumnCatalog{}, err
-	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
-		return schemaColumnCatalog{}, err
-	}
-	return catalog, RequireRunForkSelectedContractExecutionCapabilities(caps, catalog)
+func (s *PostgresStore) requireRunForkSelectedContractExecutionAccess() error {
+	return s.requireCurrentSchema()
 }
 
 func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req RunForkSelectedContractExecutionMaterializeRequest) (RunForkMaterialization, error) {
 	if s == nil || s.DB == nil {
 		return RunForkMaterialization{}, fmt.Errorf("postgres store is required")
 	}
-	if _, err := s.requireRunForkSelectedContractExecutionCapabilities(ctx); err != nil {
+	if err := s.requireRunForkSelectedContractExecutionAccess(); err != nil {
 		return RunForkMaterialization{}, err
 	}
-	if err := s.requireRunForkMaterializerCapabilities(ctx); err != nil {
+	if err := s.requireRunForkMaterializerAccess(); err != nil {
 		return RunForkMaterialization{}, err
 	}
-	if err := s.requireRunForkSelectedContractBindingCapabilities(ctx); err != nil {
+	if err := s.requireRunForkSelectedContractBindingAccess(); err != nil {
 		return RunForkMaterialization{}, err
 	}
 	selection, err := normalizeRunForkSelectedContractSelection(req.ContractSelection)
@@ -213,12 +181,8 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 	if err != nil {
 		return RunForkMaterialization{}, err
 	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
-		return RunForkMaterialization{}, err
-	}
 	replayAdmission := RunForkSelectedContractReplayResumeAdmission(plan)
-	timerReconstruction, err := s.planRunForkSelectedContractTimerReconstruction(ctx, catalog, plan)
+	timerReconstruction, err := s.planRunForkSelectedContractTimerReconstruction(ctx, plan)
 	if err != nil {
 		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
 			admission := runForkReplayResumeAdmissionWithBlocker(replayAdmission, fact, blocker)
@@ -282,7 +246,7 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 	if err := ensureRunForkNotAlreadyMaterialized(ctx, tx, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID); err != nil {
 		return RunForkMaterialization{}, err
 	}
-	if err := ensureRunForkActivationNoForkReplayState(ctx, tx, catalog, forkRunID); err != nil {
+	if err := ensureRunForkActivationNoForkReplayState(ctx, tx, forkRunID); err != nil {
 		return RunForkMaterialization{}, err
 	}
 	metadata, err := loadRunForkEntityMetadata(plan)
@@ -302,7 +266,7 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 		return RunForkMaterialization{}, fmt.Errorf("resolve selected-contract fork author activity scope: %w", err)
 	}
 	ctx = runtimeauthoractivity.WithScope(ctx, forkScope)
-	if err := insertRunForkRun(ctx, tx, catalog, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, identity); err != nil {
+	if err := insertRunForkRun(ctx, tx, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, identity); err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("insert selected-contract fork run: %w", err)
 	}
 
@@ -360,8 +324,7 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 	if _, err := uuid.Parse(forkRunID); err != nil {
 		return RunForkActivation{}, fmt.Errorf("fork run_id must be a UUID: %w", err)
 	}
-	catalog, err := s.requireRunForkSelectedContractExecutionCapabilities(ctx)
-	if err != nil {
+	if err := s.requireRunForkSelectedContractExecutionAccess(); err != nil {
 		return RunForkActivation{}, err
 	}
 
@@ -472,7 +435,7 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 	if len(sourceAdvancedFacts) > 0 {
 		result.SourceAdvancedAfterFork = true
 	}
-	if err := ensureRunForkSelectedContractExecutionForkState(ctx, tx, catalog, lineage.ForkRunID, req.AllowedSourceEventIDs); err != nil {
+	if err := ensureRunForkSelectedContractExecutionForkState(ctx, tx, lineage.ForkRunID, req.AllowedSourceEventIDs); err != nil {
 		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
 			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
 			result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
@@ -551,8 +514,7 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 	if _, err := uuid.Parse(forkRunID); err != nil {
 		return fmt.Errorf("fork run_id must be a UUID: %w", err)
 	}
-	catalog, err := s.requireRunForkSelectedContractExecutionCapabilities(ctx)
-	if err != nil {
+	if err := s.requireRunForkSelectedContractExecutionAccess(); err != nil {
 		return err
 	}
 	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
@@ -580,31 +542,25 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 		return fmt.Errorf("discard selected-contract fork with dependent lineage: %w", err)
 	}
 	var preserveCompletionEvidence bool
-	if catalog.hasColumns("run_fork_selected_contract_runtime_executions", "fork_run_id") {
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1::uuid)`, forkRunID).Scan(&preserveCompletionEvidence); err != nil {
-			return fmt.Errorf("check selected-contract completion evidence preservation: %w", err)
-		}
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1::uuid)`, forkRunID).Scan(&preserveCompletionEvidence); err != nil {
+		return fmt.Errorf("check selected-contract completion evidence preservation: %w", err)
 	}
 
-	if !preserveCompletionEvidence && catalog.hasColumns("agent_turns", "run_id") {
+	if !preserveCompletionEvidence {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM agent_turns WHERE run_id = $1::uuid`, forkRunID); err != nil {
 			return fmt.Errorf("delete selected-contract fork turns: %w", err)
 		}
 	}
-	if !preserveCompletionEvidence && catalog.hasColumns("agent_conversation_audits", "run_id") {
+	if !preserveCompletionEvidence {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM agent_conversation_audits WHERE run_id = $1::uuid`, forkRunID); err != nil {
 			return fmt.Errorf("delete selected-contract fork conversation audits: %w", err)
 		}
 	}
-	if catalog.hasColumns("agent_sessions", "run_id") {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM agent_sessions WHERE run_id = $1::uuid`, forkRunID); err != nil {
-			return fmt.Errorf("delete selected-contract fork sessions: %w", err)
-		}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM agent_sessions WHERE run_id = $1::uuid`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract fork sessions: %w", err)
 	}
-	if catalog.hasColumns("author_activity_occurrences", "run_id") {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM author_activity_occurrences WHERE run_id = $1::uuid`, forkRunID); err != nil {
-			return fmt.Errorf("delete selected-contract fork author activity: %w", err)
-		}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM author_activity_occurrences WHERE run_id = $1::uuid`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract fork author activity: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM run_fork_selected_contract_branch_divergences
@@ -612,13 +568,11 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 	`, forkRunID); err != nil {
 		return fmt.Errorf("delete selected-contract branch divergence: %w", err)
 	}
-	if catalog.hasColumns(runForkSelectedContractRouteRecoveryTable, "fork_run_id") {
-		if _, err := tx.ExecContext(ctx, `
-			DELETE FROM run_fork_selected_contract_route_recoveries
-			WHERE fork_run_id = $1::uuid
-		`, forkRunID); err != nil {
-			return fmt.Errorf("delete selected-contract route recovery: %w", err)
-		}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM run_fork_selected_contract_route_recoveries
+		WHERE fork_run_id = $1::uuid
+	`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract route recovery: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM run_fork_selected_contract_executions
@@ -626,10 +580,8 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 	`, forkRunID); err != nil {
 		return fmt.Errorf("delete selected-contract execution lineage: %w", err)
 	}
-	if catalog.hasColumns(runForkDeliveryEventReplayTable, "fork_run_id") {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM run_fork_delivery_event_replays WHERE fork_run_id = $1::uuid`, forkRunID); err != nil {
-			return fmt.Errorf("delete selected-contract fork replay lineage: %w", err)
-		}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM run_fork_delivery_event_replays WHERE fork_run_id = $1::uuid`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract fork replay lineage: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM event_receipts
@@ -650,15 +602,11 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 	`, forkRunID); err != nil {
 		return fmt.Errorf("delete selected-contract fork deliveries: %w", err)
 	}
-	if catalog.hasColumns("timers", "run_id") {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM timers WHERE run_id = $1::uuid`, forkRunID); err != nil {
-			return fmt.Errorf("delete selected-contract fork timers: %w", err)
-		}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM timers WHERE run_id = $1::uuid`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract fork timers: %w", err)
 	}
-	if catalog.hasColumns("activity_attempts", "run_id") {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM activity_attempts WHERE run_id = $1::uuid`, forkRunID); err != nil {
-			return fmt.Errorf("delete selected-contract fork activity evidence: %w", err)
-		}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM activity_attempts WHERE run_id = $1::uuid`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract fork activity evidence: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM entity_mutations WHERE run_id = $1::uuid`, forkRunID); err != nil {
 		return fmt.Errorf("delete selected-contract fork mutations: %w", err)
@@ -802,7 +750,7 @@ func (s *PostgresStore) RecordRunForkSelectedContractExecutionLineage(ctx contex
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("postgres store is required")
 	}
-	if _, err := s.requireRunForkSelectedContractExecutionCapabilities(ctx); err != nil {
+	if err := s.requireRunForkSelectedContractExecutionAccess(); err != nil {
 		return err
 	}
 	createdAt := lineage.CreatedAt
@@ -1110,10 +1058,10 @@ func runForkReplayResumeAdmissionWithSourceAdvancedConversationHistory(admission
 	return admission
 }
 
-func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, forkRunID string, allowedSourceEventIDs []string) error {
+func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, forkRunID string, allowedSourceEventIDs []string) error {
 	allowedEvents := uniqueNonEmptyStrings(allowedSourceEventIDs)
 	if len(allowedEvents) == 0 {
-		return ensureRunForkActivationNoForkReplayState(ctx, tx, catalog, forkRunID)
+		return ensureRunForkActivationNoForkReplayState(ctx, tx, forkRunID)
 	}
 
 	// Materialization preflights empty fork-local replay state. At activation

@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
 )
@@ -96,27 +95,6 @@ func (s *fakeAgentConversationReadStore) LoadOperatorPublicConversationTurn(_ co
 	s.lastConversationTurnSessionID = sessionID
 	s.lastConversationTurnID = turnID
 	return s.conversationTurnResult, s.conversationTurnErr
-}
-
-type apiConversationCapabilitySource struct {
-	caps store.StoreSchemaCapabilities
-}
-
-func (s apiConversationCapabilitySource) ResolveSchemaCapabilities(context.Context) (store.StoreSchemaCapabilities, error) {
-	return s.caps, nil
-}
-
-func apiConversationReadCaps(sessionRunID, auditRunID bool) store.StoreSchemaCapabilities {
-	return store.StoreSchemaCapabilities{
-		Conversations: store.ConversationSchemaCapabilities{
-			Sessions:     store.SchemaFlavorCanonical,
-			Audits:       store.SchemaFlavorCanonical,
-			Turns:        store.SchemaFlavorCanonical,
-			TurnBlocks:   true,
-			SessionRunID: sessionRunID,
-			AuditRunID:   auditRunID,
-		},
-	}
 }
 
 func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
@@ -611,54 +589,16 @@ func assertUnsupportedAgentMetricStubsAbsent(t *testing.T, payload map[string]an
 
 func TestOperatorAgentConversationHandlersSanitizeRunIDProjectionFailures(t *testing.T) {
 	rawRunIDColumnErr := errors.New(`pq: column "run_id" does not exist at position 46:14 (42703)`)
-	tests := []struct {
-		name   string
-		body   string
-		caps   store.StoreSchemaCapabilities
-		expect func(sqlmock.Sqlmock)
-	}{
-		{
-			name: "conversation list raw projection error",
-			body: `{"jsonrpc":"2.0","id":"convs","method":"conversation.list","params":{"limit":20}}`,
-			caps: apiConversationReadCaps(true, true),
-			expect: func(mock sqlmock.Sqlmock) {
-				mock.ExpectQuery("(?s)SELECT\\s+conversations\\.session_id,\\s+conversations\\.agent_id,\\s+conversations\\.run_id,.*FROM \\(").
-					WithArgs(21).
-					WillReturnError(rawRunIDColumnErr)
-			},
-		},
-		{
-			name: "conversation list run_id filter without any run_id capability",
-			body: `{"jsonrpc":"2.0","id":"convs","method":"conversation.list","params":{"run_id":"11111111-1111-1111-1111-111111111111"}}`,
-			caps: apiConversationReadCaps(false, false),
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			db, mock, err := sqlmock.New()
-			if err != nil {
-				t.Fatalf("sqlmock: %v", err)
-			}
-			defer db.Close()
-			if tc.expect != nil {
-				tc.expect(mock)
-			}
+	reader := &fakeAgentConversationReadStore{listConversationsErr: rawRunIDColumnErr}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			AgentConversations: reader,
+		}),
+	})
 
-			reader := store.NewOperatorConversationReadSurface(db, apiConversationCapabilitySource{caps: tc.caps})
-			handler := testHandler(t, Options{
-				AuthTokens: []string{testToken},
-				Handlers: OperatorReadHandlers(OperatorReadOptions{
-					AgentConversations: reader,
-				}),
-			})
-
-			resp := rpcCall(t, handler, tc.body)
-			assertConversationRunIDErrorSanitized(t, resp)
-			if err := mock.ExpectationsWereMet(); err != nil {
-				t.Fatalf("expectations: %v", err)
-			}
-		})
-	}
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"convs","method":"conversation.list","params":{"limit":20}}`)
+	assertConversationRunIDErrorSanitized(t, resp)
 }
 
 func assertConversationRunIDErrorSanitized(t *testing.T, resp rpcResponse) {

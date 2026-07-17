@@ -16,14 +16,14 @@ type backgroundWorkflowNode struct {
 }
 
 func newBackgroundWorkflowNode(executor WorkflowNodeExecutor, bus systemNodeBus, db *sql.DB) *backgroundWorkflowNode {
-	return newBackgroundWorkflowNodeWithRetryBase(executor, bus, db, nil, 0)
+	return newBackgroundWorkflowNodeWithRetryBase(executor, bus, db, 0)
 }
 
-func newBackgroundWorkflowNodeWithRetryBase(executor WorkflowNodeExecutor, bus systemNodeBus, db *sql.DB, eventReceiptsCapability func(context.Context) (bool, error), retryBase time.Duration) *backgroundWorkflowNode {
-	return newBackgroundWorkflowNodeWithReceiptStoreAndRetryBase(executor, bus, db, NewWorkflowInstanceStore(db), eventReceiptsCapability, retryBase)
+func newBackgroundWorkflowNodeWithRetryBase(executor WorkflowNodeExecutor, bus systemNodeBus, db *sql.DB, retryBase time.Duration) *backgroundWorkflowNode {
+	return newBackgroundWorkflowNodeWithReceiptStoreAndRetryBase(executor, bus, db, NewWorkflowInstanceStore(db), retryBase)
 }
 
-func newBackgroundWorkflowNodeWithReceiptStoreAndRetryBase(executor WorkflowNodeExecutor, bus systemNodeBus, db *sql.DB, receiptStore SystemNodeReceiptPersistence, eventReceiptsCapability func(context.Context) (bool, error), retryBase time.Duration) *backgroundWorkflowNode {
+func newBackgroundWorkflowNodeWithReceiptStoreAndRetryBase(executor WorkflowNodeExecutor, bus systemNodeBus, db *sql.DB, receiptStore SystemNodeReceiptPersistence, retryBase time.Duration) *backgroundWorkflowNode {
 	if executor == nil || bus == nil {
 		return nil
 	}
@@ -33,7 +33,7 @@ func newBackgroundWorkflowNodeWithReceiptStoreAndRetryBase(executor WorkflowNode
 			return nil
 		}
 		return fmt.Errorf("workflow executor %s did not handle subscribed event %s", executor.NodeID(), evt.Type())
-	}, retryBase, eventReceiptsCapability)
+	}, retryBase)
 	return node
 }
 

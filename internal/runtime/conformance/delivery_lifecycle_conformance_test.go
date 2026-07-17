@@ -17,6 +17,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -203,7 +204,7 @@ func newDeliveryLifecycleFixture(t *testing.T, ctx context.Context) *deliveryLif
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	requireCanonicalDeliveryLifecycleSurface(t, ctx, pg)
 
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, "review.requested")
@@ -240,19 +241,7 @@ func newDeliveryLifecycleFixture(t *testing.T, ctx context.Context) *deliveryLif
 
 func requireCanonicalDeliveryLifecycleSurface(t *testing.T, ctx context.Context, pg *store.PostgresStore) {
 	t.Helper()
-	caps, err := pg.BindSchemaCapabilities(ctx)
-	if err != nil {
-		t.Fatalf("BindSchemaCapabilities: %v", err)
-	}
-	if caps.Events.Log != store.SchemaFlavorCanonical {
-		t.Fatalf("events capability = %s, want canonical", caps.Events.Log)
-	}
-	if caps.Events.Deliveries != store.SchemaFlavorCanonical {
-		t.Fatalf("event_deliveries capability = %s, want canonical", caps.Events.Deliveries)
-	}
-	if caps.Events.Receipts != store.SchemaFlavorCanonical {
-		t.Fatalf("event_receipts capability = %s, want canonical", caps.Events.Receipts)
-	}
+	storetest.BootstrapPostgresRuntimeStore(t, pg)
 	requireTableColumns(t, ctx, pg.DB, "event_deliveries", "delivery_id", "event_id", "subscriber_type", "subscriber_id", "status", "retry_count", "created_at", "delivered_at")
 	requireTableColumns(t, ctx, pg.DB, "event_receipts", "event_id", "subscriber_type", "subscriber_id", "outcome", "side_effects", "processed_at")
 }

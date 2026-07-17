@@ -35,24 +35,23 @@ type PipelineCoordinator struct {
 	entityLockMu sync.Mutex
 	entityLocks  map[string]*sync.Mutex
 
-	module                  WorkflowModule
-	workflowStore           *WorkflowInstanceStore
-	expressionEval          *workflowExpressionEvaluator
-	instanceActivator       FlowInstanceActivator
-	instanceDeactivator     FlowInstanceDeactivator
-	timerScheduler          *Scheduler
-	timerScheduleStore      SchedulePersistence
-	workflowTimers          *WorkflowTimerLifecycle
-	mailboxMaterializer     MailboxWriteMaterializationStore
-	decisionCards           decisioncard.Store
-	eventReceiptsCapability func(context.Context) (bool, error)
-	credentials             runtimecredentials.Store
-	managedCredentials      runtimemanagedcredentials.Store
-	mockConnectorResponses  *providerconnectors.MockResponsePlan
-	channelActivityTools    map[string]ChannelActivityTarget
-	artifactRoot            string
-	bundleHash              string
-	decisionCardCadence     decisioncard.CadencePolicy
+	module                 WorkflowModule
+	workflowStore          *WorkflowInstanceStore
+	expressionEval         *workflowExpressionEvaluator
+	instanceActivator      FlowInstanceActivator
+	instanceDeactivator    FlowInstanceDeactivator
+	timerScheduler         *Scheduler
+	timerScheduleStore     SchedulePersistence
+	workflowTimers         *WorkflowTimerLifecycle
+	mailboxMaterializer    MailboxWriteMaterializationStore
+	decisionCards          decisioncard.Store
+	credentials            runtimecredentials.Store
+	managedCredentials     runtimemanagedcredentials.Store
+	mockConnectorResponses *providerconnectors.MockResponsePlan
+	channelActivityTools   map[string]ChannelActivityTarget
+	artifactRoot           string
+	bundleHash             string
+	decisionCardCadence    decisioncard.CadencePolicy
 
 	testSubscribeHook                func()
 	testEntityStateHook              func(entityID, state string)
@@ -73,7 +72,6 @@ type PipelineCoordinatorOptions struct {
 	TimerScheduleStore               SchedulePersistence
 	MailboxMaterializer              MailboxWriteMaterializationStore
 	DecisionCards                    decisioncard.Store
-	EventReceiptsCapability          func(context.Context) (bool, error)
 	Credentials                      runtimecredentials.Store
 	ManagedCredentials               runtimemanagedcredentials.Store
 	MockConnectorResponses           *providerconnectors.MockResponsePlan
@@ -135,7 +133,6 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		timerScheduleStore:               opts.TimerScheduleStore,
 		mailboxMaterializer:              opts.MailboxMaterializer,
 		decisionCards:                    opts.DecisionCards,
-		eventReceiptsCapability:          opts.EventReceiptsCapability,
 		credentials:                      credentials,
 		managedCredentials:               opts.ManagedCredentials,
 		mockConnectorResponses:           opts.MockConnectorResponses,

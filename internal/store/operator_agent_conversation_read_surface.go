@@ -14,7 +14,6 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 )
 
 type OperatorAgentConversationReadSource interface {
@@ -28,13 +27,13 @@ type OperatorAgentConversationReadSource interface {
 }
 
 type OperatorConversationReadSource interface {
-	ResolveSchemaCapabilities(ctx context.Context) (StoreSchemaCapabilities, error)
+	requireCurrentSchema() error
 }
 
 type OperatorAgentConversationReadSurface struct {
 	db        *sql.DB
 	source    OperatorAgentConversationReadSource
-	capSource OperatorConversationReadSource
+	owner     OperatorConversationReadSource
 	turnLimit int
 }
 
@@ -42,14 +41,14 @@ func NewOperatorAgentConversationReadSurface(db *sql.DB, source OperatorAgentCon
 	if db == nil || source == nil {
 		return nil
 	}
-	return &OperatorAgentConversationReadSurface{db: db, source: source, capSource: source, turnLimit: maxStoreInt(turnLimit, 0)}
+	return &OperatorAgentConversationReadSurface{db: db, source: source, owner: source, turnLimit: maxStoreInt(turnLimit, 0)}
 }
 
 func NewOperatorConversationReadSurface(db *sql.DB, source OperatorConversationReadSource) *OperatorAgentConversationReadSurface {
 	if db == nil || source == nil {
 		return nil
 	}
-	return &OperatorAgentConversationReadSurface{db: db, capSource: source}
+	return &OperatorAgentConversationReadSurface{db: db, owner: source}
 }
 
 type OperatorAgentListOptions struct {
@@ -383,7 +382,7 @@ func (s *PostgresStore) ListOperatorConversations(ctx context.Context, opts Oper
 }
 
 func (r *OperatorAgentConversationReadSurface) ListOperatorAgents(ctx context.Context, opts OperatorAgentListOptions) (OperatorAgentListResult, error) {
-	if err := r.requireAgentCapabilities(ctx); err != nil {
+	if err := r.requireAgentAccess(); err != nil {
 		return OperatorAgentListResult{}, err
 	}
 	opts.Flow = strings.Trim(strings.TrimSpace(opts.Flow), "/")
@@ -463,24 +462,14 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDiagnosis(ctx co
 }
 
 func (r *OperatorAgentConversationReadSurface) ListOperatorConversations(ctx context.Context, opts OperatorConversationListOptions) (OperatorConversationListResult, error) {
-	if err := r.requireConversationCapabilities(ctx); err != nil {
+	if err := r.requireConversationAccess(); err != nil {
 		return OperatorConversationListResult{}, err
 	}
 	opts, err := defaultOperatorConversationListOptions(opts)
 	if err != nil {
 		return OperatorConversationListResult{}, err
 	}
-	caps, err := r.resolveConversationCapabilities(ctx)
-	if err != nil {
-		return OperatorConversationListResult{}, err
-	}
-	if opts.RunID != "" && !caps.Conversations.SessionRunID && !caps.Conversations.AuditRunID {
-		return OperatorConversationListResult{}, operatorConversationRunIDCapabilityError("run_id filtering requires agent_sessions.run_id or agent_conversation_audits.run_id")
-	}
-	sources := operatorConversationQuerySources(caps)
-	if len(sources) == 0 {
-		return OperatorConversationListResult{Conversations: []OperatorConversationSummary{}}, nil
-	}
+	sources := operatorConversationQuerySources()
 	args := make([]any, 0, 8)
 	where := []string{"TRUE"}
 	add := func(value any) int {
@@ -575,7 +564,7 @@ func (r *OperatorAgentConversationReadSurface) ListOperatorConversations(ctx con
 }
 
 func (r *OperatorAgentConversationReadSurface) ListOperatorConversationTurns(ctx context.Context, opts OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error) {
-	source, ok := r.capSource.(interface {
+	source, ok := r.owner.(interface {
 		ListOperatorConversationTurns(context.Context, OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error)
 	})
 	if !ok {
@@ -585,7 +574,7 @@ func (r *OperatorAgentConversationReadSurface) ListOperatorConversationTurns(ctx
 }
 
 func (r *OperatorAgentConversationReadSurface) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (OperatorPublicConversationTurnDetail, error) {
-	source, ok := r.capSource.(interface {
+	source, ok := r.owner.(interface {
 		LoadOperatorPublicConversationTurn(context.Context, string, string) (OperatorPublicConversationTurnDetail, error)
 	})
 	if !ok {
@@ -594,55 +583,22 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorPublicConversationTur
 	return source.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
 }
 
-func (r *OperatorAgentConversationReadSurface) requireAgentCapabilities(ctx context.Context) error {
+func (r *OperatorAgentConversationReadSurface) requireAgentAccess() error {
 	if r == nil || r.db == nil || r.source == nil {
 		return fmt.Errorf("operator agent read surface requires postgres store")
 	}
-	caps, err := r.resolveConversationCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	if caps.Conversations.Turns != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("agent_turns", caps.Conversations.Turns)
-	}
-	if !caps.Conversations.TurnBlocks {
-		return errors.New("operator agent read surface requires canonical agent_turns.turn_blocks")
-	}
-	return RequireCanonicalPendingAgentDeliveryCapabilities(caps)
+	return r.owner.requireCurrentSchema()
 }
 
-func (r *OperatorAgentConversationReadSurface) requireConversationCapabilities(ctx context.Context) error {
-	if r == nil || r.db == nil || r.capSource == nil {
+func (r *OperatorAgentConversationReadSurface) requireConversationAccess() error {
+	if r == nil || r.db == nil || r.owner == nil {
 		return fmt.Errorf("operator conversation read surface requires postgres store")
 	}
-	caps, err := r.resolveConversationCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	if caps.Conversations.Sessions != SchemaFlavorCanonical && caps.Conversations.Audits != SchemaFlavorCanonical {
-		if caps.Conversations.Audits != SchemaFlavorUnavailable {
-			return unsupportedSchemaCapability("agent_conversation_audits", caps.Conversations.Audits)
-		}
-		return unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
-	}
-	if caps.Conversations.Turns != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("agent_turns", caps.Conversations.Turns)
-	}
-	if !caps.Conversations.TurnBlocks {
-		return errors.New("operator conversation read surface requires canonical agent_turns.turn_blocks")
-	}
-	return nil
-}
-
-func (r *OperatorAgentConversationReadSurface) resolveConversationCapabilities(ctx context.Context) (StoreSchemaCapabilities, error) {
-	if r == nil || r.capSource == nil {
-		return StoreSchemaCapabilities{}, fmt.Errorf("operator conversation read surface requires schema capabilities")
-	}
-	return r.capSource.ResolveSchemaCapabilities(ctx)
+	return r.owner.requireCurrentSchema()
 }
 
 func (r *OperatorAgentConversationReadSurface) loadLatestPublicConversationTurn(ctx context.Context, sessionID string) (*OperatorPublicConversationTurn, error) {
-	source, ok := r.capSource.(operatorPublicConversationProjectionSource)
+	source, ok := r.owner.(operatorPublicConversationProjectionSource)
 	if !ok {
 		return nil, errors.New("operator conversation read surface requires the canonical public turn owner")
 	}
@@ -1096,14 +1052,6 @@ func defaultOperatorConversationListOptions(opts OperatorConversationListOptions
 	return opts, nil
 }
 
-func operatorConversationRunIDCapabilityError(reason string) error {
-	reason = strings.TrimSpace(reason)
-	if reason == "" {
-		return ErrOperatorConversationRunIDCapability
-	}
-	return fmt.Errorf("%w: %s", ErrOperatorConversationRunIDCapability, reason)
-}
-
 func operatorConversationReadQueryError(operation string, err error) error {
 	if err == nil {
 		return nil
@@ -1112,39 +1060,15 @@ func operatorConversationReadQueryError(operation string, err error) error {
 	if operation == "" {
 		operation = "operator conversation read"
 	}
-	if operatorConversationRunIDProjectionError(err) {
-		return fmt.Errorf("%s: %w", operation, operatorConversationRunIDCapabilityError("selected conversation source cannot project run_id"))
-	}
 	return fmt.Errorf("%s: %w", operation, err)
 }
 
-func operatorConversationRunIDProjectionError(err error) bool {
-	if err == nil {
-		return false
-	}
-	var pqErr *pq.Error
-	if errors.As(err, &pqErr) && pqErr != nil {
-		if string(pqErr.Code) == "42703" && (strings.EqualFold(pqErr.Column, "run_id") || strings.Contains(strings.ToLower(pqErr.Message), "run_id")) {
-			return true
-		}
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "run_id") &&
-		(strings.Contains(message, `column "run_id" does not exist`) || strings.Contains(message, "42703"))
-}
-
-func operatorConversationQuerySources(caps StoreSchemaCapabilities) []string {
-	sources := []string{}
-	if caps.Conversations.Sessions == SchemaFlavorCanonical {
-		sessionRunID := "''"
-		if caps.Conversations.SessionRunID {
-			sessionRunID = "COALESCE(run_id::text, '')"
-		}
-		sources = append(sources, fmt.Sprintf(`
+func operatorConversationQuerySources() []string {
+	return []string{`
 			SELECT
 				session_id::text AS session_id,
 				agent_id,
-				%s AS run_id,
+				COALESCE(run_id::text, '') AS run_id,
 				'live_session' AS kind,
 				flow_instance,
 				memory_enabled,
@@ -1160,18 +1084,11 @@ func operatorConversationQuerySources(caps StoreSchemaCapabilities) []string {
 				created_at
 			FROM agent_sessions
 			WHERE status IN ('active', 'terminated') AND memory_enabled = TRUE
-		`, sessionRunID))
-	}
-	if caps.Conversations.Audits == SchemaFlavorCanonical {
-		auditRunID := "''"
-		if caps.Conversations.AuditRunID {
-			auditRunID = "COALESCE(run_id::text, '')"
-		}
-		sources = append(sources, fmt.Sprintf(`
+		`, fmt.Sprintf(`
 			SELECT
 				session_id::text AS session_id,
 				agent_id,
-				%s AS run_id,
+				COALESCE(run_id::text, '') AS run_id,
 				'turn_audit' AS kind,
 				COALESCE(flow_instance, '') AS flow_instance,
 				memory_enabled,
@@ -1188,9 +1105,7 @@ func operatorConversationQuerySources(caps StoreSchemaCapabilities) []string {
 			FROM (
 				%s
 			) task_conversations
-		`, auditRunID, CanonicalStatelessConversationVisibilitySourceSQL(caps.Conversations)))
-	}
-	return sources
+		`, CanonicalStatelessConversationVisibilitySourceSQL())}
 }
 
 func scanOperatorConversationSummary(scanner operatorRowScanner) (OperatorConversationSummary, error) {

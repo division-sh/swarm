@@ -46,7 +46,7 @@ func TestSelectedForkCompletionAuthorityIssuanceConsumesExactAdmissionSQLite(t *
 
 func TestSelectedForkCompletionAuthorityIssuanceConsumesExactAdmissionPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	proveSelectedForkCompletionAuthorityIssuance(t, newSelectedCompletionFixture(t, &PostgresStore{DB: db}, db, false))
+	proveSelectedForkCompletionAuthorityIssuance(t, newSelectedCompletionFixture(t, admitTestPostgresStore(t, db), db, false))
 }
 
 func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selectedCompletionFixture) {
@@ -221,7 +221,7 @@ func TestSelectedForkCompletionAuthoritySingleCurrentGenerationSQLite(t *testing
 
 func TestSelectedForkCompletionAuthoritySingleCurrentGenerationPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	proveSelectedForkCompletionAuthoritySingleCurrentGeneration(t, newSelectedCompletionFixture(t, &PostgresStore{DB: db}, db, false))
+	proveSelectedForkCompletionAuthoritySingleCurrentGeneration(t, newSelectedCompletionFixture(t, admitTestPostgresStore(t, db), db, false))
 }
 
 func proveSelectedForkCompletionAuthoritySingleCurrentGeneration(t *testing.T, fixture selectedCompletionFixture) {
@@ -270,7 +270,7 @@ func TestSelectedForkCompletionAuthorityRecoveryNoRedispatchSQLite(t *testing.T)
 
 func TestSelectedForkCompletionAuthorityRecoveryNoRedispatchPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t, newSelectedCompletionFixture(t, &PostgresStore{DB: db}, db, false))
+	proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t, newSelectedCompletionFixture(t, admitTestPostgresStore(t, db), db, false))
 }
 
 func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixture selectedCompletionFixture) {
@@ -360,7 +360,7 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 
 func TestSelectedForkCompletionAuthorityCleanupPreservesEvidencePostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	store := &PostgresStore{DB: db}
+	store := admitTestPostgresStore(t, db)
 	fixture := newSelectedCompletionFixture(t, store, db, false)
 	ctx := testAuthorActivityContext()
 
@@ -422,7 +422,7 @@ func TestSelectedForkCompletionAuthorityCleanupPreservesEvidencePostgres(t *test
 
 func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	store := &PostgresStore{DB: db}
+	store := admitTestPostgresStore(t, db)
 	fixture := newSelectedCompletionFixture(t, store, db, false)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -547,7 +547,7 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 
 func TestSelectedForkDiscardRejectsLiveDependentForkPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	store := &PostgresStore{DB: db}
+	store := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := time.Now().UTC()
 	sourceRunID := uuid.NewString()

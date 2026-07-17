@@ -16,7 +16,6 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -79,13 +78,6 @@ func NewSQLiteRuntimeStore(path string) (*SQLiteRuntimeStore, error) {
 	}, nil
 }
 
-func (s *SQLiteRuntimeStore) schemaCapabilities(ctx context.Context) (StoreSchemaCapabilities, error) {
-	if s == nil || s.DB == nil {
-		return StoreSchemaCapabilities{}, fmt.Errorf("sqlite runtime store is required")
-	}
-	return s.ResolveSchemaCapabilities(ctx)
-}
-
 func (*SQLiteRuntimeStore) SupportsPersistedReplay() bool { return true }
 
 func (s *SQLiteRuntimeStore) SetSessionLockTTL(ttl time.Duration) {
@@ -122,25 +114,6 @@ func (s *SQLiteRuntimeStore) validateEventPayload(ctx context.Context, eventType
 	return nil
 }
 
-func (s *SQLiteRuntimeStore) CanonicalRuntimeLogCapability(ctx context.Context) (bool, bool, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return false, false, err
-	}
-	if caps.Events.Log != SchemaFlavorCanonical {
-		return false, false, nil
-	}
-	return true, caps.Events.LogRunID, nil
-}
-
-func (s *SQLiteRuntimeStore) CanonicalEventReceiptsCapability(ctx context.Context) (bool, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return false, err
-	}
-	return caps.Events.Log == SchemaFlavorCanonical && caps.Events.Receipts == SchemaFlavorCanonical, nil
-}
-
 func (s *SQLiteRuntimeStore) AppendEvent(ctx context.Context, evt events.Event) error {
 	_, err := s.AppendEventOutcome(ctx, evt)
 	return err
@@ -169,6 +142,9 @@ func (s *SQLiteRuntimeStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt 
 }
 
 func (s *SQLiteRuntimeStore) AppendEventTxOutcome(ctx context.Context, tx *sql.Tx, evt events.Event) (runtimebus.EventAppendOutcome, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
 	if tx == nil {
 		return s.AppendEventOutcome(ctx, evt)
 	}
@@ -178,23 +154,14 @@ func (s *SQLiteRuntimeStore) AppendEventTxOutcome(ctx context.Context, tx *sql.T
 	if err := runtimeauthoractivity.Require(ctx); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	if caps.Events.Log != SchemaFlavorCanonical {
-		return runtimebus.EventAppendOutcomeUnknown, unsupportedSchemaCapability("events", caps.Events.Log)
-	}
-	evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, caps, chooseRowQueryer(s.DB, tx), evt))
+	var err error
+	evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, chooseRowQueryer(s.DB, tx), evt))
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	wantIdentity := eventStorageEnvelope(evt)
 	if err := s.validateEventPayload(ctx, wantIdentity.EventName, wantIdentity.Payload); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	if !caps.Events.LogRunID || !caps.Events.LogTaskID || !caps.Events.LogRouteIdentity {
-		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("canonical events run_id/task_id/route columns are required")
 	}
 	existingIdentity, found, err := loadSQLiteEventIdentity(ctx, tx, wantIdentity.EventID)
 	if err != nil {
@@ -246,10 +213,8 @@ func (s *SQLiteRuntimeStore) AppendEventTxOutcome(ctx context.Context, tx *sql.T
 		}
 		return runtimebus.EventAppendExactDuplicate, nil
 	}
-	if caps.Events.LogRunID && caps.Events.RunCounterColumns && runLifecycleEntityStateCountSource(caps) {
-		if err := sqliteSyncRunCounts(ctx, tx, wantIdentity.RunID); err != nil {
-			return runtimebus.EventAppendOutcomeUnknown, err
-		}
+	if err := sqliteSyncRunCounts(ctx, tx, wantIdentity.RunID); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	if err := recordPersistedEventAuthorActivity(ctx, s, evt, wantIdentity.ProducedBy, wantIdentity.ProducedByType); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
@@ -257,7 +222,7 @@ func (s *SQLiteRuntimeStore) AppendEventTxOutcome(ctx context.Context, tx *sql.T
 	return runtimebus.EventAppendInserted, nil
 }
 
-func (s *SQLiteRuntimeStore) eventPersistenceAdmissionOptions(ctx context.Context, caps StoreSchemaCapabilities, q rowQueryer, evt events.Event) events.AdmissionOptions {
+func (s *SQLiteRuntimeStore) eventPersistenceAdmissionOptions(ctx context.Context, q rowQueryer, evt events.Event) events.AdmissionOptions {
 	runID := strings.TrimSpace(evt.RunID())
 	if runID == "" {
 		if lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx); ok {
@@ -278,7 +243,7 @@ func (s *SQLiteRuntimeStore) eventPersistenceAdmissionOptions(ctx context.Contex
 		}
 	}
 	if runID == "" && parentID != "" {
-		if foundRunID := lookupSQLiteEventRunID(ctx, caps, q, parentID); foundRunID != "" {
+		if foundRunID := lookupSQLiteEventRunID(ctx, q, parentID); foundRunID != "" {
 			runID = foundRunID
 		}
 	}
@@ -290,9 +255,9 @@ func (s *SQLiteRuntimeStore) eventPersistenceAdmissionOptions(ctx context.Contex
 	}
 }
 
-func lookupSQLiteEventRunID(ctx context.Context, caps StoreSchemaCapabilities, q rowQueryer, eventID string) string {
+func lookupSQLiteEventRunID(ctx context.Context, q rowQueryer, eventID string) string {
 	eventID = strings.TrimSpace(eventID)
-	if q == nil || eventID == "" || caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogRunID {
+	if q == nil || eventID == "" {
 		return ""
 	}
 	var runID string
@@ -370,12 +335,8 @@ func (s *SQLiteRuntimeStore) ListEventDeliveryRecipients(ctx context.Context, ev
 }
 
 func (s *SQLiteRuntimeStore) UpsertAgent(ctx context.Context, rec runtimemanager.PersistedAgent) error {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
-	}
-	if caps.Agents != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("agents", caps.Agents)
 	}
 	if rec.Config.ID == "" {
 		return fmt.Errorf("agent id is required")
@@ -470,32 +431,6 @@ func (s *SQLiteRuntimeStore) LoadAgents(ctx context.Context) ([]runtimemanager.P
 		out = append(out, rec)
 	}
 	return out, rows.Err()
-}
-
-func (s *SQLiteRuntimeStore) EnsureEntitySchema(ctx context.Context, entityID string) error {
-	if strings.TrimSpace(entityID) == "" {
-		return fmt.Errorf("entity_id is required")
-	}
-	if _, err := uuid.Parse(strings.TrimSpace(entityID)); err != nil {
-		return nil
-	}
-	identity, err := runtimecurrentstate.RequireIdentity(ctx, entityID)
-	if err != nil {
-		return fmt.Errorf("lookup sqlite entity schema identity: %w", err)
-	}
-	var exists int
-	if err := s.DB.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM entity_state
-		WHERE run_id = ?
-		  AND entity_id = ?
-	`, identity.RunID, identity.EntityID).Scan(&exists); err != nil {
-		return fmt.Errorf("lookup sqlite entity schema row: %w", err)
-	}
-	if exists == 0 {
-		return fmt.Errorf("lookup sqlite entity schema row: sql: no rows in result set")
-	}
-	return nil
 }
 
 func (s *SQLiteRuntimeStore) EnsureRuntimeIngressState(ctx context.Context, now time.Time) (runtimeingress.State, error) {

@@ -22,10 +22,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-type pipelineTransitionSchemaCapabilityProvider interface {
-	CanonicalEventReceiptsCapability(context.Context) (bool, error)
-}
-
 type targetFailureDeadLetterRecorder interface {
 	RecordDeadLetter(context.Context, runtimedeadletters.Record) error
 }
@@ -207,7 +203,7 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	postCommitActions := make([]func(), 0, 8)
 	afterPublishActions := make([]func(), 0, 4)
 	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
-	ictx = runtimepipeline.WithPipelineTransitionCollector(ictx, &deferredTransitions, eb.pipelineTransitionCapability())
+	ictx = runtimepipeline.WithPipelineTransitionCollector(ictx, &deferredTransitions)
 	ictx = runtimepipeline.WithPipelinePostCommitActions(ictx, &postCommitActions)
 	ictx = runtimepipeline.WithPipelineAfterPublishActions(ictx, &afterPublishActions)
 	ictx = runtimepipeline.WithPipelineReceiptOverride(ictx, receiptOverride)
@@ -642,7 +638,7 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 	postCommitActions := make([]func(), 0, 8)
 	afterPublishActions := make([]func(), 0, 4)
 	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
-	ctx = runtimepipeline.WithPipelineTransitionCollector(ctx, &deferredTransitions, eb.pipelineTransitionCapability())
+	ctx = runtimepipeline.WithPipelineTransitionCollector(ctx, &deferredTransitions)
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
 	ctx = runtimepipeline.WithPipelineAfterPublishActions(ctx, &afterPublishActions)
 	ctx = runtimepipeline.WithPipelineReceiptOverride(ctx, receiptOverride)
@@ -881,16 +877,6 @@ func (eb *EventBus) withAuthorActivityEventDescriptor(ctx context.Context, evt e
 
 func (eb *EventBus) WithBundleFingerprint(ctx context.Context) context.Context {
 	return eb.withBundleFingerprint(ctx)
-}
-
-func (eb *EventBus) pipelineTransitionCapability() func(context.Context) (bool, error) {
-	if eb == nil || eb.store == nil {
-		return nil
-	}
-	if provider, ok := eb.store.(pipelineTransitionSchemaCapabilityProvider); ok && provider != nil {
-		return provider.CanonicalEventReceiptsCapability
-	}
-	return nil
 }
 
 func (eb *EventBus) convergeStandaloneRuntimePlatformRun(ctx context.Context, evt events.Event) error {
@@ -2064,7 +2050,7 @@ func (eb *EventBus) publishPersistedRecipients(ctx context.Context, evt events.E
 		postCommitActions := make([]func(), 0, 8)
 		deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
 		receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
-		ctx = runtimepipeline.WithPipelineTransitionCollector(ctx, &deferredTransitions, eb.pipelineTransitionCapability())
+		ctx = runtimepipeline.WithPipelineTransitionCollector(ctx, &deferredTransitions)
 		ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
 		ctx = runtimepipeline.WithPipelineReceiptOverride(ctx, receiptOverride)
 		var err error

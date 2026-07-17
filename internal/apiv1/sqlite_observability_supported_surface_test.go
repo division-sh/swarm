@@ -266,9 +266,7 @@ func newPostgresObservabilitySurfaceFixture(t *testing.T, ctx context.Context) o
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := &storepkg.PostgresStore{DB: db}
-	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
-		t.Fatalf("BindSchemaCapabilities postgres: %v", err)
-	}
+	storetest.BootstrapPostgresRuntimeStore(t, pg)
 	return newObservabilitySurfaceFixture(t, ctx, pg)
 }
 

@@ -20,6 +20,7 @@ func TestPostgresStore_ApplyDestructiveResetQuiescence_TerminalizesRunsAndDelive
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := testAuthorActivityContext()
 	now := time.Date(2026, 5, 15, 2, 40, 0, 0, time.UTC)
@@ -181,6 +182,7 @@ func TestPostgresStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecoverableW
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := testAuthorActivityContext()
 	now := time.Date(2026, 5, 18, 2, 10, 0, 0, time.UTC)
@@ -417,6 +419,7 @@ func TestPostgresStore_ApplyDestructiveResetQuiescence_DryRunDoesNotMutate(t *te
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := testAuthorActivityContext()
 	now := time.Date(2026, 5, 15, 2, 45, 0, 0, time.UTC)

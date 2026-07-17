@@ -43,9 +43,6 @@ func (s *PostgresStore) BootstrapSchema(ctx context.Context, request SchemaBoots
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, postgresSchemaBootstrapLock); err != nil {
 		return fmt.Errorf("serialize postgres schema bootstrap: %w", err)
 	}
-	if err := enforcePostgresDecisionCardLifecycleOutboxCutoff(ctx, tx); err != nil {
-		return err
-	}
 	target, report, err := inspectPostgresCompatibility(ctx, tx, expected)
 	if err != nil {
 		return err
@@ -70,8 +67,8 @@ func (s *PostgresStore) BootstrapSchema(ctx context.Context, request SchemaBoots
 		return fmt.Errorf("commit postgres schema bootstrap: %w", err)
 	}
 	committed = true
-	_, err = s.BindSchemaCapabilities(ctx)
-	return err
+	s.schemaAdmission.markCurrent()
+	return nil
 }
 
 func inspectPostgresCompatibility(ctx context.Context, q schemaQueryer, expected schemaShape) (string, schemaCompatibilityReport, error) {
@@ -87,7 +84,7 @@ func inspectPostgresCompatibility(ctx context.Context, q schemaQueryer, expected
 		return target, schemaCompatibilityReport{State: schemaStateFresh}, nil
 	}
 	var origin *RuntimeStoreOrigin
-	var drift []string
+	drift := retiredPlatformTableDrift(tables)
 	if _, ok := tables[RuntimeStoreMetadataTable]; !ok {
 		drift = append(drift, "non-empty public schema has no runtime_store_metadata origin stamp")
 	} else {

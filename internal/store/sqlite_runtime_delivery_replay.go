@@ -153,6 +153,9 @@ func (s *SQLiteRuntimeStore) InsertEventDeliveryRoutesTx(ctx context.Context, tx
 	if eventID == "" || len(deliveryRoutes) == 0 {
 		return nil
 	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
 	ownedTx := tx == nil
 	if ownedTx {
 		return s.runRuntimeMutation(ctx, "sqlite event delivery routes", func(txctx context.Context, tx *sql.Tx) error {
@@ -165,13 +168,6 @@ func (s *SQLiteRuntimeStore) InsertEventDeliveryRoutesTx(ctx context.Context, tx
 	var runID sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT run_id FROM events WHERE event_id = ?`, eventID).Scan(&runID); err != nil {
 		return fmt.Errorf("load event run for sqlite delivery routes: %w", err)
-	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	if !caps.Events.DeliveryTargetRoute || !caps.Events.DeliveryContext || !caps.Events.DeliveryPayloadProjection {
-		return fmt.Errorf("event_deliveries requires delivery_target_route, delivery_context, and delivery_payload_projection")
 	}
 	for _, route := range deliveryRoutes {
 		route = route.Normalized()
@@ -389,12 +385,8 @@ func (s *SQLiteRuntimeStore) ListEventDeliveryRoutes(ctx context.Context, eventI
 	if eventID == "" {
 		return nil, nil
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
-	}
-	if !caps.Events.DeliveryTargetRoute || !caps.Events.DeliveryContext || !caps.Events.DeliveryPayloadProjection {
-		return nil, fmt.Errorf("event_deliveries requires delivery_target_route, delivery_context, and delivery_payload_projection")
 	}
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT subscriber_type, subscriber_id, COALESCE(delivery_target_route, '{}'),

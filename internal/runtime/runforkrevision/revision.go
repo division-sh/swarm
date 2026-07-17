@@ -189,13 +189,7 @@ func CaptureCurrentTransaction(ctx context.Context, tx *sql.Tx) (map[string]int6
 	if tx == nil {
 		return nil, fmt.Errorf("run fork revision capture requires an existing postgres transaction")
 	}
-	changeQueries, err := availableCurrentTransactionChangeQueries(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	if len(changeQueries) == 0 {
-		return map[string]int64{}, nil
-	}
+	changeQueries := currentTransactionChangeQueries()
 	query := `
 		SELECT DISTINCT run_id, family
 		FROM (` + strings.Join(changeQueries, "\nUNION ALL\n") + `) changed
@@ -229,122 +223,26 @@ func CaptureCurrentTransaction(ctx context.Context, tx *sql.Tx) (map[string]int6
 	return CaptureChanges(ctx, tx, changes...)
 }
 
-type currentTransactionFamilySchema struct {
-	required map[string][]string
-	query    string
+var currentTransactionFamilyQueries = map[Family]string{
+	FamilyEvents:                  `SELECT run_id::text AS run_id, 'events'::text AS family FROM events WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
+	FamilyEntityMutations:         `SELECT run_id::text AS run_id, 'entity_mutations'::text AS family FROM entity_mutations WHERE xmin::text::bigint = txid_current()`,
+	FamilyEntityMetadata:          `SELECT run_id::text AS run_id, 'entity_metadata'::text AS family FROM entity_state WHERE xmin::text::bigint = txid_current()`,
+	FamilyEventDeliveries:         `SELECT run_id::text AS run_id, 'event_deliveries'::text AS family FROM event_deliveries WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
+	FamilyEventReceipts:           `SELECT e.run_id::text AS run_id, 'event_receipts'::text AS family FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id IS NOT NULL AND r.xmin::text::bigint = txid_current()`,
+	FamilyDeadLetters:             `SELECT e.run_id::text AS run_id, 'dead_letters'::text AS family FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id IS NOT NULL AND d.xmin::text::bigint = txid_current()`,
+	FamilyTimers:                  `SELECT run_id::text AS run_id, 'timers'::text AS family FROM timers WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
+	FamilyAgentSessions:           `SELECT run_id::text AS run_id, 'agent_sessions'::text AS family FROM agent_sessions WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
+	FamilyAgentTurns:              `SELECT run_id::text AS run_id, 'agent_turns'::text AS family FROM agent_turns WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
+	FamilyAgentConversationAudits: `SELECT run_id::text AS run_id, 'agent_conversation_audits'::text AS family FROM agent_conversation_audits WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
+	FamilyReplyContexts:           `SELECT run_id::text AS run_id, 'reply_contexts'::text AS family FROM reply_contexts WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
 }
 
-var currentTransactionFamilySchemas = map[Family]currentTransactionFamilySchema{
-	FamilyEvents: {
-		required: map[string][]string{"events": {"event_id", "run_id", "event_name", "entity_id", "flow_instance", "source_route", "target_route", "target_set", "scope", "payload", "chain_depth", "produced_by", "produced_by_type", "handler_node", "idempotency_key", "source_event_id", "created_at"}},
-		query:    `SELECT run_id::text AS run_id, 'events'::text AS family FROM events WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
-	},
-	FamilyEntityMutations: {
-		required: map[string][]string{"entity_mutations": {"mutation_id", "run_id", "entity_id", "field", "new_value", "caused_by_event", "created_at"}},
-		query:    `SELECT run_id::text AS run_id, 'entity_mutations'::text AS family FROM entity_mutations WHERE xmin::text::bigint = txid_current()`,
-	},
-	FamilyEntityMetadata: {
-		required: map[string][]string{"entity_state": {"run_id", "entity_id", "flow_instance", "entity_type", "created_at"}},
-		query:    `SELECT run_id::text AS run_id, 'entity_metadata'::text AS family FROM entity_state WHERE xmin::text::bigint = txid_current()`,
-	},
-	FamilyEventDeliveries: {
-		required: map[string][]string{"event_deliveries": {"delivery_id", "run_id", "event_id", "subscriber_type", "subscriber_id", "delivery_target_route", "delivery_context", "delivery_payload_projection", "status", "retry_count", "reason_code", "active_session_id", "started_at", "delivered_at", "created_at"}},
-		query:    `SELECT run_id::text AS run_id, 'event_deliveries'::text AS family FROM event_deliveries WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
-	},
-	FamilyEventReceipts: {
-		required: map[string][]string{
-			"event_receipts": {"receipt_id", "event_id", "subscriber_type", "subscriber_id", "outcome", "reason_code", "processed_at"},
-			"events":         {"event_id", "run_id"},
-		},
-		query: `SELECT e.run_id::text AS run_id, 'event_receipts'::text AS family FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id IS NOT NULL AND r.xmin::text::bigint = txid_current()`,
-	},
-	FamilyDeadLetters: {
-		required: map[string][]string{
-			"dead_letters": {"dead_letter_id", "original_event_id", "handler_node", "created_at"},
-			"events":       {"event_id", "run_id"},
-		},
-		query: `SELECT e.run_id::text AS run_id, 'dead_letters'::text AS family FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id IS NOT NULL AND d.xmin::text::bigint = txid_current()`,
-	},
-	FamilyTimers: {
-		required: map[string][]string{"timers": {"timer_id", "run_id", "timer_name", "entity_id", "flow_instance", "fire_event", "fire_payload", "fire_at", "recurring", "recurrence_cron", "recurrence_interval", "owner_node", "owner_agent", "task_type", "status", "fired_at", "created_at"}},
-		query:    `SELECT run_id::text AS run_id, 'timers'::text AS family FROM timers WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
-	},
-	FamilyAgentSessions: {
-		required: map[string][]string{"agent_sessions": {"session_id", "run_id", "status", "created_at", "terminated_at"}},
-		query:    `SELECT run_id::text AS run_id, 'agent_sessions'::text AS family FROM agent_sessions WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
-	},
-	FamilyAgentTurns: {
-		required: map[string][]string{"agent_turns": {"turn_id", "run_id", "session_id", "created_at"}},
-		query:    `SELECT run_id::text AS run_id, 'agent_turns'::text AS family FROM agent_turns WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
-	},
-	FamilyAgentConversationAudits: {
-		required: map[string][]string{"agent_conversation_audits": {"session_id", "run_id", "status", "created_at", "updated_at"}},
-		query:    `SELECT run_id::text AS run_id, 'agent_conversation_audits'::text AS family FROM agent_conversation_audits WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
-	},
-	FamilyReplyContexts: {
-		required: map[string][]string{"reply_contexts": {"reply_context_id", "run_id", "request_event_id", "state", "created_at", "updated_at", "terminal_at"}},
-		query:    `SELECT run_id::text AS run_id, 'reply_contexts'::text AS family FROM reply_contexts WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
-	},
-}
-
-var revisionOwnerSchema = map[string][]string{
-	"run_fork_revision_heads": {"run_id", "last_revision", "updated_at"},
-	"run_fork_revisions":      {"run_id", "revision", "transaction_id"},
-	"run_fork_fact_revisions": {"run_id", "revision", "family", "fact_key", "fact", "present", "source_transaction_id"},
-}
-
-func availableCurrentTransactionChangeQueries(ctx context.Context, tx *sql.Tx) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `
-		SELECT table_name, column_name
-		FROM information_schema.columns
-		WHERE table_schema = current_schema()
-		  AND table_name IN (
-			'events', 'entity_mutations', 'entity_state', 'event_deliveries',
-			'event_receipts', 'dead_letters', 'timers', 'agent_sessions',
-			'agent_turns', 'agent_conversation_audits', 'reply_contexts',
-			'run_fork_revision_heads', 'run_fork_revisions', 'run_fork_fact_revisions'
-		  )
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("inspect run fork revision capture schema: %w", err)
-	}
-	defer rows.Close()
-	columns := map[string]map[string]struct{}{}
-	for rows.Next() {
-		var table, column string
-		if err := rows.Scan(&table, &column); err != nil {
-			return nil, fmt.Errorf("scan run fork revision capture schema: %w", err)
-		}
-		if columns[table] == nil {
-			columns[table] = map[string]struct{}{}
-		}
-		columns[table][column] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read run fork revision capture schema: %w", err)
-	}
-	if !schemaContainsRequirements(columns, revisionOwnerSchema) {
-		return nil, nil
-	}
+func currentTransactionChangeQueries() []string {
 	queries := make([]string, 0, len(allFamilies))
 	for _, family := range allFamilies {
-		schema := currentTransactionFamilySchemas[family]
-		if schemaContainsRequirements(columns, schema.required) {
-			queries = append(queries, schema.query)
-		}
+		queries = append(queries, currentTransactionFamilyQueries[family])
 	}
-	return queries, nil
-}
-
-func schemaContainsRequirements(columns map[string]map[string]struct{}, required map[string][]string) bool {
-	for table, names := range required {
-		for _, name := range names {
-			if _, ok := columns[table][name]; !ok {
-				return false
-			}
-		}
-	}
-	return true
+	return queries
 }
 
 func captureCanonicalProjection(ctx context.Context, tx *sql.Tx, runID string, revision int64, family Family) error {

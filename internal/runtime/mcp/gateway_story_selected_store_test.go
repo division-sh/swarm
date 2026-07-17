@@ -30,7 +30,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -65,7 +64,7 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 			name: "postgres",
 			start: func(t *testing.T) gatewayStorySelectedStore {
 				_, db, _ := testutil.StartPostgres(t)
-				return gatewayStorySelectedStore{backend: &store.PostgresStore{DB: db}, db: db, postgres: true}
+				return gatewayStorySelectedStore{backend: storetest.AdmitPostgresRuntimeStore(t, db), db: db, postgres: true}
 			},
 		},
 	} {

@@ -25,12 +25,8 @@ func (s *PostgresStore) ResolveAgentDirectiveRunTarget(ctx context.Context, agen
 	if agentID == "" {
 		return runtimeagentcontrol.RunTargetResolution{}, fmt.Errorf("agent_id is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return runtimeagentcontrol.RunTargetResolution{}, err
-	}
-	if !caps.Events.HasRuns {
-		return runtimeagentcontrol.RunTargetResolution{}, unsupportedSchemaCapability("runs", SchemaFlavorUnavailable)
 	}
 	if explicitRunID != "" {
 		if err := validateDirectiveRunTarget(ctx, s.DB, agentID, explicitRunID); err != nil {
@@ -40,9 +36,6 @@ func (s *PostgresStore) ResolveAgentDirectiveRunTarget(ctx context.Context, agen
 			RunID: explicitRunID,
 			Mode:  runtimeagentcontrol.RunResolutionSpecified,
 		}, nil
-	}
-	if caps.Conversations.Sessions != SchemaFlavorCanonical || !caps.Conversations.SessionRunID {
-		return runtimeagentcontrol.RunTargetResolution{}, unsupportedSchemaCapability("agent_sessions.run_id", caps.Conversations.Sessions)
 	}
 	sessions, err := listActiveDirectiveSessions(ctx, s.DB, agentID)
 	if err != nil {

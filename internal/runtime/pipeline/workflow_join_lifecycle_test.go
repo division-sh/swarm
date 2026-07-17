@@ -779,9 +779,8 @@ func TestWorkflowJoinFailurePersistsCanonicalReceiptAndRuntimeLog(t *testing.T) 
 	bundle := workflowJoinLifecycleBundle()
 	bus := &recordingPipelineBus{}
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module:                  &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
-		WorkflowStore:           store,
-		EventReceiptsCapability: func(context.Context) (bool, error) { return true, nil },
+		Module:        &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
+		WorkflowStore: store,
 	})
 	path := "orders/" + uuid.NewString()
 	entityID := FlowInstanceEntityID(path)

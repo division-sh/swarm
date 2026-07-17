@@ -38,7 +38,7 @@ func selectedScheduleStoreCases() []selectedScheduleStoreCase {
 			if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', now())`, runID); err != nil {
 				t.Fatalf("seed PostgreSQL run: %v", err)
 			}
-			store := &PostgresStore{DB: db}
+			store := admitTestPostgresStore(t, db)
 			t.Cleanup(func() { _ = store.ReleaseScheduleClaims(context.Background()) })
 			return store, db, ctx
 		}},

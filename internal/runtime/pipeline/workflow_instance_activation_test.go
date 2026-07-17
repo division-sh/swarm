@@ -720,13 +720,12 @@ opco.ceo_ready:
 	_, db, _ := testutil.StartPostgres(t)
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
-		bus:                     bus,
-		db:                      db,
-		workflowStore:           NewWorkflowInstanceStore(db),
-		expressionEval:          newWorkflowExpressionEvaluator(),
-		entityLocks:             map[string]*sync.Mutex{},
-		module:                  staticSemanticWorkflowModule{source: source},
-		eventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+		bus:            bus,
+		db:             db,
+		workflowStore:  NewWorkflowInstanceStore(db),
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+		module:         staticSemanticWorkflowModule{source: source},
 	}
 	seedPipelineNodeDeliveryAuthority(t, db, evt, "lifecycle-orchestrator")
 	handled, err := pc.executeNodeHandlerPlanResult(testPipelineCoordinatorRunContext(t, pc), "lifecycle-orchestrator", evt)
@@ -804,13 +803,12 @@ states: [initializing, ready]
 	t.Cleanup(cleanup)
 	workflowStore := NewWorkflowInstanceStore(db)
 	pc := &PipelineCoordinator{
-		bus:                     &recordingPipelineBus{},
-		db:                      db,
-		workflowStore:           workflowStore,
-		expressionEval:          newWorkflowExpressionEvaluator(),
-		entityLocks:             map[string]*sync.Mutex{},
-		module:                  staticSemanticWorkflowModule{source: source},
-		eventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+		bus:            &recordingPipelineBus{},
+		db:             db,
+		workflowStore:  workflowStore,
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+		module:         staticSemanticWorkflowModule{source: source},
 	}
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	if err := workflowStore.Upsert(ctx, WorkflowInstance{

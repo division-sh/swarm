@@ -246,7 +246,7 @@ func newSelectedReviewFixture(t *testing.T, sqlite bool) selectedCompletionFixtu
 		return newSelectedCompletionFixture(t, s, s.DB, true)
 	}
 	_, db, _ := testutil.StartPostgres(t)
-	return newSelectedCompletionFixture(t, &PostgresStore{DB: db}, db, false)
+	return newSelectedCompletionFixture(t, admitTestPostgresStore(t, db), db, false)
 }
 
 func newCompletionReviewFixture(t *testing.T, sqlite bool) completionSettlementFixture {
@@ -256,7 +256,7 @@ func newCompletionReviewFixture(t *testing.T, sqlite bool) completionSettlementF
 		return newCompletionSettlementFixture(t, s, s.DB, true)
 	}
 	_, db, _ := testutil.StartPostgres(t)
-	return newCompletionSettlementFixture(t, &PostgresStore{DB: db}, db, false)
+	return newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false)
 }
 
 func setSelectedReviewAuthority(t *testing.T, fixture selectedCompletionFixture, executionID, state string, lease time.Time) {

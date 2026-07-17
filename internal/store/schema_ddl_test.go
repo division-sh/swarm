@@ -251,43 +251,6 @@ func TestPlatformSpecEventReceiptsUsesTypedSubscriberIdentity(t *testing.T) {
 	}
 }
 
-func TestGeneratePlatformTableDDLs_StripsDeprecatedEntitySubjectDDL(t *testing.T) {
-	var spec runtimecontracts.PlatformSpecDocument
-	spec.PlatformTables.Tables = map[string]struct {
-		Description string `yaml:"description"`
-		DDL         string `yaml:"ddl"`
-	}{
-		"entity_state": {
-			DDL: "CREATE TABLE entity_state (\n    entity_id UUID PRIMARY KEY,\n    subject_id UUID,\n    flow_instance TEXT NOT NULL,\n    INDEX idx_entity_subject (subject_id) WHERE subject_id IS NOT NULL,\n    INDEX idx_entity_state_flow (flow_instance)\n);",
-		},
-	}
-
-	plans, err := GeneratePlatformTableDDLs(spec)
-	if err != nil {
-		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
-	}
-	if len(plans) != 1 {
-		t.Fatalf("expected 1 platform DDL plan, got %d", len(plans))
-	}
-	for _, statement := range plans[0].Statements {
-		if strings.Contains(statement, "subject_id") {
-			t.Fatalf("deprecated subject_id DDL survived: %q", statement)
-		}
-		if strings.Contains(statement, "idx_entity_subject") {
-			t.Fatalf("deprecated idx_entity_subject DDL survived: %q", statement)
-		}
-	}
-	if plans[0].ColumnCount != 2 {
-		t.Fatalf("column count = %d, want 2", plans[0].ColumnCount)
-	}
-	if len(plans[0].Statements) != 2 {
-		t.Fatalf("statements = %#v, want create table plus surviving flow index", plans[0].Statements)
-	}
-	if got := plans[0].Statements[1]; !strings.Contains(got, `CREATE INDEX IF NOT EXISTS "idx_entity_state_flow" ON "entity_state"(flow_instance)`) {
-		t.Fatalf("expected non-subject inline index to survive, got %q", got)
-	}
-}
-
 func TestGeneratePlatformTableDDLs_OrdersRunsBeforeEvents(t *testing.T) {
 	var spec runtimecontracts.PlatformSpecDocument
 	spec.PlatformTables.Tables = map[string]struct {
@@ -319,76 +282,6 @@ func TestGeneratePlatformTableDDLs_OrdersRunsBeforeEvents(t *testing.T) {
 	}
 	if plans[2].TableName != "entity_mutations" {
 		t.Fatalf("third table = %q, want entity_mutations", plans[2].TableName)
-	}
-}
-
-func TestGenerateEntityTableDDLs(t *testing.T) {
-	schema := runtimecontracts.EntitySchema{
-		Groups: []runtimecontracts.EntitySchemaGroup{{
-			Name: "items",
-			Fields: []runtimecontracts.EntitySchemaField{
-				{Name: "status", Type: "string", Indexed: true},
-				{Name: "score", Type: "numeric(5,2)", Nullable: true},
-			},
-		}},
-	}
-
-	plans, err := GenerateEntityTableDDLs(schema)
-	if err != nil {
-		t.Fatalf("GenerateEntityTableDDLs: %v", err)
-	}
-	if len(plans) != 1 {
-		t.Fatalf("expected 1 entity DDL plan, got %d", len(plans))
-	}
-	if plans[0].TableName != "items" {
-		t.Fatalf("unexpected entity table %q", plans[0].TableName)
-	}
-	if plans[0].ColumnCount != 5 {
-		t.Fatalf("unexpected entity column count %d", plans[0].ColumnCount)
-	}
-	createStmt := plans[0].Statements[0]
-	if !strings.Contains(createStmt, `"entity_id" UUID PRIMARY KEY`) {
-		t.Fatalf("expected entity_id primary key, got %q", createStmt)
-	}
-	if !strings.Contains(createStmt, `"status" TEXT NOT NULL`) {
-		t.Fatalf("expected status column, got %q", createStmt)
-	}
-	if !strings.Contains(createStmt, `"score" NUMERIC(5,2)`) {
-		t.Fatalf("expected score column, got %q", createStmt)
-	}
-	if len(plans[0].Statements) != 2 || !strings.Contains(plans[0].Statements[1], `CREATE INDEX IF NOT EXISTS "idx_items_status"`) {
-		t.Fatalf("expected indexed status column, got %#v", plans[0].Statements)
-	}
-}
-
-func TestGenerateEntityTableDDLs_IgnoresManagedTimestampDuplicates(t *testing.T) {
-	schema := runtimecontracts.EntitySchema{
-		Groups: []runtimecontracts.EntitySchemaGroup{{
-			Name: "metadata",
-			Fields: []runtimecontracts.EntitySchemaField{
-				{Name: "created_at", Type: "timestamptz"},
-				{Name: "updated_at", Type: "timestamptz"},
-				{Name: "human_notes", Type: "text"},
-			},
-		}},
-	}
-
-	plans, err := GenerateEntityTableDDLs(schema)
-	if err != nil {
-		t.Fatalf("GenerateEntityTableDDLs: %v", err)
-	}
-	if len(plans) != 1 {
-		t.Fatalf("expected 1 entity DDL plan, got %d", len(plans))
-	}
-	createStmt := plans[0].Statements[0]
-	if strings.Count(createStmt, `"created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()`) != 1 {
-		t.Fatalf("expected single managed created_at column, got %q", createStmt)
-	}
-	if strings.Count(createStmt, `"updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()`) != 1 {
-		t.Fatalf("expected single managed updated_at column, got %q", createStmt)
-	}
-	if !strings.Contains(createStmt, `"human_notes" TEXT NOT NULL`) {
-		t.Fatalf("expected human_notes column, got %q", createStmt)
 	}
 }
 

@@ -14,12 +14,8 @@ func (s *PostgresStore) ActiveRunBundleAvailabilities(ctx context.Context) ([]ru
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
-	}
-	if !caps.Events.HasRuns || !caps.Events.RunBundleHash || !caps.Events.RunBundleSource {
-		return nil, fmt.Errorf("active run bundle availability requires runs.bundle_hash and runs.bundle_source")
 	}
 	return runbundle.ListActiveAvailabilities(ctx, s.DB)
 }
@@ -39,8 +35,8 @@ func (s *PostgresStore) ActiveRunBundleAvailabilityConflicts(ctx context.Context
 }
 
 func (s *PostgresStore) LoadRunBundleAvailability(ctx context.Context, runID string) (runbundle.Availability, error) {
-	if s == nil || s.DB == nil {
-		return runbundle.Availability{}, fmt.Errorf("postgres store is required")
+	if err := s.requireCurrentSchema(); err != nil {
+		return runbundle.Availability{}, err
 	}
 	availability, err := runbundle.LoadAvailability(ctx, s.DB, runID)
 	if errors.Is(err, runbundle.ErrRunNotFound) {

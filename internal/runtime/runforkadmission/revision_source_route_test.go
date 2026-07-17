@@ -12,6 +12,7 @@ import (
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -77,7 +78,7 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 		t.Fatalf("commit revision: %v", err)
 	}
 
-	plan, err := (&store.PostgresStore{DB: db}).PlanRunFork(ctx, store.RunForkPlanRequest{
+	plan, err := (storetest.AdmitPostgresRuntimeStore(t, db)).PlanRunFork(ctx, store.RunForkPlanRequest{
 		SourceRunID: runID,
 		At:          completedEventID,
 	})
@@ -265,7 +266,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			if tc.explicitSelector {
 				selector = eventID
 			}
-			plan, err := (&store.PostgresStore{DB: db}).PlanRunFork(ctx, store.RunForkPlanRequest{SourceRunID: runID, At: selector})
+			plan, err := (storetest.AdmitPostgresRuntimeStore(t, db)).PlanRunFork(ctx, store.RunForkPlanRequest{SourceRunID: runID, At: selector})
 			if err != nil {
 				t.Fatalf("PlanRunFork: %v", err)
 			}

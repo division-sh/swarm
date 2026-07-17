@@ -1870,9 +1870,6 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		if err := pg.Ping(ctx); err != nil {
 			return storeBundle{}, err
 		}
-		if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
-			return storeBundle{}, err
-		}
 		bundle := selectedPostgresStoreBundle(pg, cfg)
 		if err := validateSelectedStoreBundleRoles(selection.Backend, bundle); err != nil {
 			closeDB(pg.DB)
@@ -1885,10 +1882,6 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			return storeBundle{}, err
 		}
 		if err := sqliteStore.Ping(ctx); err != nil {
-			_ = sqliteStore.Close()
-			return storeBundle{}, err
-		}
-		if _, err := sqliteStore.BindSchemaCapabilities(ctx); err != nil {
 			_ = sqliteStore.Close()
 			return storeBundle{}, err
 		}
@@ -2137,20 +2130,6 @@ func ensureServeSchemaTables(ctx context.Context, stores storeBundle, request st
 	}
 	if err := stores.SchemaBootstrapper.BootstrapSchema(ctx, request); err != nil {
 		return err
-	}
-	if err := rebindServePostgresSchemaCapabilities(ctx, stores); err != nil {
-		return err
-	}
-	return nil
-}
-
-func rebindServePostgresSchemaCapabilities(ctx context.Context, stores storeBundle) error {
-	binder := stores.facade().schemaCapabilityBinder()
-	if binder == nil {
-		return nil
-	}
-	if _, err := binder.BindSchemaCapabilities(ctx); err != nil {
-		return fmt.Errorf("bind post-bootstrap schema capabilities: %w", err)
 	}
 	return nil
 }

@@ -8,15 +8,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	"github.com/google/uuid"
 )
 
 func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.PersistedAgent) error {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
 	if rec.Config.ID == "" {
@@ -36,25 +33,14 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.Pers
 	if !rec.StartedAt.IsZero() {
 		startedAt = rec.StartedAt
 	}
-	switch caps.Agents {
-	case SchemaFlavorCanonical:
-		return s.upsertAgentSpec(ctx, rec, projection, startedAt)
-	default:
-		return unsupportedSchemaCapability("agents", caps.Agents)
-	}
+	return s.upsertAgentSpec(ctx, rec, projection, startedAt)
 }
 
 func (s *PostgresStore) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	switch caps.Agents {
-	case SchemaFlavorCanonical:
-		return s.loadAgentsSpec(ctx)
-	default:
-		return nil, unsupportedSchemaCapability("agents", caps.Agents)
-	}
+	return s.loadAgentsSpec(ctx)
 }
 
 func (s *PostgresStore) upsertAgentSpec(ctx context.Context, rec runtimemanager.PersistedAgent, projection persistedAgentProjection, startedAt any) error {
@@ -257,36 +243,4 @@ func coalesce(vals ...string) string {
 		}
 	}
 	return ""
-}
-
-func (s *PostgresStore) EnsureEntitySchema(ctx context.Context, entityID string) error {
-	if strings.TrimSpace(entityID) == "" {
-		return fmt.Errorf("entity_id is required")
-	}
-	if _, err := uuid.Parse(strings.TrimSpace(entityID)); err != nil {
-		return nil
-	}
-	identity, err := runtimecurrentstate.RequireIdentity(ctx, entityID)
-	if err != nil {
-		return fmt.Errorf("lookup entity slug: %w", err)
-	}
-	var slug string
-	err = s.DB.QueryRowContext(ctx, `
-		SELECT COALESCE(NULLIF(slug, ''), '')
-		FROM entity_state
-		WHERE run_id = $1::uuid
-		  AND entity_id = $2::uuid
-	`, identity.RunID, identity.EntityID).Scan(&slug)
-	if err != nil {
-		return fmt.Errorf("lookup entity slug: %w", err)
-	}
-	schema := sanitizeSchemaIdent(slug)
-	if schema == "" {
-		return fmt.Errorf("entity %s has no valid slug for schema creation", entityID)
-	}
-	schema = schema + "_schema"
-	if _, err := s.DB.ExecContext(ctx, `CREATE SCHEMA IF NOT EXISTS `+quoteIdent(schema)); err != nil {
-		return fmt.Errorf("create entity schema %s: %w", schema, err)
-	}
-	return nil
 }

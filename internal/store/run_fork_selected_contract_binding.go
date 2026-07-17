@@ -32,41 +32,8 @@ type RunForkSelectedContractBinding struct {
 	CreatedAt         time.Time                `json:"created_at"`
 }
 
-func RequireRunForkSelectedContractBindingCapabilities(caps StoreSchemaCapabilities, catalog schemaColumnCatalog) error {
-	_ = caps
-	required := map[string][]string{
-		runForkSelectedContractBindingTable: {
-			"binding_id",
-			"fork_run_id",
-			"source_run_id",
-			"fork_event_id",
-			"mode",
-			"contracts_root",
-			"bundle_hash",
-			"workflow_name",
-			"workflow_version",
-			"created_at",
-		},
-	}
-	for tableName, columns := range required {
-		if catalog.hasColumns(tableName, columns...) {
-			continue
-		}
-		return fmt.Errorf("run fork selected contract binding requires %s columns %v", tableName, columns)
-	}
-	return nil
-}
-
-func (s *PostgresStore) requireRunForkSelectedContractBindingCapabilities(ctx context.Context) error {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
-		return err
-	}
-	return RequireRunForkSelectedContractBindingCapabilities(caps, catalog)
+func (s *PostgresStore) requireRunForkSelectedContractBindingAccess() error {
+	return s.requireCurrentSchema()
 }
 
 func (s *PostgresStore) LoadRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (RunForkSelectedContractBinding, bool, error) {
@@ -80,23 +47,8 @@ func (s *PostgresStore) LoadRunForkSelectedContractBinding(ctx context.Context, 
 	if _, err := uuid.Parse(forkRunID); err != nil {
 		return RunForkSelectedContractBinding{}, false, fmt.Errorf("fork run_id must be a UUID: %w", err)
 	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return RunForkSelectedContractBinding{}, false, err
-	}
-	if !catalog.hasColumns(
-		runForkSelectedContractBindingTable,
-		"fork_run_id",
-		"source_run_id",
-		"fork_event_id",
-		"mode",
-		"contracts_root",
-		"bundle_hash",
-		"workflow_name",
-		"workflow_version",
-		"created_at",
-	) {
-		return RunForkSelectedContractBinding{}, false, nil
 	}
 	binding, err := loadRunForkSelectedContractBinding(ctx, s.DB, forkRunID)
 	if err == sql.ErrNoRows {
@@ -109,7 +61,7 @@ func (s *PostgresStore) LoadRunForkSelectedContractBinding(ctx context.Context, 
 }
 
 func (s *PostgresStore) RequireRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (RunForkSelectedContractBinding, error) {
-	if err := s.requireRunForkSelectedContractBindingCapabilities(ctx); err != nil {
+	if err := s.requireRunForkSelectedContractBindingAccess(); err != nil {
 		return RunForkSelectedContractBinding{}, err
 	}
 	binding, ok, err := s.LoadRunForkSelectedContractBinding(ctx, forkRunID)

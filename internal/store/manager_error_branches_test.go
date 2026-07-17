@@ -24,42 +24,6 @@ func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 		t.Fatal("expected missing agent id error")
 	}
 
-	// EnsureEntitySchema: invalid/missing slug.
-	vid := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
-		ON CONFLICT (run_id) DO NOTHING
-	`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES ('entity-no-slug', 'test', 'static', '{}'::jsonb, 'active', now())
-	`); err != nil {
-		t.Fatalf("seed flow instance: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'entity-no-slug', 'default', 'operating',
-			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
-		)
-	`, runID, vid); err != nil {
-		t.Fatalf("seed entity state: %v", err)
-	}
-	if err := pg.EnsureEntitySchema(ctx, vid); err == nil {
-		t.Fatal("expected EnsureEntitySchema to fail for empty slug")
-	}
-	if err := pg.EnsureEntitySchema(ctx, "ent-001"); err != nil {
-		t.Fatalf("expected EnsureEntitySchema to ignore non-UUID entity ids: %v", err)
-	}
-	if err := pg.EnsureEntitySchema(ctx, ""); err == nil {
-		t.Fatal("expected EnsureEntitySchema to require entity_id")
-	}
-
 	// Canonical lifecycle transition: validation.
 	if _, err := pg.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{}); err == nil {
 		t.Fatal("expected lifecycle transition validation error")

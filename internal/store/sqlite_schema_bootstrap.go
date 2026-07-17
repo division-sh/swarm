@@ -28,6 +28,10 @@ func (s *SQLiteSchemaStore) BootstrapSchema(ctx context.Context, request SchemaB
 		return fmt.Errorf("open serialized sqlite schema connection: %w", err)
 	}
 	defer conn.Close()
+	// A restart may overlap the previous runtime's final write transaction.
+	if _, err := conn.ExecContext(ctx, `PRAGMA busy_timeout = 5000`); err != nil {
+		return fmt.Errorf("configure sqlite schema bootstrap lock timeout: %w", err)
+	}
 	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
 		return fmt.Errorf("serialize sqlite schema bootstrap: %w", err)
 	}
@@ -37,9 +41,6 @@ func (s *SQLiteSchemaStore) BootstrapSchema(ctx context.Context, request SchemaB
 			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
 		}
 	}()
-	if err := enforceSQLiteDecisionCardLifecycleOutboxCutoff(ctx, conn); err != nil {
-		return err
-	}
 	report, err := inspectSQLiteCompatibility(ctx, conn, expected)
 	if err != nil {
 		return err
@@ -69,8 +70,8 @@ func (s *SQLiteSchemaStore) BootstrapSchema(ctx context.Context, request SchemaB
 	if _, err := s.DB.ExecContext(ctx, `PRAGMA journal_mode = WAL`); err != nil {
 		return fmt.Errorf("enable sqlite WAL after schema acceptance: %w", err)
 	}
-	_, err = s.BindSchemaCapabilities(ctx)
-	return err
+	s.schemaAdmission.markCurrent()
+	return nil
 }
 
 func inspectSQLiteCompatibility(ctx context.Context, q schemaQueryer, expected schemaShape) (schemaCompatibilityReport, error) {
@@ -82,7 +83,7 @@ func inspectSQLiteCompatibility(ctx context.Context, q schemaQueryer, expected s
 		return schemaCompatibilityReport{State: schemaStateFresh}, nil
 	}
 	var origin *RuntimeStoreOrigin
-	var drift []string
+	drift := retiredPlatformTableDrift(tables)
 	if _, ok := tables[RuntimeStoreMetadataTable]; !ok {
 		drift = append(drift, "non-empty SQLite store has no runtime_store_metadata origin stamp")
 	} else {

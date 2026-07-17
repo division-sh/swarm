@@ -520,8 +520,7 @@ func newActivityBoringFullFlowCoordinator(t *testing.T, db *sql.DB, kind activit
 				},
 			}},
 		},
-		WorkflowStore:           store,
-		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+		WorkflowStore: store,
 	})
 	bus.coordinator = pc
 	return activityBoringFixture{db: db, bus: bus, pc: pc}

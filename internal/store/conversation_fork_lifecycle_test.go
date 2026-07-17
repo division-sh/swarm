@@ -18,7 +18,7 @@ import (
 
 func TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	s := &PostgresStore{DB: db}
+	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now)
@@ -144,7 +144,7 @@ func activeConversationForkTestClock() time.Time {
 
 func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	s := &PostgresStore{DB: db}
+	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now)
@@ -189,7 +189,7 @@ func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testi
 
 func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	s := &PostgresStore{DB: db}
+	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now)
@@ -411,7 +411,7 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 
 func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	s := &PostgresStore{DB: db}
+	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now)
@@ -606,8 +606,8 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conver
 	`, source.sessionID, source.runID, source.agentID, conversationForkSourceFlowInstance, base.Add(-3*time.Minute)); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
-	capability1 := seedManagedAgentTurnCapabilitySurface(t, &PostgresStore{DB: db}, source.runID, source.agentID, source.sessionID, source.turn1ID, "session", "global")
-	capability2 := seedManagedAgentTurnCapabilitySurface(t, &PostgresStore{DB: db}, source.runID, source.agentID, source.sessionID, source.turn2ID, "session", "global")
+	capability1 := seedManagedAgentTurnCapabilitySurface(t, admitTestPostgresStore(t, db), source.runID, source.agentID, source.sessionID, source.turn1ID, "session", "global")
+	capability2 := seedManagedAgentTurnCapabilitySurface(t, admitTestPostgresStore(t, db), source.runID, source.agentID, source.sessionID, source.turn2ID, "session", "global")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source,

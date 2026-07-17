@@ -17,8 +17,7 @@ import (
 )
 
 func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.Schedule) error {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
@@ -47,33 +46,21 @@ func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.S
 	flowInstance := sc.EffectiveFlowInstance()
 	sc.FlowInstance = flowInstance
 
-	switch caps.Schedules {
-	case SchemaFlavorCanonical:
-		return s.upsertScheduleSpec(ctx, sc)
-	default:
-		return unsupportedSchemaCapability("timers/schedules", caps.Schedules)
-	}
+	return s.upsertScheduleSpec(ctx, sc)
 }
 
 func (s *PostgresStore) CancelSchedule(ctx context.Context, agentID, eventType string) error {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(agentID) == "" || strings.TrimSpace(eventType) == "" {
 		return fmt.Errorf("agent_id and event_type are required")
 	}
-	switch caps.Schedules {
-	case SchemaFlavorCanonical:
-		return s.cancelScheduleSpec(ctx, runtimecorrelation.RunIDFromContext(ctx), agentID, eventType)
-	default:
-		return unsupportedSchemaCapability("timers/schedules", caps.Schedules)
-	}
+	return s.cancelScheduleSpec(ctx, runtimecorrelation.RunIDFromContext(ctx), agentID, eventType)
 }
 
 func (s *PostgresStore) CancelScheduleExact(ctx context.Context, sc runtimepipeline.Schedule) error {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
@@ -88,30 +75,18 @@ func (s *PostgresStore) CancelScheduleExact(ctx context.Context, sc runtimepipel
 	sc.NormalizeRunID()
 	flowInstance := sc.EffectiveFlowInstance()
 	sc.FlowInstance = flowInstance
-	switch caps.Schedules {
-	case SchemaFlavorCanonical:
-		return s.cancelScheduleExactSpec(ctx, sc)
-	default:
-		return unsupportedSchemaCapability("timers/schedules", caps.Schedules)
-	}
+	return s.cancelScheduleExactSpec(ctx, sc)
 }
 
 func (s *PostgresStore) LoadActiveSchedules(ctx context.Context) ([]runtimepipeline.Schedule, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	switch caps.Schedules {
-	case SchemaFlavorCanonical:
-		return s.loadActiveSchedulesSpec(ctx)
-	default:
-		return nil, unsupportedSchemaCapability("timers/schedules", caps.Schedules)
-	}
+	return s.loadActiveSchedulesSpec(ctx)
 }
 
 func (s *PostgresStore) MarkScheduleFired(ctx context.Context, sc runtimepipeline.Schedule) error {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
@@ -119,17 +94,11 @@ func (s *PostgresStore) MarkScheduleFired(ctx context.Context, sc runtimepipelin
 	}
 	sc = scheduleWithContextRunID(ctx, sc)
 	sc.NormalizeRunID()
-	switch caps.Schedules {
-	case SchemaFlavorCanonical:
-		return s.markScheduleFiredSpec(ctx, sc)
-	default:
-		return unsupportedSchemaCapability("timers/schedules", caps.Schedules)
-	}
+	return s.markScheduleFiredSpec(ctx, sc)
 }
 
 func (s *PostgresStore) MarkScheduleFiredExact(ctx context.Context, sc runtimepipeline.Schedule) error {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
@@ -144,12 +113,7 @@ func (s *PostgresStore) MarkScheduleFiredExact(ctx context.Context, sc runtimepi
 	sc.NormalizeRunID()
 	flowInstance := sc.EffectiveFlowInstance()
 	sc.FlowInstance = flowInstance
-	switch caps.Schedules {
-	case SchemaFlavorCanonical:
-		return s.markScheduleFiredExactSpec(ctx, sc)
-	default:
-		return unsupportedSchemaCapability("timers/schedules", caps.Schedules)
-	}
+	return s.markScheduleFiredExactSpec(ctx, sc)
 }
 
 func persistedSchedulePayload(sc runtimepipeline.Schedule) []byte {

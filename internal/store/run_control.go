@@ -30,6 +30,9 @@ func (s *PostgresStore) RunDispatchBlocked(ctx context.Context, runID string) (b
 	if s == nil || s.DB == nil {
 		return false, fmt.Errorf("postgres store is required")
 	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return false, err
+	}
 	runID = nullUUIDString(runID)
 	if runID == "" {
 		return false, nil
@@ -68,15 +71,11 @@ func (s *PostgresStore) runControlTransition(ctx context.Context, req runtimerun
 	if req.ControlledBy == "" {
 		req.ControlledBy = "api.v1"
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return runtimeruncontrol.State{}, err
 	}
-	if !caps.Events.HasRuns {
-		return runtimeruncontrol.State{}, fmt.Errorf("runs table is required")
-	}
 	var state runtimeruncontrol.State
-	err = s.runAuthorActivityMutation(ctx, "postgres run control transition", func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runAuthorActivityMutation(ctx, "postgres run control transition", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		state, err = lockRunControlState(txctx, tx, runID)
 		if err != nil {
@@ -91,7 +90,7 @@ func (s *PostgresStore) runControlTransition(ctx context.Context, req runtimerun
 			if err := rejectPostgresStandingRunStopTx(txctx, tx, runID); err != nil {
 				return err
 			}
-			state, err = s.stopRunControlTx(txctx, tx, caps, state, req)
+			state, err = s.stopRunControlTx(txctx, tx, state, req)
 		case "pause":
 			state, err = pauseRunControlTx(txctx, tx, state, req)
 		case "continue":
@@ -231,7 +230,7 @@ func continueRunControlTx(ctx context.Context, tx *sql.Tx, state runtimeruncontr
 	return state, nil
 }
 
-func (s *PostgresStore) stopRunControlTx(ctx context.Context, tx *sql.Tx, caps StoreSchemaCapabilities, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+func (s *PostgresStore) stopRunControlTx(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
 	switch state.Status {
 	case "running", "paused":
 	case "completed", "failed", "cancelled", "forked":
@@ -239,14 +238,14 @@ func (s *PostgresStore) stopRunControlTx(ctx context.Context, tx *sql.Tx, caps S
 	default:
 		return runtimeruncontrol.State{}, fmt.Errorf("unsupported run status %q", state.Status)
 	}
-	abandoned, err := s.quiesceStoppedRunWorkTx(ctx, tx, caps, state.RunID, req.Reason, req.Now.UTC())
+	abandoned, err := s.quiesceStoppedRunWorkTx(ctx, tx, state.RunID, req.Reason, req.Now.UTC())
 	if err != nil {
 		return runtimeruncontrol.State{}, err
 	}
 	if err := supersedeDecisionCardsForRun(ctx, tx, state.RunID, "run_stopped", req.Now.UTC(), false, true); err != nil {
 		return runtimeruncontrol.State{}, err
 	}
-	if _, err := storerunlifecycle.MarkTerminal(ctx, tx, state.RunID, "cancelled", nil, req.Now.UTC(), runLifecycleOptions(caps)); err != nil {
+	if _, err := storerunlifecycle.MarkTerminal(ctx, tx, state.RunID, "cancelled", nil, req.Now.UTC(), runLifecycleOptions()); err != nil {
 		return runtimeruncontrol.State{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -283,10 +282,7 @@ func rejectPostgresStandingRunStopTx(ctx context.Context, tx *sql.Tx, runID stri
 	return fmt.Errorf("run %s is owned by standing service %s; use `swarm standing suspend %s` or `swarm standing reset %s`", runID, serviceID, serviceID, serviceID)
 }
 
-func (s *PostgresStore) quiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx, caps StoreSchemaCapabilities, runID, reason string, now time.Time) (int, error) {
-	if caps.Events.Deliveries != SchemaFlavorCanonical || !caps.Events.DeliveryRunID {
-		return 0, fmt.Errorf("run stop requires canonical event_deliveries.run_id")
-	}
+func (s *PostgresStore) quiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx, runID, reason string, now time.Time) (int, error) {
 	deliveries, err := lockActiveRunQuiescenceDeliveriesTx(ctx, tx, []string{runID})
 	if err != nil {
 		return 0, err
@@ -312,13 +308,7 @@ func (s *PostgresStore) quiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx,
 	return len(deliveries), nil
 }
 
-func (s *PostgresStore) abandonPendingRunDeliveriesTx(ctx context.Context, tx *sql.Tx, caps StoreSchemaCapabilities, runID string) (int, error) {
-	if caps.Events.Deliveries != SchemaFlavorCanonical || !caps.Events.DeliveryRunID {
-		if caps.Events.Deliveries != SchemaFlavorCanonical {
-			return 0, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-		}
-		return 0, fmt.Errorf("run stop requires canonical event_deliveries.run_id")
-	}
+func (s *PostgresStore) abandonPendingRunDeliveriesTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT d.delivery_id::text, d.event_id::text, d.subscriber_type, d.subscriber_id, COALESCE(d.retry_count, 0)
 		FROM event_deliveries d

@@ -26,7 +26,7 @@ import (
 
 func TestPostgresEventAdmissionRejectsMalformedChildDirectAppend(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
 	err := pg.AppendEvent(ctx, eventtest.MalformedChildWithoutRunLineage(
@@ -854,7 +854,7 @@ func terminalEventAdmissionEvent(eventID, runID, payload string, createdAt time.
 
 func TestPostgresEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritativeFacts(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
 	err := pg.AppendEvent(ctx, eventtest.MalformedProjectionWithoutAuthoritativeFacts(
@@ -969,7 +969,7 @@ func TestSQLiteDiagnosticDirectEventsRequireClosedTypedOwners(t *testing.T) {
 
 func TestPostgresDiagnosticDirectEventsRequireClosedTypedOwners(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	store := &PostgresStore{DB: db}
+	store := admitTestPostgresStore(t, db)
 	assertDiagnosticDirectEventsRequireClosedTypedOwners(t, func(ctx context.Context, evt events.Event) error {
 		return store.AppendEvent(ctx, evt)
 	})
@@ -1023,7 +1023,7 @@ type globalRuntimeLogIdentityHarness struct {
 
 func TestPostgresGlobalRuntimeLogIdentityIsIdempotentAndNonRouted(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	store := &PostgresStore{DB: db}
+	store := admitTestPostgresStore(t, db)
 	assertGlobalRuntimeLogIdentity(t, globalRuntimeLogIdentityHarness{
 		append: store.AppendEvent,
 		appendTx: func(ctx context.Context, evt events.Event) error {
@@ -1123,7 +1123,7 @@ func assertGlobalRuntimeLogIdentity(t *testing.T, harness globalRuntimeLogIdenti
 
 func TestPostgresRunScopedRuntimeLogRequiresExistingRun(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	store := &PostgresStore{DB: db}
+	store := admitTestPostgresStore(t, db)
 	assertRunScopedRuntimeLogRequiresExistingRun(t, store.AppendEvent, func(ctx context.Context, runID, eventID string) (int, int, error) {
 		var runCount, eventCount int
 		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE run_id = $1::uuid`, runID).Scan(&runCount); err != nil {
@@ -1177,7 +1177,7 @@ func assertRunScopedRuntimeLogRequiresExistingRun(
 
 func TestPostgresRuntimeLogWriterUsesAdmissionFactsAndRemainsNonRouted(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
 	logger := runtimepkg.NewRuntimeLogger(pg)

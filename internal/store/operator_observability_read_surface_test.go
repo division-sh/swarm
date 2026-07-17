@@ -14,7 +14,7 @@ import (
 func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -135,7 +135,7 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 func TestOperatorObservabilityEventOwnerDoesNotPromotePayloadEntityIdentity(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 
 	runID := uuid.NewString()
 	targetEntityID := uuid.NewString()
@@ -203,7 +203,7 @@ func TestOperatorObservabilityEventOwnerDoesNotPromotePayloadEntityIdentity(t *t
 func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 
 	runID := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
@@ -336,7 +336,7 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 func TestPostgresRuntimeLogSourceFilterMatchesProjectionFallback(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 
 	runID := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
@@ -478,7 +478,7 @@ func assertRuntimeLogIDsAndSources(t *testing.T, logs []OperatorRuntimeLogEntry,
 func TestOperatorRuntimeLogsFilterBySessionAndTimeWindow(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 
 	runID := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
@@ -533,7 +533,7 @@ func TestOperatorRuntimeLogsFilterBySessionAndTimeWindow(t *testing.T) {
 func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 
 	bundleA := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	bundleB := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -614,7 +614,7 @@ func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 
 	runID := uuid.NewString()
 	base := time.Unix(1700000300, 0).UTC()
@@ -697,7 +697,7 @@ func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 func TestRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 
 	runID := uuid.NewString()
 	businessEvent := uuid.NewString()
@@ -734,7 +734,7 @@ func TestRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 func TestRunDebugTracePageTypedFilters(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 
 	runID := uuid.NewString()
 	entityOne := uuid.NewString()

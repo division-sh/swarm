@@ -38,7 +38,7 @@ func newForkedConsumerTestBackend(t *testing.T, backend string) *forkedConsumerT
 	case "postgres":
 		_, db, _ := testutil.StartPostgres(t)
 		out.db = db
-		out.postgres = &PostgresStore{DB: db}
+		out.postgres = admitTestPostgresStore(t, db)
 		if _, err := db.Exec(`INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'running', $2, 'ephemeral', $3)`, out.sourceRun, authorActivityTestBundleHash, now.Add(-time.Hour)); err != nil {
 			t.Fatal(err)
 		}

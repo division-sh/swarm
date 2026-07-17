@@ -208,7 +208,6 @@ rows:
       - {kind: issue, issue: 1293}
       - {kind: go_test, name: TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority}
       - {kind: go_test, name: TestPipelineCoordinatorInterceptReplayScopeMarkerDoesNotAuthorizeConcreteNode}
-      - {kind: go_test, name: TestPipelineCoordinatorInterceptSkipsWhenCanonicalDeliveryAuthorityUnavailable}
       - {kind: go_test, name: TestPipelineCoordinatorInterceptSettlesAuthorizedNodeDelivery}
       - {kind: go_test, name: TestSystemNodeRunner_SkipsWithoutPersistedNodeDeliveryAuthority}
       - {kind: go_test, name: TestSystemNodeProcessedSettlementFailsWithoutNodeDeliveryAuthority}

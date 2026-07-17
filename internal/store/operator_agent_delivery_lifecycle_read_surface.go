@@ -105,7 +105,7 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryLifecycl
 	if err != nil {
 		return OperatorAgentDeliveryLifecycleList{}, err
 	}
-	if err := r.requireAgentDeliveryLifecycleCapabilities(ctx); err != nil {
+	if err := r.requireAgentDeliveryLifecycleAccess(); err != nil {
 		return OperatorAgentDeliveryLifecycleList{}, err
 	}
 	if err := r.ensureAgentDeliveryLifecycleAgentExists(ctx, agentID); err != nil {
@@ -134,7 +134,7 @@ func (s *SQLiteRuntimeStore) LoadOperatorAgentDeliveryLifecycle(ctx context.Cont
 	if err != nil {
 		return OperatorAgentDeliveryLifecycleList{}, err
 	}
-	if err := s.requireSQLiteAgentDeliveryLifecycleCapabilities(ctx); err != nil {
+	if err := s.requireSQLiteAgentDeliveryLifecycleAccess(); err != nil {
 		return OperatorAgentDeliveryLifecycleList{}, err
 	}
 	if err := s.ensureSQLiteAgentDeliveryLifecycleAgentExists(ctx, agentID); err != nil {
@@ -183,81 +183,18 @@ func defaultOperatorAgentDeliveryLifecycleOptions(opts OperatorAgentDeliveryLife
 	return opts, nil
 }
 
-func (r *OperatorAgentConversationReadSurface) requireAgentDeliveryLifecycleCapabilities(ctx context.Context) error {
+func (r *OperatorAgentConversationReadSurface) requireAgentDeliveryLifecycleAccess() error {
 	if r == nil || r.db == nil {
 		return fmt.Errorf("operator agent delivery lifecycle read owner requires postgres store")
 	}
-	caps, err := r.resolveConversationCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	if err := requireAgentDeliveryLifecycleSchemaCapabilities(caps); err != nil {
-		return err
-	}
-	catalog, err := loadSchemaColumnCatalog(ctx, r.db)
-	if err != nil {
-		return err
-	}
-	if err := requireAgentDeliveryLifecycleColumnCatalog(catalog); err != nil {
-		return err
-	}
-	return nil
+	return r.owner.requireCurrentSchema()
 }
 
-func (s *SQLiteRuntimeStore) requireSQLiteAgentDeliveryLifecycleCapabilities(ctx context.Context) error {
+func (s *SQLiteRuntimeStore) requireSQLiteAgentDeliveryLifecycleAccess() error {
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("sqlite runtime store is required")
 	}
-	caps, err := s.ResolveSchemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	if err := requireAgentDeliveryLifecycleSchemaCapabilities(caps); err != nil {
-		return err
-	}
-	catalog, err := loadSQLiteSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
-		return err
-	}
-	if err := requireAgentDeliveryLifecycleColumnCatalog(catalog); err != nil {
-		return err
-	}
-	return nil
-}
-
-func requireAgentDeliveryLifecycleSchemaCapabilities(caps StoreSchemaCapabilities) error {
-	switch {
-	case caps.Agents != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("agents", caps.Agents)
-	case caps.Events.Log != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("events", caps.Events.Log)
-	case !caps.Events.LogRunID:
-		return fmt.Errorf("agent delivery lifecycle read owner requires canonical events.run_id")
-	case caps.Events.Deliveries != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	}
-	return nil
-}
-
-func requireAgentDeliveryLifecycleColumnCatalog(catalog schemaColumnCatalog) error {
-	required := map[string][]string{
-		"agents": {
-			"agent_id", "status",
-		},
-		"events": {
-			"event_id", "run_id", "event_name", "entity_id",
-		},
-		"event_deliveries": {
-			"delivery_id", "run_id", "event_id", "subscriber_type", "subscriber_id",
-			"status", "retry_count", "reason_code", "failure", "started_at", "delivered_at", "created_at",
-		},
-	}
-	for table, columns := range required {
-		if !catalog.hasColumns(table, columns...) {
-			return fmt.Errorf("agent delivery lifecycle read owner requires canonical %s columns: %s", table, strings.Join(columns, ", "))
-		}
-	}
-	return nil
+	return s.requireCurrentSchema()
 }
 
 func (r *OperatorAgentConversationReadSurface) ensureAgentDeliveryLifecycleAgentExists(ctx context.Context, agentID string) error {

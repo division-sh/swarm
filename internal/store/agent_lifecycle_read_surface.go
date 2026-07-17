@@ -25,19 +25,8 @@ type agentLifecycleDeliveryRecord struct {
 	DeliveredAt     sql.NullTime
 }
 
-func RequireCanonicalAgentLifecycleCapabilities(caps StoreSchemaCapabilities) error {
-	if caps.Events.Deliveries == SchemaFlavorCanonical {
-		return nil
-	}
-	return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-}
-
 func (s *PostgresStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]AgentDeliveryLifecycleFacts, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := RequireCanonicalAgentLifecycleCapabilities(caps); err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
 	normalized := normalizePendingAgentIDs(agentIDs)

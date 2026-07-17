@@ -2169,13 +2169,12 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 	store := NewWorkflowInstanceStore(db)
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
-		bus:                     bus,
-		db:                      db,
-		module:                  module,
-		workflowStore:           store,
-		expressionEval:          newWorkflowExpressionEvaluator(),
-		entityLocks:             map[string]*sync.Mutex{},
-		eventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+		bus:            bus,
+		db:             db,
+		module:         module,
+		workflowStore:  store,
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
 	}
 
 	const (

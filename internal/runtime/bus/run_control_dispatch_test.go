@@ -12,7 +12,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
-	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -22,7 +22,7 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	t.Cleanup(cleanup)
 
 	ctx := testAuthorActivityContext(context.Background())
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eb, err := newScopedTestEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -106,7 +106,7 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 	t.Cleanup(cleanup)
 
 	ctx := testAuthorActivityContext(context.Background())
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eb, err := newScopedTestEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -167,7 +167,7 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 	t.Cleanup(cleanup)
 
 	ctx := testAuthorActivityContext(context.Background())
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eventType := events.EventType("custom.run_control.intercepted")
 	deferredType := events.EventType("custom.run_control.deferred")
 	recorder := &runControlRecordingInterceptor{
@@ -239,7 +239,7 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 	t.Cleanup(cleanup)
 
 	ctx := testAuthorActivityContext(context.Background())
-	pg := &store.PostgresStore{DB: db}
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eventType := events.EventType("custom.run_control.postcommit")
 	deferredType := events.EventType("custom.run_control.postcommit.deferred")
 	recorder := &runControlRecordingInterceptor{

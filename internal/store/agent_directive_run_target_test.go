@@ -13,7 +13,7 @@ func TestPostgresStoreResolveAgentDirectiveRunTarget(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	ctx := testAuthorActivityContext()
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 	createDirectiveRunTargetTables(t, ctx, pg)
 
 	runA := "00000000-0000-0000-0000-0000000000a1"

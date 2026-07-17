@@ -12,12 +12,8 @@ func (s *SQLiteRuntimeStore) ListV1MailboxItems(ctx context.Context, opts Mailbo
 	if s == nil || s.DB == nil {
 		return nil, "", fmt.Errorf("sqlite runtime store is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return nil, "", err
-	}
-	if caps.Mailbox != SchemaFlavorCanonical {
-		return nil, "", unsupportedSchemaCapability("mailbox", caps.Mailbox)
 	}
 	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
 		return nil, "", err
@@ -86,12 +82,8 @@ func (s *SQLiteRuntimeStore) GetV1MailboxItem(ctx context.Context, id string) (M
 	if s == nil || s.DB == nil {
 		return MailboxV1ItemDetail{}, fmt.Errorf("sqlite runtime store is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return MailboxV1ItemDetail{}, err
-	}
-	if caps.Mailbox != SchemaFlavorCanonical {
-		return MailboxV1ItemDetail{}, unsupportedSchemaCapability("mailbox", caps.Mailbox)
 	}
 	if strings.TrimSpace(id) == "" {
 		return MailboxV1ItemDetail{}, ErrMailboxV1NotFound

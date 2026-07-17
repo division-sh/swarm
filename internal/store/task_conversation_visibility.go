@@ -3,21 +3,12 @@ package store
 // CanonicalStatelessConversationVisibilitySourceSQL returns the canonical
 // stateless conversation visibility contract: audits are visible only from
 // agent_conversation_audits.
-func CanonicalStatelessConversationVisibilitySourceSQL(caps ConversationSchemaCapabilities) string {
-	if caps.Audits != SchemaFlavorCanonical {
-		return ""
-	}
-	runID := "''"
-	if caps.AuditRunID {
-		runID = "COALESCE(run_id::text, '')"
-	}
-	// Keep run_id in the projection even when the audit table lacks that
-	// column so shared conversation readers can always select it safely.
+func CanonicalStatelessConversationVisibilitySourceSQL() string {
 	return `
 		SELECT
 			session_id::text AS session_id,
 			agent_id,
-			` + runID + ` AS run_id,
+			COALESCE(run_id::text, '') AS run_id,
 			COALESCE(flow_instance, '') AS flow_instance,
 			memory_enabled,
 			memory_source,

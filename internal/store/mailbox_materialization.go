@@ -21,14 +21,10 @@ func (s *PostgresStore) MaterializeMailboxWrite(ctx context.Context, item runtim
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("postgres store is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	if caps.Mailbox != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("mailbox", caps.Mailbox)
-	}
-	item, err = normalizeMailboxWriteMaterialization(item)
+	item, err := normalizeMailboxWriteMaterialization(item)
 	if err != nil {
 		return err
 	}
@@ -54,14 +50,10 @@ func (s *SQLiteRuntimeStore) MaterializeMailboxWrite(ctx context.Context, item r
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("sqlite runtime store is required")
 	}
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	if caps.Mailbox != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("mailbox", caps.Mailbox)
-	}
-	item, err = normalizeMailboxWriteMaterialization(item)
+	item, err := normalizeMailboxWriteMaterialization(item)
 	if err != nil {
 		return err
 	}

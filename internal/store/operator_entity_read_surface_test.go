@@ -14,7 +14,7 @@ import (
 func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
+	pg := admitTestPostgresStore(t, db)
 
 	runA := uuid.NewString()
 	runB := uuid.NewString()

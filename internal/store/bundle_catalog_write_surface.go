@@ -38,7 +38,7 @@ func (e *BundleCatalogConflictError) Is(target error) bool {
 }
 
 func (s *PostgresStore) UpsertBundleCatalog(ctx context.Context, req BundleCatalogUpsert) (BundleCatalogUpsertResult, error) {
-	if err := s.requireBundleCatalogCapabilities(ctx); err != nil {
+	if err := s.requireBundleCatalogAccess(); err != nil {
 		return BundleCatalogUpsertResult{}, err
 	}
 	req.BundleHash = strings.TrimSpace(req.BundleHash)

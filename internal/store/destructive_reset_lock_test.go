@@ -13,6 +13,7 @@ func TestPostgresStore_TryAcquireSerializesDestructiveResetLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
 	ctx := testAuthorActivityContext()

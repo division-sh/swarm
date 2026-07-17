@@ -273,59 +273,15 @@ func normalizedUniqueStrings(values []string) []string {
 	return out
 }
 
-func RequireCanonicalRunDebugCapabilities(caps StoreSchemaCapabilities, catalog schemaColumnCatalog) error {
-	switch {
-	case caps.Events.Log != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("events", caps.Events.Log)
-	case !caps.Events.LogRunID:
-		return fmt.Errorf("run debug read surface requires canonical events.run_id")
-	case caps.Events.Deliveries != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	case !caps.Events.DeliveryRunID:
-		return fmt.Errorf("run debug read surface requires canonical event_deliveries.run_id")
-	case caps.EntityState != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("entity_state", caps.EntityState)
-	case !caps.EntityRunID:
-		return fmt.Errorf("run debug read surface requires canonical entity_state.run_id")
-	case caps.Conversations.Turns != SchemaFlavorCanonical:
-		return unsupportedSchemaCapability("agent_turns", caps.Conversations.Turns)
-	case !caps.Conversations.TurnRunID:
-		return fmt.Errorf("run debug read surface requires canonical agent_turns.run_id")
-	}
-	required := map[string][]string{
-		"runs":              {"run_id", "status", "failure", "started_at", "ended_at", "entity_count"},
-		"run_control_state": {"run_id", "reason"},
-		"entity_state":      {"run_id", "entity_id"},
-		"event_deliveries":  {"delivery_id", "run_id", "event_id", "subscriber_type", "subscriber_id", "delivery_payload_projection", "status", "retry_count", "reason_code", "failure", "active_session_id", "created_at", "started_at", "delivered_at"},
-		"dead_letters":      {"dead_letter_id", "original_event_id", "original_event", "entity_id", "failure", "retry_count", "chain_depth", "handler_node", "created_at"},
-		"entity_mutations":  {"mutation_id", "run_id", "entity_id", "field", "old_value", "new_value", "caused_by_event", "writer_type", "writer_id", "handler_step", "created_at"},
-	}
-	for tableName, columns := range required {
-		if catalog.hasColumns(tableName, columns...) {
-			continue
-		}
-		return fmt.Errorf("run debug read surface requires %s columns %v", tableName, columns)
-	}
-	return nil
-}
-
-func (s *PostgresStore) requireRunDebugCapabilities(ctx context.Context) error {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
-		return err
-	}
-	return RequireCanonicalRunDebugCapabilities(caps, catalog)
+func (s *PostgresStore) requireRunDebugAccess() error {
+	return s.requireCurrentSchema()
 }
 
 func (s *PostgresStore) ResolveLatestRunDebugRunID(ctx context.Context) (string, error) {
 	if s == nil || s.DB == nil {
 		return "", fmt.Errorf("postgres store is required")
 	}
-	if err := s.requireRunDebugCapabilities(ctx); err != nil {
+	if err := s.requireRunDebugAccess(); err != nil {
 		return "", err
 	}
 	var runID string
@@ -356,7 +312,7 @@ func (s *PostgresStore) ListRunDebugRuns(ctx context.Context, limit int) ([]RunD
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
-	if err := s.requireRunDebugCapabilities(ctx); err != nil {
+	if err := s.requireRunDebugAccess(); err != nil {
 		return nil, err
 	}
 	if limit <= 0 {
@@ -438,7 +394,7 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 	if s == nil || s.DB == nil {
 		return RunDebugReport{}, fmt.Errorf("postgres store is required")
 	}
-	if err := s.requireRunDebugCapabilities(ctx); err != nil {
+	if err := s.requireRunDebugAccess(); err != nil {
 		return RunDebugReport{}, err
 	}
 	runID = strings.TrimSpace(runID)
@@ -876,7 +832,7 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 	if s == nil || s.DB == nil {
 		return nil, "", fmt.Errorf("postgres store is required")
 	}
-	if err := s.requireRunDebugCapabilities(ctx); err != nil {
+	if err := s.requireRunDebugAccess(); err != nil {
 		return nil, "", err
 	}
 	runID = strings.TrimSpace(runID)
@@ -895,15 +851,8 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 		return nil, "", ErrRunNotFound
 	}
 
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return nil, "", err
-	}
-	sessionSources := runDebugTraceSessionSources(caps)
-	replyContextSelect := "''"
-	if caps.Events.DeliveryContext {
-		replyContextSelect = "COALESCE(d.delivery_context->'reply'->>'id', '')"
-	}
+	sessionSources := runDebugTraceSessionSources()
+	replyContextSelect := "COALESCE(d.delivery_context->'reply'->>'id', '')"
 	args := []any{runID}
 	cursorWhere := ""
 	if opts.Cursor != "" {
@@ -1196,55 +1145,28 @@ func nullableCursorTimestamp(timestamp string) string {
 	return strings.TrimSpace(timestamp)
 }
 
-func runDebugTraceSessionSources(caps StoreSchemaCapabilities) string {
-	sources := []string{}
-	if caps.Conversations.Sessions == SchemaFlavorCanonical {
-		runIDExpr := "NULL::uuid"
-		if caps.Conversations.SessionRunID {
-			runIDExpr = "run_id"
-		}
-		sources = append(sources, `
+func runDebugTraceSessionSources() string {
+	sources := []string{`
 			SELECT
 				session_id,
-				`+runIDExpr+`,
+				run_id,
 				'live_session' AS session_kind,
 				memory_enabled,
 				memory_source,
 				COALESCE(status, '') AS status,
 				updated_at
 			FROM agent_sessions
-		`)
-	}
-	if caps.Conversations.Audits == SchemaFlavorCanonical {
-		runIDExpr := "NULL::uuid"
-		if caps.Conversations.AuditRunID {
-			runIDExpr = "run_id"
-		}
-		sources = append(sources, `
+		`, `
 			SELECT
 				session_id,
-				`+runIDExpr+`,
+				run_id,
 				'turn_audit' AS session_kind,
 				memory_enabled,
 				memory_source,
 				COALESCE(status, '') AS status,
 				updated_at
 			FROM agent_conversation_audits
-		`)
-	}
-	if len(sources) == 0 {
-		return `
-			SELECT
-				NULL::uuid AS session_id,
-				NULL::uuid AS run_id,
-				''::text AS session_kind,
-				false AS memory_enabled,
-				''::text AS memory_source,
-				''::text AS status,
-				NULL::timestamptz AS updated_at
-			WHERE FALSE
-		`
-	}
+		`}
 	return strings.Join(sources, "\nUNION ALL\n")
 }
 

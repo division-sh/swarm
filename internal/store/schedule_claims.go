@@ -13,12 +13,8 @@ import (
 )
 
 func (s *PostgresStore) ClaimSchedule(ctx context.Context, sc runtimepipeline.Schedule) (bool, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
+	if err := s.requireCurrentSchema(); err != nil {
 		return false, err
-	}
-	if caps.Schedules != SchemaFlavorCanonical {
-		return false, unsupportedSchemaCapability("timers/schedules", caps.Schedules)
 	}
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
 		return false, fmt.Errorf("agent_id and event_type are required")

@@ -85,12 +85,9 @@ func runForkReplayResumeAdmissionWithTimerReconstruction(admission RunForkReplay
 	return admission
 }
 
-func (s *PostgresStore) planRunForkSelectedContractTimerReconstruction(ctx context.Context, catalog schemaColumnCatalog, plan RunForkPlan) (runForkTimerReconstructionPlan, error) {
+func (s *PostgresStore) planRunForkSelectedContractTimerReconstruction(ctx context.Context, plan RunForkPlan) (runForkTimerReconstructionPlan, error) {
 	if !runForkPlanHasTimerBlocker(plan) {
 		return runForkTimerReconstructionPlan{}, nil
-	}
-	if !catalog.hasColumns("timers", "run_id", "source_timer_id", "forked_from_run_id", "forked_from_event_id", "reconstruction_owner") {
-		return runForkTimerReconstructionPlan{}, fmt.Errorf("selected-contract timer reconstruction requires run-scoped timer lineage columns")
 	}
 	facts := loadRunForkSourceFactsFromRevision(plan.historicalSnapshot, plan.Entities)
 	rows, err := loadRunForkReconstructableSourceTimersFromRevision(plan.historicalSnapshot, facts)

@@ -171,10 +171,6 @@ type AgentLifecycleDiagnosticPersistence interface {
 	MarkAgentLifecycleDiagnosticProjected(context.Context, string, time.Time) error
 }
 
-type EntitySchemaPersistence interface {
-	EnsureEntitySchema(ctx context.Context, entityID string) error
-}
-
 type ReceiptPersistence interface {
 	UpsertEventReceipt(ctx context.Context, eventID, agentID string, status ReceiptStatus, failure *runtimefailures.Envelope) error
 }
@@ -186,7 +182,6 @@ type PendingEventPersistence interface {
 
 type ManagerPersistence interface {
 	AgentPersistence
-	EntitySchemaPersistence
 	ReceiptPersistence
 	PendingEventPersistence
 }

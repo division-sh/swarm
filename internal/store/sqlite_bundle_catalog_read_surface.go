@@ -8,22 +8,12 @@ import (
 	"strings"
 )
 
-func (s *SQLiteRuntimeStore) requireBundleCatalogCapabilities(ctx context.Context) error {
-	if s == nil || s.DB == nil {
-		return fmt.Errorf("sqlite runtime store is required")
-	}
-	catalog, err := loadSQLiteSchemaColumnCatalog(ctx, s.DB)
-	if err != nil {
-		return err
-	}
-	if catalog.hasColumns("bundles", "bundle_hash", "content_yaml", "parsed_json", "data_blob", "metadata", "ingested_at") {
-		return nil
-	}
-	return fmt.Errorf("bundle catalog read surface requires bundles columns [bundle_hash content_yaml parsed_json data_blob metadata ingested_at]")
+func (s *SQLiteRuntimeStore) requireBundleCatalogAccess() error {
+	return s.requireCurrentSchema()
 }
 
 func (s *SQLiteRuntimeStore) ListBundleCatalog(ctx context.Context, opts BundleCatalogListOptions) (BundleCatalogListResult, error) {
-	if err := s.requireBundleCatalogCapabilities(ctx); err != nil {
+	if err := s.requireBundleCatalogAccess(); err != nil {
 		return BundleCatalogListResult{}, err
 	}
 	opts = defaultBundleCatalogListOptions(opts)
@@ -92,7 +82,7 @@ func (s *SQLiteRuntimeStore) ListBundleCatalog(ctx context.Context, opts BundleC
 }
 
 func (s *SQLiteRuntimeStore) LoadBundleCatalog(ctx context.Context, bundleHash string) (BundleCatalogDetail, error) {
-	if err := s.requireBundleCatalogCapabilities(ctx); err != nil {
+	if err := s.requireBundleCatalogAccess(); err != nil {
 		return BundleCatalogDetail{}, err
 	}
 	bundleHash = strings.TrimSpace(bundleHash)

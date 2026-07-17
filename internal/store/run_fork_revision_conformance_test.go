@@ -452,7 +452,7 @@ func TestRunForkRevisionCaptureOrdersMultiRunLocksDeterministically(t *testing.T
 func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testAuthorActivityContext()
-	store := &PostgresStore{DB: db}
+	store := admitTestPostgresStore(t, db)
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 	agentID := "revision-lifecycle-agent"
 	agent := runtimemanager.PersistedAgent{
@@ -553,7 +553,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 func TestRunForkRevisionSessionProjectionIgnoresExcludedWriterChurnAndTracksStatusPresence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testAuthorActivityContext()
-	store := &PostgresStore{DB: db}
+	store := admitTestPostgresStore(t, db)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	agentID := "revision-session-agent"
@@ -640,7 +640,7 @@ func TestScheduleNoOpTerminalMutationsDoNotPublishRunForkRevision(t *testing.T) 
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	store := &PostgresStore{DB: db}
+	store := admitTestPostgresStore(t, db)
 
 	tests := []struct {
 		name   string
@@ -742,7 +742,7 @@ func TestRunForkRevisionDeletionPublishesTombstoneAndUnrevisionedDriftFailsClose
 	if _, err := db.ExecContext(ctx, `UPDATE events SET event_name='revision.drifted' WHERE event_id=$1::uuid`, eventID); err != nil {
 		t.Fatalf("write unrevisioned drift: %v", err)
 	}
-	if _, err := (&PostgresStore{DB: db}).PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID}); err == nil || !strings.Contains(err.Error(), "unsupported unrevisioned events facts") {
+	if _, err := (admitTestPostgresStore(t, db)).PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID}); err == nil || !strings.Contains(err.Error(), "unsupported unrevisioned events facts") {
 		t.Fatalf("PlanRunFork drift error = %v, want fail-closed unrevisioned events", err)
 	}
 }
