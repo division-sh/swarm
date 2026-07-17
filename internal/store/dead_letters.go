@@ -25,6 +25,9 @@ func (s *PostgresStore) RecordDeadLetter(ctx context.Context, rec runtimedeadlet
 }
 
 func (s *PostgresStore) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx, rec runtimedeadletters.Record) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
 	if err := runtimeauthoractivity.Require(ctx); err != nil {
 		return err
 	}
@@ -50,6 +53,9 @@ func (s *SQLiteRuntimeStore) RecordDeadLetter(ctx context.Context, rec runtimede
 }
 
 func (s *SQLiteRuntimeStore) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx, rec runtimedeadletters.Record) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
 	if tx == nil {
 		return s.runAuthorActivityMutation(ctx, "sqlite record dead letter", func(txctx context.Context, tx *sql.Tx) error {
 			return s.RecordDeadLetterTx(txctx, tx, rec)

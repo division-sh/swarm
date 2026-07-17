@@ -1752,6 +1752,8 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	if err := standaloneDB.PingContext(ctx); err != nil {
 		t.Fatalf("ping standalone PostgreSQL handle: %v", err)
 	}
+	servedStore := storetest.AdmitPostgresRuntimeStore(t, servedDB)
+	standaloneStore := storetest.AdmitPostgresRuntimeStore(t, standaloneDB)
 
 	selection := store.RunForkContractSelection{
 		Mode:            "selected_contracts",
@@ -1801,20 +1803,19 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	results := make(chan contenderResult, 2)
 	contenders := []struct {
 		surface string
-		db      *sql.DB
+		store   *store.PostgresStore
 	}{
-		{surface: "served", db: servedDB},
-		{surface: "standalone", db: standaloneDB},
+		{surface: "served", store: servedStore},
+		{surface: "standalone", store: standaloneStore},
 	}
 	for _, contender := range contenders {
 		contender := contender
 		go func() {
 			<-start
-			pg := &store.PostgresStore{DB: contender.db}
 			req := baseRequest
-			req.Store = pg
+			req.Store = contender.store
 			container, buildErr := buildSelectedContractForkLocalRuntimeContainer(ctx, req)
-			results <- contenderResult{surface: contender.surface, container: container, store: pg, err: buildErr}
+			results <- contenderResult{surface: contender.surface, container: container, store: contender.store, err: buildErr}
 		}()
 	}
 	close(start)

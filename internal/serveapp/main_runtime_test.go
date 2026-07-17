@@ -3933,7 +3933,7 @@ func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlP
 
 func runServedLiveAgentReplayBacklogLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
-	backlogRunID, backlogEventID := seedServedLiveAgentPendingBacklogDelivery(t, rt.DB, rt.Backend)
+	backlogRunID, backlogEventID := seedServedLiveAgentPendingBacklogDelivery(t, rt)
 	backlogKey := "issue-1910-" + rt.Backend + "-" + backlogRunID + "-agent-replay-backlog"
 	var backlog servedAgentReplayBacklogProofResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.replay_backlog", map[string]any{
@@ -4416,8 +4416,10 @@ func requireServedLiveAgentReplayDeliveryPair(t *testing.T, backend string, orig
 	}
 }
 
-func seedServedLiveAgentPendingBacklogDelivery(t *testing.T, db *sql.DB, backend string) (string, string) {
+func seedServedLiveAgentPendingBacklogDelivery(t *testing.T, rt servedControlProofRuntime) (string, string) {
 	t.Helper()
+	db := rt.DB
+	backend := rt.Backend
 	ctx := context.Background()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -4453,7 +4455,10 @@ func seedServedLiveAgentPendingBacklogDelivery(t *testing.T, db *sql.DB, backend
 		`, deliveryID, runID, eventID, now); err != nil {
 			t.Fatalf("seed postgres live-agent backlog delivery: %v", err)
 		}
-		if err := (&store.PostgresStore{DB: db}).UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", nil); err != nil {
+		if rt.Postgres == nil {
+			t.Fatal("served postgres store owner is required for live-agent backlog seed")
+		}
+		if err := rt.Postgres.UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", nil); err != nil {
 			t.Fatalf("seed postgres live-agent backlog pipeline receipt: %v", err)
 		}
 	case "sqlite":
@@ -4475,8 +4480,10 @@ func seedServedLiveAgentPendingBacklogDelivery(t *testing.T, db *sql.DB, backend
 		`, deliveryID, runID, eventID, now); err != nil {
 			t.Fatalf("seed sqlite live-agent backlog delivery: %v", err)
 		}
-		sqliteStore := &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: db}}
-		if err := sqliteStore.UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", nil); err != nil {
+		if rt.SQLite == nil {
+			t.Fatal("served sqlite store owner is required for live-agent backlog seed")
+		}
+		if err := rt.SQLite.UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", nil); err != nil {
 			t.Fatalf("seed sqlite live-agent backlog pipeline receipt: %v", err)
 		}
 	default:
@@ -4600,7 +4607,10 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 			`, deliveryID, runID, eventID, now); err != nil {
 			t.Fatalf("seed postgres run-control pending delivery: %v", err)
 		}
-		if err := (&store.PostgresStore{DB: db}).UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", nil); err != nil {
+		if rt.Postgres == nil {
+			t.Fatal("served postgres store owner is required for run-control seed")
+		}
+		if err := rt.Postgres.UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", nil); err != nil {
 			t.Fatalf("seed postgres run-control pipeline receipt: %v", err)
 		}
 	case "sqlite":
@@ -4622,8 +4632,10 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 			`, deliveryID, runID, eventID, now); err != nil {
 			t.Fatalf("seed sqlite run-control pending delivery: %v", err)
 		}
-		sqliteStore := &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: db}}
-		if err := sqliteStore.UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", nil); err != nil {
+		if rt.SQLite == nil {
+			t.Fatal("served sqlite store owner is required for run-control seed")
+		}
+		if err := rt.SQLite.UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", nil); err != nil {
 			t.Fatalf("seed sqlite run-control pipeline receipt: %v", err)
 		}
 	default:
