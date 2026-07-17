@@ -606,6 +606,40 @@ func TestExecutorTimerReconciliationRequiresExactEventAuthority(t *testing.T) {
 	}
 }
 
+func TestExecutorTimerReconciliationCarriesOnlyActualTransitionTarget(t *testing.T) {
+	executor := &Executor{deps: RuntimeDependencies{Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{Timers: []runtimecontracts.WorkflowTimerContract{{
+			ID: "waiting.timeout", Event: "timer.timeout", StartOn: "state:waiting", Delay: "1h",
+		}}},
+	})}}
+	createdAt := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
+	frame := executor.newExecutionFrame(stubTx{ctx: context.Background()}, ExecutionRequest{
+		EntityID: "entity-1",
+		Event: eventtest.RootIngress(
+			"event-1", "work.noted", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, createdAt,
+		),
+		State: StateSnapshot{CurrentState: "waiting"},
+	})
+
+	intents, err := executor.buildTimerIntents(&frame)
+	if err != nil {
+		t.Fatalf("build event-only timer intent: %v", err)
+	}
+	if len(intents) != 1 || intents[0].FromState != "waiting" || intents[0].ToState != "" {
+		t.Fatalf("event-only timer intents = %#v, want waiting -> empty", intents)
+	}
+
+	frame.result.NextState = "done"
+	frame.result.StateMutation.NextState = "done"
+	intents, err = executor.buildTimerIntents(&frame)
+	if err != nil {
+		t.Fatalf("build transition timer intent: %v", err)
+	}
+	if len(intents) != 1 || intents[0].FromState != "waiting" || intents[0].ToState != "done" {
+		t.Fatalf("transition timer intents = %#v, want waiting -> done", intents)
+	}
+}
+
 func testStateSnapshot(currentState string, metadata map[string]any, gates map[string]bool, buckets map[string]map[string]any) StateSnapshot {
 	return StateSnapshot{
 		CurrentState: currentState,

@@ -6229,7 +6229,7 @@ engine:
           cancel_on is invalid when start_on is boot until the platform defines an explicit global boot-timer cancellation
           primitive.
       trigger_forms:
-        state: "state:<name> starts or cancels when the entity enters the named state"
+        state: "state:<name> starts or cancels when an actual persisted transition enters the named state. Handling an event while already in that state is not a state entry."
         event: "event:<name> starts or cancels when the named event fires for the entity"
         boot: "start_on: boot starts a global schedule at platform boot. This form is only valid on start_on."
       invalid_forms:
