@@ -195,7 +195,11 @@ func (l *WorkflowTimerLifecycle) Reconcile(ctx context.Context, entityID, curren
 		activeByDeclaration[workflowTimerGenerationKey(activation.Ref.Declaration, activation.Ref.Generation)] = activation
 	}
 
-	generation, _, err := workflowLoopGenerationForStage(source, &instance, nextState)
+	generationStage := nextState
+	if generationStage == "" {
+		generationStage = currentState
+	}
+	generation, _, err := workflowLoopGenerationForStage(source, &instance, generationStage)
 	if err != nil {
 		return err
 	}

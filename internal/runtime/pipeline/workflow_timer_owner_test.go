@@ -15,6 +15,8 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -239,6 +241,118 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 			}
 			if got := statusByDeclaration["waiting.event_armed"]; got != workflowTimerStatusActive {
 				t.Fatalf("event-armed timer status = %q, want active without state-trigger cancellation", got)
+			}
+		})
+	}
+}
+
+func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			runID := runtimecorrelation.RunIDFromContext(ctx)
+			entityID := uuid.NewString()
+			createdAt := canonicalWorkflowTimerTime(time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC))
+			loopActivation, err := loopruntime.New(
+				runID, entityID, "", "revision", "revision_id", uuid.NewString(), "waiting", 3, createdAt,
+			)
+			if err != nil {
+				t.Fatalf("create loop activation: %v", err)
+			}
+			carrier := runtimeengine.NewStateCarrier(
+				map[string]any{"run_id": runID}, nil, map[string]map[string]any{},
+			)
+			if err := loopruntime.Store(carrier.StateBuckets, loopActivation); err != nil {
+				t.Fatalf("store loop activation: %v", err)
+			}
+			if err := store.Upsert(ctx, WorkflowInstance{
+				InstanceID: entityID, StorageRef: entityID, WorkflowName: "workflow-timer-owner-test",
+				WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
+				CreatedAt: createdAt, Metadata: carrier.PersistedMetadata(), StateBuckets: carrier.PersistedStateBuckets(),
+			}); err != nil {
+				t.Fatalf("seed workflow instance: %v", err)
+			}
+
+			bus := &recordingPipelineBus{}
+			pc := NewPipelineCoordinatorWithOptions(bus, store.db, PipelineCoordinatorOptions{
+				Module:        &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowTimerLoopEventBundle())},
+				WorkflowStore: store,
+			})
+			armHandler := runtimecontracts.SystemNodeEventHandler{
+				Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "waiting"},
+			}
+			execute := func(eventID, eventType, revisionID string, handler runtimecontracts.SystemNodeEventHandler) {
+				t.Helper()
+				payload := []byte(fmt.Sprintf(`{"revision_id":%q}`, revisionID))
+				eventAt := createdAt.Add(time.Minute)
+				evt := eventtest.RootIngress(
+					eventID, events.EventType(eventType), "operator", "",
+					payload, 0, runID, "",
+					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), eventAt,
+				)
+				persistWorkflowTimerLoopEvent(t, store, ctx, eventID, eventType, runID, entityID, payload, eventAt)
+				result, err := pc.executeNodeContractHandler(ctx, "observer", handler, workflowTriggerContext{
+					Event: evt, State: pc.currentWorkflowState(ctx, entityID),
+				}, false)
+				if err != nil {
+					t.Fatalf("execute %s handler: %v", eventType, err)
+				}
+				if !result.Handled {
+					t.Fatalf("%s handler was not handled", eventType)
+				}
+			}
+
+			firstEventID := uuid.NewString()
+			firstGeneration := loopActivation.Generation()
+			execute(firstEventID, "timer.arm", firstGeneration.RevisionID, armHandler)
+			execute(firstEventID, "timer.arm", firstGeneration.RevisionID, armHandler)
+			active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
+			if len(active) != 1 || !active[0].Ref.Generation.Equal(firstGeneration) {
+				t.Fatalf("first-generation exact replay activations = %#v, want one generation %#v", active, firstGeneration)
+			}
+			firstTimer := active[0]
+
+			repeatHandler := runtimecontracts.SystemNodeEventHandler{
+				Loop:       &runtimecontracts.LoopOperationSpec{Repeat: "revision", From: "waiting"},
+				AdvancesTo: "waiting",
+			}
+			execute(uuid.NewString(), "loop.repeat", firstGeneration.RevisionID, repeatHandler)
+			persistedInstance, ok, err := store.Load(ctx, entityID)
+			if err != nil || !ok {
+				t.Fatalf("load repeated workflow instance found=%v err=%v", ok, err)
+			}
+			persistedCarrier, err := runtimeengine.StateCarrierFromPersisted(persistedInstance.Metadata, persistedInstance.StateBuckets)
+			if err != nil {
+				t.Fatalf("decode repeated loop state: %v", err)
+			}
+			nextLoop, ok, err := loopruntime.Load(persistedCarrier.StateBuckets, "", "revision")
+			if err != nil || !ok {
+				t.Fatalf("load next loop generation found=%v err=%v", ok, err)
+			}
+			nextGeneration := nextLoop.Generation()
+			if nextGeneration.Equal(firstGeneration) {
+				t.Fatalf("loop repeat retained generation %#v", nextGeneration)
+			}
+			if persisted := loadWorkflowTimerOwnerActivation(t, store, ctx, firstTimer.Ref.ActivationID); persisted.Status != workflowTimerStatusCancelled {
+				t.Fatalf("superseded timer status = %q, want cancelled", persisted.Status)
+			}
+			if outcome, err := pc.FireWorkflowTimer(ctx, firstTimer.schedule()); err != nil || outcome != WorkflowTimerFireTerminal {
+				t.Fatalf("stale timer fire outcome=%q err=%v, want terminal no-op", outcome, err)
+			}
+			if bus.publishedCount() != 0 {
+				t.Fatalf("stale timer published events = %d, want 0", bus.publishedCount())
+			}
+
+			nextEventID := uuid.NewString()
+			execute(nextEventID, "timer.arm", nextGeneration.RevisionID, armHandler)
+			execute(nextEventID, "timer.arm", nextGeneration.RevisionID, armHandler)
+			active = listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
+			if len(active) != 1 || !active[0].Ref.Generation.Equal(nextGeneration) || active[0].Ref == firstTimer.Ref {
+				t.Fatalf("next-generation exact replay activations = %#v, want one new generation %#v", active, nextGeneration)
+			}
+			all := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, false)
+			if len(all) != 2 {
+				t.Fatalf("activation history = %#v, want one cancelled and one active generation", all)
 			}
 		})
 	}
@@ -1033,6 +1147,43 @@ func listWorkflowTimerOwnerActivations(t *testing.T, store *WorkflowInstanceStor
 	return activations
 }
 
+func persistWorkflowTimerLoopEvent(
+	t *testing.T,
+	store *WorkflowInstanceStore,
+	ctx context.Context,
+	eventID, eventType, runID, entityID string,
+	payload []byte,
+	createdAt time.Time,
+) {
+	t.Helper()
+	if store.isSQLite() {
+		_, err := store.db.ExecContext(ctx, `
+			INSERT INTO events (
+				event_id, execution_mode, run_id, event_name, entity_id, flow_instance,
+				scope, payload, chain_depth, produced_by_type, created_at
+			) VALUES (?, 'live', ?, ?, ?, NULL, 'entity', ?, 0, 'external', ?)
+			ON CONFLICT(event_id) DO NOTHING
+		`, eventID, runID, eventType, entityID, string(payload), createdAt.UTC())
+		if err != nil {
+			t.Fatalf("persist SQLite loop event: %v", err)
+		}
+		return
+	}
+	_, err := store.db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, run_id, event_name, entity_id, source_route, target_route, target_set,
+			scope, payload, execution_mode, chain_depth, produced_by, produced_by_type, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, $3, $4::uuid, '{}'::jsonb, '{}'::jsonb, '[]'::jsonb,
+			'entity', $5::jsonb, 'live', 0, 'operator', 'external', $6
+		)
+		ON CONFLICT(event_id) DO NOTHING
+	`, eventID, runID, eventType, entityID, string(payload), createdAt.UTC())
+	if err != nil {
+		t.Fatalf("persist PostgreSQL loop event: %v", err)
+	}
+}
+
 func workflowTimerOwnerBundle(recurring bool) *runtimecontracts.WorkflowContractBundle {
 	return workflowTimerOwnerBundleWithDelay(recurring, "1h")
 }
@@ -1060,5 +1211,20 @@ func workflowTimerEventOnlyStateTriggerBundle() *runtimecontracts.WorkflowContra
 				StartOn: "event:timer.arm", CancelOn: "state:waiting", Delay: "1h",
 			},
 		},
+	}}
+}
+
+func workflowTimerLoopEventBundle() *runtimecontracts.WorkflowContractBundle {
+	return &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+		Name: "workflow-timer-owner-test", Version: "1.0.0", InitialStage: "waiting",
+		Stages: []runtimecontracts.WorkflowStageContract{{ID: "waiting"}, {ID: "escaped"}},
+		Loops: []runtimecontracts.WorkflowLoopPlan{{
+			ID: "revision", RevisionField: "revision_id", MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3},
+			Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escaped"}, EntryStage: "waiting", RegionStages: []string{"waiting"},
+		}},
+		Timers: []runtimecontracts.WorkflowTimerContract{{
+			ID: "waiting.event_armed", Owner: "runtime", Event: "timer.event_armed",
+			StartOn: "event:timer.arm", Delay: "1h",
+		}},
 	}}
 }
