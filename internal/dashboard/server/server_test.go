@@ -1639,6 +1639,69 @@ func TestSQLAgentReader_ListGenericAgents_ScopesLiveTurnToSelectedActiveSession(
 	}
 }
 
+func TestSQLAgentReader_ListGenericAgents_PreservesTurnLimitOnSQLite(t *testing.T) {
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	db := sqliteStore.DB
+	ctx := context.Background()
+	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:            "agent-1",
+			Role:          "researcher",
+			FlowID:        "entity",
+			FlowPath:      "entity",
+			Type:          "managed",
+			Model:         "regular",
+			ExecutionMode: "live",
+			Memory:        agentmemory.Authored(true),
+		},
+		Status:    "active",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+
+	sessionOlder := uuid.NewString()
+	sessionSelected := uuid.NewString()
+	runID := uuid.NewString()
+	olderUpdatedAt := time.Date(2026, 4, 15, 3, 0, 0, 0, time.UTC)
+	selectedUpdatedAt := olderUpdatedAt.Add(5 * time.Minute)
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, olderUpdatedAt); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, conversation, turn_count, runtime_state, status, created_at, updated_at
+		) VALUES
+			(?, ?, 'agent-1', 'entity/older', 1, 'authored', '[]', 1, '{"provider_session_id":"provider-older"}', 'active', ?, ?),
+			(?, ?, 'agent-1', 'entity/selected', 1, 'authored', '[]', 11, '{"provider_session_id":"provider-selected"}', 'active', ?, ?)
+	`, sessionOlder, runID, olderUpdatedAt, olderUpdatedAt, sessionSelected, runID, selectedUpdatedAt, selectedUpdatedAt); err != nil {
+		t.Fatalf("seed agent_sessions: %v", err)
+	}
+
+	reader := NewSQLAgentReader(db, sqliteStore, 12)
+	items, err := reader.ListGenericAgents(ctx)
+	if err != nil {
+		t.Fatalf("ListGenericAgents: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one agent, got %+v", items)
+	}
+	if items[0].SessionID != sessionSelected {
+		t.Fatalf("session_id = %q, want %q", items[0].SessionID, sessionSelected)
+	}
+	if items[0].TurnCount != 11 || items[0].TurnLimit != 12 || !items[0].NearBreaker {
+		t.Fatalf("turn projection = count:%d limit:%d near_breaker:%t, want 11/12/true", items[0].TurnCount, items[0].TurnLimit, items[0].NearBreaker)
+	}
+
+	detail, found, err := reader.GetGenericAgent(ctx, "agent-1")
+	if err != nil || !found {
+		t.Fatalf("GetGenericAgent: found=%t err=%v", found, err)
+	}
+	if detail.TurnCount != 11 || detail.TurnLimit != 12 || !detail.NearBreaker {
+		t.Fatalf("detail turn projection = count:%d limit:%d near_breaker:%t, want 11/12/true", detail.TurnCount, detail.TurnLimit, detail.NearBreaker)
+	}
+}
+
 func seedDashboardTurnCapabilitySurface(t testing.TB, ctx context.Context, pg *store.PostgresStore, turnID, sessionID, agentID, runtimeMode string) string {
 	t.Helper()
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
