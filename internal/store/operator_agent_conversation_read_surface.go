@@ -52,8 +52,9 @@ func NewOperatorConversationReadSurface(db *sql.DB, source OperatorConversationR
 }
 
 type OperatorAgentListOptions struct {
-	Flow string
-	Role string
+	Flow      string
+	Role      string
+	TurnLimit int
 }
 
 type OperatorAgentListResult struct {
@@ -366,7 +367,7 @@ type operatorRowScanner interface {
 }
 
 func (s *PostgresStore) ListOperatorAgents(ctx context.Context, opts OperatorAgentListOptions) (OperatorAgentListResult, error) {
-	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).ListOperatorAgents(ctx, opts)
+	return NewOperatorAgentConversationReadSurface(s.DB, s, opts.TurnLimit).ListOperatorAgents(ctx, opts)
 }
 
 func (s *PostgresStore) LoadOperatorAgent(ctx context.Context, agentID string) (OperatorAgentDetail, error) {

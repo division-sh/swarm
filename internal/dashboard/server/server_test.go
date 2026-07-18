@@ -1580,7 +1580,7 @@ func TestSQLAgentReader_ListGenericAgents_ScopesLiveTurnToSelectedActiveSession(
 			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, conversation, turn_count, runtime_state, status, created_at, updated_at
 		) VALUES
 			($1::uuid, $3::uuid, 'agent-1', 'entity/older', TRUE, 'authored', '[]'::jsonb, 1, '{"provider_session_id":"provider-older"}'::jsonb, 'active', $4, $4),
-			($2::uuid, $3::uuid, 'agent-1', 'entity/selected', TRUE, 'authored', '[]'::jsonb, 7, '{"provider_session_id":"provider-selected"}'::jsonb, 'active', $5, $5)
+			($2::uuid, $3::uuid, 'agent-1', 'entity/selected', TRUE, 'authored', '[]'::jsonb, 11, '{"provider_session_id":"provider-selected"}'::jsonb, 'active', $5, $5)
 	`, sessionOlder, sessionSelected, runID, olderUpdatedAt, selectedUpdatedAt); err != nil {
 		t.Fatalf("seed agent_sessions: %v", err)
 	}
@@ -1618,6 +1618,9 @@ func TestSQLAgentReader_ListGenericAgents_ScopesLiveTurnToSelectedActiveSession(
 	if items[0].CurrentTaskID != "task-selected" {
 		t.Fatalf("current_task_id = %q, want task-selected", items[0].CurrentTaskID)
 	}
+	if items[0].TurnCount != 11 || items[0].TurnLimit != 12 || !items[0].NearBreaker {
+		t.Fatalf("turn projection = count:%d limit:%d near_breaker:%t, want 11/12/true", items[0].TurnCount, items[0].TurnLimit, items[0].NearBreaker)
+	}
 	if items[0].LiveTurn == nil {
 		t.Fatalf("expected live_turn, got nil")
 	}
@@ -1626,6 +1629,13 @@ func TestSQLAgentReader_ListGenericAgents_ScopesLiveTurnToSelectedActiveSession(
 	}
 	if items[0].LastTool == nil || items[0].LastTool.Name != "selected_tool" || items[0].LastTool.ToolUseID != "toolu-selected" {
 		t.Fatalf("last_tool = %#v", items[0].LastTool)
+	}
+	detail, found, err := reader.GetGenericAgent(ctx, "agent-1")
+	if err != nil || !found {
+		t.Fatalf("GetGenericAgent: found=%t err=%v", found, err)
+	}
+	if detail.TurnCount != 11 || detail.TurnLimit != 12 || !detail.NearBreaker {
+		t.Fatalf("detail turn projection = count:%d limit:%d near_breaker:%t, want 11/12/true", detail.TurnCount, detail.TurnLimit, detail.NearBreaker)
 	}
 }
 

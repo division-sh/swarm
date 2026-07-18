@@ -24,7 +24,7 @@ func newSQLiteOperatorAgentConversationReadSurface(s *SQLiteRuntimeStore, turnLi
 }
 
 func (s *SQLiteRuntimeStore) ListOperatorAgents(ctx context.Context, opts OperatorAgentListOptions) (OperatorAgentListResult, error) {
-	return newSQLiteOperatorAgentConversationReadSurface(s, 0).ListOperatorAgents(ctx, opts)
+	return newSQLiteOperatorAgentConversationReadSurface(s, opts.TurnLimit).ListOperatorAgents(ctx, opts)
 }
 
 func (s *SQLiteRuntimeStore) LoadOperatorAgent(ctx context.Context, agentID string) (OperatorAgentDetail, error) {
