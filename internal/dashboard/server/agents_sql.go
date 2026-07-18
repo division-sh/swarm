@@ -11,13 +11,13 @@ import (
 )
 
 type SQLAgentReader struct {
-	owner dashboardAgentReadOwner
+	owner     dashboardAgentReadOwner
+	turnLimit int
 }
 
 type dashboardAgentReadOwner interface {
 	LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error)
 	ListOperatorAgents(context.Context, store.OperatorAgentListOptions) (store.OperatorAgentListResult, error)
-	LoadOperatorAgent(context.Context, string) (store.OperatorAgentDetail, error)
 }
 
 func NewSQLAgentReader(db *sql.DB, source any, turnLimit int) *SQLAgentReader {
@@ -25,7 +25,10 @@ func NewSQLAgentReader(db *sql.DB, source any, turnLimit int) *SQLAgentReader {
 	if db == nil || !ok || owner == nil {
 		return nil
 	}
-	return &SQLAgentReader{owner: owner}
+	if turnLimit < 0 {
+		turnLimit = 0
+	}
+	return &SQLAgentReader{owner: owner, turnLimit: turnLimit}
 }
 
 func (r *SQLAgentReader) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
@@ -39,6 +42,7 @@ func (r *SQLAgentReader) ListOperatorAgents(ctx context.Context, opts store.Oper
 	if r == nil || r.owner == nil {
 		return store.OperatorAgentListResult{}, nil
 	}
+	opts.TurnLimit = r.turnLimit
 	return r.owner.ListOperatorAgents(ctx, opts)
 }
 
@@ -46,7 +50,21 @@ func (r *SQLAgentReader) LoadOperatorAgent(ctx context.Context, agentID string) 
 	if r == nil || r.owner == nil {
 		return store.OperatorAgentDetail{}, store.ErrAgentNotFound
 	}
-	return r.owner.LoadOperatorAgent(ctx, agentID)
+	agentID = strings.TrimSpace(agentID)
+	result, err := r.ListOperatorAgents(ctx, store.OperatorAgentListOptions{})
+	if err != nil {
+		return store.OperatorAgentDetail{}, err
+	}
+	for _, agent := range result.Agents {
+		if strings.TrimSpace(agent.AgentID) == agentID {
+			return store.OperatorAgentDetail{
+				Agent:             agent,
+				CurrentSessionRef: agent.CurrentSessionRef,
+				LastTurnRef:       agent.LastTurnRef,
+			}, nil
+		}
+	}
+	return store.OperatorAgentDetail{}, store.ErrAgentNotFound
 }
 
 func (r *SQLAgentReader) ListGenericAgents(ctx context.Context) ([]genericAgent, error) {
