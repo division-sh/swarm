@@ -698,9 +698,11 @@ func cliHumanCodeExportLookup(repoRoot string) func(string) (io.ReadCloser, erro
 		if !ok {
 			command := exec.Command("go", "list", "-export", "-f={{.Export}}", path)
 			command.Dir = repoRoot
-			output, err := command.CombinedOutput()
+			var stderr strings.Builder
+			command.Stderr = &stderr
+			output, err := command.Output()
 			if err != nil {
-				return nil, fmt.Errorf("go list export for %s: %w: %s", path, err, strings.TrimSpace(string(output)))
+				return nil, fmt.Errorf("go list export for %s: %w: %s", path, err, strings.TrimSpace(stderr.String()))
 			}
 			exportPath = strings.TrimSpace(string(output))
 			if exportPath == "" {
