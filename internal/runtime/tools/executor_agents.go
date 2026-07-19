@@ -97,20 +97,29 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 	if !ok {
 		return nil, fmt.Errorf("agent_message requires typed causal execution mode")
 	}
-	evt := events.NewChildEventWithLineage(
-		uuid.NewString(),
-		events.EventType(in.EventType),
-		events.AgentProducer(in.SourceAgent),
-		in.TaskID,
-		wirePayload,
-		0,
-		events.EventLineage{
-			RunID:         runtimecorrelation.RunIDFromContext(ctx),
-			ExecutionMode: executionMode,
-		},
-		events.EventEnvelope{EntityID: targetEntity},
-		time.Now(),
-	)
+	inbound, ok := runtimecorrelation.InboundEventFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("agent_message requires typed inbound event lineage")
+	}
+	lineage := events.LineageFromEvent(inbound)
+	lineage.TaskID = in.TaskID
+	lineage.ExecutionMode = executionMode
+	sourceEntity := actor.EffectiveEntityID()
+	sourceFlowInstance := actor.CanonicalFlowPath()
+	sourceFlowID := emitActorFlowID(e.workflowSource, actor, sourceFlowInstance)
+	routingSource, err := events.NewRuntimeRoutingSource(sourceFlowID, sourceFlowInstance, sourceEntity)
+	if err != nil {
+		return nil, err
+	}
+	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{EntityID: targetEntity}, routingSource.Route())
+	evt, err := events.NewChildEvent(events.ChildEventInput{Facts: events.EventFacts{
+		ID: uuid.NewString(), Type: events.EventType(in.EventType), Producer: events.ProducerClaim{Type: events.EventProducerAgent, ID: actor.ID},
+		TaskID: in.TaskID, Payload: wirePayload, Envelope: envelope, RoutingSource: routingSource,
+		CreatedAt: time.Now(), ExecutionMode: executionMode,
+	}, Lineage: lineage})
+	if err != nil {
+		return nil, err
+	}
 	if err := e.bus.PublishDirect(ctx, evt, targets); err != nil {
 		return nil, err
 	}

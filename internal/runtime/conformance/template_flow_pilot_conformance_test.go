@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -512,12 +513,14 @@ func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptors(context.Co
 	return append([]runtimebus.ActiveFlowInstanceDescriptor(nil), s.flowInstances...), nil
 }
 
-func (s *fanOutPinRouteMemoryStore) InsertEventDeliveryRoutes(_ context.Context, eventID string, routes []events.DeliveryRoute) error {
-	if s.deliveryRoutes == nil {
-		s.deliveryRoutes = map[string][]events.DeliveryRoute{}
-	}
-	s.deliveryRoutes[eventID] = events.NormalizeDeliveryRoutes(routes)
-	return nil
+func (s *fanOutPinRouteMemoryStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
+		if s.deliveryRoutes == nil {
+			s.deliveryRoutes = map[string][]events.DeliveryRoute{}
+		}
+		s.deliveryRoutes[req.Event.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
+		return nil
+	})
 }
 
 func fanOutPinRouteDeliveryRoutesContain(routes []events.DeliveryRoute, target events.RouteIdentity) bool {

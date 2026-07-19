@@ -67,9 +67,8 @@ func TestUnacceptedSelectedStoreEventMutationBoundariesFailBeforeSQL(t *testing.
 					name string
 					call func() error
 				}{
-					{name: "begin_event_transaction", call: func() error { _, err := store.BeginEventTx(context.Background()); return err }},
 					{name: "run_event_transaction", call: func() error {
-						return store.RunEventTransaction(context.Background(), func(context.Context, *sql.Tx) error {
+						return store.runEventTransaction(context.Background(), func(context.Context, *sql.Tx) error {
 							callbackCalled = true
 							return nil
 						})
@@ -87,9 +86,8 @@ func TestUnacceptedSelectedStoreEventMutationBoundariesFailBeforeSQL(t *testing.
 					name string
 					call func() error
 				}{
-					{name: "begin_event_transaction", call: func() error { _, err := store.BeginEventTx(context.Background()); return err }},
 					{name: "run_event_transaction", call: func() error {
-						return store.RunEventTransaction(context.Background(), func(context.Context, *sql.Tx) error {
+						return store.runEventTransaction(context.Background(), func(context.Context, *sql.Tx) error {
 							callbackCalled = true
 							return nil
 						})

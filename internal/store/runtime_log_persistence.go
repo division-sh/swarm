@@ -9,30 +9,21 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
 const runtimeLogEventName = "platform.runtime_log"
 
-func runtimeLogEvent(ctx context.Context, record runtimepkg.RuntimeLogPersistenceRecord) events.Event {
-	evt := events.NewDiagnosticDirectEvent(
-		"",
-		events.EventType(runtimeLogEventName),
-		events.PlatformProducer("runtime"),
-		"",
-		json.RawMessage(record.Payload),
-		0,
-		strings.TrimSpace(record.RunID),
-		strings.TrimSpace(record.ParentEventID),
-		events.EventEnvelope{},
-		time.Time{},
-	)
-	if mode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
-		evt = events.Project(evt, events.ProjectExecutionMode(mode))
-	}
-	return evt
+func runtimeLogEvent(record runtimepkg.RuntimeLogPersistenceRecord) (events.Event, error) {
+	return events.NewDiagnosticDirectEvent(events.DiagnosticDirectEventInput{
+		Facts: events.EventFacts{
+			Type:     events.EventType(runtimeLogEventName),
+			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
+			Payload:  json.RawMessage(record.Payload), CreatedAt: time.Time{}, ExecutionMode: record.ExecutionMode,
+		},
+		RunID: strings.TrimSpace(record.RunID), ParentEventID: strings.TrimSpace(record.ParentEventID),
+	})
 }
 
 func (s *PostgresStore) RuntimeLogLineageParentEventID(ctx context.Context, runID, explicitParentEventID, subjectEventID string) (string, error) {
@@ -82,14 +73,20 @@ func (s *PostgresStore) PersistRuntimeLog(ctx context.Context, record runtimepkg
 	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
 		return err
 	}
-	evt, err := events.AdmitForPersistence(runtimeLogEvent(ctx, record), events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	constructed, err := runtimeLogEvent(record)
+	if err != nil {
+		return err
+	}
+	evt, err := events.AdmitForPersistence(constructed, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return err
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return s.AppendEventTx(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), tx, evt)
+		_, err := s.appendAdmittedEventTxOutcome(ctx, tx, evt)
+		return err
 	}
-	return s.AppendEvent(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), evt)
+	_, err = s.commitRuntimeLogEvent(ctx, evt)
+	return err
 }
 
 func (s *SQLiteRuntimeStore) RuntimeLogLineageParentEventID(ctx context.Context, runID, explicitParentEventID, subjectEventID string) (string, error) {
@@ -139,12 +136,18 @@ func (s *SQLiteRuntimeStore) PersistRuntimeLog(ctx context.Context, record runti
 	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
 		return err
 	}
-	evt, err := events.AdmitForPersistence(runtimeLogEvent(ctx, record), events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	constructed, err := runtimeLogEvent(record)
+	if err != nil {
+		return err
+	}
+	evt, err := events.AdmitForPersistence(constructed, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return err
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return s.AppendEventTx(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), tx, evt)
+		_, err := s.appendAdmittedEventTxOutcome(ctx, tx, evt)
+		return err
 	}
-	return s.AppendEvent(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), evt)
+	_, err = s.commitRuntimeLogEvent(ctx, evt)
+	return err
 }

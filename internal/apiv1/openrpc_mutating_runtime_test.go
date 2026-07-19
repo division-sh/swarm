@@ -1389,7 +1389,7 @@ func mutatingProbeOriginalEvent(eventID string, subscribers []string, status str
 	event := eventtest.PersistedProjectionForProducer(
 		eventID,
 		events.EventType("scan.requested"),
-		events.AgentProducer("origin-agent"),
+		eventtest.Producer(events.EventProducerAgent, "origin-agent"),
 		"",
 		json.RawMessage(`{"topic":"medicine"}`),
 		0,

@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
@@ -515,18 +516,19 @@ func (l *WorkflowTimerLifecycle) Fire(ctx context.Context, schedule Schedule) (W
 		}
 		firedAt := canonicalWorkflowTimerTime(time.Now())
 		eventID := timeridentity.WorkflowTimerOccurrenceEventID(occurrence)
-		evt := events.NewRuntimeControlEvent(
-			eventID,
-			events.EventType(activation.EventType),
-			events.AgentProducer(activation.OwnerAgent),
-			occurrence.TaskID(),
-			json.RawMessage(append([]byte(nil), activation.Payload...)),
-			0,
-			activation.RunID,
-			"",
-			events.EventEnvelope{EntityID: activation.EntityID, FlowInstance: activation.FlowInstance},
-			firedAt,
-		)
+		evt, err := events.NewRuntimeControlEvent(events.RuntimeEventInput{
+			Facts: events.EventFacts{
+				ID: eventID, Type: events.EventType(activation.EventType),
+				Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime.workflow_timer"},
+				TaskID:   occurrence.TaskID(), Payload: json.RawMessage(append([]byte(nil), activation.Payload...)),
+				Envelope:  events.EventEnvelope{EntityID: activation.EntityID, FlowInstance: activation.FlowInstance},
+				CreatedAt: firedAt, ExecutionMode: executionmode.Live,
+			},
+			RunID: activation.RunID,
+		})
+		if err != nil {
+			return err
+		}
 		if err := publisher.PublishInMutation(txctx, evt); err != nil {
 			return err
 		}
@@ -617,7 +619,7 @@ func (l *WorkflowTimerLifecycle) AuthorizeAcceptedEvent(ctx context.Context, evt
 		evt.RunID() != activation.RunID || workflowEventEntityID(evt) != activation.EntityID ||
 		strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != activation.FlowInstance ||
 		strings.TrimSpace(string(evt.Type())) != activation.EventType ||
-		!evt.Producer().Equal(events.AgentProducer(activation.OwnerAgent)) ||
+		evt.ProducerType() != events.EventProducerPlatform || evt.SourceAgent() != "runtime.workflow_timer" ||
 		!workflowTimerJSONEqual(evt.Payload(), activation.Payload) {
 		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("accepted workflow timer event does not match canonical activation")
 	}

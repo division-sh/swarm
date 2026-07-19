@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -140,12 +141,11 @@ type directiveEventStore struct {
 	finalizeFailureCalls int
 }
 
-func (s *directiveEventStore) AppendEvent(_ context.Context, evt events.Event) error {
-	s.events = append(s.events, evt)
-	return nil
-}
-func (*directiveEventStore) InsertEventDeliveries(context.Context, string, []string) error {
-	return nil
+func (s *directiveEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
+		s.events = append(s.events, req.Event.Event())
+		return nil
+	})
 }
 func (*directiveEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return nil, runtimereplayclaim.ErrAuthoritativeRecipientManifestUnavailable
@@ -166,7 +166,7 @@ func (s *directiveEventStore) ReserveDirectiveOperation(_ context.Context, req r
 	op := req.Operation
 	op.CreatedAt, op.UpdatedAt = req.Now, req.Now
 	s.operations[op.OperationID] = op
-	s.events = append(s.events, req.Event)
+	s.events = append(s.events, req.Event.Event())
 	return runtimeagentcontrol.DirectiveOperationReservation{Operation: op, Created: true}, nil
 }
 

@@ -16,15 +16,14 @@ type inFlightSweepStore struct {
 	claims atomic.Int32
 }
 
-func (*inFlightSweepStore) AppendEvent(context.Context, events.Event) error { return nil }
-
-func (*inFlightSweepStore) InsertEventDeliveries(context.Context, string, []string) error {
-	return nil
+func (*inFlightSweepStore) CommitPublish(ctx context.Context, plan CommitPublishPlan) (PreparedPublish, error) {
+	return (InMemoryEventStore{}).CommitPublish(ctx, plan)
 }
 
 func (*inFlightSweepStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return nil, nil
 }
+func (*inFlightSweepStore) SupportsPersistedReplay() bool { return true }
 
 func (s *inFlightSweepStore) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
 	return []events.PersistedReplayEvent{s.event}, nil

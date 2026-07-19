@@ -62,9 +62,13 @@ func TestPipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutGenericAu
 	}
 	seedDeliveryAuthorityNodeDeliveryForTarget(t, db, evt.ID(), route.SubscriberID, target)
 	targetEvt := eventtest.TargetRouted(evt, target)
+	delivery, err := events.NewDeliveryEvent(targetEvt, route)
+	if err != nil {
+		t.Fatalf("NewDeliveryEvent: %v", err)
+	}
 	targetPostCommit := make([]func(), 0, 1)
 	targetCtx := WithPipelinePostCommitActions(ctx, &targetPostCommit)
-	passthrough, _, err := pc.InterceptDeliveryRoute(targetCtx, targetEvt, route)
+	passthrough, _, err := pc.InterceptDeliveryRoute(targetCtx, delivery, route)
 	if err != nil {
 		t.Fatalf("target InterceptDeliveryRoute: %v", err)
 	}
@@ -100,26 +104,22 @@ func TestPipelineCoordinatorInterceptDeliveryRouteRejectsAmbiguousConnectedInput
 	eventID := uuid.NewString()
 	target := events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: entityID}
 	evt := eventtest.RootIngress(eventID, "producer/deploy.done", "producer", "", []byte(`{}`), 0, testPipelineRunID, "", events.EventEnvelope{
-		Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"},
-		Target: target,
+		EntityID:     target.EntityID,
+		FlowInstance: target.FlowInstance,
+		Source:       events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()},
+		Target:       target,
 	}, time.Now().UTC())
 	ctx := testAuthorActivityContext(context.Background())
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
-			produced_by, produced_by_type, created_at
-		) VALUES ('live',
-			$1::uuid, $2::uuid, $3, $4::uuid, $5, 'entity', '{}'::jsonb,
-			'producer', 'node', now()
-		)
-	`, eventID, testPipelineRunID, string(evt.Type()), entityID, target.FlowInstance); err != nil {
-		t.Fatalf("seed ambiguous connected-input event: %v", err)
-	}
+	seedPipelineEventRecord(t, ctx, db, evt)
 	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "receiver-node", Target: target}
 	seedDeliveryAuthorityNodeDeliveryForTarget(t, db, eventID, route.SubscriberID, target)
+	delivery, err := events.NewDeliveryEvent(evt, route)
+	if err != nil {
+		t.Fatalf("NewDeliveryEvent: %v", err)
+	}
 
 	for attempt := 1; attempt <= 2; attempt++ {
-		passthrough, deferred, err := pc.InterceptDeliveryRoute(ctx, evt, route)
+		passthrough, deferred, err := pc.InterceptDeliveryRoute(ctx, delivery, route)
 		if err == nil || !strings.Contains(err.Error(), "multiple connected input events") {
 			t.Fatalf("attempt %d InterceptDeliveryRoute error = %v, want explicit receiver-pin ambiguity", attempt, err)
 		}
@@ -307,17 +307,7 @@ func seedDeliveryAuthorityEvent(t *testing.T, db *sql.DB, ctx context.Context) e
 		time.Now().UTC(),
 	)
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
-			produced_by, produced_by_type, created_at
-		) VALUES ('live',
-			$1::uuid, $2::uuid, $3, $4::uuid, 'runtime', 'entity', $5::jsonb,
-			'src', 'agent', now()
-		)
-	`, evt.ID(), evt.RunID(), string(evt.Type()), entityID, string(evt.Payload())); err != nil {
-		t.Fatalf("seed delivery authority event: %v", err)
-	}
+	seedPipelineEventRecord(t, ctx, db, evt)
 	return evt
 }
 

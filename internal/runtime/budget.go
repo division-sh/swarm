@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -356,18 +357,14 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 		"timestamp":     now.Format(time.RFC3339),
 	}
 	evtID := uuid.NewString()
-	evt := events.NewRuntimeDiagnosticEvent(
-		evtID,
-		events.EventType("platform.budget_threshold_crossed"),
-		events.PlatformProducer("runtime"),
-		"",
-		mustJSON(payload),
-		0,
-		"",
-		"",
-		events.EventEnvelope{},
-		time.Now(),
-	)
+	evt, err := events.NewRuntimeDiagnosticEvent(events.RuntimeEventInput{Facts: events.EventFacts{
+		ID: evtID, Type: events.EventType("platform.budget_threshold_crossed"),
+		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"}, Payload: mustJSON(payload),
+		CreatedAt: time.Now(), ExecutionMode: executionmode.Live,
+	}})
+	if err != nil {
+		return err
+	}
 	if err := t.bus.Publish(ctx, evt); err != nil {
 		return err
 	}

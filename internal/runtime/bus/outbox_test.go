@@ -2,7 +2,6 @@ package bus_test
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 	"sync"
@@ -13,11 +12,9 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/google/uuid"
 )
 
@@ -33,27 +30,68 @@ type directRecipientTransactionalStore struct {
 	deliveries    map[string][]string
 	routes        map[string][]events.DeliveryRoute
 	deadLetterErr error
+	active        []string
 }
 
-type directRecipientEventMutation struct {
-	ctx   context.Context
-	store *directRecipientTransactionalStore
+type outboxClaimStore struct {
+	directRecipientTransactionalStore
+	claimMu sync.Mutex
+	claims  map[string]struct{}
 }
 
-func (s *recordingEventStore) AppendEvent(_ context.Context, evt events.Event) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.events = append(s.events, evt)
+type outboxClaimLease struct {
+	store   *outboxClaimStore
+	eventID string
+}
+
+func (s *outboxClaimStore) ClaimPipelinePublication(_ context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+	return s.claim(eventID)
+}
+
+func (s *outboxClaimStore) ClaimPipelineReplay(_ context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+	return s.claim(eventID)
+}
+
+func (s *outboxClaimStore) claim(eventID string) (runtimeownership.Lease, bool, error) {
+	s.claimMu.Lock()
+	defer s.claimMu.Unlock()
+	if s.claims == nil {
+		s.claims = make(map[string]struct{})
+	}
+	if _, exists := s.claims[eventID]; exists {
+		return nil, false, nil
+	}
+	s.claims[eventID] = struct{}{}
+	return &outboxClaimLease{store: s, eventID: eventID}, true, nil
+}
+
+func (l *outboxClaimLease) Release(context.Context) error {
+	if l == nil || l.store == nil {
+		return nil
+	}
+	l.store.claimMu.Lock()
+	delete(l.store.claims, l.eventID)
+	l.store.claimMu.Unlock()
 	return nil
 }
 
-func (*recordingEventStore) InsertEventDeliveries(context.Context, string, []string) error {
-	return nil
+func (s *recordingEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return prepareTestCommitPublish(ctx, plan, &testCommitPublishTransaction{finalize: func(context.Context, runtimebus.CommitPublishRequest) error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return nil
+	}, begin: func(_ context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.events = append(s.events, admitted.Event())
+		return runtimebus.EventAppendInserted, nil
+	}})
 }
 
 func (*recordingEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return []string{}, nil
 }
+func (*recordingEventStore) SupportsPersistedReplay() bool { return false }
 
 func (s *recordingEventStore) eventTypes() []string {
 	s.mu.Lock()
@@ -65,166 +103,88 @@ func (s *recordingEventStore) eventTypes() []string {
 	return out
 }
 
-func (s *directRecipientTransactionalStore) AppendEvent(context.Context, events.Event) error {
-	return nil
-}
-
-func (s *directRecipientTransactionalStore) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
-	s.mu.Lock()
-	if s.deliveries == nil {
-		s.deliveries = map[string][]string{}
-	}
-	previous, existed := s.deliveries[eventID]
-	s.deliveries[eventID] = append([]string(nil), agentIDs...)
-	s.mu.Unlock()
-	_ = runtimepipeline.QueuePipelineRollbackAction(ctx, func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if existed {
-			s.deliveries[eventID] = append([]string(nil), previous...)
-		} else {
-			delete(s.deliveries, eventID)
-		}
-	})
-	return nil
-}
-
 func (s *directRecipientTransactionalStore) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.deliveries[eventID]...), nil
 }
+func (*directRecipientTransactionalStore) SupportsPersistedReplay() bool { return true }
 
 func (s *directRecipientTransactionalStore) ListActiveAgentDescriptors(context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
 	return append([]runtimebus.ActiveAgentDescriptor(nil), s.descriptors...), nil
 }
 
-func (*directRecipientTransactionalStore) BeginEventTx(context.Context) (*sql.Tx, error) {
-	return nil, nil
+func (s *directRecipientTransactionalStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return prepareTestCommitPublish(ctx, plan, &testCommitPublishTransaction{
+		begin:    s.beginPreparedPublish,
+		finalize: s.finalizePreparedPublish,
+	})
 }
 
-func (s *directRecipientTransactionalStore) EventMutationFromContext(ctx context.Context) (runtimebus.EventMutation, bool) {
-	if _, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); !ok {
-		return nil, false
-	}
-	mutation := &directRecipientEventMutation{store: s}
-	mutation.ctx = runtimebus.WithEventMutationContext(ctx, mutation)
-	return mutation, true
+func (s *directRecipientTransactionalStore) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
+	return s.beginPreparedPublish(ctx, prepared.AdmittedEvent())
 }
 
-func (m *directRecipientEventMutation) Context() context.Context {
-	if m == nil || m.ctx == nil {
-		return context.Background()
-	}
-	return m.ctx
-}
-
-func (m *directRecipientEventMutation) AppendEvent(ctx context.Context, evt events.Event) error {
-	_, err := m.AppendEventOutcome(ctx, evt)
-	return err
-}
-
-func (m *directRecipientEventMutation) AppendEventOutcome(ctx context.Context, evt events.Event) (runtimebus.EventAppendOutcome, error) {
-	m.store.mu.Lock()
-	for _, existing := range m.store.events {
+func (s *directRecipientTransactionalStore) beginPreparedPublish(ctx context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
+	s.mu.Lock()
+	evt := admitted.Event()
+	for _, existing := range s.events {
 		if existing.ID() == evt.ID() {
-			m.store.mu.Unlock()
+			s.mu.Unlock()
 			if existing.Type() != evt.Type() {
 				return runtimebus.EventAppendOutcomeUnknown, errors.New("conflicting event identity")
 			}
 			return runtimebus.EventAppendExactDuplicate, nil
 		}
 	}
-	m.store.events = append(m.store.events, evt)
-	m.store.mu.Unlock()
+	previousEvents := append([]events.Event(nil), s.events...)
+	previousRoutes := append([]events.DeliveryRoute(nil), s.routes[evt.ID()]...)
+	previousDeliveries := append([]string(nil), s.deliveries[evt.ID()]...)
+	s.events = append(s.events, evt)
+	s.active = append(s.active, evt.ID())
+	s.mu.Unlock()
 	_ = runtimepipeline.QueuePipelineRollbackAction(ctx, func() {
-		m.store.mu.Lock()
-		defer m.store.mu.Unlock()
-		for i := range m.store.events {
-			if m.store.events[i].ID() == evt.ID() {
-				m.store.events = append(m.store.events[:i], m.store.events[i+1:]...)
-				return
-			}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.events = previousEvents
+		if s.routes != nil {
+			s.routes[evt.ID()] = previousRoutes
+		}
+		if s.deliveries != nil {
+			s.deliveries[evt.ID()] = previousDeliveries
 		}
 	})
 	return runtimebus.EventAppendInserted, nil
 }
 
-func (m *directRecipientEventMutation) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
-	return m.store.InsertEventDeliveriesTx(ctx, nil, eventID, agentIDs)
+func (s *directRecipientTransactionalStore) FinalizePreparedPublish(_ context.Context, finalization runtimebus.PreparedPublishFinalization) error {
+	return s.finalizePreparedPublish(context.Background(), finalization.Request())
 }
 
-func (m *directRecipientEventMutation) InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, _ map[string]events.RouteIdentity) error {
-	return m.store.InsertEventDeliveriesTx(ctx, nil, eventID, agentIDs)
-}
-
-func (m *directRecipientEventMutation) InsertEventDeliveryRoutes(ctx context.Context, eventID string, routes []events.DeliveryRoute) error {
-	return m.store.InsertEventDeliveryRoutesTx(ctx, nil, eventID, routes)
-}
-
-func (*directRecipientEventMutation) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {
-	return nil
-}
-
-func (m *directRecipientEventMutation) RecordDeadLetter(context.Context, runtimedeadletters.Record) error {
-	if m == nil || m.store == nil {
-		return nil
-	}
-	return m.store.deadLetterErr
-}
-
-func (m *directRecipientEventMutation) UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
-	return m.store.UpsertPipelineReceiptTx(ctx, nil, eventID, status, failure)
-}
-
-func (s *directRecipientTransactionalStore) AppendEventTx(_ context.Context, _ *sql.Tx, evt events.Event) error {
+func (s *directRecipientTransactionalStore) finalizePreparedPublish(_ context.Context, req runtimebus.CommitPublishRequest) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.events = append(s.events, evt)
-	return nil
-}
-
-func (s *directRecipientTransactionalStore) InsertEventDeliveriesTx(ctx context.Context, _ *sql.Tx, eventID string, agentIDs []string) error {
-	return s.InsertEventDeliveries(ctx, eventID, agentIDs)
-}
-
-func (s *directRecipientTransactionalStore) InsertEventDeliveryRoutesTx(ctx context.Context, _ *sql.Tx, eventID string, routes []events.DeliveryRoute) error {
-	s.mu.Lock()
+	evt := req.Event.Event()
+	if len(s.active) == 0 || s.active[len(s.active)-1] != evt.ID() {
+		return errors.New("prepared event finalization does not match the active event")
+	}
+	if req.DeadLetter != nil && s.deadLetterErr != nil {
+		return s.deadLetterErr
+	}
 	if s.routes == nil {
 		s.routes = map[string][]events.DeliveryRoute{}
 	}
 	if s.deliveries == nil {
 		s.deliveries = map[string][]string{}
 	}
-	previousRoutes, routesExisted := s.routes[eventID]
-	previousDeliveries, deliveriesExisted := s.deliveries[eventID]
-	s.routes[eventID] = events.NormalizeDeliveryRoutes(routes)
-	s.deliveries[eventID] = nil
-	for _, route := range s.routes[eventID] {
-		if route.SubscriberType != "agent" {
-			continue
+	s.routes[evt.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
+	s.deliveries[evt.ID()] = nil
+	for _, route := range s.routes[evt.ID()] {
+		if route.SubscriberType == "agent" {
+			s.deliveries[evt.ID()] = append(s.deliveries[evt.ID()], route.SubscriberID)
 		}
-		s.deliveries[eventID] = append(s.deliveries[eventID], route.SubscriberID)
 	}
-	s.mu.Unlock()
-	_ = runtimepipeline.QueuePipelineRollbackAction(ctx, func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if routesExisted {
-			s.routes[eventID] = append([]events.DeliveryRoute(nil), previousRoutes...)
-		} else {
-			delete(s.routes, eventID)
-		}
-		if deliveriesExisted {
-			s.deliveries[eventID] = append([]string(nil), previousDeliveries...)
-		} else {
-			delete(s.deliveries, eventID)
-		}
-	})
-	return nil
-}
-
-func (*directRecipientTransactionalStore) UpsertPipelineReceiptTx(context.Context, *sql.Tx, string, string, *runtimefailures.Envelope) error {
+	s.active = s.active[:len(s.active)-1]
 	return nil
 }
 
@@ -274,7 +234,7 @@ func (*recordingDeliveryRouteInterceptor) Intercept(context.Context, events.Even
 	return true, nil, nil
 }
 
-func (r *recordingDeliveryRouteInterceptor) InterceptDeliveryRoute(_ context.Context, _ events.Event, route events.DeliveryRoute) (bool, []events.Event, error) {
+func (r *recordingDeliveryRouteInterceptor) InterceptDeliveryRoute(_ context.Context, _ events.DeliveryEvent, route events.DeliveryRoute) (bool, []events.Event, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.routes = append(r.routes, route.Normalized())
@@ -361,6 +321,7 @@ func TestEngineDispatcherQueuesWhenPipelineSQLTxActive(t *testing.T) {
 	}
 	postCommitActions := make([]func(), 0, 1)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	txctx = runtimebus.WithCommitPublishTransaction(txctx, store)
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommitActions)
 
 	if err := eb.EngineOutbox().WriteOutbox(txctx, []runtimeengine.EmitIntent{intent}); err != nil {
@@ -544,6 +505,7 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	ctx = runtimebus.WithCommitPublishTransaction(ctx, recordingStore)
 	intent := runtimeengine.EmitIntent{
 		Event: eventtest.RootIngress(
 			"evt-1",
@@ -629,6 +591,7 @@ func TestEngineOutboxExactDuplicateDispatchIsOperationNoOp(t *testing.T) {
 			t.Fatalf("Begin: %v", err)
 		}
 		ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+		ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
 		if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
 			_ = tx.Rollback()
 			t.Fatalf("WriteOutbox: %v", err)
@@ -662,6 +625,93 @@ func TestEngineOutboxExactDuplicateDispatchIsOperationNoOp(t *testing.T) {
 	}
 }
 
+func TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack(t *testing.T) {
+	for _, commit := range []bool{true, false} {
+		name := "rollback"
+		if commit {
+			name = "commit_then_dispatch"
+		}
+		t.Run(name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock: %v", err)
+			}
+			defer db.Close()
+
+			store := &outboxClaimStore{directRecipientTransactionalStore: directRecipientTransactionalStore{
+				descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "reviewer", EntityID: "ent-claim"}},
+			}}
+			eb, err := runtimebus.NewEventBus(store)
+			if err != nil {
+				t.Fatalf("NewEventBus: %v", err)
+			}
+			reviewer := eb.Subscribe("reviewer")
+			intent := runtimeengine.EmitIntent{
+				Event: eventtest.RootIngress(
+					"evt-outbox-claim-"+name,
+					events.EventType("custom.emitted"),
+					"",
+					"",
+					[]byte(`{"entity_id":"ent-claim"}`),
+					0,
+					"",
+					"",
+					events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-claim"),
+					time.Now().UTC(),
+				),
+				Recipients: []string{"reviewer"},
+			}
+
+			mock.ExpectBegin()
+			if commit {
+				mock.ExpectCommit()
+			} else {
+				mock.ExpectRollback()
+			}
+			tx, err := db.Begin()
+			if err != nil {
+				t.Fatalf("Begin: %v", err)
+			}
+			rollbackActions := []func(){}
+			ctx := runtimepipeline.WithPipelineRollbackActions(runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx), &rollbackActions)
+			ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
+			if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+				t.Fatalf("WriteOutbox: %v", err)
+			}
+
+			if commit {
+				if err := tx.Commit(); err != nil {
+					t.Fatalf("Commit: %v", err)
+				}
+				if lease, claimed, err := store.ClaimPipelineReplay(context.Background(), intent.Event.ID()); err != nil || claimed || lease != nil {
+					t.Fatalf("replay claim before designated dispatch = claimed:%v lease:%T err:%v", claimed, lease, err)
+				}
+				if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
+					t.Fatalf("DispatchPostCommit: %v", err)
+				}
+				_ = requireBusEvent(t, reviewer, "claimed outbox event")
+			} else {
+				if err := tx.Rollback(); err != nil {
+					t.Fatalf("Rollback: %v", err)
+				}
+				runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
+				requireNoBusEvent(t, reviewer, "rolled-back outbox event")
+			}
+
+			lease, claimed, err := store.ClaimPipelineReplay(context.Background(), intent.Event.ID())
+			if err != nil || !claimed || lease == nil {
+				t.Fatalf("replay claim after lifecycle completion = claimed:%v lease:%T err:%v", claimed, lease, err)
+			}
+			if err := lease.Release(context.Background()); err != nil {
+				t.Fatalf("release replay claim: %v", err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("sql expectations: %v", err)
+			}
+		})
+	}
+}
+
 func TestEngineOutboxPreservesAppendOutcomeForEveryIntentInBatch(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -686,6 +736,7 @@ func TestEngineOutboxPreservesAppendOutcomeForEveryIntentInBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
 	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent, intent}); err != nil {
 		t.Fatalf("WriteOutbox: %v", err)
 	}
@@ -732,6 +783,7 @@ func TestEngineOutboxPreexistingExactDuplicateBatchDispatchesZero(t *testing.T) 
 			t.Fatal(err)
 		}
 		ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+		ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
 		if err := eb.EngineOutbox().WriteOutbox(ctx, intents); err != nil {
 			t.Fatalf("WriteOutbox: %v", err)
 		}
@@ -782,6 +834,7 @@ func TestEngineOutboxConflictingSameIDBatchRollsBackOrderedOutcomes(t *testing.T
 	}
 	rollbackActions := []func(){}
 	ctx := runtimepipeline.WithPipelineRollbackActions(runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx), &rollbackActions)
+	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
 	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent, conflict}); err == nil || !strings.Contains(err.Error(), "conflicting event identity") {
 		t.Fatalf("WriteOutbox conflict error = %v", err)
 	}
@@ -805,6 +858,7 @@ func TestEngineOutboxConflictingSameIDBatchRollsBackOrderedOutcomes(t *testing.T
 			t.Fatal(err)
 		}
 		ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+		ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
 		if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
 			t.Fatal(err)
 		}
@@ -847,6 +901,7 @@ func TestEngineOutboxDistinctIntentBatchDispatchesEachOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
 	if err := eb.EngineOutbox().WriteOutbox(ctx, intents); err != nil {
 		t.Fatal(err)
 	}
@@ -865,56 +920,6 @@ func TestEngineOutboxDistinctIntentBatchDispatchesEachOnce(t *testing.T) {
 	requireNoBusEvent(t, reviewer, "distinct intent over-dispatch")
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
-	}
-}
-
-func TestEngineOutboxSkipsEmptyNoopIntentBeforeAdmission(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	mock.ExpectBegin()
-	mock.ExpectCommit()
-
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("Begin: %v", err)
-	}
-	recordingStore := &directRecipientTransactionalStore{}
-	eb, err := newScopedTestEventBus(recordingStore)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
-	intents := []runtimeengine.EmitIntent{{
-		Event: eventtest.RootIngress("evt-empty-noop", "", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-	}}
-	if err := eb.EngineOutbox().WriteOutbox(ctx, intents); err != nil {
-		t.Fatalf("WriteOutbox empty noop: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
-	}
-	if got := len(recordingStore.events); got != 0 {
-		t.Fatalf("persisted events = %d, want 0", got)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("sql expectations: %v", err)
-	}
-}
-
-func TestEngineDispatcherSkipsEmptyNoopIntentBeforeAdmission(t *testing.T) {
-	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	intents := []runtimeengine.EmitIntent{{
-		Event: eventtest.RootIngress("evt-empty-noop-dispatch", "", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-	}}
-	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), intents); err != nil {
-		t.Fatalf("DispatchPostCommit empty noop: %v", err)
 	}
 }
 
@@ -970,6 +975,7 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 			events.EventType("review/inst-1/task.started"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 	}
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
 	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("WriteOutbox: %v", err)
 	}
@@ -1033,6 +1039,7 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 		Recipients: []string{"control-plane", "reviewer-ent-1", "reviewer-ent-2", "missing-agent"},
 	}
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
 	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("WriteOutbox: %v", err)
 	}
@@ -1100,6 +1107,7 @@ func TestEngineOutbox_TargetFailureDeadLetterErrorFailsClosed(t *testing.T) {
 		),
 	}
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
 	err = eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent})
 	if !errors.Is(err, deadLetterErr) {
 		t.Fatalf("WriteOutbox error = %v, want dead-letter persistence failure", err)
@@ -1153,6 +1161,7 @@ func TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedMan
 		),
 	}
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
 	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("WriteOutbox: %v", err)
 	}
@@ -1225,6 +1234,7 @@ func TestEngineOutboxAndDispatcher_RoutesPendingInternalDeliveriesToRouteInterce
 		),
 	}
 	txctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	txctx = runtimebus.WithCommitPublishTransaction(txctx, store)
 	if err := eb.EngineOutbox().WriteOutbox(txctx, []runtimeengine.EmitIntent{intent}); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("WriteOutbox: %v", err)
@@ -1383,6 +1393,7 @@ func TestEngineDispatcher_TransactionalDirectIntentHonorsEmptyPersistedManifest(
 		Recipients: []string{"reviewer-ent-2"},
 	}
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
 	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("WriteOutbox: %v", err)
 	}
@@ -1438,6 +1449,7 @@ func TestPublishDirectInMutationRejectsFilteredExplicitRecipient(t *testing.T) {
 	postCommit := make([]func(), 0, 1)
 	rollback := make([]func(), 0, 1)
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
 	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
 	err = eb.PublishDirectInMutation(ctx, evt, []string{"requester-agent"})

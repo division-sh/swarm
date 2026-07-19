@@ -224,8 +224,8 @@ rows:
       - typed backend-neutral runtime mutation unit of work
     owners:
       - backend_neutral_runtime_mutation_write_boundary
-      - runtimebus.EventMutationRunner/EventMutation
-      - EventBus.PublishInMutation
+      - runtimebus.EventCommitter/EventPublicationOperation
+      - EventBus.PublishInMutation admitted-event commit scope
       - runtimepipeline.Store.RunPipelineMutation
       - SQLiteRuntimeStore.RunRuntimeMutation
       - PostgresStore normal transaction methods
@@ -233,7 +233,7 @@ rows:
       - kind: artifact
         path: platform-spec.yaml
       - kind: go_test
-        name: TestEventBusPublishInMutationRunsInterceptorsAfterMutationCommit
+        name: TestEventBusPublishTransactional_RunsInterceptorsAfterCommit
       - kind: go_test
         name: TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter
       - kind: go_test
@@ -248,12 +248,12 @@ rows:
       - kind: go_test
         name: TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary
       - kind: go_test
-        name: TestEventBusPublishInMutationRunsInterceptorsAfterMutationCommit
+        name: TestEventBusPublishTransactional_RunsInterceptorsAfterCommit
     notes: >
-      #1414 closed the first event/pipeline callback slice. #1403 closes the
-      remaining selected runtime row-family typed UoW accounting: producers
-      consume typed mutation owners, while raw *Tx helpers remain backend-local
-      implementation detail below store boundaries.
+      #2108/#2104 replace the raw event mutation callback with the closed admitted-event
+      commit/publication operation. Pipeline and other selected runtime row families
+      retain their independently owned typed mutation boundaries, while raw *Tx
+      helpers remain backend-local implementation detail below store boundaries.
 
   - id: sqlite_busy_serialization_behavior_guard
     classification: guard

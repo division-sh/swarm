@@ -10,8 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -33,7 +35,7 @@ func (s *PostgresStore) ReserveDirectiveOperation(ctx context.Context, req runti
 		return runtimeagentcontrol.DirectiveOperationReservation{}, err
 	}
 	var reservation runtimeagentcontrol.DirectiveOperationReservation
-	err = s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err = s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		if op.IdempotencyKey != "" {
 			if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, directiveOperationLockKey(op)); err != nil {
 				return fmt.Errorf("lock directive operation key: %w", err)
@@ -59,12 +61,14 @@ func (s *PostgresStore) ReserveDirectiveOperation(ctx context.Context, req runti
 				return fmt.Errorf("remove legacy directive idempotency projection: %w", err)
 			}
 		}
-		txctx = withDiagnosticDirectOwner(txctx, diagnosticDirectAgentDirective)
-		if err := s.AppendEventTx(txctx, tx, req.Event); err != nil {
+		outcome, err := (sqlPublishCommitter{tx: tx, store: s}).commitNamedEvent(txctx, "reserve directive operation", events.EventAdmissionOperatorInjected, runtimebus.CommitPublishRequest{
+			Event: req.Event, ReplayScope: runtimereplayclaim.CommittedReplayScopeDirect,
+		})
+		if err != nil {
 			return err
 		}
-		if err := s.UpsertCommittedReplayScopeTx(txctx, tx, op.DirectiveEventID, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
-			return err
+		if outcome == runtimebus.EventAppendExactDuplicate {
+			return fmt.Errorf("directive event %s already exists without its operation", op.DirectiveEventID)
 		}
 		if err := insertPostgresDirectiveOperation(txctx, tx, op, req.Now); err != nil {
 			return err
@@ -107,12 +111,14 @@ func (s *SQLiteRuntimeStore) ReserveDirectiveOperation(ctx context.Context, req 
 				return fmt.Errorf("remove legacy sqlite directive idempotency projection: %w", err)
 			}
 		}
-		txctx = withDiagnosticDirectOwner(txctx, diagnosticDirectAgentDirective)
-		if err := s.AppendEventTx(txctx, tx, req.Event); err != nil {
+		outcome, err := (sqlPublishCommitter{tx: tx, store: s}).commitNamedEvent(txctx, "reserve directive operation", events.EventAdmissionOperatorInjected, runtimebus.CommitPublishRequest{
+			Event: req.Event, ReplayScope: runtimereplayclaim.CommittedReplayScopeDirect,
+		})
+		if err != nil {
 			return err
 		}
-		if err := s.UpsertCommittedReplayScopeTx(txctx, tx, op.DirectiveEventID, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
-			return err
+		if outcome == runtimebus.EventAppendExactDuplicate {
+			return fmt.Errorf("directive event %s already exists without its operation", op.DirectiveEventID)
 		}
 		if err := insertSQLiteDirectiveOperationTx(txctx, tx, op, req.Now); err != nil {
 			return err
@@ -158,7 +164,8 @@ func validateDirectiveReservation(req runtimeagentcontrol.ReserveDirectiveOperat
 			return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("requested_run_id must be a UUID: %w", err)
 		}
 	}
-	if req.Event.ID() != op.DirectiveEventID || req.Event.RunID() != op.ResolvedRunID || string(req.Event.Type()) != runtimeagentcontrol.DirectiveEventType {
+	event := req.Event.Event()
+	if event.ID() != op.DirectiveEventID || event.RunID() != op.ResolvedRunID || string(event.Type()) != runtimeagentcontrol.DirectiveEventType || req.Event.Class() != events.EventAdmissionOperatorInjected {
 		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("directive operation event identity mismatch")
 	}
 	if op.State == "" {
@@ -295,7 +302,7 @@ func (s *SQLiteRuntimeStore) RecordDirectiveExecuted(ctx context.Context, operat
 
 func (s *PostgresStore) FinalizeDirectiveSuccess(ctx context.Context, operationID string, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
 	var out runtimeagentcontrol.DirectiveOperation
-	err := s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		op, err := requireActivePostgresDirectiveOperation(txctx, tx, operationID)
 		if err != nil {
 			return err
@@ -421,7 +428,7 @@ func (s *PostgresStore) finalizePostgresDirectiveFailure(ctx context.Context, op
 		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("validate directive operation failure: %w", err)
 	}
 	var out runtimeagentcontrol.DirectiveOperation
-	err = s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err = s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		op, err := requireActivePostgresDirectiveOperation(txctx, tx, operationID)
 		if err != nil {
 			return err
@@ -528,7 +535,7 @@ func (s *SQLiteRuntimeStore) LoadDirectiveOperationByKey(ctx context.Context, me
 
 func (s *PostgresStore) transitionPostgresDirectiveOperation(ctx context.Context, operationID string, transition func(context.Context, *sql.Tx) error) (runtimeagentcontrol.DirectiveOperation, error) {
 	var out runtimeagentcontrol.DirectiveOperation
-	err := s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		if _, err := requireActivePostgresDirectiveOperation(txctx, tx, operationID); err != nil {
 			return err
 		}

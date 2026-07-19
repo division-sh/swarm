@@ -11,10 +11,14 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -38,14 +42,7 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	`, sourceRunID, authorActivityTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'fork.before', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
-	`, sourceRunID, firstEventID, entityID, at); err != nil {
-		t.Fatalf("seed first event: %v", err)
-	}
+	seedPostgresRootEventRecordFixture(t, ctx, db, firstEventID, sourceRunID, "fork.before", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -76,14 +73,7 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	}
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'fork.field_only', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
-	`, sourceRunID, secondEventID, entityID, fieldOnlyAt); err != nil {
-		t.Fatalf("seed selected event: %v", err)
-	}
+	seedPostgresRootEventRecordFixture(t, ctx, db, secondEventID, sourceRunID, "fork.field_only", events.EventProducerPlatform, "test", entityID, "", fieldOnlyAt)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -103,14 +93,7 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	}
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'fork.after', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
-	`, sourceRunID, thirdEventID, entityID, afterAt); err != nil {
-		t.Fatalf("seed later event: %v", err)
-	}
+	seedPostgresRootEventRecordFixture(t, ctx, db, thirdEventID, sourceRunID, "fork.after", events.EventProducerPlatform, "test", entityID, "", afterAt)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -304,14 +287,7 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 	`, sourceRunID, authorActivityTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'fork.no_event_flow', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
-	`, sourceRunID, eventID, entityID, at); err != nil {
-		t.Fatalf("seed selected event: %v", err)
-	}
+	seedPostgresRootEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.no_event_flow", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -338,14 +314,7 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 	}
 
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'fork.post_flow', $3::uuid, 'post-flow/ignored', 'entity', '{}'::jsonb, 'test', 'platform', $4)
-	`, sourceRunID, postEventID, entityID, afterAt); err != nil {
-		t.Fatalf("seed later event: %v", err)
-	}
+	seedPostgresRootEventRecordFixture(t, ctx, db, postEventID, sourceRunID, "fork.post_flow", events.EventProducerPlatform, "test", entityID, "post-flow/ignored", afterAt)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -419,14 +388,7 @@ func TestRunForkPlanner_FailsClosedWithoutSourceAtTEntitySnapshotMetadata(t *tes
 	`, sourceRunID, authorActivityTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'fork.no_metadata', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
-	`, sourceRunID, eventID, entityID, at); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	seedPostgresRootEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.no_metadata", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -489,14 +451,7 @@ func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeHasNoSourceMetadataAuthori
 	`, sourceRunID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'fork.event_flow_only', $3::uuid, 'event-flow/at-T', 'entity', '{}'::jsonb, 'test', 'platform', $4)
-	`, sourceRunID, eventID, entityID, at); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	seedPostgresRootEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.event_flow_only", events.EventProducerPlatform, "test", entityID, "event-flow/at-T", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -536,14 +491,7 @@ func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeConflictsWithSourceMetadat
 	`, sourceRunID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'fork.conflicting_entity_type', $3::uuid, 'event-flow/at-T', 'entity', '{}'::jsonb, 'test', 'platform', $4)
-	`, sourceRunID, eventID, entityID, at); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	seedPostgresRootEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.conflicting_entity_type", events.EventProducerPlatform, "test", entityID, "event-flow/at-T", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -777,14 +725,7 @@ func TestRunForkMaterializer_FailsClosedOnRepeatAndUnsupportedBlockers(t *testin
 	`, sourceRunID, authorActivityTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'fork.pending', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
-	`, sourceRunID, eventID, entityID, at); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	seedPostgresRootEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.pending", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -840,14 +781,7 @@ func TestRunForkMaterializer_FailsClosedOnRepeatAndUnsupportedBlockers(t *testin
 	if _, err := db.ExecContext(ctx, `DELETE FROM event_deliveries WHERE run_id = $1::uuid`, sourceRunID); err != nil {
 		t.Fatalf("clear pending delivery: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'fork.delivery_cleared', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
-	`, sourceRunID, clearEventID, entityID, at.Add(time.Second)); err != nil {
-		t.Fatalf("seed clear-frontier event: %v", err)
-	}
+	seedPostgresRootEventRecordFixture(t, ctx, db, clearEventID, sourceRunID, "fork.delivery_cleared", events.EventProducerPlatform, "test", entityID, "", at.Add(time.Second))
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEventDeliveries)
 	if _, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID}); err == nil || !strings.Contains(err.Error(), RunForkBlockerNonAgentDeliveryReplayUnsupported) {
 		t.Fatalf("MaterializeRunFork original frontier after delete error = %v, want immutable non-agent delivery blocker", err)
@@ -954,44 +888,44 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
-	eventID := uuid.NewString()
+	rootEventID := uuid.NewString()
 	at := time.Unix(1700000850, 0).UTC()
-	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
-	sourceParentID := uuid.NewString()
+	seedActivationReadySourceRun(t, db, sourceRunID, entityID, rootEventID, at)
+	eventID := uuid.NewString()
 	// Route-bearing replay is gated by historical route proof; this fixture isolates direct pending-delivery replay.
 	sourceEnvelope := events.EventEnvelope{
 		EntityID: entityID,
 		Scope:    events.EventScopeEntity,
 		Target:   events.RouteIdentity{EntityID: entityID},
 	}
-	sourceRoute, _ := json.Marshal(sourceEnvelope.Source)
-	targetRoute, _ := json.Marshal(sourceEnvelope.Target)
-	targetSet, _ := json.Marshal(sourceEnvelope.TargetSet)
-	if _, err := db.ExecContext(ctx, `
-		UPDATE events
-		SET task_id = 'event-owned-task',
-		    payload = '{"task_id":"payload-owned-task","topic":"fork-ready"}'::jsonb,
-		    execution_mode = 'mock',
-		    chain_depth = 3,
-		    produced_by = 'declarative-node',
-		    produced_by_type = 'node',
-		    source_event_id = $2::uuid,
-		    flow_instance = $3,
-		    source_route = $4::jsonb,
-		    target_route = $5::jsonb,
-		    target_set = $6::jsonb
-		WHERE event_id = $1::uuid
-	`, eventID, sourceParentID, sourceEnvelope.FlowInstance, sourceRoute, targetRoute, targetSet); err != nil {
+	sourceEvent := eventtest.ChildWithLineage(
+		eventID,
+		events.EventType("fork.ready"),
+		"declarative-node",
+		"event-owned-task",
+		json.RawMessage(`{"task_id":"payload-owned-task","topic":"fork-ready"}`),
+		3,
+		events.EventLineage{
+			RunID:         sourceRunID,
+			ParentEventID: rootEventID,
+			TaskID:        "event-owned-task",
+			ExecutionMode: executionmode.Mock,
+		},
+		sourceEnvelope,
+		at,
+	)
+	if err := insertPostgresCanonicalEventRecordFixture(ctx, db, sourceEvent); err != nil {
 		t.Fatalf("seed complete historical replay source event: %v", err)
 	}
 	sourceRow, found, err := loadPostgresEventIdentity(ctx, db, eventID)
 	if err != nil || !found {
 		t.Fatalf("load complete historical replay source = found:%v err:%v", found, err)
 	}
-	sourceEvent, err := eventFromPersistedIdentity(sourceRow)
+	sourceAdmitted, err := decodeEventRecord(sourceRow)
 	if err != nil {
 		t.Fatalf("decode complete historical replay source: %v", err)
 	}
+	sourceEvent = sourceAdmitted.Event()
 
 	var sourceDeliveryID string
 	if err := db.QueryRowContext(ctx, `
@@ -1079,10 +1013,11 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	if err != nil || !found {
 		t.Fatalf("load canonical fork replay event = found:%v err:%v", found, err)
 	}
-	forkEvent, err := eventFromPersistedIdentity(forkRow)
+	forkAdmitted, err := decodeEventRecord(forkRow)
 	if err != nil {
 		t.Fatalf("decode canonical fork replay event: %v", err)
 	}
+	forkEvent := forkAdmitted.Event()
 	if forkEvent.ID() == sourceEvent.ID() || forkEvent.RunID() != materialized.ForkRunID || forkEvent.Type() != sourceEvent.Type() ||
 		!forkEvent.Producer().Equal(sourceEvent.Producer()) || forkEvent.TaskID() != sourceEvent.TaskID() ||
 		forkEvent.ExecutionMode() != sourceEvent.ExecutionMode() || forkEvent.ChainDepth() != 0 || forkEvent.ParentEventID() != "" ||
@@ -1169,11 +1104,12 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	}
 	ch := eb.Subscribe("safe-agent", events.EventType("fork.ready"))
 	currentOnly := eb.Subscribe("current-only-agent", events.EventType("fork.ready"))
-	if _, err := db.ExecContext(ctx, `UPDATE events SET chain_depth = -1 WHERE event_id = $1::uuid`, forkEventID); err != nil {
-		t.Fatalf("corrupt fork replay event before dispatch: %v", err)
-	}
-	if replayed, err := eb.SweepUndispatched(ctx, time.Hour, 10); err == nil || !strings.Contains(err.Error(), "chain_depth") {
-		t.Fatalf("SweepUndispatched corrupt replay = count:%d err:%v, want chain_depth failure", replayed, err)
+	eventtestsql.CorruptEventStore(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventtestsql.EventCorruptionClaim{
+		Invariant: "store.event_record.exact_persistence",
+		Reason:    "prove historical replay refuses a malformed durable route object",
+	}, "", `UPDATE events SET target_route = $1::jsonb WHERE event_id = $2::uuid`, `"bad"`, forkEventID)
+	if replayed, err := eb.SweepUndispatched(ctx, time.Hour, 10); err == nil || !strings.Contains(err.Error(), "target_route") {
+		t.Fatalf("SweepUndispatched corrupt replay = count:%d err:%v, want target_route failure", replayed, err)
 	}
 	select {
 	case evt := <-ch:
@@ -1187,9 +1123,14 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	if corruptReceiptCount != 0 {
 		t.Fatalf("corrupt historical replay receipts = %d, want 0", corruptReceiptCount)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE events SET chain_depth = 0 WHERE event_id = $1::uuid`, forkEventID); err != nil {
-		t.Fatalf("restore fork replay event before dispatch: %v", err)
+	targetRoute, err := json.Marshal(forkEvent.Envelope().Target)
+	if err != nil {
+		t.Fatalf("marshal fork replay target route: %v", err)
 	}
+	eventtestsql.CorruptEventStore(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventtestsql.EventCorruptionClaim{
+		Invariant: "store.event_record.exact_persistence",
+		Reason:    "restore the exact target route after the corruption proof",
+	}, "", `UPDATE events SET target_route = $1::jsonb WHERE event_id = $2::uuid`, string(targetRoute), forkEventID)
 	replayed, err := eb.SweepUndispatched(ctx, time.Hour, 10)
 	if err != nil {
 		t.Fatalf("SweepUndispatched: %v", err)
@@ -1268,14 +1209,7 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 				`, foreignRunID, at.Add(-time.Minute)); err != nil {
 					t.Fatalf("seed foreign run: %v", err)
 				}
-				if _, err := db.ExecContext(ctx, `
-					INSERT INTO events (execution_mode,
-						run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-					)
-					VALUES ('live', $1::uuid, $2::uuid, 'foreign.ready', 'global', '{}'::jsonb, 'test', 'platform', $3)
-				`, foreignRunID, foreignEventID, at); err != nil {
-					t.Fatalf("seed foreign event: %v", err)
-				}
+				seedPostgresRootEventRecordFixture(t, ctx, db, foreignEventID, foreignRunID, "foreign.ready", events.EventProducerPlatform, "test", "", "", at)
 				var deliveryID string
 				if err := db.QueryRowContext(ctx, `
 					INSERT INTO event_deliveries (
@@ -1492,14 +1426,7 @@ func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'fork.after', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
-	`, sourceRunID, afterEventID, entityID, at.Add(time.Second)); err != nil {
-		t.Fatalf("seed post-fork event: %v", err)
-	}
+	seedPostgresRootEventRecordFixture(t, ctx, db, afterEventID, sourceRunID, "fork.after", events.EventProducerPlatform, "test", entityID, "flow-a/1", at.Add(time.Second))
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents)
 	blocked, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
 	if err == nil || !strings.Contains(err.Error(), "source_events_advanced_after_fork_point") {
@@ -1595,14 +1522,7 @@ func TestRunForkActivation_FailsClosedForForkReplayStateWithTaxonomy(t *testing.
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'fork.replay_state', 'global', '{}'::jsonb, 'test', 'platform', $3)
-	`, materialized.ForkRunID, forkEventID, at.Add(time.Second)); err != nil {
-		t.Fatalf("seed fork event: %v", err)
-	}
+	seedPostgresRootEventRecordFixture(t, ctx, db, forkEventID, materialized.ForkRunID, "fork.replay_state", events.EventProducerPlatform, "test", "", "", at.Add(time.Second))
 
 	blocked, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
 	if err == nil || !strings.Contains(err.Error(), "fork_events_already_exist") {
@@ -1837,14 +1757,7 @@ func seedActivationReadySourceRun(t *testing.T, db *sql.DB, sourceRunID, entityI
 	`, sourceRunID, authorActivityTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-			VALUES ('live', $1::uuid, $2::uuid, 'fork.ready', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
-	`, sourceRunID, eventID, entityID, at); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	seedPostgresRootEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.ready", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at

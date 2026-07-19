@@ -73,7 +73,9 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		0,
 		templateInstanceDeliveryRunID,
 		"",
-		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: finalflowinstanceauthoring.ProducerFlowID}),
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
+			FlowID: finalflowinstanceauthoring.ProducerFlowID, FlowInstance: finalflowinstanceauthoring.ProducerFlowID, EntityID: "88888888-8888-4888-8888-888888888888",
+		}),
 		time.Now().UTC(),
 	)
 	preflight, err := bus.CheckPublishRecipientPlan(ctx, evt)

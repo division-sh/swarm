@@ -341,7 +341,11 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		selectedState = selected.State
 		hasSelectedState = true
 	}
-	entityID, evt = ensureHandlerEntityID(source, flowID, handler, entityID, evt)
+	resolvedEntityID, resolvedEvent, err := ensureHandlerEntityID(source, flowID, handler, entityID, evt)
+	if err != nil {
+		return nil, err
+	}
+	entityID, evt = resolvedEntityID, resolvedEvent
 	ctx = withPipelineFlowScope(ctx, flowID)
 	currentState := e.coordinator.currentWorkflowState(ctx, entityID)
 	if hasSelectedState && strings.TrimSpace(selectedState.EntityID) != "" && strings.TrimSpace(currentState.EntityID) == "" {
@@ -380,11 +384,18 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		return nil, err
 	}
 	result, err := node.Handle(ctx, runtimeengine.ExecutionRequest{
-		EntityID:        identity.NormalizeEntityID(entityID),
-		NodeID:          identity.NormalizeNodeID(e.nodeID),
-		FlowID:          identity.NormalizeFlowID(flowID),
-		Event:           evt,
-		ProducerRoute:   actionResultProducerRoute(source, flowID, entityID, evt, stateSnapshot, evt.TargetRoute()),
+		EntityID: identity.NormalizeEntityID(entityID),
+		NodeID:   identity.NormalizeNodeID(e.nodeID),
+		FlowID:   identity.NormalizeFlowID(flowID),
+		Event:    evt,
+		ProducerRoute: actionResultProducerRoute(
+			source,
+			flowID,
+			entityID,
+			evt,
+			stateSnapshot,
+			workflowNodeProducerRoute(source, e.nodeID, flowID, entityID, stateSnapshot),
+		),
 		HandlerEventKey: handlerEventKey,
 		ChainDepth:      evt.ChainDepth(),
 		Handler:         handler,
@@ -404,22 +415,30 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	}, nil
 }
 
-func ensureHandlerEntityID(source semanticview.Source, flowID string, handler SystemNodeEventHandler, entityID string, evt Event) (string, Event) {
+func ensureHandlerEntityID(source semanticview.Source, flowID string, handler SystemNodeEventHandler, entityID string, evt Event) (string, Event, error) {
 	entityID = strings.TrimSpace(firstNonEmptyString(entityID, evt.EntityID()))
 	if entityID != "" {
 		if strings.TrimSpace(evt.EntityID()) == "" {
-			evt = events.Project(evt, events.ProjectEnvelope(events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID)))
+			resolved, err := events.ResolveEnvelope(evt, events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID))
+			if err != nil {
+				return "", evt, err
+			}
+			evt = resolved
 		}
-		return entityID, evt
+		return entityID, evt, nil
 	}
 	if !handlerMaterializesEntity(source, flowID, handler) {
-		return "", evt
+		return "", evt, nil
 	}
 	entityID = canonicalHandlerEntityID(source, flowID, evt)
 	if entityID == "" {
-		return "", evt
+		return "", evt, nil
 	}
-	return entityID, events.Project(evt, events.ProjectEnvelope(events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID)))
+	resolved, err := events.ResolveEnvelope(evt, events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID))
+	if err != nil {
+		return "", evt, err
+	}
+	return entityID, resolved, nil
 }
 
 func canonicalHandlerEntityID(source semanticview.Source, flowID string, evt Event) string {

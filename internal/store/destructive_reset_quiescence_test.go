@@ -3,9 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
@@ -106,6 +109,7 @@ func TestPostgresStore_ApplyDestructiveResetQuiescence_TerminalizesRunsAndDelive
 		SELECT status, COALESCE(reason_code, '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
 	`, delivered).Scan(&deliveredStatus, &deliveredReason); err != nil {
 		t.Fatalf("load delivered row: %v", err)
 	}
@@ -117,6 +121,7 @@ func TestPostgresStore_ApplyDestructiveResetQuiescence_TerminalizesRunsAndDelive
 		SELECT status, COALESCE(reason_code, '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
 	`, agentExhaustedFailed).Scan(&exhaustedStatus, &exhaustedReason); err != nil {
 		t.Fatalf("load exhausted failed row: %v", err)
 	}
@@ -199,7 +204,7 @@ func TestPostgresStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecoverableW
 	agentInProgress := seedDestructiveResetEvent(t, ctx, pg, runID, "serve.agent.in_progress")
 	agentRetryableFailed := seedDestructiveResetEvent(t, ctx, pg, runID, "serve.agent.failed_retryable")
 	nodePending := seedDestructiveResetEvent(t, ctx, pg, runID, "serve.node.pending")
-	terminalRunPending := seedDestructiveResetEvent(t, ctx, pg, terminalRunID, "serve.terminal.pending")
+	terminalRunPending := seedDestructiveResetPersistedEvent(t, ctx, pg, terminalRunID, "serve.terminal.pending")
 	activeSessionID := uuid.NewString()
 	timerID := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `
@@ -304,8 +309,8 @@ func TestSQLiteRuntimeStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecover
 		INSERT INTO runs (run_id, status, started_at, ended_at) VALUES
 			(?, 'running', ?, NULL),
 			(?, 'paused', ?, NULL),
-			(?, 'completed', ?, ?)
-	`, runID, now.Add(-time.Hour), pausedRunID, now.Add(-time.Hour), terminalRunID, now.Add(-time.Hour), now.Add(-time.Minute)); err != nil {
+			(?, 'running', ?, NULL)
+	`, runID, now.Add(-time.Hour), pausedRunID, now.Add(-time.Hour), terminalRunID, now.Add(-time.Hour)); err != nil {
 		t.Fatalf("seed sqlite runs: %v", err)
 	}
 	agentPending := seedSQLiteServeAbandonEvent(t, ctx, store, runID, "serve.agent.pending", now)
@@ -314,6 +319,11 @@ func TestSQLiteRuntimeStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecover
 	agentExhaustedFailed := seedSQLiteServeAbandonEvent(t, ctx, store, runID, "serve.agent.failed_exhausted", now)
 	nodePending := seedSQLiteServeAbandonEvent(t, ctx, store, runID, "serve.node.pending", now)
 	terminalRunPending := seedSQLiteServeAbandonEvent(t, ctx, store, terminalRunID, "serve.terminal.pending", now)
+	if _, err := store.DB.ExecContext(ctx, `
+		UPDATE runs SET status = 'completed', ended_at = ? WHERE run_id = ?
+	`, now.Add(-time.Minute), terminalRunID); err != nil {
+		t.Fatalf("terminalize sqlite fixture run: %v", err)
+	}
 	activeSessionID := uuid.NewString()
 	timerID := uuid.NewString()
 	if _, err := store.DB.ExecContext(ctx, `
@@ -393,6 +403,8 @@ func TestSQLiteRuntimeStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecover
 		SELECT status, COALESCE(reason_code, '')
 		FROM event_deliveries
 		WHERE event_id = ?
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = 'agent-a'
 	`, agentExhaustedFailed).Scan(&exhaustedStatus, &exhaustedReason); err != nil {
 		t.Fatalf("load exhausted failed delivery: %v", err)
 	}
@@ -404,6 +416,8 @@ func TestSQLiteRuntimeStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecover
 		SELECT status, COALESCE(reason_code, '')
 		FROM event_deliveries
 		WHERE event_id = ?
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = 'agent-a'
 	`, terminalRunPending).Scan(&terminalDeliveryStatus, &terminalDeliveryReason); err != nil {
 		t.Fatalf("load terminal run delivery: %v", err)
 	}
@@ -455,6 +469,7 @@ func TestPostgresStore_ApplyDestructiveResetQuiescence_DryRunDoesNotMutate(t *te
 		SELECT status, COALESCE(reason_code, '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
 	`, eventID).Scan(&status, &reason); err != nil {
 		t.Fatalf("load delivery after dry-run: %v", err)
 	}
@@ -501,13 +516,11 @@ func assertServeAbandonReceipt(t *testing.T, ctx context.Context, pg *PostgresSt
 func seedSQLiteServeAbandonEvent(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, runID, name string, at time.Time) string {
 	t.Helper()
 	eventID := uuid.NewString()
-	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES ('live',
-			?, ?, ?, 'global', '{}', 'test', 'agent', ?
-		)
-	`, eventID, runID, name, at.UTC()); err != nil {
+	event := eventtest.RootIngress(
+		eventID, events.EventType("test.event"), "test", "", json.RawMessage(`{}`), 0,
+		runID, "", events.EventEnvelope{}, at.UTC(),
+	)
+	if err := commitSemanticEventFixture(ctx, store, event); err != nil {
 		t.Fatalf("seed sqlite event %s: %v", name, err)
 	}
 	return eventID
@@ -567,14 +580,25 @@ func assertSQLiteServeAbandonReceipt(t *testing.T, ctx context.Context, store *S
 func seedDestructiveResetEvent(t *testing.T, ctx context.Context, pg *PostgresStore, runID, name string) string {
 	t.Helper()
 	eventID := uuid.NewString()
-	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES ('live',
-			$1::uuid, $2::uuid, $3, 'global', '{}'::jsonb, 'test', 'agent', now()
-		)
-	`, eventID, runID, name); err != nil {
+	event := eventtest.RootIngress(
+		eventID, events.EventType("test.event"), "test", "", json.RawMessage(`{}`), 0,
+		runID, "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	if err := commitSemanticEventFixture(ctx, pg, event); err != nil {
 		t.Fatalf("seed event %s: %v", name, err)
+	}
+	return eventID
+}
+
+func seedDestructiveResetPersistedEvent(t *testing.T, ctx context.Context, pg *PostgresStore, runID, name string) string {
+	t.Helper()
+	eventID := uuid.NewString()
+	event := eventtest.RootIngress(
+		eventID, events.EventType("test.event"), "test", "", json.RawMessage(`{}`), 0,
+		runID, "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	if err := insertCanonicalEventRecordFixture(ctx, pg, event); err != nil {
+		t.Fatalf("seed persisted event %s: %v", name, err)
 	}
 	return eventID
 }

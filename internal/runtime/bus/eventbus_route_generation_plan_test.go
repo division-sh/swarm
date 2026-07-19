@@ -91,8 +91,8 @@ func TestEventBusPublishInMutationDoesNotCrossAgentRouteGenerations(t *testing.T
 
 	mutationDone := make(chan error, 1)
 	go func() {
-		mutationDone <- store.RunEventMutation(context.Background(), func(mutation EventMutation) error {
-			return eb.PublishInMutation(mutation.Context(), evt)
+		mutationDone <- runConnectRoutePlanCommitScope(context.Background(), store, func(commitCtx context.Context) error {
+			return eb.PublishInMutation(commitCtx, evt)
 		})
 	}()
 	requireRouteGenerationSignal(t, barrier.started, "post-commit interceptor")

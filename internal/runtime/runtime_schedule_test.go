@@ -89,7 +89,7 @@ func TestScheduleEventPayloadPreservesJoinTimeoutHandle(t *testing.T) {
 }
 
 func TestScheduledEventUsesTypedScheduleEnvelope(t *testing.T) {
-	evt := scheduledEvent(runtimepipeline.Schedule{
+	evt, err := scheduledEvent(runtimepipeline.Schedule{
 		RunID:        "11111111-1111-1111-1111-111111111111",
 		AgentID:      "runtime",
 		EventType:    "timer.check",
@@ -97,6 +97,9 @@ func TestScheduledEventUsesTypedScheduleEnvelope(t *testing.T) {
 		FlowInstance: "review/inst-1",
 		Payload:      []byte(`{"entity_id":"payload-entity","flow_instance":"payload-flow"}`),
 	})
+	if err != nil {
+		t.Fatalf("scheduledEvent: %v", err)
+	}
 
 	if got := evt.EntityID(); got != "ent-001" {
 		t.Fatalf("event entity_id = %q, want ent-001", got)

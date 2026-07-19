@@ -217,7 +217,7 @@ func (s *PostgresStore) applyScheduleTerminalTransition(
 		return nil
 	}
 	if _, activeTx := runtimepipeline.PipelineSQLTxFromContext(ctx); activeTx {
-		postCommitCtx := runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx))
+		postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)))
 		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
 			_ = s.ReleaseSchedule(postCommitCtx, sc)
 		}) {

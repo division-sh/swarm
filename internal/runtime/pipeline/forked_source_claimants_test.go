@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -168,17 +171,20 @@ func TestForkedSourceSystemNodeDeliveryMutationsRefuseAndPreserveLineage(t *test
 			fixture := newForkedPipelineBackend(t, backend)
 			nodeID := "freeze-node"
 			eventID := uuid.NewString()
+			dialect := runtimeauthoractivity.DialectPostgres
 			if fixture.sqlite {
-				if _, err := fixture.db.ExecContext(fixture.ctx, `INSERT INTO events (event_id, execution_mode, run_id, event_name, scope, payload, chain_depth, produced_by_type, created_at) VALUES (?, 'live', ?, 'freeze.pending', 'global', '{}', 0, 'platform', ?)`, eventID, fixture.runID, fixture.frozenAt.Add(-time.Minute)); err != nil {
-					t.Fatal(err)
-				}
+				dialect = runtimeauthoractivity.DialectSQLite
+			}
+			event := eventtest.PersistedProjectionForProducer(
+				eventID, "freeze.pending", eventtest.Producer(events.EventProducerPlatform, "test"), "",
+				[]byte(`{}`), 0, fixture.runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, fixture.frozenAt.Add(-time.Minute),
+			)
+			seedPipelineEventRecordForDialect(t, fixture.ctx, fixture.db, dialect, event)
+			if fixture.sqlite {
 				if _, err := fixture.db.ExecContext(fixture.ctx, `INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, delivery_target_route, status, retry_count, created_at) VALUES (?, ?, ?, 'node', ?, '{}', 'pending', 0, ?)`, uuid.NewString(), fixture.runID, eventID, nodeID, fixture.frozenAt); err != nil {
 					t.Fatal(err)
 				}
 			} else {
-				if _, err := fixture.db.ExecContext(fixture.ctx, `INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at) VALUES ('live', $1::uuid, $2::uuid, 'freeze.pending', 'global', '{}'::jsonb, 'test', 'platform', $3)`, fixture.runID, eventID, fixture.frozenAt.Add(-time.Minute)); err != nil {
-					t.Fatal(err)
-				}
 				if _, err := fixture.db.ExecContext(fixture.ctx, `INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, delivery_target_route, status, retry_count, created_at) VALUES ($1::uuid, $2::uuid, 'node', $3, '{}'::jsonb, 'pending', 0, $4)`, fixture.runID, eventID, nodeID, fixture.frozenAt); err != nil {
 					t.Fatal(err)
 				}

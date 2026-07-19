@@ -130,7 +130,10 @@ func (pc *PipelineCoordinator) selectedHandlerEntityFromInstance(ctx context.Con
 	if storageRef := strings.TrimSpace(selected.StorageRef); storageRef != "" {
 		envelope = events.EnvelopeForFlowInstance(envelope, storageRef)
 	}
-	selectedEvent := events.Project(evt, events.ProjectEnvelope(envelope))
+	selectedEvent, err := events.ResolveEnvelope(evt, envelope)
+	if err != nil {
+		return selectedHandlerEntity{}, fmt.Errorf("%s selected event envelope: %w", label, err)
+	}
 	return selectedHandlerEntity{
 		EntityID: entityID,
 		State:    state,
@@ -202,7 +205,10 @@ func (pc *PipelineCoordinator) createdHandlerEntityForDeclaredKey(ctx context.Co
 	}
 	envelope := events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID)
 	envelope = events.EnvelopeForFlowInstance(envelope, instance.InstancePath)
-	selectedEvent := events.Project(evt, events.ProjectEnvelope(envelope))
+	selectedEvent, err := events.ResolveEnvelope(evt, envelope)
+	if err != nil {
+		return selectedHandlerEntity{}, fmt.Errorf("select_or_create_entity event envelope: %w", err)
+	}
 	return selectedHandlerEntity{
 		EntityID: entityID,
 		State:    state,

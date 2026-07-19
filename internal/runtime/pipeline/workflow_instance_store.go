@@ -148,6 +148,12 @@ func NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, runner 
 	return &WorkflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner}
 }
 
+func (s *WorkflowInstanceStore) ConfigureRuntimeMutationRunner(runner RuntimeMutationRunner) {
+	if s != nil {
+		s.runtimeMutation = runner
+	}
+}
+
 func (s *WorkflowInstanceStore) ConfigureDecisionCardLifecycle(cards decisioncard.Store, publishers ...workflowGateMutationPublisher) {
 	if s != nil {
 		s.decisionCards = cards
@@ -480,16 +486,16 @@ func (s *WorkflowInstanceStore) runInPipelineTransaction(ctx context.Context, fn
 		}
 		ctx = WithoutPipelineSQLTxContext(ctx)
 	}
+	if s.runtimeMutation != nil {
+		return s.runtimeMutation.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
+			tx, ok := sqlTxFromContext(txctx)
+			if !ok || tx == nil {
+				return fmt.Errorf("selected runtime mutation did not provide pipeline transaction")
+			}
+			return fn(txctx, tx)
+		})
+	}
 	if s.isSQLite() {
-		if s.runtimeMutation != nil {
-			return s.runtimeMutation.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-				tx, ok := sqlTxFromContext(txctx)
-				if !ok || tx == nil {
-					return fmt.Errorf("sqlite runtime mutation did not provide pipeline transaction")
-				}
-				return fn(txctx, tx)
-			})
-		}
 		return errSQLiteWorkflowInstanceStoreRuntimeMutationRunnerRequired
 	}
 	return s.runInPipelineTransactionOnce(ctx, fn)

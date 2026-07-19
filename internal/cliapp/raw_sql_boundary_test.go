@@ -141,11 +141,6 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "outbox write path participates in the selected runtime event/pipeline transaction boundary",
 		},
-		"internal/runtime/bus/store.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1783,
-			Reason:         "bus store interface names raw event transaction primitives that remain confined to runtime unit-of-work ownership",
-		},
 		"internal/runtime/manager/agent_manager.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          2007,

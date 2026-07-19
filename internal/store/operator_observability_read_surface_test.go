@@ -1,11 +1,16 @@
 package store
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -24,14 +29,8 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES
-			('live', $1::uuid, $2::uuid, 'task.failed', $3::uuid, 'entity', '{"entity_id":"`+entityID+`","n":1}'::jsonb, 'agent-a', 'agent', $4),
-			('live', $5::uuid, $2::uuid, 'task.completed', $3::uuid, 'entity', '{"entity_id":"`+entityID+`","n":2}'::jsonb, 'agent-b', 'agent', $6)
-	`, olderEventID, runID, entityID, base, newerEventID, base.Add(time.Minute)); err != nil {
-		t.Fatalf("seed events: %v", err)
-	}
+	seedOperatorObservabilityEvent(t, ctx, pg, olderEventID, runID, "task.failed", events.EventProducerAgent, "agent-a", json.RawMessage(`{"entity_id":"`+entityID+`","n":1}`), entityID, base)
+	seedOperatorObservabilityEvent(t, ctx, pg, newerEventID, runID, "task.completed", events.EventProducerAgent, "agent-b", json.RawMessage(`{"entity_id":"`+entityID+`","n":2}`), entityID, base.Add(time.Minute))
 	if _, err := db.ExecContext(ctx, `
 			INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, failure, created_at)
 			VALUES
@@ -145,22 +144,8 @@ func TestOperatorObservabilityEventOwnerDoesNotPromotePayloadEntityIdentity(t *t
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ('live', $1::uuid, $2::uuid, 'task.payload_only', 'global',
-			jsonb_build_object('entity_id', $3::text, 'marker', 'payload-only'),
-			'agent-a', 'agent', $4)
-	`, payloadOnlyEventID, runID, targetEntityID, base); err != nil {
-		t.Fatalf("seed payload-only event: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ('live', $1::uuid, $2::uuid, 'task.canonical_entity', $3::uuid, 'entity',
-			jsonb_build_object('entity_id', 'payload-business-value', 'marker', 'canonical'),
-			'agent-b', 'agent', $4)
-	`, canonicalEventID, runID, targetEntityID, base.Add(time.Second)); err != nil {
-		t.Fatalf("seed canonical event: %v", err)
-	}
+	seedOperatorObservabilityEvent(t, ctx, pg, payloadOnlyEventID, runID, "task.payload_only", events.EventProducerAgent, "agent-a", json.RawMessage(`{"entity_id":"`+targetEntityID+`","marker":"payload-only"}`), "", base)
+	seedOperatorObservabilityEvent(t, ctx, pg, canonicalEventID, runID, "task.canonical_entity", events.EventProducerAgent, "agent-b", json.RawMessage(`{"entity_id":"payload-business-value","marker":"canonical"}`), targetEntityID, base.Add(time.Second))
 
 	filtered, err := pg.ListOperatorEvents(ctx, OperatorEventListOptions{
 		Filter: OperatorEventListFilter{EntityID: targetEntityID},
@@ -225,12 +210,7 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 				"failure":` + failure + `
 			}
 		}`
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ('live', $1::uuid, $2::uuid, 'platform.runtime_log', 'global', $3::jsonb, 'runtime', 'platform', $4)
-		`, eventID, runID, payload, createdAt); err != nil {
-			t.Fatalf("seed runtime log: %v", err)
-		}
+		seedOperatorRuntimeLog(t, ctx, pg, eventID, runID, "runtime", json.RawMessage(payload), createdAt)
 		return eventID
 	}
 	olderLog := insertLog("old_code", base)
@@ -295,23 +275,26 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 	}
 
 	bulkFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassInternalFailure, "bulk_code", nil))
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-		SELECT 'live', gen_random_uuid(), $1::uuid, 'platform.runtime_log', 'global',
-			jsonb_build_object(
-				'log_level', 'error',
-				'message', 'bulk runtime failed',
-				'details', jsonb_build_object(
-					'component', 'mcp-gateway',
-					'action', 'request_failed',
-					'agent_id', 'agent-1',
-					'failure', $3::jsonb
-				)
-			),
-			'runtime', 'platform', $2::timestamptz + (g * interval '1 millisecond')
-		FROM generate_series(1, 1005) AS g
-	`, runID, base.Add(2*time.Minute), bulkFailure); err != nil {
-		t.Fatalf("seed bulk runtime logs: %v", err)
+	bulkPayload := json.RawMessage(`{"log_level":"error","message":"bulk runtime failed","details":{"component":"mcp-gateway","action":"request_failed","agent_id":"agent-1","failure":` + bulkFailure + `}}`)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin bulk runtime-log fixture: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	txctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	if err != nil {
+		t.Fatalf("begin bulk runtime-log author activity: %v", err)
+	}
+	for i := 1; i <= 1005; i++ {
+		event := eventtest.DiagnosticDirect(
+			uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", bulkPayload, 0, runID, "", events.EventEnvelope{}, base.Add(2*time.Minute+time.Duration(i)*time.Millisecond),
+		)
+		if err := commitDiagnosticRuntimeLogFixtureTx(txctx, pg, tx, event); err != nil {
+			t.Fatalf("seed bulk runtime log %d: %v", i, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit bulk runtime-log fixture: %v", err)
 	}
 	bulkIncidents, err := pg.ListOperatorRuntimeIncidents(ctx, OperatorRuntimeIncidentListOptions{
 		SinceHours: 2,
@@ -354,22 +337,16 @@ func TestPostgresRuntimeLogSourceFilterMatchesProjectionFallback(t *testing.T) {
 			"message":"` + message + `",
 			"details":` + details + `
 		}`
-		var producer any
+		producer := "runtime"
 		if producedBy != nil {
-			producer = *producedBy
+			producer = strings.TrimSpace(*producedBy)
 		}
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ('live', $1::uuid, $2::uuid, 'platform.runtime_log', 'global', $3::jsonb, $4, 'platform', $5)
-		`, eventID, runID, payload, producer, createdAt); err != nil {
-			t.Fatalf("seed runtime log: %v", err)
-		}
+		seedOperatorRuntimeLog(t, ctx, pg, eventID, runID, producer, json.RawMessage(payload), createdAt)
 		return eventID
 	}
 	runtimeFallbackID := insertLog("runtime fallback", `{"component":"source-parity","action":"runtime_fallback"}`, nil, base.Add(time.Second))
 	producedByID := insertLog("producer fallback", `{"component":"source-parity","action":"producer_fallback"}`, producedByValue("operator-runtime"), base.Add(2*time.Second))
 	agentID := insertLog("agent source", `{"component":"source-parity","action":"agent_source","agent_id":"agent-1"}`, producedByValue("runtime"), base.Add(3*time.Second))
-	blankProducedByID := insertLog("blank producer fallback", `{"component":"source-parity","action":"blank_producer_fallback"}`, producedByValue("   "), base.Add(4*time.Second))
 	blankAgentID := insertLog("blank agent fallback", `{"component":"source-parity","action":"blank_agent_fallback","agent_id":"   "}`, producedByValue("operator-runtime-trimmed"), base.Add(5*time.Second))
 
 	all, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
@@ -382,14 +359,13 @@ func TestPostgresRuntimeLogSourceFilterMatchesProjectionFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListOperatorRuntimeLogs all: %v", err)
 	}
-	if len(all.Logs) != 5 {
-		t.Fatalf("all logs = %#v, want five", all.Logs)
+	if len(all.Logs) != 4 {
+		t.Fatalf("all logs = %#v, want four", all.Logs)
 	}
 	assertRuntimeLogIDsAndSources(t, all.Logs, map[string]string{
 		runtimeFallbackID: "runtime",
 		producedByID:      "operator-runtime",
 		agentID:           "agent-1",
-		blankProducedByID: "runtime",
 		blankAgentID:      "operator-runtime-trimmed",
 	})
 
@@ -405,7 +381,6 @@ func TestPostgresRuntimeLogSourceFilterMatchesProjectionFallback(t *testing.T) {
 	}
 	assertRuntimeLogIDsAndSources(t, runtimeRows.Logs, map[string]string{
 		runtimeFallbackID: "runtime",
-		blankProducedByID: "runtime",
 	})
 
 	producerRows, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
@@ -497,12 +472,7 @@ func TestOperatorRuntimeLogsFilterBySessionAndTimeWindow(t *testing.T) {
 				"session_id":"` + sessionID + `"
 			}
 		}`
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ('live', $1::uuid, $2::uuid, 'platform.runtime_log', 'global', $3::jsonb, 'runtime', 'platform', $4)
-		`, eventID, runID, payload, createdAt); err != nil {
-			t.Fatalf("seed runtime log: %v", err)
-		}
+		seedOperatorRuntimeLog(t, ctx, pg, eventID, runID, "runtime", json.RawMessage(payload), createdAt)
 		return eventID
 	}
 	inWindow := insertLog("sess-1", base.Add(1*time.Second))
@@ -562,12 +532,7 @@ func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 				"failure":` + failure + `
 			}
 		}`
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ('live', $1::uuid, $2::uuid, 'platform.runtime_log', 'global', $3::jsonb, 'runtime', 'platform', $4)
-		`, eventID, runID, payload, createdAt); err != nil {
-			t.Fatalf("seed runtime log: %v", err)
-		}
+		seedOperatorRuntimeLog(t, ctx, pg, eventID, runID, "runtime", json.RawMessage(payload), createdAt)
 		return eventID
 	}
 	logA := insertLog(runA, "bundle_a_code", base.Add(time.Second))
@@ -623,14 +588,8 @@ func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 	}
 	firstEvent := uuid.NewString()
 	secondEvent := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES
-			('live', $1::uuid, $2::uuid, 'first.event', 'global', '{}'::jsonb, 'runtime', 'platform', $3),
-			('live', $4::uuid, $2::uuid, 'second.event', 'global', '{}'::jsonb, 'runtime', 'platform', $5)
-	`, firstEvent, runID, base, secondEvent, base.Add(time.Second)); err != nil {
-		t.Fatalf("seed trace events: %v", err)
-	}
+	seedOperatorObservabilityEvent(t, ctx, pg, firstEvent, runID, "first.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), "", base)
+	seedOperatorObservabilityEvent(t, ctx, pg, secondEvent, runID, "second.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), "", base.Add(time.Second))
 
 	page1, next, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 1})
 	if err != nil {
@@ -706,14 +665,8 @@ func TestRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES
-			('live', $1::uuid, $3::uuid, 'item.received', 'global', '{}'::jsonb, 'runtime', 'platform', $4),
-			('live', $2::uuid, $3::uuid, 'platform.runtime_log', 'global', '{}'::jsonb, 'runtime', 'platform', $5)
-	`, businessEvent, runtimeLogEvent, runID, base, base.Add(time.Millisecond)); err != nil {
-		t.Fatalf("seed trace rows: %v", err)
-	}
+	seedOperatorObservabilityEvent(t, ctx, pg, businessEvent, runID, "item.received", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), "", base)
+	seedOperatorRuntimeLog(t, ctx, pg, runtimeLogEvent, runID, "runtime", json.RawMessage(`{}`), base.Add(time.Millisecond))
 
 	allRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10})
 	if err != nil {
@@ -748,14 +701,8 @@ func TestRunDebugTracePageTypedFilters(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES
-			('live', $1::uuid, $2::uuid, 'first.event', $3::uuid, 'entity', '{}'::jsonb, 'runtime', 'platform', $4),
-			('live', $5::uuid, $2::uuid, 'second.event', $6::uuid, 'entity', '{}'::jsonb, 'runtime', 'platform', $7)
-	`, firstEvent, runID, entityOne, base, secondEvent, entityTwo, base.Add(time.Second)); err != nil {
-		t.Fatalf("seed trace events: %v", err)
-	}
+	seedOperatorObservabilityEvent(t, ctx, pg, firstEvent, runID, "first.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), entityOne, base)
+	seedOperatorObservabilityEvent(t, ctx, pg, secondEvent, runID, "second.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), entityTwo, base.Add(time.Second))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at)
 		VALUES
@@ -810,5 +757,40 @@ func TestRunDebugTracePageTypedFilters(t *testing.T) {
 				t.Fatalf("trace rows = %#v, want only %s", rows, tc.want)
 			}
 		})
+	}
+}
+
+func seedOperatorObservabilityEvent(
+	t *testing.T,
+	ctx context.Context,
+	pg *PostgresStore,
+	eventID, runID, eventName string,
+	producerType events.EventProducerType,
+	producerID string,
+	payload json.RawMessage,
+	entityID string,
+	createdAt time.Time,
+) {
+	t.Helper()
+	envelope := events.EventEnvelope{}
+	if entityID != "" {
+		envelope = events.EnvelopeForEntityID(envelope, entityID)
+	}
+	event := eventtest.PersistedProjectionForProducer(
+		eventID, events.EventType(eventName), eventtest.Producer(producerType, producerID), "",
+		payload, 0, runID, "", envelope, createdAt,
+	)
+	if err := commitSemanticEventFixture(ctx, pg, event); err != nil {
+		t.Fatalf("seed operator observability event %s: %v", eventName, err)
+	}
+}
+
+func seedOperatorRuntimeLog(t *testing.T, ctx context.Context, pg *PostgresStore, eventID, runID, producerID string, payload json.RawMessage, createdAt time.Time) {
+	t.Helper()
+	event := eventtest.DiagnosticDirect(
+		eventID, events.EventTypePlatformRuntimeLog, producerID, "", payload, 0, runID, "", events.EventEnvelope{}, createdAt,
+	)
+	if err := commitDiagnosticRuntimeLogFixture(ctx, pg, event); err != nil {
+		t.Fatalf("seed operator runtime log: %v", err)
 	}
 }

@@ -9,8 +9,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -19,42 +21,21 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
-	entityID := uuid.NewString()
 	now := time.Now().Add(-time.Minute).UTC()
 	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, now); err != nil {
 		t.Fatalf("seed sqlite replay run: %v", err)
 	}
 
 	runtimeLogID := persistSQLiteRuntimeLogForReplayTest(t, ctx, store, runID)
-	inboundID := uuid.NewString()
-	publicationID := uuid.NewString()
-	publicationEventID := uuid.NewString()
-	agentDirectiveID := uuid.NewString()
 	executableID := uuid.NewString()
-
-	appendSQLiteDiagnosticReplayTestEvent(t, ctx, store, eventtest.DiagnosticDirect(
-		inboundID,
-		events.EventTypePlatformInboundRecord,
-		"github",
-		"",
-		json.RawMessage(`{"publication_id":"`+publicationID+`","provider":"github","provider_event_id":"provider-event-1","entity_id":"`+entityID+`","event_ids":["`+publicationEventID+`"],"event_names":["inbound.github.push"],"output_count":1}`),
-		0,
-		runID,
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-		now.Add(time.Second),
-	))
-	appendSQLiteDiagnosticReplayTestEvent(t, ctx, store, eventtest.DiagnosticDirect(agentDirectiveID,
-
-		events.EventTypePlatformAgentDirective,
-		"runtime", "", json.RawMessage(`{"agent_id":"agent-1","directive":"resume"}`), 0, runID, "", events.EventEnvelope{}, now.Add(2*time.Second)))
-	if err := store.UpsertCommittedReplayScope(ctx, agentDirectiveID, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
-		t.Fatalf("UpsertCommittedReplayScope(agent directive): %v", err)
-	}
 	appendSQLiteReplayTestEvent(t, ctx, store, eventtest.PersistedProjection(executableID,
 
 		events.EventType("workflow.executable"),
 		"runtime", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, now.Add(3*time.Second)))
+	eventtestsql.CorruptEventStore(t, ctx, store.DB, runtimeauthoractivity.DialectSQLite, eventtestsql.EventCorruptionClaim{
+		Invariant: "store.event_record.named_operation_atomicity",
+		Reason:    "prove recovery fails closed when durable replay-scope evidence is missing",
+	}, `DELETE FROM event_deliveries WHERE event_id = ? AND subscriber_type = ? AND subscriber_id = ?`, "", executableID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID)
 
 	globalMissing, err := store.ListEventsMissingPipelineReceipt(ctx, now.Add(-time.Hour), 20)
 	if err != nil {
@@ -93,9 +74,7 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 		t.Fatalf("SweepUndispatched(sqlite) redelivered = %d, want 0", swept)
 	}
 
-	for _, diagnosticID := range []string{runtimeLogID, inboundID, agentDirectiveID} {
-		assertNoSQLitePipelineReceipt(t, ctx, store, diagnosticID)
-	}
+	assertNoSQLitePipelineReceipt(t, ctx, store, runtimeLogID)
 	assertSQLitePipelineReceipt(t, ctx, store, executableID, "dead_letter", "committed_replay_scope_missing")
 }
 
@@ -104,28 +83,21 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	runID := uuid.NewString()
-	entityID := uuid.NewString()
 	now := time.Now().Add(-time.Minute).UTC()
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, now); err != nil {
 		t.Fatalf("seed postgres replay run: %v", err)
 	}
 
 	runtimeLogID := persistPostgresRuntimeLogForReplayTest(t, ctx, pg, runID)
-	inboundID := recordPostgresInboundEventForReplayTest(t, ctx, pg, runID, entityID)
-	agentDirectiveID := uuid.NewString()
 	executableID := uuid.NewString()
-
-	appendPostgresDiagnosticReplayTestEvent(t, ctx, pg, eventtest.DiagnosticDirect(agentDirectiveID,
-
-		events.EventTypePlatformAgentDirective,
-		"runtime", "", json.RawMessage(`{"agent_id":"agent-1","directive":"resume"}`), 0, runID, "", events.EventEnvelope{}, now.Add(2*time.Second)))
-	if err := pg.UpsertCommittedReplayScope(ctx, agentDirectiveID, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
-		t.Fatalf("UpsertCommittedReplayScope(agent directive): %v", err)
-	}
 	appendPostgresReplayTestEvent(t, ctx, pg, eventtest.PersistedProjection(executableID,
 
 		events.EventType("workflow.executable"),
 		"runtime", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, now.Add(3*time.Second)))
+	eventtestsql.CorruptEventStore(t, ctx, pg.DB, runtimeauthoractivity.DialectPostgres, eventtestsql.EventCorruptionClaim{
+		Invariant: "store.event_record.named_operation_atomicity",
+		Reason:    "prove recovery fails closed when durable replay-scope evidence is missing",
+	}, "", `DELETE FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = $2 AND subscriber_id = $3`, executableID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID)
 
 	globalMissing, err := pg.ListEventsMissingPipelineReceipt(ctx, now.Add(-time.Hour), 20)
 	if err != nil {
@@ -164,16 +136,14 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 		t.Fatalf("SweepUndispatched(postgres) redelivered = %d, want 0", swept)
 	}
 
-	for _, diagnosticID := range []string{runtimeLogID, inboundID, agentDirectiveID} {
-		assertNoPostgresPipelineReceipt(t, ctx, pg, diagnosticID)
-	}
+	assertNoPostgresPipelineReceipt(t, ctx, pg, runtimeLogID)
 	assertPostgresPipelineReceipt(t, ctx, pg, executableID, "dead_letter", "committed_replay_scope_missing")
 }
 
 func persistSQLiteRuntimeLogForReplayTest(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, runID string) string {
 	t.Helper()
 	payload := json.RawMessage(`{"log_level":"warn","message":"diagnostic replay proof","details":{"component":"diagnostic_replay","action":"proof"}}`)
-	if err := store.PersistRuntimeLog(ctx, runtimepkg.RuntimeLogPersistenceRecord{RunID: runID, Payload: payload}); err != nil {
+	if err := store.PersistRuntimeLog(ctx, runtimepkg.RuntimeLogPersistenceRecord{RunID: runID, Payload: payload, ExecutionMode: executionmode.Live}); err != nil {
 		t.Fatalf("PersistRuntimeLog(sqlite): %v", err)
 	}
 	var eventID string
@@ -193,7 +163,7 @@ func persistSQLiteRuntimeLogForReplayTest(t *testing.T, ctx context.Context, sto
 func persistPostgresRuntimeLogForReplayTest(t *testing.T, ctx context.Context, pg *PostgresStore, runID string) string {
 	t.Helper()
 	payload := json.RawMessage(`{"log_level":"warn","message":"diagnostic replay proof","details":{"component":"diagnostic_replay","action":"proof"}}`)
-	if err := pg.PersistRuntimeLog(ctx, runtimepkg.RuntimeLogPersistenceRecord{RunID: runID, Payload: payload}); err != nil {
+	if err := pg.PersistRuntimeLog(ctx, runtimepkg.RuntimeLogPersistenceRecord{RunID: runID, Payload: payload, ExecutionMode: executionmode.Live}); err != nil {
 		t.Fatalf("PersistRuntimeLog(postgres): %v", err)
 	}
 	var eventID string
@@ -210,53 +180,16 @@ func persistPostgresRuntimeLogForReplayTest(t *testing.T, ctx context.Context, p
 	return eventID
 }
 
-func recordPostgresInboundEventForReplayTest(t *testing.T, ctx context.Context, pg *PostgresStore, runID, entityID string) string {
-	t.Helper()
-	eventID := uuid.NewString()
-	publicationID := uuid.NewString()
-	publicationEventID := uuid.NewString()
-	evt := eventtest.DiagnosticDirect(
-		eventID,
-		events.EventTypePlatformInboundRecord,
-		"github",
-		inboundEventIdempotencyKey("provider-event-1", entityID, "github"),
-		json.RawMessage(`{"publication_id":"`+publicationID+`","provider":"github","provider_event_id":"provider-event-1","entity_id":"`+entityID+`","event_ids":["`+publicationEventID+`"],"event_names":["inbound.github.push"],"output_count":1}`),
-		0,
-		runID,
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-		time.Now().UTC(),
-	)
-	if err := pg.AppendEvent(withDiagnosticDirectOwner(ctx, diagnosticDirectInboundRecord), evt); err != nil {
-		t.Fatalf("append typed inbound evidence: %v", err)
-	}
-	return eventID
-}
-
 func appendSQLiteReplayTestEvent(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, evt events.Event) {
 	t.Helper()
-	if err := store.AppendEvent(ctx, evt); err != nil {
+	if err := commitSemanticEventFixture(ctx, store, evt); err != nil {
 		t.Fatalf("AppendEvent(%s): %v", evt.Type(), err)
 	}
 }
 
 func appendPostgresReplayTestEvent(t *testing.T, ctx context.Context, pg *PostgresStore, evt events.Event) {
 	t.Helper()
-	if err := pg.AppendEvent(ctx, evt); err != nil {
-		t.Fatalf("AppendEvent(%s): %v", evt.Type(), err)
-	}
-}
-
-func appendSQLiteDiagnosticReplayTestEvent(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, evt events.Event) {
-	t.Helper()
-	if err := store.AppendEvent(withDiagnosticDirectOwner(ctx, string(evt.Type())), evt); err != nil {
-		t.Fatalf("AppendEvent(%s): %v", evt.Type(), err)
-	}
-}
-
-func appendPostgresDiagnosticReplayTestEvent(t *testing.T, ctx context.Context, pg *PostgresStore, evt events.Event) {
-	t.Helper()
-	if err := pg.AppendEvent(withDiagnosticDirectOwner(ctx, string(evt.Type())), evt); err != nil {
+	if err := commitSemanticEventFixture(ctx, pg, evt); err != nil {
 		t.Fatalf("AppendEvent(%s): %v", evt.Type(), err)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/google/uuid"
 )
@@ -65,8 +66,18 @@ func (s *WorkflowInstanceStore) supersedeWorkflowInstanceGates(ctx context.Conte
 		if err != nil {
 			return err
 		}
-		evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_superseded"), events.PlatformProducer("platform"), "", payload, 0, runID, "",
-			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, anchor.EntityID), anchor.FlowInstance), now.UTC())
+		evt, err := events.NewRuntimeControlEvent(events.RuntimeEventInput{
+			Facts: events.EventFacts{
+				ID: uuid.NewString(), Type: events.EventType("mailbox.card_superseded"),
+				Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "platform"},
+				Payload:  payload, Envelope: events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, anchor.EntityID), anchor.FlowInstance),
+				CreatedAt: now.UTC(), ExecutionMode: executionmode.Live,
+			},
+			RunID: runID,
+		})
+		if err != nil {
+			return err
+		}
 		if err := s.gateEvents.PublishInMutation(ctx, evt); err != nil {
 			return fmt.Errorf("publish terminated flow decision card supersession: %w", err)
 		}

@@ -1,10 +1,13 @@
 package store
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -126,10 +129,17 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	agentID := "standing-agent"
 	sessionID := uuid.NewString()
 	timerID := uuid.NewString()
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO events (execution_mode, event_id, run_id, event_name, payload) VALUES ('live', ?, ?, 'standing.work', '{}')`, eventID, created.RunID); err != nil {
+	fixtureCtx := testAuthorActivityContext()
+	if err := commitSemanticEventFixture(fixtureCtx, store, eventtest.PersistedProjection(
+		eventID, events.EventType("standing.work"), "test", "", json.RawMessage(`{}`), 0,
+		created.RunID, "", events.EventEnvelope{}, time.Now().UTC(),
+	)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO events (execution_mode, event_id, run_id, event_name, payload) VALUES ('live', ?, ?, 'standing.unsettled', '{}')`, unsettledEventID, created.RunID); err != nil {
+	if err := commitSemanticEventFixture(fixtureCtx, store, eventtest.PersistedProjection(
+		unsettledEventID, events.EventType("standing.unsettled"), "test", "", json.RawMessage(`{}`), 0,
+		created.RunID, "", events.EventEnvelope{}, time.Now().UTC(),
+	)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.DB.ExecContext(ctx, `INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status) VALUES (?, ?, ?, 'agent', ?, 'in_progress')`, uuid.NewString(), created.RunID, eventID, agentID); err != nil {
@@ -156,7 +166,11 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	if err := store.DB.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = ?`, created.RunID).Scan(&runStatus); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.DB.QueryRowContext(ctx, `SELECT status, reason_code FROM event_deliveries WHERE event_id = ?`, eventID).Scan(&deliveryStatus, &deliveryReason); err != nil {
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT status, reason_code
+		FROM event_deliveries
+		WHERE event_id = ? AND subscriber_type = 'agent' AND subscriber_id = ?
+	`, eventID, agentID).Scan(&deliveryStatus, &deliveryReason); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.DB.QueryRowContext(ctx, `SELECT status, termination_reason FROM agent_sessions WHERE session_id = ?`, sessionID).Scan(&sessionStatus, &sessionReason); err != nil {
@@ -338,11 +352,17 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	unsettledEventID := uuid.NewString()
 	agentID := "standing-agent"
 	timerID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO events (execution_mode, event_id, run_id, event_name, payload) VALUES ('live', $1::uuid, $2::uuid, 'standing.work', '{}')`, eventID, created[0].RunID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO events (execution_mode, event_id, run_id, event_name, payload) VALUES ('live', $1::uuid, $2::uuid, 'standing.unsettled', '{}')`, unsettledEventID, created[0].RunID); err != nil {
-		t.Fatal(err)
+	for _, fixture := range []struct {
+		id        string
+		eventType events.EventType
+	}{
+		{id: eventID, eventType: "standing.work"},
+		{id: unsettledEventID, eventType: "standing.unsettled"},
+	} {
+		seedPostgresRootEventRecordFixture(
+			t, ctx, db, fixture.id, created[0].RunID, fixture.eventType,
+			events.EventProducerPlatform, "test", "", "", time.Now().UTC(),
+		)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status) VALUES ($1::uuid, $2::uuid, $3::uuid, 'agent', $4, 'in_progress')`, uuid.NewString(), created[0].RunID, eventID, agentID); err != nil {
 		t.Fatal(err)

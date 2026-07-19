@@ -72,14 +72,9 @@ func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 
 	evt := eventtest.RootIngress(uuid.NewString(),
 		"source.evt",
-		"src", "", []byte(`{"entity_id":"`+uuid.NewString()+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+		"src", "", []byte(`{"entity_id":"`+uuid.NewString()+`"}`), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ('live', $1::uuid, $2, NULLIF($3,'')::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
-	`, evt.ID(), string(evt.Type()), evt.EntityID(), string(evt.Payload())); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	seedPipelineEventRecord(t, ctx, db, evt)
 	seedPipelineNodeDeliveryAuthority(t, db, evt, "node-a")
 
 	runner.ProcessEventForTest(ctx, evt)
@@ -148,12 +143,7 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 		time.Now().UTC(),
 	)
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, run_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ('live', $1::uuid, $2::uuid, $3, $4::uuid, 'runtime', 'entity', $5::jsonb, 'src', 'agent', now())
-	`, evt.ID(), testPipelineRunID, string(evt.Type()), entityID, string(evt.Payload())); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	seedPipelineEventRecord(t, ctx, db, evt)
 
 	repoRoot := contractComplianceRepoRoot(t)
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier6-event-loop", "test-chain-depth-limit")
@@ -204,15 +194,8 @@ func TestSystemNodeRunner_SkipsQuiescedDestructiveResetDelivery(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testPipelineRunContext(t, db)
 	eventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES ('live',
-			$1::uuid, $2::uuid, 'source.evt', 'global', '{}'::jsonb, 'src', 'agent', now()
-		)
-	`, eventID, testPipelineRunID); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	evt := eventtest.RootIngress(eventID, "source.evt", "src", "", []byte(`{}`), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	seedPipelineEventRecord(t, ctx, db, evt)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at, delivered_at
@@ -229,7 +212,7 @@ func TestSystemNodeRunner_SkipsQuiescedDestructiveResetDelivery(t *testing.T) {
 		return errors.New("should not run")
 	})
 
-	runner.ProcessEventForTest(ctx, eventtest.RootIngress(eventID, "source.evt", "", "", []byte(`{}`), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC()))
+	runner.ProcessEventForTest(ctx, evt)
 
 	if handled != 0 {
 		t.Fatalf("handler calls = %d, want 0 for quiesced delivery", handled)
@@ -299,18 +282,13 @@ func TestSystemNodeRunner_UsesAdmittedEventReceiptsForIdempotency(t *testing.T) 
 		"",
 		[]byte(`{"entity_id":"`+entityID+`"}`),
 		0,
-		"",
+		testPipelineRunID,
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 		time.Now().UTC(),
 	)
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ('live', $1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
-	`, evt.ID(), string(evt.Type()), entityID, string(evt.Payload())); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	seedPipelineEventRecord(t, ctx, db, evt)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, status, created_at)
 		VALUES ($1::uuid, 'node', 'node-a', 'pending', now())
@@ -349,18 +327,13 @@ func TestSystemNodeRunner_SkipsWithoutPersistedNodeDeliveryAuthority(t *testing.
 		"",
 		[]byte(`{"entity_id":"`+entityID+`"}`),
 		0,
-		"",
+		testPipelineRunID,
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 		time.Now().UTC(),
 	)
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ('live', $1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
-	`, evt.ID(), string(evt.Type()), entityID, string(evt.Payload())); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	seedPipelineEventRecord(t, ctx, db, evt)
 
 	attempts := 0
 	bus := &recordingPipelineBus{}
@@ -449,18 +422,13 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 		"",
 		[]byte(`{"entity_id":"`+uuid.NewString()+`","dimension":"expansion_potential","score":74,"tier":3}`),
 		0,
-		"",
+		testPipelineRunID,
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()),
 		time.Now().UTC(),
 	)
 
-	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `
-		INSERT INTO events (execution_mode, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ('live', $1::uuid, $2, NULLIF($3,'')::uuid, 'runtime', 'entity', $4::jsonb, 'analysis-agent', 'agent', now())
-	`, evt.ID(), string(evt.Type()), evt.EntityID(), string(evt.Payload())); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	seedPipelineEventRecord(t, testAuthorActivityContext(context.Background()), db, evt)
 	seedPipelineNodeDeliveryAuthority(t, db, evt, "node-a")
 	postCommit := make([]func(), 0, 1)
 	override := &PipelineReceiptOverride{}

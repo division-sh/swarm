@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -103,21 +104,19 @@ func TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude(t 
 			fixture := newForkedConsumerTestBackend(t, backend)
 			ctx := testAuthorActivityBundleSourceContext()
 			eventID := uuid.NewString()
+			event := eventtest.PersistedProjectionForProducer(
+				eventID, events.EventType("freeze.pending"), eventtest.Producer(events.EventProducerPlatform, "test"),
+				"", []byte(`{}`), 0, fixture.sourceRun, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, fixture.forkedAt.Add(-time.Minute),
+			)
 			if fixture.postgres != nil {
-				if _, err := fixture.db.ExecContext(ctx, `
-					INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-					VALUES ('live', $1::uuid, $2::uuid, 'freeze.pending', 'global', '{}'::jsonb, 'test', 'platform', $3)
-				`, fixture.sourceRun, eventID, fixture.forkedAt.Add(-time.Minute)); err != nil {
+				if err := commitSemanticEventFixture(ctx, fixture.postgres, event); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := fixture.db.ExecContext(ctx, `INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, created_at) VALUES ($1::uuid, $2::uuid, 'agent', 'freeze-agent', 'pending', $3)`, fixture.sourceRun, eventID, fixture.forkedAt); err != nil {
 					t.Fatal(err)
 				}
 			} else {
-				if _, err := fixture.db.ExecContext(ctx, `
-					INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-					VALUES ('live', ?, ?, 'freeze.pending', 'global', '{}', 'test', 'platform', ?)
-				`, fixture.sourceRun, eventID, fixture.forkedAt.Add(-time.Minute)); err != nil {
+				if err := commitSemanticEventFixture(ctx, fixture.sqlite, event); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := fixture.db.ExecContext(ctx, `INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, created_at) VALUES (?, ?, 'agent', 'freeze-agent', 'pending', ?)`, fixture.sourceRun, eventID, fixture.forkedAt); err != nil {

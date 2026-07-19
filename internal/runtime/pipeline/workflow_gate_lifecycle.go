@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -169,8 +170,18 @@ func (pc *PipelineCoordinator) publishWorkflowGateSuperseded(ctx context.Context
 	if err != nil {
 		return err
 	}
-	evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_superseded"), events.PlatformProducer("platform"), "", payload, 0, card.RunID, "",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, anchor.EntityID), anchor.FlowInstance), now.UTC())
+	evt, err := events.NewRuntimeControlEvent(events.RuntimeEventInput{
+		Facts: events.EventFacts{
+			ID: uuid.NewString(), Type: events.EventType("mailbox.card_superseded"),
+			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "platform"},
+			Payload:  payload, Envelope: events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, anchor.EntityID), anchor.FlowInstance),
+			CreatedAt: now.UTC(), ExecutionMode: executionmode.Live,
+		},
+		RunID: card.RunID,
+	})
+	if err != nil {
+		return err
+	}
 	if err := publisher.PublishInMutation(ctx, evt); err != nil {
 		return fmt.Errorf("publish decision card superseded event: %w", err)
 	}

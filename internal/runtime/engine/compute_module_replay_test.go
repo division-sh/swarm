@@ -42,7 +42,7 @@ func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnSto
 	source := computeModuleReplaySource(t)
 	exec := newComputeModuleReplayExecutor(t, source)
 	req := computeModuleReplayExecutionRequest(t)
-	first, err := exec.Execute(ctx, req)
+	first, err := exec.ExecuteSemanticFixture(ctx, req)
 	if err != nil {
 		t.Fatalf("initial Execute: %v", err)
 	}

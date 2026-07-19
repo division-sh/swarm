@@ -13,26 +13,23 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
 
 type inboundBatchPreflightMutation struct {
-	EventMutation
 	appendCalls int
 }
 
 func (m *inboundBatchPreflightMutation) Context() context.Context {
-	return WithEventMutationContext(context.Background(), m)
+	return WithCommitPublishTransaction(context.Background(), m)
 }
 
-func (m *inboundBatchPreflightMutation) AppendEvent(ctx context.Context, evt events.Event) error {
-	_, err := m.AppendEventOutcome(ctx, evt)
-	return err
-}
-
-func (m *inboundBatchPreflightMutation) AppendEventOutcome(context.Context, events.Event) (EventAppendOutcome, error) {
+func (m *inboundBatchPreflightMutation) BeginPreparedPublish(context.Context, PreparedPublishEvent) (EventAppendOutcome, error) {
 	m.appendCalls++
 	return EventAppendOutcomeUnknown, errors.New("mutation append sentinel")
+}
+
+func (*inboundBatchPreflightMutation) FinalizePreparedPublish(context.Context, PreparedPublishFinalization) error {
+	return errors.New("preflight sentinel must stop before finalization")
 }
 
 type inboundBatchAuthorizationVerifier struct {
@@ -213,26 +210,26 @@ func TestPrepareInboundDeliveryBatchRejectsNonExclusiveOrMisorderedOutputsBefore
 }
 
 type inboundBatchOverlayMutation struct {
-	EventMutation
 	ctx      context.Context
 	overlays []*RouteTable
+	active   []string
 }
 
 func (m *inboundBatchOverlayMutation) Context() context.Context {
-	return WithEventMutationContext(m.ctx, m)
+	return WithCommitPublishTransaction(m.ctx, m)
 }
 
-func (m *inboundBatchOverlayMutation) AppendEvent(ctx context.Context, evt events.Event) error {
-	_, err := m.AppendEventOutcome(ctx, evt)
-	return err
-}
-
-func (m *inboundBatchOverlayMutation) AppendEventOutcome(ctx context.Context, _ events.Event) (EventAppendOutcome, error) {
+func (m *inboundBatchOverlayMutation) BeginPreparedPublish(ctx context.Context, prepared PreparedPublishEvent) (EventAppendOutcome, error) {
 	m.overlays = append(m.overlays, transactionRouteTableFromContext(ctx))
+	m.active = append(m.active, prepared.AdmittedEvent().ID())
 	return EventAppendInserted, nil
 }
 
-func (m *inboundBatchOverlayMutation) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {
+func (m *inboundBatchOverlayMutation) FinalizePreparedPublish(_ context.Context, finalization PreparedPublishFinalization) error {
+	if len(m.active) == 0 || m.active[len(m.active)-1] != finalization.Request().Event.ID() {
+		return errors.New("prepared event finalization does not match active inbound event")
+	}
+	m.active = m.active[:len(m.active)-1]
 	return nil
 }
 

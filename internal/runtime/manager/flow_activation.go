@@ -94,12 +94,20 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if initialState == "" {
 		initialState = "pending"
 	}
+	autoEmitRunID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	triggerEventID := strings.TrimSpace(req.TriggerEvent.ID())
+	triggerRunID := strings.TrimSpace(req.TriggerEvent.RunID())
+	if autoEmitRunID == "" {
+		autoEmitRunID = triggerRunID
+	} else if triggerRunID != "" && triggerRunID != autoEmitRunID {
+		return fmt.Errorf("flow activation trigger run_id %s conflicts with context run_id %s", triggerRunID, autoEmitRunID)
+	}
 	autoEmitLineage := events.EventLineage{
-		RunID:         runtimecorrelation.RunIDFromContext(ctx),
-		ParentEventID: strings.TrimSpace(req.TriggerEvent.ID()),
+		RunID:         autoEmitRunID,
+		ParentEventID: triggerEventID,
 		ExecutionMode: req.TriggerEvent.ExecutionMode(),
 	}
-	autoEmitEvent, autoEmitName, err := buildAutoEmitOnCreateEvent(req.ContractBundle, schema, templateID, flowPath, flowEntityID, autoEmitLineage, req.Config)
+	autoEmitResult, autoEmitName, err := buildAutoEmitOnCreateEvent(req.ContractBundle, schema, templateID, flowPath, flowEntityID, autoEmitLineage, req.Config)
 	if err != nil {
 		return err
 	}
@@ -123,7 +131,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 			return err
 		}
 		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
-			postCommitCtx := runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx))
+			postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)))
 			if err := am.installFlowInstanceAgents(postCommitCtx, req, schema, scope); err != nil {
 				am.logFlowInstanceActivationSideEffectFailure(req, err)
 			}
@@ -134,7 +142,15 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		return err
 	}
 	if strings.TrimSpace(autoEmitName) != "" {
-		autoEmitCtx := events.WithDeliveryContext(context.Background(), req.Context)
+		autoEmitEvent, ok := autoEmitResult.Get()
+		if !ok {
+			return fmt.Errorf("auto-emit %s constructed no event", autoEmitName)
+		}
+		autoEmitCtx := context.WithoutCancel(ctx)
+		autoEmitCtx = runtimepipeline.WithoutPipelineSQLTxContext(autoEmitCtx)
+		autoEmitCtx = runtimepipeline.WithoutPipelineSQLConnContext(autoEmitCtx)
+		autoEmitCtx = runtimebus.WithoutCommitPublishTransaction(autoEmitCtx)
+		autoEmitCtx = events.WithDeliveryContext(autoEmitCtx, req.Context)
 		publishAutoEmit := func() {
 			if err := am.bus.Publish(autoEmitCtx, autoEmitEvent); err != nil {
 				am.bus.LogRuntime(autoEmitCtx, runtimepipeline.RuntimeLogEntry{
@@ -273,10 +289,13 @@ func flowInstanceActivationMetadata(instance runtimeflowidentity.Instance, flowE
 	return metadata
 }
 
-func buildAutoEmitOnCreateEvent(source semanticview.Source, schema runtimecontracts.FlowSchemaDocument, templateID, flowPath, flowEntityID string, lineage events.EventLineage, config map[string]any) (events.Event, string, error) {
+func buildAutoEmitOnCreateEvent(source semanticview.Source, schema runtimecontracts.FlowSchemaDocument, templateID, flowPath, flowEntityID string, lineage events.EventLineage, config map[string]any) (events.OptionalEvent, string, error) {
 	autoEmit := strings.TrimSpace(schema.AutoEmitOnCreate.Event)
 	if autoEmit == "" {
-		return events.EmptyEvent(), "", nil
+		return events.NoEvent(), "", nil
+	}
+	if strings.TrimSpace(lineage.RunID) == "" || strings.TrimSpace(lineage.ParentEventID) == "" {
+		return events.NoEvent(), autoEmit, fmt.Errorf("auto-emit %s requires exact trigger run_id and parent_event_id", autoEmit)
 	}
 	eventType := eventidentity.ExternalizeForFlow(flowPath, []string{autoEmit}, autoEmit)
 	payload := map[string]any{}
@@ -288,11 +307,15 @@ func buildAutoEmitOnCreateEvent(source semanticview.Source, schema runtimecontra
 		payload[key] = value
 	}
 	if err := validateAutoEmitPayload(source, templateID, autoEmit, payload); err != nil {
-		return events.EmptyEvent(), autoEmit, fmt.Errorf("auto-emit %s: %w", autoEmit, err)
+		return events.NoEvent(), autoEmit, fmt.Errorf("auto-emit %s: %w", autoEmit, err)
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return events.EmptyEvent(), autoEmit, fmt.Errorf("encode auto-emit payload %s: %w", autoEmit, err)
+		return events.NoEvent(), autoEmit, fmt.Errorf("encode auto-emit payload %s: %w", autoEmit, err)
+	}
+	routingSource, err := events.NewRuntimeRoutingSource(templateID, flowPath, flowEntityID)
+	if err != nil {
+		return events.NoEvent(), autoEmit, err
 	}
 	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{
 		EntityID:     flowEntityID,
@@ -302,7 +325,14 @@ func buildAutoEmitOnCreateEvent(source semanticview.Source, schema runtimecontra
 		FlowInstance: flowPath,
 		EntityID:     flowEntityID,
 	})
-	return events.NewChildEventWithLineage(uuid.NewString(), events.EventType(eventType), events.PlatformProducer("flow-instance-activator"), "", encoded, 0, lineage, envelope, time.Now().UTC()), autoEmit, nil
+	evt, err := events.NewChildEvent(events.ChildEventInput{Facts: events.EventFacts{
+		ID: uuid.NewString(), Type: events.EventType(eventType), Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "flow-instance-activator"},
+		Payload: encoded, Envelope: envelope, RoutingSource: routingSource, CreatedAt: time.Now().UTC(), ExecutionMode: lineage.ExecutionMode,
+	}, Lineage: lineage})
+	if err != nil {
+		return events.NoEvent(), autoEmit, err
+	}
+	return events.SomeEvent(evt), autoEmit, nil
 }
 
 func validateAutoEmitPayload(source semanticview.Source, flowID, eventType string, payload map[string]any) error {

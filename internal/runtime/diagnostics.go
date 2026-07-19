@@ -9,6 +9,8 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -59,6 +61,7 @@ type RuntimeLogPersistenceRecord struct {
 	RunID         string
 	Payload       []byte
 	ParentEventID string
+	ExecutionMode executionmode.Mode
 }
 
 type InstanceDigestRow struct {
@@ -250,9 +253,14 @@ func logRuntimeEventSpec(ctx context.Context, persistence RuntimeLogPersistence,
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, err
 	}
+	mode := runtimeeffects.ExecutionMode(executionmode.Live)
+	if contextualMode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
+		mode = contextualMode
+	}
 	record := RuntimeLogPersistenceRecord{
 		Payload:       encoded,
 		ParentEventID: parentEventID,
+		ExecutionMode: executionmode.Mode(mode),
 	}
 	if hasRunID {
 		record.RunID = runID

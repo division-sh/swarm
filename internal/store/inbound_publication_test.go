@@ -13,18 +13,28 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 type inboundPublicationProofStore interface {
 	runtimeinbound.Runner
+	runtimebus.EventStore
+}
+
+func commitInboundPublicationTestEvent(store runtimebus.EventStore, mutation runtimeinbound.Mutation, event events.Event) error {
+	eventBus, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		return err
+	}
+	_, err = eventBus.PreparePublishInMutation(mutation.Context(), event)
+	return err
 }
 
 func TestSQLiteInboundPublicationOperationCommitsRetriesAndRollsBackAtomically(t *testing.T) {
@@ -73,10 +83,7 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 		callbackCalls++
 		publications, evidence := inboundPublicationProofEvents(t, request)
 		for _, publication := range publications {
-			if err := mutation.AppendEvent(mutation.Context(), publication.Event); err != nil {
-				return err
-			}
-			if err := mutation.UpsertCommittedReplayScope(mutation.Context(), publication.Event.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+			if err := commitInboundPublicationTestEvent(store, mutation, publication.Event); err != nil {
 				return err
 			}
 		}
@@ -114,7 +121,7 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	publications, _ := inboundPublicationProofEvents(t, failedRequest)
 	injected := errors.New("injected publication failure")
 	if _, err := store.RunInboundPublicationMutation(ctx, failedRequest, func(mutation runtimeinbound.Mutation) error {
-		if err := mutation.AppendEvent(mutation.Context(), publications[0].Event); err != nil {
+		if err := commitInboundPublicationTestEvent(store, mutation, publications[0].Event); err != nil {
 			return err
 		}
 		return injected
@@ -218,10 +225,7 @@ func runInboundPublicationStandingGenerationRebindProof(t *testing.T, db *sql.DB
 			return err
 		}
 		for _, publication := range publications {
-			if err := mutation.AppendEvent(mutation.Context(), publication.Event); err != nil {
-				return err
-			}
-			if err := mutation.UpsertCommittedReplayScope(mutation.Context(), publication.Event.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+			if err := commitInboundPublicationTestEvent(store, mutation, publication.Event); err != nil {
 				return err
 			}
 		}
@@ -268,10 +272,7 @@ func runInboundPublicationOrdinalRollbackProof(t *testing.T, ctx context.Context
 				appendCount = len(publications)
 			}
 			for index := 0; index < appendCount; index++ {
-				if err := mutation.AppendEvent(mutation.Context(), publications[index].Event); err != nil {
-					return err
-				}
-				if err := mutation.UpsertCommittedReplayScope(mutation.Context(), publications[index].Event.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+				if err := commitInboundPublicationTestEvent(store, mutation, publications[index].Event); err != nil {
 					return err
 				}
 			}
@@ -301,10 +302,7 @@ func runInboundPublicationOrdinalRollbackProof(t *testing.T, ctx context.Context
 	)
 	if _, err := store.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
 		for _, publication := range publications {
-			if err := mutation.AppendEvent(mutation.Context(), publication.Event); err != nil {
-				return err
-			}
-			if err := mutation.UpsertCommittedReplayScope(mutation.Context(), publication.Event.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+			if err := commitInboundPublicationTestEvent(store, mutation, publication.Event); err != nil {
 				return err
 			}
 		}
@@ -334,10 +332,7 @@ func runInboundPublicationConcurrentRetryProof(t *testing.T, ctx context.Context
 			record, err := store.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
 				callbackCalls.Add(1)
 				for _, publication := range publications {
-					if err := mutation.AppendEvent(mutation.Context(), publication.Event); err != nil {
-						return err
-					}
-					if err := mutation.UpsertCommittedReplayScope(mutation.Context(), publication.Event.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+					if err := commitInboundPublicationTestEvent(store, mutation, publication.Event); err != nil {
 						return err
 					}
 				}
@@ -376,10 +371,7 @@ func commitInboundPublicationProof(t *testing.T, ctx context.Context, store inbo
 	publications, evidence := inboundPublicationProofEventsCount(t, request, outputCount)
 	record, err := store.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
 		for _, publication := range publications {
-			if err := mutation.AppendEvent(mutation.Context(), publication.Event); err != nil {
-				return err
-			}
-			if err := mutation.UpsertCommittedReplayScope(mutation.Context(), publication.Event.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+			if err := commitInboundPublicationTestEvent(store, mutation, publication.Event); err != nil {
 				return err
 			}
 		}
@@ -575,7 +567,7 @@ func inboundPublicationProofEventsCount(t *testing.T, request runtimeinbound.Req
 		t.Fatalf("BuildEvidencePayload: %v", err)
 	}
 	evidence := eventtest.DiagnosticDirect(
-		request.MarkerEventID, events.EventType(diagnosticDirectInboundRecord), "runtime", "", payload, 0,
+		request.MarkerEventID, events.EventTypePlatformInboundRecord, "runtime", "", payload, 0,
 		request.ResolvedRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), request.OriginalReceivedAt,
 	)
 	return publications, evidence

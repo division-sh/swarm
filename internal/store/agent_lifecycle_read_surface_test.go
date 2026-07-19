@@ -1,8 +1,13 @@
 package store
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -60,12 +65,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_CoversEveryCurrentStateLa
 	agentIDs := make([]string, 0, len(cases))
 	for index, tc := range cases {
 		eventID := uuid.NewString()
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type)
-			VALUES ('live', $1::uuid, $2::uuid, 'task.completed', 'global', '{}'::jsonb, 'runtime', 'agent')
-		`, eventID, runID); err != nil {
-			t.Fatalf("seed event for %s: %v", tc.agentID, err)
-		}
+		seedAgentLifecycleEvent(t, ctx, pg, eventID, runID, time.Now().UTC())
 		var activeSession any
 		if tc.activeSession != "" {
 			activeSession = tc.activeSession
@@ -116,15 +116,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalLiveLifecycl
 	activeEventID := uuid.NewString()
 	oldDeadLetterEventID := uuid.NewString()
 	for _, eventID := range []string{activeEventID, oldDeadLetterEventID} {
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (execution_mode,
-				event_id, run_id, event_name, scope, payload, produced_by, produced_by_type
-			) VALUES ('live',
-				$1::uuid, $2::uuid, 'task.completed', 'global', '{}'::jsonb, 'runtime', 'agent'
-			)
-		`, eventID, runID); err != nil {
-			t.Fatalf("seed event %s: %v", eventID, err)
-		}
+		seedAgentLifecycleEvent(t, ctx, pg, eventID, runID, time.Now().UTC())
 	}
 
 	activeSessionID := uuid.NewString()
@@ -167,15 +159,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalTerminalLife
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type
-		) VALUES ('live',
-			$1::uuid, $2::uuid, 'task.completed', 'global', '{}'::jsonb, 'runtime', 'agent'
-		)
-	`, eventID, runID); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	seedAgentLifecycleEvent(t, ctx, pg, eventID, runID, time.Now().UTC())
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, created_at, delivered_at
@@ -195,5 +179,16 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalTerminalLife
 	}
 	if got := facts["agent-1"].BlockingLayer; got != "delivery_terminal" {
 		t.Fatalf("blocking_layer = %q, want delivery_terminal", got)
+	}
+}
+
+func seedAgentLifecycleEvent(t *testing.T, ctx context.Context, pg *PostgresStore, eventID, runID string, createdAt time.Time) {
+	t.Helper()
+	event := eventtest.PersistedProjectionForProducer(
+		eventID, "task.completed", eventtest.Producer(events.EventProducerAgent, "runtime"), "",
+		json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, createdAt,
+	)
+	if err := commitSemanticEventFixture(ctx, pg, event); err != nil {
+		t.Fatalf("seed lifecycle event %s: %v", eventID, err)
 	}
 }

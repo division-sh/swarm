@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -20,12 +21,10 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, run_id, event_name, payload, created_at)
-		VALUES ('live', $1::uuid, $2::uuid, 'custom.stop', '{}'::jsonb, now())
-	`, eventID, runID); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	seedPostgresRootEventRecordFixture(
+		t, ctx, db, eventID, runID, events.EventType("custom.stop"),
+		events.EventProducerPlatform, "test", "", "", time.Now().UTC(),
+	)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, created_at)
 		VALUES ($1::uuid, $2::uuid, 'agent', 'agent-pending', 'pending', now())

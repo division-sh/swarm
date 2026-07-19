@@ -38,7 +38,7 @@ func TestPostgresPublicationClaimRetainsBorrowedConnectionAfterOriginalOwnerRetu
 			childEventID := uuid.NewString()
 			var child runtimeownership.Lease
 			var childCtx context.Context
-			if err := store.RunEventTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+			if err := store.runEventTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
 				lease, claimed, err := store.ClaimPipelinePublication(txctx, childEventID)
 				if err != nil {
 					return err

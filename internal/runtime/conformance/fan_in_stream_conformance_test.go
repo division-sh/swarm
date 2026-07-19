@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -247,6 +248,25 @@ type fanInStreamMemoryStore struct {
 	events         map[string]events.Event
 	deliveryRoutes map[string][]events.DeliveryRoute
 	scopes         map[string]runtimereplayclaim.CommittedReplayScope
+}
+
+func (s *fanInStreamMemoryStore) CommitPublish(ctx context.Context, plan bus.CommitPublishPlan) (bus.PreparedPublish, error) {
+	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req bus.CommitPublishRequest) error {
+		event := req.Event.Event()
+		if s.events == nil {
+			s.events = map[string]events.Event{}
+		}
+		if s.deliveryRoutes == nil {
+			s.deliveryRoutes = map[string][]events.DeliveryRoute{}
+		}
+		if s.scopes == nil {
+			s.scopes = map[string]runtimereplayclaim.CommittedReplayScope{}
+		}
+		s.events[event.ID()] = event
+		s.deliveryRoutes[event.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
+		s.scopes[event.ID()] = req.ReplayScope
+		return nil
+	})
 }
 
 func (s *fanInStreamMemoryStore) SupportsPersistedReplay() bool { return true }

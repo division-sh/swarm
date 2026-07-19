@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -17,22 +17,18 @@ type runStartAppendStore struct {
 	appended []string
 }
 
-func (s *runStartAppendStore) AppendEvent(_ context.Context, evt events.Event) error {
-	s.appended = append(s.appended, string(evt.Type()))
-	return nil
-}
-
-func (*runStartAppendStore) InsertEventDeliveries(context.Context, string, []string) error {
-	return nil
-}
-
-func (*runStartAppendStore) InsertEventDeliveryRoutes(context.Context, string, []events.DeliveryRoute) error {
-	return nil
+func (s *runStartAppendStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
+		s.appended = append(s.appended, string(req.Event.Event().Type()))
+		return nil
+	})
 }
 
 func (*runStartAppendStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return nil, nil
 }
+
+func (*runStartAppendStore) SupportsPersistedReplay() bool { return false }
 
 func TestHandlerRunStartRejectsUndeclaredInputBeforePublish(t *testing.T) {
 	source := semanticview.Wrap(runStartInputBundle("scan.corpus_file_requested"))

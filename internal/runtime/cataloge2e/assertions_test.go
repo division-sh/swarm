@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -57,7 +58,8 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	rootEventID := uuid.NewString()
 	childEventID := uuid.NewString()
 	grandchildEventID := uuid.NewString()
-	if err := pg.AppendEvent(testAuthorActivityContext(context.Background()), eventtest.RootIngress(
+	fixtureCtx := testAuthorActivityContext(context.Background())
+	storetest.CommitSemanticEvent(t, fixtureCtx, pg, eventtest.RootIngress(
 		rootEventID,
 		"root.started",
 		"",
@@ -68,37 +70,29 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, rootID),
 		time.Now().UTC(),
-	)); err != nil {
-		t.Fatalf("append root event: %v", err)
-	}
-	if err := pg.AppendEvent(testAuthorActivityContext(context.Background()), eventtest.RootIngress(
+	))
+	storetest.CommitSemanticEvent(t, fixtureCtx, pg, eventtest.ChildWithLineage(
 		childEventID,
 		"child.started",
 		"",
 		"",
 		[]byte(`{"entity_id":"`+childID+`"}`),
 		0,
-		catalogRuntimeRunID,
-		rootEventID,
+		events.EventLineage{RunID: catalogRuntimeRunID, ParentEventID: rootEventID, ExecutionMode: executionmode.Live},
 		events.EnvelopeForEntityID(events.EventEnvelope{}, childID),
 		time.Now().UTC(),
-	)); err != nil {
-		t.Fatalf("append child event: %v", err)
-	}
-	if err := pg.AppendEvent(testAuthorActivityContext(context.Background()), eventtest.RootIngress(
+	))
+	storetest.CommitSemanticEvent(t, fixtureCtx, pg, eventtest.ChildWithLineage(
 		grandchildEventID,
 		"grandchild.done",
 		"",
 		"",
 		[]byte(`{"entity_id":"`+grandchildID+`"}`),
 		0,
-		catalogRuntimeRunID,
-		childEventID,
+		events.EventLineage{RunID: catalogRuntimeRunID, ParentEventID: childEventID, ExecutionMode: executionmode.Live},
 		events.EnvelopeForEntityID(events.EventEnvelope{}, grandchildID),
 		time.Now().UTC(),
-	)); err != nil {
-		t.Fatalf("append grandchild event: %v", err)
-	}
+	))
 
 	got := catalogCausalEntityIDs(t, db, startedAt, map[string]struct{}{rootEventID: {}}, rootID)
 	if len(got) != 3 {
@@ -214,7 +208,7 @@ func TestAssertEmittedEvents_AcceptsCrossFlowInheritDispatcherEmission(t *testin
 	h.bundle = bundle
 
 	insertCatalogAssertionEntityState(t, h, entityID, "dispatched")
-	if err := h.pg.AppendEvent(testAuthorActivityContext(context.Background()), eventtest.RootIngress(
+	storetest.CommitSemanticEvent(t, testAuthorActivityContext(context.Background()), h.pg, eventtest.RootIngress(
 		uuid.NewString(),
 		"score.requested",
 		"runtime",
@@ -225,9 +219,7 @@ func TestAssertEmittedEvents_AcceptsCrossFlowInheritDispatcherEmission(t *testin
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 		time.Now().UTC(),
-	)); err != nil {
-		t.Fatalf("append score.requested event: %v", err)
-	}
+	))
 
 	assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, []string{"score.requested"}, "", semanticview.Wrap(bundle))
 }
@@ -278,7 +270,7 @@ func insertCatalogAssertionEntityState(t *testing.T, h *runtimeHarness, entityID
 
 func insertCatalogAssertionDeadLetterEvent(t *testing.T, h *runtimeHarness, entityID string) {
 	t.Helper()
-	if err := h.pg.AppendEvent(testAuthorActivityContext(context.Background()), eventtest.RootIngress(
+	storetest.CommitSemanticEvent(t, testAuthorActivityContext(context.Background()), h.pg, eventtest.RootIngress(
 		uuid.NewString(),
 		"platform.dead_letter",
 		"runtime",
@@ -289,9 +281,7 @@ func insertCatalogAssertionDeadLetterEvent(t *testing.T, h *runtimeHarness, enti
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 		time.Now().UTC(),
-	)); err != nil {
-		t.Fatalf("append platform.dead_letter event: %v", err)
-	}
+	))
 }
 
 func seedCatalogAssertionPublishedEvent(h *runtimeHarness, eventID, entityID string, status runtimepipeline.HandlerOutcomeStatus) {

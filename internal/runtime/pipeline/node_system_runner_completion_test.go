@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -777,17 +778,9 @@ func seedSQLiteSystemNodeCompletionEventWithoutDelivery(t *testing.T, db *sql.DB
 	`, runID, now); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
-			chain_depth, produced_by_type, created_at
-		) VALUES ('live',
-			?, ?, 'worker/work.assign', ?, 'example', 'entity', '{}',
-			0, 'external', ?
-		)
-	`, eventID, runID, entityID, now); err != nil {
-		t.Fatalf("seed sqlite event: %v", err)
-	}
+	event := eventtest.RootIngress(eventID, "worker/work.assign", "test", "", []byte(`{}`), 0, runID, "",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "example"), now)
+	seedPipelineEventRecordForDialect(t, ctx, db, runtimeauthoractivity.DialectSQLite, event)
 }
 
 func seedSystemNodeCompletionTargetDelivery(t *testing.T, db *sql.DB, runID, eventID, nodeID string, target events.RouteIdentity) {
@@ -883,17 +876,9 @@ func seedSystemNodeCompletionEventWithoutDelivery(t *testing.T, db *sql.DB, runI
 	`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
-			chain_depth, produced_by, produced_by_type, created_at
-		) VALUES ('live',
-			$1::uuid, $2::uuid, 'example.started', $3::uuid, 'example', 'entity', '{}'::jsonb,
-			0, 'test', 'external', now()
-		)
-	`, eventID, runID, entityID); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	event := eventtest.RootIngress(eventID, "example.started", "test", "", []byte(`{}`), 0, runID, "",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "example"), time.Now().UTC())
+	seedPipelineEventRecord(t, ctx, db, event)
 	if _, err := db.ExecContext(ctx, `
 		UPDATE runs
 		SET trigger_event_id = $2::uuid,

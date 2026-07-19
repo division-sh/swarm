@@ -22,6 +22,8 @@ import (
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
+	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/eventrecord/sqlite"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
@@ -114,55 +116,27 @@ func (s *SQLiteRuntimeStore) validateEventPayload(ctx context.Context, eventType
 	return nil
 }
 
-func (s *SQLiteRuntimeStore) AppendEvent(ctx context.Context, evt events.Event) error {
-	_, err := s.AppendEventOutcome(ctx, evt)
-	return err
-}
-
-func (s *SQLiteRuntimeStore) AppendEventOutcome(ctx context.Context, evt events.Event) (runtimebus.EventAppendOutcome, error) {
-	outcome := runtimebus.EventAppendOutcomeUnknown
-	err := s.runAuthorActivityMutation(ctx, "sqlite append event", func(txctx context.Context, tx *sql.Tx) error {
-		var err error
-		outcome, err = s.AppendEventTxOutcome(txctx, tx, evt)
-		return err
-	})
-	return outcome, err
-}
-
-func (s *SQLiteRuntimeStore) BeginEventTx(ctx context.Context) (*sql.Tx, error) {
-	if s == nil || s.DB == nil {
-		return nil, fmt.Errorf("sqlite runtime store is required")
-	}
-	if err := s.requireCurrentSchema(); err != nil {
-		return nil, err
-	}
-	return s.DB.BeginTx(ctx, nil)
-}
-
-func (s *SQLiteRuntimeStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
-	_, err := s.AppendEventTxOutcome(ctx, tx, evt)
-	return err
-}
-
-func (s *SQLiteRuntimeStore) AppendEventTxOutcome(ctx context.Context, tx *sql.Tx, evt events.Event) (runtimebus.EventAppendOutcome, error) {
+func (s *SQLiteRuntimeStore) appendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	if tx == nil {
-		return s.AppendEventOutcome(ctx, evt)
-	}
-	if err := validateDiagnosticDirectOwner(ctx, evt); err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
+		outcome := runtimebus.EventAppendOutcomeUnknown
+		err := s.runAuthorActivityMutation(ctx, "sqlite append admitted event", func(txctx context.Context, tx *sql.Tx) error {
+			var err error
+			outcome, err = s.appendAdmittedEventTxOutcome(txctx, tx, admitted)
+			return err
+		})
+		return outcome, err
 	}
 	if err := runtimeauthoractivity.Require(ctx); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	var err error
-	evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, chooseRowQueryer(s.DB, tx), evt))
+	evt := admitted.Event()
+	wantIdentity, err := eventrecord.FromAdmitted(admitted)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	wantIdentity := eventStorageEnvelope(evt)
 	if err := s.validateEventPayload(ctx, wantIdentity.EventName, wantIdentity.Payload); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
@@ -186,23 +160,11 @@ func (s *SQLiteRuntimeStore) AppendEventTxOutcome(ctx context.Context, tx *sql.T
 	if ensureErr != nil {
 		return runtimebus.EventAppendOutcomeUnknown, ensureErr
 	}
-	result, err := tx.ExecContext(ctx, `
-		INSERT INTO events (
-			event_id, run_id, event_name, task_id, entity_id, flow_instance, source_route, target_route, target_set,
-			scope, payload, execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(event_id) DO NOTHING
-	`, wantIdentity.EventID, sqliteNullString(wantIdentity.RunID), wantIdentity.EventName, sqliteNullString(wantIdentity.TaskID), sqliteNullString(wantIdentity.EntityID), sqliteNullString(wantIdentity.FlowInstance), string(wantIdentity.SourceRoute), string(wantIdentity.TargetRoute), string(wantIdentity.TargetSet),
-		wantIdentity.Scope, string(wantIdentity.Payload), wantIdentity.ExecutionMode, wantIdentity.ChainDepth, sqliteNullString(wantIdentity.ProducedBy), wantIdentity.ProducedByType, sqliteNullString(wantIdentity.SourceEventID), wantIdentity.CreatedAt.UTC())
+	inserted, err := eventrecordsqlite.Insert(ctx, tx, wantIdentity)
 	if err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("append sqlite event: %w", err)
+		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("append sqlite event: read affected rows: %w", err)
-	}
-	if rows == 0 {
+	if !inserted {
 		existingIdentity, found, err := loadSQLiteEventIdentity(ctx, tx, wantIdentity.EventID)
 		if err != nil {
 			return runtimebus.EventAppendOutcomeUnknown, err
@@ -219,60 +181,10 @@ func (s *SQLiteRuntimeStore) AppendEventTxOutcome(ctx context.Context, tx *sql.T
 	if err := sqliteSyncRunCounts(ctx, tx, wantIdentity.RunID); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	if err := recordPersistedEventAuthorActivity(ctx, s, evt, wantIdentity.ProducedBy, wantIdentity.ProducedByType); err != nil {
+	if err := recordPersistedEventAuthorActivity(ctx, s, evt, wantIdentity.ProducedBy, string(wantIdentity.ProducedByType)); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	return runtimebus.EventAppendInserted, nil
-}
-
-func (s *SQLiteRuntimeStore) eventPersistenceAdmissionOptions(ctx context.Context, q rowQueryer, evt events.Event) events.AdmissionOptions {
-	runID := strings.TrimSpace(evt.RunID())
-	if runID == "" {
-		if lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx); ok {
-			runID = strings.TrimSpace(lineage.RunID)
-		}
-	}
-	parentID := strings.TrimSpace(evt.ParentEventID())
-	if parentID == "" {
-		if lineageParentID := runtimecorrelation.RuntimeLineageParentForEvent(ctx, evt.ID()); lineageParentID != "" {
-			parentID = lineageParentID
-		}
-	}
-	if parentID == "" {
-		if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
-			if inboundID := strings.TrimSpace(inbound.ID()); inboundID != "" && inboundID != strings.TrimSpace(evt.ID()) {
-				parentID = inboundID
-			}
-		}
-	}
-	if runID == "" && parentID != "" {
-		if foundRunID := lookupSQLiteEventRunID(ctx, q, parentID); foundRunID != "" {
-			runID = foundRunID
-		}
-	}
-	return events.AdmissionOptions{
-		RunIDCandidate:                runID,
-		ParentEventIDCandidate:        parentID,
-		SelectedForkLineageOwner:      selectedForkLineageOwnerFromContext(ctx),
-		RequirePersistentUUIDIdentity: true,
-	}
-}
-
-func lookupSQLiteEventRunID(ctx context.Context, q rowQueryer, eventID string) string {
-	eventID = strings.TrimSpace(eventID)
-	if q == nil || eventID == "" {
-		return ""
-	}
-	var runID string
-	if err := q.QueryRowContext(ctx, `
-		SELECT COALESCE(run_id, '')
-		FROM events
-		WHERE event_id = ?
-		LIMIT 1
-	`, eventID).Scan(&runID); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(runID)
 }
 
 func (s *SQLiteRuntimeStore) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {

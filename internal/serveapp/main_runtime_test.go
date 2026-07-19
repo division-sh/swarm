@@ -968,16 +968,9 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	`, advancedSourceRunID, projection.BundleHash, storerunlifecycle.BundleSourcePersisted); err != nil {
 		t.Fatalf("stamp advanced source run bundle identity: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
-			execution_mode, run_id, event_id, event_name, entity_id, flow_instance,
-			scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'source.after', $3::uuid, 'flow-a/1',
-			'entity', '{}'::jsonb, 'test', 'platform', $4)
-	`, advancedSourceRunID, advancedAfterEventID, advancedEntityID, advancedAt.Add(time.Second)); err != nil {
-		t.Fatalf("seed post-fork source event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+		advancedAfterEventID, advancedSourceRunID, "source.after", eventtest.Producer(events.EventProducerPlatform, "test"),
+		[]byte(`{}`), events.EventEnvelope{EntityID: advancedEntityID, FlowInstance: "flow-a/1", Scope: events.EventScopeEntity}, advancedAt.Add(time.Second))
 	captureRunForkCLIRevision(t, db, advancedSourceRunID, runforkrevision.FamilyEvents)
 
 	stdout, stderr, code := runServedCLICommand(t, "http://"+apiAddr+"/v1/rpc", []string{
@@ -2769,7 +2762,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 		"payload":         map[string]any{"item_id": "review"},
 		"idempotency_key": keyPrefix + "-run-queued",
 	})
-	if queued.RunID != runID || queued.SourceEventID != initialEventID || queued.NewRunCreated || queued.EventID == "" {
+	if queued.RunID != runID || queued.OperatorReferenceEventID != initialEventID || queued.NewRunCreated || queued.EventID == "" {
 		t.Fatalf("%s queued event.publish result = %#v, want existing paused run", rt.Backend, queued)
 	}
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", "item-observer", "pending", 1)
@@ -3248,15 +3241,10 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		}
 		cards, workflow, insertNotice = pg, runtimepipeline.NewWorkflowInstanceStore(rt.DB), pg.InsertMailboxItem
 		seedEvent = func(ctx context.Context, evt events.Event) error {
-			return pg.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
-				if err := mutation.AppendEvent(mutation.Context(), evt); err != nil {
-					return err
-				}
-				if err := mutation.UpsertCommittedReplayScope(mutation.Context(), evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
-					return err
-				}
-				return mutation.UpsertPipelineReceipt(mutation.Context(), evt.ID(), "success", nil)
-			})
+			storetest.CommitSemanticEventWithInitialFacts(t, ctx, pg, evt, nil,
+				runtimereplayclaim.CommittedReplayScopeSubscribed,
+				&runtimebus.InitialPipelineReceipt{Status: "success"})
+			return nil
 		}
 	case "sqlite":
 		if _, err := rt.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES (?, 'running', ?, ?, ?)`, runID, bundleHash, bundleFact.BundleSource, now); err != nil {
@@ -3270,15 +3258,10 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		workflow = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(rt.DB, sqlite)
 		insertNotice = sqlite.InsertMailboxItem
 		seedEvent = func(ctx context.Context, evt events.Event) error {
-			return sqlite.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
-				if err := mutation.AppendEvent(mutation.Context(), evt); err != nil {
-					return err
-				}
-				if err := mutation.UpsertCommittedReplayScope(mutation.Context(), evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
-					return err
-				}
-				return mutation.UpsertPipelineReceipt(mutation.Context(), evt.ID(), "success", nil)
-			})
+			storetest.CommitSemanticEventWithInitialFacts(t, ctx, sqlite, evt, nil,
+				runtimereplayclaim.CommittedReplayScopeSubscribed,
+				&runtimebus.InitialPipelineReceipt{Status: "success"})
+			return nil
 		}
 	default:
 		t.Fatalf("unknown decision-card proof backend %q", rt.Backend)
@@ -3643,7 +3626,7 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	if err := json.Unmarshal(spinupEnvelope.Result, &spinup); err != nil {
 		t.Fatalf("decode spinup event.publish result: %v\n%s", err, string(spinupEnvelope.Result))
 	}
-	if spinup.RunID != runID || spinup.SourceEventID != bootstrap.EventID || spinup.NewRunCreated || spinup.EventID == "" {
+	if spinup.RunID != runID || spinup.OperatorReferenceEventID != bootstrap.EventID || spinup.NewRunCreated || spinup.EventID == "" {
 		t.Fatalf("spinup event.publish result = %#v, want existing run with source lineage", spinup)
 	}
 	requireServedEventPublishPreHandlerProof(t, db, backend, blocked, runID, spinup.EventID, "portfolio-node")
@@ -4374,7 +4357,7 @@ func publishServedLiveAgentHoldEvent(t *testing.T, rt servedControlProofRuntime,
 		"payload":         map[string]any{"item_id": "hold"},
 		"idempotency_key": "issue-1910-" + rt.Backend + "-" + runID + "-agent-hold-" + label,
 	})
-	if result.RunID != runID || result.SourceEventID != sourceEventID || result.NewRunCreated || result.EventID == "" {
+	if result.RunID != runID || result.OperatorReferenceEventID != sourceEventID || result.NewRunCreated || result.EventID == "" {
 		t.Fatalf("%s live-agent hold event.publish result = %#v, want existing run source=%s", rt.Backend, result, sourceEventID)
 	}
 	assertServedEventPublishDeliveriesContainStatus(t, result.Deliveries, "agent", "load-agent", "pending", "in_progress", "delivered")
@@ -4423,76 +4406,39 @@ func seedServedLiveAgentPendingBacklogDelivery(t *testing.T, rt servedControlPro
 	ctx := context.Background()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	deliveryID := uuid.NewString()
 	now := time.Now().UTC()
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("seed %s live-agent backlog transaction: %v", backend, err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
+	var selectedStore any
 	switch backend {
 	case "postgres":
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := db.ExecContext(ctx, `
 			INSERT INTO runs (run_id, status, bundle_source, started_at)
 			VALUES ($1::uuid, 'running', 'legacy', $2)
 		`, runID, now); err != nil {
 			t.Fatalf("seed postgres live-agent backlog run: %v", err)
 		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ('live', $1::uuid, $2::uuid, 'thing.agent_hold', 'global', '{"note":"backlog"}'::jsonb, 'test', 'agent', $3)
-		`, eventID, runID, now); err != nil {
-			t.Fatalf("seed postgres live-agent backlog event: %v", err)
-		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, created_at)
-			VALUES ($1::uuid, $2::uuid, $3::uuid, 'agent', 'load-agent', 'pending', $4)
-		`, deliveryID, runID, eventID, now); err != nil {
-			t.Fatalf("seed postgres live-agent backlog delivery: %v", err)
-		}
 		if rt.Postgres == nil {
 			t.Fatal("served postgres store owner is required for live-agent backlog seed")
 		}
-		if err := rt.Postgres.UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", nil); err != nil {
-			t.Fatalf("seed postgres live-agent backlog pipeline receipt: %v", err)
-		}
+		selectedStore = rt.Postgres
 	case "sqlite":
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := db.ExecContext(ctx, `
 			INSERT INTO runs (run_id, status, bundle_source, started_at)
 			VALUES (?, 'running', 'legacy', ?)
 		`, runID, now); err != nil {
 			t.Fatalf("seed sqlite live-agent backlog run: %v", err)
 		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ('live', ?, ?, 'thing.agent_hold', 'global', '{"note":"backlog"}', 'test', 'agent', ?)
-		`, eventID, runID, now); err != nil {
-			t.Fatalf("seed sqlite live-agent backlog event: %v", err)
-		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, created_at)
-			VALUES (?, ?, ?, 'agent', 'load-agent', 'pending', ?)
-		`, deliveryID, runID, eventID, now); err != nil {
-			t.Fatalf("seed sqlite live-agent backlog delivery: %v", err)
-		}
 		if rt.SQLite == nil {
 			t.Fatal("served sqlite store owner is required for live-agent backlog seed")
 		}
-		if err := rt.SQLite.UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", nil); err != nil {
-			t.Fatalf("seed sqlite live-agent backlog pipeline receipt: %v", err)
-		}
+		selectedStore = rt.SQLite
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit %s live-agent backlog seed: %v", backend, err)
-	}
-	committed = true
+	event := eventtest.PersistedProjection(eventID, "thing.agent_hold", "test", "", json.RawMessage(`{"note":"backlog"}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
+	storetest.CommitSemanticEventWithInitialFacts(t, ctx, selectedStore, event,
+		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "load-agent"}},
+		runtimereplayclaim.CommittedReplayScopeSubscribed,
+		&runtimebus.InitialPipelineReceipt{Status: "processed"})
 	if got := servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, "platform", "pipeline", "success"); got != 1 {
 		t.Fatalf("%s seeded live-agent backlog pipeline receipt count for event=%s = %d, want 1\n%s", backend, eventID, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
@@ -4575,76 +4521,39 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 	ctx := context.Background()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	deliveryID := uuid.NewString()
 	now := time.Now().UTC()
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("seed %s run-control transaction: %v", backend, err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
+	var selectedStore any
 	switch backend {
 	case "postgres":
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := db.ExecContext(ctx, `
 			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
 			VALUES ($1::uuid, 'running', $2, 'persisted', $3)
 		`, runID, rt.BundleHash, now); err != nil {
 			t.Fatalf("seed postgres run-control pending run: %v", err)
 		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ('live', $1::uuid, $2::uuid, 'control.stop.pending', 'global', '{}'::jsonb, 'test', 'agent', $3)
-		`, eventID, runID, now); err != nil {
-			t.Fatalf("seed postgres run-control pending event: %v", err)
-		}
-		if _, err := tx.ExecContext(ctx, `
-				INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, created_at)
-				VALUES ($1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-pending', 'pending', $4)
-			`, deliveryID, runID, eventID, now); err != nil {
-			t.Fatalf("seed postgres run-control pending delivery: %v", err)
-		}
 		if rt.Postgres == nil {
 			t.Fatal("served postgres store owner is required for run-control seed")
 		}
-		if err := rt.Postgres.UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", nil); err != nil {
-			t.Fatalf("seed postgres run-control pipeline receipt: %v", err)
-		}
+		selectedStore = rt.Postgres
 	case "sqlite":
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := db.ExecContext(ctx, `
 				INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
 				VALUES (?, 'running', ?, 'ephemeral', ?)
 			`, runID, rt.BundleHash, now); err != nil {
 			t.Fatalf("seed sqlite run-control pending run: %v", err)
 		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ('live', ?, ?, 'control.stop.pending', 'global', '{}', 'test', 'agent', ?)
-		`, eventID, runID, now); err != nil {
-			t.Fatalf("seed sqlite run-control pending event: %v", err)
-		}
-		if _, err := tx.ExecContext(ctx, `
-				INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, created_at)
-				VALUES (?, ?, ?, 'agent', 'agent-pending', 'pending', ?)
-			`, deliveryID, runID, eventID, now); err != nil {
-			t.Fatalf("seed sqlite run-control pending delivery: %v", err)
-		}
 		if rt.SQLite == nil {
 			t.Fatal("served sqlite store owner is required for run-control seed")
 		}
-		if err := rt.SQLite.UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", nil); err != nil {
-			t.Fatalf("seed sqlite run-control pipeline receipt: %v", err)
-		}
+		selectedStore = rt.SQLite
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit %s run-control pending seed: %v", backend, err)
-	}
-	committed = true
+	event := eventtest.PersistedProjection(eventID, "control.stop.pending", "test", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
+	storetest.CommitSemanticEventWithInitialFacts(t, ctx, selectedStore, event,
+		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-pending"}},
+		runtimereplayclaim.CommittedReplayScopeSubscribed,
+		&runtimebus.InitialPipelineReceipt{Status: "processed"})
 	if got := servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, "platform", "pipeline", "success"); got != 1 {
 		t.Fatalf("%s seeded pipeline receipt count for event=%s = %d, want 1\n%s", backend, eventID, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
@@ -5058,13 +4967,9 @@ func servedJoinEntityID(t *testing.T, db *sql.DB, runID string) string {
 
 func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourceEventID string) string {
 	t.Helper()
-	tx, err := db.BeginTx(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("begin served join fork frontier: %v", err)
-	}
-	defer tx.Rollback()
+	ctx := context.Background()
 	var flowInstance string
-	if err := tx.QueryRowContext(context.Background(), `
+	if err := db.QueryRowContext(ctx, `
 		SELECT COALESCE(flow_instance, '')
 		FROM entity_state
 		WHERE run_id = $1::uuid
@@ -5073,48 +4978,18 @@ func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourc
 		t.Fatalf("load served join flow instance: %v", err)
 	}
 	eventID := uuid.NewString()
-	deliveryID := uuid.NewString()
 	var createdAt time.Time
-	if err := tx.QueryRowContext(context.Background(), `SELECT clock_timestamp()`).Scan(&createdAt); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&createdAt); err != nil {
 		t.Fatalf("load served join fork frontier timestamp: %v", err)
 	}
-	if _, err := tx.ExecContext(context.Background(), `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, entity_id, flow_instance, scope, source_event_id,
-			payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live',
-			$1::uuid, $2::uuid, 'fork.probe', $3::uuid, $4, 'entity', $5::uuid,
-			'{"marker":"replayed"}'::jsonb, 'join-proof', 'platform', $6
-		)
-	`, eventID, runID, entityID, flowInstance, sourceEventID, createdAt); err != nil {
-		t.Fatalf("seed served join fork event: %v", err)
-	}
-	if _, err := tx.ExecContext(context.Background(), `
-		INSERT INTO event_deliveries (
-			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, 'agent', 'frontier-agent', 'pending', 'join_fork_replay_proof', $4)
-	`, deliveryID, runID, eventID, createdAt); err != nil {
-		t.Fatalf("seed served join fork delivery: %v", err)
-	}
-	if _, err := tx.ExecContext(context.Background(), `
-		INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects)
-		VALUES ($1::uuid, 'platform', 'pipeline', 'success', 'pipeline_persisted', '{}'::jsonb)
-	`, eventID); err != nil {
-		t.Fatalf("seed served join fork pipeline receipt: %v", err)
-	}
-	if _, err := runforkrevision.Capture(
-		context.Background(), tx, runID,
-		runforkrevision.FamilyEvents,
-		runforkrevision.FamilyEventDeliveries,
-		runforkrevision.FamilyEventReceipts,
-	); err != nil {
-		t.Fatalf("capture served join fork frontier revision: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit served join fork frontier: %v", err)
-	}
+	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), flowInstance)
+	event := eventtest.PersistedProjectionForProducer(
+		eventID, "fork.probe", eventtest.Producer(events.EventProducerPlatform, "join-proof"), "",
+		json.RawMessage(`{"marker":"replayed"}`), 0, runID, sourceEventID, envelope, createdAt,
+	)
+	storetest.CommitSemanticForkFrontier(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), event,
+		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "frontier-agent"}},
+		&runtimebus.InitialPipelineReceipt{Status: "processed"})
 	return eventID
 }
 
@@ -5271,11 +5146,11 @@ func requireServedEventPublishPreHandlerProof(t *testing.T, db *sql.DB, backend 
 }
 
 type servedEventPublishRPCResult struct {
-	EventID       string `json:"event_id"`
-	RunID         string `json:"run_id"`
-	SourceEventID string `json:"source_event_id,omitempty"`
-	NewRunCreated bool   `json:"new_run_created"`
-	Deliveries    []struct {
+	EventID                  string `json:"event_id"`
+	RunID                    string `json:"run_id"`
+	OperatorReferenceEventID string `json:"operator_reference_event_id,omitempty"`
+	NewRunCreated            bool   `json:"new_run_created"`
+	Deliveries               []struct {
 		SubscriberType string `json:"subscriber_type"`
 		SubscriberID   string `json:"subscriber_id"`
 		Status         string `json:"status"`
@@ -5577,7 +5452,7 @@ func runServedEventPublishActiveLoadProof(
 	if err := json.Unmarshal(holdEnvelope.Result, &hold); err != nil {
 		t.Fatalf("%s decode agent-hold event.publish result: %v\n%s", backend, err, string(holdEnvelope.Result))
 	}
-	if hold.RunID != runID || hold.SourceEventID != initialEventID || hold.NewRunCreated || hold.EventID == "" {
+	if hold.RunID != runID || hold.OperatorReferenceEventID != initialEventID || hold.NewRunCreated || hold.EventID == "" {
 		t.Fatalf("%s agent-hold event.publish result = %#v, want existing run with source lineage", backend, hold)
 	}
 	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, hold.EventID); got == 0 {
@@ -5642,7 +5517,7 @@ func runServedEventPublishActiveLoadProof(
 	if err := json.Unmarshal(followEnvelope.Result, &followUp); err != nil {
 		t.Fatalf("%s decode follow-up event.publish result: %v\n%s", backend, err, string(followEnvelope.Result))
 	}
-	if followUp.RunID != runID || followUp.SourceEventID != hold.EventID || followUp.NewRunCreated || followUp.EventID == "" {
+	if followUp.RunID != runID || followUp.OperatorReferenceEventID != hold.EventID || followUp.NewRunCreated || followUp.EventID == "" {
 		t.Fatalf("%s follow-up event.publish result = %#v, want existing run with hold event source lineage", backend, followUp)
 	}
 	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, followUp.EventID); got == 0 {
@@ -7581,16 +7456,9 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 		_ = sqliteStore.Close()
 		t.Fatalf("seed sqlite active run: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES ('live',
-			?, ?, 'serve.abandon.test', 'global', '{}', 'test', 'agent', ?
-		)
-	`, eventID, runID, now); err != nil {
-		_ = sqliteStore.Close()
-		t.Fatalf("seed sqlite active delivery event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, ctx, sqliteStore.DB, runtimeauthoractivity.DialectSQLite,
+		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerAgent, "test"),
+		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, reason_code, created_at
@@ -7677,15 +7545,9 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 	`, runID, source, fingerprint); err != nil {
 		t.Fatalf("seed unavailable bundle run %s: %v", source, err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES ('live',
-			$1::uuid, $2::uuid, $3, 'global', '{}'::jsonb, 'test', 'agent', now()
-		)
-	`, eventID, runID, "startup."+source+".event"); err != nil {
-		t.Fatalf("seed event %s: %v", source, err)
-	}
+	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+		eventID, runID, events.EventType("startup."+source+".event"), eventtest.Producer(events.EventProducerAgent, "test"),
+		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, reason_code, created_at
@@ -7979,14 +7841,10 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, $3, $4::uuid, 'flow-a/1', 'entity', $5::jsonb, 'test', 'platform', $6)
-	`, runID, eventID, eventName, entityID, fmt.Sprintf(`{"entity_id":%q}`, entityID), at); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+		eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerPlatform, "test"),
+		[]byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)),
+		events.EventEnvelope{EntityID: entityID, FlowInstance: "flow-a/1", Scope: events.EventScopeEntity}, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
@@ -8901,15 +8759,9 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	`, runID, bundleHash, storerunlifecycle.BundleSourceEphemeral, mismatchFingerprint); err != nil {
 		t.Fatalf("seed active mismatched run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES ('live',
-			$1::uuid, $2::uuid, 'serve.abandon.test', 'global', '{}'::jsonb, 'test', 'agent', now()
-		)
-	`, eventID, runID); err != nil {
-		t.Fatalf("seed active delivery event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerAgent, "test"),
+		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, reason_code, created_at

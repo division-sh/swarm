@@ -585,7 +585,7 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			withTestMemory(effects.Context("anthropic-reused-session"), "agent-1", "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			withTestMemory(effects.Context("anthropic-reused-session"), "agent-1", "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType("session.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
 			ExecutionMode: "live",
@@ -629,7 +629,7 @@ func TestAnthropicAPIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(
 
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			withTestMemory(unmanagedLLMTestContext(), "agent-1", "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			withTestMemory(unmanagedLLMTestContext(), "agent-1", "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType("session.requested"), "", "", nil, 0, testMemoryRunID, "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
 			ExecutionMode: "live",
@@ -664,7 +664,7 @@ func TestClaudeCLIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(t *
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, publisher)
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			withTestMemory(unmanagedLLMTestContext(), "agent-1", "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			withTestMemory(unmanagedLLMTestContext(), "agent-1", "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType("session.requested"), "", "", nil, 0, testMemoryRunID, "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
 			ExecutionMode: "live",

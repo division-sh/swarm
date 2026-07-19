@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
@@ -226,6 +227,10 @@ func forkedDirectiveReservation(t *testing.T, runID string, now time.Time) agent
 	if err != nil {
 		t.Fatal(err)
 	}
+	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatal(err)
+	}
 	return agentcontrol.ReserveDirectiveOperationRequest{
 		Operation: agentcontrol.DirectiveOperation{
 			OperationID: operationID, Method: agentcontrol.DirectiveOperationMethod, ActorTokenID: "operator",
@@ -233,7 +238,7 @@ func forkedDirectiveReservation(t *testing.T, runID string, now time.Time) agent
 			RequestedRunID: runID, ResolvedRunID: runID, RunIDResolution: agentcontrol.RunResolutionSpecified,
 			Source: request.Source, OperatorID: request.OperatorID, DirectiveEventID: eventID, State: agentcontrol.DirectiveOperationPrepared,
 		},
-		Event: event, Now: now,
+		Event: admitted, Now: now,
 	}
 }
 

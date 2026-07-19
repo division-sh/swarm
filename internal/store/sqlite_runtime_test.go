@@ -47,7 +47,7 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 		events.EventType("test.started"),
 		"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 
-	if err := store.AppendEvent(ctx, evt); err != nil {
+	if err := commitSemanticEventFixture(ctx, store, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	if err := store.InsertEventDeliveries(ctx, evtID, []string{"agent-1"}); err != nil {
@@ -254,10 +254,10 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	`, runID, now); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ('live', ?, ?, 'custom.stop', 'global', '{}', 'test', 'agent', ?)
-	`, eventID, runID, now); err != nil {
+	if err := commitSemanticEventFixture(ctx, store, eventtest.PersistedProjection(
+		eventID, events.EventType("custom.stop"), "test", "", json.RawMessage(`{}`), 0,
+		runID, "", events.EventEnvelope{}, now,
+	)); err != nil {
 		t.Fatalf("seed sqlite event: %v", err)
 	}
 	if _, err := store.DB.ExecContext(ctx, `
@@ -910,8 +910,8 @@ func TestSQLiteRuntimeStoreRunEventTransactionEnsuresFreshRunRow(t *testing.T) {
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	if err := store.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return store.AppendEventTx(txctx, tx, eventtest.PersistedProjection(
+	if err := store.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return commitSemanticEventFixtureTx(txctx, store, tx, eventtest.PersistedProjection(
 			eventID,
 			events.EventType("item.received"),
 			"api.v1",
@@ -1054,7 +1054,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerSettlesDelivery(t *testing.T) {
 		events.EventType("company.scanned"),
 		"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 
-	if err := store.AppendEvent(ctx, evt); err != nil {
+	if err := commitSemanticEventFixture(ctx, store, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	if err := store.InsertEventDeliveryRoutes(ctx, eventID, []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "background-node"}}); err != nil {
@@ -1117,7 +1117,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerDeadLettersDelivery(t *testing.
 		events.EventType("company.scanned"),
 		"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 
-	if err := store.AppendEvent(ctx, evt); err != nil {
+	if err := commitSemanticEventFixture(ctx, store, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	if err := store.InsertEventDeliveryRoutes(ctx, eventID, []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "background-node"}}); err != nil {
@@ -1174,7 +1174,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithoutDeliveryAuthority(t
 		events.EventType("company.scanned"),
 		"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 
-	if err := store.AppendEvent(ctx, evt); err != nil {
+	if err := commitSemanticEventFixture(ctx, store, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	owner := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
@@ -1225,7 +1225,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithTerminalDeliveryAuthor
 				events.EventType("company.scanned"),
 				"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 
-			if err := store.AppendEvent(ctx, evt); err != nil {
+			if err := commitSemanticEventFixture(ctx, store, evt); err != nil {
 				t.Fatalf("AppendEvent: %v", err)
 			}
 			if _, err := store.DB.ExecContext(ctx, `
@@ -1283,7 +1283,7 @@ func TestSQLiteRuntimeStoreDeliveryReplayAndReceiptSemantics(t *testing.T) {
 		events.EventType("test.delivery_requested"),
 		"runtime", "", json.RawMessage(`{"delivery":true}`), 0, runID, "", events.EventEnvelope{}, now)
 
-	if err := store.PersistEventWithDeliveriesAndScope(ctx, evt, []string{"agent-1"}, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+	if err := commitSemanticEventFixtureWithAgents(ctx, store, evt, []string{"agent-1"}); err != nil {
 		t.Fatalf("PersistEventWithDeliveriesAndScope: %v", err)
 	}
 
@@ -1374,19 +1374,19 @@ func TestSQLiteRuntimeStoreDeliveryReplayAndReceiptSemantics(t *testing.T) {
 			"runtime", "", json.RawMessage(`{"subscription":true}`), 0, runID, "", events.EventEnvelope{}, now.Add(offset))
 
 	}
-	if err := store.AppendEvent(ctx, subEvt(subSelfID, time.Second)); err != nil {
+	if err := commitSemanticEventFixture(ctx, store, subEvt(subSelfID, time.Second)); err != nil {
 		t.Fatalf("AppendEvent subscription self: %v", err)
 	}
 	if err := store.InsertEventDeliveries(ctx, subSelfID, []string{"agent-2"}); err != nil {
 		t.Fatalf("InsertEventDeliveries subscription self: %v", err)
 	}
-	if err := store.AppendEvent(ctx, subEvt(subOtherID, 2*time.Second)); err != nil {
+	if err := commitSemanticEventFixture(ctx, store, subEvt(subOtherID, 2*time.Second)); err != nil {
 		t.Fatalf("AppendEvent subscription other: %v", err)
 	}
 	if err := store.InsertEventDeliveries(ctx, subOtherID, []string{"agent-1"}); err != nil {
 		t.Fatalf("InsertEventDeliveries subscription other: %v", err)
 	}
-	if err := store.AppendEvent(ctx, subEvt(subNoDeliveryID, 3*time.Second)); err != nil {
+	if err := commitSemanticEventFixture(ctx, store, subEvt(subNoDeliveryID, 3*time.Second)); err != nil {
 		t.Fatalf("AppendEvent subscription no delivery: %v", err)
 	}
 	subscribed, err := store.ListPendingSubscribedEvents(ctx, "agent-2", []events.EventType{"subscription.*"}, now.Add(-time.Minute), 10)
@@ -1406,7 +1406,7 @@ func TestSQLiteRuntimeStoreImmediateTerminalReceiptPreservesOriginalFailure(t *t
 	now := time.Now().UTC()
 	eventID := uuid.NewString()
 	evt := eventtest.PersistedProjection(eventID, events.EventType("test.terminal_delivery"), "runtime", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, now)
-	if err := store.PersistEventWithDeliveriesAndScope(ctx, evt, []string{"agent-1"}, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+	if err := commitSemanticEventFixtureWithAgents(ctx, store, evt, []string{"agent-1"}); err != nil {
 		t.Fatalf("persist terminal delivery: %v", err)
 	}
 	if err := store.MarkEventDeliveryInProgress(ctx, eventID, "agent-1", ""); err != nil {
@@ -1454,7 +1454,7 @@ func TestPendingSubscribedRecoveryUsesAdmittedSameScopeSubscriptionsSQLite(t *te
 		id        string
 		eventType events.EventType
 	}{{localID, "review/inst-1/task.ready"}, {foreignID, "foreign/task.ready"}} {
-		if err := store.AppendEvent(ctx, eventtest.PersistedProjection(row.id, row.eventType, "runtime", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, now)); err != nil {
+		if err := commitSemanticEventFixture(ctx, store, eventtest.PersistedProjection(row.id, row.eventType, "runtime", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, now)); err != nil {
 			t.Fatalf("AppendEvent(%s): %v", row.eventType, err)
 		}
 		if err := store.InsertEventDeliveries(ctx, row.id, []string{"reviewer"}); err != nil {
@@ -1478,7 +1478,7 @@ func TestSQLiteRuntimeStoreDirectDeadLetterIsNotRetryExhaustion(t *testing.T) {
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	eventID := uuid.NewString()
 	evt := eventtest.PersistedProjection(eventID, events.EventType("test.direct_dead_letter"), "runtime", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-	if err := store.PersistEventWithDeliveriesAndScope(ctx, evt, []string{"agent-1"}, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+	if err := commitSemanticEventFixtureWithAgents(ctx, store, evt, []string{"agent-1"}); err != nil {
 		t.Fatalf("persist direct dead-letter delivery: %v", err)
 	}
 	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassChainDepthExceeded, "chain_depth_exceeded", "agent-manager", "process_event", nil), "agent-manager", "process_event")
@@ -1580,7 +1580,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	}
 
 	eventID := uuid.NewString()
-	if err := store.PersistEventWithDeliveries(ctx, eventtest.PersistedProjection(eventID,
+	if err := commitSemanticEventFixtureWithAgents(ctx, store, eventtest.PersistedProjection(eventID,
 
 		events.EventType("trace.visible"),
 		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now),
@@ -1621,7 +1621,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	}
 
 	logID := uuid.NewString()
-	if err := store.AppendEvent(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), eventtest.DiagnosticDirect(logID,
+	if err := commitDiagnosticRuntimeLogFixture(ctx, store, eventtest.DiagnosticDirect(logID,
 
 		events.EventTypePlatformRuntimeLog,
 		"runtime", "", json.RawMessage(`{"log_level":"warn","message":"runtime warning","details":{"component":"scheduler","action":"session_warning","session_id":"`+lease.SessionID+`"}}`), 0, runID, "", events.EventEnvelope{}, now.Add(time.Second))); err != nil {

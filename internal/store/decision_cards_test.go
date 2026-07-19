@@ -860,14 +860,14 @@ func seedDecisionCardCompletionEvent(t *testing.T, ctx context.Context, cards de
 	evt := eventtest.PersistedProjection(eventID, events.EventType("launch.completed"), "test", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now)
 	switch selected := cards.(type) {
 	case *PostgresStore:
-		if err := selected.AppendEvent(ctx, evt); err != nil {
+		if err := commitSemanticEventFixture(ctx, selected, evt); err != nil {
 			t.Fatal(err)
 		}
 		if err := selected.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err != nil {
 			t.Fatal(err)
 		}
 	case *SQLiteRuntimeStore:
-		if err := selected.AppendEvent(ctx, evt); err != nil {
+		if err := commitSemanticEventFixture(ctx, selected, evt); err != nil {
 			t.Fatal(err)
 		}
 		if err := selected.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err != nil {
@@ -1067,12 +1067,12 @@ func appendDecisionCardTestEvent(t *testing.T, ctx context.Context, cards decisi
 	t.Helper()
 	switch selected := cards.(type) {
 	case *PostgresStore:
-		if err := selected.AppendEventTx(ctx, tx, evt); err != nil {
+		if err := commitSemanticEventFixtureTx(ctx, selected, tx, evt); err != nil {
 			return err
 		}
 		return selected.UpsertPipelineReceiptTx(ctx, tx, evt.ID(), "processed", nil)
 	case *SQLiteRuntimeStore:
-		if err := selected.AppendEventTx(ctx, tx, evt); err != nil {
+		if err := commitSemanticEventFixtureTx(ctx, selected, tx, evt); err != nil {
 			return err
 		}
 		return selected.UpsertPipelineReceiptTx(ctx, tx, evt.ID(), "processed", nil)

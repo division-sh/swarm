@@ -94,7 +94,7 @@ func TestExecutorRejectsAccumulateWithHandlerOnCompleteWithoutBootverify(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = exec.Execute(context.Background(), ExecutionRequest{
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -130,7 +130,7 @@ func TestExecutor_RejectsInvalidAdvancesToTransition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -177,7 +177,7 @@ func TestExecutor_GuardBlocksTransitionForTerminalState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -217,7 +217,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 		return exec
 	}
 
-	rejected, err := newExecutor(50, false).Execute(context.Background(), ExecutionRequest{
+	rejected, err := newExecutor(50, false).ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -237,7 +237,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 		t.Fatalf("rejected Status = %q, want %q", rejected.Status, OutcomeRejected)
 	}
 
-	passed, err := newExecutor(80, true).Execute(context.Background(), ExecutionRequest{
+	passed, err := newExecutor(80, true).ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -292,7 +292,7 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "ent-1",
 		NodeID:   "node-1",
 		Event: eventtest.RootIngress("evt-1",
@@ -377,7 +377,7 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 			"task.completed", "", "", json.RawMessage(`{"item_id":"item-1","marker":"first"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: handler,
 	}
-	firstResult, err := exec.Execute(context.Background(), first)
+	firstResult, err := exec.ExecuteSemanticFixture(context.Background(), first)
 	if err != nil {
 		t.Fatalf("first Execute error: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 	duplicate := first
 	duplicate.Event = eventtest.RootIngress("evt-2",
 		"task.completed", "", "", json.RawMessage(`{"item_id":"item-1","marker":"duplicate"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	duplicateResult, err := exec.Execute(context.Background(), duplicate)
+	duplicateResult, err := exec.ExecuteSemanticFixture(context.Background(), duplicate)
 	if err != nil {
 		t.Fatalf("second Execute error: %v", err)
 	}
@@ -452,7 +452,7 @@ func TestExecutor_FanInInputOwnsWindowAndDedupAtRuntime(t *testing.T) {
 		if err != nil {
 			t.Fatalf("marshal payload: %v", err)
 		}
-		_, err = exec.Execute(context.Background(), ExecutionRequest{
+		_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 			EntityID:        templatefanin.ReceiverFlowInstance,
 			NodeID:          templatefanin.ReceiverNodeID,
 			FlowID:          templatefanin.ReceiverFlowID,

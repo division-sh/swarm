@@ -106,7 +106,6 @@ func TestSelectedSQLiteRuntimeWriterBoundaryAudit(t *testing.T) {
 		classConsumesCanonical,
 		classActiveTxHelper,
 		classDifferentConcept,
-		classSplitLegacy,
 	} {
 		if byClass[required] == 0 {
 			t.Fatalf("runtime writer audit did not classify any seam as %q", required)
@@ -269,8 +268,11 @@ func TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary(t *testing.T)
 		t.Fatalf("read internal/runtime/bus/eventbus_publish.go: %v", err)
 	}
 	publishText := string(publishData)
-	if !strings.Contains(publishText, ".RunEventMutation(ctx,") {
-		t.Fatal("event publish must consume EventMutationRunner.RunEventMutation when available")
+	if !strings.Contains(publishText, ".CommitPublish(") {
+		t.Fatal("event publish must consume the closed CommitPublish operation")
+	}
+	if strings.Contains(publishText, "EventMutation") || strings.Contains(publishText, "RunEventMutation") {
+		t.Fatal("event publish retains the removed generic event-mutation callback")
 	}
 	if strings.Contains(publishText, "PublishTx") {
 		t.Fatal("event publish must not expose a producer-facing PublishTx raw transaction hook")
@@ -398,7 +400,7 @@ func collectRuntimeWriterCallSitesFromSource(path, src string) ([]runtimeWriterC
 				info.callsRuntimeMutation = true
 			case "runRuntimeMutation":
 				info.callsRuntimeMutation = true
-			case "RunEventTransaction", "RunEventMutation":
+			case "runEventTransaction", "RunEventPublication":
 				info.callsEventTransaction = true
 			case "RunPipelineMutation", "runInPipelineTransaction":
 				info.callsPipelineTransaction = true
@@ -489,7 +491,7 @@ func runtimeWriterPrimitive(call *ast.CallExpr) (string, runtimeWriterPrimitiveK
 		return name, primitiveWrite, true
 	case "Query", "QueryContext", "QueryRow", "QueryRowContext", "Prepare", "PrepareContext":
 		return name, primitiveRead, true
-	case "RunPipelineMutation", "runInPipelineTransaction", "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation", "RunEventTransaction", "RunEventMutation", "PipelineSQLTxFromContext", "sqlTxFromContext":
+	case "RunPipelineMutation", "runInPipelineTransaction", "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation", "runEventTransaction", "RunEventPublication", "PipelineSQLTxFromContext", "sqlTxFromContext":
 		return name, primitiveBoundary, true
 	default:
 		return "", "", false
@@ -511,7 +513,7 @@ func collectRuntimeWriterBoundaryCallbackScopes(body ast.Node) []runtimeWriterBo
 		switch primitive {
 		case "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation":
 			scope.runtime = true
-		case "RunEventTransaction", "RunEventMutation":
+		case "runEventTransaction", "RunEventPublication":
 			scope.event = true
 		case "RunPipelineMutation", "runInPipelineTransaction":
 			scope.pipeline = true
@@ -685,7 +687,7 @@ func classifyRuntimeWriterCallSite(site runtimeWriterCallSite) (runtimeWriterCla
 	}
 	if site.Kind == primitiveBoundary {
 		switch site.Primitive {
-		case "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation", "RunEventTransaction", "RunEventMutation":
+		case "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation", "runEventTransaction", "RunEventPublication":
 			return classConsumesCanonical, "canonical runtime mutation/event transaction boundary", true
 		case "RunPipelineMutation", "runInPipelineTransaction":
 			return classConsumesCanonical, "pipeline mutation owner delegates production SQLite writes to RunRuntimeMutationContext", true
@@ -804,14 +806,10 @@ func classifySQLiteRuntimeStoreCallSite(site runtimeWriterCallSite) (runtimeWrit
 		}
 	}
 	switch site.Function {
-	case "RunRuntimeMutation", "RunRuntimeMutationContext", "RunEventTransaction", "RunEventMutation", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation", "runRuntimeMutationOnce", "runRuntimeMutationOnceLocked":
+	case "RunRuntimeMutation", "RunRuntimeMutationContext", "runEventTransaction", "RunEventPublication", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation", "runRuntimeMutationOnce", "runRuntimeMutationOnceLocked":
 		return classConsumesCanonical, "canonical SQLite runtime mutation owner", true
 	case "CompleteDecisionRouteObligation", "QuarantineDecisionRouteObligation":
 		return classConsumesCanonical, "decision-card obligation completion consumes the serialized decision-card mutation owner", true
-	case "BeginEventTx":
-		if site.Kind == primitiveBegin {
-			return classSplitLegacy, "legacy TransactionalEventStore fallback; production SQLite publish uses RunEventMutation", true
-		}
 	}
 	if site.Kind == primitiveWrite || site.Kind == primitiveBegin {
 		if (site.InRuntimeMutationCallback || site.InEventTransactionCallback) && site.UsesBoundaryCallbackTx {
@@ -881,6 +879,46 @@ func sqliteActiveTxHelper(site runtimeWriterCallSite) bool {
 
 func runtimeWriterRules() []runtimeWriterRule {
 	return []runtimeWriterRule{
+		{
+			name:           "sealed event publication test transaction",
+			path:           rx(`^internal/runtime/bus/bustest/publish\.go$`),
+			function:       rx(`^BeginPreparedPublish$`),
+			kinds:          kinds(primitiveBegin),
+			classification: classDifferentConcept,
+			reason:         "test-only implementation of the sealed CommitPublish transaction; it opens no database transaction",
+		},
+		{
+			name:           "canonical semantic event fixture transaction",
+			path:           rx(`^internal/store/storetest/event\.go$`),
+			function:       rx(`^commitSemanticEventWithInitialFacts$`),
+			kinds:          kinds(primitiveBegin),
+			classification: classActiveTxHelper,
+			reason:         "test-only semantic event fixture commits an admitted record and its declared initial facts atomically",
+		},
+		{
+			name:           "declared event corruption fixture",
+			path:           rx(`^internal/store/testsql/event\.go$`),
+			function:       rx(`^(CorruptEventStore|RejectEventStoreCorruption)$`),
+			kinds:          kinds(primitiveWrite),
+			classification: classDifferentConcept,
+			reason:         "test-only fail-closed corruption owner requires an explicit invariant and reason",
+		},
+		{
+			name:           "private sqlite admitted event adapter",
+			path:           rx(`^internal/store/internal/eventrecord/sqlite/adapter\.go$`),
+			function:       rx(`^(Insert|Load|LoadMany)$`),
+			kinds:          allPrimitiveKinds(),
+			classification: classActiveTxHelper,
+			reason:         "private event-record adapter executes only for the named admitted-event storage operations",
+		},
+		{
+			name:           "private postgres admitted event adapter",
+			path:           rx(`^internal/store/internal/eventrecord/postgres/adapter\.go$`),
+			function:       rx(`^(Insert|Load|LoadMany|DeleteSelectedForkRunEvents)$`),
+			kinds:          allPrimitiveKinds(),
+			classification: classActiveTxHelper,
+			reason:         "private event-record adapter executes only for the named admitted-event storage operations",
+		},
 		{
 			name:           "workflow timer lifecycle transaction helpers",
 			path:           rx(`^internal/runtime/pipeline/workflow_timer_store\.go$`),

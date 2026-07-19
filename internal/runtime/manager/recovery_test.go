@@ -16,9 +16,11 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
@@ -100,12 +102,14 @@ func (b *recoveryTestBus) LogRuntime(_ context.Context, entry runtimepipeline.Ru
 	b.runtimeLogs = append(b.runtimeLogs, entry)
 	return nil
 }
-func (b *recoveryTestBus) Store() runtimebus.EventStore                                  { return b }
-func (b *recoveryTestBus) AppendEvent(context.Context, events.Event) error               { return nil }
-func (b *recoveryTestBus) InsertEventDeliveries(context.Context, string, []string) error { return nil }
+func (b *recoveryTestBus) Store() runtimebus.EventStore { return b }
+func (b *recoveryTestBus) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return runtimebustest.CommitPublishNoop(ctx, plan)
+}
 func (b *recoveryTestBus) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
 	return append([]string(nil), b.deliveries[eventID]...), nil
 }
+func (*recoveryTestBus) SupportsPersistedReplay() bool { return true }
 func (*recoveryTestBus) ClaimPipelineReplay(context.Context, string) (runtimeownership.Lease, bool, error) {
 	return recoveryTestReplayLease{}, true, nil
 }
@@ -605,9 +609,10 @@ func TestRecover_UsesCanonicalPipelineReplayAftermathDiagnostics(t *testing.T) {
 	parentID := "evt-parent"
 	bus := &recoveryTestBus{
 		replayable: []events.PersistedReplayEvent{{
-			Event: eventtest.RootIngress(childID,
-				events.EventType("system.recover"), "", "", nil, 0, "run-1",
-				parentID, events.EventEnvelope{}, time.Now().UTC()),
+			Event: eventtest.ChildWithLineage(childID,
+				events.EventType("system.recover"), "runtime", "", nil, 0,
+				events.EventLineage{RunID: "run-1", ParentEventID: parentID, ExecutionMode: executionmode.Live},
+				events.EventEnvelope{}, time.Now().UTC()),
 		}},
 		deliveries: map[string][]string{
 			childID: {"agent-a"},

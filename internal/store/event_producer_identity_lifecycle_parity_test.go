@@ -16,7 +16,7 @@ import (
 )
 
 type eventProducerIdentityLifecycleStore interface {
-	PersistEventWithDeliveries(context.Context, events.Event, []string) error
+	semanticEventFixtureStore
 	ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error)
 	ListEventsMissingPipelineReceiptForRun(context.Context, string, time.Time, int) ([]events.PersistedReplayEvent, error)
 	ListEventsWithPendingDeliveriesForRun(context.Context, string, time.Time, int) ([]events.PersistedReplayEvent, error)
@@ -45,7 +45,7 @@ func TestEventProducerIdentityPersistenceToReadbackParity(t *testing.T) {
 			runID := uuid.NewString()
 			eventID := uuid.NewString()
 			agentID := "normalizer"
-			producer := events.NodeProducer("declarative-node")
+			producer := eventtest.Producer(events.EventProducerNode, "declarative-node")
 			envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
 				FlowID:       "source-flow",
 				FlowInstance: "source-flow/one",
@@ -63,7 +63,7 @@ func TestEventProducerIdentityPersistenceToReadbackParity(t *testing.T) {
 				envelope,
 				createdAt,
 			)
-			if err := surface.PersistEventWithDeliveries(ctx, event, []string{agentID}); err != nil {
+			if err := commitSemanticEventFixtureWithAgents(ctx, surface, event, []string{agentID}); err != nil {
 				t.Fatalf("PersistEventWithDeliveries: %v", err)
 			}
 
@@ -78,16 +78,36 @@ func TestEventProducerIdentityPersistenceToReadbackParity(t *testing.T) {
 				})
 			}
 
-			setPersistedEventProducerIdentity(t, fixture, ctx, eventID, "", string(events.EventProducerNode))
-			for _, readback := range readbacks {
-				t.Run(readback.name+"_fails_closed", func(t *testing.T) {
-					if _, err := readback.load(); err == nil || !strings.Contains(err.Error(), "producer identity") {
-						t.Fatalf("readback error = %v, want missing producer identity failure", err)
+			for _, malformed := range []struct {
+				name         string
+				producerID   string
+				producerType string
+				mutateRecord func(*persistedEventIdentity)
+			}{
+				{
+					name: "missing_producer_id", producerType: string(events.EventProducerNode),
+					mutateRecord: func(record *persistedEventIdentity) { record.ProducedBy = "" },
+				},
+				{
+					name: "missing_producer_type", producerID: producer.ID(),
+					mutateRecord: func(record *persistedEventIdentity) { record.ProducedByType = "" },
+				},
+			} {
+				t.Run(malformed.name, func(t *testing.T) {
+					if err := setPersistedEventProducerIdentity(fixture, ctx, eventID, malformed.producerID, malformed.producerType); err == nil {
+						t.Fatal("strict event schema accepted malformed producer identity")
+					}
+					record, found, err := loadEventProducerIdentityRecord(ctx, fixture, eventID)
+					if err != nil || !found {
+						t.Fatalf("load canonical event record: found=%v err=%v", found, err)
+					}
+					malformed.mutateRecord(&record)
+					if _, err := decodeEventRecord(record); err == nil || !strings.Contains(err.Error(), "producer identity") {
+						t.Fatalf("canonical decoder error = %v, want producer identity failure", err)
 					}
 				})
 			}
 
-			setPersistedEventProducerIdentity(t, fixture, ctx, eventID, producer.ID(), string(producer.Type()))
 			insertProducerIdentityDecisionObligation(t, fixture, ctx, eventID, runID, createdAt)
 			due, err := surface.ListDueDecisionRouteObligations(ctx, createdAt.Add(time.Hour), 10)
 			if err != nil {
@@ -95,10 +115,6 @@ func TestEventProducerIdentityPersistenceToReadbackParity(t *testing.T) {
 			}
 			assertPersistedNodeProducerEvent(t, persistedEventByID(t, due, eventID), eventID, runID, producer, true)
 
-			setPersistedEventProducerIdentity(t, fixture, ctx, eventID, producer.ID(), "")
-			if _, err := surface.ListDueDecisionRouteObligations(ctx, createdAt.Add(time.Hour), 10); err == nil || !strings.Contains(err.Error(), "producer identity") {
-				t.Fatalf("decision-route readback error = %v, want partial producer identity failure", err)
-			}
 		})
 	}
 }
@@ -114,28 +130,28 @@ func eventProducerIdentityReadbacks(surface eventProducerIdentityLifecycleStore,
 		return func() (events.Event, error) {
 			records, err := load()
 			if err != nil {
-				return events.EmptyEvent(), err
+				return events.Event{}, err
 			}
 			for _, record := range records {
 				if record.Event.ID() == eventID {
 					return record.Event, nil
 				}
 			}
-			return events.EmptyEvent(), fmt.Errorf("event %s not returned", eventID)
+			return events.Event{}, fmt.Errorf("event %s not returned", eventID)
 		}
 	}
 	fromEvents := func(load func() ([]events.Event, error)) func() (events.Event, error) {
 		return func() (events.Event, error) {
 			loaded, err := load()
 			if err != nil {
-				return events.EmptyEvent(), err
+				return events.Event{}, err
 			}
 			for _, event := range loaded {
 				if event.ID() == eventID {
 					return event, nil
 				}
 			}
-			return events.EmptyEvent(), fmt.Errorf("event %s not returned", eventID)
+			return events.Event{}, fmt.Errorf("event %s not returned", eventID)
 		}
 	}
 	since := createdAt.Add(-time.Minute)
@@ -174,14 +190,14 @@ func eventProducerIdentityReadbacks(surface eventProducerIdentityLifecycleStore,
 			load: func() (events.Event, error) {
 				page, err := surface.ListPendingAgentDeliveryDetails(ctx, PendingAgentDeliveryListOptions{AgentID: agentID, Since: since, Limit: 10})
 				if err != nil {
-					return events.EmptyEvent(), err
+					return events.Event{}, err
 				}
 				for _, detail := range page.PendingDeliveries {
 					if detail.Event.ID() == eventID {
 						return detail.Event, nil
 					}
 				}
-				return events.EmptyEvent(), fmt.Errorf("event %s not returned", eventID)
+				return events.Event{}, fmt.Errorf("event %s not returned", eventID)
 			},
 		},
 		{
@@ -200,7 +216,7 @@ func eventProducerIdentityReadbacks(surface eventProducerIdentityLifecycleStore,
 			load: func() (events.Event, error) {
 				view, err := surface.LoadOperatorEvent(ctx, eventID)
 				if err != nil {
-					return events.EmptyEvent(), err
+					return events.Event{}, err
 				}
 				return view.EventSnapshot()
 			},
@@ -234,19 +250,24 @@ func persistedEventByID(t *testing.T, records []events.PersistedReplayEvent, eve
 		}
 	}
 	t.Fatalf("event %s not returned in %#v", eventID, records)
-	return events.EmptyEvent()
+	return events.Event{}
 }
 
-func setPersistedEventProducerIdentity(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context, eventID, producerID, producerType string) {
-	t.Helper()
+func setPersistedEventProducerIdentity(fixture authorActivityReceiptFixture, ctx context.Context, eventID, producerID, producerType string) error {
 	query := `UPDATE events SET produced_by = NULLIF(?, ''), produced_by_type = NULLIF(?, '') WHERE event_id = ?`
 	args := []any{producerID, producerType, eventID}
 	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
 		query = `UPDATE events SET produced_by = NULLIF($1, ''), produced_by_type = NULLIF($2, '') WHERE event_id = $3::uuid`
 	}
-	if _, err := fixture.db.ExecContext(ctx, query, args...); err != nil {
-		t.Fatalf("set persisted producer identity: %v", err)
+	_, err := fixture.db.ExecContext(ctx, query, args...)
+	return err
+}
+
+func loadEventProducerIdentityRecord(ctx context.Context, fixture authorActivityReceiptFixture, eventID string) (persistedEventIdentity, bool, error) {
+	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+		return loadPostgresEventIdentity(ctx, fixture.db, eventID)
 	}
+	return loadSQLiteEventIdentity(ctx, fixture.db, eventID)
 }
 
 func insertProducerIdentityDecisionObligation(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context, eventID, runID string, at time.Time) {
@@ -304,21 +325,21 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 	createdAt := time.Date(2026, 7, 14, 13, 0, 0, 0, time.UTC)
 	sourceRunID := uuid.NewString()
 	sourceEventID := uuid.NewString()
-	producer := events.NodeProducer("declarative-node")
+	producer := eventtest.Producer(events.EventProducerNode, "declarative-node")
 	sourceEnvelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "source-flow", FlowInstance: "source-flow/one", EntityID: uuid.NewString()})
-	sourceEvent := events.Project(eventtest.PersistedProjectionForProducer(
+	sourceEvent := eventtest.InExecutionMode(eventtest.PersistedProjectionForProducer(
 		sourceEventID, events.EventType("test.node_emitted"), producer, "event-owned-task",
 		[]byte(`{"task_id":"payload-owned-task"}`), 2, sourceRunID, "", sourceEnvelope, createdAt,
-	), events.ProjectExecutionMode(executionmode.Mock))
-	if err := surface.PersistEventWithDeliveries(ctx, sourceEvent, nil); err != nil {
+	), executionmode.Mock)
+	if err := commitSemanticEventFixtureWithAgents(ctx, surface, sourceEvent, nil); err != nil {
 		t.Fatalf("persist source event: %v", err)
 	}
 	forkRunID := uuid.NewString()
 	forkOwner := eventtest.PersistedProjectionForProducer(
-		uuid.NewString(), events.EventType("test.node_emitted"), events.PlatformProducer("runtime"), "",
+		uuid.NewString(), events.EventType("test.node_emitted"), eventtest.Producer(events.EventProducerPlatform, "runtime"), "",
 		[]byte(`{}`), 0, forkRunID, "", events.EventEnvelope{}, createdAt.Add(time.Minute),
 	)
-	if err := surface.PersistEventWithDeliveries(ctx, forkOwner, nil); err != nil {
+	if err := commitSemanticEventFixtureWithAgents(ctx, surface, forkOwner, nil); err != nil {
 		t.Fatalf("persist fork run owner: %v", err)
 	}
 
@@ -339,7 +360,7 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 		t.Fatalf("historical replay source producer = %q/%q, want %q/%q", loaded.ProducerType(), loaded.SourceAgent(), producer.Type(), producer.ID())
 	}
 	replayedEventID := uuid.NewString()
-	replayedProjection, err := projectRunForkReplayEvent(loaded, forkRunID, replayedEventID, createdAt.Add(2*time.Minute))
+	replayedProjection, err := projectRunForkReplayEvent(loaded, runForkActivationLineage{SourceRunID: sourceRunID, ForkRunID: forkRunID}, replayedEventID, createdAt.Add(2*time.Minute))
 	if err != nil {
 		t.Fatalf("projectRunForkReplayEvent: %v", err)
 	}
@@ -350,6 +371,27 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 	}
 	if outcome != runtimebus.EventAppendInserted {
 		t.Fatalf("append replay event outcome = %d, want inserted", outcome)
+	}
+	sourceDeliveryID := uuid.NewString()
+	forkDeliveryID := uuid.NewString()
+	if _, err := tx.ExecContext(txctx, `
+		INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, created_at)
+		VALUES
+			($1::uuid, $2::uuid, $3::uuid, 'agent', 'replay-agent', 'delivered', $4),
+			($5::uuid, $6::uuid, $7::uuid, 'agent', 'replay-agent', 'delivered', $4)
+	`, sourceDeliveryID, sourceRunID, sourceEventID, createdAt.Add(2*time.Minute), forkDeliveryID, forkRunID, replayedEventID); err != nil {
+		t.Fatalf("insert replay delivery fixtures: %v", err)
+	}
+	if _, err := tx.ExecContext(txctx, `
+		INSERT INTO run_fork_delivery_event_replays (
+			replay_id, fork_run_id, source_run_id, source_event_id, source_delivery_id,
+			fork_event_id, fork_delivery_id, subscriber_type, subscriber_id, selection_authority, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
+			$6::uuid, $7::uuid, 'agent', 'replay-agent', $8, $9
+		)
+	`, uuid.NewString(), forkRunID, sourceRunID, sourceEventID, sourceDeliveryID, replayedEventID, forkDeliveryID, RunForkDeliveryEventReplayOwner, createdAt.Add(2*time.Minute)); err != nil {
+		t.Fatalf("insert replay lineage fixture: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit historical replay transaction: %v", err)

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -86,15 +88,18 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO events (
-			event_id, run_id, event_name, entity_id, scope, payload, execution_mode, produced_by, produced_by_type, created_at
-		) VALUES (
-			?, ?, 'task.ready', ?, 'global', '{}', 'live', 'runtime', 'agent', ?
-		)
-	`, eventID, runID, entityID, now.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	storetest.CommitSemanticEvent(t, ctx, sqliteStore, eventtest.PersistedProjectionForProducer(
+		eventID,
+		events.EventType("task.ready"),
+		eventtest.Producer(events.EventProducerAgent, "runtime"),
+		"",
+		[]byte(`{}`),
+		0,
+		runID,
+		"",
+		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity},
+		now.Add(-time.Minute),
+	))
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, failure, created_at

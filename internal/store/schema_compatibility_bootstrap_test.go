@@ -154,7 +154,12 @@ func TestSchemaBootstrapRejectsLegacyPlatformShapesUnchanged(t *testing.T) {
 		{name: "receipt_without_failure", table: "event_receipts", postgres: []string{`ALTER TABLE event_receipts DROP COLUMN failure`}, sqlite: []string{`ALTER TABLE event_receipts DROP COLUMN failure`}},
 		{name: "dead_letter_flat_failure", table: "dead_letters", postgres: []string{`ALTER TABLE dead_letters ADD COLUMN failure_type TEXT`}, sqlite: []string{`ALTER TABLE dead_letters ADD COLUMN failure_type TEXT`}},
 		{name: "activity_error", table: "activity_attempts", postgres: []string{`ALTER TABLE activity_attempts ADD COLUMN error TEXT`}, sqlite: []string{`ALTER TABLE activity_attempts ADD COLUMN error TEXT`}},
-		{name: "event_without_source_route", table: "events", postgres: []string{`DROP INDEX idx_events_source_route`, `ALTER TABLE events DROP COLUMN source_route`}, sqlite: []string{`DROP INDEX idx_events_source_route`, `ALTER TABLE events DROP COLUMN source_route`}},
+		{name: "event_without_source_route", table: "events", postgres: []string{`DROP INDEX idx_events_source_route`, `ALTER TABLE events DROP COLUMN source_route`}, sqlite: []string{
+			`DROP INDEX idx_events_source_route`,
+			`CREATE TABLE events_without_source_route AS SELECT event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at, routing_source_kind, routing_source_authority, target_route, target_set, operator_reference_event_id, handler_node, idempotency_key FROM events`,
+			`DROP TABLE events`,
+			`ALTER TABLE events_without_source_route RENAME TO events`,
+		}},
 		{name: "run_error_summary", table: "runs", postgres: []string{`ALTER TABLE runs ADD COLUMN error_summary TEXT`}, sqlite: []string{`ALTER TABLE runs ADD COLUMN error_summary TEXT`}},
 		{name: "directive_flat_error", table: "agent_directive_operations", postgres: []string{`ALTER TABLE agent_directive_operations ADD COLUMN error_code TEXT`}, sqlite: []string{`ALTER TABLE agent_directive_operations ADD COLUMN error_code TEXT`}},
 		{name: "mailbox_without_deferred_until", table: "mailbox", postgres: []string{`ALTER TABLE mailbox DROP COLUMN deferred_until`}, sqlite: []string{`ALTER TABLE mailbox DROP COLUMN deferred_until`}},

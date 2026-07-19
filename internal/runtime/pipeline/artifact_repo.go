@@ -267,20 +267,25 @@ func (pc *PipelineCoordinator) queueArtifactRepoResultEvent(ctx context.Context,
 		EntityID:     entityID,
 		FlowInstance: flowInstance,
 	}
-	if !sourceRoute.Empty() {
-		envelope = events.EnvelopeForSourceRoute(envelope, sourceRoute)
+	routingSource, err := events.RuntimeRoutingSourceFromRoute(sourceRoute)
+	if err != nil {
+		return false, fmt.Errorf("artifact result routing source: %w", err)
 	}
-	evt := events.NewChildEvent(
-		uuid.NewString(),
-		events.EventType(eventType),
-		events.PlatformProducer(runtimeWorkflowID),
-		"",
-		mustJSON(payload),
-		chainDepth,
-		execCtx.Request.Event,
-		envelope,
-		time.Now().UTC(),
-	)
+	if !routingSource.Empty() {
+		envelope = events.EnvelopeForSourceRoute(envelope, routingSource.Route())
+	}
+	evt, err := events.NewChildEvent(events.ChildEventInput{
+		Facts: events.EventFacts{
+			ID: uuid.NewString(), Type: events.EventType(eventType),
+			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: runtimeWorkflowID},
+			Payload:  mustJSON(payload), ChainDepth: chainDepth, Envelope: envelope,
+			RoutingSource: routingSource, CreatedAt: time.Now().UTC(),
+		},
+		Lineage: events.LineageFromEvent(execCtx.Request.Event),
+	})
+	if err != nil {
+		return false, fmt.Errorf("construct artifact result event: %w", err)
+	}
 	return runtimeengine.QueueActionEmitIntent(ctx, runtimeengine.EmitIntent{
 		Event:         evt,
 		ChainDepth:    chainDepth,

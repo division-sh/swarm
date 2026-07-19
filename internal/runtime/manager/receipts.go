@@ -101,7 +101,7 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 		return eventProcessResult{record: record}
 	}
 	if am.shouldInterceptDirective(agent.ID(), evt) {
-		am.writeReceipt(ctx, evt.ID(), agent.ID(), ReceiptStatusProcessed, nil)
+		am.writeReceipt(ctx, evt, agent.ID(), ReceiptStatusProcessed, nil)
 		record.Outcome = startupManagerReplayOutcomeSkipped
 		record.ReasonCode = startupManagerReplayReasonDirectiveIntercepted
 		return eventProcessResult{record: record}
@@ -161,17 +161,15 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 	if err != nil {
 		status := receiptStatusForAgentFailure(err)
 		agentFailure := runtimeengine.NormalizeFailure(err, "agent-manager", "process_event.on_event")
-		am.maybeTripAuthCircuitBreaker(ctx, agent.ID(), evt.ID(), agentFailure.Failure)
-		am.writeReceipt(ctx, evt.ID(), agent.ID(), status, &agentFailure.Failure)
+		am.maybeTripAuthCircuitBreaker(ctx, agent.ID(), evt, agentFailure.Failure)
+		am.writeReceipt(ctx, evt, agent.ID(), status, &agentFailure.Failure)
 		record.Outcome = startupManagerReplayOutcomeDropped
 		record.ReasonCode = startupManagerReplayReasonProcessFailed
 		record.Failure = runtimefailures.CloneEnvelope(&agentFailure.Failure)
 		return eventProcessResult{record: record, err: agentFailure}
 	}
 	for idx, e := range out {
-		if strings.TrimSpace(e.ID()) == "" {
-			e = events.Project(e, events.ProjectID(deterministicOutputEventID(evt, agent.ID(), idx, e)))
-		}
+		_ = idx
 		if am.shouldSkipAlreadyPublishedOutput(ctx, e.ID()) {
 			continue
 		}
@@ -180,14 +178,14 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 				"event_id": e.ID(), "event_type": e.Type(), "agent_id": agent.ID(),
 			}, err)
 			failure := runtimefailures.FromError(pubErr, "agent-manager", "process_event.publish_output")
-			am.writeReceipt(ctx, evt.ID(), agent.ID(), ReceiptStatusError, &failure.Failure)
+			am.writeReceipt(ctx, evt, agent.ID(), ReceiptStatusError, &failure.Failure)
 			record.Outcome = startupManagerReplayOutcomeDropped
 			record.ReasonCode = startupManagerReplayReasonPublishFailed
 			record.Failure = runtimefailures.CloneEnvelope(&failure.Failure)
 			return eventProcessResult{record: record, err: pubErr}
 		}
 	}
-	am.writeReceipt(ctx, evt.ID(), agent.ID(), ReceiptStatusProcessed, nil)
+	am.writeReceipt(ctx, evt, agent.ID(), ReceiptStatusProcessed, nil)
 	record.Outcome = startupManagerReplayOutcomeReplayed
 	record.ReasonCode = startupManagerReplayReasonReplayed
 	return eventProcessResult{record: record}
@@ -323,7 +321,8 @@ func (am *AgentManager) shouldSkipEventDetailed(agentID, eventID string) (bool, 
 	}
 }
 
-func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID, eventID string, failure runtimefailures.Envelope) {
+func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID string, evt events.Event, failure runtimefailures.Envelope) {
+	eventID := strings.TrimSpace(evt.ID())
 	reason := ""
 	authRequired := false
 	switch {
@@ -395,7 +394,7 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID
 		flowInstance = flowPathFromAgentConfig(cfg)
 	}
 	if authRequired {
-		authEvt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("platform.auth_required"), events.PlatformProducer("runtime"), "", mustJSON(map[string]any{
+		authEvt, constructErr := newPlatformRuntimeControlEvent(eventCtx, evt.RunID(), eventID, events.EventType("platform.auth_required"), mustJSON(map[string]any{
 			"agent_id":      strings.TrimSpace(agentID),
 			"entity_id":     entityID,
 			"flow_instance": flowInstance,
@@ -403,7 +402,10 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID
 			"action":        "llm_call",
 			"failure":       failure,
 			"timestamp":     now.Format(time.RFC3339Nano),
-		}), 0, "", "", events.EventEnvelope{EntityID: entityID, FlowInstance: flowInstance}, now)
+		}), events.EventEnvelope{EntityID: entityID, FlowInstance: flowInstance}, now)
+		if constructErr != nil {
+			return
+		}
 		if err := am.bus.Publish(eventCtx, authEvt); err != nil {
 			if am.bus != nil {
 				am.bus.LogRuntime(eventCtx, runtimepipeline.RuntimeLogEntry{
@@ -429,7 +431,8 @@ func (am *AgentManager) isAuthBreakerTripped() bool {
 	return am.authBreakerTripped
 }
 
-func (am *AgentManager) writeReceipt(ctx context.Context, eventID, agentID string, status ReceiptStatus, failure *runtimefailures.Envelope) {
+func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, agentID string, status ReceiptStatus, failure *runtimefailures.Envelope) {
+	eventID := strings.TrimSpace(evt.ID())
 	if am.store == nil || eventID == "" || agentID == "" {
 		return
 	}
@@ -496,7 +499,7 @@ func (am *AgentManager) writeReceipt(ctx context.Context, eventID, agentID strin
 		if receiptCancel != nil {
 			escalateCtx = context.WithoutCancel(writeCtx)
 		}
-		am.maybeEscalateDeadLetter(escalateCtx, eventID, agentID)
+		am.maybeEscalateDeadLetter(escalateCtx, evt, agentID)
 	}
 }
 
@@ -579,7 +582,8 @@ func (am *AgentManager) logDeliveryLifecycle(ctx context.Context, eventID, agent
 	_ = am.bus.LogRuntime(ctx, entry)
 }
 
-func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, agentID string) {
+func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, evt events.Event, agentID string) {
+	eventID := strings.TrimSpace(evt.ID())
 	reader, ok := am.store.(eventReceiptReader)
 	if !ok || reader == nil {
 		return
@@ -635,13 +639,17 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 	}
 
 	eventCtx := am.runtimePlatformControlEventContext(ctx)
-	if err := am.bus.Publish(eventCtx, events.NewRuntimeDiagnosticEvent(uuid.NewString(), events.EventType("platform.dead_letter_escalation"), events.PlatformProducer("runtime"), "", mustJSON(map[string]any{
+	escalation, constructErr := newPlatformRuntimeDiagnosticEvent(eventCtx, evt.RunID(), eventID, events.EventType("platform.dead_letter_escalation"), mustJSON(map[string]any{
 		"flow_instance":     flowInstance,
 		"dead_letter_count": count,
 		"window_minutes":    int(deadLetterEscalationWindow / time.Minute),
 		"sample_events":     sampleEvents,
 		"timestamp":         time.Now().UTC().Format(time.RFC3339Nano),
-	}), 0, "", "", events.EventEnvelope{FlowInstance: flowInstance}, time.Now().UTC())); err != nil {
+	}), events.EventEnvelope{FlowInstance: flowInstance}, time.Now().UTC())
+	if constructErr != nil {
+		return
+	}
+	if err := am.bus.Publish(eventCtx, escalation); err != nil {
 		if am.bus != nil {
 			am.bus.LogRuntime(eventCtx, runtimepipeline.RuntimeLogEntry{
 				Level:     "error",

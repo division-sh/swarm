@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -436,10 +438,11 @@ func setupPostgresReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurf
 			if i == 0 {
 				eventName = "provider.requested"
 			}
-			if _, err := db.ExecContext(ctx, `
-				INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-				VALUES ('live', $1::uuid, $2::uuid, $3, 'global', '{}'::jsonb, 'test', 'platform', now())
-			`, runID, eventID, eventName); err != nil {
+			event := eventtest.PersistedProjectionForProducer(
+				eventID, events.EventType(eventName), eventtest.Producer(events.EventProducerPlatform, "test"), "",
+				json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC(),
+			)
+			if err := commitSemanticEventFixture(ctx, store, event); err != nil {
 				return err
 			}
 		}
@@ -459,10 +462,11 @@ func setupSQLiteReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurfac
 			if i == 0 {
 				eventName = "provider.requested"
 			}
-			if _, err := store.DB.ExecContext(ctx, `
-				INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-				VALUES ('live', ?, ?, ?, 'global', '{}', 'test', 'platform', ?)
-			`, runID, eventID, eventName, time.Now().UTC()); err != nil {
+			event := eventtest.PersistedProjectionForProducer(
+				eventID, events.EventType(eventName), eventtest.Producer(events.EventProducerPlatform, "test"), "",
+				json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC(),
+			)
+			if err := commitSemanticEventFixture(ctx, store, event); err != nil {
 				return fmt.Errorf("insert sqlite event: %w", err)
 			}
 		}

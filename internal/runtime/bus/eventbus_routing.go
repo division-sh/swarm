@@ -245,7 +245,17 @@ func filterRecipientsForExplicitAgentScope(evt events.Event, recipients []string
 }
 
 func (eb *EventBus) resolveRoutedSubscribers(eventType string) []Subscriber {
-	return eb.resolveRoutedSubscribersForEvent(events.NewRouteProbeEvent(events.EventType(eventType)))
+	probe, err := events.NewRouteProbe(events.EventType(eventType))
+	if err != nil || eb == nil {
+		return nil
+	}
+	eb.mu.RLock()
+	table := eb.routeTable
+	eb.mu.RUnlock()
+	if table == nil {
+		return nil
+	}
+	return dedupeSubscribers(table.Resolve(string(probe.Type())))
 }
 
 func (eb *EventBus) resolveRoutedSubscribersForEvent(evt events.Event) []Subscriber {
@@ -269,7 +279,7 @@ func (eb *EventBus) resolveRoutedSubscribersForEvent(evt events.Event) []Subscri
 }
 
 func (eb *EventBus) resolveRoutedRecipients(eventType string) []string {
-	return eb.resolveRoutedRecipientsForEvent(events.NewRouteProbeEvent(events.EventType(eventType)))
+	return subscriberIDs(eb.resolveRoutedSubscribers(eventType))
 }
 
 func (eb *EventBus) resolveRoutedRecipientsForEvent(evt events.Event) []string {
@@ -371,7 +381,7 @@ func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt eve
 			}
 			token := recipient.route.lifecycleToken()
 			tracked := eb.beginAgentRouteDelivery(token)
-			sendResult := recipient.send(ctx, deliverEvent)
+			sendResult := recipient.send(ctx, deliverEvent.Event())
 			if tracked && sendResult != agentRouteSendDelivered {
 				eb.CompleteAgentRouteDelivery(token)
 			}

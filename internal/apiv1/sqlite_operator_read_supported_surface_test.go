@@ -6,8 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	storepkg "github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -36,15 +39,11 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	`, sessionID, runID, agentID, base.Add(-5*time.Minute), base); err != nil {
 		t.Fatalf("seed sqlite session: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO events (
-			event_id, run_id, event_name, entity_id, scope, payload, execution_mode, produced_by, produced_by_type, created_at
-		) VALUES (
-			?, ?, 'operator.read', NULL, 'global', '{}', 'live', 'runtime', 'platform', ?
-		)
-	`, eventID, runID, base.Add(-4*time.Minute)); err != nil {
-		t.Fatalf("seed sqlite event: %v", err)
-	}
+	storetest.InsertRootEventRecord(
+		t, ctx, sqliteStore.DB, "sqlite", eventID, runID, events.EventType("operator.read"),
+		eventtest.Producer(events.EventProducerPlatform, "runtime"), []byte(`{}`),
+		events.EventEnvelope{Scope: events.EventScopeGlobal}, base.Add(-4*time.Minute),
+	)
 	capabilitySurfaceID := seedSQLiteOperatorReadCapabilitySurface(t, ctx, sqliteStore, runID, turnID, sessionID, agentID, "session")
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO agent_turns (

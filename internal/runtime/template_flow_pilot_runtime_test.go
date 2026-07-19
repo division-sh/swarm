@@ -60,7 +60,9 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 		0,
 		templateInstanceDeliveryRunID,
 		"",
-		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "producer"}),
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
+			FlowID: "producer", FlowInstance: "producer", EntityID: "88888888-8888-4888-8888-888888888888",
+		}),
 		time.Now().UTC(),
 	)
 	preflight, err := bus.CheckPublishRecipientPlan(ctx, evt)
@@ -167,7 +169,9 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 				0,
 				templateInstanceDeliveryRunID,
 				"",
-				events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "producer"}),
+				events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
+					FlowID: "producer", FlowInstance: "producer", EntityID: "88888888-8888-4888-8888-888888888888",
+				}),
 				time.Now().UTC(),
 			)
 			plan, err := bus.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), evt)

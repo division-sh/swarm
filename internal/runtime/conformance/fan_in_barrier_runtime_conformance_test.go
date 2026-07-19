@@ -109,6 +109,7 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			portfolio := loadFanInBarrierPortfolio(t, ctx, runtime.workflowStore)
 			if portfolio.CurrentState != "awaiting" {
 				dumpFanInBarrierEvents(t, ctx, backend, db)
+				t.Logf("fan-in runtime diagnostics: %#v", runtime.diagnostics.snapshot())
 				if instances, listErr := runtime.workflowStore.List(ctx); listErr != nil {
 					t.Logf("list fan-in workflow instances: %v", listErr)
 				} else {

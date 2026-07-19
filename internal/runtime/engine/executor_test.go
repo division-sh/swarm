@@ -1022,7 +1022,7 @@ func TestExecutor_LoadsStateInsideEntityLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	_, err = exec.Execute(context.Background(), ExecutionRequest{
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 		NodeID:   identity.NodeID("node-1"),
 		FlowID:   identity.FlowID("flow-1"),
@@ -1132,7 +1132,7 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 		},
 	}
 	req.State.SetMetadata("dimensions_requested", []any{"build_complexity"})
-	result, err := exec.Execute(context.Background(), req)
+	result, err := exec.ExecuteSemanticFixture(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
@@ -1258,7 +1258,7 @@ func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t 
 			},
 		},
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "scoring-node",
 		Event: eventtest.RootIngress("evt-1",
@@ -1468,7 +1468,7 @@ func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitField
 			},
 		},
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "scoring-node",
 		Event: eventtest.RootIngress("evt-1",
@@ -1523,7 +1523,7 @@ func newAccumulatorProjectionTestExecutor(t *testing.T, evaluator Evaluator) *Ex
 
 func executeAccumulatorProjectionTestEvent(t *testing.T, exec *Executor, handler runtimecontracts.SystemNodeEventHandler, state StateSnapshot) ExecutionResult {
 	t.Helper()
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "scoring-node",
 		Event: eventtest.RootIngress("evt-1",
@@ -1580,7 +1580,7 @@ func TestExecutor_AccumulatorProjectionMaterializesForQualifiedRuntimeEvent(t *t
 	if !ok {
 		t.Fatal("expected qualified runtime event to resolve to authored local handler")
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "scoring-node",
 		FlowID:   "scoring",
@@ -1635,7 +1635,7 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 		},
 	}
 	firstState := testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{})
-	first, err := exec.Execute(context.Background(), ExecutionRequest{
+	first, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "lifecycle-orchestrator",
 		FlowID:   "operating",
@@ -1664,7 +1664,7 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 		t.Fatalf("first stream accumulator = %#v, want one item", firstAccumulator)
 	}
 	secondState := testStateSnapshot("pending", map[string]any{}, nil, first.StateMutation.StateCarrier.StateBuckets)
-	second, err := exec.Execute(context.Background(), ExecutionRequest{
+	second, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "lifecycle-orchestrator",
 		FlowID:   "operating",
@@ -1736,7 +1736,7 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := runtimecontracts.SystemNodeEventHandler{Join: &spec}
-	first, err := exec.Execute(context.Background(), ExecutionRequest{
+	first, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1", NodeID: "join-node", FlowID: "orders", HandlerEventKey: "item.completed", Handler: handler,
 		Event: eventtest.RootIngress("evt-b", "item.completed", "", "", json.RawMessage(`{"member_id":"b","result":{"score":2}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now),
 		State: testStateSnapshot("awaiting", map[string]any{"expected": []any{"a", "b"}}, nil, buckets),
@@ -1747,7 +1747,7 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 	if first.Status != OutcomeWaiting {
 		t.Fatalf("first status = %s, want waiting", first.Status)
 	}
-	second, err := exec.Execute(context.Background(), ExecutionRequest{
+	second, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1", NodeID: "join-node", FlowID: "orders", HandlerEventKey: "item.completed", Handler: handler,
 		Event: eventtest.RootIngress("evt-a", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{"score":1}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now.Add(time.Second)),
 		State: testStateSnapshot("awaiting", map[string]any{"expected": []any{"a", "b"}}, nil, first.StateMutation.StateCarrier.StateBuckets),
@@ -1809,7 +1809,7 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 	if err := joinruntime.Store(buckets, activation); err != nil {
 		t.Fatal(err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "portfolio/portfolio", NodeID: "portfolio-collector", FlowID: "portfolio", HandlerEventKey: "operating.reported", Handler: rawHandler,
 		Event: eventtest.RootIngress("evt-operating-a", "operating.reported", "", "", json.RawMessage(`{"operating_id":"operating-a","period_id":"2026-Q3","revenue":42}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "portfolio/portfolio"), now),
 		State: testStateSnapshot("awaiting", map[string]any{"expected_operating_ids": []any{"operating-a"}, "period_id": "2026-Q3"}, nil, buckets),
@@ -1865,7 +1865,7 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 			if err := joinruntime.Store(buckets, activation); err != nil {
 				t.Fatal(err)
 			}
-			result, err := exec.Execute(context.Background(), ExecutionRequest{
+			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID: "entity-1", NodeID: "join-node", FlowID: "orders", HandlerEventKey: "item.completed", Handler: runtimecontracts.SystemNodeEventHandler{Join: &spec},
 				Event: eventtest.RootIngress("evt-a", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{"score":1}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now),
 				State: testStateSnapshot("awaiting", map[string]any{"expected": []any{"a"}}, nil, buckets),
@@ -1905,7 +1905,7 @@ func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) 
 			{"component_id": "b"},
 		},
 	})
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "lifecycle-orchestrator",
 		FlowID:   "operating",
@@ -1975,7 +1975,7 @@ func TestExecutor_PolicySheetLookupRowFeedsSelectionRow(t *testing.T) {
 			ValueSummary: `"templates/service/go"`,
 		}},
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 		NodeID:   identity.NodeID("repo-scaffold"),
 		Event: eventtest.RootIngress(
@@ -2060,7 +2060,7 @@ func TestExecutor_PolicySheetComputeModuleRowFeedsSelectionRow(t *testing.T) {
 			"files":     runtimepaths.Parse("payload.files"),
 		},
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 		NodeID:   identity.NodeID("render-node"),
 		FlowID:   identity.FlowID("render"),
@@ -2138,7 +2138,7 @@ func TestExecutor_PolicySheetPythonModuleRowFeedsSelectionRow(t *testing.T) {
 	source, module := sourceWithPythonRendererModule(t)
 	exec := newStructuredRendererExecutor(t, source)
 	req := structuredRendererExecutionRequest(t, pythonRendererModuleSpec())
-	result, err := exec.Execute(context.Background(), req)
+	result, err := exec.ExecuteSemanticFixture(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
@@ -2172,7 +2172,7 @@ func TestExecutor_PolicySheetPythonModuleRowFeedsSelectionRow(t *testing.T) {
 	}
 
 	req.ExpectedComputeModuleTraces = append([]ComputeModuleTrace(nil), result.ComputeModuleTraces...)
-	replayed, err := exec.Execute(context.Background(), req)
+	replayed, err := exec.ExecuteSemanticFixture(context.Background(), req)
 	if err != nil {
 		t.Fatalf("replay Execute with matching trace error: %v", err)
 	}
@@ -2180,11 +2180,11 @@ func TestExecutor_PolicySheetPythonModuleRowFeedsSelectionRow(t *testing.T) {
 		t.Fatalf("replay traces = %d, want 1", got)
 	}
 	req.ExpectedComputeModuleTraces[0].FuelConsumed++
-	if _, err := exec.Execute(context.Background(), req); err != nil {
+	if _, err := exec.ExecuteSemanticFixture(context.Background(), req); err != nil {
 		t.Fatalf("python replay with fuel evidence drift error = %v, want fuel evidence-only acceptance", err)
 	}
 	req.ExpectedComputeModuleTraces[0].SourceHash = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-	_, err = exec.Execute(context.Background(), req)
+	_, err = exec.ExecuteSemanticFixture(context.Background(), req)
 	if err == nil {
 		t.Fatal("replay Execute error = nil, want source hash divergence")
 	}
@@ -2203,7 +2203,7 @@ func TestExecutor_PythonModuleOutputSchemaFailureStopsBeforeEmit(t *testing.T) {
 `))
 	exec := newStructuredRendererExecutor(t, source)
 	req := structuredRendererExecutionRequest(t, pythonRendererModuleSpec())
-	result, err := exec.Execute(context.Background(), req)
+	result, err := exec.ExecuteSemanticFixture(context.Background(), req)
 	if err == nil {
 		t.Fatal("Execute error = nil, want output schema violation")
 	}
@@ -2222,7 +2222,7 @@ func TestExecutor_PythonModuleOutputSchemaFailureStopsBeforeEmit(t *testing.T) {
 		t.Fatalf("failure trace = %#v, want ABI failure outcome without output hash", trace)
 	}
 	req.ExpectedComputeModuleTraces = append([]ComputeModuleTrace(nil), result.ComputeModuleTraces...)
-	_, err = exec.Execute(context.Background(), req)
+	_, err = exec.ExecuteSemanticFixture(context.Background(), req)
 	if err == nil {
 		t.Fatal("replay Execute error = nil, want reproduced deterministic failure")
 	}
@@ -2230,7 +2230,7 @@ func TestExecutor_PythonModuleOutputSchemaFailureStopsBeforeEmit(t *testing.T) {
 		t.Fatalf("replay error = %#v, want original deterministic code %s", err, computemodule.CodeABI)
 	}
 	req.ExpectedComputeModuleTraces[0].ErrorCode = string(computemodule.CodeTrap)
-	_, err = exec.Execute(context.Background(), req)
+	_, err = exec.ExecuteSemanticFixture(context.Background(), req)
 	if err == nil {
 		t.Fatal("replay Execute error = nil, want error-code divergence")
 	}
@@ -2247,7 +2247,7 @@ func TestExecutor_ComputeModuleReplayTraceComparison(t *testing.T) {
 	exec := newStructuredRendererExecutor(t, source)
 	req := structuredRendererExecutionRequest(t, structuredRendererModuleSpec())
 
-	first, err := exec.Execute(context.Background(), req)
+	first, err := exec.ExecuteSemanticFixture(context.Background(), req)
 	if err != nil {
 		t.Fatalf("initial Execute error: %v", err)
 	}
@@ -2256,7 +2256,7 @@ func TestExecutor_ComputeModuleReplayTraceComparison(t *testing.T) {
 	}
 
 	req.ExpectedComputeModuleTraces = append([]ComputeModuleTrace(nil), first.ComputeModuleTraces...)
-	replayed, err := exec.Execute(context.Background(), req)
+	replayed, err := exec.ExecuteSemanticFixture(context.Background(), req)
 	if err != nil {
 		t.Fatalf("replay Execute with matching trace error: %v", err)
 	}
@@ -2266,7 +2266,7 @@ func TestExecutor_ComputeModuleReplayTraceComparison(t *testing.T) {
 
 	zeroExpected := structuredRendererExecutionRequest(t, structuredRendererModuleSpec())
 	zeroExpected.ExpectedComputeModuleTraces = []ComputeModuleTrace{}
-	_, err = exec.Execute(context.Background(), zeroExpected)
+	_, err = exec.ExecuteSemanticFixture(context.Background(), zeroExpected)
 	if err == nil {
 		t.Fatal("replay Execute with zero expected traces error = nil, want unexpected trace divergence")
 	}
@@ -2279,7 +2279,7 @@ func TestExecutor_ComputeModuleReplayTraceComparison(t *testing.T) {
 	}
 
 	req.ExpectedComputeModuleTraces[0].OutputHash = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-	_, err = exec.Execute(context.Background(), req)
+	_, err = exec.ExecuteSemanticFixture(context.Background(), req)
 	if err == nil {
 		t.Fatal("replay Execute error = nil, want divergence")
 	}
@@ -2298,7 +2298,7 @@ func TestExecutor_ComputeModuleReplayEnvelopeClassifiesDivergenceKinds(t *testin
 	source, _ := sourceWithStructuredRendererModule(t)
 	exec := newStructuredRendererExecutor(t, source)
 	req := structuredRendererExecutionRequest(t, structuredRendererModuleSpec())
-	first, err := exec.Execute(context.Background(), req)
+	first, err := exec.ExecuteSemanticFixture(context.Background(), req)
 	if err != nil {
 		t.Fatalf("initial Execute error: %v", err)
 	}
@@ -2362,7 +2362,7 @@ func TestExecutor_ComputeModuleReplayEnvelopeClassifiesDivergenceKinds(t *testin
 			trace := base
 			tc.mutate(&trace)
 			replayReq.ExpectedComputeModuleTraces = []ComputeModuleTrace{trace}
-			_, err := exec.Execute(context.Background(), replayReq)
+			_, err := exec.ExecuteSemanticFixture(context.Background(), replayReq)
 			if err == nil {
 				t.Fatal("replay Execute error = nil, want replay finding")
 			}
@@ -2461,7 +2461,7 @@ func TestExecutor_PolicySheetValidateRowFeedsSelectionRow(t *testing.T) {
 			"manifest_source_ref": runtimepaths.Parse("payload.file_manifest.source_ref"),
 		},
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 		NodeID:   identity.NodeID("deploy-node"),
 		Event: eventtest.RootIngress(
@@ -2585,7 +2585,7 @@ func TestExecutor_PolicySheetValidateNumericEqualityCanonicalizesRuntimeValues(t
 			"entity_count":  runtimepaths.Parse("entity.expected_count"),
 		},
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 		NodeID:   identity.NodeID("deploy-node"),
 		Event: eventtest.RootIngress(
@@ -2654,7 +2654,7 @@ func TestExecutor_AccumulatorProjectionFailsClosedWhenDeclaredBindingDoesNotReso
 	if !ok {
 		t.Fatal("expected qualified runtime event to resolve to authored local handler")
 	}
-	_, err = exec.Execute(context.Background(), ExecutionRequest{
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "scoring-node",
 		FlowID:   "scoring",
@@ -2786,7 +2786,7 @@ func TestExecutor_ActivityIntentPersistsBeforePostCommitDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:        identity.NormalizeEntityID("entity-1"),
 		NodeID:          identity.NormalizeNodeID("scanner"),
 		FlowID:          identity.NormalizeFlowID("research"),
@@ -2840,7 +2840,7 @@ func TestExecutor_ActivityDispatchDoesNotRunWhenIntentPersistenceFails(t *testin
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	_, err = exec.Execute(context.Background(), ExecutionRequest{
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:        identity.NormalizeEntityID("entity-1"),
 		NodeID:          identity.NormalizeNodeID("scanner"),
 		FlowID:          identity.NormalizeFlowID("research"),
@@ -2881,7 +2881,7 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -2949,7 +2949,7 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 		Items:    []map[string]any{{"seed": true}},
 	})
 
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -3022,7 +3022,7 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	_, err = exec.Execute(context.Background(), ExecutionRequest{
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -3061,7 +3061,7 @@ func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -3100,7 +3100,7 @@ func TestExecutor_FilterRejectsUnqualifiedConditionField(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	_, err = exec.Execute(context.Background(), ExecutionRequest{
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -3141,7 +3141,7 @@ func TestExecutor_GuardRecursesAndUsesRegistryCheck(t *testing.T) {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -3180,7 +3180,7 @@ func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -3233,7 +3233,7 @@ rules:
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -3266,7 +3266,7 @@ func TestExecutor_RulesUseHandlerAdvancesToDefaultWhenRuleOmitsTarget(t *testing
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -3305,7 +3305,7 @@ func TestExecutor_HandlerSetsGateAppliesWithMatchedRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -3350,7 +3350,7 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
@@ -3388,7 +3388,7 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRulesWithoutRuleEmit(t 
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
@@ -3459,7 +3459,7 @@ func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing
 				t.Fatalf("NewExecutor error: %v", err)
 			}
 
-			result, err := exec.Execute(context.Background(), ExecutionRequest{
+			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID:   "entity-1",
 				NodeID:     "node-1",
 				FlowID:     "flow-1",
@@ -3555,7 +3555,7 @@ func TestExecutor_EmitFromLoweringQueuesCanonicalPayload(t *testing.T) {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
 		NodeID:     "bucket-node",
 		ChainDepth: 1,
@@ -3643,7 +3643,7 @@ func TestExecutor_OnSuccessEmitWithMatchedRuleQueuesRuleThenSuccess(t *testing.T
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
@@ -3745,7 +3745,7 @@ func TestExecutor_OnSuccessEmitFiresWhenRulesDoNotMatch(t *testing.T) {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
@@ -3794,7 +3794,7 @@ func TestExecutor_OnSuccessEmitFailsClosedWhenRuleEventMatchesSuccessEvent(t *te
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 
-	_, err = exec.Execute(context.Background(), ExecutionRequest{
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
@@ -3871,7 +3871,7 @@ func TestExecutor_OnSuccessSecondEmitFailureDoesNotCommitFirstEmitOrState(t *tes
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 
-	_, err = exec.Execute(context.Background(), ExecutionRequest{
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
@@ -3914,7 +3914,7 @@ func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -3968,7 +3968,7 @@ func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *te
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -4023,7 +4023,7 @@ func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelectio
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -4070,7 +4070,7 @@ func TestExecutor_ChainDepthOverflowInterceptsEmitsButSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
@@ -4116,7 +4116,7 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
@@ -4179,7 +4179,7 @@ func TestExecutor_FanOutBoundExceededFailsClosedBeforeEmit(t *testing.T) {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -4309,7 +4309,7 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 				timerPayload["items"] = []any{map[string]any{"id": "item-b"}, map[string]any{"id": "item-a"}, map[string]any{"id": "item-b"}}
 				payload, _ = json.Marshal(timerPayload)
 			}
-			result, err := exec.Execute(context.Background(), ExecutionRequest{
+			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID:        "entity-1",
 				NodeID:          "node-1",
 				FlowID:          "flow-1",
@@ -4348,7 +4348,7 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 
 			transition = &recordingTransitionValidator{}
 			exec.deps.TransitionValidator = transition
-			result, err = exec.Execute(context.Background(), ExecutionRequest{
+			result, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID:        "entity-1",
 				NodeID:          "node-1",
 				FlowID:          "flow-1",
@@ -4392,7 +4392,7 @@ func TestExecutor_FanOutRejectsInvalidSourceAndExplicitZeroBound(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewExecutor error: %v", err)
 			}
-			result, err := exec.Execute(context.Background(), ExecutionRequest{
+			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID: "entity-1", NodeID: "node-1", FlowID: "flow-1",
 				Event:   eventtest.RootIngress("evt-1", "batch.ready", "", "", json.RawMessage(`{"items":[{"id":"item-a"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 				Handler: runtimecontracts.SystemNodeEventHandler{FanOut: &tc.spec},
@@ -4440,7 +4440,7 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "vertical-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -4534,7 +4534,7 @@ func TestExecutor_EmitIntentUsesTargetStateFlowIdentityBeforeInboundSource(t *te
 				"flow_path": targetFlowInstance,
 			}, nil, map[string]map[string]any{})
 			state.EntityID = identity.NormalizeEntityID(targetEntityID)
-			result, err := exec.Execute(context.Background(), ExecutionRequest{
+			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID: targetEntityID,
 				NodeID:   "validation-router",
 				FlowID:   "validation",
@@ -4611,7 +4611,7 @@ func TestExecutor_EmitIntentUsesAdmittedProducerRouteBeforeStateMetadata(t *test
 		FlowInstance: "validation",
 		EntityID:     "validation-entity",
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:      identity.NormalizeEntityID(admitted.EntityID),
 		NodeID:        "validation-router",
 		FlowID:        "validation",
@@ -4646,7 +4646,7 @@ func TestExecutor_EmitIntentUsesAdmittedProducerRouteBeforeStateMetadata(t *test
 	}
 }
 
-func TestExecutor_EmitIntentFallsBackToInboundFlowWhenStateFlowPathNormalizesEmpty(t *testing.T) {
+func TestExecutor_EmitIntentUsesExplicitProducerRouteWhenStateFlowPathNormalizesEmpty(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     stubSource(),
 		StateRepo:  stubStateRepo{},
@@ -4659,10 +4659,13 @@ func TestExecutor_EmitIntentFallsBackToInboundFlowWhenStateFlowPathNormalizesEmp
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "root",
+		ProducerRoute: events.RouteIdentity{
+			FlowID: "root", FlowInstance: "source/inst-1", EntityID: "entity-1",
+		},
 		Event: eventtest.RootIngress(
 			"evt-1",
 			"root.started",
@@ -4690,7 +4693,7 @@ func TestExecutor_EmitIntentFallsBackToInboundFlowWhenStateFlowPathNormalizesEmp
 		t.Fatalf("EmitIntents count = %d, want 1", got)
 	}
 	if got := result.EmitIntents[0].Event.FlowInstance(); got != "source/inst-1" {
-		t.Fatalf("emitted flow_instance = %q, want inbound fallback source/inst-1", got)
+		t.Fatalf("emitted flow_instance = %q, want explicit producer source/inst-1", got)
 	}
 }
 
@@ -4752,7 +4755,7 @@ func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *test
 			if len(payload) == 0 {
 				payload = json.RawMessage(`{}`)
 			}
-			result, err := exec.Execute(context.Background(), ExecutionRequest{
+			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID: "component-entity",
 				NodeID:   "component-node",
 				FlowID:   "component-scaffold",
@@ -4804,7 +4807,7 @@ func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "component-entity",
 		NodeID:   "component-node",
 		FlowID:   "component-scaffold",
@@ -4855,7 +4858,7 @@ func TestExecutor_StaticProducerTargetRouteDoesNotOwnEventNamespace(t *testing.T
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "repo-entity",
 		NodeID:   "repo-node",
 		FlowID:   "repo-scaffold",
@@ -4921,7 +4924,7 @@ func TestExecutor_ChildPinOutputTargetsStoredParentRoute(t *testing.T) {
 	}, nil, map[string]map[string]any{})
 	state.EntityID = identity.NormalizeEntityID("child-ent")
 
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "child-ent",
 		NodeID:   "child-node",
 		FlowID:   "child",
@@ -5000,7 +5003,7 @@ func TestExecutor_DataAccumulationTargetPathWritesNestedEntityLeaf(t *testing.T)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"summary":"ready"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
@@ -5046,7 +5049,7 @@ func TestExecutor_DataAccumulationAppliesTypedContainedOperations(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		Event: eventtest.RootIngress(
@@ -5161,7 +5164,7 @@ func TestExecutor_SingletonCoordinatorAppliesContainedStateThroughLoadedContract
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "coordinator-1",
 		NodeID:   "coordinator-node",
 		FlowID:   "coordinator",
@@ -5239,7 +5242,7 @@ func TestExecutor_DataAccumulationContainedOperationRejectsMissingMapKey(t *test
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	_, err = exec.Execute(context.Background(), ExecutionRequest{
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		Event:    eventtest.RootIngress("evt-1", "job.received", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
@@ -5285,7 +5288,7 @@ func TestExecutor_DataAccumulationRejectsContainedSetOrMergeIndex(t *testing.T) 
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := exec.Execute(context.Background(), ExecutionRequest{
+			_, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID: "entity-1",
 				NodeID:   "node-1",
 				Event:    eventtest.RootIngress("evt-1", "job.received", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
@@ -5328,7 +5331,7 @@ func TestExecutor_RejectsUndeclaredNestedEntityWriteBeforeExecution(t *testing.T
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	_, err = exec.Execute(context.Background(), ExecutionRequest{
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
@@ -5363,7 +5366,7 @@ func TestExecutor_ClearRemovesNestedEntityLeaf(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
@@ -5413,7 +5416,7 @@ func TestExecutor_ClearSpecialTargetsBypassContractValidation(t *testing.T) {
 			handlerAccumulatorBucketKey: map[string]any{"items": []any{"a"}},
 		},
 	})
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "root",
@@ -5451,7 +5454,7 @@ func TestExecutor_EmitFieldsCELFailureReturnsError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	_, err = exec.Execute(context.Background(), ExecutionRequest{
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "vertical-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -5485,7 +5488,7 @@ func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -5527,7 +5530,7 @@ func TestExecutor_FanOutInternalCountBypassesEntityContractValidation(t *testing
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "root",
@@ -5565,7 +5568,7 @@ func TestExecutor_FanOutUsesExplicitEmitEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
@@ -5610,7 +5613,7 @@ func TestExecutor_GuardKillTransitionsToKilledStateWhenDeclared(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -5651,7 +5654,7 @@ func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -5695,7 +5698,7 @@ func TestExecutor_GroupByBareKeyUsesItemScopeWithoutFallbackAcrossRoots(t *testi
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -5745,7 +5748,7 @@ func TestExecutor_ClearGatesWildcardUsesNodeGateSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -5788,7 +5791,7 @@ func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -5831,7 +5834,7 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -5886,7 +5889,7 @@ func TestExecutor_RuleActionRunsOnlyForSelectedRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -5939,7 +5942,7 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelActionWithRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -5999,7 +6002,7 @@ func TestExecutor_RejectsUnsupportedRuleActionContextsBeforeExecution(t *testing
 			if err != nil {
 				t.Fatalf("NewExecutor error: %v", err)
 			}
-			result, err := exec.Execute(context.Background(), ExecutionRequest{
+			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID: "entity-1",
 				NodeID:   "node-1",
 				FlowID:   "flow-1",
@@ -6108,7 +6111,7 @@ func TestExecutor_ActionRegistryEmitContractViolationRejectsHandler(t *testing.T
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -6158,7 +6161,7 @@ func TestExecutor_GuardOnFailEscalateCreatesEmitIntent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
@@ -6206,7 +6209,7 @@ func TestExecutor_GuardOnFailEscalateObjectFieldsShapeExplicitPayload(t *testing
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	result, err := exec.Execute(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
 		NodeID:     "node-1",
 		FlowID:     "flow-1",

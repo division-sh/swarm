@@ -297,6 +297,7 @@ func normalizeConstraint(value string) string {
 	v := normalizeExpression(value)
 	v = compatSQLCastPattern.ReplaceAllString(v, "")
 	v = strings.ReplaceAll(v, " = any (array[", " in (")
+	v = strings.ReplaceAll(v, " <> all (array[", " not in (")
 	v = strings.ReplaceAll(v, "])", ")")
 	if strings.HasPrefix(v, "check (") && strings.HasSuffix(v, ")") {
 		return "check " + canonicalBooleanExpression(strings.TrimSpace(v[len("check "):]))

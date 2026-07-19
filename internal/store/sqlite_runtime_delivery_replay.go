@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -197,96 +196,6 @@ func (s *SQLiteRuntimeStore) InsertEventDeliveryRoutesTx(ctx context.Context, tx
 		}
 	}
 	return nil
-}
-
-func (s *SQLiteRuntimeStore) PersistEventWithDeliveries(ctx context.Context, evt events.Event, agentIDs []string) error {
-	_, err := s.PersistEventWithDeliveriesOutcome(ctx, evt, agentIDs)
-	return err
-}
-
-func (s *SQLiteRuntimeStore) PersistEventWithDeliveriesOutcome(ctx context.Context, evt events.Event, agentIDs []string) (runtimebus.EventAppendOutcome, error) {
-	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	return s.PersistEventWithDeliveriesAndScopeOutcome(ctx, evt, agentIDs, runtimereplayclaim.CommittedReplayScopeSubscribed)
-}
-
-func (s *SQLiteRuntimeStore) PersistEventWithDeliveriesAndScope(ctx context.Context, evt events.Event, agentIDs []string, scope runtimereplayclaim.CommittedReplayScope) error {
-	_, err := s.PersistEventWithDeliveriesAndScopeOutcome(ctx, evt, agentIDs, scope)
-	return err
-}
-
-func (s *SQLiteRuntimeStore) PersistEventWithDeliveriesAndScopeOutcome(ctx context.Context, evt events.Event, agentIDs []string, scope runtimereplayclaim.CommittedReplayScope) (runtimebus.EventAppendOutcome, error) {
-	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	return s.persistEventAtomicOutcome(ctx, "sqlite event/delivery", evt, func(txctx context.Context, tx *sql.Tx) error {
-		if err := s.InsertEventDeliveriesTx(txctx, tx, evt.ID(), agentIDs); err != nil {
-			return err
-		}
-		return s.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID(), scope)
-	})
-}
-
-func (s *SQLiteRuntimeStore) PersistEventWithDeliveryRoutesAndScope(ctx context.Context, evt events.Event, agentIDs []string, deliveryTargets map[string]events.RouteIdentity, scope runtimereplayclaim.CommittedReplayScope) error {
-	_, err := s.PersistEventWithDeliveryRoutesAndScopeOutcome(ctx, evt, agentIDs, deliveryTargets, scope)
-	return err
-}
-
-func (s *SQLiteRuntimeStore) PersistEventWithDeliveryRoutesAndScopeOutcome(ctx context.Context, evt events.Event, agentIDs []string, deliveryTargets map[string]events.RouteIdentity, scope runtimereplayclaim.CommittedReplayScope) (runtimebus.EventAppendOutcome, error) {
-	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	return s.persistEventAtomicOutcome(ctx, "sqlite event/routes", evt, func(txctx context.Context, tx *sql.Tx) error {
-		if err := s.InsertEventDeliveriesWithTargetsTx(txctx, tx, evt.ID(), agentIDs, deliveryTargets); err != nil {
-			return err
-		}
-		return s.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID(), scope)
-	})
-}
-
-func (s *SQLiteRuntimeStore) PersistEventWithDeliveryRouteSetAndScope(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, scope runtimereplayclaim.CommittedReplayScope) error {
-	_, err := s.PersistEventWithDeliveryRouteSetAndScopeOutcome(ctx, evt, deliveryRoutes, scope)
-	return err
-}
-
-func (s *SQLiteRuntimeStore) PersistEventWithDeliveryRouteSetAndScopeOutcome(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, scope runtimereplayclaim.CommittedReplayScope) (runtimebus.EventAppendOutcome, error) {
-	if err := rejectDiagnosticDirectDeliveryPersistence(evt); err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	return s.persistEventAtomicOutcome(ctx, "sqlite event/route-set", evt, func(txctx context.Context, tx *sql.Tx) error {
-		if err := s.InsertEventDeliveryRoutesTx(txctx, tx, evt.ID(), deliveryRoutes); err != nil {
-			return err
-		}
-		return s.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID(), scope)
-	})
-}
-
-func (s *SQLiteRuntimeStore) persistEventAtomicOutcome(
-	ctx context.Context,
-	operation string,
-	evt events.Event,
-	persistSideEffects func(context.Context, *sql.Tx) error,
-) (runtimebus.EventAppendOutcome, error) {
-	outcome := runtimebus.EventAppendOutcomeUnknown
-	err := s.runAuthorActivityMutation(ctx, operation, func(txctx context.Context, tx *sql.Tx) error {
-		var err error
-		outcome, err = s.AppendEventTxOutcome(txctx, tx, evt)
-		if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
-			return err
-		}
-		if persistSideEffects != nil {
-			return persistSideEffects(txctx, tx)
-		}
-		return nil
-	})
-	if err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	if outcome == runtimebus.EventAppendOutcomeUnknown {
-		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("sqlite event transaction completed without append outcome")
-	}
-	return outcome, nil
 }
 
 func (s *SQLiteRuntimeStore) UpsertCommittedReplayScope(ctx context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error {
@@ -476,24 +385,7 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.
 	queryArgs = append(queryArgs, diagnosticDirectReplayEventArgs()...)
 	queryArgs = append(queryArgs, limit)
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT
-			e.event_id,
-			COALESCE(e.run_id, ''),
-			e.event_name,
-			COALESCE(e.task_id, ''),
-			COALESCE(e.entity_id, ''),
-			COALESCE(e.flow_instance, ''),
-			COALESCE(e.scope, 'global'),
-			e.payload,
-			COALESCE(e.chain_depth, 0),
-			COALESCE(e.produced_by, ''),
-			COALESCE(e.produced_by_type, ''),
-			COALESCE(e.source_event_id, ''),
-			e.created_at,
-			e.execution_mode,
-			COALESCE(e.source_route, '{}'),
-			COALESCE(e.target_route, '{}'),
-			COALESCE(e.target_set, '[]')
+		SELECT e.event_id
 		FROM events e
 		LEFT JOIN runs run ON run.run_id = e.run_id
 		LEFT JOIN event_receipts r
@@ -514,81 +406,18 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.
 	if err != nil {
 		return nil, fmt.Errorf("list sqlite events missing pipeline receipt: %w", err)
 	}
-	defer rows.Close()
-	out := make([]events.PersistedReplayEvent, 0, limit)
-	for rows.Next() {
-		var eventID string
-		var row persistedEventIdentity
-		var payloadRaw, createdAtRaw, sourceRouteRaw, targetRouteRaw, targetSetRaw any
-		if err := rows.Scan(
-			&eventID,
-			&row.RunID,
-			&row.EventName,
-			&row.TaskID,
-			&row.EntityID,
-			&row.FlowInstance,
-			&row.Scope,
-			&payloadRaw,
-			&row.ChainDepth,
-			&row.ProducedBy,
-			&row.ProducedByType,
-			&row.SourceEventID,
-			&createdAtRaw,
-			&row.ExecutionMode,
-			&sourceRouteRaw,
-			&targetRouteRaw,
-			&targetSetRaw,
-		); err != nil {
-			return nil, fmt.Errorf("scan sqlite missing pipeline receipt event: %w", err)
-		}
-		row.Payload = sqliteJSONRawMessage(payloadRaw)
-		if parsedCreatedAt, ok, err := sqliteTimeValue(createdAtRaw); err != nil {
-			return nil, fmt.Errorf("scan sqlite missing pipeline receipt created_at: %w", err)
-		} else if ok {
-			row.CreatedAt = parsedCreatedAt.UTC()
-		}
-		row.SourceRoute = sqliteJSONRawMessage(sourceRouteRaw)
-		row.TargetRoute = sqliteJSONRawMessage(targetRouteRaw)
-		row.TargetSet = sqliteJSONRawMessage(targetSetRaw)
-		row.EventID = eventID
-		evt, err := eventFromPersistedIdentity(row)
-		if err != nil {
-			return nil, err
-		}
-		record := events.PersistedReplayEvent{Event: evt}
-		if strings.TrimSpace(evt.RunID()) == "" {
-			record.ReplayFailure = replayAdmissionFailure("missing_canonical_run_id")
-		}
-		out = append(out, record)
+	eventIDs, err := scanOrderedEventIDs(rows, "sqlite missing pipeline receipt")
+	if err != nil {
+		return nil, err
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read sqlite missing pipeline receipt events: %w", err)
-	}
-	return out, nil
+	return hydrateSQLitePersistedReplayEvents(ctx, s.DB, eventIDs)
 }
 
 func (s *SQLiteRuntimeStore) listSQLiteEventsWithPendingDeliveriesForRun(ctx context.Context, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
 	queryArgs := append([]any{runID, since}, diagnosticDirectReplayEventArgs()...)
 	queryArgs = append(queryArgs, limit)
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT
-			e.event_id,
-			COALESCE(e.run_id, ''),
-			e.event_name,
-			COALESCE(e.task_id, ''),
-			COALESCE(e.entity_id, ''),
-			COALESCE(e.flow_instance, ''),
-			COALESCE(e.scope, 'global'),
-			e.payload,
-			COALESCE(e.chain_depth, 0),
-			COALESCE(e.produced_by, ''),
-			COALESCE(e.produced_by_type, ''),
-			COALESCE(e.source_event_id, ''),
-			e.created_at,
-			e.execution_mode,
-			COALESCE(e.source_route, '{}'),
-			COALESCE(e.target_route, '{}'),
-			COALESCE(e.target_set, '[]')
+		SELECT e.event_id
 		FROM events e
 		JOIN runs run ON run.run_id = e.run_id
 		WHERE e.run_id = ?
@@ -608,57 +437,11 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsWithPendingDeliveriesForRun(ctx con
 	if err != nil {
 		return nil, fmt.Errorf("list sqlite events with pending deliveries: %w", err)
 	}
-	defer rows.Close()
-	out := make([]events.PersistedReplayEvent, 0, limit)
-	for rows.Next() {
-		var eventID string
-		var row persistedEventIdentity
-		var payloadRaw, createdAtRaw, sourceRouteRaw, targetRouteRaw, targetSetRaw any
-		if err := rows.Scan(
-			&eventID,
-			&row.RunID,
-			&row.EventName,
-			&row.TaskID,
-			&row.EntityID,
-			&row.FlowInstance,
-			&row.Scope,
-			&payloadRaw,
-			&row.ChainDepth,
-			&row.ProducedBy,
-			&row.ProducedByType,
-			&row.SourceEventID,
-			&createdAtRaw,
-			&row.ExecutionMode,
-			&sourceRouteRaw,
-			&targetRouteRaw,
-			&targetSetRaw,
-		); err != nil {
-			return nil, fmt.Errorf("scan sqlite event with pending deliveries: %w", err)
-		}
-		row.Payload = sqliteJSONRawMessage(payloadRaw)
-		if parsedCreatedAt, ok, err := sqliteTimeValue(createdAtRaw); err != nil {
-			return nil, fmt.Errorf("scan sqlite pending-delivery event created_at: %w", err)
-		} else if ok {
-			row.CreatedAt = parsedCreatedAt.UTC()
-		}
-		row.SourceRoute = sqliteJSONRawMessage(sourceRouteRaw)
-		row.TargetRoute = sqliteJSONRawMessage(targetRouteRaw)
-		row.TargetSet = sqliteJSONRawMessage(targetSetRaw)
-		row.EventID = eventID
-		evt, err := eventFromPersistedIdentity(row)
-		if err != nil {
-			return nil, err
-		}
-		record := events.PersistedReplayEvent{Event: evt}
-		if strings.TrimSpace(evt.RunID()) == "" {
-			record.ReplayFailure = replayAdmissionFailure("missing_canonical_run_id")
-		}
-		out = append(out, record)
+	eventIDs, err := scanOrderedEventIDs(rows, "sqlite pending delivery")
+	if err != nil {
+		return nil, err
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read sqlite events with pending deliveries: %w", err)
-	}
-	return out, nil
+	return hydrateSQLitePersistedReplayEvents(ctx, s.DB, eventIDs)
 }
 
 func (s *SQLiteRuntimeStore) ClaimPipelineReplay(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
@@ -1033,116 +816,13 @@ func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(ctx context.Context, ag
 	if since.IsZero() {
 		since = time.Now().Add(-30 * 24 * time.Hour)
 	}
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT
-			e.event_id,
-			COALESCE(e.run_id, ''),
-			e.event_name,
-			COALESCE(e.task_id, ''),
-			COALESCE(e.entity_id, ''),
-			COALESCE(e.flow_instance, ''),
-			COALESCE(e.scope, 'global'),
-			e.payload,
-			COALESCE(e.chain_depth, 0),
-			COALESCE(e.produced_by, ''),
-			COALESCE(e.produced_by_type, ''),
-			COALESCE(e.source_event_id, ''),
-			e.created_at,
-			e.execution_mode,
-			COALESCE(e.source_route, '{}'),
-			COALESCE(e.target_route, '{}'),
-			COALESCE(e.target_set, '[]'),
-			CASE WHEN d.delivery_id IS NULL THEN 0 ELSE 1 END,
-			COALESCE(d.status, ''),
-			COALESCE(d.retry_count, 0),
-			COALESCE(d.created_at, e.created_at),
-			d.delivered_at,
-			CASE WHEN r.event_id IS NULL THEN 0 ELSE 1 END
-		FROM events e
-		LEFT JOIN event_deliveries d
-			ON d.event_id = e.event_id
-			AND d.subscriber_type = 'agent'
-			AND d.subscriber_id = ?
-		LEFT JOIN event_receipts r
-			ON r.event_id = e.event_id
-			AND r.subscriber_type = 'agent'
-			AND r.subscriber_id = ?
-		WHERE e.created_at >= ?
-		  AND EXISTS (
-				SELECT 1
-				FROM event_deliveries d_me
-				WHERE d_me.event_id = e.event_id
-				  AND d_me.subscriber_type = 'agent'
-				  AND d_me.subscriber_id = ?
-			)
-		ORDER BY e.created_at ASC, e.event_id ASC
-	`, agentID, agentID, since.UTC(), agentID)
+	records, err := s.listSQLitePendingAgentDeliveryRecords(ctx, []string{agentID}, since)
 	if err != nil {
-		return nil, fmt.Errorf("query sqlite pending subscribed events: %w", err)
+		return nil, err
 	}
-	defer rows.Close()
 	out := make([]events.Event, 0, limit)
 	now := s.now()
-	for rows.Next() {
-		var eventID string
-		var row persistedEventIdentity
-		var payloadRaw, createdAtRaw, sourceRouteRaw, targetRouteRaw, targetSetRaw any
-		var deliveryCreatedAtRaw, deliveryDeliveredAtRaw any
-		var deliveryFound, receiptFound int
-		record := pendingAgentDeliveryRecord{AgentID: agentID}
-		if err := rows.Scan(
-			&eventID,
-			&row.RunID,
-			&row.EventName,
-			&row.TaskID,
-			&row.EntityID,
-			&row.FlowInstance,
-			&row.Scope,
-			&payloadRaw,
-			&row.ChainDepth,
-			&row.ProducedBy,
-			&row.ProducedByType,
-			&row.SourceEventID,
-			&createdAtRaw,
-			&row.ExecutionMode,
-			&sourceRouteRaw,
-			&targetRouteRaw,
-			&targetSetRaw,
-			&deliveryFound,
-			&record.DeliveryStatus,
-			&record.DeliveryRetryCount,
-			&deliveryCreatedAtRaw,
-			&deliveryDeliveredAtRaw,
-			&receiptFound,
-		); err != nil {
-			return nil, fmt.Errorf("scan sqlite pending subscribed event: %w", err)
-		}
-		row.Payload = sqliteJSONRawMessage(payloadRaw)
-		if parsedCreatedAt, ok, err := sqliteTimeValue(createdAtRaw); err != nil {
-			return nil, fmt.Errorf("scan sqlite pending subscribed event created_at: %w", err)
-		} else if ok {
-			row.CreatedAt = parsedCreatedAt.UTC()
-		}
-		if deliveryCreatedAt, ok, err := sqliteTimeValue(deliveryCreatedAtRaw); err != nil {
-			return nil, fmt.Errorf("scan sqlite pending subscribed delivery created_at: %w", err)
-		} else if ok {
-			record.DeliveryCreatedAt = deliveryCreatedAt
-		}
-		if deliveryDeliveredAt, ok, err := sqliteTimeValue(deliveryDeliveredAtRaw); err != nil {
-			return nil, fmt.Errorf("scan sqlite pending subscribed delivery delivered_at: %w", err)
-		} else if ok {
-			record.DeliveryDeliveredAt = sql.NullTime{Time: deliveryDeliveredAt, Valid: true}
-		}
-		record.DeliveryFound = deliveryFound != 0
-		record.ReceiptFound = receiptFound != 0
-		row.SourceRoute = sqliteJSONRawMessage(sourceRouteRaw)
-		row.TargetRoute = sqliteJSONRawMessage(targetRouteRaw)
-		row.TargetSet = sqliteJSONRawMessage(targetSetRaw)
-		row.EventID = eventID
-		record.Event, err = eventFromPersistedIdentity(row)
-		if err != nil {
-			return nil, err
-		}
+	for _, record := range records {
 		if !record.isPending(now) {
 			continue
 		}
@@ -1153,9 +833,6 @@ func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(ctx context.Context, ag
 		if len(out) >= limit {
 			break
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read sqlite pending subscribed events: %w", err)
 	}
 	return out, nil
 }
@@ -1230,22 +907,6 @@ func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.C
 		SELECT
 			d.subscriber_id,
 			e.event_id,
-			COALESCE(e.run_id, ''),
-			e.event_name,
-			COALESCE(e.task_id, ''),
-			COALESCE(e.entity_id, ''),
-			COALESCE(e.flow_instance, ''),
-			COALESCE(e.scope, 'global'),
-			e.payload,
-			COALESCE(e.chain_depth, 0),
-			COALESCE(e.produced_by, ''),
-			COALESCE(e.produced_by_type, ''),
-			COALESCE(e.source_event_id, ''),
-			e.created_at,
-			e.execution_mode,
-			COALESCE(e.source_route, '{}'),
-			COALESCE(e.target_route, '{}'),
-			COALESCE(e.target_set, '[]'),
 			1,
 			COALESCE(d.status, ''),
 			COALESCE(d.retry_count, 0),
@@ -1268,40 +929,18 @@ func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.C
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite pending agent delivery records: %w", err)
 	}
-	defer rows.Close()
 	out := make([]pendingAgentDeliveryRecord, 0)
+	eventIDs := make([]string, 0)
 	for rows.Next() {
 		var (
 			record               pendingAgentDeliveryRecord
 			eventID              string
-			row                  persistedEventIdentity
-			payloadRaw           any
-			eventCreatedRaw      any
-			sourceRouteRaw       any
-			targetRouteRaw       any
-			targetSetRaw         any
 			deliveryCreatedRaw   any
 			deliveryDeliveredRaw any
 		)
 		if err := rows.Scan(
 			&record.AgentID,
 			&eventID,
-			&row.RunID,
-			&row.EventName,
-			&row.TaskID,
-			&row.EntityID,
-			&row.FlowInstance,
-			&row.Scope,
-			&payloadRaw,
-			&row.ChainDepth,
-			&row.ProducedBy,
-			&row.ProducedByType,
-			&row.SourceEventID,
-			&eventCreatedRaw,
-			&row.ExecutionMode,
-			&sourceRouteRaw,
-			&targetRouteRaw,
-			&targetSetRaw,
 			&record.DeliveryFound,
 			&record.DeliveryStatus,
 			&record.DeliveryRetryCount,
@@ -1309,14 +948,12 @@ func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.C
 			&deliveryDeliveredRaw,
 			&record.ReceiptFound,
 		); err != nil {
+			_ = rows.Close()
 			return nil, fmt.Errorf("scan pending agent delivery record: %w", err)
-		}
-		eventCreatedAt, _, err := sqliteTimeValue(eventCreatedRaw)
-		if err != nil {
-			return nil, fmt.Errorf("scan pending agent event created_at: %w", err)
 		}
 		deliveryCreatedAt, ok, err := sqliteTimeValue(deliveryCreatedRaw)
 		if err != nil {
+			_ = rows.Close()
 			return nil, fmt.Errorf("scan pending agent delivery created_at: %w", err)
 		}
 		if ok {
@@ -1324,26 +961,45 @@ func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.C
 		}
 		deliveryDeliveredAt, ok, err := sqliteTimeValue(deliveryDeliveredRaw)
 		if err != nil {
+			_ = rows.Close()
 			return nil, fmt.Errorf("scan pending agent delivery delivered_at: %w", err)
 		}
 		if ok {
 			record.DeliveryDeliveredAt = sql.NullTime{Time: deliveryDeliveredAt, Valid: true}
 		}
 		record.AgentID = strings.TrimSpace(record.AgentID)
-		row.Payload = sqliteJSONRawMessage(payloadRaw)
-		row.CreatedAt = eventCreatedAt
-		row.SourceRoute = sqliteJSONRawMessage(sourceRouteRaw)
-		row.TargetRoute = sqliteJSONRawMessage(targetRouteRaw)
-		row.TargetSet = sqliteJSONRawMessage(targetSetRaw)
-		row.EventID = eventID
-		record.Event, err = eventFromPersistedIdentity(row)
+		out = append(out, record)
+		eventIDs = append(eventIDs, strings.TrimSpace(eventID))
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("read pending agent delivery records: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close pending agent delivery records: %w", err)
+	}
+	uniqueIDs, err := pendingDeliveryEventRecordIDs(eventIDs)
+	if err != nil {
+		return nil, err
+	}
+	records, err := loadSQLiteEventIdentities(ctx, s.DB, uniqueIDs)
+	if err != nil {
+		return nil, err
+	}
+	eventsByID := make(map[string]events.Event, len(records))
+	for _, durable := range records {
+		event, err := decodeEventRecord(durable)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, record)
+		eventsByID[durable.EventID] = event.Event()
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read pending agent delivery records: %w", err)
+	for index, eventID := range eventIDs {
+		event, ok := eventsByID[eventID]
+		if !ok {
+			return nil, fmt.Errorf("pending agent delivery event %s was not hydrated", eventID)
+		}
+		out[index].Event = event
 	}
 	return out, nil
 }

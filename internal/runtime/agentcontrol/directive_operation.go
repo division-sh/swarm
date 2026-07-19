@@ -103,7 +103,7 @@ func ValidateDirectiveOperationEvidence(op DirectiveOperation) error {
 
 type ReserveDirectiveOperationRequest struct {
 	Operation DirectiveOperation
-	Event     events.Event
+	Event     events.AdmittedEvent
 	Now       time.Time
 }
 

@@ -13,29 +13,30 @@ import (
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
 
 var errInboundPublicationNotFound = errors.New("inbound publication not found")
 
 type inboundPublicationTransactionStore interface {
-	appendInboundEvidenceTx(context.Context, *sql.Tx, events.Event) error
 	linkInboundPublicationEventTx(context.Context, *sql.Tx, runtimeinbound.Request, runtimeinbound.EventRecord) error
 	finalizeInboundPublicationTx(context.Context, *sql.Tx, runtimeinbound.Request, int) (runtimeinbound.Record, error)
 }
 
 type sqlInboundPublicationMutation struct {
-	runtimebus.EventMutation
-	ctx       context.Context
-	tx        *sql.Tx
-	store     inboundPublicationTransactionStore
-	request   runtimeinbound.Request
-	finalized bool
-	record    runtimeinbound.Record
+	ctx        context.Context
+	tx         *sql.Tx
+	store      inboundPublicationTransactionStore
+	eventStore eventCommitTxStore
+	request    runtimeinbound.Request
+	finalized  bool
+	record     runtimeinbound.Record
 }
 
-func newSQLInboundPublicationMutation(ctx context.Context, tx *sql.Tx, txStore runtimebus.TransactionalEventStore, store inboundPublicationTransactionStore) *sqlInboundPublicationMutation {
-	eventMutation := newSQLEventMutation(ctx, tx, txStore, store)
-	return &sqlInboundPublicationMutation{EventMutation: eventMutation, ctx: eventMutation.Context(), tx: tx, store: store}
+func newSQLInboundPublicationMutation(ctx context.Context, tx *sql.Tx, eventStore eventCommitTxStore, store inboundPublicationTransactionStore) *sqlInboundPublicationMutation {
+	committer := &sqlPublishCommitter{tx: tx, store: eventStore}
+	ctx = runtimebus.WithCommitPublishTransaction(ctx, committer)
+	return &sqlInboundPublicationMutation{ctx: ctx, tx: tx, store: store, eventStore: eventStore}
 }
 
 func (m *sqlInboundPublicationMutation) Context() context.Context {
@@ -109,8 +110,16 @@ func (m *sqlInboundPublicationMutation) FinalizeInboundPublication(ctx context.C
 			return err
 		}
 	}
-	if err := m.store.appendInboundEvidenceTx(ctx, m.tx, finalization.EvidenceEvent); err != nil {
-		return err
+	evidence, err := events.AdmitForPersistence(finalization.EvidenceEvent, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		return fmt.Errorf("admit inbound evidence: %w", err)
+	}
+	committer := sqlPublishCommitter{tx: m.tx, store: m.eventStore}
+	if _, err := committer.commitNamedEvent(ctx, "finalize inbound publication evidence", events.EventAdmissionDiagnosticDirect, runtimebus.CommitPublishRequest{Event: evidence, ReplayScope: runtimereplayclaim.CommittedReplayScopeDirect}); err != nil {
+		return fmt.Errorf("commit inbound evidence: %w", err)
+	}
+	if err := recordInboundAuthorActivity(ctx, finalization.EvidenceEvent, m.request.Provider); err != nil {
+		return fmt.Errorf("record inbound author activity: %w", err)
 	}
 	record, err := m.store.finalizeInboundPublicationTx(ctx, m.tx, m.request, len(finalization.Events))
 	if err != nil {
@@ -130,7 +139,7 @@ func (s *PostgresStore) RunInboundPublicationMutation(ctx context.Context, reque
 		return runtimeinbound.Record{}, fmt.Errorf("inbound publication mutation callback is required")
 	}
 	var result runtimeinbound.Record
-	err := s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		identityKey := inboundEventIdempotencyKey(request.ProviderEventID, request.EntityID, request.Provider)
 		if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, identityKey); err != nil {
 			return fmt.Errorf("lock inbound publication identity: %w", err)
@@ -387,14 +396,6 @@ func insertPostgresInboundPublicationPreparedTx(ctx context.Context, tx *sql.Tx,
 	return nil
 }
 
-func (s *PostgresStore) appendInboundEvidenceTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
-	ctx = withDiagnosticDirectOwner(ctx, diagnosticDirectInboundRecord)
-	if err := s.AppendEventTx(ctx, tx, evt); err != nil {
-		return fmt.Errorf("append inbound evidence: %w", err)
-	}
-	return recordInboundAuthorActivity(ctx, evt, evt.SourceAgent())
-}
-
 func (s *PostgresStore) linkInboundPublicationEventTx(ctx context.Context, tx *sql.Tx, request runtimeinbound.Request, child runtimeinbound.EventRecord) error {
 	auth := child.Authorization.Normalized()
 	_, err := tx.ExecContext(ctx, `
@@ -571,20 +572,21 @@ func loadPostgresInboundPublicationRoutes(ctx context.Context, db inboundPublica
 }
 
 func loadPostgresInboundPublicationEvent(ctx context.Context, db inboundPublicationQueryer, eventID string) (events.Event, error) {
-	var row persistedEventIdentity
-	err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(run_id::text, ''), event_name, COALESCE(task_id, ''), COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''),
-		       scope, payload, COALESCE(chain_depth, 0), COALESCE(produced_by, ''), COALESCE(produced_by_type, ''),
-		       COALESCE(source_event_id::text, ''), created_at, execution_mode, source_route, target_route, target_set
-		FROM events WHERE event_id = $1::uuid
-	`, eventID).Scan(&row.RunID, &row.EventName, &row.TaskID, &row.EntityID, &row.FlowInstance, &row.Scope, &row.Payload,
-		&row.ChainDepth, &row.ProducedBy, &row.ProducedByType, &row.SourceEventID, &row.CreatedAt, &row.ExecutionMode,
-		&row.SourceRoute, &row.TargetRoute, &row.TargetSet)
+	row, found, err := loadPostgresEventIdentity(ctx, db, eventID)
 	if err != nil {
-		return events.EmptyEvent(), fmt.Errorf("load inbound publication event: %w", err)
+		var event events.Event
+		return event, fmt.Errorf("load inbound publication event: %w", err)
 	}
-	row.EventID = eventID
-	return eventFromPersistedIdentity(row)
+	if !found {
+		var event events.Event
+		return event, fmt.Errorf("load inbound publication event: event %s not found", strings.TrimSpace(eventID))
+	}
+	admitted, err := decodeEventRecord(row)
+	if err != nil {
+		var event events.Event
+		return event, err
+	}
+	return admitted.Event(), nil
 }
 
 func canonicalInboundRecipientManifest(raw json.RawMessage) (json.RawMessage, string, int, error) {

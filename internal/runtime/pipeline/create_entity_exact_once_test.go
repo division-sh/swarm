@@ -279,23 +279,11 @@ func seedExactOnceEventDelivery(t *testing.T, store *WorkflowInstanceStore, ctx 
 
 func seedExactOnceEvent(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, evt events.Event) {
 	t.Helper()
-	runID := runtimecorrelation.RunIDFromContext(ctx)
 	if store.isSQLite() {
-		if _, err := store.db.ExecContext(ctx, `
-			INSERT OR IGNORE INTO events (execution_mode, event_id, run_id, event_name, scope, payload, chain_depth, produced_by_type, created_at)
-			VALUES ('live', ?, ?, ?, 'global', ?, ?, 'agent', ?)
-		`, evt.ID(), runID, strings.TrimSpace(string(evt.Type())), string(evt.Payload()), evt.ChainDepth(), evt.CreatedAt()); err != nil {
-			t.Fatalf("seed sqlite event: %v", err)
-		}
+		seedPipelineEventRecordForDialect(t, ctx, store.db, "sqlite", evt)
 		return
 	}
-	if _, err := store.db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, chain_depth, produced_by_type, created_at)
-		VALUES ('live', $1::uuid, $2::uuid, $3, 'global', $4::jsonb, $5, 'agent', $6)
-		ON CONFLICT (event_id) DO NOTHING
-	`, evt.ID(), runID, strings.TrimSpace(string(evt.Type())), string(evt.Payload()), evt.ChainDepth(), evt.CreatedAt()); err != nil {
-		t.Fatalf("seed postgres event: %v", err)
-	}
+	seedPipelineEventRecord(t, ctx, store.db, evt)
 }
 
 func assertMutationCount(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, eventID, field, writerID, handlerStep string, want int) {

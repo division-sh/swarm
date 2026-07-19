@@ -931,8 +931,9 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 	eventIDs := h.publishedEventIDs(entityID)
 	for _, eventID := range eventIDs {
 		var outcome string
+		var failure []byte
 		err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
-			SELECT outcome
+			SELECT outcome, COALESCE(failure, '{}'::jsonb)
 			FROM event_receipts
 			WHERE event_id = $1::uuid
 			  AND subscriber_type = 'platform'
@@ -942,7 +943,7 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 			  )
 			ORDER BY processed_at DESC
 			LIMIT 1
-		`, strings.TrimSpace(eventID)).Scan(&outcome)
+		`, strings.TrimSpace(eventID)).Scan(&outcome, &failure)
 		if err == sql.ErrNoRows {
 			continue
 		}
@@ -951,7 +952,16 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 		}
 		got := strings.TrimSpace(strings.ToLower(outcome))
 		if got != "success" {
-			t.Fatalf("handler_outcome = %q, want %q", got, want)
+			var diagnostic []byte
+			_ = h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+				SELECT payload
+				FROM events
+				WHERE event_name = 'platform.runtime_log'
+				  AND payload->'details'->>'action' = 'handler_error'
+				ORDER BY created_at DESC
+				LIMIT 1
+			`).Scan(&diagnostic)
+			t.Fatalf("handler_outcome = %q, want %q; failure=%s; diagnostic=%s", got, want, failure, diagnostic)
 		}
 		return
 	}

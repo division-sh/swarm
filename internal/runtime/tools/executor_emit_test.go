@@ -3,12 +3,16 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -61,6 +65,7 @@ type emitRoutePlanStore struct {
 	scopes      map[string]runtimereplayclaim.CommittedReplayScope
 	receipts    map[string]string
 	receiptErrs map[string]*failures.Envelope
+	active      []string
 }
 
 func newEmitRoutePlanStore() *emitRoutePlanStore {
@@ -73,12 +78,35 @@ func newEmitRoutePlanStore() *emitRoutePlanStore {
 	}
 }
 
-func (s *emitRoutePlanStore) AppendEvent(_ context.Context, evt events.Event) error {
-	s.events[evt.ID()] = evt
-	return nil
+func (s *emitRoutePlanStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return runtimebustest.CommitPublish(ctx, plan, s.beginPublish, s.finalizePublish)
 }
 
-func (s *emitRoutePlanStore) InsertEventDeliveries(_ context.Context, _ string, _ []string) error {
+func (s *emitRoutePlanStore) beginPublish(_ context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
+	event := admitted.Event()
+	if existing, ok := s.events[event.ID()]; ok {
+		if !reflect.DeepEqual(existing, event) {
+			return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("event %s conflicts with its admitted fixture", event.ID())
+		}
+		return runtimebus.EventAppendExactDuplicate, nil
+	}
+	s.events[event.ID()] = event
+	s.active = append(s.active, event.ID())
+	return runtimebus.EventAppendInserted, nil
+}
+
+func (s *emitRoutePlanStore) finalizePublish(_ context.Context, req runtimebus.CommitPublishRequest) error {
+	event := req.Event.Event()
+	if len(s.active) == 0 || s.active[len(s.active)-1] != event.ID() {
+		return errors.New("prepared event finalization does not match active emit event")
+	}
+	s.routes[event.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
+	s.scopes[event.ID()] = req.ReplayScope
+	if req.PipelineReceipt != nil {
+		s.receipts[event.ID()] = req.PipelineReceipt.Status
+		s.receiptErrs[event.ID()] = failures.CloneEnvelope(req.PipelineReceipt.Failure)
+	}
+	s.active = s.active[:len(s.active)-1]
 	return nil
 }
 
@@ -93,13 +121,6 @@ func (s *emitRoutePlanStore) ListEventDeliveryRecipients(_ context.Context, even
 }
 
 func (s *emitRoutePlanStore) SupportsPersistedReplay() bool { return true }
-
-func (s *emitRoutePlanStore) PersistEventWithDeliveryRouteSetAndScope(_ context.Context, evt events.Event, routes []events.DeliveryRoute, scope runtimereplayclaim.CommittedReplayScope) error {
-	s.events[evt.ID()] = evt
-	s.routes[evt.ID()] = events.NormalizeDeliveryRoutes(routes)
-	s.scopes[evt.ID()] = scope
-	return nil
-}
 
 func (s *emitRoutePlanStore) UpsertPipelineReceipt(_ context.Context, eventID, status string, failure *failures.Envelope) error {
 	s.receipts[eventID] = status
@@ -153,7 +174,7 @@ func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
 		EmitEvents:    []string{"category.assessed"},
 	}
 
-	_, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_category_assessed", map[string]any{
+	_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_category_assessed", map[string]any{
 		"category":  "AP automation",
 		"signal_id": "sig-1",
 	})
@@ -223,7 +244,7 @@ func TestHandleEmitTool_ValidatesCriteriaCitationsBeforePublish(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			exec, bus, actor := criteriaCitationEmitTestExecutor()
-			_, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_cto_spec_vetoed", tc.payload)
+			_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_cto_spec_vetoed", tc.payload)
 			if tc.wantReason == "" {
 				if err != nil {
 					t.Fatalf("handleEmitTool: %v", err)
@@ -347,7 +368,7 @@ func TestHandleEmitTool_RejectsMutableActorCriteriaGrant(t *testing.T) {
 	})
 	actor.Criteria = []string{"feasibility_exclusions"}
 
-	_, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_cto_spec_vetoed", map[string]any{
+	_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_cto_spec_vetoed", map[string]any{
 		"cite": "FX-HARD-01",
 	})
 	if err == nil {
@@ -409,18 +430,12 @@ func TestHandleEmitTool_PreservesInboundChildFlowOwnerAndExecutionMode(t *testin
 		FlowPath:      "validation",
 		EmitEvents:    []string{"research.completed"},
 	}
-	inbound := eventtest.InExecutionMode(eventtest.RootIngress(
-		"",
+	inbound := toolTestInboundEvent(
 		events.EventType("validation/validation.started"),
-		"",
-		"",
 		nil,
-		0,
-		"",
-		"",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), "validation/inst-1"),
-		time.Time{},
-	), executionmode.Mock)
+		executionmode.Mock,
+	)
 	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound)
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_research_completed", map[string]any{
@@ -488,17 +503,11 @@ func TestHandleEmitTool_DoesNotAdoptForeignInboundFlowOwner(t *testing.T) {
 		FlowPath:      "validation",
 		EmitEvents:    []string{"research.completed"},
 	}
-	inbound := eventtest.RootIngress(
-		"",
+	inbound := toolTestInboundEvent(
 		events.EventType("scoring/vertical.shortlisted"),
-		"",
-		"",
 		nil,
-		0,
-		"",
-		"",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), "scoring/inst-1"),
-		time.Time{},
+		executionmode.Live,
 	)
 	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound)
 
@@ -562,7 +571,7 @@ func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
 		EmitEvents:    []string{"vertical.discovered"},
 	}
 
-	_, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_vertical_discovered", map[string]any{
+	_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_vertical_discovered", map[string]any{
 		"name": "Law firm AP automation",
 	})
 	if err != nil {
@@ -651,17 +660,11 @@ func TestHandleEmitTool_TargetsParentRouteForChildPinOutput(t *testing.T) {
 		FlowInstance: "wrong-root",
 		EntityID:     "33333333-3333-3333-3333-333333333333",
 	}
-	inbound := eventtest.RootIngress(
-		"",
+	inbound := toolTestInboundEvent(
 		events.EventType("analyzer-flow/analysis.requested"),
-		"",
-		"",
 		nil,
-		0,
-		"",
-		"",
 		events.EnvelopeForTargetRoute(events.EnvelopeForSourceRoute(events.EventEnvelope{}, wrongInboundParent), childRoute),
-		time.Time{},
+		executionmode.Live,
 	)
 	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound)
 
@@ -735,7 +738,7 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 		EntityID:      "22222222-2222-2222-2222-222222222222",
 		EmitEvents:    []string{"analyzer-flow/analysis.done"},
 	}
-	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RootIngress("", events.EventType("analyzer-flow/analysis.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), toolTestInboundEvent("analyzer-flow/analysis.requested", nil, events.EventEnvelope{}, executionmode.Live))
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
 	if err == nil {
@@ -795,21 +798,15 @@ func TestHandleEmitTool_StaticChildPinOutputTargetsDeliveryEntity(t *testing.T) 
 		FlowPath:      "root/analyzer-flow",
 		EmitEvents:    []string{"analyzer-flow/analysis.done"},
 	}
-	inbound := eventtest.RootIngress(
-		"",
+	inbound := toolTestInboundEvent(
 		events.EventType("analyzer-flow/analysis.requested"),
-		"",
-		"",
 		nil,
-		0,
-		"",
-		"",
 		events.EnvelopeForSourceRoute(events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-1111-1111-111111111111"), events.RouteIdentity{
 			FlowID:       "wrong-root",
 			FlowInstance: "wrong-root",
 			EntityID:     "33333333-3333-3333-3333-333333333333",
 		}),
-		time.Time{},
+		executionmode.Live,
 	)
 
 	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound)
@@ -870,17 +867,11 @@ func TestHandleEmitTool_RootStaticPinOutputStillRequiresTarget(t *testing.T) {
 		FlowPath:      "analyzer-flow",
 		EmitEvents:    []string{"analyzer-flow/analysis.done"},
 	}
-	inbound := eventtest.RootIngress(
-		"",
+	inbound := toolTestInboundEvent(
 		events.EventType("analyzer-flow/analysis.requested"),
-		"",
-		"",
 		nil,
-		0,
-		"",
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-1111-1111-111111111111"),
-		time.Time{},
+		executionmode.Live,
 	)
 	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound)
 
@@ -923,7 +914,7 @@ func TestHandleEmitTool_RootSchemaPinOutputStillRequiresTarget(t *testing.T) {
 		EmitEvents:    []string{"root.ready"},
 	}
 
-	_, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_root_ready", map[string]any{})
+	_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_root_ready", map[string]any{})
 	if err == nil {
 		t.Fatal("handleEmitTool error = nil, want target_required_missing")
 	}
@@ -1100,7 +1091,7 @@ func TestHandleEmitTool_RootReceiverConnectRejectsMissingOrIncompleteParentIdent
 				WorkflowInstances: emitWorkflowInstanceLoader{rows: tc.rows},
 			})
 
-			_, err = exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_deploy_done", map[string]any{})
+			_, err = exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_deploy_done", map[string]any{})
 			if err == nil || !strings.Contains(err.Error(), "parent_route_incomplete") {
 				t.Fatalf("handleEmitTool error = %v, want parent_route_incomplete", err)
 			}
@@ -1188,7 +1179,7 @@ func TestHandleEmitTool_FailsClosedOnUndeclaredPayloadField(t *testing.T) {
 		EmitEvents:    []string{"category.assessed"},
 	}
 
-	_, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_category_assessed", map[string]any{
+	_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_category_assessed", map[string]any{
 		"category":   "AP automation",
 		"unexpected": true,
 	})
@@ -1224,7 +1215,7 @@ func TestHandleEmitTool_AllowsDeclaredTemplateIDBusinessPayload(t *testing.T) {
 		EmitEvents:    []string{"repo.template.selected"},
 	}
 
-	_, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_repo_template_selected", map[string]any{
+	_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_repo_template_selected", map[string]any{
 		"template_id": "application-basic-v1",
 	})
 	if err != nil {
@@ -1287,7 +1278,7 @@ func TestHandleEmitTool_AllowsValidWave1EventPayloadTypes(t *testing.T) {
 		EmitEvents:    []string{"scan.completed"},
 	}
 
-	_, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_scan_completed", map[string]any{
+	_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_scan_completed", map[string]any{
 		"mode": "fast",
 		"details": map[string]any{
 			"source": "scanner-a",
@@ -1381,7 +1372,7 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 		FlowPath:      "review",
 		EmitEvents:    []string{"review/task.requested"},
 	}
-	_, err := exec.handleEmitTool(unmanagedToolTestContext(), reviewActor, "emit_task_requested", map[string]any{
+	_, err := exec.handleEmitTool(toolEventTestContext(reviewActor), reviewActor, "emit_task_requested", map[string]any{
 		"details": map[string]any{
 			"priority": "urgent",
 		},
@@ -1401,7 +1392,7 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 		FlowPath:      "validation",
 		EmitEvents:    []string{"validation/task.requested"},
 	}
-	_, err = exec.handleEmitTool(unmanagedToolTestContext(), validationActor, "emit_task_requested", map[string]any{
+	_, err = exec.handleEmitTool(toolEventTestContext(validationActor), validationActor, "emit_task_requested", map[string]any{
 		"details": map[string]any{
 			"priority": "low",
 		},
@@ -1476,7 +1467,7 @@ func TestHandleEmitTool_FailsClosedOnSameActorDuplicateLeafScopedSchemas(t *test
 		EmitEvents:    []string{"review/task.requested", "validation/task.requested"},
 	}
 
-	_, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_task_requested", map[string]any{
+	_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_task_requested", map[string]any{
 		"priority": "urgent",
 	})
 	requireToolFailure(t, err, failures.ClassSchemaInvalid, "invalid_emit_tool_name")
@@ -1520,7 +1511,7 @@ func TestHandleEmitTool_FailsClosedOnNamedTypeViolation(t *testing.T) {
 		EmitEvents:    []string{"scan.completed"},
 	}
 
-	_, err := exec.handleEmitTool(unmanagedToolTestContext(), actor, "emit_scan_completed", map[string]any{
+	_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_scan_completed", map[string]any{
 		"details": "not-an-object",
 	})
 	requireToolFailure(t, err, failures.ClassSchemaInvalid, "schema_validation_failed")

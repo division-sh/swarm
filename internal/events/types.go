@@ -49,15 +49,15 @@ const (
 type EventAdmissionClass string
 
 const (
-	EventAdmissionUnknown           EventAdmissionClass = ""
-	EventAdmissionRootIngress       EventAdmissionClass = "root_ingress"
-	EventAdmissionRuntimeControl    EventAdmissionClass = "runtime_control"
-	EventAdmissionRuntimeDiagnostic EventAdmissionClass = "runtime_diagnostic"
-	EventAdmissionDiagnosticDirect  EventAdmissionClass = "diagnostic_direct"
-	EventAdmissionChild             EventAdmissionClass = "child"
-	EventAdmissionReplay            EventAdmissionClass = "replay"
-	EventAdmissionProjection        EventAdmissionClass = "projection"
-	EventAdmissionRouteProbe        EventAdmissionClass = "route_probe"
+	EventAdmissionUnknown            EventAdmissionClass = ""
+	EventAdmissionRootIngress        EventAdmissionClass = "root_ingress"
+	EventAdmissionOperatorInjected   EventAdmissionClass = "operator_injected"
+	EventAdmissionRuntimeControl     EventAdmissionClass = "runtime_control"
+	EventAdmissionRuntimeDiagnostic  EventAdmissionClass = "runtime_diagnostic"
+	EventAdmissionDiagnosticDirect   EventAdmissionClass = "diagnostic_direct"
+	EventAdmissionChild              EventAdmissionClass = "child"
+	EventAdmissionReplay             EventAdmissionClass = "replay"
+	EventAdmissionSelectedForkReplay EventAdmissionClass = "selected_fork_replay"
 )
 
 type EventProducerType string
@@ -85,28 +85,19 @@ type ProducerIdentity struct {
 	id           string
 }
 
+// ProducerClaim is the untrusted construction input for ProducerIdentity.
+// A successful semantic event constructor validates and consumes this claim.
+type ProducerClaim struct {
+	Type EventProducerType
+	ID   string
+}
+
 func NewProducerIdentity(producerType EventProducerType, id string) (ProducerIdentity, error) {
 	producer := normalizedProducerIdentity(producerType, id)
 	if err := producer.Validate(); err != nil {
 		return ProducerIdentity{}, err
 	}
 	return producer, nil
-}
-
-func NodeProducer(id string) ProducerIdentity {
-	return normalizedProducerIdentity(EventProducerNode, id)
-}
-
-func AgentProducer(id string) ProducerIdentity {
-	return normalizedProducerIdentity(EventProducerAgent, id)
-}
-
-func PlatformProducer(id string) ProducerIdentity {
-	return normalizedProducerIdentity(EventProducerPlatform, id)
-}
-
-func ExternalProducer(id string) ProducerIdentity {
-	return normalizedProducerIdentity(EventProducerExternal, id)
 }
 
 func normalizedProducerIdentity(producerType EventProducerType, id string) ProducerIdentity {
@@ -152,6 +143,135 @@ type RouteIdentity struct {
 	EntityID     string `json:"entity_id,omitempty"`
 	FlowID       string `json:"flow_id,omitempty"`
 }
+
+type RoutingSourceKind string
+
+const (
+	RoutingSourceAbsent          RoutingSourceKind = ""
+	RoutingSourceDeclaredIngress RoutingSourceKind = "declared_ingress"
+	RoutingSourceRuntimeInstance RoutingSourceKind = "runtime_instance"
+)
+
+// RoutingSource is the opaque event-owned source fact. It records exact source
+// identity only; connect-policy interpretation belongs to the routing owner.
+type RoutingSource struct {
+	kind      RoutingSourceKind
+	route     RouteIdentity
+	authority string
+}
+
+func NoRoutingSource() RoutingSource { return RoutingSource{} }
+
+func NewDeclaredIngressRoutingSource(flowID, flowInstance, entityID, authority string) (RoutingSource, error) {
+	source := RoutingSource{
+		kind:      RoutingSourceDeclaredIngress,
+		route:     RouteIdentity{FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID}.Normalized(),
+		authority: strings.TrimSpace(authority),
+	}
+	if source.route.FlowID == "" || source.route.EntityID == "" || source.authority == "" {
+		return RoutingSource{}, fmt.Errorf("declared ingress routing source requires flow_id, entity_id, and resolution authority")
+	}
+	return source, nil
+}
+
+func NewRuntimeRoutingSource(flowID, flowInstance, entityID string) (RoutingSource, error) {
+	source := RoutingSource{
+		kind:  RoutingSourceRuntimeInstance,
+		route: RouteIdentity{FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID}.Normalized(),
+	}
+	if source.route.FlowID == "" || source.route.FlowInstance == "" || source.route.EntityID == "" {
+		return RoutingSource{}, fmt.Errorf("runtime routing source requires flow_id, flow_instance, and entity_id")
+	}
+	return source, nil
+}
+
+// RuntimeRoutingSourceFromRoute records a runtime source only when the caller
+// claims complete flow/instance/entity identity. Flow scope and entity identity
+// remain useful event context, but neither is a routing address on its own.
+func RuntimeRoutingSourceFromRoute(route RouteIdentity) (RoutingSource, error) {
+	route = route.Normalized()
+	if route.FlowID == "" || route.EntityID == "" {
+		return NoRoutingSource(), nil
+	}
+	return NewRuntimeRoutingSource(route.FlowID, route.FlowInstance, route.EntityID)
+}
+
+func RestoreRoutingSource(kind RoutingSourceKind, route RouteIdentity, authority string) (RoutingSource, error) {
+	switch RoutingSourceKind(strings.TrimSpace(string(kind))) {
+	case RoutingSourceAbsent:
+		if !route.Normalized().Empty() || strings.TrimSpace(authority) != "" {
+			return RoutingSource{}, fmt.Errorf("absent routing source cannot carry route or authority")
+		}
+		return RoutingSource{}, nil
+	case RoutingSourceDeclaredIngress:
+		return NewDeclaredIngressRoutingSource(route.FlowID, route.FlowInstance, route.EntityID, authority)
+	case RoutingSourceRuntimeInstance:
+		if strings.TrimSpace(authority) != "" {
+			return RoutingSource{}, fmt.Errorf("runtime routing source cannot carry ingress authority")
+		}
+		return NewRuntimeRoutingSource(route.FlowID, route.FlowInstance, route.EntityID)
+	default:
+		return RoutingSource{}, fmt.Errorf("routing source kind %q is invalid", kind)
+	}
+}
+
+func (s RoutingSource) Kind() RoutingSourceKind { return s.kind }
+func (s RoutingSource) Route() RouteIdentity    { return s.route.Normalized() }
+func (s RoutingSource) Authority() string       { return strings.TrimSpace(s.authority) }
+func (s RoutingSource) Empty() bool             { return s.kind == RoutingSourceAbsent }
+
+type OperatorReferenceProvenance struct {
+	referencedEventID string
+}
+
+func NewOperatorReferenceProvenance(eventID string) (OperatorReferenceProvenance, error) {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return OperatorReferenceProvenance{}, fmt.Errorf("operator referenced event_id is required")
+	}
+	if _, err := uuid.Parse(eventID); err != nil {
+		return OperatorReferenceProvenance{}, fmt.Errorf("operator referenced event_id must be a UUID: %w", err)
+	}
+	return OperatorReferenceProvenance{referencedEventID: eventID}, nil
+}
+
+func (p OperatorReferenceProvenance) ReferencedEventID() string {
+	return strings.TrimSpace(p.referencedEventID)
+}
+
+type SelectedForkLineage struct {
+	destinationRunID string
+	sourceRunID      string
+	sourceEventID    string
+	authorityStamp   string
+	taskID           string
+	executionMode    executionmode.Mode
+}
+
+func NewSelectedForkLineage(destinationRunID, sourceRunID, sourceEventID, authorityStamp, taskID string, mode executionmode.Mode) (SelectedForkLineage, error) {
+	lineage := SelectedForkLineage{
+		destinationRunID: strings.TrimSpace(destinationRunID),
+		sourceRunID:      strings.TrimSpace(sourceRunID),
+		sourceEventID:    strings.TrimSpace(sourceEventID),
+		authorityStamp:   strings.TrimSpace(authorityStamp),
+		taskID:           strings.TrimSpace(taskID),
+		executionMode:    mode,
+	}
+	if lineage.destinationRunID == "" || lineage.sourceRunID == "" || lineage.sourceEventID == "" || lineage.authorityStamp == "" {
+		return SelectedForkLineage{}, fmt.Errorf("selected-fork lineage requires destination run, source run, source event, and selection authority")
+	}
+	if !lineage.executionMode.Valid() {
+		return SelectedForkLineage{}, fmt.Errorf("selected-fork lineage requires live or mock execution_mode")
+	}
+	return lineage, nil
+}
+
+func (l SelectedForkLineage) DestinationRunID() string          { return l.destinationRunID }
+func (l SelectedForkLineage) SourceRunID() string               { return l.sourceRunID }
+func (l SelectedForkLineage) SourceEventID() string             { return l.sourceEventID }
+func (l SelectedForkLineage) AuthorityStamp() string            { return l.authorityStamp }
+func (l SelectedForkLineage) TaskID() string                    { return l.taskID }
+func (l SelectedForkLineage) ExecutionMode() executionmode.Mode { return l.executionMode }
 
 // ReplyContextRef is an opaque reference to platform-owned reply routing
 // state. The full mutable record is never carried through event payloads or
@@ -313,6 +433,9 @@ type Event struct {
 	deliveryContext DeliveryContext
 	createdAt       time.Time
 	executionMode   executionmode.Mode
+	routingSource   RoutingSource
+	operatorRef     *OperatorReferenceProvenance
+	selectedFork    *SelectedForkLineage
 }
 
 type deliveryContextKey struct{}
@@ -359,124 +482,130 @@ type EventLineage struct {
 	ExecutionMode executionmode.Mode
 }
 
-// ProjectionChange describes one intentional change to an existing event.
-// Project applies these changes to a lossless clone so newly added event-owned
-// facts cannot be dropped by open-coded reconstruction.
-type ProjectionChange func(*Event)
+type EventFacts struct {
+	ID            string
+	Type          EventType
+	Producer      ProducerClaim
+	TaskID        string
+	Payload       json.RawMessage
+	ChainDepth    int
+	Envelope      EventEnvelope
+	RoutingSource RoutingSource
+	CreatedAt     time.Time
+	ExecutionMode executionmode.Mode
+}
 
-func Project(evt Event, changes ...ProjectionChange) Event {
-	projected := evt.Clone()
-	for _, change := range changes {
-		if change != nil {
-			change(&projected)
-		}
+type RootIngressEventInput struct {
+	Facts EventFacts
+	RunID string
+}
+
+type OperatorInjectedEventInput struct {
+	Facts      EventFacts
+	RunID      string
+	Provenance *OperatorReferenceProvenance
+}
+
+type ChildEventInput struct {
+	Facts   EventFacts
+	Lineage EventLineage
+}
+
+type ReplayEventInput struct {
+	Facts   EventFacts
+	Lineage EventLineage
+}
+
+type SelectedForkReplayEventInput struct {
+	Facts   EventFacts
+	Lineage SelectedForkLineage
+}
+
+type RuntimeEventInput struct {
+	Facts         EventFacts
+	RunID         string
+	ParentEventID string
+}
+
+type DiagnosticDirectEventInput struct {
+	Facts         EventFacts
+	RunID         string
+	ParentEventID string
+}
+
+func NewRootIngressEvent(input RootIngressEventInput) (Event, error) {
+	return newSemanticEvent(EventAdmissionRootIngress, input.Facts, input.RunID, "", nil, nil)
+}
+
+func NewOperatorInjectedEvent(input OperatorInjectedEventInput) (Event, error) {
+	if strings.TrimSpace(input.RunID) == "" {
+		return Event{}, fmt.Errorf("operator-injected event requires target run_id")
 	}
-	return projected
+	return newSemanticEvent(EventAdmissionOperatorInjected, input.Facts, input.RunID, "", input.Provenance, nil)
 }
 
-func ProjectLineage(runID, parentEventID string) ProjectionChange {
-	return func(evt *Event) {
-		evt.runID = strings.TrimSpace(runID)
-		evt.parentEventID = strings.TrimSpace(parentEventID)
+func NewChildEvent(input ChildEventInput) (Event, error) {
+	lineage := input.Lineage.Normalized()
+	if err := validateCausalLineage(EventAdmissionChild, lineage); err != nil {
+		return Event{}, err
 	}
-}
-
-func ProjectID(id string) ProjectionChange {
-	return func(evt *Event) {
-		evt.id = strings.TrimSpace(id)
+	if strings.TrimSpace(input.Facts.TaskID) == "" {
+		input.Facts.TaskID = lineage.TaskID
 	}
+	input.Facts.ExecutionMode = lineage.ExecutionMode
+	return newSemanticEvent(EventAdmissionChild, input.Facts, lineage.RunID, lineage.ParentEventID, nil, nil)
 }
 
-func ProjectCreatedAt(createdAt time.Time) ProjectionChange {
-	return func(evt *Event) {
-		evt.createdAt = createdAt
-		if !createdAt.IsZero() {
-			evt.createdAt = createdAt.UTC()
-		}
+func NewReplayEvent(input ReplayEventInput) (Event, error) {
+	lineage := input.Lineage.Normalized()
+	if err := validateCausalLineage(EventAdmissionReplay, lineage); err != nil {
+		return Event{}, err
 	}
-}
-
-func ProjectTaskID(taskID string) ProjectionChange {
-	return func(evt *Event) {
-		evt.taskID = strings.TrimSpace(taskID)
+	if strings.TrimSpace(input.Facts.TaskID) == "" {
+		input.Facts.TaskID = lineage.TaskID
 	}
+	input.Facts.ExecutionMode = lineage.ExecutionMode
+	return newSemanticEvent(EventAdmissionReplay, input.Facts, lineage.RunID, lineage.ParentEventID, nil, nil)
 }
 
-func ProjectPayload(payload json.RawMessage) ProjectionChange {
-	return func(evt *Event) {
-		evt.payload = clonePayload(payload)
+func NewSelectedForkReplayEvent(input SelectedForkReplayEventInput) (Event, error) {
+	lineage := input.Lineage
+	if strings.TrimSpace(lineage.DestinationRunID()) == "" {
+		return Event{}, fmt.Errorf("selected-fork replay requires typed lineage")
 	}
-}
-
-func ProjectEnvelope(envelope EventEnvelope) ProjectionChange {
-	return func(evt *Event) {
-		evt.setEnvelopeClaim(envelope)
+	if strings.TrimSpace(input.Facts.TaskID) == "" {
+		input.Facts.TaskID = lineage.TaskID()
 	}
+	input.Facts.ExecutionMode = lineage.ExecutionMode()
+	return newSemanticEvent(EventAdmissionSelectedForkReplay, input.Facts, lineage.DestinationRunID(), "", nil, &lineage)
 }
 
-func ProjectDeliveryContext(deliveryContext DeliveryContext) ProjectionChange {
-	return func(evt *Event) {
-		evt.deliveryContext = deliveryContext.Normalized()
+func NewRuntimeControlEvent(input RuntimeEventInput) (Event, error) {
+	return newRuntimeEvent(EventAdmissionRuntimeControl, input)
+}
+
+func NewRuntimeDiagnosticEvent(input RuntimeEventInput) (Event, error) {
+	return newRuntimeEvent(EventAdmissionRuntimeDiagnostic, input)
+}
+
+func newRuntimeEvent(class EventAdmissionClass, input RuntimeEventInput) (Event, error) {
+	if strings.TrimSpace(input.ParentEventID) != "" && strings.TrimSpace(input.RunID) == "" {
+		return Event{}, fmt.Errorf("%s event with causal parent requires run_id", class)
 	}
+	return newSemanticEvent(class, input.Facts, input.RunID, input.ParentEventID, nil, nil)
 }
 
-func ProjectExecutionMode(mode executionmode.Mode) ProjectionChange {
-	return func(evt *Event) {
-		evt.executionMode = mode
+func NewDiagnosticDirectEvent(input DiagnosticDirectEventInput) (Event, error) {
+	if !IsDiagnosticDirectEventType(input.Facts.Type) {
+		return Event{}, fmt.Errorf("diagnostic-direct event type %q is not in the closed catalog", input.Facts.Type)
 	}
-}
-
-func NewRootIngressEvent(id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
-	return newEvent(EventAdmissionRootIngress, id, eventType, producer, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
-}
-
-func NewRuntimeControlEvent(id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
-	return newEvent(EventAdmissionRuntimeControl, id, eventType, producer, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
-}
-
-func NewRuntimeDiagnosticEvent(id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
-	return newEvent(EventAdmissionRuntimeDiagnostic, id, eventType, producer, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
-}
-
-func NewDiagnosticDirectEvent(id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
-	return newEvent(EventAdmissionDiagnosticDirect, id, eventType, producer, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
-}
-
-func NewChildEvent(id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, parent Event, envelope EventEnvelope, createdAt time.Time) Event {
-	return NewChildEventWithLineage(id, eventType, producer, taskID, payload, chainDepth, LineageFromEvent(parent), envelope, createdAt)
-}
-
-func NewChildEventWithLineage(id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, lineage EventLineage, envelope EventEnvelope, createdAt time.Time) Event {
-	lineage = lineage.Normalized()
-	if strings.TrimSpace(taskID) == "" {
-		taskID = lineage.TaskID
+	if !input.Facts.RoutingSource.Empty() || !input.Facts.Envelope.Source.Normalized().Empty() || !input.Facts.Envelope.Target.Normalized().Empty() || len(input.Facts.Envelope.TargetSet) > 0 {
+		return Event{}, fmt.Errorf("diagnostic-direct event must be non-routed")
 	}
-	return newEvent(EventAdmissionChild, id, eventType, producer, taskID, payload, chainDepth, lineage.RunID, lineage.ParentEventID, envelope, createdAt).withExecutionModeClaim(lineage.ExecutionMode)
-}
-
-func NewReplayEvent(id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, lineage EventLineage, envelope EventEnvelope, createdAt time.Time) Event {
-	lineage = lineage.Normalized()
-	if strings.TrimSpace(taskID) == "" {
-		taskID = lineage.TaskID
+	if strings.TrimSpace(input.ParentEventID) != "" && strings.TrimSpace(input.RunID) == "" {
+		return Event{}, fmt.Errorf("diagnostic-direct event with causal parent requires run_id")
 	}
-	return newEvent(EventAdmissionReplay, id, eventType, producer, taskID, payload, chainDepth, lineage.RunID, lineage.ParentEventID, envelope, createdAt).withExecutionModeClaim(lineage.ExecutionMode)
-}
-
-// NewProjectionEvent reconstructs an event from already-authoritative facts.
-// Production call sites are restricted by TestProductionEventConstructionUsesPublicAPI;
-// new runtime producers must use the semantic constructors above.
-func NewProjectionEvent(id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
-	return newEvent(EventAdmissionProjection, id, eventType, producer, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
-}
-
-// NewRouteProbeEvent constructs a non-persisted route-query/sentinel event.
-// Production call sites are restricted by TestProductionEventConstructionUsesPublicAPI.
-func NewRouteProbeEvent(eventType EventType) Event {
-	return newEvent(EventAdmissionRouteProbe, "", eventType, ProducerIdentity{}, "", nil, 0, "", "", EventEnvelope{}, time.Time{})
-}
-
-func EmptyEvent() Event {
-	return Event{}
+	return newSemanticEvent(EventAdmissionDiagnosticDirect, input.Facts, input.RunID, input.ParentEventID, nil, nil)
 }
 
 func LineageFromEvent(parent Event) EventLineage {
@@ -497,25 +626,84 @@ func (l EventLineage) Normalized() EventLineage {
 	}
 }
 
-func newEvent(class EventAdmissionClass, id string, eventType EventType, producer ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
+func newSemanticEvent(class EventAdmissionClass, facts EventFacts, runID, parentEventID string, operatorRef *OperatorReferenceProvenance, selectedFork *SelectedForkLineage) (Event, error) {
+	producer, err := NewProducerIdentity(facts.Producer.Type, facts.Producer.ID)
+	if err != nil {
+		return Event{}, fmt.Errorf("event producer identity: %w", err)
+	}
+	eventType := EventType(strings.TrimSpace(string(facts.Type)))
+	if eventType == "" {
+		return Event{}, fmt.Errorf("event type is required")
+	}
+	if facts.ChainDepth < 0 {
+		return Event{}, fmt.Errorf("event chain_depth must be nonnegative")
+	}
+	payload := clonePayload(facts.Payload)
+	if !json.Valid(payload) {
+		return Event{}, fmt.Errorf("event payload must be valid JSON")
+	}
+	if !facts.ExecutionMode.Valid() {
+		return Event{}, fmt.Errorf("event execution_mode must be live or mock")
+	}
+	envelope := cloneEventEnvelope(facts.Envelope)
+	sourceRoute := facts.RoutingSource.Route()
+	switch facts.RoutingSource.Kind() {
+	case RoutingSourceAbsent:
+		if !envelope.Source.Normalized().Empty() {
+			return Event{}, fmt.Errorf("event envelope source requires a typed routing source")
+		}
+	case RoutingSourceDeclaredIngress:
+		if !envelope.Source.Normalized().Empty() {
+			return Event{}, fmt.Errorf("declared ingress routing source is opaque and cannot become envelope source evidence")
+		}
+	case RoutingSourceRuntimeInstance:
+		if declared := envelope.Source.Normalized(); !declared.Empty() && declared != sourceRoute {
+			return Event{}, fmt.Errorf("event envelope source does not match typed routing source")
+		}
+		envelope.Source = sourceRoute
+	default:
+		return Event{}, fmt.Errorf("event routing source kind %q is invalid", facts.RoutingSource.Kind())
+	}
+	if err := validateEnvelopeClaim(envelope, false); err != nil {
+		return Event{}, fmt.Errorf("event envelope: %w", err)
+	}
+	if operatorRef != nil && class != EventAdmissionOperatorInjected {
+		return Event{}, fmt.Errorf("operator provenance is only valid for operator-injected events")
+	}
+	if selectedFork != nil && class != EventAdmissionSelectedForkReplay {
+		return Event{}, fmt.Errorf("selected-fork lineage is only valid for selected-fork replay events")
+	}
 	evt := Event{
 		admissionClass: EventAdmissionClass(strings.TrimSpace(string(class))),
-		id:             strings.TrimSpace(id),
-		eventType:      EventType(strings.TrimSpace(string(eventType))),
-		producer:       normalizedProducerIdentity(producer.Type(), producer.ID()),
-		taskID:         strings.TrimSpace(taskID),
-		payload:        clonePayload(payload),
-		chainDepth:     chainDepth,
+		id:             strings.TrimSpace(facts.ID),
+		eventType:      eventType,
+		producer:       producer,
+		taskID:         strings.TrimSpace(facts.TaskID),
+		payload:        payload,
+		chainDepth:     facts.ChainDepth,
 		runID:          strings.TrimSpace(runID),
 		parentEventID:  strings.TrimSpace(parentEventID),
-		createdAt:      createdAt,
-		executionMode:  executionmode.Live,
+		createdAt:      facts.CreatedAt,
+		executionMode:  facts.ExecutionMode,
+		routingSource:  facts.RoutingSource,
+		operatorRef:    operatorRef,
+		selectedFork:   selectedFork,
 	}
 	evt.setEnvelopeClaim(envelope)
 	if !evt.createdAt.IsZero() {
-		evt.createdAt = evt.createdAt.UTC()
+		evt.createdAt = evt.createdAt.UTC().Truncate(time.Microsecond)
 	}
-	return evt
+	return evt, nil
+}
+
+func validateCausalLineage(class EventAdmissionClass, lineage EventLineage) error {
+	if lineage.RunID == "" || lineage.ParentEventID == "" {
+		return fmt.Errorf("%s event requires run_id and parent_event_id", class)
+	}
+	if !lineage.ExecutionMode.Valid() {
+		return fmt.Errorf("%s event requires live or mock execution_mode", class)
+	}
+	return nil
 }
 
 func (e Event) MarshalJSON() ([]byte, error) {
@@ -532,47 +720,11 @@ func (e Event) MarshalJSON() ([]byte, error) {
 }
 
 func (e *Event) UnmarshalJSON(data []byte) error {
-	var raw eventJSON
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	producer, err := NewProducerIdentity(raw.ProducerType, raw.SourceAgent)
-	if err != nil {
-		return err
-	}
-	*e = NewProjectionEvent(
-		raw.ID,
-		raw.Type,
-		producer,
-		raw.TaskID,
-		raw.Payload,
-		0,
-		"",
-		"",
-		EventEnvelope{},
-		raw.CreatedAt,
-	)
-	if !raw.ExecutionMode.Valid() {
-		return fmt.Errorf("event execution_mode must be live or mock")
-	}
-	*e = e.WithExecutionMode(raw.ExecutionMode)
-	return nil
+	return fmt.Errorf("events.Event cannot be reconstructed from partial JSON; use a class-specific constructor or canonical durable readback")
 }
 
 func (e Event) ExecutionMode() executionmode.Mode {
 	return e.executionMode
-}
-
-func (e Event) WithExecutionMode(mode executionmode.Mode) Event {
-	if mode.Valid() {
-		e.executionMode = mode
-	}
-	return e
-}
-
-func (e Event) withExecutionModeClaim(mode executionmode.Mode) Event {
-	e.executionMode = mode
-	return e
 }
 
 func clonePayload(payload json.RawMessage) json.RawMessage {
@@ -679,7 +831,31 @@ func (e Event) Clone() Event {
 	cloned.envelopeClaim = cloneEventEnvelope(e.envelopeClaim)
 	cloned.envelope = e.NormalizedEnvelope()
 	cloned.deliveryContext = e.DeliveryContext()
+	if e.operatorRef != nil {
+		ref := *e.operatorRef
+		cloned.operatorRef = &ref
+	}
+	if e.selectedFork != nil {
+		lineage := *e.selectedFork
+		cloned.selectedFork = &lineage
+	}
 	return cloned
+}
+
+func (e Event) RoutingSource() RoutingSource { return e.routingSource }
+
+func (e Event) OperatorReference() (OperatorReferenceProvenance, bool) {
+	if e.operatorRef == nil {
+		return OperatorReferenceProvenance{}, false
+	}
+	return *e.operatorRef, true
+}
+
+func (e Event) SelectedForkLineage() (SelectedForkLineage, bool) {
+	if e.selectedFork == nil {
+		return SelectedForkLineage{}, false
+	}
+	return *e.selectedFork, true
 }
 
 func (e Event) TaskID() string {
@@ -698,11 +874,6 @@ func (e Event) RunID() string {
 	return strings.TrimSpace(e.runID)
 }
 
-func (e Event) WithRunID(runID string) Event {
-	e.runID = strings.TrimSpace(runID)
-	return e
-}
-
 func (e Event) ParentEventID() string {
 	return strings.TrimSpace(e.parentEventID)
 }
@@ -718,79 +889,8 @@ func (e Event) CreatedAt() time.Time {
 	return e.createdAt.UTC()
 }
 
-func (e Event) WithParentEventID(parentEventID string) Event {
-	e.parentEventID = strings.TrimSpace(parentEventID)
-	return e
-}
-
-func (e Event) WithTaskID(taskID string) Event {
-	e.taskID = strings.TrimSpace(taskID)
-	return e
-}
-
-func (e Event) WithLineage(lineage EventLineage) Event {
-	lineage = lineage.Normalized()
-	if runID := lineage.RunID; runID != "" && e.RunID() == "" {
-		e.runID = runID
-	}
-	if parentEventID := lineage.ParentEventID; parentEventID != "" && e.ParentEventID() == "" {
-		e.parentEventID = parentEventID
-	}
-	if taskID := lineage.TaskID; taskID != "" && e.TaskID() == "" {
-		e.taskID = taskID
-	}
-	return e
-}
-
-func (e Event) WithEnvelope(envelope EventEnvelope) Event {
-	e.setEnvelopeClaim(envelope)
-	return e
-}
-
-// WithDeliveryContext creates a route-scoped event projection. The context is
-// intentionally omitted from Event JSON and EventEnvelope.
-func (e Event) WithDeliveryContext(deliveryContext DeliveryContext) Event {
-	e.deliveryContext = deliveryContext.Normalized()
-	return e
-}
-
 func (e Event) DeliveryContext() DeliveryContext {
 	return e.deliveryContext.Normalized()
-}
-
-func (e Event) WithEntityID(entityID string) Event {
-	e.setEnvelopeClaim(EnvelopeForEntityID(e.envelope, entityID))
-	return e
-}
-
-func (e Event) WithFlowInstance(flowInstance string) Event {
-	e.setEnvelopeClaim(EnvelopeForFlowInstance(e.envelope, flowInstance))
-	return e
-}
-
-func (e Event) WithSourceRoute(route RouteIdentity) Event {
-	e.setEnvelopeClaim(EnvelopeForSourceRoute(e.envelope, route))
-	return e
-}
-
-func (e Event) WithTargetRoute(route RouteIdentity) Event {
-	e.setEnvelopeClaim(EnvelopeForTargetRoute(e.envelope, route))
-	return e
-}
-
-func (e Event) WithTargetSet(routes []RouteIdentity) Event {
-	e.setEnvelopeClaim(EnvelopeForTargetSet(e.envelope, routes))
-	return e
-}
-
-func (e Event) WithoutTargetRoute() Event {
-	e.setEnvelopeClaim(EnvelopeForBroadcast(e.envelope))
-	return e
-}
-
-func (e Event) WithDeliveryTarget(route RouteIdentity) Event {
-	e.setEnvelopeClaim(EnvelopeForTargetRoute(e.envelope, route))
-	return e
 }
 
 func (e Event) ContextMap(currentState string) map[string]any {

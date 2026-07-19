@@ -352,7 +352,7 @@ search_dimensions:
       - internal/store/events.go
       - internal/store/sqlite_runtime_delivery_replay.go
       - internal/runtime/bus/eventbus_publish.go
-      - internal/runtime/template_instance_delivery_test.go
+      - internal/runtime/bus/final_flow_instance_authoring_route_test.go
     canonical_layer: durable_delivery_authority
   - id: execution_admission_settlement
     pattern: 'MarkSystemNodeProcessed|SettleDelivery|SystemNodeProcessed|delivery authority'

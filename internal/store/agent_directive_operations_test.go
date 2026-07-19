@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -576,6 +577,10 @@ func directiveOperationReservationForTest(t *testing.T, operationID, eventID, ke
 	if err != nil {
 		t.Fatalf("NewDirectiveEvent: %v", err)
 	}
+	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatalf("AdmitForPersistence: %v", err)
+	}
 	return runtimeagentcontrol.ReserveDirectiveOperationRequest{
 		Operation: runtimeagentcontrol.DirectiveOperation{
 			OperationID:      operationID,
@@ -593,7 +598,7 @@ func directiveOperationReservationForTest(t *testing.T, operationID, eventID, ke
 			DirectiveEventID: eventID,
 			State:            runtimeagentcontrol.DirectiveOperationPrepared,
 		},
-		Event: event,
+		Event: admitted,
 		Now:   now,
 	}
 }

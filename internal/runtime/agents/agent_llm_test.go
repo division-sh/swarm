@@ -783,8 +783,7 @@ type directiveFactoryPublishBus struct {
 	events []events.Event
 }
 
-func (b *directiveFactoryPublishBus) Publish(ctx context.Context, evt events.Event) error {
-	_, evt = runtimecorrelation.CorrelateEvent(ctx, evt)
+func (b *directiveFactoryPublishBus) Publish(_ context.Context, evt events.Event) error {
 	b.events = append(b.events, evt)
 	return nil
 }

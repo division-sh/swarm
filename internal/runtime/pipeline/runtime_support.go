@@ -402,6 +402,13 @@ func PipelineSQLConnFromContext(ctx context.Context) (*sql.Conn, bool) {
 	return conn, ok && conn != nil
 }
 
+func WithoutPipelineSQLConnContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, sqlConnContextKey{}, (*sql.Conn)(nil))
+}
+
 func sqlTxFromContext(ctx context.Context) (*sql.Tx, bool) {
 	if ctx == nil {
 		return nil, false
@@ -615,7 +622,7 @@ func appendEmitIntentsAsEvents(collector *[]events.Event, intents []runtimeengin
 	for _, intent := range intents {
 		emitted := cloneEvent(intent.Event)
 		if !intent.Context.Empty() {
-			emitted = events.Project(emitted, events.ProjectDeliveryContext(intent.Context))
+			emitted = events.NewContextDeliveryEvent(emitted, intent.Context).Event()
 		}
 		*collector = append(*collector, emitted)
 	}

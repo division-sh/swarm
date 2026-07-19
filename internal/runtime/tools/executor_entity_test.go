@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -1301,15 +1302,19 @@ accounts:
 	`, sourceRunID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES
-			('live', $1::uuid, $2::uuid, 'fork.state_entry', $4::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $5),
-			('live', $1::uuid, $3::uuid, 'fork.field_only', $4::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $6)
-	`, sourceRunID, stateEventID, forkEventID, entityID, at, forkAt); err != nil {
-		t.Fatalf("seed event: %v", err)
+	for _, fixture := range []struct {
+		id        string
+		eventType events.EventType
+		createdAt time.Time
+	}{
+		{id: stateEventID, eventType: "fork.state_entry", createdAt: at},
+		{id: forkEventID, eventType: "fork.field_only", createdAt: forkAt},
+	} {
+		storetest.InsertCanonicalEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventtest.PersistedProjectionForProducer(
+			fixture.id, fixture.eventType, eventtest.Producer(events.EventProducerPlatform, "test"),
+			"", []byte(`{}`), 0, sourceRunID, "",
+			events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, fixture.createdAt,
+		))
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -1400,15 +1405,19 @@ accounts:
 	`, sourceRunID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES
-			('live', $1::uuid, $2::uuid, 'fork.state_entry', $4::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $5),
-			('live', $1::uuid, $3::uuid, 'fork.field_only', $4::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $6)
-	`, sourceRunID, stateEventID, forkEventID, entityID, at, forkAt); err != nil {
-		t.Fatalf("seed event: %v", err)
+	for _, fixture := range []struct {
+		id        string
+		eventType events.EventType
+		createdAt time.Time
+	}{
+		{id: stateEventID, eventType: "fork.state_entry", createdAt: at},
+		{id: forkEventID, eventType: "fork.field_only", createdAt: forkAt},
+	} {
+		storetest.InsertCanonicalEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventtest.PersistedProjectionForProducer(
+			fixture.id, fixture.eventType, eventtest.Producer(events.EventProducerPlatform, "test"),
+			"", []byte(`{}`), 0, sourceRunID, "",
+			events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, fixture.createdAt,
+		))
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (

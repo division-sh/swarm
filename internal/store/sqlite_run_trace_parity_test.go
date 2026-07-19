@@ -2,9 +2,13 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 )
 
 func TestSQLiteRunDebugTracePagePaginationWindowAndFilterParity(t *testing.T) {
@@ -139,13 +143,17 @@ func TestSQLiteRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, base); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES
-			('live', ?, ?, 'item.received', NULL, 'global', '{}', 'runtime', 'platform', ?),
-			('live', ?, ?, 'platform.runtime_log', NULL, 'global', '{}', 'runtime', 'platform', ?)
-	`, runID, businessEvent, base, runID, runtimeLogEvent, base.Add(time.Millisecond)); err != nil {
-		t.Fatalf("seed trace rows: %v", err)
+	if err := commitSemanticEventFixture(ctx, sqliteStore, eventtest.PersistedProjection(
+		businessEvent, events.EventType("item.received"), "runtime", "", json.RawMessage(`{}`), 0,
+		runID, "", events.EventEnvelope{}, base,
+	)); err != nil {
+		t.Fatalf("seed business trace row: %v", err)
+	}
+	if err := commitDiagnosticRuntimeLogFixture(ctx, sqliteStore, eventtest.DiagnosticDirect(
+		runtimeLogEvent, events.EventTypePlatformRuntimeLog, "runtime", "", json.RawMessage(`{}`), 0,
+		runID, "", events.EventEnvelope{}, base.Add(time.Millisecond),
+	)); err != nil {
+		t.Fatalf("seed runtime-log trace row: %v", err)
 	}
 
 	allRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10})
@@ -178,10 +186,10 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, base.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ('live', ?, ?, 'trace.task_audit', NULL, 'global', '{}', 'runtime', 'platform', ?)
-	`, runID, eventID, base); err != nil {
+	if err := commitSemanticEventFixture(ctx, sqliteStore, eventtest.PersistedProjection(
+		eventID, events.EventType("trace.task_audit"), "runtime", "", json.RawMessage(`{}`), 0,
+		runID, "", events.EventEnvelope{}, base,
+	)); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
 	seedSQLiteTraceAgent(t, ctx, sqliteStore, agentID, base)
@@ -273,7 +281,7 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, fixture.runID, base.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	events := []struct {
+	eventRows := []struct {
 		id   string
 		name string
 		at   time.Time
@@ -284,11 +292,11 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 		{fixture.secondDeliveredID, "trace.second_delivered", base.Add(2 * time.Second)},
 		{"00000000-0000-0000-0000-000000000005", "trace.tie", base.Add(10 * time.Second)},
 	}
-	for _, event := range events {
-		if _, err := sqliteStore.DB.ExecContext(ctx, `
-			INSERT INTO events (execution_mode, run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ('live', ?, ?, ?, NULL, 'global', '{}', 'runtime', 'platform', ?)
-		`, fixture.runID, event.id, event.name, event.at); err != nil {
+	for _, event := range eventRows {
+		if err := commitSemanticEventFixture(ctx, sqliteStore, eventtest.PersistedProjection(
+			event.id, events.EventType(event.name), "runtime", "", json.RawMessage(`{}`), 0,
+			fixture.runID, "", events.EventEnvelope{}, event.at,
+		)); err != nil {
 			t.Fatalf("seed event %s: %v", event.name, err)
 		}
 	}

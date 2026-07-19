@@ -108,7 +108,14 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	if eb == nil || eb.store == nil {
 		return 0, nil
 	}
-	paused, err := eb.runtimeIngressDispatchPaused(ctx, events.NewRouteProbeEvent(events.EventType("__runtime_ingress_probe__")))
+	eb.mu.RLock()
+	ingressGate := eb.runtimeIngressDispatchGate
+	eb.mu.RUnlock()
+	paused := false
+	var err error
+	if ingressGate != nil {
+		paused, err = ingressGate.QueueableIngressPaused(ctx)
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -148,6 +155,9 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 		}
 		if !claimed {
 			continue
+		}
+		if lease == nil {
+			return redelivered, errors.New("pipeline replay claim owner returned a nil lease")
 		}
 		workCtx := runtimereplayclaim.BindLeaseContext(ctx, lease)
 		if record.ReplayFailure != nil {

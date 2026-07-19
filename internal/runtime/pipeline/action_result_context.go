@@ -12,9 +12,12 @@ import (
 func actionResultProducerRoute(source semanticview.Source, flowID, entityID string, evt events.Event, state runtimeengine.StateSnapshot, admitted events.RouteIdentity) events.RouteIdentity {
 	flowID = strings.TrimSpace(flowID)
 	entityID = strings.TrimSpace(entityID)
+	admitted = admitted.Normalized()
+	if sourceFact, err := events.RuntimeRoutingSourceFromRoute(admitted); err == nil && !sourceFact.Empty() &&
+		(flowID == "" || admitted.FlowID == flowID) && (entityID == "" || admitted.EntityID == entityID) {
+		return admitted
+	}
 	candidates := []events.RouteIdentity{
-		admitted,
-		evt.TargetRoute(),
 		{
 			FlowID:       flowID,
 			FlowInstance: asString(state.StateCarrier.Metadata["flow_path"]),
@@ -36,6 +39,29 @@ func actionResultProducerRoute(source semanticview.Source, flowID, entityID stri
 		FlowID:   flowID,
 		EntityID: entityID,
 	}.Normalized()
+}
+
+func workflowNodeProducerRoute(source semanticview.Source, nodeID, flowID, entityID string, state runtimeengine.StateSnapshot) events.RouteIdentity {
+	flowID = strings.TrimSpace(flowID)
+	if route := staticActionResultProducerRoute(source, flowID, entityID); !route.Empty() {
+		return route
+	}
+	if flowID == "" && source != nil {
+		contractSource, ok := source.NodeContractSource(strings.TrimSpace(nodeID))
+		if ok && strings.TrimSpace(contractSource.Layer) == "project" {
+			flowID = strings.TrimSpace(source.WorkflowName())
+		}
+	}
+	route := events.RouteIdentity{
+		FlowID:       flowID,
+		FlowInstance: asString(state.StateCarrier.Metadata["flow_path"]),
+		EntityID:     strings.TrimSpace(entityID),
+	}.Normalized()
+	sourceFact, err := events.RuntimeRoutingSourceFromRoute(route)
+	if err != nil || sourceFact.Empty() {
+		return events.RouteIdentity{}
+	}
+	return route
 }
 
 func normalizeActionResultProducerRouteCandidate(source semanticview.Source, flowID, entityID string, route events.RouteIdentity) (events.RouteIdentity, bool) {

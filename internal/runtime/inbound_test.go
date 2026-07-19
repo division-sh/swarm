@@ -27,13 +27,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -171,6 +168,23 @@ func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *Runti
 
 type identityInboundCredentialStore struct{}
 
+func testInboundTarget(alias, signingSecret string) InboundTarget {
+	return InboundTarget{
+		BundleHash:          "bundle-v1:sha256:" + strings.Repeat("a", 64),
+		ServiceID:           "10000000-0000-4000-8000-000000000001",
+		PackageKey:          "test-inbound-package",
+		FlowID:              "test-inbound-flow",
+		RunID:               "10000000-0000-4000-8000-000000000002",
+		PublicationSequence: 1,
+		InstanceID:          "test-inbound-flow/standing-1",
+		FlowInstance:        "test-inbound-flow/standing-1",
+		EntityID:            "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+		EntitySlug:          alias,
+		Alias:               alias,
+		SigningSecret:       signingSecret,
+	}
+}
+
 func (identityInboundCredentialStore) Get(_ context.Context, key string) (string, bool, error) {
 	return key, strings.TrimSpace(key) != "", nil
 }
@@ -180,20 +194,24 @@ func (identityInboundCredentialStore) Delete(context.Context, string) error     
 
 type failingInboundEventStore struct{}
 
-func (failingInboundEventStore) AppendEvent(context.Context, events.Event) error {
-	return errors.New("append failed")
+func (s failingInboundEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return runtimebustest.CommitPublish(ctx, plan, s.beginPublish, nil)
 }
 
-func (failingInboundEventStore) InsertEventDeliveries(context.Context, string, []string) error {
-	return nil
+func (failingInboundEventStore) beginPublish(context.Context, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
+	return runtimebus.EventAppendOutcomeUnknown, errors.New("append failed")
+}
+
+func (s failingInboundEventStore) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
+	return s.beginPublish(ctx, prepared.AdmittedEvent())
+}
+
+func (failingInboundEventStore) FinalizePreparedPublish(context.Context, runtimebus.PreparedPublishFinalization) error {
+	return errors.New("failed inbound event must not finalize")
 }
 
 func (failingInboundEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return []string{}, nil
-}
-
-func (s failingInboundEventStore) RunEventMutation(ctx context.Context, fn func(runtimebus.EventMutation) error) error {
-	return runInboundTestMutation(ctx, s.AppendEvent, nil, fn)
 }
 
 type capturingInboundEventStore struct {
@@ -204,74 +222,43 @@ type capturingInboundEventStore struct {
 	providerEventID string
 	entityID        string
 	provider        string
+	active          []string
 }
 
-func (s *capturingInboundEventStore) AppendEvent(_ context.Context, evt events.Event) error {
-	s.events = append(s.events, evt)
+func (s *capturingInboundEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return runtimebustest.CommitPublish(ctx, plan, s.beginPublish, s.finalizePublish)
+}
+
+func (s *capturingInboundEventStore) beginPublish(_ context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
+	if s.duplicate {
+		return runtimebus.EventAppendExactDuplicate, nil
+	}
+	s.events = append(s.events, admitted.Event())
+	s.active = append(s.active, admitted.ID())
 	s.recorded = true
+	return runtimebus.EventAppendInserted, nil
+}
+
+func (s *capturingInboundEventStore) finalizePublish(_ context.Context, req runtimebus.CommitPublishRequest) error {
+	if len(s.active) == 0 || s.active[len(s.active)-1] != req.Event.ID() {
+		return errors.New("prepared event finalization does not match active inbound event")
+	}
+	s.active = s.active[:len(s.active)-1]
 	return nil
 }
 
-func (*capturingInboundEventStore) InsertEventDeliveries(context.Context, string, []string) error {
-	return nil
+func (s *capturingInboundEventStore) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
+	return s.beginPublish(ctx, prepared.AdmittedEvent())
+}
+
+func (s *capturingInboundEventStore) FinalizePreparedPublish(ctx context.Context, finalization runtimebus.PreparedPublishFinalization) error {
+	return s.finalizePublish(ctx, finalization.Request())
 }
 
 func (*capturingInboundEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return []string{}, nil
 }
 
-func (s *capturingInboundEventStore) RunEventMutation(ctx context.Context, fn func(runtimebus.EventMutation) error) error {
-	if s.seen == nil {
-		s.seen = map[string]struct{}{}
-	}
-	return runInboundTestMutation(ctx, s.AppendEvent, s, fn)
-}
-
-type inboundTestMutation struct {
-	ctx    context.Context
-	append func(context.Context, events.Event) error
-	sink   *capturingInboundEventStore
-}
-
-func runInboundTestMutation(ctx context.Context, appendEvent func(context.Context, events.Event) error, sink *capturingInboundEventStore, fn func(runtimebus.EventMutation) error) error {
-	postCommit := make([]func(), 0, 4)
-	mutation := &inboundTestMutation{append: appendEvent, sink: sink}
-	mutation.ctx = runtimebus.WithEventMutationContext(runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit), mutation)
-	if err := fn(mutation); err != nil {
-		return err
-	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	return nil
-}
-
-func (m *inboundTestMutation) Context() context.Context { return m.ctx }
-func (m *inboundTestMutation) AppendEvent(ctx context.Context, event events.Event) error {
-	return m.append(ctx, event)
-}
-func (m *inboundTestMutation) AppendEventOutcome(ctx context.Context, event events.Event) (runtimebus.EventAppendOutcome, error) {
-	if err := m.append(ctx, event); err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	return runtimebus.EventAppendInserted, nil
-}
-func (*inboundTestMutation) InsertEventDeliveries(context.Context, string, []string) error {
-	return nil
-}
-func (*inboundTestMutation) InsertEventDeliveriesWithTargets(context.Context, string, []string, map[string]events.RouteIdentity) error {
-	return nil
-}
-func (*inboundTestMutation) InsertEventDeliveryRoutes(context.Context, string, []events.DeliveryRoute) error {
-	return nil
-}
-func (*inboundTestMutation) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {
-	return nil
-}
-func (*inboundTestMutation) UpsertPipelineReceipt(context.Context, string, string, *runtimefailures.Envelope) error {
-	return nil
-}
-func (*inboundTestMutation) RecordDeadLetter(context.Context, runtimedeadletters.Record) error {
-	return nil
-}
 func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
 	bus, err := runtimebus.NewEventBus(eventStore)
@@ -313,7 +300,7 @@ func (s *rollbackTrackingInboundStore) bindTestInboundEventStore(store runtimebu
 }
 
 func (s *rollbackTrackingInboundStore) ResolveInboundTarget(context.Context, string, string) (InboundTarget, error) {
-	return InboundTarget{EntityID: "entity-1", EntitySlug: "entity-1"}, nil
+	return testInboundTarget("entity-1", ""), nil
 }
 
 type recordingInboundStore struct {
@@ -442,58 +429,15 @@ type testInboundPublicationMutation struct {
 
 func newTestInboundPublicationMutation(ctx context.Context, store runtimebus.EventStore) *testInboundPublicationMutation {
 	mutation := &testInboundPublicationMutation{store: store}
-	mutation.ctx = runtimebus.WithEventMutationContext(ctx, mutation)
+	transaction, ok := store.(runtimebus.CommitPublishTransaction)
+	if !ok {
+		transaction = &runtimebustest.Transaction{}
+	}
+	mutation.ctx = runtimebus.WithCommitPublishTransaction(ctx, transaction)
 	return mutation
 }
 
 func (m *testInboundPublicationMutation) Context() context.Context { return m.ctx }
-
-func (m *testInboundPublicationMutation) AppendEvent(ctx context.Context, evt events.Event) error {
-	if m.store == nil {
-		return nil
-	}
-	return m.store.AppendEvent(ctx, evt)
-}
-
-func (m *testInboundPublicationMutation) AppendEventOutcome(ctx context.Context, evt events.Event) (runtimebus.EventAppendOutcome, error) {
-	if m.store == nil {
-		return runtimebus.EventAppendInserted, nil
-	}
-	if owner, ok := m.store.(runtimebus.EventAppendOutcomePersistence); ok {
-		return owner.AppendEventOutcome(ctx, evt)
-	}
-	if err := m.store.AppendEvent(ctx, evt); err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	return runtimebus.EventAppendInserted, nil
-}
-
-func (m *testInboundPublicationMutation) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
-	if m.store == nil {
-		return nil
-	}
-	return m.store.InsertEventDeliveries(ctx, eventID, agentIDs)
-}
-
-func (m *testInboundPublicationMutation) InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, _ map[string]events.RouteIdentity) error {
-	return m.InsertEventDeliveries(ctx, eventID, agentIDs)
-}
-
-func (*testInboundPublicationMutation) InsertEventDeliveryRoutes(context.Context, string, []events.DeliveryRoute) error {
-	return nil
-}
-
-func (*testInboundPublicationMutation) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {
-	return nil
-}
-
-func (*testInboundPublicationMutation) UpsertPipelineReceipt(context.Context, string, string, *runtimefailures.Envelope) error {
-	return nil
-}
-
-func (*testInboundPublicationMutation) RecordDeadLetter(context.Context, runtimedeadletters.Record) error {
-	return nil
-}
 
 func (m *testInboundPublicationMutation) FinalizeInboundPublication(_ context.Context, finalization runtimeinbound.Finalization) error {
 	m.finalization = finalization
@@ -697,11 +641,7 @@ func TestInboundGateway_GitHubPausedRuntimeUsesIngressOwnerAndAcceptsQueueableWe
 	}
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	store := &recordingInboundStore{
-		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
-			SigningSecret: "github-secret",
-		},
+		target:   testInboundTarget("customer-a", "github-secret"),
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
@@ -733,11 +673,7 @@ func TestInboundGateway_GitHubAdapterOwnsSignatureDeliveryIDAndEventMapping(t *t
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	store := &recordingInboundStore{
-		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
-			SigningSecret: "github-secret",
-		},
+		target:   testInboundTarget("customer-a", "github-secret"),
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
@@ -1022,11 +958,7 @@ func TestInboundGateway_SlackURLVerificationReturnsChallengeWithoutMarkerOrPubli
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	store := &recordingInboundStore{
-		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
-			SigningSecret: "slack-secret",
-		},
+		target:   testInboundTarget("customer-a", "slack-secret"),
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
@@ -1060,11 +992,7 @@ func TestInboundGateway_SlackURLVerificationRequiresChallengeBeforeMarkerAndPubl
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	store := &recordingInboundStore{
-		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
-			SigningSecret: "slack-secret",
-		},
+		target:   testInboundTarget("customer-a", "slack-secret"),
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
@@ -1210,11 +1138,7 @@ func TestInboundGateway_SlackEventCallbackOwnsEventIDAndInnerEventMapping(t *tes
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	store := &recordingInboundStore{
-		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
-			SigningSecret: "slack-secret",
-		},
+		target:   testInboundTarget("customer-a", "slack-secret"),
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
@@ -1279,11 +1203,7 @@ func TestInboundGateway_SlackEventCallbackAcknowledgesBeforePostCommitDispatchCo
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	store := &recordingInboundStore{
-		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
-			SigningSecret: "slack-secret",
-		},
+		target:   testInboundTarget("customer-a", "slack-secret"),
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
@@ -1332,11 +1252,7 @@ func TestInboundGateway_SlackEventCallbackRequiresEventIDBeforeMarkerAndPublish(
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	store := &recordingInboundStore{
-		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
-			SigningSecret: "slack-secret",
-		},
+		target:   testInboundTarget("customer-a", "slack-secret"),
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
@@ -1364,11 +1280,7 @@ func TestInboundGateway_SlackDuplicateEventDoesNotPublishAgain(t *testing.T) {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	store := &recordingInboundStore{
-		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
-			SigningSecret: "slack-secret",
-		},
+		target:   testInboundTarget("customer-a", "slack-secret"),
 		inserted: false,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
@@ -1409,11 +1321,7 @@ func TestInboundGateway_StripeManifestOwnsSignatureReplayIDTypeAndAck(t *testing
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	store := &recordingInboundStore{
-		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
-			SigningSecret: "stripe-secret",
-		},
+		target:   testInboundTarget("customer-a", "stripe-secret"),
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
@@ -1644,11 +1552,7 @@ func TestInboundGateway_TwilioManifestOwnsURLFormSignatureAndLiteralEvent(t *tes
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	store := &recordingInboundStore{
-		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
-			SigningSecret: "twilio-secret",
-		},
+		target:   testInboundTarget("customer-a", "twilio-secret"),
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
@@ -1837,11 +1741,7 @@ func TestInboundGateway_ShopifyManifestOwnsRawBodySignatureDeliveryIDAndTopic(t 
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	store := &recordingInboundStore{
-		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
-			SigningSecret: "shopify-secret",
-		},
+		target:   testInboundTarget("customer-a", "shopify-secret"),
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
@@ -2057,11 +1957,7 @@ func TestInboundGateway_TypeformAndIntercomManifestsOwnRawBodySignatureDeliveryI
 				t.Fatalf("NewEventBus: %v", err)
 			}
 			store := &recordingInboundStore{
-				target: InboundTarget{
-					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-					EntitySlug:    "customer-a",
-					SigningSecret: tc.secret,
-				},
+				target:   testInboundTarget("customer-a", tc.secret),
 				inserted: true,
 			}
 			g := newTestInboundGateway(t, bus, nil, nil, store)
@@ -2345,11 +2241,7 @@ func TestInboundGateway_TelegramManifestOwnsTokenDeliveryIDLiteralEventAndAck(t 
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	store := &recordingInboundStore{
-		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
-			SigningSecret: "telegram-secret",
-		},
+		target:   testInboundTarget("customer-a", "telegram-secret"),
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)

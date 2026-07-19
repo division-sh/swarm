@@ -21,7 +21,7 @@ func TestPostgresStore_EventDeliveryRoutesPersistNodeTargetRows(t *testing.T) {
 	evt := eventtest.PersistedProjectionForProducer(
 		uuid.NewString(),
 		events.EventType("child/output.done"),
-		events.NodeProducer("workflow-runtime"),
+		eventtest.Producer(events.EventProducerNode, "workflow-runtime"),
 		"",
 		[]byte(`{}`),
 		0,
@@ -34,7 +34,7 @@ func TestPostgresStore_EventDeliveryRoutesPersistNodeTargetRows(t *testing.T) {
 		time.Now().UTC(),
 	)
 
-	if err := pg.AppendEvent(ctx, evt); err != nil {
+	if err := commitSemanticEventFixture(ctx, pg, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	routes := []events.DeliveryRoute{

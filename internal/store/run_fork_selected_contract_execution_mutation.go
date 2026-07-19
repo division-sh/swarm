@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
+	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -47,23 +48,26 @@ type RunForkSelectedContractExecutionActivateRequest struct {
 }
 
 type RunForkSelectedContractSourceEvent struct {
-	SourceEventID string             `json:"source_event_id"`
-	EventName     string             `json:"event_name"`
-	ExecutionMode executionmode.Mode `json:"execution_mode"`
-	EntityID      string             `json:"entity_id,omitempty"`
-	FlowInstance  string             `json:"flow_instance,omitempty"`
-	Scope         string             `json:"scope,omitempty"`
-	Payload       json.RawMessage    `json:"payload,omitempty"`
+	SourceEventID      string             `json:"source_event_id"`
+	EventName          string             `json:"event_name"`
+	ExecutionMode      executionmode.Mode `json:"execution_mode"`
+	EntityID           string             `json:"entity_id,omitempty"`
+	FlowInstance       string             `json:"flow_instance,omitempty"`
+	Scope              string             `json:"scope,omitempty"`
+	SourceFlowID       string             `json:"source_flow_id,omitempty"`
+	SourceFlowInstance string             `json:"source_flow_instance,omitempty"`
+	SourceEntityID     string             `json:"source_entity_id,omitempty"`
+	Payload            json.RawMessage    `json:"payload,omitempty"`
 }
 
 type RunForkSelectedContractExecutionLineage struct {
-	Owner         string    `json:"owner"`
-	ForkRunID     string    `json:"fork_run_id"`
-	SourceRunID   string    `json:"source_run_id"`
-	SourceEventID string    `json:"source_event_id"`
-	ForkEventID   string    `json:"fork_event_id"`
-	EventName     string    `json:"event_name"`
-	CreatedAt     time.Time `json:"created_at"`
+	ForkRunID          string    `json:"fork_run_id"`
+	SourceRunID        string    `json:"source_run_id"`
+	SourceEventID      string    `json:"source_event_id"`
+	ForkEventID        string    `json:"fork_event_id"`
+	EventName          string    `json:"event_name"`
+	SelectionAuthority string    `json:"selection_authority"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 type RunForkSelectedContractBranchDivergence struct {
@@ -611,8 +615,8 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 	if _, err := tx.ExecContext(ctx, `DELETE FROM entity_mutations WHERE run_id = $1::uuid`, forkRunID); err != nil {
 		return fmt.Errorf("delete selected-contract fork mutations: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE run_id = $1::uuid`, forkRunID); err != nil {
-		return fmt.Errorf("delete selected-contract fork events: %w", err)
+	if err := eventrecordpostgres.DeleteSelectedForkRunEvents(ctx, tx, forkRunID); err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM entity_state WHERE run_id = $1::uuid`, forkRunID); err != nil {
 		return fmt.Errorf("delete selected-contract fork entity state: %w", err)
@@ -688,43 +692,27 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Cont
 	if err := storerunlifecycle.RequireActive(storyctx, tx, forkRunID, storerunlifecycle.DialectPostgres); err != nil {
 		return nil, fmt.Errorf("admit selected-contract source event preparation fork: %w", err)
 	}
-	rows, err := tx.QueryContext(storyctx, `
-		SELECT
-			event_id::text,
-			event_name,
-			COALESCE(entity_id::text, ''),
-			COALESCE(flow_instance, ''),
-			COALESCE(scope, ''),
-			execution_mode,
-			COALESCE(payload, '{}'::jsonb)
-		FROM events
-		WHERE run_id = $1::uuid
-		  AND event_id = ANY($2::uuid[])
-		ORDER BY created_at ASC, event_id ASC
-	`, sourceRunID, pq.Array(ids))
+	records, err := loadPostgresEventIdentities(storyctx, tx, ids)
 	if err != nil {
 		return nil, fmt.Errorf("load selected-contract source events: %w", err)
 	}
 	out := make([]RunForkSelectedContractSourceEvent, 0, len(ids))
-	for rows.Next() {
-		var event RunForkSelectedContractSourceEvent
-		if err := rows.Scan(&event.SourceEventID, &event.EventName, &event.EntityID, &event.FlowInstance, &event.Scope, &event.ExecutionMode, &event.Payload); err != nil {
-			return nil, fmt.Errorf("scan selected-contract source event: %w", err)
+	for _, record := range records {
+		admitted, err := decodeEventRecord(record)
+		if err != nil {
+			return nil, fmt.Errorf("decode selected-contract source event %s: %w", record.EventID, err)
 		}
-		if !json.Valid(event.Payload) {
-			return nil, fmt.Errorf("selected-contract source event %s payload is not valid json", event.SourceEventID)
+		event := admitted.Event()
+		if event.RunID() != sourceRunID {
+			return nil, fmt.Errorf("selected-contract source event %s does not belong to source run %s", event.ID(), sourceRunID)
 		}
-		out = append(out, event)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, fmt.Errorf("read selected-contract source events: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("close selected-contract source events: %w", err)
-	}
-	if len(out) != len(ids) {
-		return nil, fmt.Errorf("selected-contract source event lookup returned %d rows for %d requested events", len(out), len(ids))
+		sourceRoute := event.SourceRoute()
+		out = append(out, RunForkSelectedContractSourceEvent{
+			SourceEventID: event.ID(), EventName: string(event.Type()), ExecutionMode: event.ExecutionMode(),
+			EntityID: event.EntityID(), FlowInstance: event.FlowInstance(), Scope: string(event.Scope()),
+			SourceFlowID: sourceRoute.FlowID, SourceFlowInstance: sourceRoute.FlowInstance, SourceEntityID: sourceRoute.EntityID,
+			Payload: event.Payload(),
+		})
 	}
 	for idx := range out {
 		prepared, err := prepareRunForkSelectedContractSourceEvent(storyctx, tx, forkRunID, out[idx])
@@ -746,37 +734,81 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Cont
 	return out, nil
 }
 
-func (s *PostgresStore) RecordRunForkSelectedContractExecutionLineage(ctx context.Context, lineage RunForkSelectedContractExecutionLineage) error {
-	if s == nil || s.DB == nil {
-		return fmt.Errorf("postgres store is required")
-	}
-	if err := s.requireRunForkSelectedContractExecutionAccess(); err != nil {
-		return err
+func normalizeSelectedForkExecutionLineage(lineage RunForkSelectedContractExecutionLineage) (RunForkSelectedContractExecutionLineage, error) {
+	lineage.ForkRunID = strings.TrimSpace(lineage.ForkRunID)
+	lineage.SourceRunID = strings.TrimSpace(lineage.SourceRunID)
+	lineage.SourceEventID = strings.TrimSpace(lineage.SourceEventID)
+	lineage.ForkEventID = strings.TrimSpace(lineage.ForkEventID)
+	lineage.EventName = strings.TrimSpace(lineage.EventName)
+	lineage.SelectionAuthority = strings.TrimSpace(lineage.SelectionAuthority)
+	for name, value := range map[string]string{
+		"fork_run_id": lineage.ForkRunID, "source_run_id": lineage.SourceRunID,
+		"source_event_id": lineage.SourceEventID, "fork_event_id": lineage.ForkEventID,
+		"event_name": lineage.EventName, "selection_authority": lineage.SelectionAuthority,
+	} {
+		if value == "" {
+			return RunForkSelectedContractExecutionLineage{}, fmt.Errorf("selected-fork execution lineage requires %s", name)
+		}
 	}
 	createdAt := lineage.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	lineage.CreatedAt = createdAt.UTC()
+	return lineage, nil
+}
+
+func insertPostgresSelectedForkExecutionLineageTx(ctx context.Context, tx *sql.Tx, lineage RunForkSelectedContractExecutionLineage) error {
+	lineage, err := normalizeSelectedForkExecutionLineage(lineage)
 	if err != nil {
-		return fmt.Errorf("begin selected-contract execution lineage: %w", err)
+		return err
 	}
-	defer tx.Rollback()
-	if err := storerunlifecycle.RequireActive(ctx, tx, lineage.ForkRunID, storerunlifecycle.DialectPostgres); err != nil {
-		return fmt.Errorf("admit selected-contract execution lineage: %w", err)
-	}
-	_, err = tx.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_executions (
-			fork_run_id, source_run_id, source_event_id, fork_event_id, event_name, created_at
+			execution_id, fork_run_id, source_run_id, source_event_id, fork_event_id,
+			event_name, selection_authority, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6)
-		ON CONFLICT (fork_run_id, source_event_id) DO NOTHING
-	`, lineage.ForkRunID, lineage.SourceRunID, lineage.SourceEventID, lineage.ForkEventID, lineage.EventName, createdAt)
+		SELECT $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8
+		FROM events source
+		WHERE source.event_id = $4::uuid AND source.run_id = $3::uuid
+	`, uuid.NewString(), lineage.ForkRunID, lineage.SourceRunID, lineage.SourceEventID,
+		lineage.ForkEventID, lineage.EventName, lineage.SelectionAuthority, lineage.CreatedAt)
 	if err != nil {
-		return fmt.Errorf("record selected-contract execution lineage: %w", err)
+		return fmt.Errorf("insert selected-contract execution lineage: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit selected-contract execution lineage: %w", err)
+	if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+		if err != nil {
+			return fmt.Errorf("read selected-contract execution lineage rows: %w", err)
+		}
+		return fmt.Errorf("selected-contract source event %s does not belong to source run %s", lineage.SourceEventID, lineage.SourceRunID)
+	}
+	return nil
+}
+
+func insertSQLiteSelectedForkExecutionLineageTx(ctx context.Context, tx *sql.Tx, lineage RunForkSelectedContractExecutionLineage) error {
+	lineage, err := normalizeSelectedForkExecutionLineage(lineage)
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `
+		INSERT INTO run_fork_selected_contract_executions (
+			execution_id, fork_run_id, source_run_id, source_event_id, fork_event_id,
+			event_name, selection_authority, created_at
+		)
+		SELECT ?, ?, ?, ?, ?, ?, ?, ?
+		FROM events source
+		WHERE source.event_id = ? AND source.run_id = ?
+	`, uuid.NewString(), lineage.ForkRunID, lineage.SourceRunID, lineage.SourceEventID,
+		lineage.ForkEventID, lineage.EventName, lineage.SelectionAuthority, lineage.CreatedAt,
+		lineage.SourceEventID, lineage.SourceRunID)
+	if err != nil {
+		return fmt.Errorf("insert sqlite selected-contract execution lineage: %w", err)
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+		if err != nil {
+			return fmt.Errorf("read sqlite selected-contract execution lineage rows: %w", err)
+		}
+		return fmt.Errorf("selected-contract source event %s does not belong to source run %s", lineage.SourceEventID, lineage.SourceRunID)
 	}
 	return nil
 }

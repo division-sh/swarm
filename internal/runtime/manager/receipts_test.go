@@ -25,8 +25,11 @@ type recordingReceiptBus struct {
 	runtimeLogs []runtimepipeline.RuntimeLogEntry
 }
 
-func (b *recordingReceiptBus) Publish(ctx context.Context, evt events.Event) error {
-	_, evt = runtimecorrelation.CorrelateEvent(ctx, evt)
+func receiptTestEvent(id string) events.Event {
+	return eventtest.RootIngress(id, events.EventType("work.requested"), "source", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
+}
+
+func (b *recordingReceiptBus) Publish(_ context.Context, evt events.Event) error {
 	b.published = append(b.published, evt)
 	return nil
 }
@@ -128,7 +131,7 @@ func TestWriteReceiptConvergesNormalRunCompletionAfterReceiptPersists(t *testing
 	}
 	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{}, store)
 
-	am.writeReceipt(testAuthorActivityContext(context.Background()), "event-1", "agent-1", ReceiptStatusProcessed, nil)
+	am.writeReceipt(testAuthorActivityContext(context.Background()), receiptTestEvent("event-1"), "agent-1", ReceiptStatusProcessed, nil)
 
 	if store.upsertCalls != 1 {
 		t.Fatalf("receipt upsert calls = %d, want 1", store.upsertCalls)
@@ -151,7 +154,7 @@ func TestWriteReceiptConvergesNormalRunCompletionAfterReceiptRetryPersists(t *te
 	}
 	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{}, store)
 
-	am.writeReceipt(testAuthorActivityContext(context.Background()), "event-1", "agent-1", ReceiptStatusProcessed, nil)
+	am.writeReceipt(testAuthorActivityContext(context.Background()), receiptTestEvent("event-1"), "agent-1", ReceiptStatusProcessed, nil)
 
 	if store.upsertCalls != 2 {
 		t.Fatalf("receipt upsert calls = %d, want 2", store.upsertCalls)
@@ -213,13 +216,13 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{
 		RuntimeIngressSafetyPause: func(ctx context.Context, reason string, failure *runtimefailures.Envelope) error {
 			pauseCalls++
-			return bus.Publish(ctx, eventtest.RootIngress("", events.EventType("platform.paused"),
+			return bus.Publish(ctx, eventtest.RuntimeControl("", events.EventType("platform.paused"),
 				"runtime", "", mustJSON(map[string]any{
 					"reason":    reason,
 					"paused_by": "runtime",
 					"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
 					"failure":   failure,
-				}), 0, "", "", events.EventEnvelope{}, time.Now().UTC()))
+				}), 0, "run-1", "evt-1", events.EventEnvelope{}, time.Now().UTC()))
 		},
 	})
 	registerReceiptTestAgent(t, am, runtimeactors.AgentConfig{
@@ -234,7 +237,7 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 
 	ctx := runtimecorrelation.WithInboundEvent(testAuthorActivityContext(context.Background()), inbound)
 	ctx = runtimecorrelation.WithRunID(ctx, inbound.RunID())
-	am.maybeTripAuthCircuitBreaker(ctx, "agent-a", inbound.ID(), testAuthFailure())
+	am.maybeTripAuthCircuitBreaker(ctx, "agent-a", inbound, testAuthFailure())
 
 	if len(bus.published) != 2 {
 		t.Fatalf("published events = %d, want 2", len(bus.published))
@@ -293,7 +296,7 @@ func TestMaybeTripAuthCircuitBreaker_PreservesCanceledEventLineage(t *testing.T)
 	ctx, cancel := context.WithCancel(ctx)
 	cancel()
 
-	am.maybeTripAuthCircuitBreaker(ctx, "agent-a", inbound.ID(), testAuthFailure())
+	am.maybeTripAuthCircuitBreaker(ctx, "agent-a", inbound, testAuthFailure())
 
 	var authEvt events.Event
 	for _, evt := range bus.published {
@@ -400,25 +403,26 @@ func TestMaybeEscalateDeadLetter_PublishesTypedFlowInstanceEnvelope(t *testing.T
 		FlowPath:      "review/inst-1",
 	})
 
+	evt := receiptTestEvent("evt-1")
 	for i := 0; i < deadLetterEscalationThreshold; i++ {
-		am.maybeEscalateDeadLetter(testAuthorActivityContext(context.Background()), "evt-1", "agent-a")
+		am.maybeEscalateDeadLetter(testAuthorActivityContext(context.Background()), evt, "agent-a")
 	}
 
 	if len(bus.published) != 1 {
 		t.Fatalf("published events = %d, want 1", len(bus.published))
 	}
-	evt := bus.published[0]
-	if evt.Type() != events.EventType("platform.dead_letter_escalation") {
-		t.Fatalf("event type = %s, want platform.dead_letter_escalation", evt.Type())
+	publishedEvt := bus.published[0]
+	if publishedEvt.Type() != events.EventType("platform.dead_letter_escalation") {
+		t.Fatalf("event type = %s, want platform.dead_letter_escalation", publishedEvt.Type())
 	}
-	if got := evt.FlowInstance(); got != "review/inst-1" {
+	if got := publishedEvt.FlowInstance(); got != "review/inst-1" {
 		t.Fatalf("dead-letter escalation flow_instance = %q, want review/inst-1", got)
 	}
-	if got := evt.Scope(); got != events.EventScopeFlow {
+	if got := publishedEvt.Scope(); got != events.EventScopeFlow {
 		t.Fatalf("dead-letter escalation scope = %q, want %q", got, events.EventScopeFlow)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
+	if err := json.Unmarshal(publishedEvt.Payload(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
 	if got := payload["flow_instance"]; got != "review/inst-1" {
@@ -607,7 +611,7 @@ func TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions(t *te
 			store.found = true
 			am := NewAgentManager(bus, nil, store)
 
-			am.writeReceipt(testAuthorActivityContext(context.Background()), "evt-1", "agent-a", ReceiptStatusError, testFailure("handler_failed"))
+			am.writeReceipt(testAuthorActivityContext(context.Background()), receiptTestEvent("evt-1"), "agent-a", ReceiptStatusError, testFailure("handler_failed"))
 
 			if len(bus.runtimeLogs) != 1 {
 				t.Fatalf("runtime logs = %d, want 1", len(bus.runtimeLogs))
@@ -647,7 +651,7 @@ func TestWriteReceipt_RetryAfterContextCancellationStillLogsLifecycleTransition(
 	store.upsertErrs = []error{context.Canceled, nil}
 	am := NewAgentManager(bus, nil, store)
 
-	am.writeReceipt(testAuthorActivityContext(context.Background()), "evt-1", "agent-a", ReceiptStatusError, testFailure("handler_failed"))
+	am.writeReceipt(testAuthorActivityContext(context.Background()), receiptTestEvent("evt-1"), "agent-a", ReceiptStatusError, testFailure("handler_failed"))
 
 	if store.upsertCalls != 2 {
 		t.Fatalf("upsert calls = %d, want 2", store.upsertCalls)

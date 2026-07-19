@@ -122,7 +122,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		time.Now(),
 	)
 
-	if err := pg.AppendEvent(ctx, evt); err != nil {
+	if err := commitSemanticEventFixture(ctx, pg, evt); err != nil {
 		t.Fatalf("append event: %v", err)
 	}
 	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{"control-plane"}); err != nil {

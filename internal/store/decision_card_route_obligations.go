@@ -41,12 +41,7 @@ func (s *PostgresStore) ListDueDecisionRouteObligations(ctx context.Context, now
 		return nil, nil
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.task_id, ''),
-			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'), e.payload,
-			COALESCE(e.chain_depth, 0), COALESCE(e.produced_by, ''), COALESCE(e.produced_by_type, ''),
-			COALESCE(e.source_event_id::text, ''), e.created_at, e.execution_mode,
-			COALESCE(e.source_route, '{}'::jsonb), COALESCE(e.target_route, '{}'::jsonb),
-			COALESCE(e.target_set, '[]'::jsonb)
+		SELECT e.event_id::text
 		FROM decision_card_route_obligations o
 		JOIN events e ON e.event_id = o.event_id
 		JOIN runs run ON run.run_id = o.run_id
@@ -57,7 +52,11 @@ func (s *PostgresStore) ListDueDecisionRouteObligations(ctx context.Context, now
 	if err != nil {
 		return nil, fmt.Errorf("list due decision route obligations: %w", err)
 	}
-	return scanDecisionRouteObligationEvents(rows, limit)
+	eventIDs, err := scanOrderedEventIDs(rows, "decision route obligation")
+	if err != nil {
+		return nil, err
+	}
+	return hydratePostgresPersistedReplayEvents(ctx, s.DB, eventIDs)
 }
 
 func (s *SQLiteRuntimeStore) ListDueDecisionRouteObligations(ctx context.Context, now time.Time, limit int) ([]events.PersistedReplayEvent, error) {
@@ -72,12 +71,7 @@ func (s *SQLiteRuntimeStore) ListDueDecisionRouteObligations(ctx context.Context
 		return nil, nil
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT e.event_id, COALESCE(e.run_id, ''), e.event_name, COALESCE(e.task_id, ''),
-			COALESCE(e.entity_id, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'), e.payload,
-			COALESCE(e.chain_depth, 0), COALESCE(e.produced_by, ''), COALESCE(e.produced_by_type, ''),
-			COALESCE(e.source_event_id, ''), e.created_at, e.execution_mode,
-			COALESCE(e.source_route, '{}'), COALESCE(e.target_route, '{}'),
-			COALESCE(e.target_set, '[]')
+		SELECT e.event_id
 		FROM decision_card_route_obligations o
 		JOIN events e ON e.event_id = o.event_id
 		JOIN runs run ON run.run_id = o.run_id
@@ -88,45 +82,11 @@ func (s *SQLiteRuntimeStore) ListDueDecisionRouteObligations(ctx context.Context
 	if err != nil {
 		return nil, fmt.Errorf("list due decision route obligations: %w", err)
 	}
-	return scanDecisionRouteObligationEvents(rows, limit)
-}
-
-func scanDecisionRouteObligationEvents(rows *sql.Rows, limit int) ([]events.PersistedReplayEvent, error) {
-	defer rows.Close()
-	out := make([]events.PersistedReplayEvent, 0, limit)
-	for rows.Next() {
-		var eventID string
-		var row persistedEventIdentity
-		var payloadRaw, createdAtRaw, sourceRouteRaw, targetRouteRaw, targetSetRaw any
-		if err := rows.Scan(&eventID, &row.RunID, &row.EventName, &row.TaskID, &row.EntityID, &row.FlowInstance, &row.Scope,
-			&payloadRaw, &row.ChainDepth, &row.ProducedBy, &row.ProducedByType, &row.SourceEventID, &createdAtRaw,
-			&row.ExecutionMode, &sourceRouteRaw, &targetRouteRaw, &targetSetRaw); err != nil {
-			return nil, fmt.Errorf("scan decision route obligation: %w", err)
-		}
-		createdAt, ok, err := sqliteTimeValue(createdAtRaw)
-		if err != nil || !ok {
-			return nil, fmt.Errorf("decode decision route obligation created_at: %w", err)
-		}
-		row.Payload = sqliteJSONRawMessage(payloadRaw)
-		row.CreatedAt = createdAt.UTC()
-		row.SourceRoute = sqliteJSONRawMessage(sourceRouteRaw)
-		row.TargetRoute = sqliteJSONRawMessage(targetRouteRaw)
-		row.TargetSet = sqliteJSONRawMessage(targetSetRaw)
-		row.EventID = eventID
-		evt, err := eventFromPersistedIdentity(row)
-		if err != nil {
-			return nil, err
-		}
-		record := events.PersistedReplayEvent{Event: evt}
-		if strings.TrimSpace(row.RunID) == "" {
-			record.ReplayFailure = replayAdmissionFailure("missing_canonical_run_id")
-		}
-		out = append(out, record)
+	eventIDs, err := scanOrderedEventIDs(rows, "decision route obligation")
+	if err != nil {
+		return nil, err
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read decision route obligations: %w", err)
-	}
-	return out, nil
+	return hydrateSQLitePersistedReplayEvents(ctx, s.DB, eventIDs)
 }
 
 func (s *PostgresStore) DeferDecisionRouteObligation(ctx context.Context, eventID string, nextAttemptAt time.Time, failure *runtimefailures.Envelope) error {

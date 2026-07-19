@@ -720,6 +720,9 @@ func (b *WorkflowContractBundle) NodeContractSource(nodeID string) (ContractItem
 			}, true
 		}
 	}
+	if _, ok := b.Nodes[nodeID]; ok {
+		return ContractItemSource{Layer: "project"}, true
+	}
 	return ContractItemSource{}, false
 }
 func (b *WorkflowContractBundle) EventContractSource(eventType string) (ContractItemSource, bool) {

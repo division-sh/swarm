@@ -18,7 +18,7 @@ import (
 )
 
 type authorActivityReceiptStore interface {
-	PersistEventWithDeliveries(context.Context, events.Event, []string) error
+	semanticEventFixtureStore
 	UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, *runtimefailures.Envelope) error
 }
 
@@ -43,12 +43,14 @@ func TestAuthorActivityDuplicateTerminalReceiptIsNoOpParity(t *testing.T) {
 			fixture := tt.open(t)
 			ctx := testAuthorActivityContext()
 			eventID := uuid.NewString()
+			runID := uuid.NewString()
+			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			agentID := "normalizer"
 			event := eventtest.PersistedProjection(
 				eventID, events.EventType("test.delivery_receipt"), "runtime", "", []byte(`{"text":"how are you","secret":"must-not-render"}`), 0,
-				"", "", events.EventEnvelope{}, time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
+				runID, "", events.EventEnvelope{}, time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
 			)
-			if err := fixture.store.PersistEventWithDeliveries(ctx, event, []string{agentID}); err != nil {
+			if err := commitSemanticEventFixtureWithAgents(ctx, fixture.store, event, []string{agentID}); err != nil {
 				t.Fatalf("PersistEventWithDeliveries: %v", err)
 			}
 			if err := fixture.store.UpsertEventReceipt(ctx, eventID, agentID, runtimemanager.ReceiptStatusProcessed, nil); err != nil {
@@ -97,12 +99,14 @@ func TestAuthoredNodeEventProducerTypeParity(t *testing.T) {
 			fixture := tt.open(t)
 			ctx := testAuthorActivityContext()
 			eventID := uuid.NewString()
+			runID := uuid.NewString()
+			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			event := eventtest.PersistedProjectionForProducer(
-				eventID, events.EventType("test.node_emitted"), events.NodeProducer("declarative-node"), "", []byte(`{}`), 0,
-				"", "", events.EventEnvelope{}, time.Date(2026, 7, 16, 3, 0, 0, 0, time.UTC),
+				eventID, events.EventType("test.node_emitted"), eventtest.Producer(events.EventProducerNode, "declarative-node"), "", []byte(`{}`), 0,
+				runID, "", events.EventEnvelope{}, time.Date(2026, 7, 16, 3, 0, 0, 0, time.UTC),
 			)
 
-			if err := fixture.store.PersistEventWithDeliveries(ctx, event, nil); err != nil {
+			if err := commitSemanticEventFixtureWithAgents(ctx, fixture.store, event, nil); err != nil {
 				t.Fatalf("PersistEventWithDeliveries: %v", err)
 			}
 			producedBy, producedByType := readEventProducerIdentity(t, fixture, ctx, eventID)
@@ -118,6 +122,17 @@ func TestAuthoredNodeEventProducerTypeParity(t *testing.T) {
 				t.Fatalf("emitted occurrence = %#v, want exact declarative-node/node producer", occurrences[0])
 			}
 		})
+	}
+}
+
+func seedAuthorActivityReceiptRun(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context, runID string) {
+	t.Helper()
+	query := `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`
+	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+		query = `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`
+	}
+	if _, err := fixture.db.ExecContext(ctx, query, runID, time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("seed author activity receipt run: %v", err)
 	}
 }
 

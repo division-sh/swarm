@@ -22,7 +22,7 @@ func (e *Executor) logEmitToolOutcome(
 	resolvedEventType string,
 	preValidationPayload map[string]any,
 	postEnrichmentPayload map[string]any,
-	emitted events.Event,
+	emitted events.OptionalEvent,
 	outcome string,
 	failureClass string,
 	failureStage string,
@@ -59,17 +59,19 @@ func (e *Executor) logEmitToolOutcome(
 	if post := safeTelemetryPayloadSnapshot(postEnrichmentPayload); post != nil {
 		detail["post_enrichment_payload"] = post
 	}
-	if v := strings.TrimSpace(emitted.ID()); v != "" {
-		detail["emitted_event_id"] = v
-	}
-	if v := strings.TrimSpace(string(emitted.Type())); v != "" {
-		detail["emitted_event_type"] = v
-	}
-	if v := strings.TrimSpace(emitted.EntityID()); v != "" {
-		detail["emitted_entity_id"] = v
-	}
-	if v := strings.TrimSpace(emitted.TaskID()); v != "" {
-		detail["emitted_task_id"] = v
+	if event, ok := emitted.Get(); ok {
+		if v := strings.TrimSpace(event.ID()); v != "" {
+			detail["emitted_event_id"] = v
+		}
+		if v := strings.TrimSpace(string(event.Type())); v != "" {
+			detail["emitted_event_type"] = v
+		}
+		if v := strings.TrimSpace(event.EntityID()); v != "" {
+			detail["emitted_entity_id"] = v
+		}
+		if v := strings.TrimSpace(event.TaskID()); v != "" {
+			detail["emitted_task_id"] = v
+		}
 	}
 	if v := strings.TrimSpace(actor.EffectiveEntityID()); v != "" {
 		detail["actor_entity_id"] = v

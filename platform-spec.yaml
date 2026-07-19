@@ -872,6 +872,47 @@ contract_formats:
         readers MUST NOT infer or repair it. Historical and operator replay consume
         the canonical decoded event and preserve every fact not explicitly changed
         by their typed replay-lineage rule.
+      invariant_ids:
+        runtime.event.producer_origin_valid_at_construction:
+          owner: internal/events class-specific constructors and ProducerIdentity
+          rule: Every successful durable event construction carries one validated non-empty typed producer identity; no later layer classifies, defaults, or repairs it.
+          negative_proof: TestEventConstructionClassInvariantMatrix
+        runtime.event.class_lineage_valid_at_construction:
+          owner: internal/events class-specific constructors and typed lineage/provenance values
+          rule: Constructor class and every class-conditioned causal, operator, or selected-fork lineage fact are complete before admission.
+          negative_proof: TestEventConstructionClassInvariantMatrix
+        runtime.event.routing_source_typed_at_construction:
+          owner: internal/events RoutingSource
+          rule: Routing source is an opaque typed construction fact; target, receiver, payload, top-level projections, and empty strings never become source evidence.
+          negative_proof: TestEventConstructionClassInvariantMatrix
+        runtime.event.admitted_persistence_boundary:
+          owner: internal/events AdmittedEvent and the closed named store operations
+          rule: Durable event writers accept only opaque admitted values; raw Event, SQL, row, transaction, and generic mutation capabilities are unavailable to runtime and API consumers.
+          negative_proof: TestEventAdmittedPersistenceBoundaryGuard
+        runtime.event.delivery_projection_nonpersistable:
+          owner: internal/events DeliveryEvent
+          rule: Receiver-local target, context, and payload projections are distinct nonpersistable values and never rewrite the journal event.
+          negative_proof: TestEventDeliveryProjectionCannotPersist
+        store.event_record.exact_persistence:
+          owner: internal/store/internal/eventrecord Record and backend-private adapters
+          rule: The immutable durable record contains and writes every admitted event-owned fact exactly, with no adapter defaults, inference, classification, or repair.
+          negative_proof: TestEventRecordExactPersistenceParity
+        store.event_record.exact_duplicate_identity:
+          owner: internal/store event record comparator
+          rule: Every durable field participates in duplicate identity; only an exact record is idempotent and every differing field is an identity conflict.
+          negative_proof: TestEventRecordEveryFieldDuplicateParity
+        store.event_record.canonical_readback:
+          owner: internal/store/internal/eventrecord decoder and backend-private bounded hydrators
+          rule: Every complete executable, recoverable, or replayable readback hydrates stable event IDs through one decoder and fails on missing, duplicate, ambiguous-lineage, corrupt, or cancelled input.
+          negative_proof: TestEventRecordBatchHydrationContractParity
+        store.event_record.named_operation_atomicity:
+          owner: internal/store closed event commit operations
+          rule: Event rows and their declared initial delivery, replay, receipt, dead-letter, inbound, diagnostic, or selected-fork lineage facts commit atomically; exact duplicate stops the whole operation before side effects.
+          negative_proof: TestEventNamedOperationAtomicityParity
+        store.event_record.selected_backend_parity:
+          owner: PostgreSQL and SQLite selected-store event adapters and operations
+          rule: Both selected stores enforce the same construction, DDL, exact-write, duplicate, rollback, bounded-hydration, and canonical-readback contract.
+          negative_proof: TestFreshEventDDLRejectsMalformedStructuralFactsParity
       terminal_run_admission:
         owner: internal/store/runlifecycle plus the selected-store event mutation boundary
         rule: >
@@ -921,13 +962,16 @@ contract_formats:
             source, run ownership, and the persisted source execution_mode are
             explicit before persistence or dispatch. Replay never defaults a
             missing causal mode to live.
-            Selected-contract fork-local replay is the bounded exception where
-            the durable parent/source authority is
-            run_fork_selected_contract_executions rather than
-            events.source_event_id. Admission MUST consume the selected-fork
+            Selected-fork replay is the bounded exception where durable
+            parent/source authority is the exact typed selected-fork lineage
+            owner rather than events.source_event_id. Selected-contract
+            execution uses run_fork_selected_contract_executions; historical
+            delivery/event replay uses run_fork_delivery_event_replays with an
+            explicit selection_authority. Admission MUST consume the selected-fork
             lineage owner instead of silently writing a generic source_event_id
-            parent, and the typed execution lineage row MUST be committed after
-            the fork event row exists and before selected-contract activation.
+            parent. The event, exact lineage row, and declared initial
+            delivery/replay facts MUST commit in one named operation before
+            selected-contract activation, handler dispatch, or provider use.
         runtime_control:
           rule: Platform control events that enter generic runtime dispatch use
             runtime-control constructors so control traffic is not confused with
@@ -11494,18 +11538,43 @@ platform_tables:
         identities; legacy entity_id and flow_instance are receiver-context projections. idempotency_key for external
         dedup. source_event_id for causal chain tracing. run_id links every event to its execution context for observability
         and fork/replay. execution_mode is the causal live/mock fact copied from execution authority; downstream cards and readbacks never reconstruct it from provider or backend names.'
-      ddl: "CREATE TABLE events (\n    event_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id            UUID\
-        \ REFERENCES runs(run_id),\n    event_name        TEXT NOT NULL,\n    task_id          TEXT,\n    entity_id         UUID,\n    flow_instance\
-        \     TEXT,\n    source_route      JSONB NOT NULL DEFAULT '{}',\n    target_route      JSONB NOT NULL DEFAULT '{}',\n\
-        \    target_set        JSONB NOT NULL DEFAULT '[]',\n    scope             TEXT NOT NULL DEFAULT 'entity' CHECK (scope IN ('entity', 'flow', 'global')),\n\
-        \    payload           JSONB NOT NULL DEFAULT '{}',\n    execution_mode    TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),\n    chain_depth       INTEGER NOT NULL DEFAULT 0,\n\
-        \    produced_by       TEXT,\n    produced_by_type  TEXT CHECK (produced_by_type IN ('node', 'agent',\
-        \ 'platform', 'external')),\n    handler_node      TEXT,\n    idempotency_key   TEXT,\n    source_event_id   UUID,\n\
-        \    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_events_run (run_id, created_at) WHERE\
-        \ run_id IS NOT NULL,\n    INDEX idx_events_entity (entity_id, created_at) WHERE entity_id IS NOT NULL,\n    INDEX\
-        \ idx_events_flow (flow_instance, event_name) WHERE flow_instance IS NOT NULL,\n    INDEX idx_events_source_route ((source_route->>'flow_instance'), (source_route->>'entity_id')) WHERE source_route <> '{}'::jsonb,\n    INDEX idx_events_target_route ((target_route->>'flow_instance'), (target_route->>'entity_id')) WHERE target_route <> '{}'::jsonb,\n    INDEX idx_events_global (event_name,\
-        \ created_at) WHERE scope = 'global',\n    INDEX idx_events_idempotency (idempotency_key) WHERE idempotency_key\
-        \ IS NOT NULL,\n    INDEX idx_events_source (source_event_id) WHERE source_event_id IS NOT NULL\n);"
+      ddl: |
+        CREATE TABLE events (
+            event_class                 TEXT NOT NULL CHECK (event_class IN ('root_ingress', 'operator_injected', 'child', 'replay', 'selected_fork_replay', 'runtime_control', 'runtime_diagnostic', 'diagnostic_direct')),
+            event_id                    UUID PRIMARY KEY,
+            run_id                      UUID REFERENCES runs(run_id),
+            event_name                  TEXT NOT NULL CHECK (NULLIF(TRIM(event_name), '') IS NOT NULL),
+            task_id                     TEXT,
+            entity_id                   UUID,
+            flow_instance               TEXT,
+            scope                       TEXT NOT NULL CHECK (scope IN ('entity', 'flow', 'global')),
+            payload                     JSONB NOT NULL,
+            execution_mode              TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
+            chain_depth                 INTEGER NOT NULL CHECK (chain_depth >= 0),
+            produced_by                 TEXT NOT NULL CHECK (NULLIF(TRIM(produced_by), '') IS NOT NULL),
+            produced_by_type            TEXT NOT NULL CHECK (produced_by_type IN ('node', 'agent', 'platform', 'external')),
+            source_event_id             UUID,
+            created_at                  TIMESTAMPTZ NOT NULL,
+            routing_source_kind         TEXT NOT NULL CHECK (routing_source_kind IN ('', 'declared_ingress', 'runtime_instance')),
+            routing_source_authority    TEXT,
+            source_route                JSONB NOT NULL,
+            target_route                JSONB NOT NULL,
+            target_set                  JSONB NOT NULL,
+            operator_reference_event_id UUID,
+            handler_node                TEXT,
+            idempotency_key             TEXT,
+            CHECK ((event_class IN ('child', 'replay') AND source_event_id IS NOT NULL AND run_id IS NOT NULL) OR (event_class NOT IN ('child', 'replay') AND source_event_id IS NULL) OR (event_class IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct') AND source_event_id IS NOT NULL AND run_id IS NOT NULL)),
+            CHECK ((event_class = 'operator_injected') OR operator_reference_event_id IS NULL),
+            CHECK ((routing_source_kind = '' AND source_route = '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL) OR (routing_source_kind = 'declared_ingress' AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NOT NULL) OR (routing_source_kind = 'runtime_instance' AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL)),
+            INDEX idx_events_run (run_id, created_at) WHERE run_id IS NOT NULL,
+            INDEX idx_events_entity (entity_id, created_at) WHERE entity_id IS NOT NULL,
+            INDEX idx_events_flow (flow_instance, event_name) WHERE flow_instance IS NOT NULL,
+            INDEX idx_events_source_route ((source_route->>'flow_instance'), (source_route->>'entity_id')) WHERE source_route <> '{}'::jsonb,
+            INDEX idx_events_target_route ((target_route->>'flow_instance'), (target_route->>'entity_id')) WHERE target_route <> '{}'::jsonb,
+            INDEX idx_events_global (event_name, created_at) WHERE scope = 'global',
+            INDEX idx_events_idempotency (idempotency_key) WHERE idempotency_key IS NOT NULL,
+            INDEX idx_events_source (source_event_id) WHERE source_event_id IS NOT NULL
+        );
     author_activity_order:
       description: Singleton commit-order owner for author activity. It is locked before every admitted source mutation and never exposed as runtime outcome truth.
       ddl: |
@@ -11925,7 +11994,21 @@ platform_tables:
         selected-contract execution owner publishes fresh fork-local events under the fork run_id and records which source
         frontier event each fork event executed from. Source events, deliveries, receipts, dead letters, retry state, and
         post-fork outcomes are lineage evidence only and must not be copied or used as fork suppressors.
-      ddl: "CREATE TABLE run_fork_selected_contract_executions (\n    execution_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    fork_run_id     UUID NOT NULL REFERENCES runs(run_id),\n    source_run_id   UUID NOT NULL REFERENCES runs(run_id),\n    source_event_id UUID NOT NULL REFERENCES events(event_id),\n    fork_event_id   UUID NOT NULL REFERENCES events(event_id),\n    event_name      TEXT NOT NULL,\n    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (fork_run_id, source_event_id),\n    UNIQUE (fork_event_id),\n    INDEX idx_run_fork_selected_contract_executions_fork (fork_run_id, fork_event_id),\n    INDEX idx_run_fork_selected_contract_executions_source (source_run_id, source_event_id)\n);"
+      ddl: |
+        CREATE TABLE run_fork_selected_contract_executions (
+            execution_id       UUID PRIMARY KEY,
+            fork_run_id        UUID NOT NULL REFERENCES runs(run_id),
+            source_run_id      UUID NOT NULL REFERENCES runs(run_id),
+            source_event_id    UUID NOT NULL REFERENCES events(event_id),
+            fork_event_id      UUID NOT NULL REFERENCES events(event_id),
+            event_name         TEXT NOT NULL CHECK (NULLIF(TRIM(event_name), '') IS NOT NULL),
+            selection_authority TEXT NOT NULL CHECK (NULLIF(TRIM(selection_authority), '') IS NOT NULL),
+            created_at         TIMESTAMPTZ NOT NULL,
+            UNIQUE (fork_run_id, source_event_id),
+            UNIQUE (fork_event_id),
+            INDEX idx_run_fork_selected_contract_executions_fork (fork_run_id, fork_event_id),
+            INDEX idx_run_fork_selected_contract_executions_source (source_run_id, source_event_id)
+        );
     run_fork_selected_contract_branch_divergences:
       description: Durable source/fork branch divergence evidence for selected-contract fixed-event fork execution. This
         table is written only by the selected-contract execution owner when the source has advanced after the fork point
@@ -11972,7 +12055,24 @@ platform_tables:
         run gets fresh fork-local event_id and delivery_id values; this table records which source event/delivery facts
         produced those fork-local rows. It is not a generic historical replay log and does not authorize session, turn,
         timer, route, source-advanced, or contract-swap reconstruction.
-      ddl: "CREATE TABLE run_fork_delivery_event_replays (\n    replay_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    fork_run_id       UUID NOT NULL REFERENCES runs(run_id),\n    source_run_id     UUID NOT NULL REFERENCES runs(run_id),\n    source_event_id   UUID NOT NULL REFERENCES events(event_id),\n    source_delivery_id UUID NOT NULL REFERENCES event_deliveries(delivery_id),\n    fork_event_id     UUID NOT NULL REFERENCES events(event_id),\n    fork_delivery_id  UUID NOT NULL REFERENCES event_deliveries(delivery_id),\n    subscriber_type   TEXT NOT NULL CHECK (subscriber_type IN ('node', 'agent')),\n    subscriber_id     TEXT NOT NULL,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (fork_run_id, source_delivery_id),\n    UNIQUE (fork_delivery_id),\n    INDEX idx_run_fork_replays_fork (fork_run_id, fork_event_id),\n    INDEX idx_run_fork_replays_source (source_run_id, source_event_id)\n);"
+      ddl: |
+        CREATE TABLE run_fork_delivery_event_replays (
+            replay_id          UUID PRIMARY KEY,
+            fork_run_id        UUID NOT NULL REFERENCES runs(run_id),
+            source_run_id      UUID NOT NULL REFERENCES runs(run_id),
+            source_event_id    UUID NOT NULL REFERENCES events(event_id),
+            source_delivery_id UUID NOT NULL REFERENCES event_deliveries(delivery_id),
+            fork_event_id      UUID NOT NULL REFERENCES events(event_id),
+            fork_delivery_id   UUID NOT NULL REFERENCES event_deliveries(delivery_id),
+            subscriber_type    TEXT NOT NULL CHECK (subscriber_type IN ('node', 'agent')),
+            subscriber_id      TEXT NOT NULL CHECK (NULLIF(TRIM(subscriber_id), '') IS NOT NULL),
+            selection_authority TEXT NOT NULL CHECK (NULLIF(TRIM(selection_authority), '') IS NOT NULL),
+            created_at         TIMESTAMPTZ NOT NULL,
+            UNIQUE (fork_run_id, source_delivery_id),
+            UNIQUE (fork_delivery_id),
+            INDEX idx_run_fork_replays_fork (fork_run_id, fork_event_id),
+            INDEX idx_run_fork_replays_source (source_run_id, source_event_id)
+        );
     event_receipts:
       description: Handler completion acknowledgement. One receipt per event × subscriber. Replaces both pipeline_receipts
         and system_node_ledger. entity_id nullable for global events. subscriber_type + subscriber_id identify the handler
@@ -22295,7 +22395,7 @@ cli_specification:
         behavior: Optional existing nonterminal run id to inject the event into. Omitted means the server allocates and starts a new run.
       - name: --source-event-id <event-id>
         maps_to: source_event_id
-        behavior: Optional parent/source event id for explicit checkpoint lineage. Must be used with --run-id and must name an event from the same run.
+        behavior: Optional same-run event reference recorded as operator provenance. Must be used with --run-id and must name an event from the same run. It is not causal parentage and does not populate events.source_event_id.
       - name: --target-flow-instance <flow-instance>
         maps_to: target.flow_instance
         behavior: Optional existing-run receiver target flow instance. Must be used with --run-id and --target-entity-id.
@@ -22318,7 +22418,7 @@ cli_specification:
         success_detail: >-
           One publish summary line with event_id, event_name, run_id, new_run_created, and delivery count,
           followed by persisted delivery rows containing delivery_id, subscriber_type, subscriber_id, status,
-          session_id, and attempt, and source_event_id when server-owned lineage was supplied.
+          session_id, and attempt, and operator_reference_event_id when operator reference provenance was supplied.
       exit_codes:
         success: 0
         cli_validation: 2
@@ -22348,7 +22448,7 @@ cli_specification:
       - explicit target route publish persists event.target and one delivery_target_route through the server-owned event.publish/EventBus path; nonexistent entity, mismatched entity/flow ownership, not-routable target flow, missing/terminal run, source lineage mismatch, blank/malformed target params, and payload-only entity_id/flow_instance non-authority fail closed before event/idempotency persistence
       - payload.entity_id on a create_entity event produces server PAYLOAD_VALIDATION_FAILED before event/idempotency persistence; the CLI exits through publish_rejected and does not treat payload.entity_id as target/entity routing authority
       - missing/blank event name, invalid or non-object --payload-json, blank optional flags, partial target route flags, target route flags without --run-id, malformed bundle_hash, malformed bundle fingerprint, both bundle identity flags together, invalid args, and missing explicit token for non-loopback API targets make zero API calls
-      - success output renders only server-owned EventPublishResult event_id, run_id, source_event_id when present, new_run_created, and typed persisted delivery rows
+      - success output renders only server-owned EventPublishResult event_id, run_id, operator_reference_event_id when present, new_run_created, and typed persisted delivery rows; it never labels operator reference provenance as causal source_event_id
       - RUN_NOT_FOUND, EVENT_NOT_FOUND, publish rejection errors, auth/HTTP/RPC failures, and malformed EventPublishResult values fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.replay, agent.replay, or agent.replay_backlog usage
       relation_to_run_start: '`run.start` remains usable for #743 until a separate migration changes the CLI internals to event.publish.'
@@ -24701,9 +24801,9 @@ api_specification:
             $ref: '#/components/schemas/OpaqueId'
           run_id:
             $ref: '#/components/schemas/OpaqueId'
-          source_event_id:
+          operator_reference_event_id:
             $ref: '#/components/schemas/OpaqueId'
-            description: Verified parent/source event lineage for this publication when supplied. Omitted means the event is unparented and must not be treated as causal checkpoint proof.
+            description: Verified same-run event reference provenance for this operator publication when supplied. It is not causal parentage or checkpoint proof; operator-injected events remain root events with source_event_id absent.
           new_run_created:
             type: boolean
           deliveries:
@@ -27762,11 +27862,11 @@ api_specification:
         \ Existing-run publication may provide `target` as the singular receiver route identity (`flow_instance` plus `entity_id`).\
         \ When present, `target` is route authority and the server validates that the entity exists in the selected run,\
         \ belongs to the selected target flow instance, and has a selected delivery route for the requested event before\
-        \ event/idempotency persistence. The API must not infer an entity target from run_id or payload.entity_id.\n\nCheckpoint/source-authority policy:\
-        \ callers that need causal proof\nMUST provide source_event_id together with run_id. The source event\nmust exist\
-        \ in the same run_id and the server persists it as\nevents.source_event_id / ParentEventID. Omitted source_event_id\n\
-        means the published event is unparented; it is valid low-level\ningress but MUST NOT be presented as proof that an\
-        \ internal\napproval/checkpoint path occurred. source_event_id without run_id,\nmalformed source_event_id, or a source\
+        \ event/idempotency persistence. The API must not infer an entity target from run_id or payload.entity_id.\n\nOperator-reference provenance policy:\
+        \ source_event_id is an input selector for an optional operator reference. It MUST be supplied with run_id, the referenced event\
+        \ must exist in the same run, and the server persists it as events.operator_reference_event_id. It never populates\
+        \ events.source_event_id / ParentEventID and does not prove causal checkpoint or approval lineage. Omitted source_event_id\
+        \ means no operator reference provenance is recorded. source_event_id without run_id, malformed source_event_id, or a referenced\
         \ event from another run fails\nclosed before event or idempotency completion persistence. A missing\nsource event\
         \ fails closed with EVENT_NOT_FOUND.\n\nThe method consumes the same canonical EventBus/store event-publication\n\
         owner used by runtime dispatch. Delivery results are read back from the\npersisted event_deliveries owner; the API\
@@ -27835,7 +27935,7 @@ api_specification:
           $ref: '#/components/schemas/OpaqueId'
       - name: source_event_id
         required: false
-        description: Optional parent/source event id for explicit checkpoint lineage. Requires run_id and must identify an event in the same run.
+        description: Optional same-run event reference for operator provenance. Requires run_id and must identify an event in that run. It is not causal parentage and does not populate events.source_event_id.
         schema:
           $ref: '#/components/schemas/OpaqueId'
       - name: target

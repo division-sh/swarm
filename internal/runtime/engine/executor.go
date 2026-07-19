@@ -2297,6 +2297,14 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 	resultEvents := runtimecontracts.ActivityResultEventsForSite(site)
 	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(effectClass)
 	sourceRoute := emitSourceRoute(frame)
+	intentFlowID := frame.req.FlowID
+	if sourceRoute.FlowID != "" {
+		intentFlowID = identity.NormalizeFlowID(sourceRoute.FlowID)
+	}
+	intentEntityID := frame.req.EntityID
+	if sourceRoute.EntityID != "" {
+		intentEntityID = identity.NormalizeEntityID(sourceRoute.EntityID)
+	}
 	intent := ActivityIntent{
 		ActivityID:       resultEvents.ActivityID,
 		Tool:             toolID,
@@ -2309,9 +2317,9 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 		RetryMaxAttempts: defaults.MaxAttempts,
 		RetryBackoff:     defaults.Backoff,
 		ForkPolicy:       runtimecontracts.ActivityForkPolicyForEffectClass(effectClass),
-		EntityID:         frame.req.EntityID,
+		EntityID:         intentEntityID,
 		NodeID:           frame.req.NodeID,
-		FlowID:           frame.req.FlowID,
+		FlowID:           intentFlowID,
 		FlowInstance:     sourceRoute.FlowInstance,
 		HandlerEventKey:  frame.req.HandlerEventKey,
 		SourceEventID:    frame.req.Event.ID(),
@@ -3162,24 +3170,31 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 		EntityID:     entityID,
 		FlowInstance: flowInstance,
 	}
-	if !sourceRoute.Empty() {
-		envelope = events.EnvelopeForSourceRoute(envelope, sourceRoute)
-	}
 	resolution, err := e.resolveEmitRoute(frame, spec, eventType, sourceRoute, envelope)
 	if err != nil {
 		return EmitIntent{}, err
 	}
-	evt := events.NewChildEvent(
-		"",
-		events.EventType(strings.TrimSpace(eventType)),
-		events.NodeProducer(frame.req.NodeID.String()),
-		"",
-		encoded,
-		chainDepth,
-		frame.req.Event,
-		resolution.Envelope,
-		createdAt,
-	)
+	routingSource, err := events.RuntimeRoutingSourceFromRoute(sourceRoute)
+	if err != nil {
+		return EmitIntent{}, fmt.Errorf("construct emit routing source %+v: %w", sourceRoute, err)
+	}
+	if !routingSource.Empty() {
+		resolution.Envelope = events.EnvelopeForSourceRoute(resolution.Envelope, routingSource.Route())
+	} else {
+		resolution.Envelope.Source = events.RouteIdentity{}
+	}
+	evt, err := events.NewChildEvent(events.ChildEventInput{
+		Facts: events.EventFacts{
+			Type:     events.EventType(strings.TrimSpace(eventType)),
+			Producer: events.ProducerClaim{Type: events.EventProducerNode, ID: frame.req.NodeID.String()},
+			Payload:  encoded, ChainDepth: chainDepth, Envelope: resolution.Envelope,
+			RoutingSource: routingSource, CreatedAt: createdAt,
+		},
+		Lineage: events.LineageFromEvent(frame.req.Event),
+	})
+	if err != nil {
+		return EmitIntent{}, fmt.Errorf("construct emitted event: %w", err)
+	}
 	frame.lastEmitCreatedAt = createdAt
 	return EmitIntent{
 		Event:         evt,

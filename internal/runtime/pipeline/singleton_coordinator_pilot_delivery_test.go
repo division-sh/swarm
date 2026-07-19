@@ -169,21 +169,7 @@ func seedSingletonCoordinatorPilotInstance(t *testing.T, store *WorkflowInstance
 
 func seedSingletonCoordinatorPilotEvent(t *testing.T, db *sql.DB, ctx context.Context, evt events.Event) {
 	t.Helper()
-	targetRaw, err := json.Marshal(evt.TargetRoute())
-	if err != nil {
-		t.Fatalf("marshal target route: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
-			produced_by, produced_by_type, target_route, created_at
-		) VALUES ('live',
-			$1::uuid, $2::uuid, $3, $4::uuid, $5, 'entity', $6::jsonb,
-			$7, 'agent', $8::jsonb, now()
-		)
-	`, evt.ID(), evt.RunID(), string(evt.Type()), evt.EntityID(), evt.FlowInstance(), string(evt.Payload()), evt.SourceAgent(), string(targetRaw)); err != nil {
-		t.Fatalf("seed singleton coordinator pilot event: %v", err)
-	}
+	seedPipelineEventRecord(t, ctx, db, evt)
 }
 
 func seedSingletonCoordinatorPilotNodeDelivery(t *testing.T, db *sql.DB, ctx context.Context, eventID, nodeID string, target events.RouteIdentity) {

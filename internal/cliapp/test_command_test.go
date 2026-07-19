@@ -64,7 +64,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 				}
 				result := eventPublishTestResult(false)
 				result["event_id"] = "event-2"
-				result["source_event_id"] = "event-1"
+				result["operator_reference_event_id"] = "event-1"
 				writeJSONRPCResult(t, w, req.ID, result)
 			default:
 				t.Fatalf("unexpected extra event.publish params = %#v", req.Params)
@@ -207,7 +207,7 @@ func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t 
 			result := eventPublishTestResult(false)
 			result["run_id"] = setupRunID
 			result["event_id"] = "event-setup-follow-up"
-			result["source_event_id"] = ""
+			result["operator_reference_event_id"] = ""
 			writeJSONRPCResult(t, w, req.ID, result)
 		case "run.diagnose":
 			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(setupRunID, true))
@@ -321,7 +321,7 @@ func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) 
 			result := eventPublishTestResult(false)
 			result["run_id"] = setupRunID
 			result["event_id"] = "event-root-setup"
-			result["source_event_id"] = ""
+			result["operator_reference_event_id"] = ""
 			writeJSONRPCResult(t, w, req.ID, result)
 		case "run.diagnose":
 			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(setupRunID, true))
@@ -939,9 +939,9 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, contractsPath string,
 			result["event_id"] = eventID
 			result["run_id"] = activeRunID
 			if source, ok := req.Params["source_event_id"].(string); ok {
-				result["source_event_id"] = source
+				result["operator_reference_event_id"] = source
 			} else {
-				result["source_event_id"] = ""
+				result["operator_reference_event_id"] = ""
 			}
 			writeJSONRPCResult(t, w, req.ID, result)
 		case "run.diagnose":

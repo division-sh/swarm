@@ -222,7 +222,10 @@ func workflowNodeFlowID(source semanticview.Source, nodeID string) string {
 	if !ok {
 		return ""
 	}
-	return strings.TrimSpace(contractSource.FlowID)
+	if flowID := strings.TrimSpace(contractSource.FlowID); flowID != "" {
+		return flowID
+	}
+	return ""
 }
 
 func runtimecontractsHandlerPatternMatches(pattern, eventType string) bool {

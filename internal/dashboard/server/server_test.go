@@ -19,7 +19,9 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -440,18 +442,18 @@ type stubBuilderRunStore struct {
 	runControls map[string]string
 }
 
-func (s *stubBuilderRunStore) AppendEvent(_ context.Context, evt events.Event) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.events = append(s.events, evt)
-	return nil
-}
-func (*stubBuilderRunStore) InsertEventDeliveries(context.Context, string, []string) error {
-	return nil
+func (s *stubBuilderRunStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.events = append(s.events, req.Event.Event())
+		return nil
+	})
 }
 func (*stubBuilderRunStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return []string{}, nil
 }
+func (*stubBuilderRunStore) SupportsPersistedReplay() bool { return false }
 func (s *stubBuilderRunStore) MarkRunTerminal(_ context.Context, runID, status string, failure *runtimefailures.Envelope, endedAt time.Time) (runtimebus.RunLifecycleSnapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1394,15 +1396,8 @@ func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelec
 	inProgressNoReceiptEventID := uuid.NewString()
 	deadEventID := uuid.NewString()
 	for _, eventID := range []string{pendingEventID, failedEventID, inProgressNoReceiptEventID, deadEventID} {
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (execution_mode,
-				event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-			) VALUES ('live',
-				$1::uuid, $2::uuid, 'task.completed', 'global', '{}'::jsonb, 'runtime', 'agent', now() - interval '5 minutes'
-			)
-		`, eventID, runID); err != nil {
-			t.Fatalf("seed event %s: %v", eventID, err)
-		}
+		storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "task.completed",
+			eventtest.Producer(events.EventProducerAgent, "runtime"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC().Add(-5*time.Minute))
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
@@ -1495,15 +1490,8 @@ func TestSQLAgentReader_ListGenericAgents_UsesFullPendingDeliveryFactHorizon(t *
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES ('live',
-			$1::uuid, $2::uuid, 'task.completed', 'global', '{}'::jsonb, 'runtime', 'agent', now() - interval '45 days'
-		)
-	`, eventID, runID); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "task.completed",
+		eventtest.Producer(events.EventProducerAgent, "runtime"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC().Add(-45*24*time.Hour))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, delivered_at, created_at
@@ -2388,11 +2376,10 @@ func TestHandler_RunEventStreamPreservesCanonicalRuntimeLogWithoutEntityID(t *te
 	}
 
 	logPayload := json.RawMessage(`{"log_level":"warn","message":"runtime log","details":{"component":"scheduler","action":"canonical-owner","error":"boom"}}`)
-	if err := storeStub.AppendEvent(context.Background(), eventtest.PersistedProjection("evt-runtime-log",
-
+	if err := bus.Publish(context.Background(), eventtest.RuntimeDiagnostic(uuid.NewString(),
 		events.EventType("platform.runtime_log"),
 		"runtime", "", logPayload, 0, runID, "", events.EventEnvelope{}, now)); err != nil {
-		t.Fatalf("append canonical runtime log: %v", err)
+		t.Fatalf("publish runtime-log fixture: %v", err)
 	}
 
 	typedHandler, ok := handler.(*Handler)

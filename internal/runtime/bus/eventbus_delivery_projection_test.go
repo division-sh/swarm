@@ -24,10 +24,10 @@ func TestSyntheticCarryProjectionIsRouteScopedForMixedDeliveries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("project ordinary route: %v", err)
 	}
-	if got := payloadStringField(t, projected, "validation_case_id"); got != "case-1" {
+	if got := payloadStringField(t, projected.Event(), "validation_case_id"); got != "case-1" {
 		t.Fatalf("projected validation_case_id = %q, want case-1", got)
 	}
-	if got := payloadStringField(t, unprojected, "validation_case_id"); got != "" {
+	if got := payloadStringField(t, unprojected.Event(), "validation_case_id"); got != "" {
 		t.Fatalf("ordinary route leaked validation_case_id = %q", got)
 	}
 	if string(evt.Payload()) != `{"candidate":"acct-1"}` {
@@ -43,7 +43,7 @@ func TestDeliveryRouteProjectionPreservesUntargetedLiveRecipientEnvelope(t *test
 	if err != nil {
 		t.Fatalf("project untargeted live route: %v", err)
 	}
-	routes := projected.TargetRoutes()
+	routes := projected.Event().TargetRoutes()
 	if len(routes) != 1 || routes[0] != want {
 		t.Fatalf("projected target routes = %#v, want original envelope route %#v", routes, want)
 	}
@@ -77,7 +77,7 @@ func TestCreateSyntheticCarryFailsClosedOnDynamicPayloadCollisionBeforeHandler(t
 		PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": "synthetic-value"}),
 	}
 	err = eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{"validator"}, []events.DeliveryRoute{route})
-	if err == nil || !strings.Contains(err.Error(), "producer payload and receiver-owned synthetic carry") {
+	if err == nil || !strings.Contains(err.Error(), "delivery payload projection conflicts with producer field") {
 		t.Fatalf("delivery error = %v, want synthetic carry collision", err)
 	}
 	select {
@@ -117,8 +117,8 @@ type projectionCaptureInterceptor struct {
 	events []events.Event
 }
 
-func (i *projectionCaptureInterceptor) InterceptDeliveryRoute(_ context.Context, evt events.Event, _ events.DeliveryRoute) (bool, []events.Event, error) {
-	i.events = append(i.events, evt)
+func (i *projectionCaptureInterceptor) InterceptDeliveryRoute(_ context.Context, evt events.DeliveryEvent, _ events.DeliveryRoute) (bool, []events.Event, error) {
+	i.events = append(i.events, evt.Event())
 	return true, nil, nil
 }
 

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -30,7 +29,6 @@ import (
 type completeEventDispatchStore interface {
 	runtimebus.EventStore
 	runtimemanager.ManagerPersistence
-	PersistEventWithDeliveriesAndScope(context.Context, events.Event, []string, runtimereplayclaim.CommittedReplayScope) error
 	UpsertPipelineReceipt(context.Context, string, string, *runtimefailures.Envelope) error
 }
 
@@ -52,14 +50,9 @@ func TestCompleteEventSnapshotDispatchesThroughRecoveryOwnersOnSQLiteAndPostgres
 				ch := fixture.bus.Subscribe(fixture.agentID, fixture.event.Type())
 				defer fixture.bus.Unsubscribe(fixture.agentID)
 
-				fixture.setChainDepth(t, -1)
-				if _, err := fixture.invoke(surface); err == nil || !strings.Contains(err.Error(), "chain_depth") {
-					t.Fatalf("%s accepted corrupt complete event: %v", surface, err)
+				if err := fixture.updateChainDepth(-1); err == nil {
+					t.Fatalf("%s schema admitted negative chain_depth", backend)
 				}
-				fixture.assertNoDispatchMutation(t)
-				assertNoCompleteEventDelivery(t, ch)
-
-				fixture.setChainDepth(t, fixture.event.ChainDepth())
 				if _, err := fixture.invoke(surface); err != nil {
 					t.Fatalf("%s dispatch: %v", surface, err)
 				}
@@ -94,20 +87,9 @@ func TestCompleteEventSnapshotDispatchesThroughManagerBacklogOnSQLiteAndPostgres
 				t.Fatalf("UpsertPipelineReceipt: %v", err)
 			}
 
-			fixture.setChainDepth(t, -1)
-			corruptSeen := make(chan events.Event, 1)
-			corruptManager := fixture.newRecordingManager(t, corruptSeen)
-			corruptCtx := fixture.managedContext(t)
-			if _, err := corruptManager.HydrateForStartup(corruptCtx); err != nil {
-				t.Fatalf("hydrate corrupt manager: %v", err)
+			if err := fixture.updateChainDepth(-1); err == nil {
+				t.Fatalf("%s schema admitted negative chain_depth", backend)
 			}
-			if _, err := corruptManager.ReplayBacklog(corruptCtx, runtimeagentcontrol.ReplayBacklogRequest{AgentID: fixture.agentID}); err == nil || !strings.Contains(err.Error(), "chain_depth") {
-				t.Fatalf("manager recovery accepted corrupt complete event: %v", err)
-			}
-			fixture.assertNoAgentDispatchMutation(t)
-			assertNoCompleteEventDelivery(t, corruptSeen)
-
-			fixture.setChainDepth(t, fixture.event.ChainDepth())
 			seen := make(chan events.Event, 1)
 			manager := fixture.newRecordingManager(t, seen)
 			managerCtx := fixture.managedContext(t)
@@ -145,14 +127,15 @@ func newCompleteEventDispatchFixture(t *testing.T, backend string, decisionOblig
 	ctx := testAuthorActivityContext(context.Background())
 	createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	runID, eventID := uuid.NewString(), uuid.NewString()
+	seedCompleteEventDispatchRun(t, ctx, db, backend, runID, createdAt)
 	sourceRoute := events.RouteIdentity{
 		FlowID: "source-flow", FlowInstance: "source-flow/one", EntityID: uuid.NewString(),
 	}
 	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute)
-	event := events.Project(eventtest.PersistedProjectionForProducer(
+	event := eventtest.InExecutionMode(eventtest.PersistedProjectionForProducer(
 		eventID,
 		events.EventType("custom.replay.checked"),
-		events.NodeProducer("declarative-node"),
+		eventtest.Producer(events.EventProducerNode, "declarative-node"),
 		"event-owned-task",
 		[]byte(`{"task_id":"payload-owned-task","text":"complete snapshot"}`),
 		3,
@@ -160,11 +143,9 @@ func newCompleteEventDispatchFixture(t *testing.T, backend string, decisionOblig
 		"",
 		envelope,
 		createdAt,
-	), events.ProjectExecutionMode(executionmode.Mock))
+	), executionmode.Mock)
 	agentID := "complete-event-agent"
-	if err := selected.PersistEventWithDeliveriesAndScope(ctx, event, []string{agentID}, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
-		t.Fatalf("PersistEventWithDeliveriesAndScope: %v", err)
-	}
+	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: agentID}}, runtimereplayclaim.CommittedReplayScopeSubscribed)
 	fixture := completeEventDispatchFixture{
 		store: selected, db: db, dialect: backend, ctx: ctx, bus: bus, event: event, agentID: agentID,
 	}
@@ -172,6 +153,17 @@ func newCompleteEventDispatchFixture(t *testing.T, backend string, decisionOblig
 		fixture.insertDecisionObligation(t)
 	}
 	return fixture
+}
+
+func seedCompleteEventDispatchRun(t testing.TB, ctx context.Context, db *sql.DB, backend, runID string, startedAt time.Time) {
+	t.Helper()
+	query := `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`
+	if backend == "postgres" {
+		query = `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`
+	}
+	if _, err := db.ExecContext(ctx, query, runID, startedAt); err != nil {
+		t.Fatalf("seed %s complete-event run: %v", backend, err)
+	}
 }
 
 func (f completeEventDispatchFixture) invoke(surface string) (int, error) {
@@ -187,16 +179,14 @@ func (f completeEventDispatchFixture) invoke(surface string) (int, error) {
 	}
 }
 
-func (f completeEventDispatchFixture) setChainDepth(t *testing.T, depth int) {
-	t.Helper()
+func (f completeEventDispatchFixture) updateChainDepth(depth int) error {
 	query := `UPDATE events SET chain_depth = ? WHERE event_id = ?`
 	args := []any{depth, f.event.ID()}
 	if f.dialect == "postgres" {
 		query = `UPDATE events SET chain_depth = $1 WHERE event_id = $2::uuid`
 	}
-	if _, err := f.db.ExecContext(f.ctx, query, args...); err != nil {
-		t.Fatalf("set chain depth: %v", err)
-	}
+	_, err := f.db.ExecContext(f.ctx, query, args...)
+	return err
 }
 
 func (f completeEventDispatchFixture) assertNoDispatchMutation(t *testing.T) {

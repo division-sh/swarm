@@ -2,7 +2,7 @@ package bus
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"strings"
 	"time"
 
@@ -10,13 +10,25 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
 
 type EventStore interface {
-	AppendEvent(ctx context.Context, evt events.Event) error
-	InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error
+	CommitPublishOwner
 	runtimereplayclaim.RecipientReader
+}
+
+type CommitPublishOwner interface {
+	CommitPublish(ctx context.Context, plan CommitPublishPlan) (PreparedPublish, error)
+}
+
+// CommitPublishPlan is a sealed EventBus-owned publication plan. Selected
+// stores execute only this exact semantic plan inside their transaction; no
+// caller-supplied function or transaction capability crosses the boundary.
+type CommitPublishPlan interface {
+	PrepareCommitPublish(context.Context) (PreparedPublish, error)
+	commitPublishPlan()
 }
 
 type EventAppendOutcome uint8
@@ -27,8 +39,71 @@ const (
 	EventAppendExactDuplicate
 )
 
-type EventAppendOutcomePersistence interface {
-	AppendEventOutcome(ctx context.Context, evt events.Event) (EventAppendOutcome, error)
+type InitialPipelineReceipt struct {
+	Status  string
+	Failure *runtimefailures.Envelope
+}
+
+// CommitPublishRequest is the closed journal operation for event classes whose
+// mandatory initial side effects are the delivery manifest, replay scope, and
+// optional failure evidence declared here.
+type CommitPublishRequest struct {
+	Event           events.AdmittedEvent
+	DeliveryRoutes  []events.DeliveryRoute
+	ReplayScope     runtimereplayclaim.CommittedReplayScope
+	PipelineReceipt *InitialPipelineReceipt
+	DeadLetter      *runtimedeadletters.Record
+}
+
+// CommitPublishTransaction is the transaction-local half of the sealed
+// CommitPublish operation. The opaque values below can only be constructed by
+// EventBus, so this capability cannot be used as an alternate event writer.
+// Beginning the event before route materialization permits lifecycle writes to
+// reference it while finalization still commits every declared initial fact in
+// the same selected-store transaction.
+type CommitPublishTransaction interface {
+	BeginPreparedPublish(ctx context.Context, event PreparedPublishEvent) (EventAppendOutcome, error)
+	FinalizePreparedPublish(ctx context.Context, finalization PreparedPublishFinalization) error
+}
+
+type PreparedPublishEvent struct {
+	event events.AdmittedEvent
+}
+
+func (e PreparedPublishEvent) AdmittedEvent() events.AdmittedEvent {
+	return e.event
+}
+
+type PreparedPublishFinalization struct {
+	request CommitPublishRequest
+}
+
+func (f PreparedPublishFinalization) Request() CommitPublishRequest {
+	return f.request
+}
+
+type commitPublishTransactionContextKey struct{}
+
+func WithCommitPublishTransaction(ctx context.Context, transaction CommitPublishTransaction) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, commitPublishTransactionContextKey{}, transaction)
+}
+
+func CommitPublishTransactionFromContext(ctx context.Context) (CommitPublishTransaction, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	transaction, ok := ctx.Value(commitPublishTransactionContextKey{}).(CommitPublishTransaction)
+	return transaction, ok && transaction != nil
+}
+
+func WithoutCommitPublishTransaction(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, commitPublishTransactionContextKey{}, nil)
 }
 
 type FlowInstanceRouteRecord struct {
@@ -203,48 +278,6 @@ type RunLifecycleReadPersistence interface {
 	LoadRunLifecycleSnapshot(ctx context.Context, runID string) (RunLifecycleSnapshot, error)
 }
 
-// AtomicEventPersistence is an optional capability for transactionally
-// persisting an event row and its delivery manifest together.
-type AtomicEventPersistence interface {
-	PersistEventWithDeliveries(ctx context.Context, evt events.Event, agentIDs []string) error
-}
-
-type AtomicEventOutcomePersistence interface {
-	PersistEventWithDeliveriesOutcome(ctx context.Context, evt events.Event, agentIDs []string) (EventAppendOutcome, error)
-}
-
-type AtomicEventReplayScopePersistence interface {
-	PersistEventWithDeliveriesAndScope(ctx context.Context, evt events.Event, agentIDs []string, scope runtimereplayclaim.CommittedReplayScope) error
-}
-
-type AtomicEventReplayScopeOutcomePersistence interface {
-	PersistEventWithDeliveriesAndScopeOutcome(ctx context.Context, evt events.Event, agentIDs []string, scope runtimereplayclaim.CommittedReplayScope) (EventAppendOutcome, error)
-}
-
-type AtomicEventRoutePersistence interface {
-	PersistEventWithDeliveryRoutesAndScope(ctx context.Context, evt events.Event, agentIDs []string, deliveryTargets map[string]events.RouteIdentity, scope runtimereplayclaim.CommittedReplayScope) error
-}
-
-type AtomicEventRouteOutcomePersistence interface {
-	PersistEventWithDeliveryRoutesAndScopeOutcome(ctx context.Context, evt events.Event, agentIDs []string, deliveryTargets map[string]events.RouteIdentity, scope runtimereplayclaim.CommittedReplayScope) (EventAppendOutcome, error)
-}
-
-type AtomicEventDeliveryRouteSetPersistence interface {
-	PersistEventWithDeliveryRouteSetAndScope(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, scope runtimereplayclaim.CommittedReplayScope) error
-}
-
-type AtomicEventDeliveryRouteSetOutcomePersistence interface {
-	PersistEventWithDeliveryRouteSetAndScopeOutcome(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, scope runtimereplayclaim.CommittedReplayScope) (EventAppendOutcome, error)
-}
-
-type EventDeliveryRoutePersistence interface {
-	InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error
-}
-
-type EventDeliveryRouteSetPersistence interface {
-	InsertEventDeliveryRoutes(ctx context.Context, eventID string, deliveryRoutes []events.DeliveryRoute) error
-}
-
 type EventDeliveryTargetReader interface {
 	ListEventDeliveryTargets(ctx context.Context, eventID string) (map[string]events.RouteIdentity, error)
 }
@@ -253,102 +286,56 @@ type EventDeliveryRouteSetReader interface {
 	ListEventDeliveryRoutes(ctx context.Context, eventID string) ([]events.DeliveryRoute, error)
 }
 
-type EventReplayScopePersistence interface {
-	UpsertCommittedReplayScope(ctx context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error
-}
-
-type eventMutationContextKey struct{}
-
-// EventMutation is the typed event-publish unit of work consumed by runtime
-// producers. Backend SQL transaction details stay below this semantic boundary.
-type EventMutation interface {
-	Context() context.Context
-	AppendEvent(ctx context.Context, evt events.Event) error
-	AppendEventOutcome(ctx context.Context, evt events.Event) (EventAppendOutcome, error)
-	InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error
-	InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error
-	InsertEventDeliveryRoutes(ctx context.Context, eventID string, deliveryRoutes []events.DeliveryRoute) error
-	UpsertCommittedReplayScope(ctx context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error
-	UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error
-	RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error
-}
-
-type EventMutationRunner interface {
-	RunEventMutation(ctx context.Context, fn func(EventMutation) error) error
-}
-
-type EventMutationContextProvider interface {
-	EventMutationFromContext(ctx context.Context) (EventMutation, bool)
-}
-
-func WithEventMutationContext(ctx context.Context, mutation EventMutation) context.Context {
-	if mutation == nil {
-		return ctx
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return context.WithValue(ctx, eventMutationContextKey{}, mutation)
-}
-
-func EventMutationFromContext(ctx context.Context) (EventMutation, bool) {
-	if ctx == nil {
-		return nil, false
-	}
-	mutation, ok := ctx.Value(eventMutationContextKey{}).(EventMutation)
-	return mutation, ok && mutation != nil
-}
-
-// WithoutEventMutationContext crosses the commit boundary without retaining a
-// mutation whose transaction is no longer usable. Post-commit consumers must
-// acquire a fresh mutation from their own active transaction.
-func WithoutEventMutationContext(ctx context.Context) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return context.WithValue(ctx, eventMutationContextKey{}, nil)
-}
-
-type TransactionalEventReplayScopePersistence interface {
-	UpsertCommittedReplayScopeTx(ctx context.Context, tx *sql.Tx, eventID string, scope runtimereplayclaim.CommittedReplayScope) error
-}
-
-// TransactionalEventStore is the backend-local raw-SQL helper used below
-// EventMutation implementations. Selected runtime producers consume
-// EventMutationRunner/EventMutation instead of this raw transaction shape.
-type TransactionalEventStore interface {
-	BeginEventTx(ctx context.Context) (*sql.Tx, error)
-	AppendEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error
-	InsertEventDeliveriesTx(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string) error
-	UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status string, failure *runtimefailures.Envelope) error
-}
-
-type TransactionalEventAppendOutcomeStore interface {
-	AppendEventTxOutcome(ctx context.Context, tx *sql.Tx, evt events.Event) (EventAppendOutcome, error)
-}
-
-type EventTransactionRunner interface {
-	RunEventTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error
-}
-
-type TransactionalEventDeliveryRoutePersistence interface {
-	InsertEventDeliveriesWithTargetsTx(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error
-}
-
-type TransactionalEventDeliveryRouteSetPersistence interface {
-	InsertEventDeliveryRoutesTx(ctx context.Context, tx *sql.Tx, eventID string, deliveryRoutes []events.DeliveryRoute) error
-}
-
 type PipelineReceiptSweeperStore = runtimereplayclaim.Lister
 
 type PipelineReplayClaimStore = runtimereplayclaim.Owner
 
 type InMemoryEventStore struct{}
 
-func (InMemoryEventStore) AppendEvent(_ context.Context, _ events.Event) error { return nil }
-func (InMemoryEventStore) InsertEventDeliveries(_ context.Context, _ string, _ []string) error {
+func (s InMemoryEventStore) CommitPublish(ctx context.Context, plan CommitPublishPlan) (PreparedPublish, error) {
+	if plan == nil {
+		return PreparedPublish{}, errors.New("event publish plan is required")
+	}
+	transaction := &inMemoryCommitPublishTransaction{}
+	return commitPublishInMemory(ctx, plan, transaction)
+}
+
+func commitPublishInMemory(ctx context.Context, plan CommitPublishPlan, transaction CommitPublishTransaction) (PreparedPublish, error) {
+	postCommit := make([]func(), 0, 4)
+	rollback := make([]func(), 0, 4)
+	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
+	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
+	prepared, err := plan.PrepareCommitPublish(WithCommitPublishTransaction(ctx, transaction))
+	if err != nil {
+		runtimepipeline.FlushPipelineRollbackActions(rollback)
+		return PreparedPublish{}, err
+	}
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	return prepared, nil
+}
+
+type inMemoryCommitPublishTransaction struct {
+	activeEventIDs []string
+}
+
+func (t *inMemoryCommitPublishTransaction) BeginPreparedPublish(_ context.Context, event PreparedPublishEvent) (EventAppendOutcome, error) {
+	eventID := strings.TrimSpace(event.AdmittedEvent().ID())
+	if eventID == "" {
+		return EventAppendOutcomeUnknown, errors.New("admitted event is required")
+	}
+	t.activeEventIDs = append(t.activeEventIDs, eventID)
+	return EventAppendInserted, nil
+}
+
+func (t *inMemoryCommitPublishTransaction) FinalizePreparedPublish(_ context.Context, finalization PreparedPublishFinalization) error {
+	request := finalization.Request()
+	if len(t.activeEventIDs) == 0 || t.activeEventIDs[len(t.activeEventIDs)-1] != request.Event.ID() {
+		return errors.New("prepared event finalization does not match the active event")
+	}
+	t.activeEventIDs = t.activeEventIDs[:len(t.activeEventIDs)-1]
 	return nil
 }
+
 func (InMemoryEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return nil, runtimereplayclaim.ErrAuthoritativeRecipientManifestUnavailable
 }

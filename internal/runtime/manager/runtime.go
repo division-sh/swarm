@@ -275,7 +275,11 @@ func (am *AgentManager) quarantinePoisonEvent(ctx context.Context, agentID strin
 		"timestamp":             time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	eventCtx := am.runtimePlatformControlEventContext(ctx)
-	if err := am.bus.Publish(eventCtx, events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("platform.event_quarantined"), events.PlatformProducer("runtime"), "", mustJSON(payload), 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
+	quarantined, constructErr := newPlatformRuntimeControlEvent(eventCtx, evt.RunID(), evt.ID(), events.EventType("platform.event_quarantined"), mustJSON(payload), events.EventEnvelope{}, time.Now().UTC())
+	if constructErr != nil {
+		return
+	}
+	if err := am.bus.Publish(eventCtx, quarantined); err != nil {
 		if am.bus != nil {
 			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 				Level:     "error",
@@ -480,6 +484,10 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
+	admittedDirective, err := events.AdmitForPersistence(directiveEvent, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, fmt.Errorf("admit directive event: %w", err)
+	}
 	reservationCtx := runtimecorrelation.WithRunID(am.runtimePlatformControlEventContext(ctx), target.RunID)
 	if owner, ok := am.bus.(bundleFingerprintContextOwner); ok && owner != nil {
 		reservationCtx = owner.WithBundleFingerprint(reservationCtx)
@@ -501,7 +509,7 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 			DirectiveEventID: eventID,
 			State:            runtimeagentcontrol.DirectiveOperationPrepared,
 		},
-		Event: directiveEvent,
+		Event: admittedDirective,
 		Now:   now,
 	})
 	if err != nil {
@@ -1373,7 +1381,10 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 		if err != nil {
 			return fmt.Errorf("marshal platform.reset payload: %w", err)
 		}
-		platformResetEvent = events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("platform.reset"), events.PlatformProducer("runtime"), "", payload, 0, "", "", events.EventEnvelope{}, time.Now())
+		platformResetEvent, err = newPlatformRuntimeControlEvent(context.Background(), "", "", events.EventType("platform.reset"), payload, events.EventEnvelope{}, time.Now())
+		if err != nil {
+			return err
+		}
 		hasPlatformResetEvent = true
 	}
 
@@ -1623,7 +1634,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								panicFailure := runtimefailures.FromError(runtimefailures.New(runtimefailures.ClassInternalFailure, "agent_event_panic", "agent-manager", "process_event", map[string]any{
 									"agent_id": agent.ID(), "event_id": evt.ID(), "event_type": evt.Type(),
 								}), "agent-manager", "process_event")
-								am.writeReceipt(evtCtx, evt.ID(), agent.ID(), ReceiptStatusError, &panicFailure.Failure)
+								am.writeReceipt(evtCtx, evt, agent.ID(), ReceiptStatusError, &panicFailure.Failure)
 								if am.bus != nil {
 									am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
 										Level:     "error",
@@ -1745,7 +1756,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 	}), "agent-manager", "agent_loop")
 
 	eventCtx := am.runtimePlatformControlEventContext(ctx)
-	if err := am.bus.Publish(eventCtx, events.NewRuntimeDiagnosticEvent(uuid.NewString(), events.EventType("platform.agent_panic"), events.PlatformProducer("runtime"), "", mustJSON(map[string]any{
+	panicEvent, constructErr := newPlatformRuntimeDiagnosticEvent(eventCtx, "", "", events.EventType("platform.agent_panic"), mustJSON(map[string]any{
 		"agent_id":        agent.ID(),
 		"flow_instance":   flowInstance,
 		"entity_id":       entityID,
@@ -1753,7 +1764,11 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		"stack_trace":     stackTrace,
 		"conversation_id": "",
 		"timestamp":       time.Now().UTC().Format(time.RFC3339Nano),
-	}), 0, "", "", events.EventEnvelope{EntityID: entityID, FlowInstance: flowInstance}, time.Now().UTC())); err != nil {
+	}), events.EventEnvelope{EntityID: entityID, FlowInstance: flowInstance}, time.Now().UTC())
+	if constructErr == nil {
+		constructErr = am.bus.Publish(eventCtx, panicEvent)
+	}
+	if constructErr != nil {
 		if am.bus != nil {
 			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 				Level:     "error",
@@ -1761,7 +1776,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 				Action:    "publish_agent_panic_failed",
 				AgentID:   agent.ID(),
 				EntityID:  entityID,
-				Failure:   failureEnvelope(err, "agent-manager", "publish_agent_panic"),
+				Failure:   failureEnvelope(constructErr, "agent-manager", "publish_agent_panic"),
 			})
 		}
 	}
@@ -1782,7 +1797,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		})
 	}
 
-	if err := am.bus.Publish(eventCtx, events.NewRuntimeDiagnosticEvent(uuid.NewString(), events.EventType("platform.agent_failed"), events.PlatformProducer("runtime"), "", mustJSON(map[string]any{
+	failedEvent, constructErr := newPlatformRuntimeDiagnosticEvent(eventCtx, "", "", events.EventType("platform.agent_failed"), mustJSON(map[string]any{
 		"agent_id":        agent.ID(),
 		"flow_instance":   flowInstance,
 		"entity_id":       entityID,
@@ -1790,7 +1805,11 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		"retry_count":     consecutivePanics,
 		"last_event_type": strings.TrimSpace(lastEventType),
 		"timestamp":       time.Now().UTC().Format(time.RFC3339Nano),
-	}), 0, "", "", events.EventEnvelope{EntityID: entityID, FlowInstance: flowInstance}, time.Now().UTC())); err != nil {
+	}), events.EventEnvelope{EntityID: entityID, FlowInstance: flowInstance}, time.Now().UTC())
+	if constructErr == nil {
+		constructErr = am.bus.Publish(eventCtx, failedEvent)
+	}
+	if constructErr != nil {
 		if am.bus != nil {
 			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 				Level:     "error",
@@ -1798,7 +1817,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 				Action:    "publish_agent_failed_failed",
 				AgentID:   agent.ID(),
 				EntityID:  entityID,
-				Failure:   failureEnvelope(err, "agent-manager", "publish_agent_failed"),
+				Failure:   failureEnvelope(constructErr, "agent-manager", "publish_agent_failed"),
 			})
 		}
 	}

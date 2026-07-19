@@ -32,7 +32,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 			"handle_emit_tool.resolve_event_type",
 			map[string]any{"tool": strings.TrimSpace(toolName)},
 		)
-		e.logEmitToolOutcome(ctx, actor, toolName, "", "", nil, nil, events.EmptyEvent(), "invalid_emit_tool_name", "payload_shape", "resolve_event_type", err)
+		e.logEmitToolOutcome(ctx, actor, toolName, "", "", nil, nil, events.NoEvent(), "invalid_emit_tool_name", "payload_shape", "resolve_event_type", err)
 		return nil, err
 	}
 	if e.bus == nil {
@@ -53,7 +53,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 			nil,
 			err,
 		)
-		e.logEmitToolOutcome(ctx, actor, toolName, eventType, eventType, diagnosticPayloadMap(input), nil, events.EmptyEvent(), "payload_shape_failed", "payload_shape", "decode_input", wrapped)
+		e.logEmitToolOutcome(ctx, actor, toolName, eventType, eventType, diagnosticPayloadMap(input), nil, events.NoEvent(), "payload_shape_failed", "payload_shape", "decode_input", wrapped)
 		return nil, wrapped
 	}
 	if payloadMap == nil {
@@ -67,19 +67,19 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	executionMode := actor.ExecutionMode
 	if !executionMode.Valid() {
 		err := fmt.Errorf("emit tool requires typed execution mode for agent %s", strings.TrimSpace(actor.ID))
-		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, nil, events.EmptyEvent(), "execution_mode_missing", "execution_mode", "resolve_execution_mode", err)
+		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, nil, events.NoEvent(), "execution_mode_missing", "execution_mode", "resolve_execution_mode", err)
 		return nil, err
 	}
 	if activeMode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok && activeMode != executionMode {
 		err := fmt.Errorf("emit tool execution mode %q conflicts with agent %s mode %q", activeMode, strings.TrimSpace(actor.ID), executionMode)
-		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, nil, events.EmptyEvent(), "execution_mode_conflict", "execution_mode", "resolve_execution_mode", err)
+		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, nil, events.NoEvent(), "execution_mode_conflict", "execution_mode", "resolve_execution_mode", err)
 		return nil, err
 	}
 	emitLineage := events.LineageFromEvent(inbound)
 	emitLineage.ExecutionMode = executionMode
 	payloadMap = e.enrichEmitPayloadContext(actor, inbound, schemaEventType, payloadMap)
 	if err := rejectEmitEnvelopeFields(payloadMap); err != nil {
-		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, diagnosticPayloadMap(payloadMap), events.EmptyEvent(), "payload_shape_failed", "payload_shape", "envelope_field", err)
+		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, diagnosticPayloadMap(payloadMap), events.NoEvent(), "payload_shape_failed", "payload_shape", "envelope_field", err)
 		return nil, err
 	}
 	postEnrichmentPayload := diagnosticPayloadMap(payloadMap)
@@ -91,11 +91,11 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 			map[string]any{"event": schemaEventType},
 			err,
 		)
-		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.EmptyEvent(), "schema_validation_failed", "validation", "validate_schema", wrapped)
+		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.NoEvent(), "schema_validation_failed", "validation", "validate_schema", wrapped)
 		return nil, wrapped
 	}
 	if err := e.validateEmitCriteriaCitations(actor, schemaEventType, eventSchema, payloadMap); err != nil {
-		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.EmptyEvent(), "criteria_citation_validation_failed", "validation", "validate_criteria_citations", err)
+		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.NoEvent(), "criteria_citation_validation_failed", "validation", "validate_criteria_citations", err)
 		return nil, err
 	}
 
@@ -110,25 +110,31 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		FlowInstance: flowInstance,
 		EntityID:     entityID,
 	}.Normalized()
+	routingSource, err := events.RuntimeRoutingSourceFromRoute(sourceRoute)
+	if err != nil {
+		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.NoEvent(), "routing_source_invalid", "routing_source", "construct", err)
+		return nil, err
+	}
 	envelope := events.EventEnvelope{
 		EntityID:     entityID,
 		FlowInstance: flowInstance,
 	}
-	if !sourceRoute.Empty() {
-		envelope = events.EnvelopeForSourceRoute(envelope, sourceRoute)
+	if !routingSource.Empty() {
+		envelope = events.EnvelopeForSourceRoute(envelope, routingSource.Route())
 	}
 	taskID := asString(payloadMap["task_id"])
-	emitted := events.NewChildEventWithLineage(
-		uuid.NewString(),
-		events.EventType(eventType),
-		events.AgentProducer(actor.ID),
-		taskID,
-		mustJSON(payloadMap),
-		0,
-		emitLineage,
-		envelope,
-		time.Now(),
-	)
+	emitted, err := events.NewChildEvent(events.ChildEventInput{
+		Facts: events.EventFacts{
+			ID: uuid.NewString(), Type: events.EventType(eventType), Producer: events.ProducerClaim{Type: events.EventProducerAgent, ID: actor.ID},
+			TaskID: taskID, Payload: mustJSON(payloadMap), Envelope: envelope, RoutingSource: routingSource,
+			CreatedAt: time.Now(), ExecutionMode: executionMode,
+		},
+		Lineage: emitLineage,
+	})
+	if err != nil {
+		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.NoEvent(), "event_construction_failed", "construction", "construct", err)
+		return nil, err
+	}
 	if runtimepinrouting.PinDeclaredOutput(e.workflowSource, flowID, eventType) {
 		spec := runtimecontracts.EmitSpec{Event: eventType}
 		resolvedBeforePreflight := false
@@ -150,7 +156,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 					map[string]any{"event": eventType},
 					err,
 				)
-				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "parent_route_lookup_failed", "publish", "parent_route", wrapped)
+				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "parent_route_lookup_failed", "publish", "parent_route", wrapped)
 				return nil, wrapped
 			}
 			rootResolution = runtimepinrouting.ResolveEnvelope(runtimepinrouting.ResolutionInput{
@@ -170,21 +176,14 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 					"handle_emit_tool.pin_target_resolution",
 					map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType},
 				)
-				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "pin_target_resolution_failed", "publish", "pin_target_resolution", wrapped)
+				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "pin_target_resolution_failed", "publish", "pin_target_resolution", wrapped)
 				return nil, wrapped
 			}
 			envelope = rootResolution.Envelope
-			emitted = events.NewChildEventWithLineage(
-				emitted.ID(),
-				emitted.Type(),
-				emitted.Producer(),
-				emitted.TaskID(),
-				emitted.Payload(),
-				emitted.ChainDepth(),
-				emitLineage,
-				envelope,
-				emitted.CreatedAt(),
-			)
+			emitted, err = events.ResolveEnvelope(emitted, envelope)
+			if err != nil {
+				return nil, err
+			}
 			resolvedBeforePreflight = true
 		}
 		usePublishAuthority := false
@@ -198,7 +197,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 					map[string]any{"event": eventType},
 					err,
 				)
-				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "route_plan_preflight_failed", "publish", "route_plan_preflight", wrapped)
+				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "route_plan_preflight_failed", "publish", "route_plan_preflight", wrapped)
 				return nil, wrapped
 			}
 			if plan.UsesCanonicalRouteAuthority() {
@@ -209,7 +208,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 						"handle_emit_tool.route_plan_preflight",
 						map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType},
 					)
-					e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "route_plan_preflight_failed", "publish", "route_plan_preflight", wrapped)
+					e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "route_plan_preflight_failed", "publish", "route_plan_preflight", wrapped)
 					return nil, wrapped
 				}
 				usePublishAuthority = true
@@ -225,7 +224,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 					map[string]any{"event": eventType},
 					err,
 				)
-				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "parent_route_lookup_failed", "publish", "parent_route", wrapped)
+				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "parent_route_lookup_failed", "publish", "parent_route", wrapped)
 				return nil, wrapped
 			}
 			resolution := runtimepinrouting.ResolveEnvelope(runtimepinrouting.ResolutionInput{
@@ -245,15 +244,13 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 					"handle_emit_tool.pin_target_resolution",
 					map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType},
 				)
-				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "pin_target_resolution_failed", "publish", "pin_target_resolution", wrapped)
+				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "pin_target_resolution_failed", "publish", "pin_target_resolution", wrapped)
 				return nil, wrapped
 			}
-			emitted = events.Project(
-				emitted,
-				events.ProjectLineage(emitLineage.RunID, emitLineage.ParentEventID),
-				events.ProjectTaskID(emitLineage.TaskID),
-				events.ProjectEnvelope(resolution.Envelope),
-			)
+			emitted, err = events.ResolveEnvelope(emitted, resolution.Envelope)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err := e.bus.Publish(ctx, emitted); err != nil {
@@ -264,10 +261,10 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 			map[string]any{"event": eventType, "event_id": emitted.ID()},
 			err,
 		)
-		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "event_publish_failed", "publish", "publish", wrapped)
+		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "event_publish_failed", "publish", "publish", wrapped)
 		return nil, wrapped
 	}
-	e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "published", "", "", nil)
+	e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "published", "", "", nil)
 
 	if rec, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && rec != nil {
 		rec.Append(emitted)

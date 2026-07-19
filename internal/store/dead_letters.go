@@ -15,9 +15,6 @@ import (
 	"github.com/google/uuid"
 )
 
-var _ eventMutationDeadLetterTxRecorder = (*PostgresStore)(nil)
-var _ eventMutationDeadLetterTxRecorder = (*SQLiteRuntimeStore)(nil)
-
 func (s *PostgresStore) RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error {
 	return s.runAuthorActivityMutation(ctx, "postgres record dead letter", func(txctx context.Context, tx *sql.Tx) error {
 		return s.RecordDeadLetterTx(txctx, tx, rec)

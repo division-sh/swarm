@@ -19,6 +19,7 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 	workflowStore := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	ctx := sqliteExactOnceRunContext(t, db)
 	pc, bus := newSQLiteDynamicActivationCoordinator(t, db, workflowStore)
+	parentEntityID := uuid.NewString()
 
 	parent := eventtest.RootIngress(
 		uuid.NewString(),
@@ -34,13 +35,13 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 		0,
 		runtimecorrelation.RunIDFromContext(ctx),
 		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "parent-ent"), "root/parent"),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, parentEntityID), "root/parent"),
 		time.Now().UTC(),
 	)
 
 	if err := workflowStore.Create(ctx, WorkflowInstance{
-		InstanceID:      "parent-ent",
-		StorageRef:      "parent-ent",
+		InstanceID:      parentEntityID,
+		StorageRef:      parentEntityID,
 		WorkflowName:    "root",
 		WorkflowVersion: "v-test",
 		CurrentState:    "pending",
@@ -69,27 +70,18 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 		if got := strings.TrimSpace(child.ParentEventID()); got != parent.ID() {
 			t.Fatalf("child %s parent_event_id = %q, want %q", child.ID(), got, parent.ID())
 		}
-		childID := strings.TrimSpace(child.ID())
-		if childID == "" {
-			childID = uuid.NewString()
+		admitted, err := events.AdmitForPublish(child, events.AdmissionOptions{Now: time.Now().UTC(), RequirePersistentUUIDIdentity: true})
+		if err != nil {
+			t.Fatalf("admit child %d for selected-store persistence: %v", idx, err)
 		}
-		childRunID := strings.TrimSpace(child.RunID())
-		if childRunID == "" {
-			childRunID = runtimecorrelation.RunIDFromContext(ctx)
-		}
-		child = eventtest.RootIngress(
-			childID,
-			child.Type(),
-			child.SourceAgent(),
-			child.TaskID(),
-			child.Payload(),
-			child.ChainDepth(),
-			childRunID,
-			child.ParentEventID(),
-			child.Envelope(),
-			child.CreatedAt())
-
+		child = admitted.Event()
 		children[idx] = child
+		if strings.TrimSpace(child.ID()) == "" {
+			t.Fatalf("child %d has no event identity", idx)
+		}
+		if got, want := strings.TrimSpace(child.RunID()), runtimecorrelation.RunIDFromContext(ctx); got != want {
+			t.Fatalf("child %s run_id = %q, want %q", child.ID(), got, want)
+		}
 		seedExactOnceEventDelivery(t, workflowStore, ctx, child, "spawn-node")
 	}
 

@@ -933,15 +933,14 @@ func TestPipelineEngineActionRunner_CreateFlowInstanceUsesExecutionBaseContextFo
 		},
 	}
 	runner := pipelineEngineActionRunner{coordinator: pc}
-	evt := eventtest.RootIngress(
+	evt := eventtest.ChildWithLineage(
 		"evt-123",
 		"spawn.requested",
 		"",
 		"",
 		[]byte(`{"instance_id":"inst-42","name":"alpha","template_id":"application-basic-v1"}`),
 		0,
-		"",
-		"source-evt-1",
+		events.EventLineage{RunID: testPipelineRunID, ParentEventID: "source-evt-1", ExecutionMode: executionmode.Live},
 		events.EventEnvelope{
 			EntityID: "ent-1",
 			Source: events.RouteIdentity{
@@ -1328,7 +1327,8 @@ func TestPipelineActionExecutionModeRejectsMissingAndConflictingAuthority(t *tes
 		"name: Demo\n",
 	)
 	missingEventMode := execCtx
-	missingEventMode.Request.Event = events.EmptyEvent()
+	var noEvent events.Event
+	missingEventMode.Request.Event = noEvent
 	if _, err := pipelineActionExecutionMode(context.Background(), missingEventMode); err == nil || !strings.Contains(err.Error(), "causal execution mode") {
 		t.Fatalf("missing causal mode error = %v", err)
 	}
@@ -1746,15 +1746,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughO
 		"result_kind": runtimecontracts.LiteralExpression("ready"),
 	}
 	sourceEvent := testProjectionEventWithSourceAgent(execCtx.Request.Event, "test")
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
-			produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, $3, $4::uuid, '', 'entity', $5::jsonb, $6, 'agent', $7)
-	`, testPipelineRunID, sourceEvent.ID(), string(sourceEvent.Type()), entityID, string(sourceEvent.Payload()), sourceEvent.SourceAgent(), sourceEvent.CreatedAt()); err != nil {
-		t.Fatalf("seed source event: %v", err)
-	}
+	seedPipelineEventRecord(t, ctx, db, sourceEvent)
 
 	result, err := pc.executeNodeContractHandler(ctx, "artifact-node", runtimecontracts.SystemNodeEventHandler{
 		Action: action,
@@ -1820,15 +1812,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughO
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
 	action.ArtifactRepo.Files[0].Path = runtimecontracts.LiteralExpression("../escape.yaml")
 	sourceEvent := testProjectionEventWithSourceAgent(execCtx.Request.Event, "test")
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
-			produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, $3, $4::uuid, '', 'entity', $5::jsonb, $6, 'agent', $7)
-	`, testPipelineRunID, sourceEvent.ID(), string(sourceEvent.Type()), entityID, string(sourceEvent.Payload()), sourceEvent.SourceAgent(), sourceEvent.CreatedAt()); err != nil {
-		t.Fatalf("seed source event: %v", err)
-	}
+	seedPipelineEventRecord(t, ctx, db, sourceEvent)
 
 	result, err := pc.executeNodeContractHandler(ctx, "artifact-node", runtimecontracts.SystemNodeEventHandler{
 		Action: action,
@@ -1901,15 +1885,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureR
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
 	action.ArtifactRepo.Files[0].Path = runtimecontracts.LiteralExpression("../escape.yaml")
 	sourceEvent := testProjectionEventWithSourceAgent(execCtx.Request.Event, "test")
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
-			produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, $3, $4::uuid, '', 'entity', $5::jsonb, $6, 'agent', $7)
-	`, testPipelineRunID, sourceEvent.ID(), string(sourceEvent.Type()), entityID, string(sourceEvent.Payload()), sourceEvent.SourceAgent(), sourceEvent.CreatedAt()); err != nil {
-		t.Fatalf("seed source event: %v", err)
-	}
+	seedPipelineEventRecord(t, ctx, db, sourceEvent)
 
 	_, err := pc.executeNodeContractHandler(ctx, "artifact-node", runtimecontracts.SystemNodeEventHandler{
 		Action: action,
@@ -2587,6 +2563,11 @@ func testArtifactRepoActionAndContext(entityID string, entity map[string]any, ev
 				FlowID:   identity.NormalizeFlowID("artifact-repo"),
 				NodeID:   identity.NormalizeNodeID("artifact-node"),
 				Event:    evt,
+				ProducerRoute: events.RouteIdentity{
+					FlowID:       "artifact-repo",
+					FlowInstance: "artifact-repo",
+					EntityID:     entityID,
+				},
 				State: runtimeengine.StateSnapshot{
 					EntityID:        identity.NormalizeEntityID(entityID),
 					WorkflowName:    "artifact-repo",

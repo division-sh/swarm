@@ -433,13 +433,22 @@ func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, temp
 	return runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: semanticview.Wrap(bundle),
 		Instance:       instance,
+		TriggerEvent: eventtest.RootIngress(
+			"77777777-7777-4777-8777-777777777777", events.EventType("spawn.requested"),
+			"spawner", "", json.RawMessage(`{}`), 0,
+			"77777777-7777-4777-8777-777777777778", "", events.EventEnvelope{}, time.Now().UTC(),
+		),
 	}
 }
 
-func testFlowActivationTriggerEvent(eventID string) events.Event {
+func testFlowActivationTriggerEvent(eventID string, runIDs ...string) events.Event {
+	runID := "77777777-7777-4777-8777-777777777778"
+	if len(runIDs) > 0 {
+		runID = strings.TrimSpace(runIDs[0])
+	}
 	return eventtest.RootIngress(strings.TrimSpace(eventID),
 		events.EventType("spawn.requested"),
-		"spawner", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+		"spawner", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 
 }
 
@@ -617,7 +626,7 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	const triggerEventID = "33333333-3333-3333-3333-333333333333"
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.TriggerEvent = eventtest.InExecutionMode(testFlowActivationTriggerEvent(triggerEventID), executionmode.Mock)
+	req.TriggerEvent = eventtest.InExecutionMode(testFlowActivationTriggerEvent(triggerEventID, runID), executionmode.Mock)
 
 	err := am.ActivateFlowInstance(ctx, req)
 	if err != nil {
@@ -667,20 +676,19 @@ func TestActivateFlowInstancePreservesReplyContextIntoAutoEmit(t *testing.T) {
 	}
 }
 
-func TestActivateFlowInstanceAutoEmitDoesNotInventLineageWithoutTrigger(t *testing.T) {
+func TestActivateFlowInstanceAutoEmitRejectsMissingTriggerLineage(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle("task.started")
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	req.TriggerEvent = events.Event{}
 
-	if err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
-		t.Fatalf("ActivateFlowInstance: %v", err)
+	err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req)
+	if err == nil || !strings.Contains(err.Error(), "requires exact trigger run_id and parent_event_id") {
+		t.Fatalf("ActivateFlowInstance error = %v, want exact trigger lineage failure", err)
 	}
-	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/task.started")
-	if got := strings.TrimSpace(event.ParentEventID()); got != "" {
-		t.Fatalf("parent_event_id = %q, want empty without concrete trigger", got)
-	}
-	if _, ok := event.ContextMap("")["source_event_id"]; ok {
-		t.Fatalf("event context included source_event_id without concrete trigger: %#v", event.ContextMap(""))
+	if len(bus.published) != 0 {
+		t.Fatalf("published events = %#v, want none", bus.published)
 	}
 }
 
@@ -828,7 +836,7 @@ func TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable(t *testi
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID)
+	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID, runID)
 
 	err := am.ActivateFlowInstance(ctx, req)
 	if err != nil {
@@ -1397,6 +1405,7 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	bundle := testFlowBundle("")
 	const subjectID = "11111111-1111-1111-1111-111111111111"
 	req := testActivationRequest(bundle, "review", "inst-1", subjectID, "review/inst-1")
+	req.TriggerEvent = testFlowActivationTriggerEvent(req.TriggerEvent.ID(), runID)
 
 	if err := am.ActivateFlowInstance(ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
@@ -1492,6 +1501,7 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 	bundle := testFlowBundle("")
 	const subjectID = "22222222-2222-2222-2222-222222222222"
 	req := testActivationRequest(bundle, "review", "inst-1", subjectID, "review/inst-1")
+	req.TriggerEvent = testFlowActivationTriggerEvent(req.TriggerEvent.ID(), runID)
 
 	if err := am.ActivateFlowInstance(ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)

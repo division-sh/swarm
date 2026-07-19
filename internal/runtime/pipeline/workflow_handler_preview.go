@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -112,9 +111,6 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 	pc := NewPipelineCoordinatorWithOptions(previewBus{}, nil, PipelineCoordinatorOptions{Module: module})
 	if pc == nil {
 		return HandlerPreview{}, fmt.Errorf("preview coordinator is nil")
-	}
-	if evt.CreatedAt().IsZero() {
-		evt = events.Project(evt, events.ProjectCreatedAt(time.Now().UTC()))
 	}
 	result, err := pc.executeNodeContractHandler(ctx, nodeID, handler, workflowTriggerContext{
 		Event: evt,

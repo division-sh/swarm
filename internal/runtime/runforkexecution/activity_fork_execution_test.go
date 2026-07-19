@@ -105,7 +105,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			seedSelectedContractActivityRequest(t, db, sourceRunID, sourceRequestEventID, selectedContractActivityRequestPayload{
 				ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"},
 				EffectClass: string(tt.effectClass), SuccessEvent: "flow_a.connector.succeeded", FailureEvent: "flow_a.connector.failed",
-				RetryMaxAttempts: 1, ForkPolicy: string(tt.forkPolicy), EntityID: entityID,
+				RetryMaxAttempts: 1, ForkPolicy: string(tt.forkPolicy), EntityID: entityID, FlowInstance: "flow-a/1",
 				NodeID: "test-node", FlowID: "flow_a", HandlerEventKey: "review.requested",
 				SourceEventID: initiatingEventID, SourceRunID: sourceRunID, Attempt: 1,
 				Generation: sourceGeneration, LoopStage: "review",
@@ -222,6 +222,7 @@ type selectedContractActivityRequestPayload struct {
 	EntityID         string                       `json:"entity_id"`
 	NodeID           string                       `json:"node_id"`
 	FlowID           string                       `json:"flow_id"`
+	FlowInstance     string                       `json:"flow_instance"`
 	HandlerEventKey  string                       `json:"handler_event_key"`
 	SourceEventID    string                       `json:"source_event_id"`
 	SourceRunID      string                       `json:"source_run_id"`

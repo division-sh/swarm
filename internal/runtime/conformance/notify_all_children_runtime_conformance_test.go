@@ -34,8 +34,9 @@ type notifyAllChildrenStore interface {
 }
 
 type notifyAllChildrenRuntime struct {
-	bus     *runtimebus.EventBus
-	manager *runtimemanager.AgentManager
+	bus         *runtimebus.EventBus
+	diagnostics *fanInBarrierDiagnosticBus
+	manager     *runtimemanager.AgentManager
 }
 
 func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndReplayOnBothBackends(t *testing.T) {
@@ -82,6 +83,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			descriptors := notifyAllChildrenAccountDescriptors(t, ctx, backend)
 			if len(descriptors) != 3 {
 				dumpNotifyAllChildrenRuntimeState(t, ctx, backend, db)
+				t.Logf("notify-all-children runtime diagnostics: %#v", runtime.diagnostics.snapshot())
 				t.Fatalf("active account descriptors = %#v, want A/B/stale", descriptors)
 			}
 			for _, accountID := range []string{"acct-a", "acct-b", "acct-stale"} {
@@ -273,13 +275,14 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 		guards:   runtimepipeline.NewContractGuardRegistry(source),
 		actions:  runtimepipeline.NewContractActionRegistry(source),
 	}
-	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, db, runtimepipeline.PipelineCoordinatorOptions{
+	diagnosticBus := &fanInBarrierDiagnosticBus{EventBus: eventBus}
+	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(diagnosticBus, db, runtimepipeline.PipelineCoordinatorOptions{
 		Module:            module,
 		InstanceActivator: manager.ActivateFlowInstance,
 		WorkflowStore:     workflowStore,
 		TestEngineEmitNow: engineNow,
 	})
-	return notifyAllChildrenRuntime{bus: eventBus, manager: manager}
+	return notifyAllChildrenRuntime{bus: eventBus, diagnostics: diagnosticBus, manager: manager}
 }
 
 func publishNotifyAllChildrenEvent(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, source semanticview.Source, runID, localEvent string, payload map[string]any) string {
@@ -353,13 +356,14 @@ func notifyAllChildrenAccountDescriptors(t *testing.T, ctx context.Context, back
 type notifyAllChildrenItemEvent struct {
 	ID        string
 	AccountID string
+	CreatedAt string
 }
 
 func loadNotifyAllChildrenItemEvents(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID, sourceEventID string) []notifyAllChildrenItemEvent {
 	t.Helper()
-	query := `SELECT event_id::text, payload FROM events WHERE run_id = $1::uuid AND event_name = $2 AND source_event_id = $3::uuid ORDER BY created_at, event_id`
+	query := `SELECT event_id::text, payload, created_at FROM events WHERE run_id = $1::uuid AND event_name = $2 AND source_event_id = $3::uuid ORDER BY created_at, event_id`
 	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT event_id, payload FROM events WHERE run_id = ? AND event_name = ? AND source_event_id = ? ORDER BY created_at, event_id`
+		query = `SELECT event_id, payload, created_at FROM events WHERE run_id = ? AND event_name = ? AND source_event_id = ? ORDER BY created_at, event_id`
 	}
 	rows, err := db.QueryContext(ctx, query, runID, "portfolio/account.notify.requested", sourceEventID)
 	if err != nil {
@@ -369,8 +373,8 @@ func loadNotifyAllChildrenItemEvents(t *testing.T, ctx context.Context, backend 
 	out := []notifyAllChildrenItemEvent{}
 	for rows.Next() {
 		var id string
-		var raw any
-		if err := rows.Scan(&id, &raw); err != nil {
+		var raw, createdAt any
+		if err := rows.Scan(&id, &raw, &createdAt); err != nil {
 			t.Fatalf("scan fan-out item event: %v", err)
 		}
 		payload := map[string]any{}
@@ -378,7 +382,7 @@ func loadNotifyAllChildrenItemEvents(t *testing.T, ctx context.Context, backend 
 			t.Fatalf("decode fan-out item payload: %v", err)
 		}
 		accountID, _ := payload["account_id"].(string)
-		out = append(out, notifyAllChildrenItemEvent{ID: id, AccountID: accountID})
+		out = append(out, notifyAllChildrenItemEvent{ID: id, AccountID: accountID, CreatedAt: fmt.Sprint(createdAt)})
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("read fan-out item events: %v", err)
@@ -393,7 +397,7 @@ func assertNotifyAllChildrenItemSequence(t *testing.T, items []notifyAllChildren
 		got = append(got, item.AccountID)
 	}
 	if !slices.Equal(got, want) {
-		t.Fatalf("persisted fan-out item sequence = %#v, want %#v with order and duplicates preserved", got, want)
+		t.Fatalf("persisted fan-out item sequence = %#v (%#v), want %#v with order and duplicates preserved", got, items, want)
 	}
 }
 

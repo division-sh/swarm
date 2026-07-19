@@ -24,7 +24,7 @@ func TestCoordinatorHandlerExecutionEngineUsesRuntimeEnginePath(t *testing.T) {
 	}
 	outcome, err := engine.ExecuteHandlerSteps(testAuthorActivityContext(context.Background()), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
-	}, eventtest.RootIngress("00000000-0000-0000-0000-000000000001", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Unix(1, 0).UTC()), "custom.trigger")
+	}, eventtest.RootIngress("00000000-0000-0000-0000-000000000001", events.EventType("custom.trigger"), "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Unix(1, 0).UTC()), "custom.trigger")
 	if err != nil {
 		t.Fatalf("ExecuteHandlerSteps: %v", err)
 	}
@@ -71,7 +71,10 @@ func TestEnsureHandlerEntityIDUsesCanonicalPrimaryForEntityMaterializingHandler(
 		},
 	}
 
-	entityID, evt := ensureHandlerEntityID(source, "", handler, "", eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	entityID, evt, resolveErr := ensureHandlerEntityID(source, "", handler, "", eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	if resolveErr != nil {
+		t.Fatalf("ensureHandlerEntityID: %v", resolveErr)
+	}
 
 	if entityID != FlowInstanceEntityID("root") {
 		t.Fatalf("entityID = %q, want canonical root primary", entityID)
@@ -96,7 +99,10 @@ func TestEnsureHandlerEntityIDCreateEntityUsesInboundPrimaryReference(t *testing
 		time.Time{},
 	)
 
-	entityID, evt := ensureHandlerEntityID(nil, "", handler, "ent-parent", inbound)
+	entityID, evt, resolveErr := ensureHandlerEntityID(nil, "", handler, "ent-parent", inbound)
+	if resolveErr != nil {
+		t.Fatalf("ensureHandlerEntityID: %v", resolveErr)
+	}
 
 	if entityID != "ent-parent" {
 		t.Fatalf("entityID = %q, want inbound primary reference", entityID)

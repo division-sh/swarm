@@ -97,7 +97,7 @@ func previewHandler(t testing.TB, bundle *runtimecontracts.WorkflowContractBundl
 		"",
 		rawPayload,
 		0,
-		"",
+		"00000000-0000-0000-0000-000000000001",
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "item-123"),
 		time.Now().UTC(),
