@@ -359,7 +359,7 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 		{id: eventID, eventType: "standing.work"},
 		{id: unsettledEventID, eventType: "standing.unsettled"},
 	} {
-		seedPostgresRootEventRecordFixture(
+		seedPostgresSemanticEventRecordFixture(
 			t, ctx, db, fixture.id, created[0].RunID, fixture.eventType,
 			events.EventProducerPlatform, "test", "", "", time.Now().UTC(),
 		)

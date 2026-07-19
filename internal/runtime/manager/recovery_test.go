@@ -383,9 +383,28 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 		t.Fatalf("missing selected route recovery recipient guard for %s", forkRunID)
 	}
 	guard.ExpectForkEvent("fork-event-1", "source-event-1")
-	evt := eventtest.RootIngress("fork-event-1",
+	lineage, err := events.NewSelectedForkLineage(
+		"fork-run-1",
+		"source-run-1",
+		"source-event-1",
+		"selected-contract-recovery-test",
+		"",
+		executionmode.Live,
+	)
+	if err != nil {
+		t.Fatalf("NewSelectedForkLineage: %v", err)
+	}
+	evt := eventtest.SelectedForkReplay(
+		"fork-event-1",
 		events.EventType("work.ready"),
-		selectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+		eventtest.Producer(events.EventProducerPlatform, selectedContractExecutionOwner),
+		"",
+		nil,
+		0,
+		lineage,
+		events.EventEnvelope{},
+		time.Time{},
+	)
 
 	if err := guard.AuthorizeEvent(testAuthorActivityContext(context.Background()), evt); err != nil {
 		t.Fatalf("AuthorizeEvent recovered guard: %v", err)

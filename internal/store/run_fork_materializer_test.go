@@ -42,7 +42,7 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	`, sourceRunID, authorActivityTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, firstEventID, sourceRunID, "fork.before", events.EventProducerPlatform, "test", entityID, "", at)
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, firstEventID, sourceRunID, "fork.before", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -73,7 +73,7 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	}
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
 
-	seedPostgresRootEventRecordFixture(t, ctx, db, secondEventID, sourceRunID, "fork.field_only", events.EventProducerPlatform, "test", entityID, "", fieldOnlyAt)
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, secondEventID, sourceRunID, "fork.field_only", events.EventProducerPlatform, "test", entityID, "", fieldOnlyAt)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -93,7 +93,7 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	}
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
 
-	seedPostgresRootEventRecordFixture(t, ctx, db, thirdEventID, sourceRunID, "fork.after", events.EventProducerPlatform, "test", entityID, "", afterAt)
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, thirdEventID, sourceRunID, "fork.after", events.EventProducerPlatform, "test", entityID, "", afterAt)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -287,7 +287,7 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 	`, sourceRunID, authorActivityTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.no_event_flow", events.EventProducerPlatform, "test", entityID, "", at)
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.no_event_flow", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -314,7 +314,7 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 	}
 
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
-	seedPostgresRootEventRecordFixture(t, ctx, db, postEventID, sourceRunID, "fork.post_flow", events.EventProducerPlatform, "test", entityID, "post-flow/ignored", afterAt)
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, postEventID, sourceRunID, "fork.post_flow", events.EventProducerPlatform, "test", entityID, "post-flow/ignored", afterAt)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -388,7 +388,7 @@ func TestRunForkPlanner_FailsClosedWithoutSourceAtTEntitySnapshotMetadata(t *tes
 	`, sourceRunID, authorActivityTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.no_metadata", events.EventProducerPlatform, "test", entityID, "", at)
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.no_metadata", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -451,7 +451,7 @@ func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeHasNoSourceMetadataAuthori
 	`, sourceRunID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.event_flow_only", events.EventProducerPlatform, "test", entityID, "event-flow/at-T", at)
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.event_flow_only", events.EventProducerPlatform, "test", entityID, "event-flow/at-T", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -491,7 +491,7 @@ func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeConflictsWithSourceMetadat
 	`, sourceRunID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.conflicting_entity_type", events.EventProducerPlatform, "test", entityID, "event-flow/at-T", at)
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.conflicting_entity_type", events.EventProducerPlatform, "test", entityID, "event-flow/at-T", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -725,7 +725,7 @@ func TestRunForkMaterializer_FailsClosedOnRepeatAndUnsupportedBlockers(t *testin
 	`, sourceRunID, authorActivityTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.pending", events.EventProducerPlatform, "test", entityID, "", at)
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.pending", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -781,7 +781,7 @@ func TestRunForkMaterializer_FailsClosedOnRepeatAndUnsupportedBlockers(t *testin
 	if _, err := db.ExecContext(ctx, `DELETE FROM event_deliveries WHERE run_id = $1::uuid`, sourceRunID); err != nil {
 		t.Fatalf("clear pending delivery: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, clearEventID, sourceRunID, "fork.delivery_cleared", events.EventProducerPlatform, "test", entityID, "", at.Add(time.Second))
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, clearEventID, sourceRunID, "fork.delivery_cleared", events.EventProducerPlatform, "test", entityID, "", at.Add(time.Second))
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEventDeliveries)
 	if _, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID}); err == nil || !strings.Contains(err.Error(), RunForkBlockerNonAgentDeliveryReplayUnsupported) {
 		t.Fatalf("MaterializeRunFork original frontier after delete error = %v, want immutable non-agent delivery blocker", err)
@@ -1209,7 +1209,7 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 				`, foreignRunID, at.Add(-time.Minute)); err != nil {
 					t.Fatalf("seed foreign run: %v", err)
 				}
-				seedPostgresRootEventRecordFixture(t, ctx, db, foreignEventID, foreignRunID, "foreign.ready", events.EventProducerPlatform, "test", "", "", at)
+				seedPostgresSemanticEventRecordFixture(t, ctx, db, foreignEventID, foreignRunID, "foreign.ready", events.EventProducerPlatform, "test", "", "", at)
 				var deliveryID string
 				if err := db.QueryRowContext(ctx, `
 					INSERT INTO event_deliveries (
@@ -1426,7 +1426,7 @@ func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, afterEventID, sourceRunID, "fork.after", events.EventProducerPlatform, "test", entityID, "flow-a/1", at.Add(time.Second))
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, afterEventID, sourceRunID, "fork.after", events.EventProducerPlatform, "test", entityID, "flow-a/1", at.Add(time.Second))
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents)
 	blocked, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
 	if err == nil || !strings.Contains(err.Error(), "source_events_advanced_after_fork_point") {
@@ -1522,7 +1522,7 @@ func TestRunForkActivation_FailsClosedForForkReplayStateWithTaxonomy(t *testing.
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, forkEventID, materialized.ForkRunID, "fork.replay_state", events.EventProducerPlatform, "test", "", "", at.Add(time.Second))
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkEventID, materialized.ForkRunID, "fork.replay_state", events.EventProducerPlatform, "test", "", "", at.Add(time.Second))
 
 	blocked, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
 	if err == nil || !strings.Contains(err.Error(), "fork_events_already_exist") {
@@ -1757,7 +1757,7 @@ func seedActivationReadySourceRun(t *testing.T, db *sql.DB, sourceRunID, entityI
 	`, sourceRunID, authorActivityTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.ready", events.EventProducerPlatform, "test", entityID, "", at)
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.ready", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at

@@ -28,13 +28,20 @@ type inboundPublicationProofStore interface {
 	runtimebus.EventStore
 }
 
-func commitInboundPublicationTestEvent(store runtimebus.EventStore, mutation runtimeinbound.Mutation, event events.Event) error {
+func commitInboundPublicationTestEvent(store runtimebus.EventStore, mutation runtimeinbound.Mutation, publication *runtimeinbound.EventFinalization) error {
+	if publication == nil {
+		return errors.New("inbound publication test event is required")
+	}
 	eventBus, err := runtimebus.NewEventBus(store)
 	if err != nil {
 		return err
 	}
-	_, err = eventBus.PreparePublishInMutation(mutation.Context(), event)
-	return err
+	prepared, err := eventBus.PreparePublishInMutation(mutation.Context(), publication.Event)
+	if err != nil {
+		return err
+	}
+	publication.Event = prepared.Event
+	return nil
 }
 
 func TestSQLiteInboundPublicationOperationCommitsRetriesAndRollsBackAtomically(t *testing.T) {
@@ -79,11 +86,13 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	}
 	request := inboundPublicationProofRequest(t, candidate, standing.RunID, sequence, "delivery-1")
 	callbackCalls := 0
+	var publications []runtimeinbound.EventFinalization
 	record, err := store.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
 		callbackCalls++
-		publications, evidence := inboundPublicationProofEvents(t, request)
-		for _, publication := range publications {
-			if err := commitInboundPublicationTestEvent(store, mutation, publication.Event); err != nil {
+		var evidence events.Event
+		publications, evidence = inboundPublicationProofEvents(t, request)
+		for index := range publications {
+			if err := commitInboundPublicationTestEvent(store, mutation, &publications[index]); err != nil {
 				return err
 			}
 		}
@@ -118,10 +127,10 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	}
 
 	failedRequest := inboundPublicationProofRequest(t, candidate, standing.RunID, sequence, "delivery-failure")
-	publications, _ := inboundPublicationProofEvents(t, failedRequest)
+	failedPublications, _ := inboundPublicationProofEvents(t, failedRequest)
 	injected := errors.New("injected publication failure")
 	if _, err := store.RunInboundPublicationMutation(ctx, failedRequest, func(mutation runtimeinbound.Mutation) error {
-		if err := commitInboundPublicationTestEvent(store, mutation, publications[0].Event); err != nil {
+		if err := commitInboundPublicationTestEvent(store, mutation, &failedPublications[0]); err != nil {
 			return err
 		}
 		return injected
@@ -224,8 +233,8 @@ func runInboundPublicationStandingGenerationRebindProof(t *testing.T, db *sql.DB
 		if err := workflowStore.Create(mutation.Context(), child); err != nil {
 			return err
 		}
-		for _, publication := range publications {
-			if err := commitInboundPublicationTestEvent(store, mutation, publication.Event); err != nil {
+		for index := range publications {
+			if err := commitInboundPublicationTestEvent(store, mutation, &publications[index]); err != nil {
 				return err
 			}
 		}
@@ -272,7 +281,7 @@ func runInboundPublicationOrdinalRollbackProof(t *testing.T, ctx context.Context
 				appendCount = len(publications)
 			}
 			for index := 0; index < appendCount; index++ {
-				if err := commitInboundPublicationTestEvent(store, mutation, publications[index].Event); err != nil {
+				if err := commitInboundPublicationTestEvent(store, mutation, &publications[index]); err != nil {
 					return err
 				}
 			}
@@ -301,8 +310,8 @@ func runInboundPublicationOrdinalRollbackProof(t *testing.T, ctx context.Context
 		request.ResolvedRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), request.OriginalReceivedAt,
 	)
 	if _, err := store.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
-		for _, publication := range publications {
-			if err := commitInboundPublicationTestEvent(store, mutation, publication.Event); err != nil {
+		for index := range publications {
+			if err := commitInboundPublicationTestEvent(store, mutation, &publications[index]); err != nil {
 				return err
 			}
 		}
@@ -331,8 +340,8 @@ func runInboundPublicationConcurrentRetryProof(t *testing.T, ctx context.Context
 			<-start
 			record, err := store.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
 				callbackCalls.Add(1)
-				for _, publication := range publications {
-					if err := commitInboundPublicationTestEvent(store, mutation, publication.Event); err != nil {
+				for index := range publications {
+					if err := commitInboundPublicationTestEvent(store, mutation, &publications[index]); err != nil {
 						return err
 					}
 				}
@@ -370,8 +379,8 @@ func commitInboundPublicationProof(t *testing.T, ctx context.Context, store inbo
 	t.Helper()
 	publications, evidence := inboundPublicationProofEventsCount(t, request, outputCount)
 	record, err := store.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
-		for _, publication := range publications {
-			if err := commitInboundPublicationTestEvent(store, mutation, publication.Event); err != nil {
+		for index := range publications {
+			if err := commitInboundPublicationTestEvent(store, mutation, &publications[index]); err != nil {
 				return err
 			}
 		}
@@ -546,8 +555,9 @@ func inboundPublicationProofEventsCount(t *testing.T, request runtimeinbound.Req
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := eventtest.RootIngress(rawID, "inbound.github.push", "inbound-gateway", "", []byte(`{"value":1}`), 0, request.ResolvedRunID, "", envelope, request.OriginalReceivedAt)
-	normalized := eventtest.RootIngress(normalizedID, "github.push.normalized", "inbound-gateway", "", []byte(`{"value":1}`), 0, request.ResolvedRunID, "", events.EventEnvelope{}, request.OriginalReceivedAt)
+	payload := []byte(`{"value":{"z":2,"a":1},"provider":"github"}`)
+	raw := eventtest.RootIngress(rawID, "inbound.github.push", "inbound-gateway", "", payload, 0, request.ResolvedRunID, "", envelope, request.OriginalReceivedAt)
+	normalized := eventtest.RootIngress(normalizedID, "github.push.normalized", "inbound-gateway", "", payload, 0, request.ResolvedRunID, "", events.EventEnvelope{}, request.OriginalReceivedAt)
 	authorization := runtimeprovideroutput.Authorization{
 		Provider: request.Provider, Event: string(normalized.Type()), PackID: "provider.github", PackVersion: "1.0.0",
 		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "proof-generation",
@@ -562,12 +572,12 @@ func inboundPublicationProofEventsCount(t *testing.T, request runtimeinbound.Req
 		eventIDs[index] = publications[index].Event.ID()
 		eventNames[index] = string(publications[index].Event.Type())
 	}
-	payload, err := runtimeinbound.BuildEvidencePayload(request, eventIDs, eventNames)
+	evidencePayload, err := runtimeinbound.BuildEvidencePayload(request, eventIDs, eventNames)
 	if err != nil {
 		t.Fatalf("BuildEvidencePayload: %v", err)
 	}
 	evidence := eventtest.DiagnosticDirect(
-		request.MarkerEventID, events.EventTypePlatformInboundRecord, "runtime", "", payload, 0,
+		request.MarkerEventID, events.EventTypePlatformInboundRecord, "runtime", "", evidencePayload, 0,
 		request.ResolvedRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), request.OriginalReceivedAt,
 	)
 	return publications, evidence

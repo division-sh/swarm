@@ -1189,13 +1189,13 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		t.Fatalf("seed source event: %v", err)
 	}
 	for _, fixture := range []events.Event{
-		eventtest.PersistedProjectionForProducer(
+		eventtest.PersistedChildForProducer(
 			timerForkEvent, events.EventType("timer.event"), eventtest.Producer(events.EventProducerNode, "cleanup-timer"), "",
-			[]byte(`{}`), 0, runA, "", entityEnvelope, seededAt.Add(time.Second),
+			[]byte(`{}`), 0, runA, sourceEvent, entityEnvelope, seededAt.Add(time.Second),
 		),
-		eventtest.PersistedProjectionForProducer(
+		eventtest.PersistedChildForProducer(
 			uuid.NewString(), events.EventType("extra.event"), eventtest.Producer(events.EventProducerAgent, "cleanup-agent"), "",
-			[]byte(`{}`), 0, runA, "", entityEnvelope, seededAt.Add(2*time.Second),
+			[]byte(`{}`), 0, runA, sourceEvent, entityEnvelope, seededAt.Add(2*time.Second),
 		),
 	} {
 		if err := insertCanonicalEventRecordFixture(ctx, pg, fixture); err != nil {
@@ -1203,7 +1203,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		}
 	}
 	noRunSemanticEvent := eventtest.DiagnosticDirect(
-		noRunEvent, events.EventTypePlatformRuntimeLog, "cleanup-runtime", "", []byte(`{}`), 0,
+		noRunEvent, events.EventTypePlatformRuntimeLog, "runtime", "", []byte(`{}`), 0,
 		"", "", events.EventEnvelope{}, seededAt.Add(3*time.Second),
 	)
 	if err := commitDiagnosticRuntimeLogFixture(ctx, pg, noRunSemanticEvent); err != nil {

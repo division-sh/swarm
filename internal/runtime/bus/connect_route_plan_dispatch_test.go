@@ -137,7 +137,7 @@ func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
 	} {
 		t.Run("plan/"+tc.name, func(t *testing.T) {
 			if !tc.source.Empty() {
-				tc.source.EntityID = "entity-1"
+				tc.source.EntityID = eventtest.UUID("entity-1")
 			}
 			evt := eventtest.RootIngress("", events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: tc.source}, time.Unix(1, 0).UTC())
 			plan := runtimepinrouting.ConnectRoutePlan{Source: tc.endpoint}
@@ -161,7 +161,7 @@ func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
 	} {
 		t.Run("issue/"+tc.name, func(t *testing.T) {
 			if !tc.source.Empty() {
-				tc.source.EntityID = "entity-1"
+				tc.source.EntityID = eventtest.UUID("entity-1")
 			}
 			source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
 				id: "producer", mode: tc.mode,
@@ -234,14 +234,14 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 						}
 					}
 					eventType := events.EventType("producer/work.ready")
-					sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: "producer-entity"}
+					sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-entity")}
 					if producerMode == "template" {
 						eventType = "producer/inst-1/work.ready"
 						sourceRoute.FlowInstance = "producer/inst-1"
 					}
 					envelope := events.EventEnvelope{Source: sourceRoute}
 					if rootReceiver {
-						envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{EntityID: "root-entity"})
+						envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{EntityID: eventtest.UUID("root-entity")})
 					}
 					eventID := uuid.NewString()
 					evt := eventtest.RootIngress(eventID, eventType, "", "", []byte(`{}`), 0, "", "", envelope, time.Now().UTC())
@@ -305,7 +305,7 @@ func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplica
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := eventtest.RootIngress(uuid.NewString(), "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: "producer-entity"}}, time.Now().UTC())
+	evt := eventtest.RootIngress(uuid.NewString(), "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-entity")}}, time.Now().UTC())
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -329,7 +329,7 @@ func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplica
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			eventID := uuid.NewString()
-			evt := eventtest.RootIngress(eventID, "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: "producer-entity"}}, time.Now().UTC())
+			evt := eventtest.RootIngress(eventID, "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-entity")}}, time.Now().UTC())
 			plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 			if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -367,7 +367,7 @@ func TestEventBusPublish_ConnectRoutePlanAddressCollisionRejectsRuntimeResolvedN
 				targetRouteMemoryStore: newTargetRouteMemoryStore(),
 				flowInstances: []ActiveFlowInstanceDescriptor{{
 					InstanceID:    "one",
-					EntityID:      "ent-1",
+					EntityID:      eventtest.UUID("ent-1"),
 					FlowInstance:  "consumer/one",
 					AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 				}},
@@ -444,7 +444,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsBeforeReplyContextMutation(t *
 		}
 	}
 	evt := eventtest.RootIngress(uuid.NewString(), "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
-		Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: "producer-entity"},
+		Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-entity")},
 	}, time.Now().UTC())
 
 	dispatch, err := resolver.Plan(context.Background(), evt)
@@ -1274,7 +1274,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTarget(t *t
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		flowInstances: []ActiveFlowInstanceDescriptor{{
 			InstanceID:    "one",
-			EntityID:      "ent-1",
+			EntityID:      eventtest.UUID("ent-1"),
 			FlowInstance:  "consumer/one",
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
@@ -1290,7 +1290,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTarget(t *t
 	evt := eventtest.RootIngress(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	want := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: "ent-1"}}
+	want := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: eventtest.UUID("ent-1")}}
 
 	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
 	if err != nil {
@@ -1316,7 +1316,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		flowInstances: []ActiveFlowInstanceDescriptor{{
 			InstanceID:    "one",
-			EntityID:      "ent-1",
+			EntityID:      eventtest.UUID("ent-1"),
 			FlowInstance:  "consumer/one",
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
@@ -1332,7 +1332,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 	evt := eventtest.RootIngress(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	want := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: "ent-1"}}
+	want := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: eventtest.UUID("ent-1")}}
 
 	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
 	if err != nil {
@@ -1452,7 +1452,7 @@ func TestEventBusPublish_ConnectRoutePlanCreatesTemplateInstanceOnMissingCreate(
 	replayTarget := eb.SubscribeInternal(want.SubscriberID)
 	store.flowInstances = []ActiveFlowInstanceDescriptor{{
 		InstanceID:    "drift",
-		EntityID:      "ent-drift",
+		EntityID:      eventtest.UUID("ent-drift"),
 		FlowInstance:  "consumer/drift",
 		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 	}}
@@ -1744,7 +1744,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
 			flowInstances: []ActiveFlowInstanceDescriptor{{
 				InstanceID:    "one",
-				EntityID:      "ent-1",
+				EntityID:      eventtest.UUID("ent-1"),
 				FlowInstance:  "account/one",
 				AddressFields: map[string]string{"entity.account_id": "acct-1"},
 			}},
@@ -1765,7 +1765,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 	evt := eventtest.RootIngress(eventID,
 		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	want := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "account-node-one", Target: events.RouteIdentity{FlowID: "account", FlowInstance: "account/one", EntityID: "ent-1"}}
+	want := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "account-node-one", Target: events.RouteIdentity{FlowID: "account", FlowInstance: "account/one", EntityID: eventtest.UUID("ent-1")}}
 
 	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -1794,7 +1794,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 	replayTarget := eb.SubscribeInternal("account-node-one")
 	store.flowInstances = []ActiveFlowInstanceDescriptor{{
 		InstanceID:    "drift",
-		EntityID:      "ent-drift",
+		EntityID:      eventtest.UUID("ent-drift"),
 		FlowInstance:  "account/drift",
 		AddressFields: map[string]string{"entity.account_id": "acct-1"},
 	}}
@@ -1806,7 +1806,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 		t.Fatalf("PublishPersistedRecipients: %v", err)
 	}
 	replayed := requireBusEvent(t, replayTarget, "select resolution committed replay")
-	if replayed.FlowInstance() != "account/one" || replayed.EntityID() != "ent-1" {
+	if replayed.FlowInstance() != "account/one" || replayed.EntityID() != eventtest.UUID("ent-1") {
 		t.Fatalf("replayed delivery target = flow_instance:%q entity:%q, want persisted account/one ent-1", replayed.FlowInstance(), replayed.EntityID())
 	}
 	if got := store.flowInstanceDescriptorCalls; got != 0 {
@@ -1826,7 +1826,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 			name: "missing existing instance does not create",
 			flowInstances: []ActiveFlowInstanceDescriptor{{
 				InstanceID:    "other",
-				EntityID:      "ent-other",
+				EntityID:      eventtest.UUID("ent-other"),
 				FlowInstance:  "account/other",
 				AddressFields: map[string]string{"entity.account_id": "acct-2"},
 			}},
@@ -1841,8 +1841,8 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 		{
 			name: "ambiguous existing instances fail closed",
 			flowInstances: []ActiveFlowInstanceDescriptor{
-				{InstanceID: "one", EntityID: "ent-1", FlowInstance: "account/one", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
-				{InstanceID: "two", EntityID: "ent-2", FlowInstance: "account/two", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
+				{InstanceID: "one", EntityID: eventtest.UUID("ent-1"), FlowInstance: "account/one", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
+				{InstanceID: "two", EntityID: eventtest.UUID("ent-2"), FlowInstance: "account/two", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
 			},
 			addRoutes:   []string{"one", "two"},
 			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetAmbiguous),
@@ -1932,7 +1932,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
 			flowInstances: []ActiveFlowInstanceDescriptor{{
 				InstanceID:    "one",
-				EntityID:      "ent-1",
+				EntityID:      eventtest.UUID("ent-1"),
 				FlowInstance:  "account/one",
 				AddressFields: map[string]string{"entity.account_id": "acct-1"},
 			}},
@@ -1952,7 +1952,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 	existingID := uuid.NewString()
 	existing := eventtest.RootIngress(existingID,
 		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	existingWant := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "account-node-one", Target: events.RouteIdentity{FlowID: "account", FlowInstance: "account/one", EntityID: "ent-1"}}
+	existingWant := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "account-node-one", Target: events.RouteIdentity{FlowID: "account", FlowInstance: "account/one", EntityID: eventtest.UUID("ent-1")}}
 
 	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), existing)
 	if err != nil {
@@ -2029,7 +2029,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 	replayTarget := eb.SubscribeInternal("account-node-" + activation.Instance.InstanceID)
 	store.flowInstances = []ActiveFlowInstanceDescriptor{{
 		InstanceID:    "drift",
-		EntityID:      "ent-drift",
+		EntityID:      eventtest.UUID("ent-drift"),
 		FlowInstance:  "account/drift",
 		AddressFields: map[string]string{"entity.account_id": "acct-2"},
 	}}
@@ -2097,8 +2097,8 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionFailsClosedForA
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
 			flowInstances: []ActiveFlowInstanceDescriptor{
-				{InstanceID: "one", EntityID: "ent-1", FlowInstance: "account/one", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
-				{InstanceID: "two", EntityID: "ent-2", FlowInstance: "account/two", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
+				{InstanceID: "one", EntityID: eventtest.UUID("ent-1"), FlowInstance: "account/one", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
+				{InstanceID: "two", EntityID: eventtest.UUID("ent-2"), FlowInstance: "account/two", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
 			},
 		},
 	}
@@ -2485,7 +2485,7 @@ func TestEventBusPublish_ConnectRoutePlanRejectsCreateConflict(t *testing.T) {
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
 			flowInstances: []ActiveFlowInstanceDescriptor{{
 				InstanceID:    "one",
-				EntityID:      "ent-1",
+				EntityID:      eventtest.UUID("ent-1"),
 				FlowInstance:  "consumer/one",
 				AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 			}},
@@ -2573,7 +2573,7 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		flowInstances: []ActiveFlowInstanceDescriptor{{
 			InstanceID:    "one",
-			EntityID:      "ent-1",
+			EntityID:      eventtest.UUID("ent-1"),
 			FlowInstance:  "consumer/one",
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
@@ -2591,13 +2591,13 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 	evt := eventtest.RootIngress(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	wantOne := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: "ent-1"}}
+	wantOne := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: eventtest.UUID("ent-1")}}
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	got := requireBusEvent(t, consumerOne, "initial instance-key publish")
-	if got.FlowInstance() != "consumer/one" || got.EntityID() != "ent-1" {
+	if got.FlowInstance() != "consumer/one" || got.EntityID() != eventtest.UUID("ent-1") {
 		t.Fatalf("initial delivery target = flow_instance:%q entity:%q, want consumer/one ent-1", got.FlowInstance(), got.EntityID())
 	}
 	if !deliveryRoutesContain(store.routes[eventID], wantOne) || len(store.routes[eventID]) != 1 {
@@ -2606,7 +2606,7 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 
 	store.flowInstances = []ActiveFlowInstanceDescriptor{{
 		InstanceID:    "two",
-		EntityID:      "ent-2",
+		EntityID:      eventtest.UUID("ent-2"),
 		FlowInstance:  "consumer/two",
 		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 	}}
@@ -2619,7 +2619,7 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 		t.Fatalf("PublishPersistedRecipients: %v", err)
 	}
 	got = requireBusEvent(t, consumerOne, "persisted replay after descriptor drift")
-	if got.FlowInstance() != "consumer/one" || got.EntityID() != "ent-1" {
+	if got.FlowInstance() != "consumer/one" || got.EntityID() != eventtest.UUID("ent-1") {
 		t.Fatalf("replayed delivery target = flow_instance:%q entity:%q, want persisted consumer/one ent-1", got.FlowInstance(), got.EntityID())
 	}
 	select {
@@ -2638,7 +2638,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarge
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		flowInstances: []ActiveFlowInstanceDescriptor{{
 			InstanceID:    "one",
-			EntityID:      "ent-1",
+			EntityID:      eventtest.UUID("ent-1"),
 			FlowInstance:  "consumer/one",
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
@@ -2654,7 +2654,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarge
 	evt := eventtest.RootIngress(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"source_vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	want := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: "ent-1"}}
+	want := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: eventtest.UUID("ent-1")}}
 
 	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
 	if err != nil {
@@ -2702,7 +2702,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKe
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		flowInstances: []ActiveFlowInstanceDescriptor{{
 			InstanceID:    "one",
-			EntityID:      "ent-1",
+			EntityID:      eventtest.UUID("ent-1"),
 			FlowInstance:  "consumer/one",
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
@@ -2777,7 +2777,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 			payload: `{"vertical_id":"v-1"}`,
 			flowInstances: []ActiveFlowInstanceDescriptor{{
 				InstanceID:    "two",
-				EntityID:      "ent-2",
+				EntityID:      eventtest.UUID("ent-2"),
 				FlowInstance:  "consumer/two",
 				AddressFields: map[string]string{"entity.vertical_id": "v-2"},
 			}},
@@ -2788,8 +2788,8 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 			name:    "ambiguous receiver instance key",
 			payload: `{"vertical_id":"v-1"}`,
 			flowInstances: []ActiveFlowInstanceDescriptor{
-				{InstanceID: "one", EntityID: "ent-1", FlowInstance: "consumer/one", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
-				{InstanceID: "two", EntityID: "ent-2", FlowInstance: "consumer/two", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
+				{InstanceID: "one", EntityID: eventtest.UUID("ent-1"), FlowInstance: "consumer/one", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
+				{InstanceID: "two", EntityID: eventtest.UUID("ent-2"), FlowInstance: "consumer/two", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
 			},
 			addRoutes:   []string{"one", "two"},
 			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetAmbiguous),
@@ -2863,9 +2863,9 @@ func TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTargetSet(t
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		flowInstances: []ActiveFlowInstanceDescriptor{
-			{InstanceID: "one", EntityID: "ent-1", FlowInstance: "consumer/one", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
-			{InstanceID: "two", EntityID: "ent-2", FlowInstance: "consumer/two", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
-			{InstanceID: "other", EntityID: "ent-3", FlowInstance: "consumer/other", AddressFields: map[string]string{"entity.vertical_id": "v-2"}},
+			{InstanceID: "one", EntityID: eventtest.UUID("ent-1"), FlowInstance: "consumer/one", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
+			{InstanceID: "two", EntityID: eventtest.UUID("ent-2"), FlowInstance: "consumer/two", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
+			{InstanceID: "other", EntityID: eventtest.UUID("ent-3"), FlowInstance: "consumer/other", AddressFields: map[string]string{"entity.vertical_id": "v-2"}},
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
@@ -2881,8 +2881,8 @@ func TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTargetSet(t
 	evt := eventtest.RootIngress(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	wantOne := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: "ent-1"}}
-	wantTwo := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-two", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/two", EntityID: "ent-2"}}
+	wantOne := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: eventtest.UUID("ent-1")}}
+	wantTwo := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-two", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/two", EntityID: eventtest.UUID("ent-2")}}
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -2913,7 +2913,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForBusinessFieldDescriptorGa
 			payload: `{"vertical_id":"v-1"}`,
 			flowInstances: []ActiveFlowInstanceDescriptor{{
 				InstanceID:    "one",
-				EntityID:      "ent-1",
+				EntityID:      eventtest.UUID("ent-1"),
 				FlowInstance:  "consumer/one",
 				AddressFields: map[string]string{"entity.vertical_id": "v-2"},
 			}},
@@ -2924,8 +2924,8 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForBusinessFieldDescriptorGa
 			source:  connectRoutePlanBusinessFieldSource("one", true),
 			payload: `{"vertical_id":"v-1"}`,
 			flowInstances: []ActiveFlowInstanceDescriptor{
-				{InstanceID: "one", EntityID: "ent-1", FlowInstance: "consumer/one", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
-				{InstanceID: "two", EntityID: "ent-2", FlowInstance: "consumer/two", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
+				{InstanceID: "one", EntityID: eventtest.UUID("ent-1"), FlowInstance: "consumer/one", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
+				{InstanceID: "two", EntityID: eventtest.UUID("ent-2"), FlowInstance: "consumer/two", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
 			},
 			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetAmbiguous),
 		},
@@ -2935,7 +2935,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForBusinessFieldDescriptorGa
 			payload: `{"vertical_id":"v-1"}`,
 			flowInstances: []ActiveFlowInstanceDescriptor{{
 				InstanceID:    "one",
-				EntityID:      "ent-1",
+				EntityID:      eventtest.UUID("ent-1"),
 				FlowInstance:  "consumer/one",
 				AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 			}},
@@ -2947,7 +2947,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForBusinessFieldDescriptorGa
 			payload: `{"vertical_id":"v-1"}`,
 			flowInstances: []ActiveFlowInstanceDescriptor{{
 				InstanceID:    "one",
-				EntityID:      "ent-1",
+				EntityID:      eventtest.UUID("ent-1"),
 				FlowInstance:  "consumer/one",
 				AddressFields: map[string]string{"entity.profile.vertical_id": "v-1"},
 			}},
@@ -2959,7 +2959,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForBusinessFieldDescriptorGa
 			payload: `{"vertical_id":"v-1"}`,
 			flowInstances: []ActiveFlowInstanceDescriptor{{
 				InstanceID:    "one",
-				EntityID:      "ent-1",
+				EntityID:      eventtest.UUID("ent-1"),
 				FlowInstance:  "other/one",
 				AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 			}},
@@ -3004,7 +3004,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForUnsupportedBusinessFieldT
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		flowInstances: []ActiveFlowInstanceDescriptor{{
 			InstanceID:    "one",
-			EntityID:      "ent-1",
+			EntityID:      eventtest.UUID("ent-1"),
 			FlowInstance:  "consumer/one",
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},

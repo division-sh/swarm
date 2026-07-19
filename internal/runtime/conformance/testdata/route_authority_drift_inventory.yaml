@@ -899,6 +899,7 @@ seam_families:
       - internal/runtime/bus/delivery_planner.go
       - internal/runtime/bus/eventbus_publish.go
       - internal/runtime/bus/eventbus_publish_test.go
+      - internal/runtime/bus/event_authority_contract_test.go
       - internal/runtime/conformance/delivery_lifecycle_conformance_test.go
       - internal/runtime/conformance/agent_memory_conformance_test.go
       - internal/runtime/manager/execution_projection_test.go

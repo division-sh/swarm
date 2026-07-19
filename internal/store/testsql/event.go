@@ -56,6 +56,38 @@ func RejectEventStoreCorruption(
 	}
 }
 
+func RejectEventStoreCorruptionCategory(
+	t testing.TB,
+	ctx context.Context,
+	db *sql.DB,
+	dialect runtimeauthoractivity.Dialect,
+	claim EventCorruptionClaim,
+	category string,
+	sqliteStatement string,
+	postgresStatement string,
+	args ...any,
+) {
+	t.Helper()
+	statement := eventCorruptionStatement(t, dialect, claim, sqliteStatement, postgresStatement)
+	_, err := db.ExecContext(ctx, statement, args...)
+	if err == nil {
+		t.Fatalf("event store accepted corruption for %s (%s)", claim.Invariant, claim.Reason)
+	}
+	message := strings.ToLower(err.Error())
+	switch category {
+	case "not_null":
+		if !strings.Contains(message, "not null") && !strings.Contains(message, "not-null") {
+			t.Fatalf("event store rejected %s for unrelated category: %v", claim.Reason, err)
+		}
+	case "check":
+		if !strings.Contains(message, "check constraint") && !strings.Contains(message, "constraint failed") {
+			t.Fatalf("event store rejected %s for unrelated category: %v", claim.Reason, err)
+		}
+	default:
+		t.Fatalf("unknown event corruption error category %q", category)
+	}
+}
+
 func RequireEventRowCount(t testing.TB, ctx context.Context, db *sql.DB, dialect runtimeauthoractivity.Dialect, eventID string, want int) {
 	t.Helper()
 	query := `SELECT COUNT(*) FROM events WHERE event_id = ?`

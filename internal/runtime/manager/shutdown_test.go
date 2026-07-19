@@ -55,7 +55,7 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 			}
 			ctxErrCh <- ctx.Err()
 			return []events.Event{
-				eventtest.RootIngress("evt-out-1", events.EventType("test.out"), "agent-1", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+				eventtest.RootIngress(eventtest.UUID("evt-out-1"), events.EventType("test.out"), "agent-1", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 			}, nil
 		},
 	}
@@ -73,7 +73,7 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 	}
 
 	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress("evt-in-1",
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
 		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -158,7 +158,7 @@ func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t
 	}
 
 	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress("evt-in-1",
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
 		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -239,7 +239,7 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 	}
 
 	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
-	for _, eventID := range []string{"evt-in-1", "evt-in-2"} {
+	for _, eventID := range []string{eventtest.UUID("evt-in-1"), eventtest.UUID("evt-in-2")} {
 		if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress(eventID,
 			events.EventType("test.in"),
 			"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
@@ -321,7 +321,7 @@ func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing
 		t.Fatal("expected initial run context")
 	}
 
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress("evt-in-1",
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
 		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)

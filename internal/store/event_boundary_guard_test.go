@@ -20,6 +20,8 @@ type eventBoundaryCallsite struct {
 
 var admittedEventCallsites = map[eventBoundaryCallsite]int{
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "admitEventForPublish", name: "AdmitForPublish"}:                                      1,
+	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.publishPersistedRecipients", name: "RevalidatePersistedEvent"}:              1,
+	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.PrepareSelectedForkPublish", name: "AdmitForPersistence"}:                   1,
 	{path: "internal/runtime/manager/runtime.go", scope: "AgentManager.SendDirective", name: "AdmitForPersistence"}:                                 1,
 	{path: "internal/store/eventfixture/event.go", scope: "Insert", name: "AdmitForPersistence"}:                                                    1,
 	{path: "internal/store/inbound_publication.go", scope: "sqlInboundPublicationMutation.FinalizeInboundPublication", name: "AdmitForPersistence"}: 1,
@@ -200,7 +202,7 @@ func checkEventBoundaryFile(t *testing.T, path, relative string, gotAdmission ma
 				return true
 			}
 			switch selector.Sel.Name {
-			case "AdmitForPersistence", "AdmitForPublish":
+			case "AdmitForPersistence", "AdmitForPublish", "RevalidatePersistedEvent":
 				scope := eventBoundaryEnclosingScope(file, value.Pos())
 				gotAdmission[eventBoundaryCallsite{path: relative, scope: scope, name: selector.Sel.Name}]++
 			case "RestoreAdmittedEvent":

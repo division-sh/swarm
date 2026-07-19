@@ -44,7 +44,7 @@ func TestEventBusSubscribedPublishDoesNotCrossAgentRouteGenerations(t *testing.T
 			oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 11, AgentID: agentID, Generation: 1}
 			newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 11, AgentID: agentID, Generation: 2}
 			oldCh := eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.route_generation")))
-			evt := routeGenerationTestEvent("route-generation-publish", "test.route_generation")
+			evt := routeGenerationTestEvent(eventtest.UUID("route-generation-publish"), "test.route_generation")
 
 			publishDone := make(chan error, 1)
 			go func() { publishDone <- eb.Publish(context.Background(), evt) }()
@@ -87,7 +87,7 @@ func TestEventBusPublishInMutationDoesNotCrossAgentRouteGenerations(t *testing.T
 	oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 12, AgentID: agentID, Generation: 1}
 	newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 12, AgentID: agentID, Generation: 2}
 	oldCh := eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.route_generation_mutation")))
-	evt := routeGenerationTestEvent("route-generation-mutation", "test.route_generation_mutation")
+	evt := routeGenerationTestEvent(eventtest.UUID("route-generation-mutation"), "test.route_generation_mutation")
 
 	mutationDone := make(chan error, 1)
 	go func() {
@@ -117,7 +117,7 @@ func TestEventBusPublishAcknowledgedDoesNotCrossAgentRouteGenerations(t *testing
 	oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 13, AgentID: agentID, Generation: 1}
 	newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 13, AgentID: agentID, Generation: 2}
 	oldCh := eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.route_generation_ack")))
-	evt := routeGenerationTestEvent("route-generation-ack", "test.route_generation_ack")
+	evt := routeGenerationTestEvent(eventtest.UUID("route-generation-ack"), "test.route_generation_ack")
 
 	if err := eb.PublishAcknowledged(context.Background(), evt); err != nil {
 		t.Fatalf("PublishAcknowledged: %v", err)
@@ -199,13 +199,13 @@ func TestEventBusIdentityRouteAuthorityDominatesDuplicateExactSubscription(t *te
 
 func routeGenerationTestEvent(id, eventType string) events.Event {
 	return eventtest.RootIngress(
-		id,
+		eventtest.UUID(id),
 		events.EventType(eventType),
 		"route-generation-test",
 		"",
 		[]byte(`{}`),
 		0,
-		"route-generation-run",
+		eventtest.UUID("route-generation-run"),
 		"",
 		events.EventEnvelope{},
 		time.Now().UTC(),

@@ -438,6 +438,10 @@ func eventPublicationEvent(params eventPublicationParams, createdAt time.Time) (
 		Producer: events.ProducerClaim{Type: events.EventProducerExternal, ID: params.Emitter},
 		Payload:  params.Payload, Envelope: envelope, CreatedAt: createdAt, ExecutionMode: executionmode.Live,
 	}
+	if params.NewRunCreated {
+		return events.NewRootIngressEvent(events.RootIngressEventInput{Facts: facts, RunID: params.RunID})
+	}
+	var provenance *events.OperatorReferenceProvenance
 	if sourceEventID := strings.TrimSpace(params.SourceEventID); sourceEventID != "" {
 		provenance, err := events.NewOperatorReferenceProvenance(sourceEventID)
 		if err != nil {
@@ -446,7 +450,7 @@ func eventPublicationEvent(params eventPublicationParams, createdAt time.Time) (
 		}
 		return events.NewOperatorInjectedEvent(events.OperatorInjectedEventInput{Facts: facts, RunID: params.RunID, Provenance: &provenance})
 	}
-	return events.NewRootIngressEvent(events.RootIngressEventInput{Facts: facts, RunID: params.RunID})
+	return events.NewOperatorInjectedEvent(events.OperatorInjectedEventInput{Facts: facts, RunID: params.RunID, Provenance: provenance})
 }
 
 func validateEventPublication(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams, cfg eventPublicationConfig) (eventPublicationParams, error) {

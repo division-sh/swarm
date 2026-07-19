@@ -266,7 +266,7 @@ func (g *selectedContractRecoveredRecipientGuard) AuthorizeEvent(ctx context.Con
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(evt.SourceAgent()) != selectedContractExecutionOwner {
+	if !events.ProducerIs(evt, events.EventProducerPlatform, selectedContractExecutionOwner) || evt.AdmissionClass() != events.EventAdmissionSelectedForkReplay {
 		return nil
 	}
 	_, _, err := g.expectedRecipientPlanEvent(evt)
@@ -277,7 +277,7 @@ func (g *selectedContractRecoveredRecipientGuard) Authorize(ctx context.Context,
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(evt.SourceAgent()) != selectedContractExecutionOwner {
+	if !events.ProducerIs(evt, events.EventProducerPlatform, selectedContractExecutionOwner) || evt.AdmissionClass() != events.EventAdmissionSelectedForkReplay {
 		return nil
 	}
 	sourceEventID, expected, err := g.expectedRecipientPlanEvent(evt)

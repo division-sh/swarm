@@ -175,7 +175,7 @@ func TestForkedSourceSystemNodeDeliveryMutationsRefuseAndPreserveLineage(t *test
 			if fixture.sqlite {
 				dialect = runtimeauthoractivity.DialectSQLite
 			}
-			event := eventtest.PersistedProjectionForProducer(
+			event := eventtest.PersistedRuntimeControlForProducer(
 				eventID, "freeze.pending", eventtest.Producer(events.EventProducerPlatform, "test"), "",
 				[]byte(`{}`), 0, fixture.runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, fixture.frozenAt.Add(-time.Minute),
 			)

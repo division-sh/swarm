@@ -327,45 +327,17 @@ func SemanticFingerprint(projection any) (string, error) {
 }
 
 func EventIntegrityFingerprint(evt events.Event, kind runtimeprovideroutput.Kind, authorization runtimeprovideroutput.Authorization) (string, error) {
-	var payload any
-	if len(evt.Payload()) > 0 {
-		decoder := json.NewDecoder(strings.NewReader(string(evt.Payload())))
-		decoder.UseNumber()
-		if err := decoder.Decode(&payload); err != nil {
-			return "", fmt.Errorf("decode event payload for integrity: %w", err)
-		}
+	eventProjection, err := events.IntegrityProjection(evt)
+	if err != nil {
+		return "", fmt.Errorf("project event integrity: %w", err)
 	}
-	envelope := evt.Envelope()
 	projection := struct {
-		ID            string `json:"id"`
-		Type          string `json:"type"`
-		SourceAgent   string `json:"source_agent"`
-		TaskID        string `json:"task_id"`
-		Payload       any    `json:"payload"`
-		ChainDepth    int    `json:"chain_depth"`
-		RunID         string `json:"run_id"`
-		ParentEventID string `json:"parent_event_id"`
-		Envelope      struct {
-			EntityID     string                 `json:"entity_id"`
-			FlowInstance string                 `json:"flow_instance"`
-			Scope        events.EventScope      `json:"scope"`
-			Source       events.RouteIdentity   `json:"source"`
-			Target       events.RouteIdentity   `json:"target"`
-			TargetSet    []events.RouteIdentity `json:"target_set"`
-		} `json:"envelope"`
+		Event         any                                 `json:"event"`
 		Kind          runtimeprovideroutput.Kind          `json:"kind"`
 		Authorization runtimeprovideroutput.Authorization `json:"authorization"`
 	}{
-		ID: evt.ID(), Type: string(evt.Type()), SourceAgent: evt.SourceAgent(), TaskID: evt.TaskID(),
-		Payload: payload, ChainDepth: evt.ChainDepth(), RunID: evt.RunID(), ParentEventID: evt.ParentEventID(),
-		Kind: kind, Authorization: authorization.Normalized(),
+		Event: eventProjection, Kind: kind, Authorization: authorization.Normalized(),
 	}
-	projection.Envelope.EntityID = envelope.EntityID
-	projection.Envelope.FlowInstance = envelope.FlowInstance
-	projection.Envelope.Scope = envelope.Scope
-	projection.Envelope.Source = envelope.Source
-	projection.Envelope.Target = envelope.Target
-	projection.Envelope.TargetSet = envelope.TargetSet
 	return SemanticFingerprint(projection)
 }
 

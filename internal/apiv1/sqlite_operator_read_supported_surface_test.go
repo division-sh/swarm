@@ -41,7 +41,7 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	}
 	storetest.InsertRootEventRecord(
 		t, ctx, sqliteStore.DB, "sqlite", eventID, runID, events.EventType("operator.read"),
-		eventtest.Producer(events.EventProducerPlatform, "runtime"), []byte(`{}`),
+		eventtest.Producer(events.EventProducerExternal, "operator-read-fixture"), []byte(`{}`),
 		events.EventEnvelope{Scope: events.EventScopeGlobal}, base.Add(-4*time.Minute),
 	)
 	capabilitySurfaceID := seedSQLiteOperatorReadCapabilitySurface(t, ctx, sqliteStore, runID, turnID, sessionID, agentID, "session")

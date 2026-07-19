@@ -798,10 +798,10 @@ func TestRuntimeLogger_Log_DerivesLineageFromPersistedSubjectEvent(t *testing.T)
 	if err := ensureRuntimeLogRunRowForTest(ctx, db, runID); err != nil {
 		t.Fatalf("ensure run row: %v", err)
 	}
-	if err := eventfixture.Insert(ctx, db, runtimeauthoractivity.DialectPostgres, eventtest.PersistedProjectionForProducer(
+	if err := eventfixture.Insert(ctx, db, runtimeauthoractivity.DialectPostgres, eventtest.PersistedChildForProducer(
 		subjectEventID, events.EventType("validation/validation.package_ready"),
 		eventtest.Producer(events.EventProducerAgent, "runtime.run_fork.selected_contract_execution"),
-		"", []byte(`{}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
+		"", []byte(`{}`), 0, runID, eventtest.UUID("diagnostic-subject-parent:"+subjectEventID), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
 	)); err != nil {
 		t.Fatalf("seed subject event: %v", err)
 	}
@@ -886,10 +886,10 @@ func TestRuntimeLogger_Log_PersistsTypedRuntimeLineage(t *testing.T) {
 	if err := ensureRuntimeLogRunRowForTest(ctx, db, runID); err != nil {
 		t.Fatalf("ensure run row: %v", err)
 	}
-	if err := eventfixture.Insert(ctx, db, runtimeauthoractivity.DialectPostgres, eventtest.PersistedProjectionForProducer(
+	if err := eventfixture.Insert(ctx, db, runtimeauthoractivity.DialectPostgres, eventtest.PersistedChildForProducer(
 		subjectEventID, events.EventType("validation/validation.package_ready"),
 		eventtest.Producer(events.EventProducerAgent, "runtime.run_fork.selected_contract_execution"),
-		"", []byte(`{}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
+		"", []byte(`{}`), 0, runID, eventtest.UUID("diagnostic-subject-parent:"+subjectEventID), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
 	)); err != nil {
 		t.Fatalf("seed subject event: %v", err)
 	}

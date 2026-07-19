@@ -241,6 +241,46 @@ func TestDiagnosticDirectRequiresClosedCatalogAndNamedAdmission(t *testing.T) {
 	}
 }
 
+func TestRevalidatePersistedEventPreservesSelectedForkFactsWithoutAllocation(t *testing.T) {
+	lineage, err := NewSelectedForkLineage(
+		testRunID,
+		"22222222-2222-4222-8222-222222222222",
+		"33333333-3333-4333-8333-333333333333",
+		"selection:contract-v1",
+		"task-1",
+		executionmode.Live,
+	)
+	if err != nil {
+		t.Fatalf("NewSelectedForkLineage: %v", err)
+	}
+	persisted, err := NewSelectedForkReplayEvent(SelectedForkReplayEventInput{Facts: validFacts(), Lineage: lineage})
+	if err != nil {
+		t.Fatalf("NewSelectedForkReplayEvent: %v", err)
+	}
+
+	restored, err := RevalidatePersistedEvent(persisted)
+	if err != nil {
+		t.Fatalf("RevalidatePersistedEvent: %v", err)
+	}
+	got := restored.Event()
+	if got.ID() != persisted.ID() || got.RunID() != persisted.RunID() || !got.CreatedAt().Equal(persisted.CreatedAt()) {
+		t.Fatalf("revalidated identity changed: got id=%q run=%q created=%s; want id=%q run=%q created=%s", got.ID(), got.RunID(), got.CreatedAt(), persisted.ID(), persisted.RunID(), persisted.CreatedAt())
+	}
+	if got.AdmissionClass() != EventAdmissionSelectedForkReplay {
+		t.Fatalf("revalidated class = %q, want %q", got.AdmissionClass(), EventAdmissionSelectedForkReplay)
+	}
+}
+
+func TestRevalidatePersistedEventRejectsMissingDurableTimestamp(t *testing.T) {
+	candidate, err := NewRootIngressEvent(RootIngressEventInput{Facts: validFactsWithoutIdentity()})
+	if err != nil {
+		t.Fatalf("NewRootIngressEvent: %v", err)
+	}
+	if _, err := RevalidatePersistedEvent(candidate); err == nil || !strings.Contains(err.Error(), "created_at") {
+		t.Fatalf("RevalidatePersistedEvent error = %v, want missing created_at", err)
+	}
+}
+
 func TestRestoreAdmittedEventRejectsNonPersistentIdentity(t *testing.T) {
 	facts := validFacts()
 	facts.ID = "not-a-uuid"
@@ -264,7 +304,7 @@ func validFacts() EventFacts {
 
 func validFactsWithoutIdentity() EventFacts {
 	return EventFacts{
-		Type: "task.completed", Producer: ProducerClaim{Type: EventProducerAgent, ID: "agent-1"},
+		Type: "task.completed", Producer: ProducerClaim{Type: EventProducerExternal, ID: "external-1"},
 		Payload: []byte(`{}`), ExecutionMode: executionmode.Live,
 	}
 }

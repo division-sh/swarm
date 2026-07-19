@@ -179,7 +179,19 @@ func Child(
 	return event, Insert(ctx, db, dialect, event)
 }
 
-func RuntimeDiagnostic(
+func DiagnosticDirect(
+	ctx context.Context,
+	db *sql.DB,
+	dialect runtimeauthoractivity.Dialect,
+	eventID string,
+	producerID string,
+	payload []byte,
+	createdAt time.Time,
+) (event events.Event, err error) {
+	return DiagnosticDirectForRun(ctx, db, dialect, eventID, "", "", producerID, payload, createdAt)
+}
+
+func DiagnosticDirectForRun(
 	ctx context.Context,
 	db *sql.DB,
 	dialect runtimeauthoractivity.Dialect,
@@ -198,38 +210,14 @@ func RuntimeDiagnostic(
 	if err != nil {
 		return event, err
 	}
-	event, err = events.NewRuntimeDiagnosticEvent(events.RuntimeEventInput{
-		Facts: facts,
+	event, err = events.NewDiagnosticDirectEvent(events.DiagnosticDirectEventInput{
+		Facts: events.EventFacts{
+			ID: facts.ID, Type: facts.Type, Producer: facts.Producer,
+			Payload: facts.Payload, Envelope: facts.Envelope, RoutingSource: facts.RoutingSource,
+			CreatedAt: facts.CreatedAt, ExecutionMode: facts.ExecutionMode,
+		},
 		RunID: runID, ParentEventID: parentEventID,
 	})
-	if err != nil {
-		return event, err
-	}
-	return event, Insert(ctx, db, dialect, event)
-}
-
-func DiagnosticDirect(
-	ctx context.Context,
-	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
-	eventID string,
-	producerID string,
-	payload []byte,
-	createdAt time.Time,
-) (event events.Event, err error) {
-	producer, err := events.NewProducerIdentity(events.EventProducerPlatform, producerID)
-	if err != nil {
-		return event, err
-	}
-	facts, err := eventFacts(eventID, events.EventTypePlatformRuntimeLog, producer, payload, events.EventEnvelope{Scope: events.EventScopeGlobal}, createdAt)
-	if err != nil {
-		return event, err
-	}
-	event, err = events.NewDiagnosticDirectEvent(events.DiagnosticDirectEventInput{Facts: events.EventFacts{
-		ID: facts.ID, Type: facts.Type, Producer: facts.Producer,
-		Payload: facts.Payload, Envelope: facts.Envelope, RoutingSource: facts.RoutingSource,
-		CreatedAt: facts.CreatedAt, ExecutionMode: facts.ExecutionMode,
-	}})
 	if err != nil {
 		return event, err
 	}

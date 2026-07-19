@@ -351,10 +351,10 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 	default:
 		t.Fatalf("unsupported reply tool store %T", persistence)
 	}
-	storetest.CommitSemanticEvent(t, unmanagedToolTestContext(), persistence, eventtest.PersistedProjectionForProducer(
+	storetest.CommitSemanticEvent(t, unmanagedToolTestContext(), persistence, eventtest.PersistedChildForProducer(
 		requestEventID, events.EventType("provider.requested"),
 		eventtest.Producer(events.EventProducerNode, "requester"), "", []byte(`{}`), 0,
-		runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, now,
+		runID, eventtest.UUID("provider-request-parent:"+requestEventID), events.EventEnvelope{Scope: events.EventScopeGlobal}, now,
 	))
 	record := runtimereplycontext.Record{
 		RunID:                runID,

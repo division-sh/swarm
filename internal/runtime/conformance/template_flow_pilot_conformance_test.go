@@ -228,6 +228,7 @@ func TestTemplateSelectOrCreateConformance_CoversResolutionSelectOrCreateOwner(t
 }
 
 func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t *testing.T) {
+	portfolioEntityID := runtimeflowidentity.EntityID("portfolio")
 	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("examples/routing/notify-all-children"))
 	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
 	report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
@@ -274,29 +275,29 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		t.Fatalf("NewExecutor: %v", err)
 	}
 	parent := eventtest.RootIngress(
-		"evt-notify-all-children-parent",
+		eventtest.UUID("evt-notify-all-children-parent"),
 		events.EventType("portfolio/portfolio.notify.requested"),
 		"",
 		"",
 		json.RawMessage(`{"portfolio_id":"portfolio","command":"refresh"}`),
 		0,
-		"run-notify-all-children",
+		eventtest.UUID("run-notify-all-children"),
 		"",
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
 			FlowID:       "portfolio",
 			FlowInstance: "portfolio",
-			EntityID:     "portfolio",
+			EntityID:     portfolioEntityID,
 		}),
 		time.Now().UTC(),
 	)
 	result, err := exec.Execute(testAuthorActivityContext(context.Background()), runtimeengine.ExecutionRequest{
-		EntityID: "portfolio",
+		EntityID: runtimeidentity.EntityID(portfolioEntityID),
 		NodeID:   "portfolio-coordinator",
 		FlowID:   "portfolio",
 		Event:    parent,
 		Handler:  handler,
 		State: runtimeengine.StateSnapshot{
-			EntityID:     "portfolio",
+			EntityID:     runtimeidentity.EntityID(portfolioEntityID),
 			CurrentState: "active",
 			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"account_ids": []any{"acct-a", "acct-b"}}, nil, nil),
 		},
@@ -338,7 +339,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	}
 	for idx, intent := range result.EmitIntents {
 		evt := eventtest.Child(
-			"evt-notify-all-children-child-"+string(rune('a'+idx)),
+			eventtest.UUID("evt-notify-all-children-child-"+string(rune('a'+idx))),
 			intent.Event.Type(),
 			intent.Event.SourceAgent(),
 			intent.Event.TaskID(),
@@ -382,6 +383,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 }
 
 func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
+	portfolioEntityID := runtimeflowidentity.EntityID("portfolio")
 	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
 	tests := []struct {
 		name          string
@@ -398,8 +400,8 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 			name:    "ambiguous account key",
 			payload: json.RawMessage(`{"portfolio_id":"portfolio","account_id":"acct-a","command":"refresh"}`),
 			flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
-				{InstanceID: "acct-a-one", EntityID: "ent-a1", FlowInstance: "account/acct-a-one", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
-				{InstanceID: "acct-a-two", EntityID: "ent-a2", FlowInstance: "account/acct-a-two", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
+				{InstanceID: "acct-a-one", EntityID: runtimeflowidentity.EntityID("ent-a1"), FlowInstance: "account/acct-a-one", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
+				{InstanceID: "acct-a-two", EntityID: runtimeflowidentity.EntityID("ent-a2"), FlowInstance: "account/acct-a-two", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
 			},
 			wantFailure: string(runtimepinrouting.ConnectFailureTargetAmbiguous),
 		},
@@ -418,18 +420,18 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			evt := eventtest.RootIngress(
-				"evt-notify-all-children-negative",
+				eventtest.UUID("evt-notify-all-children-negative-"+tc.name),
 				events.EventType("portfolio/account.notify.requested"),
 				"",
 				"",
 				tc.payload,
 				0,
-				"run-notify-all-children",
+				eventtest.UUID("run-notify-all-children"),
 				"",
 				events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
 					FlowID:       "portfolio",
 					FlowInstance: "portfolio",
-					EntityID:     "portfolio",
+					EntityID:     portfolioEntityID,
 				}),
 				time.Now().UTC(),
 			)

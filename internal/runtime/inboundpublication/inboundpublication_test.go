@@ -8,8 +8,64 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
 )
+
+func TestEventIntegrityFingerprintIncludesExactProducerAndClassAuthority(t *testing.T) {
+	eventID := uuid.NewString()
+	lineage := events.EventLineage{RunID: uuid.NewString(), ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live}
+	buildReplay := func(producerType events.EventProducerType) events.Event {
+		return eventtest.ReplayForProducer(
+			eventID,
+			"work.replayed",
+			eventtest.Producer(producerType, "same-id"),
+			"",
+			nil,
+			0,
+			lineage,
+			events.EventEnvelope{},
+			time.Now().UTC(),
+		)
+	}
+	left, err := EventIntegrityFingerprint(buildReplay(events.EventProducerAgent), runtimeprovideroutput.KindRaw, runtimeprovideroutput.Authorization{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	right, err := EventIntegrityFingerprint(buildReplay(events.EventProducerNode), runtimeprovideroutput.KindRaw, runtimeprovideroutput.Authorization{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if left == right {
+		t.Fatal("integrity fingerprint ignored producer_type")
+	}
+}
+
+func TestEventIntegrityFingerprintIgnoresJSONEncodingOrder(t *testing.T) {
+	eventID := uuid.NewString()
+	runID := uuid.NewString()
+	build := func(payload []byte) events.Event {
+		return eventtest.RootIngress(
+			eventID, "inbound.test", "gateway", "", payload, 0, runID, "",
+			events.EventEnvelope{}, time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC),
+		)
+	}
+	left := build([]byte(`{"outer":{"a":1,"b":2},"value":true}`))
+	right := build([]byte(`{"value":true,"outer":{"b":2,"a":1}}`))
+
+	leftFingerprint, err := EventIntegrityFingerprint(left, runtimeprovideroutput.KindRaw, runtimeprovideroutput.Authorization{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rightFingerprint, err := EventIntegrityFingerprint(right, runtimeprovideroutput.KindRaw, runtimeprovideroutput.Authorization{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leftFingerprint != rightFingerprint {
+		t.Fatalf("semantic JSON key order changed event integrity: left=%s right=%s", leftFingerprint, rightFingerprint)
+	}
+}
 
 func TestEvidencePayloadOwnsExactOrderedCommittedBatch(t *testing.T) {
 	request := evidenceProofRequest(t)

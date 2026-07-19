@@ -187,13 +187,13 @@ func assertSealedFlowPackageRuntimeDelivery(t *testing.T, source semanticview.So
 		},
 	}
 	evt := eventtest.ChildWithLineage(
-		"evt-sealed-connect",
+		eventtest.UUID("evt-sealed-connect"),
 		events.EventType("producer/work.ready"),
 		"producer",
 		"",
 		json.RawMessage(`{"work_id":"work-1"}`),
 		1,
-		events.EventLineage{RunID: "run-sealed-package", ParentEventID: "evt-sealed-parent", TaskID: "producer-node", ExecutionMode: executionmode.Live},
+		events.EventLineage{RunID: eventtest.UUID("run-sealed-package"), ParentEventID: eventtest.UUID("evt-sealed-parent"), TaskID: "producer-node", ExecutionMode: executionmode.Live},
 		events.EventEnvelope{},
 		time.Now().UTC(),
 	)
@@ -216,13 +216,13 @@ func assertSealedFlowPackageRuntimeDelivery(t *testing.T, source semanticview.So
 	}
 
 	sibling := eventtest.ChildWithLineage(
-		"evt-sealed-sibling-wildcard",
+		eventtest.UUID("evt-sealed-sibling-wildcard"),
 		events.EventType("producer/audit.seen"),
 		"producer",
 		"",
 		json.RawMessage(`{"flow_instance":"consumer"}`),
 		1,
-		events.EventLineage{RunID: "run-sealed-package", ParentEventID: "evt-sealed-parent", TaskID: "producer-node", ExecutionMode: executionmode.Live},
+		events.EventLineage{RunID: eventtest.UUID("run-sealed-package"), ParentEventID: eventtest.UUID("evt-sealed-parent"), TaskID: "producer-node", ExecutionMode: executionmode.Live},
 		events.EventEnvelope{},
 		time.Now().UTC(),
 	)

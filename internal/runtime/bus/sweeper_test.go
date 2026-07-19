@@ -121,7 +121,7 @@ func TestSweepUndispatchedUsesPersistedDeliveryRecipients(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
 			{Event: eventtest.RootIngress(
-				"evt-1",
+				eventtest.UUID("evt-1"),
 				events.EventType("custom.emitted"),
 				"",
 				"",
@@ -129,12 +129,12 @@ func TestSweepUndispatchedUsesPersistedDeliveryRecipients(t *testing.T) {
 				0,
 				"",
 				"",
-				events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+				events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")),
 				time.Now().UTC(),
 			)},
 		},
-		deliveries: map[string][]string{"evt-1": {"agent-a"}},
-		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-1": runtimereplayclaim.CommittedReplayScopeSubscribed},
+		deliveries: map[string][]string{eventtest.UUID("evt-1"): {"agent-a"}},
+		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{eventtest.UUID("evt-1"): runtimereplayclaim.CommittedReplayScopeSubscribed},
 	}
 	eb, err := newScopedTestEventBus(store)
 	if err != nil {
@@ -149,11 +149,11 @@ func TestSweepUndispatchedUsesPersistedDeliveryRecipients(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("swept count = %d, want 1", count)
 	}
-	if got := store.receipts["evt-1"]; got != "processed" {
+	if got := store.receipts[eventtest.UUID("evt-1")]; got != "processed" {
 		t.Fatalf("receipt status = %q, want processed", got)
 	}
 	evt := requireBusEvent(t, ch, "swept subscribed delivery")
-	if evt.ID() != "evt-1" {
+	if evt.ID() != eventtest.UUID("evt-1") {
 		t.Fatalf("delivered event id = %q, want evt-1", evt.ID())
 	}
 }
@@ -162,7 +162,7 @@ func TestSweepUndispatched_UsesAuthoritativeEmptyFanOutWithoutSubscribedFallback
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
 			{Event: eventtest.RootIngress(
-				"evt-2",
+				eventtest.UUID("evt-2"),
 				events.EventType("custom.routed"),
 				"",
 				"",
@@ -170,12 +170,12 @@ func TestSweepUndispatched_UsesAuthoritativeEmptyFanOutWithoutSubscribedFallback
 				0,
 				"",
 				"",
-				events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-2"),
+				events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-2")),
 				time.Now().UTC(),
 			)},
 		},
 		deliveries: map[string][]string{},
-		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-2": runtimereplayclaim.CommittedReplayScopeDirect},
+		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{eventtest.UUID("evt-2"): runtimereplayclaim.CommittedReplayScopeDirect},
 	}
 	eb, err := newScopedTestEventBus(store)
 	if err != nil {
@@ -190,7 +190,7 @@ func TestSweepUndispatched_UsesAuthoritativeEmptyFanOutWithoutSubscribedFallback
 	if count != 1 {
 		t.Fatalf("swept count = %d, want 1", count)
 	}
-	if got := store.receipts["evt-2"]; got != "processed" {
+	if got := store.receipts[eventtest.UUID("evt-2")]; got != "processed" {
 		t.Fatalf("receipt status = %q, want processed", got)
 	}
 	requireNoBusEvent(t, ch, "empty direct fan-out replay")
@@ -200,7 +200,7 @@ func TestSweepUndispatched_ReplaysSubscribedInternalOnlyUsingReplayScope(t *test
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
 			{Event: eventtest.RootIngress(
-				"evt-internal-only",
+				eventtest.UUID("evt-internal-only"),
 				events.EventType("custom.internal"),
 				"",
 				"",
@@ -208,12 +208,12 @@ func TestSweepUndispatched_ReplaysSubscribedInternalOnlyUsingReplayScope(t *test
 				0,
 				"",
 				"",
-				events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-internal"),
+				events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-internal")),
 				time.Now().UTC(),
 			)},
 		},
 		deliveries: map[string][]string{},
-		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-internal-only": runtimereplayclaim.CommittedReplayScopeSubscribed},
+		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{eventtest.UUID("evt-internal-only"): runtimereplayclaim.CommittedReplayScopeSubscribed},
 	}
 	eb, err := newScopedTestEventBus(store)
 	if err != nil {
@@ -228,11 +228,11 @@ func TestSweepUndispatched_ReplaysSubscribedInternalOnlyUsingReplayScope(t *test
 	if count != 1 {
 		t.Fatalf("swept count = %d, want 1", count)
 	}
-	if got := store.receipts["evt-internal-only"]; got != "processed" {
+	if got := store.receipts[eventtest.UUID("evt-internal-only")]; got != "processed" {
 		t.Fatalf("receipt status = %q, want processed", got)
 	}
 	evt := requireBusEvent(t, internalCh, "internal-only replay delivery")
-	if evt.ID() != "evt-internal-only" {
+	if evt.ID() != eventtest.UUID("evt-internal-only") {
 		t.Fatalf("delivered event id = %q, want evt-internal-only", evt.ID())
 	}
 }
@@ -241,7 +241,7 @@ func TestSweepUndispatched_ReplaysSubscribedMixedRecipientsUsingReplayScope(t *t
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
 			{Event: eventtest.RootIngress(
-				"evt-mixed",
+				eventtest.UUID("evt-mixed"),
 				events.EventType("custom.mixed"),
 				"",
 				"",
@@ -249,12 +249,12 @@ func TestSweepUndispatched_ReplaysSubscribedMixedRecipientsUsingReplayScope(t *t
 				0,
 				"",
 				"",
-				events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-mixed"),
+				events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-mixed")),
 				time.Now().UTC(),
 			)},
 		},
-		deliveries: map[string][]string{"evt-mixed": {"agent-a"}},
-		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-mixed": runtimereplayclaim.CommittedReplayScopeSubscribed},
+		deliveries: map[string][]string{eventtest.UUID("evt-mixed"): {"agent-a"}},
+		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{eventtest.UUID("evt-mixed"): runtimereplayclaim.CommittedReplayScopeSubscribed},
 	}
 	eb, err := newScopedTestEventBus(store)
 	if err != nil {
@@ -271,11 +271,11 @@ func TestSweepUndispatched_ReplaysSubscribedMixedRecipientsUsingReplayScope(t *t
 		t.Fatalf("swept count = %d, want 1", count)
 	}
 	evt := requireBusEvent(t, internalCh, "mixed replay delivery to internal subscriber")
-	if evt.ID() != "evt-mixed" {
+	if evt.ID() != eventtest.UUID("evt-mixed") {
 		t.Fatalf("internal delivered event id = %q, want evt-mixed", evt.ID())
 	}
 	evt = requireBusEvent(t, agentCh, "mixed replay delivery to persisted agent")
-	if evt.ID() != "evt-mixed" {
+	if evt.ID() != eventtest.UUID("evt-mixed") {
 		t.Fatalf("agent delivered event id = %q, want evt-mixed", evt.ID())
 	}
 }
@@ -284,7 +284,7 @@ func TestSweepUndispatched_DirectScopeDoesNotBroadenToCurrentInternalSubscribers
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
 			{Event: eventtest.RootIngress(
-				"evt-direct-mixed",
+				eventtest.UUID("evt-direct-mixed"),
 				events.EventType("custom.direct"),
 				"",
 				"",
@@ -292,13 +292,13 @@ func TestSweepUndispatched_DirectScopeDoesNotBroadenToCurrentInternalSubscribers
 				0,
 				"",
 				"",
-				events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-direct"),
+				events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-direct")),
 				time.Now().UTC(),
 			)},
 		},
-		deliveries: map[string][]string{"evt-direct-mixed": {"agent-a"}},
+		deliveries: map[string][]string{eventtest.UUID("evt-direct-mixed"): {"agent-a"}},
 		scopes: map[string]runtimereplayclaim.CommittedReplayScope{
-			"evt-direct-mixed": runtimereplayclaim.CommittedReplayScopeDirect,
+			eventtest.UUID("evt-direct-mixed"): runtimereplayclaim.CommittedReplayScopeDirect,
 		},
 	}
 	eb, err := newScopedTestEventBus(store)
@@ -316,7 +316,7 @@ func TestSweepUndispatched_DirectScopeDoesNotBroadenToCurrentInternalSubscribers
 		t.Fatalf("swept count = %d, want 1", count)
 	}
 	evt := requireBusEvent(t, agentCh, "direct replay delivery to persisted agent")
-	if evt.ID() != "evt-direct-mixed" {
+	if evt.ID() != eventtest.UUID("evt-direct-mixed") {
 		t.Fatalf("agent delivered event id = %q, want evt-direct-mixed", evt.ID())
 	}
 	requireNoBusEvent(t, internalCh, "direct replay delivery to current internal subscriber")
@@ -326,7 +326,7 @@ func TestSweepUndispatched_DirectEmptyManifestDoesNotBroadenToCurrentInternalSub
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
 			{Event: eventtest.RootIngress(
-				"evt-direct-empty",
+				eventtest.UUID("evt-direct-empty"),
 				events.EventType("custom.direct.empty"),
 				"",
 				"",
@@ -334,13 +334,13 @@ func TestSweepUndispatched_DirectEmptyManifestDoesNotBroadenToCurrentInternalSub
 				0,
 				"",
 				"",
-				events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-direct-empty"),
+				events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-direct-empty")),
 				time.Now().UTC(),
 			)},
 		},
 		deliveries: map[string][]string{},
 		scopes: map[string]runtimereplayclaim.CommittedReplayScope{
-			"evt-direct-empty": runtimereplayclaim.CommittedReplayScopeDirect,
+			eventtest.UUID("evt-direct-empty"): runtimereplayclaim.CommittedReplayScopeDirect,
 		},
 	}
 	eb, err := newScopedTestEventBus(store)
@@ -356,7 +356,7 @@ func TestSweepUndispatched_DirectEmptyManifestDoesNotBroadenToCurrentInternalSub
 	if count != 1 {
 		t.Fatalf("swept count = %d, want 1", count)
 	}
-	if got := store.receipts["evt-direct-empty"]; got != "processed" {
+	if got := store.receipts[eventtest.UUID("evt-direct-empty")]; got != "processed" {
 		t.Fatalf("receipt status = %q, want processed", got)
 	}
 	requireNoBusEvent(t, internalCh, "direct empty manifest delivery to current internal subscriber")
@@ -373,14 +373,14 @@ func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
 			{
-				Event: eventtest.RootIngress("evt-bad",
+				Event: eventtest.RootIngress(eventtest.UUID("evt-bad"),
 					events.EventType("custom.bad"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 
 				ReplayFailure: &replayFailure,
 			},
 			{
 				Event: eventtest.RootIngress(
-					"evt-good",
+					eventtest.UUID("evt-good"),
 					events.EventType("custom.good"),
 					"",
 					"",
@@ -388,13 +388,13 @@ func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
 					0,
 					"",
 					"",
-					events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-good"),
+					events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-good")),
 					time.Now().UTC(),
 				),
 			},
 		},
-		deliveries: map[string][]string{"evt-good": {"agent-good"}},
-		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-good": runtimereplayclaim.CommittedReplayScopeSubscribed},
+		deliveries: map[string][]string{eventtest.UUID("evt-good"): {"agent-good"}},
+		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{eventtest.UUID("evt-good"): runtimereplayclaim.CommittedReplayScopeSubscribed},
 	}
 	eb, err := newScopedTestEventBus(store)
 	if err != nil {
@@ -409,17 +409,17 @@ func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("swept count = %d, want 1", count)
 	}
-	if got := store.receipts["evt-bad"]; got != "error" {
+	if got := store.receipts[eventtest.UUID("evt-bad")]; got != "error" {
 		t.Fatalf("bad receipt status = %q, want error", got)
 	}
-	if got := store.receiptErrs["evt-bad"]; got == nil || got.Detail.Code != "replay_row_invalid" {
+	if got := store.receiptErrs[eventtest.UUID("evt-bad")]; got == nil || got.Detail.Code != "replay_row_invalid" {
 		t.Fatalf("bad receipt failure = %#v, want replay_row_invalid", got)
 	}
-	if got := store.receipts["evt-good"]; got != "processed" {
+	if got := store.receipts[eventtest.UUID("evt-good")]; got != "processed" {
 		t.Fatalf("good receipt status = %q, want processed", got)
 	}
 	evt := requireBusEvent(t, ch, "good replay delivery after malformed row")
-	if evt.ID() != "evt-good" {
+	if evt.ID() != eventtest.UUID("evt-good") {
 		t.Fatalf("delivered event id = %q, want evt-good", evt.ID())
 	}
 }
@@ -427,17 +427,17 @@ func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
 func TestSweepUndispatched_TerminallyMarksMissingCommittedReplayScopeAndContinues(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
-			{Event: eventtest.RootIngress("evt-markerless",
+			{Event: eventtest.RootIngress(eventtest.UUID("evt-markerless"),
 				events.EventType("custom.markerless"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())},
-			{Event: eventtest.RootIngress("evt-good-after-markerless",
+			{Event: eventtest.RootIngress(eventtest.UUID("evt-good-after-markerless"),
 				events.EventType("custom.good"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())},
 		},
 		deliveries: map[string][]string{
-			"evt-markerless":            {"agent-missing"},
-			"evt-good-after-markerless": {"agent-good"},
+			eventtest.UUID("evt-markerless"):            {"agent-missing"},
+			eventtest.UUID("evt-good-after-markerless"): {"agent-good"},
 		},
 		scopes: map[string]runtimereplayclaim.CommittedReplayScope{
-			"evt-good-after-markerless": runtimereplayclaim.CommittedReplayScopeSubscribed,
+			eventtest.UUID("evt-good-after-markerless"): runtimereplayclaim.CommittedReplayScopeSubscribed,
 		},
 	}
 	logger := &recordingLoggerHook{}
@@ -455,13 +455,13 @@ func TestSweepUndispatched_TerminallyMarksMissingCommittedReplayScopeAndContinue
 	if count != 1 {
 		t.Fatalf("swept count = %d, want 1", count)
 	}
-	if got := store.receipts["evt-markerless"]; got != "error" {
+	if got := store.receipts[eventtest.UUID("evt-markerless")]; got != "error" {
 		t.Fatalf("markerless receipt status = %q, want error", got)
 	}
-	if got := store.receiptErrs["evt-markerless"]; got == nil || got.Detail.Code != "committed_replay_scope_missing" {
+	if got := store.receiptErrs[eventtest.UUID("evt-markerless")]; got == nil || got.Detail.Code != "committed_replay_scope_missing" {
 		t.Fatalf("markerless receipt failure = %#v, want committed_replay_scope_missing", got)
 	}
-	if got := store.receipts["evt-good-after-markerless"]; got != "processed" {
+	if got := store.receipts[eventtest.UUID("evt-good-after-markerless")]; got != "processed" {
 		t.Fatalf("good receipt status = %q, want processed", got)
 	}
 	foundTerminalLog := false
@@ -478,7 +478,7 @@ func TestSweepUndispatched_TerminallyMarksMissingCommittedReplayScopeAndContinue
 	}
 	requireNoBusEvent(t, missingCh, "markerless replay delivery to missing subscriber")
 	evt := requireBusEvent(t, goodCh, "good replay delivery after markerless row")
-	if evt.ID() != "evt-good-after-markerless" {
+	if evt.ID() != eventtest.UUID("evt-good-after-markerless") {
 		t.Fatalf("delivered event id = %q, want evt-good-after-markerless", evt.ID())
 	}
 }
@@ -487,7 +487,7 @@ func TestSweepUndispatched_ClaimsReplayOwnershipBeforeDispatch(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
 			{Event: eventtest.RootIngress(
-				"evt-claim",
+				eventtest.UUID("evt-claim"),
 				events.EventType("custom.claimed"),
 				"",
 				"",
@@ -495,12 +495,12 @@ func TestSweepUndispatched_ClaimsReplayOwnershipBeforeDispatch(t *testing.T) {
 				0,
 				"",
 				"",
-				events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-claim"),
+				events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-claim")),
 				time.Now().UTC(),
 			)},
 		},
-		deliveries:  map[string][]string{"evt-claim": {"agent-claim"}},
-		scopes:      map[string]runtimereplayclaim.CommittedReplayScope{"evt-claim": runtimereplayclaim.CommittedReplayScopeSubscribed},
+		deliveries:  map[string][]string{eventtest.UUID("evt-claim"): {"agent-claim"}},
+		scopes:      map[string]runtimereplayclaim.CommittedReplayScope{eventtest.UUID("evt-claim"): runtimereplayclaim.CommittedReplayScopeSubscribed},
 		releaseGate: make(chan struct{}),
 		releasing:   make(chan struct{}, 1),
 	}
@@ -532,7 +532,7 @@ func TestSweepUndispatched_ClaimsReplayOwnershipBeforeDispatch(t *testing.T) {
 	requireSignalBefore(t, firstDone, time.Second, "first sweep completion")
 
 	evt := requireBusEvent(t, ch, "claimed replay delivery")
-	if evt.ID() != "evt-claim" {
+	if evt.ID() != eventtest.UUID("evt-claim") {
 		t.Fatalf("delivered event id = %q, want evt-claim", evt.ID())
 	}
 	requireNoBusEvent(t, ch, "duplicate claimed replay delivery")
@@ -541,10 +541,10 @@ func TestSweepUndispatched_ClaimsReplayOwnershipBeforeDispatch(t *testing.T) {
 func TestSweepUndispatched_FailsClosedWithoutReplayClaimOwner(t *testing.T) {
 	store := &sweeperMissingClaimStore{
 		events: []events.PersistedReplayEvent{
-			{Event: eventtest.RootIngress("evt-claim-missing",
+			{Event: eventtest.RootIngress(eventtest.UUID("evt-claim-missing"),
 				events.EventType("custom.claimed"), "", "", []byte(`{"entity_id":"ent-claim"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())},
 		},
-		deliveries: map[string][]string{"evt-claim-missing": {"agent-a"}},
+		deliveries: map[string][]string{eventtest.UUID("evt-claim-missing"): {"agent-a"}},
 	}
 	eb, err := newScopedTestEventBus(store)
 	if err != nil {

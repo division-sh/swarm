@@ -192,11 +192,11 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				}); err != nil {
 					t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 				}
-				parent := eventtest.InExecutionMode(eventtest.PersistedProjectionForProducer(
+				parent := eventtest.InExecutionMode(eventtest.PersistedRuntimeControlForProducer(
 					parentID, events.EventType("filler.event"), eventtest.Producer(events.EventProducerPlatform, "replay-proof"), "parent-task",
 					json.RawMessage(`{"parent":true}`), 0, runID, "", events.EventEnvelope{}, createdAt.Add(-time.Minute),
 				), "mock")
-				original := eventtest.InExecutionMode(eventtest.PersistedProjectionForProducer(
+				original := eventtest.InExecutionMode(eventtest.PersistedChildForProducer(
 					originalID, events.EventType("scan.requested"), eventtest.Producer(events.EventProducerAgent, "origin-agent"), "event-owned-task",
 					json.RawMessage(`{"task_id":"payload-owned-task","topic":"medicine"}`), 4, runID, parentID, envelope, createdAt,
 				), "mock")

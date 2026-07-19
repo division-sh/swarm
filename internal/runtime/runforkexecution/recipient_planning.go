@@ -355,7 +355,7 @@ func (g *selectedContractRecipientPlanPublishGuard) AuthorizeEvent(ctx context.C
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !g.authorizesSourceAgent(evt.SourceAgent()) {
+	if !g.authorizesEvent(evt) {
 		return nil
 	}
 	_, _, err := g.expectedRecipientPlanEvent(evt)
@@ -366,7 +366,7 @@ func (g *selectedContractRecipientPlanPublishGuard) Authorize(ctx context.Contex
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !g.authorizesSourceAgent(evt.SourceAgent()) {
+	if !g.authorizesEvent(evt) {
 		return nil
 	}
 	sourceEventID, expected, err := g.expectedRecipientPlanEvent(evt)
@@ -449,7 +449,7 @@ func (g *selectedContractRecipientPlanPublishGuard) MaterializeNodeDeliveryRoute
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if !g.authorizesSourceAgent(evt.SourceAgent()) {
+	if !g.authorizesEvent(evt) {
 		return nil, nil
 	}
 	if err := g.Authorize(ctx, evt, actual); err != nil {
@@ -462,11 +462,14 @@ func (g *selectedContractRecipientPlanPublishGuard) MaterializeNodeDeliveryRoute
 	return selectedContractNodeDeliveryRoutes(expected.Recipients), nil
 }
 
-func (g *selectedContractRecipientPlanPublishGuard) authorizesSourceAgent(sourceAgent string) bool {
+func (g *selectedContractRecipientPlanPublishGuard) authorizesEvent(event events.Event) bool {
 	if g == nil {
 		return false
 	}
-	_, ok := g.sourceAgents[strings.TrimSpace(sourceAgent)]
+	if event.AdmissionClass() != events.EventAdmissionSelectedForkReplay || event.ProducerType() != events.EventProducerPlatform {
+		return false
+	}
+	_, ok := g.sourceAgents[event.Producer().ID()]
 	return ok
 }
 

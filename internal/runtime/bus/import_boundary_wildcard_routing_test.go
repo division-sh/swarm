@@ -44,18 +44,18 @@ func TestImportBoundaryWildcardScopesImportedPackageToOwnSubtreeByDefault(t *tes
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	local := eventtest.RootIngress("evt-worker-local", "worker/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	local := eventtest.RootIngress(eventtest.UUID("evt-worker-local"), "worker/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	if err := eb.Publish(context.Background(), local); err != nil {
 		t.Fatalf("Publish local: %v", err)
 	}
-	if got := store.deliveries["evt-worker-local"]; len(got) != 1 || got[0] != "worker-listener" {
+	if got := store.deliveries[eventtest.UUID("evt-worker-local")]; len(got) != 1 || got[0] != "worker-listener" {
 		t.Fatalf("local persisted deliveries = %#v, want worker-listener", got)
 	}
-	sibling := eventtest.RootIngress("evt-producer-sibling", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	sibling := eventtest.RootIngress(eventtest.UUID("evt-producer-sibling"), "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	if err := eb.Publish(context.Background(), sibling); err != nil {
 		t.Fatalf("Publish sibling: %v", err)
 	}
-	if got := store.deliveries["evt-producer-sibling"]; len(got) != 0 {
+	if got := store.deliveries[eventtest.UUID("evt-producer-sibling")]; len(got) != 0 {
 		t.Fatalf("sibling persisted deliveries = %#v, want none without grant", got)
 	}
 }
@@ -137,7 +137,7 @@ func TestImportBoundaryWildcardObserveGrantAddsNarrowSiblingCandidate(t *testing
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := eventtest.RootIngress("evt-granted-sibling", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	evt := eventtest.RootIngress(eventtest.UUID("evt-granted-sibling"), "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -148,7 +148,7 @@ func TestImportBoundaryWildcardObserveGrantAddsNarrowSiblingCandidate(t *testing
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish granted sibling: %v", err)
 	}
-	if got := store.deliveries["evt-granted-sibling"]; len(got) != 1 || got[0] != "worker-listener" {
+	if got := store.deliveries[eventtest.UUID("evt-granted-sibling")]; len(got) != 1 || got[0] != "worker-listener" {
 		t.Fatalf("persisted deliveries = %#v, want worker-listener", got)
 	}
 
@@ -175,11 +175,11 @@ func TestImportBoundaryWildcardBoundedGrantDeliversAcrossSurfaces(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	nonIntersecting := eventtest.RootIngress("evt-bounded-grant-non-intersection", "producer/task.failed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	nonIntersecting := eventtest.RootIngress(eventtest.UUID("evt-bounded-grant-non-intersection"), "producer/task.failed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	if err := eb.Publish(context.Background(), nonIntersecting); err != nil {
 		t.Fatalf("Publish non-intersecting bounded grant event: %v", err)
 	}
-	if got := store.deliveries["evt-bounded-grant-non-intersection"]; len(got) != 0 {
+	if got := store.deliveries[eventtest.UUID("evt-bounded-grant-non-intersection")]; len(got) != 0 {
 		t.Fatalf("non-intersecting persisted deliveries = %#v, want none", got)
 	}
 }
@@ -340,7 +340,7 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 			if eb.RouteTable().HasFlowInstanceRoute(collisionIdentity) {
 				t.Fatal("colliding EventBus instance route was installed")
 			}
-			staticEvent := eventtest.RootIngress("evt-static-descendant-"+strings.ReplaceAll(tc.name, " ", "-"), "producer/child/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+			staticEvent := eventtest.RootIngress(eventtest.UUID(eventtest.UUID("evt-static-descendant-")+strings.ReplaceAll(tc.name, " ", "-")), "producer/child/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 			staticPlan, err := eb.CheckPublishRecipientPlan(context.Background(), staticEvent)
 			if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan static descendant: %v", err)
@@ -360,7 +360,7 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 				t.Fatalf("existing sibling route after rejected collision = %#v, want unchanged authority", got)
 			}
 
-			evt := eventtest.RootIngress("evt-template-grant-"+strings.ReplaceAll(tc.name, " ", "-"), "producer/inst-1/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+			evt := eventtest.RootIngress(eventtest.UUID(eventtest.UUID("evt-template-grant-")+strings.ReplaceAll(tc.name, " ", "-")), "producer/inst-1/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 			plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 			if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -504,7 +504,7 @@ func assertImportBoundaryWildcardAuthorizationDeliversAcrossSurfaces(t *testing.
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := eventtest.RootIngress("evt-grant-delivery", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	evt := eventtest.RootIngress(eventtest.UUID("evt-grant-delivery"), "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -515,7 +515,7 @@ func assertImportBoundaryWildcardAuthorizationDeliversAcrossSurfaces(t *testing.
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish grant-backed event: %v", err)
 	}
-	if got := store.deliveries["evt-grant-delivery"]; len(got) != 1 || got[0] != "worker-listener" {
+	if got := store.deliveries[eventtest.UUID("evt-grant-delivery")]; len(got) != 1 || got[0] != "worker-listener" {
 		t.Fatalf("grant-backed persisted deliveries = %#v, want worker-listener", got)
 	}
 }

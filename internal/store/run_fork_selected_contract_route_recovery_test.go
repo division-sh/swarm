@@ -12,6 +12,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -20,7 +21,7 @@ import (
 
 func seedSelectedRouteRecoveryEvent(t testing.TB, ctx context.Context, db *sql.DB, runID, eventID string) {
 	t.Helper()
-	seedPostgresRootEventRecordFixture(
+	seedPostgresSemanticEventRecordFixture(
 		t, ctx, db, eventID, runID, "item.received",
 		events.EventProducerPlatform, "route-recovery", "", "", time.Now().UTC(),
 	)
@@ -206,9 +207,13 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJS
 		t.Fatalf("missing recovered recipient guard for fork %s", forkRunID)
 	}
 	guard.ExpectForkEvent("00000000-0000-0000-0000-000000000991", eventID)
-	evt := eventtest.PersistedProjection("00000000-0000-0000-0000-000000000991",
-		events.EventType("item.received"),
-		RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	evt := selectedRouteRecoveryGuardEvent(
+		t,
+		"00000000-0000-0000-0000-000000000991",
+		forkRunID,
+		sourceRunID,
+		eventID,
+	)
 
 	if err := guard.Authorize(ctx, evt, runtimebus.PublishRecipientPlan{
 		RoutedRecipients: []runtimebus.PublishDiagnosticRecipient{{
@@ -269,9 +274,13 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 		t.Fatalf("missing recovered recipient guard for fork %s", forkRunID)
 	}
 	guard.ExpectForkEvent("00000000-0000-0000-0000-000000000992", eventID)
-	evt := eventtest.PersistedProjection("00000000-0000-0000-0000-000000000992",
-		events.EventType("item.received"),
-		RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	evt := selectedRouteRecoveryGuardEvent(
+		t,
+		"00000000-0000-0000-0000-000000000992",
+		forkRunID,
+		sourceRunID,
+		eventID,
+	)
 
 	if err := guard.Authorize(ctx, evt, runtimebus.PublishRecipientPlan{
 		RoutedRecipients: []runtimebus.PublishDiagnosticRecipient{{
@@ -283,6 +292,32 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 	}); err != nil {
 		t.Fatalf("Authorize recovered bundle_hash JSONB recipient plan: %v", err)
 	}
+}
+
+func selectedRouteRecoveryGuardEvent(t *testing.T, eventID, forkRunID, sourceRunID, sourceEventID string) events.Event {
+	t.Helper()
+	lineage, err := events.NewSelectedForkLineage(
+		forkRunID,
+		sourceRunID,
+		sourceEventID,
+		"selected-contract-route-recovery-test",
+		"",
+		executionmode.Live,
+	)
+	if err != nil {
+		t.Fatalf("NewSelectedForkLineage: %v", err)
+	}
+	return eventtest.SelectedForkReplay(
+		eventID,
+		events.EventType("item.received"),
+		eventtest.Producer(events.EventProducerPlatform, RunForkSelectedContractExecutionOwner),
+		"",
+		nil,
+		0,
+		lineage,
+		events.EventEnvelope{},
+		time.Time{},
+	)
 }
 
 func TestRecordRunForkSelectedContractRouteRecoveryRejectsJSONBTamperDuringManagerRecovery(t *testing.T) {

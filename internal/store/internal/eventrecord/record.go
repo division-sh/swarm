@@ -89,8 +89,8 @@ type Record struct {
 
 func FromAdmitted(admitted events.AdmittedEvent) (Record, error) {
 	event := admitted.Event()
-	if event.ID() == "" {
-		return Record{}, fmt.Errorf("admitted event is required")
+	if err := events.ValidatePersistentEvent(event); err != nil {
+		return Record{}, fmt.Errorf("admitted event: %w", err)
 	}
 	envelope := event.NormalizedEnvelope()
 	record := Record{
@@ -139,6 +139,24 @@ func (r Record) Clone() Record {
 }
 
 func (r Record) Validate() error {
+	for field, value := range map[string]string{
+		"event_class": string(r.Class), "event_id": r.EventID, "run_id": r.RunID, "event_name": r.EventName,
+		"task_id": r.TaskID, "entity_id": r.EntityID, "produced_by": r.ProducedBy,
+		"produced_by_type": string(r.ProducedByType), "source_event_id": r.SourceEventID,
+		"routing_source_kind": string(r.RoutingSourceKind), "routing_source_authority": r.RoutingSourceAuthority,
+		"operator_reference_event_id":   r.OperatorReferencedEventID,
+		"selected_fork_source_run_id":   r.SelectedForkSourceRunID,
+		"selected_fork_source_event_id": r.SelectedForkSourceEventID,
+		"selected_fork_authority_stamp": r.SelectedForkAuthorityStamp,
+		"scope":                         string(r.Scope), "execution_mode": string(r.ExecutionMode),
+	} {
+		if value != strings.TrimSpace(value) {
+			return fmt.Errorf("event record %s is not canonical", field)
+		}
+	}
+	if r.FlowInstance != strings.Trim(strings.TrimSpace(r.FlowInstance), "/") {
+		return fmt.Errorf("event record flow_instance is not canonical")
+	}
 	switch r.Class {
 	case events.EventAdmissionRootIngress,
 		events.EventAdmissionOperatorInjected,
@@ -160,6 +178,10 @@ func (r Record) Validate() error {
 	if r.CreatedAt.IsZero() {
 		return fmt.Errorf("event record created_at is required")
 	}
+	_, offset := r.CreatedAt.Zone()
+	if offset != 0 || r.CreatedAt.Nanosecond()%1000 != 0 {
+		return fmt.Errorf("event record created_at must be canonical UTC microsecond precision")
+	}
 	if !json.Valid(r.Payload) {
 		return fmt.Errorf("event record payload must be valid JSON")
 	}
@@ -169,8 +191,12 @@ func (r Record) Validate() error {
 	if !r.ExecutionMode.Valid() {
 		return fmt.Errorf("event record execution_mode must be live or mock")
 	}
-	if _, err := events.NewProducerIdentity(r.ProducedByType, r.ProducedBy); err != nil {
+	producer, err := events.NewProducerIdentity(r.ProducedByType, r.ProducedBy)
+	if err != nil {
 		return fmt.Errorf("event record producer identity: %w", err)
+	}
+	if err := events.ValidateEventIdentityContract(r.Class, events.EventType(r.EventName), producer); err != nil {
+		return fmt.Errorf("event record identity contract: %w", err)
 	}
 	if _, err := r.decodeEnvelope(); err != nil {
 		return fmt.Errorf("event record envelope: %w", err)
@@ -252,15 +278,15 @@ func (r Record) decode() (events.AdmittedEvent, error) {
 		return events.AdmittedEvent{}, fmt.Errorf("event record routing source: %w", err)
 	}
 	facts := events.EventFacts{
-		ID:            strings.TrimSpace(r.EventID),
-		Type:          events.EventType(strings.TrimSpace(r.EventName)),
+		ID:            r.EventID,
+		Type:          events.EventType(r.EventName),
 		Producer:      events.ProducerClaim{Type: r.ProducedByType, ID: r.ProducedBy},
-		TaskID:        strings.TrimSpace(r.TaskID),
+		TaskID:        r.TaskID,
 		Payload:       bytes.Clone(r.Payload),
 		ChainDepth:    r.ChainDepth,
 		Envelope:      envelope,
 		RoutingSource: routingSource,
-		CreatedAt:     r.CreatedAt.UTC().Truncate(time.Microsecond),
+		CreatedAt:     r.CreatedAt,
 		ExecutionMode: r.ExecutionMode,
 	}
 	var operatorRef *events.OperatorReferenceProvenance
@@ -289,8 +315,8 @@ func (r Record) decode() (events.AdmittedEvent, error) {
 	restored, err := events.RestoreAdmittedEvent(events.RestoredEventInput{
 		Class:         r.Class,
 		Facts:         facts,
-		RunID:         strings.TrimSpace(r.RunID),
-		ParentEventID: strings.TrimSpace(r.SourceEventID),
+		RunID:         r.RunID,
+		ParentEventID: r.SourceEventID,
 		OperatorRef:   operatorRef,
 		SelectedFork:  selectedFork,
 	})
@@ -309,29 +335,29 @@ func (r Record) decode() (events.AdmittedEvent, error) {
 
 func (r Record) Equal(other Record) bool {
 	return r.Class == other.Class &&
-		strings.TrimSpace(r.EventID) == strings.TrimSpace(other.EventID) &&
-		strings.TrimSpace(r.RunID) == strings.TrimSpace(other.RunID) &&
-		strings.TrimSpace(r.EventName) == strings.TrimSpace(other.EventName) &&
-		strings.TrimSpace(r.TaskID) == strings.TrimSpace(other.TaskID) &&
-		strings.TrimSpace(r.EntityID) == strings.TrimSpace(other.EntityID) &&
-		strings.Trim(strings.TrimSpace(r.FlowInstance), "/") == strings.Trim(strings.TrimSpace(other.FlowInstance), "/") &&
+		r.EventID == other.EventID &&
+		r.RunID == other.RunID &&
+		r.EventName == other.EventName &&
+		r.TaskID == other.TaskID &&
+		r.EntityID == other.EntityID &&
+		r.FlowInstance == other.FlowInstance &&
 		r.Scope == other.Scope &&
 		jsonEqual(r.Payload, other.Payload) &&
 		r.ExecutionMode == other.ExecutionMode &&
 		r.ChainDepth == other.ChainDepth &&
-		strings.TrimSpace(r.ProducedBy) == strings.TrimSpace(other.ProducedBy) &&
+		r.ProducedBy == other.ProducedBy &&
 		r.ProducedByType == other.ProducedByType &&
-		strings.TrimSpace(r.SourceEventID) == strings.TrimSpace(other.SourceEventID) &&
-		r.CreatedAt.UTC().Truncate(time.Microsecond).Equal(other.CreatedAt.UTC().Truncate(time.Microsecond)) &&
+		r.SourceEventID == other.SourceEventID &&
+		r.CreatedAt.Equal(other.CreatedAt) &&
 		r.RoutingSourceKind == other.RoutingSourceKind &&
-		strings.TrimSpace(r.RoutingSourceAuthority) == strings.TrimSpace(other.RoutingSourceAuthority) &&
+		r.RoutingSourceAuthority == other.RoutingSourceAuthority &&
 		jsonEqual(r.SourceRoute, other.SourceRoute) &&
 		jsonEqual(r.TargetRoute, other.TargetRoute) &&
 		jsonEqual(r.TargetSet, other.TargetSet) &&
-		strings.TrimSpace(r.OperatorReferencedEventID) == strings.TrimSpace(other.OperatorReferencedEventID) &&
-		strings.TrimSpace(r.SelectedForkSourceRunID) == strings.TrimSpace(other.SelectedForkSourceRunID) &&
-		strings.TrimSpace(r.SelectedForkSourceEventID) == strings.TrimSpace(other.SelectedForkSourceEventID) &&
-		strings.TrimSpace(r.SelectedForkAuthorityStamp) == strings.TrimSpace(other.SelectedForkAuthorityStamp) &&
+		r.OperatorReferencedEventID == other.OperatorReferencedEventID &&
+		r.SelectedForkSourceRunID == other.SelectedForkSourceRunID &&
+		r.SelectedForkSourceEventID == other.SelectedForkSourceEventID &&
+		r.SelectedForkAuthorityStamp == other.SelectedForkAuthorityStamp &&
 		r.SelectedForkLineageOwners == other.SelectedForkLineageOwners
 }
 
@@ -444,7 +470,8 @@ func equalJSONValue(left, right any) bool {
 			return false
 		}
 		for key, item := range leftValue {
-			if !equalJSONValue(item, rightValue[key]) {
+			rightItem, exists := rightValue[key]
+			if !exists || !equalJSONValue(item, rightItem) {
 				return false
 			}
 		}

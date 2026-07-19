@@ -1327,9 +1327,9 @@ func seedOperatorAgentEvent(t *testing.T, ctx context.Context, pg *PostgresStore
 	if entityID != "" {
 		envelope = events.EnvelopeForEntityID(envelope, entityID)
 	}
-	event := eventtest.PersistedProjectionForProducer(
+	event := eventtest.PersistedChildForProducer(
 		eventID, events.EventType(eventName), eventtest.Producer(events.EventProducerAgent, "runtime"), "",
-		json.RawMessage(`{}`), 0, runID, "", envelope, createdAt,
+		json.RawMessage(`{}`), 0, runID, eventtest.UUID("operator-agent-parent:"+eventID), envelope, createdAt,
 	)
 	if err := commitSemanticEventFixture(ctx, pg, event); err != nil {
 		t.Fatalf("seed operator-agent event %s: %v", eventName, err)

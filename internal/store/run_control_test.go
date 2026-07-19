@@ -21,7 +21,7 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(
+	seedPostgresSemanticEventRecordFixture(
 		t, ctx, db, eventID, runID, events.EventType("custom.stop"),
 		events.EventProducerPlatform, "test", "", "", time.Now().UTC(),
 	)

@@ -969,7 +969,7 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 		t.Fatalf("stamp advanced source run bundle identity: %v", err)
 	}
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
-		advancedAfterEventID, advancedSourceRunID, "source.after", eventtest.Producer(events.EventProducerPlatform, "test"),
+		advancedAfterEventID, advancedSourceRunID, "source.after", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{EntityID: advancedEntityID, FlowInstance: "flow-a/1", Scope: events.EventScopeEntity}, advancedAt.Add(time.Second))
 	captureRunForkCLIRevision(t, db, advancedSourceRunID, runforkrevision.FamilyEvents)
 
@@ -7457,7 +7457,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 		t.Fatalf("seed sqlite active run: %v", err)
 	}
 	storetest.InsertRootEventRecord(t, ctx, sqliteStore.DB, runtimeauthoractivity.DialectSQLite,
-		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerAgent, "test"),
+		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
@@ -7546,7 +7546,7 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 		t.Fatalf("seed unavailable bundle run %s: %v", source, err)
 	}
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
-		eventID, runID, events.EventType("startup."+source+".event"), eventtest.Producer(events.EventProducerAgent, "test"),
+		eventID, runID, events.EventType("startup."+source+".event"), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
@@ -7842,7 +7842,7 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 		t.Fatalf("seed run: %v", err)
 	}
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
-		eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerPlatform, "test"),
+		eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)),
 		events.EventEnvelope{EntityID: entityID, FlowInstance: "flow-a/1", Scope: events.EventScopeEntity}, at)
 	if _, err := db.ExecContext(ctx, `
@@ -8760,7 +8760,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 		t.Fatalf("seed active mismatched run: %v", err)
 	}
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
-		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerAgent, "test"),
+		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (

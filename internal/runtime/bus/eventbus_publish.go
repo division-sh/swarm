@@ -119,10 +119,7 @@ func (eb *EventBus) runDispatchBlocked(ctx context.Context, evt events.Event) (b
 }
 
 func runtimeIngressDispatchBypass(evt events.Event) bool {
-	if strings.TrimSpace(evt.SourceAgent()) != "runtime" {
-		return false
-	}
-	return strings.HasPrefix(strings.TrimSpace(string(evt.Type())), "platform.")
+	return events.IsRuntimePlatformEvent(evt)
 }
 
 func (eb *EventBus) dispatchQueueReason(ctx context.Context, evt events.Event) (string, error) {
@@ -362,11 +359,18 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 			return PreparedPublish{}, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
-	preparedCtx, admitted, err := admitEventForPublish(ctx, evt, time.Now())
+	admitted, err := events.AdmitForPersistence(evt, events.AdmissionOptions{
+		Now:                           time.Now(),
+		RequirePersistentUUIDIdentity: true,
+	})
 	if err != nil {
 		return PreparedPublish{}, err
 	}
 	evt = admitted.Event()
+	preparedCtx := events.WithDeliveryContext(ctx, evt.DeliveryContext())
+	if runID := strings.TrimSpace(evt.RunID()); runID != "" {
+		preparedCtx = runtimecorrelation.WithRunID(preparedCtx, runID)
+	}
 	preparedCtx, err = eb.withAuthorActivityEventDescriptor(preparedCtx, evt)
 	if err != nil {
 		return PreparedPublish{}, err
@@ -967,7 +971,7 @@ func admitDeferredEvents(ctx context.Context, out []events.Event) ([]events.Even
 }
 
 func admitEventForPublish(ctx context.Context, evt events.Event, now time.Time) (context.Context, events.AdmittedEvent, error) {
-	admitted, err := events.AdmitForPublish(evt, events.AdmissionOptions{Now: now})
+	admitted, err := events.AdmitForPublish(evt, events.AdmissionOptions{Now: now, RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return ctx, events.AdmittedEvent{}, err
 	}
@@ -1371,13 +1375,15 @@ func (eb *EventBus) publishPersistedRecipients(ctx context.Context, evt events.E
 	if !isValidEventTypeName(string(evt.Type())) {
 		return fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
-	var err error
-	var admitted events.AdmittedEvent
-	ctx, admitted, err = admitEventForPublish(ctx, evt, time.Now())
+	admitted, err := events.RevalidatePersistedEvent(evt)
 	if err != nil {
 		return err
 	}
 	evt = admitted.Event()
+	ctx = events.WithDeliveryContext(ctx, evt.DeliveryContext())
+	if runID := strings.TrimSpace(evt.RunID()); runID != "" {
+		ctx = runtimecorrelation.WithRunID(ctx, runID)
+	}
 	if reason, err := eb.dispatchQueueReason(ctx, evt); err != nil {
 		return err
 	} else if reason != "" {

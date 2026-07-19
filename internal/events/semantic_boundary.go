@@ -67,7 +67,7 @@ func RestoreAdmittedEvent(input RestoredEventInput) (AdmittedEvent, error) {
 	if event.ID() != strings.TrimSpace(input.Facts.ID) || !event.CreatedAt().Equal(input.Facts.CreatedAt.UTC().Truncate(time.Microsecond)) {
 		return AdmittedEvent{}, fmt.Errorf("durable event identity changed during readback")
 	}
-	if err := validateAdmittedIdentity(event.ID(), event.RunID(), event.ParentEventID(), true); err != nil {
+	if err := ValidatePersistentEvent(event); err != nil {
 		return AdmittedEvent{}, fmt.Errorf("durable event identity: %w", err)
 	}
 	return newAdmittedEvent(event), nil

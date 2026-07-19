@@ -59,7 +59,7 @@ func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *tes
 		t.Fatalf("seed run: %v", err)
 	}
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
-		eventID, runID, "task.completed", eventtest.Producer(events.EventProducerAgent, "runtime"),
+		eventID, runID, "task.completed", eventtest.Producer(events.EventProducerExternal, "runtime"),
 		[]byte(`{"entity_id":"`+entityID+`"}`), events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, time.Unix(1700000000, 0).UTC())
 
 	seedDelivery := func(subscriberID, status string, retryCount int, failureCode string, createdAt time.Time) {
@@ -138,7 +138,7 @@ func TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity(t *tes
 		t.Helper()
 		eventID := uuid.NewString()
 		storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
-			eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerAgent, "runtime"),
+			eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerExternal, "runtime"),
 			[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at.UTC())
 		for _, delivery := range deliveries {
 			if _, err := db.ExecContext(ctx, `
@@ -189,7 +189,7 @@ func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T)
 		t.Fatalf("seed run: %v", err)
 	}
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
-		eventID, runID, "task.completed", eventtest.Producer(events.EventProducerAgent, "runtime"),
+		eventID, runID, "task.completed", eventtest.Producer(events.EventProducerExternal, "runtime"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
@@ -242,10 +242,10 @@ func TestSQLObservabilityReader_EventIdentityDoesNotPromotePayloadEntity(t *test
 		t.Fatalf("seed run: %v", err)
 	}
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
-		payloadOnlyEventID, runID, "task.payload_only", eventtest.Producer(events.EventProducerAgent, "agent-a"),
+		payloadOnlyEventID, runID, "task.payload_only", eventtest.Producer(events.EventProducerExternal, "agent-a"),
 		[]byte(`{"entity_id":"`+targetEntityID+`","marker":"payload-only"}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, base)
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
-		canonicalEventID, runID, "task.canonical_entity", eventtest.Producer(events.EventProducerAgent, "agent-b"),
+		canonicalEventID, runID, "task.canonical_entity", eventtest.Producer(events.EventProducerExternal, "agent-b"),
 		[]byte(`{"entity_id":"payload-business-value","marker":"canonical"}`),
 		events.EventEnvelope{EntityID: targetEntityID, Scope: events.EventScopeEntity}, base.Add(time.Second))
 

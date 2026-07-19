@@ -1309,6 +1309,7 @@ type standaloneRuntimePlatformRunRecord struct {
 	RunID            string
 	RunStatus        string
 	EventID          string
+	EventClass       string
 	EventType        string
 	ProducedBy       string
 	ProducedByType   string
@@ -1317,57 +1318,29 @@ type standaloneRuntimePlatformRunRecord struct {
 	TriggerEventType string
 }
 
-func isStandaloneRuntimePlatformEventType(eventType string) bool {
-	switch strings.TrimSpace(eventType) {
-	case "platform.boot",
-		"platform.recovery_failed",
-		"platform.event_quarantined",
-		"platform.agent_panic",
-		"platform.agent_failed",
-		"platform.auth_required",
-		"platform.paused",
-		"platform.resumed",
-		"platform.dead_letter_escalation",
-		"platform.run_stalled",
-		"platform.budget_threshold_crossed":
-		return true
-	default:
-		return false
-	}
-}
-
 func loadStandaloneRuntimePlatformRunRecord(ctx context.Context, db storerunlifecycle.DBTX, eventID string) (standaloneRuntimePlatformRunRecord, bool, error) {
 	eventID = sanitizeOptionalUUID(eventID)
 	if db == nil || eventID == "" {
 		return standaloneRuntimePlatformRunRecord{}, false, nil
 	}
-	var rec standaloneRuntimePlatformRunRecord
-	err := db.QueryRowContext(ctx, `
-		SELECT
-			COALESCE(r.run_id::text, ''),
-			COALESCE(r.status, ''),
-			COALESCE(e.event_id::text, ''),
-			COALESCE(e.event_name, ''),
-			COALESCE(e.produced_by, ''),
-			COALESCE(e.produced_by_type, ''),
-			COALESCE(e.source_event_id::text, ''),
-			COALESCE(r.trigger_event_id::text, ''),
-			COALESCE(r.trigger_event_type, '')
-		FROM events e
-		INNER JOIN runs r ON r.run_id = e.run_id
-		WHERE e.event_id = $1::uuid
-		LIMIT 1
-	`, eventID).Scan(
-		&rec.RunID,
-		&rec.RunStatus,
-		&rec.EventID,
-		&rec.EventType,
-		&rec.ProducedBy,
-		&rec.ProducedByType,
-		&rec.SourceEventID,
-		&rec.TriggerEventID,
-		&rec.TriggerEventType,
-	)
+	durable, found, err := loadPostgresEventIdentity(ctx, db, eventID)
+	if err != nil || !found {
+		return standaloneRuntimePlatformRunRecord{}, found, err
+	}
+	admitted, err := decodeEventRecord(durable)
+	if err != nil {
+		return standaloneRuntimePlatformRunRecord{}, false, fmt.Errorf("decode standalone runtime platform event: %w", err)
+	}
+	event := admitted.Event()
+	rec := standaloneRuntimePlatformRunRecord{
+		RunID: event.RunID(), EventID: event.ID(), EventClass: string(event.AdmissionClass()),
+		EventType: string(event.Type()), ProducedBy: event.SourceAgent(), ProducedByType: string(event.ProducerType()),
+		SourceEventID: event.ParentEventID(),
+	}
+	err = db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), COALESCE(trigger_event_id::text, ''), COALESCE(trigger_event_type, '')
+		FROM runs WHERE run_id = $1::uuid
+	`, rec.RunID).Scan(&rec.RunStatus, &rec.TriggerEventID, &rec.TriggerEventType)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return standaloneRuntimePlatformRunRecord{}, false, nil
@@ -1382,14 +1355,8 @@ func isStandaloneRuntimePlatformRunRecord(rec standaloneRuntimePlatformRunRecord
 	if strings.TrimSpace(rec.RunID) == "" {
 		return false
 	}
-	if !isStandaloneRuntimePlatformEventType(rec.EventType) {
-		return false
-	}
-	if strings.TrimSpace(rec.ProducedByType) != "platform" {
-		return false
-	}
-	producedBy := strings.TrimSpace(rec.ProducedBy)
-	if producedBy != "" && producedBy != "runtime" {
+	producer, err := events.NewProducerIdentity(events.EventProducerType(rec.ProducedByType), rec.ProducedBy)
+	if err != nil || !events.IsStandaloneRuntimePlatformFacts(events.EventAdmissionClass(rec.EventClass), events.EventType(rec.EventType), producer) {
 		return false
 	}
 	if strings.TrimSpace(rec.SourceEventID) != "" {

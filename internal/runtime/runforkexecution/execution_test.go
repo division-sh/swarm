@@ -35,6 +35,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -1439,7 +1440,7 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 		t.Fatalf("seed selected-fork proof runs: %v", err)
 	}
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, forkEventID, sourceRunID, "selected.proof",
-		eventtest.Producer(events.EventProducerPlatform, "selected-proof"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
+		eventtest.Producer(events.EventProducerExternal, "selected-proof"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings
 			(binding_id,fork_run_id,source_run_id,fork_event_id,mode,contracts_root,workflow_name,workflow_version,created_at)
@@ -1721,7 +1722,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		t.Fatalf("seed selected-contract container competition runs: %v", err)
 	}
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, forkEventID, sourceRunID, "selected.test",
-		eventtest.Producer(events.EventProducerPlatform, "selected-test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
+		eventtest.Producer(events.EventProducerExternal, "selected-test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings
 			(binding_id,fork_run_id,source_run_id,fork_event_id,mode,contracts_root,workflow_name,workflow_version,created_at)
@@ -3011,7 +3012,7 @@ func TestExecuteSelectedContractRunForkBranchesWhenSourceAdvancedAfterForkPoint(
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, afterEventID, sourceRunID, "source.after",
-		eventtest.Producer(events.EventProducerPlatform, "source-runtime"), []byte(`{}`),
+		eventtest.Producer(events.EventProducerExternal, "source-runtime"), []byte(`{}`),
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at.Add(time.Second))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
@@ -3159,16 +3160,14 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesCanonicalPlan(t *tes
 	}
 	guard.ExpectForkEvent("fork-event", sourceEventID)
 
-	err = guard.AuthorizeEvent(context.Background(), eventtest.RootIngress("fork-event",
-		"work.begin",
-		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	err = guard.AuthorizeEvent(context.Background(), selectedContractGuardEvent(t, "fork-event",
+		"work.begin", store.RunForkSelectedContractExecutionOwner, sourceEventID))
 	if err != nil {
 		t.Fatalf("AuthorizeEvent canonical recipient plan: %v", err)
 	}
 
-	err = guard.Authorize(context.Background(), eventtest.RootIngress("fork-event",
-		"work.begin",
-		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+	err = guard.Authorize(context.Background(), selectedContractGuardEvent(t, "fork-event",
+		"work.begin", store.RunForkSelectedContractExecutionOwner, sourceEventID),
 
 		bus.PublishRecipientPlan{
 			RoutedRecipients: []bus.PublishDiagnosticRecipient{{
@@ -3207,9 +3206,8 @@ func TestSelectedContractRecipientPlanPublishGuardScopesPathDriftToFreshCreatePr
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
 	guard.ExpectForkEvent("fork-event", "source-event")
-	evt := eventtest.RootIngress("fork-event",
-		"validation.requested",
-		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	evt := selectedContractGuardEvent(t, "fork-event",
+		"validation.requested", store.RunForkSelectedContractExecutionOwner, "source-event")
 	projection, err := events.NewDeliveryPayloadProjection(map[string]string{"validation_case_id": "fork-case"})
 	if err != nil {
 		t.Fatalf("NewDeliveryPayloadProjection: %v", err)
@@ -3305,9 +3303,8 @@ func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDelivery
 	}
 	guard.ExpectForkEvent("fork-event", "source-event")
 
-	routes, err := guard.MaterializeNodeDeliveryRoutes(context.Background(), eventtest.RootIngress("fork-event",
-		"item.received",
-		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+	routes, err := guard.MaterializeNodeDeliveryRoutes(context.Background(), selectedContractGuardEvent(t, "fork-event",
+		"item.received", store.RunForkSelectedContractExecutionOwner, "source-event"),
 
 		bus.PublishRecipientPlan{
 			RoutedRecipients: []bus.PublishDiagnosticRecipient{
@@ -3353,9 +3350,8 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesContractSwapOwner(t 
 	}
 	guard.ExpectForkEvent("fork-event", sourceEventID)
 
-	err = guard.Authorize(context.Background(), eventtest.RootIngress("fork-event",
-		"work.begin",
-		store.RunForkHistoricalReplayContractSwapBootResumeOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+	err = guard.Authorize(context.Background(), selectedContractGuardEvent(t, "fork-event",
+		"work.begin", store.RunForkHistoricalReplayContractSwapBootResumeOwner, sourceEventID),
 
 		bus.PublishRecipientPlan{
 			RoutedRecipients: []bus.PublishDiagnosticRecipient{{
@@ -3388,9 +3384,8 @@ func TestSelectedContractRecipientPlanPublishGuardRejectsBypassAndSubscriptions(
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
 
-	err = guard.Authorize(context.Background(), eventtest.RootIngress("fork-event",
-		"work.begin",
-		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+	err = guard.Authorize(context.Background(), selectedContractGuardEvent(t, "fork-event",
+		"work.begin", store.RunForkSelectedContractExecutionOwner, sourceEventID),
 
 		bus.PublishRecipientPlan{
 			RoutedRecipients: []bus.PublishDiagnosticRecipient{{
@@ -3405,9 +3400,8 @@ func TestSelectedContractRecipientPlanPublishGuardRejectsBypassAndSubscriptions(
 	}
 
 	guard.ExpectForkEvent("fork-event-subscription", sourceEventID)
-	err = guard.Authorize(context.Background(), eventtest.RootIngress("fork-event-subscription",
-		"work.begin",
-		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+	err = guard.Authorize(context.Background(), selectedContractGuardEvent(t, "fork-event-subscription",
+		"work.begin", store.RunForkSelectedContractExecutionOwner, sourceEventID),
 
 		bus.PublishRecipientPlan{
 			RoutedRecipients: []bus.PublishDiagnosticRecipient{{
@@ -3423,9 +3417,8 @@ func TestSelectedContractRecipientPlanPublishGuardRejectsBypassAndSubscriptions(
 	}
 
 	guard.ExpectForkEvent("fork-event-wrong-recipient", sourceEventID)
-	err = guard.Authorize(context.Background(), eventtest.RootIngress("fork-event-wrong-recipient",
-		"work.begin",
-		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+	err = guard.Authorize(context.Background(), selectedContractGuardEvent(t, "fork-event-wrong-recipient",
+		"work.begin", store.RunForkSelectedContractExecutionOwner, sourceEventID),
 
 		bus.PublishRecipientPlan{
 			RoutedRecipients: []bus.PublishDiagnosticRecipient{{
@@ -3438,6 +3431,32 @@ func TestSelectedContractRecipientPlanPublishGuardRejectsBypassAndSubscriptions(
 	if err == nil || !strings.Contains(err.Error(), "routed recipients do not match") {
 		t.Fatalf("Authorize wrong recipient error = %v, want recipient-plan mismatch", err)
 	}
+}
+
+func selectedContractGuardEvent(t *testing.T, eventID string, eventType events.EventType, producerID, sourceEventID string) events.Event {
+	t.Helper()
+	lineage, err := events.NewSelectedForkLineage(
+		"fork-run",
+		"source-run",
+		sourceEventID,
+		"selected-contract-test",
+		"",
+		executionmode.Live,
+	)
+	if err != nil {
+		t.Fatalf("NewSelectedForkLineage: %v", err)
+	}
+	return eventtest.SelectedForkReplay(
+		eventID,
+		eventType,
+		eventtest.Producer(events.EventProducerPlatform, producerID),
+		"",
+		nil,
+		0,
+		lineage,
+		events.EventEnvelope{},
+		time.Time{},
+	)
 }
 
 func assertSelectedContractRuntimeContainerProof(t *testing.T, proof *SelectedContractForkLocalRuntimeContainer, executionOwner, sourceRunID, forkRunID, forkEventID string, sourceEventIDs []string) {
@@ -3681,7 +3700,7 @@ func seedSelectedExecutionSourceRun(t *testing.T, db *sql.DB, sourceRunID, entit
 		t.Fatalf("seed source run: %v", err)
 	}
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, sourceEventID, sourceRunID, events.EventType(eventName),
-		eventtest.Producer(events.EventProducerPlatform, "source-runtime"), payload,
+		eventtest.Producer(events.EventProducerExternal, "source-runtime"), payload,
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
@@ -3750,7 +3769,7 @@ func seedSelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, db *sql.DB,
 		"level":   "info",
 		"message": "diagnostic platform row must remain lineage-only",
 	})
-	storetest.InsertRuntimeDiagnosticEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, diagnosticEventID, sourceRunID, "", "pipeline", payload, at)
+	storetest.InsertDiagnosticDirectEventRecordForRun(t, ctx, db, runtimeauthoractivity.DialectPostgres, diagnosticEventID, sourceRunID, "", "runtime", payload, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, entity_id, flow_instance, outcome, reason_code, side_effects, processed_at
@@ -3783,7 +3802,7 @@ func seedSelectedExecutionSourceReplayScopeMarker(t *testing.T, db *sql.DB, sour
 func seedSelectedExecutionPostForkSourceEvent(t *testing.T, db *sql.DB, sourceRunID, sourceEventID, entityID string, at time.Time) {
 	t.Helper()
 	storetest.InsertRootEventRecord(t, context.Background(), db, runtimeauthoractivity.DialectPostgres, sourceEventID, sourceRunID, "source.after",
-		eventtest.Producer(events.EventProducerPlatform, "source-runtime"), []byte(`{}`),
+		eventtest.Producer(events.EventProducerExternal, "source-runtime"), []byte(`{}`),
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at)
 }
 

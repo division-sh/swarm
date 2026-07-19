@@ -274,7 +274,7 @@ func TestRunForkSourceFreezeBlocksOnlyLiveExecutionAuthority(t *testing.T) {
 func seedRunForkFreezeDeliveryAuthority(t *testing.T, ctx context.Context, db *sql.DB, lineage runForkActivationLineage, now time.Time, live bool) {
 	t.Helper()
 	eventID := uuid.NewString()
-	seedPostgresRootEventRecordFixture(
+	seedPostgresSemanticEventRecordFixture(
 		t, ctx, db, eventID, lineage.SourceRunID, events.EventType("freeze.delivery"),
 		events.EventProducerPlatform, "test", "", "", now,
 	)
