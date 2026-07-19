@@ -653,6 +653,72 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 	}
 }
 
+func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronology(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx := runForkTestContext()
+	repoRoot := runForkExecutionRepoRoot(t)
+	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
+	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
+		Mode: "selected_contracts", ContractsRoot: contractsRoot,
+	})
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
+	}
+	sourceScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loaded.BundleHash)
+	if err != nil {
+		t.Fatalf("resolve source scope: %v", err)
+	}
+	ctx = runtimeauthoractivity.WithScope(ctx, sourceScope)
+	descriptors, err := swaruntime.AuthorActivityEventDescriptors(loaded.Source)
+	if err != nil {
+		t.Fatalf("project source descriptors: %v", err)
+	}
+	lease, err := pg.RegisterAuthorActivityEventCatalog(sourceScope, descriptors)
+	if err != nil {
+		t.Fatalf("register source descriptors: %v", err)
+	}
+	t.Cleanup(lease.Release)
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	earlierEventID := "ffffffff-ffff-4fff-8fff-ffffffffffff"
+	laterEventID := "00000000-0000-4000-8000-000000000001"
+	earlierAt := time.Unix(1700002201, 0).UTC()
+	laterAt := earlierAt.Add(time.Second)
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, earlierEventID, "item.received", earlierAt)
+	payload, _ := json.Marshal(map[string]any{"entity_id": entityID})
+	storetest.InsertChildEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+		laterEventID, sourceRunID, earlierEventID, events.EventType("item.received"),
+		eventtest.Producer(events.EventProducerNode, "source-node"), payload,
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), laterAt)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'node', 'test-node', 'pending', 'source_pending_node_delivery', $3)
+	`, sourceRunID, laterEventID, laterAt); err != nil {
+		t.Fatalf("seed later source delivery: %v", err)
+	}
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
+
+	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+		SourceRunID: sourceRunID, At: laterEventID, ConfirmSourceFreeze: true,
+		Store: pg, SourceLoader: loader,
+		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source, contractsRoot),
+	})
+	if err != nil {
+		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
+	}
+	if result.ExecutedEventCount != 2 || len(result.ForkEvents) != 2 {
+		t.Fatalf("execution result = %#v, want two sequential fork events", result)
+	}
+	if result.ForkEvents[0].SourceEventID != earlierEventID || result.ForkEvents[1].SourceEventID != laterEventID {
+		t.Fatalf("sequential fork execution order = %#v, want [%s %s]", result.ForkEvents, earlierEventID, laterEventID)
+	}
+}
+
 func TestExecuteSelectedContractRunForkFailsClosedBeforeMaterializationForAgentRecipientWithoutHandlerMaterializer(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)

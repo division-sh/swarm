@@ -99,12 +99,15 @@ func admitPersistableEvent(event Event, options AdmissionOptions) (AdmittedEvent
 			return AdmittedEvent{}, fmt.Errorf("selected-fork replay event requires typed lineage")
 		}
 	case EventAdmissionRuntimeControl, EventAdmissionRuntimeDiagnostic:
-		if IsStandaloneRuntimePlatformEvent(admitted) && admitted.RunID() == "" {
+		if err := validateRuntimeLineageIntent(admitted); err != nil {
+			return AdmittedEvent{}, err
+		}
+		if admitted.runtimeIntent == runtimeLineageStandalone && admitted.RunID() == "" {
 			admitted.runID = uuid.NewString()
 		}
 	case EventAdmissionDiagnosticDirect:
-		if admitted.ParentEventID() != "" && admitted.RunID() == "" {
-			return AdmittedEvent{}, fmt.Errorf("diagnostic-direct event with causal parent requires run_id")
+		if err := validateRuntimeLineageIntent(admitted); err != nil {
+			return AdmittedEvent{}, err
 		}
 	}
 	if err := validateAdmittedIdentity(admitted.ID(), admitted.RunID(), admitted.ParentEventID(), options.RequirePersistentUUIDIdentity); err != nil {
@@ -116,6 +119,26 @@ func admitPersistableEvent(event Event, options AdmissionOptions) (AdmittedEvent
 		}
 	}
 	return newAdmittedEvent(admitted), nil
+}
+
+func validateRuntimeLineageIntent(event Event) error {
+	switch event.runtimeIntent {
+	case runtimeLineageCausal:
+		if event.RunID() == "" || event.ParentEventID() == "" {
+			return fmt.Errorf("%s causal event requires run_id and parent_event_id", event.AdmissionClass())
+		}
+	case runtimeLineageRunScoped:
+		if event.RunID() == "" || event.ParentEventID() != "" {
+			return fmt.Errorf("%s run-scoped event requires run_id without parent_event_id", event.AdmissionClass())
+		}
+	case runtimeLineageStandalone:
+		if event.ParentEventID() != "" {
+			return fmt.Errorf("%s standalone event cannot carry parent_event_id", event.AdmissionClass())
+		}
+	default:
+		return fmt.Errorf("%s event requires explicit causal, run-scoped, or standalone lineage intent", event.AdmissionClass())
+	}
+	return nil
 }
 
 func validateAdmittedIdentity(eventID, runID, parentEventID string, requirePersistentUUIDIdentity bool) error {

@@ -288,7 +288,7 @@ func expireHumanTaskCards(ctx context.Context, tx *sql.Tx, now time.Time, limit 
 		if err != nil {
 			return nil, err
 		}
-		evt, err := events.NewRuntimeControlEvent(events.RuntimeEventInput{
+		evt, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
 			Facts: events.EventFacts{
 				ID: eventID, Type: events.EventType("mailbox.card_expired"),
 				Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "platform"},

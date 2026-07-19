@@ -23,7 +23,7 @@ import (
 const decisionCardEventName = "mailbox.card_decided"
 
 func newMailboxRuntimeControlEvent(eventID, eventName, runID string, payload []byte, entityID, flowInstance string, createdAt time.Time, mode executionmode.Mode) (events.Event, error) {
-	return events.NewRuntimeControlEvent(events.RuntimeEventInput{
+	return events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
 		Facts: events.EventFacts{
 			ID: eventID, Type: events.EventType(eventName),
 			Producer:  events.ProducerClaim{Type: events.EventProducerPlatform, ID: "platform"},

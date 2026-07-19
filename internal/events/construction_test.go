@@ -15,16 +15,57 @@ type eventConstructorCallsite struct {
 	Scope string
 }
 
+type runtimeConstructorCallsite struct {
+	Path        string
+	Scope       string
+	Constructor string
+}
+
 var productionProjectionEventAllowlist = map[eventConstructorCallsite]int{}
 
 var productionRouteProbeEventAllowlist = map[eventConstructorCallsite]int{
 	{Path: "internal/runtime/bus/eventbus_routing.go", Scope: "EventBus.resolveRoutedSubscribers"}: 1,
 }
 
+var productionRuntimeConstructorAllowlist = map[runtimeConstructorCallsite]int{
+	{Path: "internal/apiv1/operator_decision_cards.go", Scope: "newMailboxRuntimeControlEvent", Constructor: "NewRunScopedRuntimeControlEvent"}:                                  1,
+	{Path: "internal/runtime/agentcontrol/control.go", Scope: "NewDirectiveEvent", Constructor: "NewRunScopedDiagnosticDirectEvent"}:                                             1,
+	{Path: "internal/runtime/budget.go", Scope: "BudgetTracker.evaluateScope", Constructor: "NewCausalRuntimeDiagnosticEvent"}:                                                   1,
+	{Path: "internal/runtime/budget.go", Scope: "BudgetTracker.evaluateScope", Constructor: "NewStandaloneRuntimeDiagnosticEvent"}:                                               1,
+	{Path: "internal/runtime/event_construction.go", Scope: "newStandaloneRuntimePlatformControlEvent", Constructor: "NewStandaloneRuntimeControlEvent"}:                         1,
+	{Path: "internal/runtime/event_construction.go", Scope: "newStandaloneRuntimePlatformDiagnosticEvent", Constructor: "NewStandaloneRuntimeDiagnosticEvent"}:                   1,
+	{Path: "internal/runtime/inbound.go", Scope: "projectInboundPublication", Constructor: "NewRunScopedDiagnosticDirectEvent"}:                                                  1,
+	{Path: "internal/runtime/ingress/controller.go", Scope: "Controller.publishTransitionEvent", Constructor: "NewCausalRuntimeControlEvent"}:                                    1,
+	{Path: "internal/runtime/ingress/controller.go", Scope: "Controller.publishTransitionEvent", Constructor: "NewStandaloneRuntimeControlEvent"}:                                1,
+	{Path: "internal/runtime/llm/session_events.go", Scope: "newAgentStartedRuntimeDiagnostic", Constructor: "NewCausalRuntimeDiagnosticEvent"}:                                  1,
+	{Path: "internal/runtime/llm/session_events.go", Scope: "newAgentStartedRuntimeDiagnostic", Constructor: "NewRunScopedRuntimeDiagnosticEvent"}:                               1,
+	{Path: "internal/runtime/llm/session_events.go", Scope: "newAgentStartedRuntimeDiagnostic", Constructor: "NewStandaloneRuntimeDiagnosticEvent"}:                              1,
+	{Path: "internal/runtime/manager/event_construction.go", Scope: "newPlatformCausalRuntimeControlEvent", Constructor: "NewCausalRuntimeControlEvent"}:                         1,
+	{Path: "internal/runtime/manager/event_construction.go", Scope: "newPlatformCausalRuntimeDiagnosticEvent", Constructor: "NewCausalRuntimeDiagnosticEvent"}:                   1,
+	{Path: "internal/runtime/manager/event_construction.go", Scope: "newPlatformStandaloneRuntimeControlEvent", Constructor: "NewStandaloneRuntimeControlEvent"}:                 1,
+	{Path: "internal/runtime/manager/event_construction.go", Scope: "newPlatformStandaloneRuntimeDiagnosticEvent", Constructor: "NewStandaloneRuntimeDiagnosticEvent"}:           1,
+	{Path: "internal/runtime/pipeline/coordinator.go", Scope: "newPipelineRuntimeDiagnostic", Constructor: "NewCausalRuntimeDiagnosticEvent"}:                                    1,
+	{Path: "internal/runtime/pipeline/node_system_runner.go", Scope: "systemNodeRunner.emitDeadLetter", Constructor: "NewCausalRuntimeDiagnosticEvent"}:                          1,
+	{Path: "internal/runtime/pipeline/workflow_gate_lifecycle.go", Scope: "PipelineCoordinator.publishWorkflowGateSuperseded", Constructor: "NewRunScopedRuntimeControlEvent"}:   1,
+	{Path: "internal/runtime/pipeline/workflow_gate_terminal.go", Scope: "WorkflowInstanceStore.supersedeWorkflowInstanceGates", Constructor: "NewRunScopedRuntimeControlEvent"}: 1,
+	{Path: "internal/runtime/pipeline/workflow_timer_owner.go", Scope: "WorkflowTimerLifecycle.Fire", Constructor: "NewRunScopedRuntimeControlEvent"}:                            1,
+	{Path: "internal/runtime/runstalled/monitor.go", Scope: "Monitor.eventForSnapshot", Constructor: "NewRunScopedRuntimeDiagnosticEvent"}:                                       1,
+	{Path: "internal/runtime/runtime.go", Scope: "scheduledEvent", Constructor: "NewRunScopedRuntimeControlEvent"}:                                                               1,
+	{Path: "internal/runtime/runtime.go", Scope: "Runtime.publishBootCompleted", Constructor: "NewStandaloneRuntimeControlEvent"}:                                                1,
+	{Path: "internal/store/eventfixture/event.go", Scope: "DiagnosticDirectForRun", Constructor: "NewCausalDiagnosticDirectEvent"}:                                               1,
+	{Path: "internal/store/eventfixture/event.go", Scope: "DiagnosticDirectForRun", Constructor: "NewRunScopedDiagnosticDirectEvent"}:                                            1,
+	{Path: "internal/store/eventfixture/event.go", Scope: "DiagnosticDirectForRun", Constructor: "NewStandaloneDiagnosticDirectEvent"}:                                           1,
+	{Path: "internal/store/human_task_cards.go", Scope: "expireHumanTaskCards", Constructor: "NewRunScopedRuntimeControlEvent"}:                                                  1,
+	{Path: "internal/store/runtime_log_persistence.go", Scope: "runtimeLogEvent", Constructor: "NewCausalDiagnosticDirectEvent"}:                                                 1,
+	{Path: "internal/store/runtime_log_persistence.go", Scope: "runtimeLogEvent", Constructor: "NewRunScopedDiagnosticDirectEvent"}:                                              1,
+	{Path: "internal/store/runtime_log_persistence.go", Scope: "runtimeLogEvent", Constructor: "NewStandaloneDiagnosticDirectEvent"}:                                             1,
+}
+
 func TestProductionEventConstructionUsesPublicAPI(t *testing.T) {
 	repoRoot := repositoryRoot(t)
 	projectionCallCounts := map[eventConstructorCallsite]int{}
 	routeProbeCallCounts := map[eventConstructorCallsite]int{}
+	runtimeCallCounts := map[runtimeConstructorCallsite]int{}
 	for _, dir := range []string{"internal", "cmd"} {
 		root := filepath.Join(repoRoot, dir)
 		if _, err := os.Stat(root); err != nil {
@@ -46,7 +87,7 @@ func TestProductionEventConstructionUsesPublicAPI(t *testing.T) {
 			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 				return nil
 			}
-			checkProductionEventConstructionFile(t, repoRoot, path, projectionCallCounts, routeProbeCallCounts)
+			checkProductionEventConstructionFile(t, repoRoot, path, projectionCallCounts, routeProbeCallCounts, runtimeCallCounts)
 			return nil
 		}); err != nil {
 			t.Fatalf("walk %s: %v", root, err)
@@ -54,6 +95,7 @@ func TestProductionEventConstructionUsesPublicAPI(t *testing.T) {
 	}
 	assertExactConstructorAllowlist(t, "NewProjectionEvent", productionProjectionEventAllowlist, projectionCallCounts)
 	assertExactConstructorAllowlist(t, "NewRouteProbeEvent", productionRouteProbeEventAllowlist, routeProbeCallCounts)
+	assertExactRuntimeConstructorAllowlist(t, runtimeCallCounts)
 }
 
 func TestTestEventFixturesUseFixtureBuilders(t *testing.T) {
@@ -92,6 +134,10 @@ func TestRemovedEventConstructionAliasesStayDeleted(t *testing.T) {
 	removed := map[string]struct{}{
 		"NodeProducer": {}, "AgentProducer": {}, "PlatformProducer": {}, "ExternalProducer": {},
 		"EmptyEvent": {}, "NewProjectionEvent": {}, "NewRouteProbeEvent": {},
+		"NewRuntimeControlEvent": {}, "NewRuntimeDiagnosticEvent": {}, "NewDiagnosticDirectEvent": {},
+	}
+	removedTypes := map[string]struct{}{
+		"RuntimeEventInput": {}, "DiagnosticDirectEventInput": {},
 	}
 	root := filepath.Join(repoRoot, "internal", "events")
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
@@ -107,12 +153,21 @@ func TestRemovedEventConstructionAliasesStayDeleted(t *testing.T) {
 			return err
 		}
 		for _, declaration := range file.Decls {
-			fn, ok := declaration.(*ast.FuncDecl)
-			if !ok {
-				continue
-			}
-			if _, forbidden := removed[fn.Name.Name]; forbidden {
-				t.Fatalf("%s:%d reintroduces removed event construction alias %s", slashPath(repoRoot, path), fset.Position(fn.Pos()).Line, fn.Name.Name)
+			switch value := declaration.(type) {
+			case *ast.FuncDecl:
+				if _, forbidden := removed[value.Name.Name]; forbidden {
+					t.Fatalf("%s:%d reintroduces removed event construction alias %s", slashPath(repoRoot, path), fset.Position(value.Pos()).Line, value.Name.Name)
+				}
+			case *ast.GenDecl:
+				for _, spec := range value.Specs {
+					typeSpec, ok := spec.(*ast.TypeSpec)
+					if !ok {
+						continue
+					}
+					if _, forbidden := removedTypes[typeSpec.Name.Name]; forbidden {
+						t.Fatalf("%s:%d reintroduces removed ambiguous runtime input %s", slashPath(repoRoot, path), fset.Position(typeSpec.Pos()).Line, typeSpec.Name.Name)
+					}
+				}
 			}
 		}
 		return nil
@@ -136,6 +191,20 @@ func assertExactConstructorAllowlist(t *testing.T, constructor string, allowlist
 	}
 }
 
+func assertExactRuntimeConstructorAllowlist(t *testing.T, counts map[runtimeConstructorCallsite]int) {
+	t.Helper()
+	for site, want := range productionRuntimeConstructorAllowlist {
+		if got := counts[site]; got != want {
+			t.Fatalf("%s in %s has %d %s calls, want %d; classify every runtime constructor exactly", site.Scope, site.Path, got, site.Constructor, want)
+		}
+	}
+	for site, got := range counts {
+		if _, ok := productionRuntimeConstructorAllowlist[site]; !ok {
+			t.Fatalf("%s in %s has %d unclassified %s calls; add an exact causal, run-scoped, or standalone census entry", site.Scope, site.Path, got, site.Constructor)
+		}
+	}
+}
+
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
 	wd, err := os.Getwd()
@@ -145,7 +214,7 @@ func repositoryRoot(t *testing.T) string {
 	return filepath.Clean(filepath.Join(wd, "..", ".."))
 }
 
-func checkProductionEventConstructionFile(t *testing.T, repoRoot, path string, projectionCallCounts, routeProbeCallCounts map[eventConstructorCallsite]int) {
+func checkProductionEventConstructionFile(t *testing.T, repoRoot, path string, projectionCallCounts, routeProbeCallCounts map[eventConstructorCallsite]int, runtimeCallCounts map[runtimeConstructorCallsite]int) {
 	t.Helper()
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, 0)
@@ -212,6 +281,13 @@ func checkProductionEventConstructionFile(t *testing.T, repoRoot, path string, p
 					}
 				}
 			case *ast.CallExpr:
+				if constructor, ok := runtimeConstructorCallName(node, eventAliases); ok {
+					site := runtimeConstructorCallsite{Path: relativePath, Scope: scope, Constructor: constructor}
+					if _, classified := productionRuntimeConstructorAllowlist[site]; !classified {
+						t.Fatalf("%s:%d calls %s from unclassified production scope %s", relativePath, fset.Position(node.Pos()).Line, constructor, scope)
+					}
+					runtimeCallCounts[site]++
+				}
 				if isNewProjectionEventCall(node, eventAliases) {
 					site := eventConstructorCallsite{Path: relativePath, Scope: scope}
 					if _, ok := productionProjectionEventAllowlist[site]; !ok {
@@ -386,6 +462,27 @@ func isNewRouteProbeEventCall(call *ast.CallExpr, eventAliases map[string]struct
 	return ok && selector.Sel.Name == "NewRouteProbe" && isEventsPackageIdent(selector.X, eventAliases)
 }
 
+func runtimeConstructorCallName(call *ast.CallExpr, eventAliases map[string]struct{}) (string, bool) {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || !isEventsPackageIdent(selector.X, eventAliases) {
+		return "", false
+	}
+	switch selector.Sel.Name {
+	case "NewCausalRuntimeControlEvent",
+		"NewRunScopedRuntimeControlEvent",
+		"NewStandaloneRuntimeControlEvent",
+		"NewCausalRuntimeDiagnosticEvent",
+		"NewRunScopedRuntimeDiagnosticEvent",
+		"NewStandaloneRuntimeDiagnosticEvent",
+		"NewCausalDiagnosticDirectEvent",
+		"NewRunScopedDiagnosticDirectEvent",
+		"NewStandaloneDiagnosticDirectEvent":
+		return selector.Sel.Name, true
+	default:
+		return "", false
+	}
+}
+
 func testEventConstructorCallName(call *ast.CallExpr, eventAliases map[string]struct{}) (string, bool) {
 	selector, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok || !isEventsPackageIdent(selector.X, eventAliases) {
@@ -393,9 +490,15 @@ func testEventConstructorCallName(call *ast.CallExpr, eventAliases map[string]st
 	}
 	switch selector.Sel.Name {
 	case "NewRootIngressEvent",
-		"NewRuntimeControlEvent",
-		"NewRuntimeDiagnosticEvent",
-		"NewDiagnosticDirectEvent",
+		"NewCausalRuntimeControlEvent",
+		"NewRunScopedRuntimeControlEvent",
+		"NewStandaloneRuntimeControlEvent",
+		"NewCausalRuntimeDiagnosticEvent",
+		"NewRunScopedRuntimeDiagnosticEvent",
+		"NewStandaloneRuntimeDiagnosticEvent",
+		"NewCausalDiagnosticDirectEvent",
+		"NewRunScopedDiagnosticDirectEvent",
+		"NewStandaloneDiagnosticDirectEvent",
 		"NewChildEvent",
 		"NewChildEventWithLineage",
 		"NewReplayEvent":
@@ -512,8 +615,11 @@ func rhsProducesEventsEvent(expr ast.Expr, eventAliases map[string]struct{}) boo
 	case *ast.SelectorExpr:
 		if isEventsPackageIdent(fun.X, eventAliases) {
 			name := fun.Sel.Name
-			return name == "EmptyEvent" || name == "NewRootIngressEvent" || name == "NewRuntimeControlEvent" ||
-				name == "NewRuntimeDiagnosticEvent" || name == "NewDiagnosticDirectEvent" || name == "NewChildEvent" || name == "NewChildEventWithLineage" ||
+			return name == "EmptyEvent" || name == "NewRootIngressEvent" || name == "NewCausalRuntimeControlEvent" ||
+				name == "NewRunScopedRuntimeControlEvent" || name == "NewStandaloneRuntimeControlEvent" ||
+				name == "NewCausalRuntimeDiagnosticEvent" || name == "NewRunScopedRuntimeDiagnosticEvent" || name == "NewStandaloneRuntimeDiagnosticEvent" ||
+				name == "NewCausalDiagnosticDirectEvent" || name == "NewRunScopedDiagnosticDirectEvent" || name == "NewStandaloneDiagnosticDirectEvent" ||
+				name == "NewChildEvent" || name == "NewChildEventWithLineage" ||
 				name == "NewReplayEvent" || name == "NewProjectionEvent" || name == "NewRouteProbeEvent"
 		}
 	case *ast.Ident:

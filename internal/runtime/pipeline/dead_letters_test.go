@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -239,9 +240,10 @@ func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *test
 	}, 0)
 	runner.SetRetryPolicyForTest(5, func(int) time.Duration { return 0 })
 
-	evt := eventtest.RootIngress(uuid.NewString(),
+	runID := uuid.NewString()
+	evt := eventtest.InExecutionMode(eventtest.RootIngress(uuid.NewString(),
 		"source.evt",
-		"src", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+		"src", "task-1", []byte(`{"entity_id":"ent-1"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()), executionmode.Mock)
 
 	runner.ProcessEventForTest(testAuthorActivityContext(context.Background()), evt)
 
@@ -254,6 +256,9 @@ func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *test
 	}
 	if published[0].Type() != "platform.dead_letter" {
 		t.Fatalf("event type = %q, want platform.dead_letter", published[0].Type())
+	}
+	if got := published[0]; got.RunID() != runID || got.ParentEventID() != evt.ID() || got.TaskID() != "task-1" || got.ExecutionMode() != executionmode.Mock {
+		t.Fatalf("dead-letter lineage = run:%q parent:%q task:%q mode:%q", got.RunID(), got.ParentEventID(), got.TaskID(), got.ExecutionMode())
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(published[0].Payload(), &payload); err != nil {

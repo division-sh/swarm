@@ -914,6 +914,7 @@ seam_families:
       - internal/runtime/pipeline/fixture_module_test.go
       - internal/runtime/pipeline/internal_subscription_test.go
       - internal/runtime/pipeline/coordinator.go
+      - internal/runtime/pipeline/contextual_runtime_lineage_test.go
       - internal/runtime/pipeline/runtime_support.go
       - internal/runtime/pipeline/workflow_conformance_test.go
       - internal/runtime/pipeline/workflow_gate_recovery_external_test.go

@@ -20,8 +20,11 @@ func TestFreshEventDDLRejectsMalformedStructuralFactsParity(t *testing.T) {
 	cases := []ddlCase{
 		{"missing_class", "not_null", validUnsafeEventRow, func(row *unsafeEventRow) { row.class = nil }},
 		{"invalid_class", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.class = "projection" }},
+		{"noncanonical_event_name", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.eventName = " schema.contract " }},
+		{"noncanonical_task_id", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.taskID = " task " }},
 		{"missing_producer_id", "not_null", validUnsafeEventRow, func(row *unsafeEventRow) { row.producedBy = nil }},
 		{"blank_producer_id", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.producedBy = "  " }},
+		{"noncanonical_producer_id", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.producedBy = " schema-proof " }},
 		{"missing_producer_type", "not_null", validUnsafeEventRow, func(row *unsafeEventRow) { row.producedByType = nil }},
 		{"invalid_producer_type", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.producedByType = "unknown" }},
 		{"child_without_parent", "check", validUnsafeChildEventRow, func(row *unsafeEventRow) { row.sourceEventID = nil }},
@@ -46,10 +49,17 @@ func TestFreshEventDDLRejectsMalformedStructuralFactsParity(t *testing.T) {
 		{"invalid_execution_mode", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.executionMode = "unknown" }},
 		{"negative_chain_depth", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.chainDepth = -1 }},
 		{"invalid_scope", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.scope = "unknown" }},
+		{"entity_scope_without_entity", "check", validUnsafeEntityEventRow, func(row *unsafeEventRow) { row.entityID = nil }},
+		{"flow_scope_without_flow", "check", validUnsafeFlowEventRow, func(row *unsafeEventRow) { row.flowInstance = nil }},
+		{"flow_scope_with_entity", "check", validUnsafeFlowEventRow, func(row *unsafeEventRow) { row.entityID = uuid.NewString() }},
+		{"global_scope_with_entity", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.entityID = uuid.NewString() }},
+		{"global_scope_with_flow", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.flowInstance = "flow-a/1" }},
+		{"noncanonical_flow_whitespace", "check", validUnsafeFlowEventRow, func(row *unsafeEventRow) { row.flowInstance = " flow-a/1 " }},
 		{"missing_payload", "not_null", validUnsafeEventRow, func(row *unsafeEventRow) { row.payload = nil }},
 		{"missing_created_at", "not_null", validUnsafeEventRow, func(row *unsafeEventRow) { row.createdAt = nil }},
 		{"runtime_source_without_route", "check", validUnsafeRuntimeSourceEventRow, func(row *unsafeEventRow) { row.sourceRoute = `{}` }},
 		{"declared_source_without_authority", "check", validUnsafeDeclaredSourceEventRow, func(row *unsafeEventRow) { row.routingSourceAuthority = nil }},
+		{"noncanonical_source_authority", "check", validUnsafeDeclaredSourceEventRow, func(row *unsafeEventRow) { row.routingSourceAuthority = " schema-proof " }},
 		{"absent_source_with_route", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.sourceRoute = `{"flow_id":"flow-a"}` }},
 	}
 	for _, eventType := range []string{"platform.runtime_log", "platform.inbound_recorded", "platform.agent_directive"} {
@@ -82,6 +92,8 @@ func TestFreshEventDDLRejectsMalformedStructuralFactsParity(t *testing.T) {
 				{"inbound_recorded_global", validUnsafeInboundRecordedEventRow},
 				{"inbound_recorded_entity", validUnsafeInboundRecordedEntityEventRow},
 				{"agent_directive_global", validUnsafeAgentDirectiveEventRow},
+				{"generic_entity_scope", validUnsafeEntityEventRow},
+				{"generic_flow_scope", validUnsafeFlowEventRow},
 			} {
 				row := control.row()
 				if runID, ok := row.runID.(string); ok && runID != "" {
@@ -142,6 +154,21 @@ func validUnsafeEventRow() unsafeEventRow {
 func validUnsafeOperatorEventRow() unsafeEventRow {
 	row := validUnsafeEventRow()
 	row.class = "operator_injected"
+	return row
+}
+
+func validUnsafeEntityEventRow() unsafeEventRow {
+	row := validUnsafeEventRow()
+	row.entityID = uuid.NewString()
+	row.flowInstance = "flow-a/1"
+	row.scope = "entity"
+	return row
+}
+
+func validUnsafeFlowEventRow() unsafeEventRow {
+	row := validUnsafeEventRow()
+	row.flowInstance = "flow-a/1"
+	row.scope = "flow"
 	return row
 }
 

@@ -275,7 +275,7 @@ func (am *AgentManager) quarantinePoisonEvent(ctx context.Context, agentID strin
 		"timestamp":             time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	eventCtx := am.runtimePlatformControlEventContext(ctx)
-	quarantined, constructErr := newPlatformRuntimeControlEvent(eventCtx, evt.RunID(), evt.ID(), events.EventType("platform.event_quarantined"), mustJSON(payload), events.EventEnvelope{}, time.Now().UTC())
+	quarantined, constructErr := newPlatformCausalRuntimeControlEvent(events.LineageFromEvent(evt), events.EventType("platform.event_quarantined"), mustJSON(payload), events.EventEnvelope{}, time.Now().UTC())
 	if constructErr != nil {
 		return
 	}
@@ -1381,7 +1381,7 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 		if err != nil {
 			return fmt.Errorf("marshal platform.reset payload: %w", err)
 		}
-		platformResetEvent, err = newPlatformRuntimeControlEvent(context.Background(), "", "", events.EventType("platform.reset"), payload, events.EventEnvelope{}, time.Now())
+		platformResetEvent, err = newPlatformStandaloneRuntimeControlEvent(events.EventType("platform.reset"), payload, events.EventEnvelope{}, time.Now())
 		if err != nil {
 			return err
 		}
@@ -1756,7 +1756,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 	}), "agent-manager", "agent_loop")
 
 	eventCtx := am.runtimePlatformControlEventContext(ctx)
-	panicEvent, constructErr := newPlatformRuntimeDiagnosticEvent(eventCtx, "", "", events.EventType("platform.agent_panic"), mustJSON(map[string]any{
+	panicEvent, constructErr := newPlatformContextualRuntimeDiagnosticEvent(eventCtx, events.EventType("platform.agent_panic"), mustJSON(map[string]any{
 		"agent_id":        agent.ID(),
 		"flow_instance":   flowInstance,
 		"entity_id":       entityID,
@@ -1797,7 +1797,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		})
 	}
 
-	failedEvent, constructErr := newPlatformRuntimeDiagnosticEvent(eventCtx, "", "", events.EventType("platform.agent_failed"), mustJSON(map[string]any{
+	failedEvent, constructErr := newPlatformContextualRuntimeDiagnosticEvent(eventCtx, events.EventType("platform.agent_failed"), mustJSON(map[string]any{
 		"agent_id":        agent.ID(),
 		"flow_instance":   flowInstance,
 		"entity_id":       entityID,

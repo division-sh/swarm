@@ -420,6 +420,7 @@ type DeliveryRoute struct {
 
 type Event struct {
 	admissionClass  EventAdmissionClass
+	runtimeIntent   runtimeLineageIntent
 	id              string
 	eventType       EventType
 	producer        ProducerIdentity
@@ -521,17 +522,27 @@ type SelectedForkReplayEventInput struct {
 	Lineage SelectedForkLineage
 }
 
-type RuntimeEventInput struct {
-	Facts         EventFacts
-	RunID         string
-	ParentEventID string
+type CausalRuntimeEventInput struct {
+	Facts   EventFacts
+	Lineage EventLineage
 }
 
-type DiagnosticDirectEventInput struct {
-	Facts         EventFacts
-	RunID         string
-	ParentEventID string
+type RunScopedRuntimeEventInput struct {
+	Facts EventFacts
+	RunID string
 }
+
+type StandaloneRuntimeEventInput struct {
+	Facts EventFacts
+}
+
+type runtimeLineageIntent string
+
+const (
+	runtimeLineageCausal     runtimeLineageIntent = "causal"
+	runtimeLineageRunScoped  runtimeLineageIntent = "run_scoped"
+	runtimeLineageStandalone runtimeLineageIntent = "standalone"
+)
 
 func NewRootIngressEvent(input RootIngressEventInput) (Event, error) {
 	return newSemanticEvent(EventAdmissionRootIngress, input.Facts, input.RunID, "", nil, nil)
@@ -580,32 +591,119 @@ func NewSelectedForkReplayEvent(input SelectedForkReplayEventInput) (Event, erro
 	return newSemanticEvent(EventAdmissionSelectedForkReplay, input.Facts, lineage.DestinationRunID(), "", nil, &lineage)
 }
 
-func NewRuntimeControlEvent(input RuntimeEventInput) (Event, error) {
-	return newRuntimeEvent(EventAdmissionRuntimeControl, input)
+func NewCausalRuntimeControlEvent(input CausalRuntimeEventInput) (Event, error) {
+	return newCausalRuntimeEvent(EventAdmissionRuntimeControl, input)
 }
 
-func NewRuntimeDiagnosticEvent(input RuntimeEventInput) (Event, error) {
-	return newRuntimeEvent(EventAdmissionRuntimeDiagnostic, input)
+func NewRunScopedRuntimeControlEvent(input RunScopedRuntimeEventInput) (Event, error) {
+	return newRunScopedRuntimeEvent(EventAdmissionRuntimeControl, input)
 }
 
-func newRuntimeEvent(class EventAdmissionClass, input RuntimeEventInput) (Event, error) {
-	if strings.TrimSpace(input.ParentEventID) != "" && strings.TrimSpace(input.RunID) == "" {
-		return Event{}, fmt.Errorf("%s event with causal parent requires run_id", class)
-	}
-	return newSemanticEvent(class, input.Facts, input.RunID, input.ParentEventID, nil, nil)
+func NewStandaloneRuntimeControlEvent(input StandaloneRuntimeEventInput) (Event, error) {
+	return newStandaloneRuntimeEvent(EventAdmissionRuntimeControl, input)
 }
 
-func NewDiagnosticDirectEvent(input DiagnosticDirectEventInput) (Event, error) {
-	if !IsDiagnosticDirectEventType(input.Facts.Type) {
-		return Event{}, fmt.Errorf("diagnostic-direct event type %q is not in the closed catalog", input.Facts.Type)
+func NewCausalRuntimeDiagnosticEvent(input CausalRuntimeEventInput) (Event, error) {
+	return newCausalRuntimeEvent(EventAdmissionRuntimeDiagnostic, input)
+}
+
+func NewRunScopedRuntimeDiagnosticEvent(input RunScopedRuntimeEventInput) (Event, error) {
+	return newRunScopedRuntimeEvent(EventAdmissionRuntimeDiagnostic, input)
+}
+
+func NewStandaloneRuntimeDiagnosticEvent(input StandaloneRuntimeEventInput) (Event, error) {
+	return newStandaloneRuntimeEvent(EventAdmissionRuntimeDiagnostic, input)
+}
+
+func NewCausalDiagnosticDirectEvent(input CausalRuntimeEventInput) (Event, error) {
+	if err := validateDiagnosticDirectFacts(input.Facts); err != nil {
+		return Event{}, err
 	}
-	if !input.Facts.RoutingSource.Empty() || !input.Facts.Envelope.Source.Normalized().Empty() || !input.Facts.Envelope.Target.Normalized().Empty() || len(input.Facts.Envelope.TargetSet) > 0 {
-		return Event{}, fmt.Errorf("diagnostic-direct event must be non-routed")
+	return newCausalRuntimeEvent(EventAdmissionDiagnosticDirect, input)
+}
+
+func NewRunScopedDiagnosticDirectEvent(input RunScopedRuntimeEventInput) (Event, error) {
+	if err := validateDiagnosticDirectFacts(input.Facts); err != nil {
+		return Event{}, err
 	}
-	if strings.TrimSpace(input.ParentEventID) != "" && strings.TrimSpace(input.RunID) == "" {
-		return Event{}, fmt.Errorf("diagnostic-direct event with causal parent requires run_id")
+	return newRunScopedRuntimeEvent(EventAdmissionDiagnosticDirect, input)
+}
+
+func NewStandaloneDiagnosticDirectEvent(input StandaloneRuntimeEventInput) (Event, error) {
+	if err := validateDiagnosticDirectFacts(input.Facts); err != nil {
+		return Event{}, err
 	}
-	return newSemanticEvent(EventAdmissionDiagnosticDirect, input.Facts, input.RunID, input.ParentEventID, nil, nil)
+	return newStandaloneRuntimeEvent(EventAdmissionDiagnosticDirect, input)
+}
+
+func newCausalRuntimeEvent(class EventAdmissionClass, input CausalRuntimeEventInput) (Event, error) {
+	lineage := input.Lineage.Normalized()
+	if err := validateCausalLineage(class, lineage); err != nil {
+		return Event{}, err
+	}
+	if strings.TrimSpace(input.Facts.TaskID) == "" {
+		input.Facts.TaskID = lineage.TaskID
+	}
+	input.Facts.ExecutionMode = lineage.ExecutionMode
+	event, err := newSemanticEvent(class, input.Facts, lineage.RunID, lineage.ParentEventID, nil, nil)
+	if err != nil {
+		return Event{}, err
+	}
+	event.runtimeIntent = runtimeLineageCausal
+	return event, nil
+}
+
+func newRunScopedRuntimeEvent(class EventAdmissionClass, input RunScopedRuntimeEventInput) (Event, error) {
+	runID := strings.TrimSpace(input.RunID)
+	if runID == "" {
+		return Event{}, fmt.Errorf("%s run-scoped event requires run_id", class)
+	}
+	event, err := newSemanticEvent(class, input.Facts, runID, "", nil, nil)
+	if err != nil {
+		return Event{}, err
+	}
+	event.runtimeIntent = runtimeLineageRunScoped
+	return event, nil
+}
+
+func newStandaloneRuntimeEvent(class EventAdmissionClass, input StandaloneRuntimeEventInput) (Event, error) {
+	event, err := newSemanticEvent(class, input.Facts, "", "", nil, nil)
+	if err != nil {
+		return Event{}, err
+	}
+	event.runtimeIntent = runtimeLineageStandalone
+	return event, nil
+}
+
+func validateDiagnosticDirectFacts(facts EventFacts) error {
+	if !IsDiagnosticDirectEventType(facts.Type) {
+		return fmt.Errorf("diagnostic-direct event type %q is not in the closed catalog", facts.Type)
+	}
+	if !facts.RoutingSource.Empty() || !facts.Envelope.Source.Normalized().Empty() || !facts.Envelope.Target.Normalized().Empty() || len(facts.Envelope.TargetSet) > 0 {
+		return fmt.Errorf("diagnostic-direct event must be non-routed")
+	}
+	return nil
+}
+
+func restoreRuntimeEvent(class EventAdmissionClass, facts EventFacts, runID, parentEventID string) (Event, error) {
+	runID = strings.TrimSpace(runID)
+	parentEventID = strings.TrimSpace(parentEventID)
+	if parentEventID != "" {
+		return newCausalRuntimeEvent(class, CausalRuntimeEventInput{Facts: facts, Lineage: EventLineage{
+			RunID: runID, ParentEventID: parentEventID, TaskID: facts.TaskID, ExecutionMode: facts.ExecutionMode,
+		}})
+	}
+	if runID != "" {
+		return newRunScopedRuntimeEvent(class, RunScopedRuntimeEventInput{Facts: facts, RunID: runID})
+	}
+	return newStandaloneRuntimeEvent(class, StandaloneRuntimeEventInput{Facts: facts})
+}
+
+func restoreDiagnosticDirectEvent(facts EventFacts, runID, parentEventID string) (Event, error) {
+	if err := validateDiagnosticDirectFacts(facts); err != nil {
+		return Event{}, err
+	}
+	return restoreRuntimeEvent(EventAdmissionDiagnosticDirect, facts, runID, parentEventID)
 }
 
 func LineageFromEvent(parent Event) EventLineage {

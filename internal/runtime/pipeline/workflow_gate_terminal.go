@@ -66,7 +66,7 @@ func (s *WorkflowInstanceStore) supersedeWorkflowInstanceGates(ctx context.Conte
 		if err != nil {
 			return err
 		}
-		evt, err := events.NewRuntimeControlEvent(events.RuntimeEventInput{
+		evt, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
 			Facts: events.EventFacts{
 				ID: uuid.NewString(), Type: events.EventType("mailbox.card_superseded"),
 				Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "platform"},

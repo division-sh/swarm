@@ -408,7 +408,7 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID
 		flowInstance = flowPathFromAgentConfig(cfg)
 	}
 	if authRequired {
-		authEvt, constructErr := newPlatformRuntimeControlEvent(eventCtx, evt.RunID(), eventID, events.EventType("platform.auth_required"), mustJSON(map[string]any{
+		authEvt, constructErr := newPlatformCausalRuntimeControlEvent(events.EventLineage{RunID: evt.RunID(), ParentEventID: eventID, TaskID: evt.TaskID(), ExecutionMode: evt.ExecutionMode()}, events.EventType("platform.auth_required"), mustJSON(map[string]any{
 			"agent_id":      strings.TrimSpace(agentID),
 			"entity_id":     entityID,
 			"flow_instance": flowInstance,
@@ -653,7 +653,7 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, evt events.
 	}
 
 	eventCtx := am.runtimePlatformControlEventContext(ctx)
-	escalation, constructErr := newPlatformRuntimeDiagnosticEvent(eventCtx, evt.RunID(), eventID, events.EventType("platform.dead_letter_escalation"), mustJSON(map[string]any{
+	escalation, constructErr := newPlatformCausalRuntimeDiagnosticEvent(events.EventLineage{RunID: evt.RunID(), ParentEventID: eventID, TaskID: evt.TaskID(), ExecutionMode: evt.ExecutionMode()}, events.EventType("platform.dead_letter_escalation"), mustJSON(map[string]any{
 		"flow_instance":     flowInstance,
 		"dead_letter_count": count,
 		"window_minutes":    int(deadLetterEscalationWindow / time.Minute),

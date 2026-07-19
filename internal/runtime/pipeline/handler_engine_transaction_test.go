@@ -393,7 +393,9 @@ func TestPipelineCoordinatorPublish_ReturnsBusPublishError(t *testing.T) {
 		bus: &recordingPipelineBus{publishErr: wantErr},
 	}
 
-	err := pc.publish(testAuthorActivityContext(context.Background()), "custom.emitted", "ent-1", map[string]any{"ok": true})
+	inbound := handlerTestRootIngress(uuid.NewString(), events.EventType("custom.received"), "gateway", "task-publish-error", []byte(`{}`), 0, uuid.NewString(), "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Now().UTC())
+	ctx := runtimecorrelation.WithInboundEvent(testAuthorActivityContext(context.Background()), inbound)
+	err := pc.publish(ctx, "custom.emitted", "ent-1", map[string]any{"ok": true})
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("publish error = %v, want %v", err, wantErr)
 	}

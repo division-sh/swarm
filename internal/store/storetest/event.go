@@ -82,6 +82,33 @@ func InsertCanonicalEventRecord(
 	return runtimebus.EventAppendExactDuplicate
 }
 
+// LoadCanonicalEventRecord exercises the same complete-record decoder used by
+// runtime recovery and replay readers.
+func LoadCanonicalEventRecord(t testing.TB, ctx context.Context, selectedStore any, eventID string) events.Event {
+	t.Helper()
+	var (
+		record eventrecord.Record
+		found  bool
+		err    error
+	)
+	switch selected := selectedStore.(type) {
+	case *store.PostgresStore:
+		record, found, err = eventrecordpostgres.Load(ctx, selected.DB, eventID)
+	case *store.SQLiteRuntimeStore:
+		record, found, err = eventrecordsqlite.Load(ctx, selected.DB, eventID)
+	default:
+		t.Fatalf("canonical event readback store %T is unsupported", selectedStore)
+	}
+	if err != nil || !found {
+		t.Fatalf("load canonical event record %s: found=%v err=%v", eventID, found, err)
+	}
+	admitted, err := record.Decode()
+	if err != nil {
+		t.Fatalf("decode canonical event record %s: %v", eventID, err)
+	}
+	return admitted.Event()
+}
+
 func InsertRootEventRecord(
 	t testing.TB,
 	ctx context.Context,

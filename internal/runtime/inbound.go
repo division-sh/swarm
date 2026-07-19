@@ -514,7 +514,7 @@ func projectInboundPublication(target InboundTarget, admitted providertriggers.A
 	if err != nil {
 		return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, err
 	}
-	evidence, err := events.NewDiagnosticDirectEvent(events.DiagnosticDirectEventInput{Facts: events.EventFacts{
+	evidence, err := events.NewRunScopedDiagnosticDirectEvent(events.RunScopedRuntimeEventInput{Facts: events.EventFacts{
 		ID: request.MarkerEventID, Type: events.EventTypePlatformInboundRecord,
 		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"}, Payload: evidencePayload,
 		Envelope: events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), CreatedAt: now, ExecutionMode: executionmode.Live,

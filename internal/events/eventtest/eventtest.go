@@ -45,20 +45,20 @@ func OperatorInjected(id string, eventType events.EventType, producerID, taskID 
 
 // RuntimeControl builds a test fixture for a runtime control event.
 func RuntimeControl(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
-	return mustEvent(events.NewRuntimeControlEvent(events.RuntimeEventInput{Facts: fixtureFacts(id, eventType, events.EventProducerPlatform, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live), RunID: runID, ParentEventID: parentEventID}))
+	facts := fixtureFacts(id, eventType, events.EventProducerPlatform, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live)
+	return mustEvent(runtimeControlFixture(facts, runID, parentEventID))
 }
 
 // RuntimeDiagnostic builds a test fixture for a runtime diagnostic event.
 func RuntimeDiagnostic(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
-	return mustEvent(events.NewRuntimeDiagnosticEvent(events.RuntimeEventInput{Facts: fixtureFacts(id, eventType, events.EventProducerPlatform, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live), RunID: runID, ParentEventID: parentEventID}))
+	facts := fixtureFacts(id, eventType, events.EventProducerPlatform, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live)
+	return mustEvent(runtimeDiagnosticFixture(facts, runID, parentEventID))
 }
 
 // DiagnosticDirect builds a test fixture for direct diagnostic persistence.
 func DiagnosticDirect(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
-	return mustEvent(events.NewDiagnosticDirectEvent(events.DiagnosticDirectEventInput{
-		Facts: fixtureFacts(id, eventType, events.EventProducerPlatform, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live),
-		RunID: runID, ParentEventID: parentEventID,
-	}))
+	facts := fixtureFacts(id, eventType, events.EventProducerPlatform, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live)
+	return mustEvent(diagnosticDirectFixture(facts, runID, parentEventID))
 }
 
 // Child builds a test fixture for a runtime child event derived from a parent.
@@ -137,9 +137,7 @@ func PersistedChildForProducer(id string, eventType events.EventType, producer e
 // readback fixture.
 func PersistedRuntimeControlForProducer(id string, eventType events.EventType, producer events.ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
 	facts := fixtureFacts(id, eventType, producer.Type(), producer.ID(), taskID, payload, chainDepth, envelope, createdAt, executionmode.Live)
-	return mustEvent(events.NewRuntimeControlEvent(events.RuntimeEventInput{
-		Facts: facts, RunID: runID, ParentEventID: parentEventID,
-	}))
+	return mustEvent(runtimeControlFixture(facts, runID, parentEventID))
 }
 
 func Producer(producerType events.EventProducerType, id string) events.ProducerIdentity {
@@ -208,11 +206,11 @@ func rebuild(evt events.Event, taskID string, mode executionmode.Mode, envelope 
 	case events.EventAdmissionReplay:
 		return mustEvent(events.NewReplayEvent(events.ReplayEventInput{Facts: facts, Lineage: events.EventLineage{RunID: evt.RunID(), ParentEventID: evt.ParentEventID(), TaskID: taskID, ExecutionMode: mode}}))
 	case events.EventAdmissionRuntimeControl:
-		return mustEvent(events.NewRuntimeControlEvent(events.RuntimeEventInput{Facts: facts, RunID: evt.RunID(), ParentEventID: evt.ParentEventID()}))
+		return mustEvent(runtimeControlFixture(facts, evt.RunID(), evt.ParentEventID()))
 	case events.EventAdmissionRuntimeDiagnostic:
-		return mustEvent(events.NewRuntimeDiagnosticEvent(events.RuntimeEventInput{Facts: facts, RunID: evt.RunID(), ParentEventID: evt.ParentEventID()}))
+		return mustEvent(runtimeDiagnosticFixture(facts, evt.RunID(), evt.ParentEventID()))
 	case events.EventAdmissionDiagnosticDirect:
-		return mustEvent(events.NewDiagnosticDirectEvent(events.DiagnosticDirectEventInput{Facts: facts, RunID: evt.RunID(), ParentEventID: evt.ParentEventID()}))
+		return mustEvent(diagnosticDirectFixture(facts, evt.RunID(), evt.ParentEventID()))
 	case events.EventAdmissionSelectedForkReplay:
 		lineage, ok := evt.SelectedForkLineage()
 		if !ok {
@@ -266,9 +264,45 @@ func persistedFixture(id string, eventType events.EventType, producer events.Pro
 		return mustEvent(events.NewChildEvent(events.ChildEventInput{Facts: facts, Lineage: events.EventLineage{RunID: runID, ParentEventID: parentEventID, TaskID: taskID, ExecutionMode: executionmode.Live}}))
 	}
 	if producer.Type == events.EventProducerPlatform {
-		return mustEvent(events.NewRuntimeControlEvent(events.RuntimeEventInput{Facts: facts, RunID: runID}))
+		return mustEvent(runtimeControlFixture(facts, runID, ""))
 	}
 	return mustEvent(events.NewRootIngressEvent(events.RootIngressEventInput{Facts: facts, RunID: runID}))
+}
+
+func runtimeControlFixture(facts events.EventFacts, runID, parentEventID string) (events.Event, error) {
+	if strings.TrimSpace(parentEventID) != "" {
+		return events.NewCausalRuntimeControlEvent(events.CausalRuntimeEventInput{Facts: facts, Lineage: events.EventLineage{
+			RunID: runID, ParentEventID: parentEventID, TaskID: facts.TaskID, ExecutionMode: facts.ExecutionMode,
+		}})
+	}
+	if strings.TrimSpace(runID) != "" {
+		return events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: runID})
+	}
+	return events.NewStandaloneRuntimeControlEvent(events.StandaloneRuntimeEventInput{Facts: facts})
+}
+
+func runtimeDiagnosticFixture(facts events.EventFacts, runID, parentEventID string) (events.Event, error) {
+	if strings.TrimSpace(parentEventID) != "" {
+		return events.NewCausalRuntimeDiagnosticEvent(events.CausalRuntimeEventInput{Facts: facts, Lineage: events.EventLineage{
+			RunID: runID, ParentEventID: parentEventID, TaskID: facts.TaskID, ExecutionMode: facts.ExecutionMode,
+		}})
+	}
+	if strings.TrimSpace(runID) != "" {
+		return events.NewRunScopedRuntimeDiagnosticEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: runID})
+	}
+	return events.NewStandaloneRuntimeDiagnosticEvent(events.StandaloneRuntimeEventInput{Facts: facts})
+}
+
+func diagnosticDirectFixture(facts events.EventFacts, runID, parentEventID string) (events.Event, error) {
+	if strings.TrimSpace(parentEventID) != "" {
+		return events.NewCausalDiagnosticDirectEvent(events.CausalRuntimeEventInput{Facts: facts, Lineage: events.EventLineage{
+			RunID: runID, ParentEventID: parentEventID, TaskID: facts.TaskID, ExecutionMode: facts.ExecutionMode,
+		}})
+	}
+	if strings.TrimSpace(runID) != "" {
+		return events.NewRunScopedDiagnosticDirectEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: runID})
+	}
+	return events.NewStandaloneDiagnosticDirectEvent(events.StandaloneRuntimeEventInput{Facts: facts})
 }
 
 func mustEvent(event events.Event, err error) events.Event {

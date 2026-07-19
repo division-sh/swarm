@@ -195,7 +195,7 @@ func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, ope
 	if err != nil {
 		return none, err
 	}
-	return events.NewDiagnosticDirectEvent(events.DiagnosticDirectEventInput{
+	return events.NewRunScopedDiagnosticDirectEvent(events.RunScopedRuntimeEventInput{
 		Facts: events.EventFacts{
 			ID: eventID, Type: events.EventType(DirectiveEventType),
 			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
