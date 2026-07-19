@@ -53,11 +53,11 @@ func RestoreAdmittedEvent(input RestoredEventInput) (AdmittedEvent, error) {
 		}
 		event, err = NewSelectedForkReplayEvent(SelectedForkReplayEventInput{Facts: input.Facts, Lineage: *input.SelectedFork})
 	case EventAdmissionRuntimeControl:
-		event, err = NewRuntimeControlEvent(RuntimeEventInput{Facts: input.Facts, RunID: input.RunID, ParentEventID: input.ParentEventID})
+		event, err = restoreRuntimeEvent(EventAdmissionRuntimeControl, input.Facts, input.RunID, input.ParentEventID)
 	case EventAdmissionRuntimeDiagnostic:
-		event, err = NewRuntimeDiagnosticEvent(RuntimeEventInput{Facts: input.Facts, RunID: input.RunID, ParentEventID: input.ParentEventID})
+		event, err = restoreRuntimeEvent(EventAdmissionRuntimeDiagnostic, input.Facts, input.RunID, input.ParentEventID)
 	case EventAdmissionDiagnosticDirect:
-		event, err = NewDiagnosticDirectEvent(DiagnosticDirectEventInput{Facts: input.Facts, RunID: input.RunID, ParentEventID: input.ParentEventID})
+		event, err = restoreDiagnosticDirectEvent(input.Facts, input.RunID, input.ParentEventID)
 	default:
 		return AdmittedEvent{}, fmt.Errorf("durable event class %q is invalid", input.Class)
 	}

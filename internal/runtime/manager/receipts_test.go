@@ -15,6 +15,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -531,7 +532,21 @@ func TestHandleAgentLoopPanic_PublishesTypedFlowInstanceEnvelope(t *testing.T) {
 		FlowPath:      "review/inst-1",
 	})
 
-	am.handleAgentLoopPanic(testAuthorActivityContext(context.Background()), panicStubAgent{id: "agent-a"}, 5, "scan.requested", "boom", "stack")
+	runID, parentID := uuid.NewString(), uuid.NewString()
+	inbound := eventtest.InExecutionMode(eventtest.RootIngress(
+		parentID,
+		events.EventType("scan.requested"),
+		"gateway",
+		"task-panic",
+		[]byte(`{}`),
+		0,
+		runID,
+		"",
+		events.EventEnvelope{EntityID: "ent-123", FlowInstance: "review/inst-1"},
+		time.Now().UTC(),
+	), executionmode.Mock)
+	ctx := runtimecorrelation.WithInboundEvent(testAuthorActivityContext(context.Background()), inbound)
+	am.handleAgentLoopPanic(ctx, panicStubAgent{id: "agent-a"}, 5, "scan.requested", "boom", "stack")
 
 	if len(bus.published) != 2 {
 		t.Fatalf("published events = %d, want 2", len(bus.published))
@@ -542,6 +557,9 @@ func TestHandleAgentLoopPanic_PublishesTypedFlowInstanceEnvelope(t *testing.T) {
 		}
 		if got := evt.Scope(); got != events.EventScopeEntity {
 			t.Fatalf("event %d scope = %q, want %q", i, got, events.EventScopeEntity)
+		}
+		if evt.RunID() != runID || evt.ParentEventID() != parentID || evt.TaskID() != "task-panic" || evt.ExecutionMode() != executionmode.Mock {
+			t.Fatalf("event %d lineage = run:%q parent:%q task:%q mode:%q", i, evt.RunID(), evt.ParentEventID(), evt.TaskID(), evt.ExecutionMode())
 		}
 	}
 	if len(bus.runtimeLogs) != 1 || bus.runtimeLogs[0].Failure == nil {

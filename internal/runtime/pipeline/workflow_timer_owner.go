@@ -516,7 +516,7 @@ func (l *WorkflowTimerLifecycle) Fire(ctx context.Context, schedule Schedule) (W
 		}
 		firedAt := canonicalWorkflowTimerTime(time.Now())
 		eventID := timeridentity.WorkflowTimerOccurrenceEventID(occurrence)
-		evt, err := events.NewRuntimeControlEvent(events.RuntimeEventInput{
+		evt, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
 			Facts: events.EventFacts{
 				ID: eventID, Type: events.EventType(activation.EventType),
 				Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime.workflow_timer"},

@@ -8,12 +8,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
-func newRuntimePlatformControlEvent(eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
-	return events.NewRuntimeControlEvent(events.RuntimeEventInput{Facts: runtimePlatformEventFacts(eventType, payload, envelope, createdAt)})
+func newStandaloneRuntimePlatformControlEvent(eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
+	return events.NewStandaloneRuntimeControlEvent(events.StandaloneRuntimeEventInput{Facts: runtimePlatformEventFacts(eventType, payload, envelope, createdAt)})
 }
 
-func newRuntimePlatformDiagnosticEvent(eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
-	return events.NewRuntimeDiagnosticEvent(events.RuntimeEventInput{Facts: runtimePlatformEventFacts(eventType, payload, envelope, createdAt)})
+func newStandaloneRuntimePlatformDiagnosticEvent(eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
+	return events.NewStandaloneRuntimeDiagnosticEvent(events.StandaloneRuntimeEventInput{Facts: runtimePlatformEventFacts(eventType, payload, envelope, createdAt)})
 }
 
 func runtimePlatformEventFacts(eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) events.EventFacts {

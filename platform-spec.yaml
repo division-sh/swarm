@@ -844,13 +844,12 @@ contract_formats:
         selected-store boundary it MUST additionally validate the UUID shape of
         every persisted event/run/parent and envelope entity identity. Missing,
         partial, or invalid producer identity fails admission. It may materialize
-        explicitly admitted event_id and created_at defaults, and may allocate
-        root-ingress run_id when the ingress class permits server allocation.
-        Runtime-owned routable platform events emitted
-        by the runtime-control or runtime-diagnostic classes may also allocate an
-        explicit standalone run_id at admission so the platform event enters the
-        normal run/delivery lifecycle without relying on store fallbacks. It MUST
-        fail closed for missing child, replay, fork, or runtime-domain lineage
+        explicitly admitted event_id and created_at defaults. It may allocate
+        root-ingress run_id when the ingress class permits server allocation, and
+        may allocate a fresh run only for an explicitly standalone runtime-control
+        or runtime-diagnostic constructor. Labels, payloads, context, and missing
+        facts never authorize run allocation. It MUST fail closed for missing
+        child, replay, fork, or runtime-domain lineage
         facts that are required by the event class. EventBus, transactional
         outbox, direct store append/persist, runtime-log diagnostic-direct
         persistence, inbound-marker persistence, and Postgres/SQLite storage
@@ -881,6 +880,10 @@ contract_formats:
           owner: internal/events class-specific constructors and typed lineage/provenance values
           rule: Constructor class and every class-conditioned causal, operator, or selected-fork lineage fact are complete before admission.
           negative_proof: TestEventConstructionClassInvariantMatrix
+        runtime.event.runtime_lineage_intent_explicit_at_construction:
+          owner: internal/events causal, run-scoped, and standalone runtime/control/diagnostic constructors
+          rule: Every runtime/control/diagnostic producer explicitly chooses causal, run-scoped unparented, or standalone unparented intent. Causal construction requires one typed EventLineage carrying run, parent, task where applicable, and execution mode; EventBus validates and never infers or mutates those facts.
+          negative_proof: TestProductionEventConstructionUsesPublicAPI
         runtime.event.routing_source_typed_at_construction:
           owner: internal/events RoutingSource
           rule: Routing source is an opaque typed construction fact; target, receiver, payload, top-level projections, and empty strings never become source evidence.
@@ -975,12 +978,18 @@ contract_formats:
         runtime_control:
           rule: Platform control events that enter generic runtime dispatch use
             runtime-control constructors so control traffic is not confused with
-            producer-authored domain emits. platform.agent_directive is not a
+            producer-authored domain emits. A causal control requires typed EventLineage;
+            a deliberately unparented control must choose the run-scoped or standalone
+            constructor explicitly. Optional lineage inputs are forbidden. platform.agent_directive is not a
             generic runtime-control event; its durable operation owner uses the
             closed diagnostic-direct constructor and persistence path.
         runtime_diagnostic:
           rule: Runtime diagnostic/dead-letter/status events use diagnostic
-            constructors and remain separate from route or delivery authority.
+            constructors and remain separate from route or delivery authority. A
+            diagnostic emitted while processing an event requires typed EventLineage;
+            startup, recovery, timer/monitor, operator, and other intentionally
+            unparented diagnostics must choose the run-scoped or standalone constructor.
+            EventBus never reads context to fill run, parent, task, or execution mode.
         diagnostic_direct:
           rule: Diagnostic-direct persisted platform events are admitted as
             non-routed/non-executable evidence before direct persistence. Their
@@ -1018,6 +1027,35 @@ contract_formats:
             canonical durable record validation/readback, and named-operation admission. Fresh SQLite and PostgreSQL
             schemas mirror every storage-enforceable producer, run, and scope fact. Payload and business-transaction
             validation remain with each named subtype operation and are not duplicated in the structural owner.
+          row_local_constraint_disposition:
+            ddl_enforced:
+              event_class: closed persistable class enum and class-conditioned producer role.
+              event_id: required UUID primary identity.
+              run_parent_shape: UUID storage plus class-conditioned required/forbidden run_id and source_event_id combinations.
+              event_name: required, nonblank, whitespace-canonical label plus the closed diagnostic-direct catalog/class pairing.
+              task_id: nullable whitespace-canonical scalar.
+              entity_flow_scope: UUID entity identity, whitespace-canonical flow_instance, exact entity/flow/global scope projection, and closed scope enum.
+              payload: required backend-native valid JSON value.
+              execution_mode: closed live/mock enum.
+              chain_depth: nonnegative integer.
+              producer: required whitespace-canonical producer ID, closed producer-type enum, class producer role, and exact runtime-log producer ID.
+              created_at: required timestamp value.
+              routing_source: closed kind enum, whitespace-canonical optional authority, and exact kind/route-presence/authority-presence combinations.
+              operator_provenance: nullable UUID allowed only for operator_injected class.
+              diagnostic_subtypes: exact producer/run/scope policy for runtime_log, inbound_recorded, and agent_directive.
+            canonical_decoder_only:
+              timestamp_representation: UTC microsecond canonicalization after backend timestamp decoding.
+              flow_instance_representation: leading/trailing slash rejection after backend scalar decoding; this remains decoder-owned because the two supported schemas do not expose one compatibility-stable portable expression for that normalization.
+              envelope_route_json: complete source/target/target-set typed JSON shape, persistent nested UUIDs, target-versus-target-set exclusion, and exact singular target projection equality.
+              routing_source_route: exact typed declared-ingress/runtime-instance route fields and equality after JSON decoding.
+              selected_fork_record_projection: typed selected-fork object reconstructed from the event row plus its joined authoritative lineage fact.
+            named_operation_cross_row:
+              run: existence, lifecycle status, and lock ownership.
+              operator_provenance: referenced event existence and same-run relationship.
+              selected_fork_lineage: source run, source event, selection authority, and exactly one lineage owner.
+              subtype_business_state: subtype payload and operation-specific business preconditions.
+              atomic_side_effects: recipient, delivery, replay, receipt, dead-letter, inbound, and outbox facts.
+            rule: A row-local portable scalar fact accepted by fresh DDL but rejected by Record.Validate is a contract defect. JSON-shape and cross-row facts remain decoder or named-operation owned only when the table above classifies them explicitly.
           subtype_admission:
             platform.runtime_log: >
               RuntimeLogPersistence may append one event row globally without a run, or against an existing run in running,
@@ -11561,26 +11599,27 @@ platform_tables:
             event_class                 TEXT NOT NULL CHECK (event_class IN ('root_ingress', 'operator_injected', 'child', 'replay', 'selected_fork_replay', 'runtime_control', 'runtime_diagnostic', 'diagnostic_direct')),
             event_id                    UUID PRIMARY KEY,
             run_id                      UUID REFERENCES runs(run_id),
-            event_name                  TEXT NOT NULL CHECK (NULLIF(TRIM(event_name), '') IS NOT NULL),
-            task_id                     TEXT,
+            event_name                  TEXT NOT NULL CHECK (event_name = TRIM(event_name) AND NULLIF(event_name, '') IS NOT NULL),
+            task_id                     TEXT CHECK (task_id IS NULL OR task_id = TRIM(task_id)),
             entity_id                   UUID,
-            flow_instance               TEXT,
+            flow_instance               TEXT CHECK (flow_instance IS NULL OR flow_instance = TRIM(flow_instance)),
             scope                       TEXT NOT NULL CHECK (scope IN ('entity', 'flow', 'global')),
             payload                     JSONB NOT NULL,
             execution_mode              TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             chain_depth                 INTEGER NOT NULL CHECK (chain_depth >= 0),
-            produced_by                 TEXT NOT NULL CHECK (NULLIF(TRIM(produced_by), '') IS NOT NULL),
+            produced_by                 TEXT NOT NULL CHECK (produced_by = TRIM(produced_by) AND NULLIF(produced_by, '') IS NOT NULL),
             produced_by_type            TEXT NOT NULL CHECK (produced_by_type IN ('node', 'agent', 'platform', 'external')),
             source_event_id             UUID,
             created_at                  TIMESTAMPTZ NOT NULL,
             routing_source_kind         TEXT NOT NULL CHECK (routing_source_kind IN ('', 'declared_ingress', 'runtime_instance')),
-            routing_source_authority    TEXT,
+            routing_source_authority    TEXT CHECK (routing_source_authority IS NULL OR routing_source_authority = TRIM(routing_source_authority)),
             source_route                JSONB NOT NULL,
             target_route                JSONB NOT NULL,
             target_set                  JSONB NOT NULL,
             operator_reference_event_id UUID,
             handler_node                TEXT,
             idempotency_key             TEXT,
+            CHECK ((scope = 'entity' AND entity_id IS NOT NULL) OR (scope = 'flow' AND entity_id IS NULL AND NULLIF(TRIM(COALESCE(flow_instance, '')), '') IS NOT NULL) OR (scope = 'global' AND entity_id IS NULL AND NULLIF(TRIM(COALESCE(flow_instance, '')), '') IS NULL)),
             CHECK ((event_class IN ('child', 'replay') AND source_event_id IS NOT NULL AND run_id IS NOT NULL) OR (event_class IN ('root_ingress', 'operator_injected', 'selected_fork_replay') AND source_event_id IS NULL) OR (event_class IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct') AND (source_event_id IS NULL OR run_id IS NOT NULL))),
             CHECK (event_class NOT IN ('root_ingress', 'operator_injected', 'selected_fork_replay') OR run_id IS NOT NULL),
             CHECK ((event_class = 'operator_injected') OR operator_reference_event_id IS NULL),
@@ -13077,9 +13116,10 @@ run_model:
       - agent_turns.run_id
       - entity_mutations.run_id
       - entity_state.run_id
-      propagation_rule: 'Child event run_id = parent event run_id. The bus publish path reads run_id from
-        the inbound event context and stamps it on every outbound event. No handler or agent code touches
-        run_id directly.'
+      propagation_rule: 'Child event run_id = parent event run_id. The causal producer compiles one typed
+        EventLineage from the inbound event before construction and supplies run_id, parent_event_id, task_id
+        where applicable, and execution_mode together. EventBus validates the completed event and MUST NOT read
+        inbound context to infer, stamp, default, or mutate lineage.'
     source_event_id:
       description: 'The event that directly caused this event to be emitted. Forms a tree (not a DAG — each
         event has exactly one parent). The root event in a run has source_event_id = NULL. Walking
@@ -13109,9 +13149,10 @@ run_model:
       in the runs table with status=running and returns the run_id. Public run forking is governed by
       multi_bundle_persistence.api_surface.run_fork and the intended CLI command
       `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]`.'
-    propagation: 'run_id propagates through the causal chain. When a handler or agent emits an event, the child
-      event inherits run_id from the parent. This is set at event creation time in the bus publish path — no
-      handler or agent code needs to pass run_id explicitly.'
+    propagation: 'run_id propagates through the causal chain. When a handler, agent, or contextual platform
+      producer emits an event, it supplies typed EventLineage from the exact parent at construction. EventBus
+      validates but never infers or mutates run_id, source_event_id, task_id, or execution_mode. Producers that
+      are deliberately unparented must choose an explicit run-scoped or standalone constructor.'
     completion: 'A run transitions to completed when: all entities have reached terminal states AND no in-flight
       events remain (pending deliveries = 0). The runtime checks this after each event receipt. Runs with active
       timers remain running until the timers fire or are cancelled.'
@@ -13556,7 +13597,7 @@ run_model:
       runtime.run_fork.selected_contract_execution.fork_local_runtime_container. This owner covers fresh fork-run platform/control or diagnostic events emitted by
       the selected-fork runtime container while processing selected fork-local work, including agent-started,
       auth-required, runtime-ingress pause/resume, budget-threshold, event-quarantine, agent-panic, agent-failed,
-      dead-letter-escalation, and runtime-log records. Such events are fork-local lineage/output evidence only when they
+      pipeline and system-node dead letters, dead-letter-escalation, and runtime-log records. Such events are fork-local lineage/output evidence only when they
       are causally parented to selected-fork execution through the fork event parent/source_event_id chain and persisted
       under the fork run_id. For platform.runtime_log diagnostics, the canonical persisted lineage is events.source_event_id;
       the runtime logger may derive it only from an explicit diagnostic parent_event_id or a verified same-run persisted

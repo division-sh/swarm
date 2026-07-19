@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -210,14 +211,21 @@ func DiagnosticDirectForRun(
 	if err != nil {
 		return event, err
 	}
-	event, err = events.NewDiagnosticDirectEvent(events.DiagnosticDirectEventInput{
-		Facts: events.EventFacts{
-			ID: facts.ID, Type: facts.Type, Producer: facts.Producer,
-			Payload: facts.Payload, Envelope: facts.Envelope, RoutingSource: facts.RoutingSource,
-			CreatedAt: facts.CreatedAt, ExecutionMode: facts.ExecutionMode,
-		},
-		RunID: runID, ParentEventID: parentEventID,
-	})
+	inputFacts := events.EventFacts{
+		ID: facts.ID, Type: facts.Type, Producer: facts.Producer,
+		Payload: facts.Payload, Envelope: facts.Envelope, RoutingSource: facts.RoutingSource,
+		CreatedAt: facts.CreatedAt, ExecutionMode: facts.ExecutionMode,
+	}
+	switch {
+	case strings.TrimSpace(parentEventID) != "":
+		event, err = events.NewCausalDiagnosticDirectEvent(events.CausalRuntimeEventInput{Facts: inputFacts, Lineage: events.EventLineage{
+			RunID: runID, ParentEventID: parentEventID, ExecutionMode: facts.ExecutionMode,
+		}})
+	case strings.TrimSpace(runID) != "":
+		event, err = events.NewRunScopedDiagnosticDirectEvent(events.RunScopedRuntimeEventInput{Facts: inputFacts, RunID: runID})
+	default:
+		event, err = events.NewStandaloneDiagnosticDirectEvent(events.StandaloneRuntimeEventInput{Facts: inputFacts})
+	}
 	if err != nil {
 		return event, err
 	}

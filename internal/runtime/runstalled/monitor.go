@@ -216,7 +216,7 @@ func (m *Monitor) eventForSnapshot(snapshot RunSnapshot, now time.Time) (events.
 	if err != nil {
 		return none, EscalationKey{}, false, err
 	}
-	evt, err := events.NewRuntimeDiagnosticEvent(events.RuntimeEventInput{
+	evt, err := events.NewRunScopedRuntimeDiagnosticEvent(events.RunScopedRuntimeEventInput{
 		Facts: events.EventFacts{
 			Type: events.EventType(EventType), Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
 			Payload: payload, Envelope: events.EventEnvelope{FlowInstance: snapshot.FlowInstance},

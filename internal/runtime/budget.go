@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -357,13 +358,20 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 		"timestamp":     now.Format(time.RFC3339),
 	}
 	evtID := uuid.NewString()
-	evt, err := events.NewRuntimeDiagnosticEvent(events.RuntimeEventInput{Facts: events.EventFacts{
+	facts := events.EventFacts{
 		ID: evtID, Type: events.EventType("platform.budget_threshold_crossed"),
 		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"}, Payload: mustJSON(payload),
 		CreatedAt: time.Now(), ExecutionMode: executionmode.Live,
-	}})
-	if err != nil {
-		return err
+	}
+	var evt events.Event
+	var constructErr error
+	if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
+		evt, constructErr = events.NewCausalRuntimeDiagnosticEvent(events.CausalRuntimeEventInput{Facts: facts, Lineage: events.LineageFromEvent(inbound)})
+	} else {
+		evt, constructErr = events.NewStandaloneRuntimeDiagnosticEvent(events.StandaloneRuntimeEventInput{Facts: facts})
+	}
+	if constructErr != nil {
+		return constructErr
 	}
 	if err := t.bus.Publish(ctx, evt); err != nil {
 		return err

@@ -16,14 +16,22 @@ import (
 const runtimeLogEventName = "platform.runtime_log"
 
 func runtimeLogEvent(record runtimepkg.RuntimeLogPersistenceRecord) (events.Event, error) {
-	return events.NewDiagnosticDirectEvent(events.DiagnosticDirectEventInput{
-		Facts: events.EventFacts{
-			Type:     events.EventType(runtimeLogEventName),
-			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
-			Payload:  json.RawMessage(record.Payload), CreatedAt: time.Time{}, ExecutionMode: record.ExecutionMode,
-		},
-		RunID: strings.TrimSpace(record.RunID), ParentEventID: strings.TrimSpace(record.ParentEventID),
-	})
+	facts := events.EventFacts{
+		Type:     events.EventType(runtimeLogEventName),
+		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
+		Payload:  json.RawMessage(record.Payload), CreatedAt: time.Time{}, ExecutionMode: record.ExecutionMode,
+	}
+	runID := strings.TrimSpace(record.RunID)
+	parentEventID := strings.TrimSpace(record.ParentEventID)
+	if parentEventID != "" {
+		return events.NewCausalDiagnosticDirectEvent(events.CausalRuntimeEventInput{Facts: facts, Lineage: events.EventLineage{
+			RunID: runID, ParentEventID: parentEventID, ExecutionMode: record.ExecutionMode,
+		}})
+	}
+	if runID != "" {
+		return events.NewRunScopedDiagnosticDirectEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: runID})
+	}
+	return events.NewStandaloneDiagnosticDirectEvent(events.StandaloneRuntimeEventInput{Facts: facts})
 }
 
 func (s *PostgresStore) RuntimeLogLineageParentEventID(ctx context.Context, runID, explicitParentEventID, subjectEventID string) (string, error) {

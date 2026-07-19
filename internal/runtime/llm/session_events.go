@@ -59,15 +59,15 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 	entityID := actor.EffectiveEntityID()
 	flowInstance := strings.TrimSpace(asString(payload["flow_instance"]))
 	eventID := uuid.NewString()
-	runID, parentEventID, mode := agentStartedEventContext(ctx, eventID)
-	evt, err := events.NewRuntimeDiagnosticEvent(events.RuntimeEventInput{Facts: events.EventFacts{
+	facts := events.EventFacts{
 		ID: eventID, Type: eventType, Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
-		Payload: raw, CreatedAt: time.Now(), ExecutionMode: mode,
+		Payload: raw, CreatedAt: time.Now(), ExecutionMode: executionmode.Live,
 		Envelope: events.EventEnvelope{
 			EntityID:     entityID,
 			FlowInstance: flowInstance,
 		},
-	}, RunID: runID, ParentEventID: parentEventID})
+	}
+	evt, err := newAgentStartedRuntimeDiagnostic(ctx, eventID, facts)
 	if err != nil {
 		logPublisherRuntime(ctx, publisher, "error", "construct_agent_started_failed", "Constructing the agent-started event failed", session.AgentID, session.ID, entityID, map[string]any{"event_type": strings.TrimSpace(string(eventType))}, err)
 		return
@@ -79,9 +79,10 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 	}
 }
 
-func agentStartedEventContext(ctx context.Context, eventID string) (string, string, executionmode.Mode) {
+func newAgentStartedRuntimeDiagnostic(ctx context.Context, eventID string, facts events.EventFacts) (events.Event, error) {
 	runID := runtimecorrelation.RunIDFromContext(ctx)
 	parentEventID := runtimecorrelation.RuntimeLineageParentForEvent(ctx, eventID)
+	taskID := strings.TrimSpace(facts.TaskID)
 	mode := executionmode.Live
 	if contextualMode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
 		mode = executionmode.Mode(contextualMode)
@@ -93,11 +94,25 @@ func agentStartedEventContext(ctx context.Context, eventID string) (string, stri
 		if parentEventID == "" {
 			parentEventID = inbound.ID()
 		}
+		if taskID == "" && parentEventID == inbound.ID() {
+			taskID = inbound.TaskID()
+		}
 		if _, hasContextMode := runtimeeffects.ExecutionModeFromContext(ctx); !hasContextMode && inbound.ExecutionMode().Valid() {
 			mode = inbound.ExecutionMode()
 		}
 	}
-	return strings.TrimSpace(runID), strings.TrimSpace(parentEventID), mode
+	runID = strings.TrimSpace(runID)
+	parentEventID = strings.TrimSpace(parentEventID)
+	facts.ExecutionMode = mode
+	if parentEventID != "" {
+		return events.NewCausalRuntimeDiagnosticEvent(events.CausalRuntimeEventInput{Facts: facts, Lineage: events.EventLineage{
+			RunID: runID, ParentEventID: parentEventID, TaskID: taskID, ExecutionMode: mode,
+		}})
+	}
+	if runID != "" {
+		return events.NewRunScopedRuntimeDiagnosticEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: runID})
+	}
+	return events.NewStandaloneRuntimeDiagnosticEvent(events.StandaloneRuntimeEventInput{Facts: facts})
 }
 
 func markInboundDeliveryActiveForSession(ctx context.Context, publisher EventPublisher, session *Session) (bool, error) {

@@ -180,6 +180,52 @@ func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t 
 	}
 }
 
+func TestLoadRunForkSelectedContractSourceEventsRestoresPersistedChronology(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := admitTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	earlierEventID := "ffffffff-ffff-4fff-8fff-ffffffffffff"
+	laterEventID := "00000000-0000-4000-8000-000000000001"
+	earlierAt := time.Unix(1700002406, 0).UTC()
+	laterAt := earlierAt.Add(time.Second)
+	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, earlierEventID, earlierAt)
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, laterEventID, sourceRunID, "item.received",
+		events.EventProducerPlatform, "test", entityID, "", laterAt)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'node', 'test-node', 'pending', $3)
+	`, sourceRunID, laterEventID, laterAt); err != nil {
+		t.Fatalf("seed later delivery: %v", err)
+	}
+	captureRunForkTestRevision(t, db, sourceRunID)
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          laterEventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	}
+
+	loaded, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{earlierEventID, laterEventID})
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractSourceEvents: %v", err)
+	}
+	if len(loaded) != 2 || loaded[0].SourceEventID != earlierEventID || loaded[1].SourceEventID != laterEventID {
+		t.Fatalf("loaded source chronology = %#v, want [%s %s]", loaded, earlierEventID, laterEventID)
+	}
+}
+
 func TestSelectedContractExecutionMaterializationTreatsSourceConversationHistoryAsLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)

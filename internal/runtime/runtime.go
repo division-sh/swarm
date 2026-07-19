@@ -1283,7 +1283,7 @@ func scheduleEventPayload(sc runtimepipeline.Schedule) []byte {
 }
 
 func scheduledEvent(sc runtimepipeline.Schedule) (events.Event, error) {
-	return events.NewRuntimeControlEvent(events.RuntimeEventInput{Facts: events.EventFacts{
+	return events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{Facts: events.EventFacts{
 		ID: uuid.NewString(), Type: events.EventType(sc.EventType), Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime.scheduler"},
 		TaskID: sc.TaskID, Payload: scheduleEventPayload(sc), CreatedAt: time.Now(), ExecutionMode: executionmode.Live,
 		Envelope: events.EventEnvelope{
@@ -1683,7 +1683,7 @@ func (rt *Runtime) recordStartupManagerRecoveryFailure(ctx context.Context, deci
 		"failure": *decision.Failure, "failed_event_id": nil, "timestamp": time.Now().UTC().Format(time.RFC3339Nano),
 	})
 	if rt.Bus != nil {
-		recoveryEvent, publishErr := newRuntimePlatformDiagnosticEvent(events.EventType("platform.recovery_failed"), payload, events.EventEnvelope{}, time.Now())
+		recoveryEvent, publishErr := newStandaloneRuntimePlatformDiagnosticEvent(events.EventType("platform.recovery_failed"), payload, events.EventEnvelope{}, time.Now())
 		if publishErr == nil {
 			publishErr = rt.Bus.Publish(ctx, recoveryEvent)
 		}
@@ -1978,7 +1978,7 @@ func (rt *Runtime) publishBootCompleted(ctx context.Context, report bootComplete
 		"self_check_passed":            nil,
 	})
 	eventID := uuid.NewString()
-	evt, err := events.NewRuntimeControlEvent(events.RuntimeEventInput{Facts: events.EventFacts{
+	evt, err := events.NewStandaloneRuntimeControlEvent(events.StandaloneRuntimeEventInput{Facts: events.EventFacts{
 		ID: eventID, Type: t, Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
 		Payload: payload, CreatedAt: time.Now(), ExecutionMode: executionmode.Live,
 	}})

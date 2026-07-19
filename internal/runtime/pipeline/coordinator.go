@@ -14,11 +14,11 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -538,7 +538,7 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			"timestamp":        time.Now().UTC().Format(time.RFC3339Nano),
 		}
 		if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
-			emitted, err := newPipelineRuntimeDiagnostic("platform.dead_letter", entityID, "", deadLetterPayload)
+			emitted, err := newPipelineRuntimeDiagnostic(events.LineageFromEvent(trigger), "platform.dead_letter", entityID, "", deadLetterPayload)
 			if err != nil {
 				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_construct_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, nil, err)
 				continue
@@ -631,7 +631,11 @@ func (pc *PipelineCoordinator) publish(ctx context.Context, eventType, entityID 
 		payload = map[string]any{}
 	}
 	flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/")
-	emitted, err := newPipelineRuntimeDiagnostic(eventType, entityID, flowInstance, payload)
+	inbound, ok := runtimecorrelation.InboundEventFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("pipeline runtime diagnostic %q requires an inbound event", strings.TrimSpace(eventType))
+	}
+	emitted, err := newPipelineRuntimeDiagnostic(events.LineageFromEvent(inbound), eventType, entityID, flowInstance, payload)
 	if err != nil {
 		return err
 	}
@@ -656,7 +660,11 @@ func (pc *PipelineCoordinator) publishDirect(ctx context.Context, eventType, ent
 		return pc.publish(ctx, eventType, entityID, payload)
 	}
 	flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/")
-	emitted, err := newPipelineRuntimeDiagnostic(eventType, entityID, flowInstance, payload)
+	inbound, ok := runtimecorrelation.InboundEventFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("pipeline direct runtime diagnostic %q requires an inbound event", strings.TrimSpace(eventType))
+	}
+	emitted, err := newPipelineRuntimeDiagnostic(events.LineageFromEvent(inbound), eventType, entityID, flowInstance, payload)
 	if err != nil {
 		return err
 	}
@@ -672,12 +680,12 @@ func (pc *PipelineCoordinator) publishDirect(ctx context.Context, eventType, ent
 	return nil
 }
 
-func newPipelineRuntimeDiagnostic(eventType, entityID, flowInstance string, payload map[string]any) (events.Event, error) {
-	return events.NewRuntimeDiagnosticEvent(events.RuntimeEventInput{Facts: events.EventFacts{
+func newPipelineRuntimeDiagnostic(lineage events.EventLineage, eventType, entityID, flowInstance string, payload map[string]any) (events.Event, error) {
+	return events.NewCausalRuntimeDiagnosticEvent(events.CausalRuntimeEventInput{Facts: events.EventFacts{
 		ID: uuid.NewString(), Type: events.EventType(strings.TrimSpace(eventType)),
 		Producer:  events.ProducerClaim{Type: events.EventProducerPlatform, ID: runtimeWorkflowID},
 		Payload:   mustJSON(payload),
 		Envelope:  events.EventEnvelope{EntityID: entityID, FlowInstance: flowInstance},
-		CreatedAt: time.Now().UTC(), ExecutionMode: executionmode.Live,
-	}})
+		CreatedAt: time.Now().UTC(), ExecutionMode: lineage.ExecutionMode,
+	}, Lineage: lineage})
 }

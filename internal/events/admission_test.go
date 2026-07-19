@@ -55,10 +55,16 @@ func TestEventConstructionClassInvariantMatrix(t *testing.T) {
 			_, err := NewSelectedForkReplayEvent(SelectedForkReplayEventInput{Facts: f, Lineage: selectedLineage})
 			return err
 		}},
-		{name: "runtime control", baseFacts: validFacts(), build: func(f EventFacts) error { _, err := NewRuntimeControlEvent(RuntimeEventInput{Facts: f}); return err }},
-		{name: "runtime diagnostic", baseFacts: validFacts(), build: func(f EventFacts) error { _, err := NewRuntimeDiagnosticEvent(RuntimeEventInput{Facts: f}); return err }},
+		{name: "runtime control", baseFacts: validFacts(), build: func(f EventFacts) error {
+			_, err := NewStandaloneRuntimeControlEvent(StandaloneRuntimeEventInput{Facts: f})
+			return err
+		}},
+		{name: "runtime diagnostic", baseFacts: validFacts(), build: func(f EventFacts) error {
+			_, err := NewStandaloneRuntimeDiagnosticEvent(StandaloneRuntimeEventInput{Facts: f})
+			return err
+		}},
 		{name: "diagnostic direct", baseFacts: diagnosticDirectFacts(), build: func(f EventFacts) error {
-			_, err := NewDiagnosticDirectEvent(DiagnosticDirectEventInput{Facts: f})
+			_, err := NewStandaloneDiagnosticDirectEvent(StandaloneRuntimeEventInput{Facts: f})
 			return err
 		}},
 	}
@@ -158,21 +164,85 @@ func TestClassSpecificConstructorsRejectFalseLineage(t *testing.T) {
 		build func() error
 	}{
 		{name: "runtime control", build: func() error {
-			_, err := NewRuntimeControlEvent(RuntimeEventInput{Facts: validFacts(), ParentEventID: "22222222-2222-4222-8222-222222222222"})
+			_, err := NewCausalRuntimeControlEvent(CausalRuntimeEventInput{Facts: validFacts(), Lineage: EventLineage{ParentEventID: "22222222-2222-4222-8222-222222222222", ExecutionMode: executionmode.Live}})
 			return err
 		}},
 		{name: "runtime diagnostic", build: func() error {
-			_, err := NewRuntimeDiagnosticEvent(RuntimeEventInput{Facts: validFacts(), ParentEventID: "22222222-2222-4222-8222-222222222222"})
+			_, err := NewCausalRuntimeDiagnosticEvent(CausalRuntimeEventInput{Facts: validFacts(), Lineage: EventLineage{ParentEventID: "22222222-2222-4222-8222-222222222222", ExecutionMode: executionmode.Live}})
 			return err
 		}},
 		{name: "diagnostic direct", build: func() error {
-			_, err := NewDiagnosticDirectEvent(DiagnosticDirectEventInput{Facts: diagnosticDirectFacts(), ParentEventID: "22222222-2222-4222-8222-222222222222"})
+			_, err := NewCausalDiagnosticDirectEvent(CausalRuntimeEventInput{Facts: diagnosticDirectFacts(), Lineage: EventLineage{ParentEventID: "22222222-2222-4222-8222-222222222222", ExecutionMode: executionmode.Live}})
 			return err
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if err := test.build(); err == nil || !strings.Contains(err.Error(), "requires run_id") {
 				t.Fatalf("error = %v, want run lineage failure", err)
+			}
+		})
+	}
+}
+
+func TestRuntimeConstructorsEncodeExplicitLineageIntent(t *testing.T) {
+	const parentID = "22222222-2222-4222-8222-222222222222"
+	lineage := EventLineage{RunID: testRunID, ParentEventID: parentID, TaskID: "task-lineage", ExecutionMode: executionmode.Mock}
+	runtimeFacts := func(eventType EventType) EventFacts {
+		facts := validFacts()
+		facts.Type = eventType
+		facts.Producer = ProducerClaim{Type: EventProducerPlatform, ID: "runtime"}
+		facts.TaskID = ""
+		return facts
+	}
+	directFacts := func() EventFacts {
+		facts := diagnosticDirectFacts()
+		facts.TaskID = ""
+		return facts
+	}
+	tests := []struct {
+		name       string
+		build      func() (Event, error)
+		wantRun    string
+		wantParent string
+		wantTask   string
+		wantMode   executionmode.Mode
+	}{
+		{name: "causal control", build: func() (Event, error) {
+			return NewCausalRuntimeControlEvent(CausalRuntimeEventInput{Facts: runtimeFacts("platform.auth_required"), Lineage: lineage})
+		}, wantRun: testRunID, wantParent: parentID, wantTask: "task-lineage", wantMode: executionmode.Mock},
+		{name: "causal diagnostic", build: func() (Event, error) {
+			return NewCausalRuntimeDiagnosticEvent(CausalRuntimeEventInput{Facts: runtimeFacts("platform.dead_letter"), Lineage: lineage})
+		}, wantRun: testRunID, wantParent: parentID, wantTask: "task-lineage", wantMode: executionmode.Mock},
+		{name: "causal direct", build: func() (Event, error) {
+			return NewCausalDiagnosticDirectEvent(CausalRuntimeEventInput{Facts: directFacts(), Lineage: lineage})
+		}, wantRun: testRunID, wantParent: parentID, wantTask: "task-lineage", wantMode: executionmode.Mock},
+		{name: "run-scoped control", build: func() (Event, error) {
+			return NewRunScopedRuntimeControlEvent(RunScopedRuntimeEventInput{Facts: runtimeFacts("platform.scheduled"), RunID: testRunID})
+		}, wantRun: testRunID, wantMode: executionmode.Live},
+		{name: "run-scoped diagnostic", build: func() (Event, error) {
+			return NewRunScopedRuntimeDiagnosticEvent(RunScopedRuntimeEventInput{Facts: runtimeFacts("platform.run_stalled"), RunID: testRunID})
+		}, wantRun: testRunID, wantMode: executionmode.Live},
+		{name: "run-scoped direct", build: func() (Event, error) {
+			return NewRunScopedDiagnosticDirectEvent(RunScopedRuntimeEventInput{Facts: directFacts(), RunID: testRunID})
+		}, wantRun: testRunID, wantMode: executionmode.Live},
+		{name: "standalone control", build: func() (Event, error) {
+			return NewStandaloneRuntimeControlEvent(StandaloneRuntimeEventInput{Facts: runtimeFacts("platform.boot")})
+		}, wantMode: executionmode.Live},
+		{name: "standalone diagnostic", build: func() (Event, error) {
+			return NewStandaloneRuntimeDiagnosticEvent(StandaloneRuntimeEventInput{Facts: runtimeFacts("platform.recovery_failed")})
+		}, wantMode: executionmode.Live},
+		{name: "standalone direct", build: func() (Event, error) {
+			return NewStandaloneDiagnosticDirectEvent(StandaloneRuntimeEventInput{Facts: directFacts()})
+		}, wantMode: executionmode.Live},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			event, err := test.build()
+			if err != nil {
+				t.Fatalf("construct event: %v", err)
+			}
+			if event.RunID() != test.wantRun || event.ParentEventID() != test.wantParent || event.TaskID() != test.wantTask || event.ExecutionMode() != test.wantMode {
+				t.Fatalf("lineage = run:%q parent:%q task:%q mode:%q, want run:%q parent:%q task:%q mode:%q", event.RunID(), event.ParentEventID(), event.TaskID(), event.ExecutionMode(), test.wantRun, test.wantParent, test.wantTask, test.wantMode)
 			}
 		})
 	}
@@ -212,7 +282,7 @@ func TestAdmissionRuntimePlatformEventAllocatesStandaloneRun(t *testing.T) {
 	facts := validFactsWithoutIdentity()
 	facts.Type = "platform.boot"
 	facts.Producer = ProducerClaim{Type: EventProducerPlatform, ID: "runtime"}
-	candidate, constructErr := NewRuntimeControlEvent(RuntimeEventInput{Facts: facts})
+	candidate, constructErr := NewStandaloneRuntimeControlEvent(StandaloneRuntimeEventInput{Facts: facts})
 	event := mustConstruct(t, candidate, constructErr)
 	admitted, err := AdmitForPublish(event, AdmissionOptions{})
 	if err != nil {
@@ -223,11 +293,25 @@ func TestAdmissionRuntimePlatformEventAllocatesStandaloneRun(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdmissionRejectsOmittedConstructorIntent(t *testing.T) {
+	facts := validFacts()
+	facts.Type = "platform.boot"
+	facts.Producer = ProducerClaim{Type: EventProducerPlatform, ID: "runtime"}
+	event, err := NewStandaloneRuntimeControlEvent(StandaloneRuntimeEventInput{Facts: facts})
+	if err != nil {
+		t.Fatalf("NewStandaloneRuntimeControlEvent: %v", err)
+	}
+	event.runtimeIntent = runtimeLineageIntent("")
+	if _, err := AdmitForPersistence(event, AdmissionOptions{}); err == nil || !strings.Contains(err.Error(), "requires explicit causal, run-scoped, or standalone lineage intent") {
+		t.Fatalf("AdmitForPersistence error = %v, want explicit lineage-intent failure", err)
+	}
+}
+
 func TestDiagnosticDirectRequiresClosedCatalogAndNamedAdmission(t *testing.T) {
 	facts := validFactsWithoutIdentity()
 	facts.Type = EventTypePlatformRuntimeLog
 	facts.Producer = ProducerClaim{Type: EventProducerPlatform, ID: "runtime"}
-	candidate, constructErr := NewDiagnosticDirectEvent(DiagnosticDirectEventInput{Facts: facts})
+	candidate, constructErr := NewStandaloneDiagnosticDirectEvent(StandaloneRuntimeEventInput{Facts: facts})
 	event := mustConstruct(t, candidate, constructErr)
 	if _, err := AdmitForPublish(event, AdmissionOptions{}); err == nil {
 		t.Fatal("generic publish admitted diagnostic-direct event")
@@ -236,7 +320,7 @@ func TestDiagnosticDirectRequiresClosedCatalogAndNamedAdmission(t *testing.T) {
 		t.Fatalf("named persistence admission: %v", err)
 	}
 	facts.Type = "platform.unregistered"
-	if _, err := NewDiagnosticDirectEvent(DiagnosticDirectEventInput{Facts: facts}); err == nil {
+	if _, err := NewStandaloneDiagnosticDirectEvent(StandaloneRuntimeEventInput{Facts: facts}); err == nil {
 		t.Fatal("diagnostic-direct constructor accepted unregistered type")
 	}
 }

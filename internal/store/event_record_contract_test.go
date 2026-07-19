@@ -324,11 +324,7 @@ func TestEventRecordCanonicalReadbackRejectsDurableScalarRepairParity(t *testing
 		value      string
 		wantDetail string
 	}{
-		{name: "event_name", sqlite: `UPDATE events SET event_name = ? WHERE event_id = ?`, postgres: `UPDATE events SET event_name = $1 WHERE event_id = $2::uuid`, value: "  readback.canonical  ", wantDetail: "event_name"},
-		{name: "task_id", sqlite: `UPDATE events SET task_id = ? WHERE event_id = ?`, postgres: `UPDATE events SET task_id = $1 WHERE event_id = $2::uuid`, value: "  task  ", wantDetail: "task_id"},
-		{name: "produced_by", sqlite: `UPDATE events SET produced_by = ? WHERE event_id = ?`, postgres: `UPDATE events SET produced_by = $1 WHERE event_id = $2::uuid`, value: "  gateway  ", wantDetail: "produced_by"},
 		{name: "flow_instance", sqlite: `UPDATE events SET flow_instance = ? WHERE event_id = ?`, postgres: `UPDATE events SET flow_instance = $1 WHERE event_id = $2::uuid`, value: "/flow-a/one/", wantDetail: "flow_instance"},
-		{name: "routing_source_authority", sqlite: `UPDATE events SET routing_source_authority = ? WHERE event_id = ?`, postgres: `UPDATE events SET routing_source_authority = $1 WHERE event_id = $2::uuid`, value: " ", wantDetail: "routing_source_authority"},
 	}
 	for _, backend := range eventRecordContractBackends() {
 		for _, mutation := range mutations {

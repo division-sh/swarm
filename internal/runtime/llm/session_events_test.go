@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
@@ -20,9 +21,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
-	"time"
 )
 
 type eventPublisherStub struct {
@@ -346,6 +347,45 @@ func TestPublishAgentStarted_LogsActiveTransitionOnlyAfterRealDeliveryMark(t *te
 	}
 	if detail["delivery_state"] != "active" || detail["delivery_previous_state"] != "launching" || detail["delivery_reason"] != "session_started" {
 		t.Fatalf("active delivery detail = %#v", detail)
+	}
+}
+
+func TestPublishAgentStartedPreservesExactContextualLineage(t *testing.T) {
+	publisher := &eventPublisherStub{}
+	runID := "10000000-0000-4000-8000-000000000001"
+	parentID := "20000000-0000-4000-8000-000000000002"
+	inbound := eventtest.InExecutionMode(eventtest.RootIngress(
+		parentID,
+		events.EventType("work.requested"),
+		"gateway",
+		"task-agent-started",
+		[]byte(`{}`),
+		0,
+		runID,
+		"",
+		events.EventEnvelope{EntityID: "entity-1", FlowInstance: "review/inst-1"},
+		time.Now().UTC(),
+	), executionmode.Mock)
+	ctx := runtimecorrelation.WithInboundEvent(unmanagedLLMTestContext(), inbound)
+	ctx = runtimeactors.WithActor(ctx, runtimeactors.AgentConfig{
+		ExecutionMode: "mock",
+		ID:            "agent-1",
+		EntityID:      "entity-1",
+		FlowPath:      "review/inst-1",
+	})
+
+	publishAgentStarted(ctx, publisher, &Session{
+		ID:      "session-1",
+		AgentID: "agent-1",
+		Memory:  agentmemory.Authored(false),
+	}, events.EventType("platform.agent_started"))
+
+	if len(publisher.events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(publisher.events))
+	}
+	got := publisher.events[0]
+	if got.RunID() != runID || got.ParentEventID() != parentID || got.TaskID() != "task-agent-started" || got.ExecutionMode() != executionmode.Mock {
+		t.Fatalf("agent-started lineage = run:%q parent:%q task:%q mode:%q", got.RunID(), got.ParentEventID(), got.TaskID(), got.ExecutionMode())
 	}
 }
 

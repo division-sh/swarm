@@ -22,7 +22,9 @@ func TestEventContractRejectsHostileClassCatalogProducerCombinations(t *testing.
 			f.Producer.Type = EventProducerPlatform
 			return NewRootIngressEvent(RootIngressEventInput{Facts: f, RunID: runID})
 		}, "requires external producer"},
-		{"runtime external producer", func() (Event, error) { return NewRuntimeControlEvent(RuntimeEventInput{Facts: base, RunID: runID}) }, "requires platform producer"},
+		{"runtime external producer", func() (Event, error) {
+			return NewRunScopedRuntimeControlEvent(RunScopedRuntimeEventInput{Facts: base, RunID: runID})
+		}, "requires platform producer"},
 		{"closed label under root", func() (Event, error) {
 			f := base
 			f.Type = EventTypePlatformRuntimeLog
@@ -31,7 +33,7 @@ func TestEventContractRejectsHostileClassCatalogProducerCombinations(t *testing.
 		{"unregistered diagnostic direct", func() (Event, error) {
 			f := base
 			f.Producer.Type = EventProducerPlatform
-			return NewDiagnosticDirectEvent(DiagnosticDirectEventInput{Facts: f, RunID: runID})
+			return NewRunScopedDiagnosticDirectEvent(RunScopedRuntimeEventInput{Facts: f, RunID: runID})
 		}, "not in the closed catalog"},
 	}
 	for _, test := range tests {
@@ -46,7 +48,7 @@ func TestEventContractRejectsHostileClassCatalogProducerCombinations(t *testing.
 func TestGenericPublishRejectsEveryClosedSubtypeAndSelectedFork(t *testing.T) {
 	runID := uuid.NewString()
 	for _, eventType := range DiagnosticDirectEventTypes() {
-		event, err := NewDiagnosticDirectEvent(DiagnosticDirectEventInput{Facts: EventFacts{
+		event, err := NewRunScopedDiagnosticDirectEvent(RunScopedRuntimeEventInput{Facts: EventFacts{
 			ID: uuid.NewString(), Type: eventType, Producer: ProducerClaim{Type: EventProducerPlatform, ID: "runtime"},
 			Payload: []byte(`{}`), CreatedAt: time.Now().UTC(), ExecutionMode: executionmode.Live,
 		}, RunID: runID})
@@ -126,7 +128,7 @@ func TestDiagnosticDirectSubtypePolicyIsCompleteAtEveryRuntimeBoundary(t *testin
 	}
 	for _, test := range valid {
 		t.Run("valid/"+test.name, func(t *testing.T) {
-			event, err := NewDiagnosticDirectEvent(diagnosticDirectContractInput(test.eventType, EventProducerPlatform, "runtime", test.runID, test.envelope))
+			event, err := diagnosticDirectContractEvent(test.eventType, EventProducerPlatform, "runtime", test.runID, test.envelope)
 			if err != nil {
 				t.Fatalf("construct valid subtype: %v", err)
 			}
@@ -169,8 +171,7 @@ func TestDiagnosticDirectSubtypePolicyIsCompleteAtEveryRuntimeBoundary(t *testin
 	)
 	for _, test := range hostile {
 		t.Run("hostile/"+test.name, func(t *testing.T) {
-			input := diagnosticDirectContractInput(test.eventType, test.producerType, test.producerID, test.runID, test.envelope)
-			if _, err := NewDiagnosticDirectEvent(input); err == nil {
+			if _, err := diagnosticDirectContractEvent(test.eventType, test.producerType, test.producerID, test.runID, test.envelope); err == nil {
 				t.Fatal("constructor accepted invalid subtype tuple")
 			}
 
@@ -178,7 +179,7 @@ func TestDiagnosticDirectSubtypePolicyIsCompleteAtEveryRuntimeBoundary(t *testin
 			if test.eventType == EventTypePlatformRuntimeLog {
 				baseRunID = ""
 			}
-			base, err := NewDiagnosticDirectEvent(diagnosticDirectContractInput(test.eventType, EventProducerPlatform, "runtime", baseRunID, globalEnvelope))
+			base, err := diagnosticDirectContractEvent(test.eventType, EventProducerPlatform, "runtime", baseRunID, globalEnvelope)
 			if err != nil {
 				t.Fatalf("construct hostile base: %v", err)
 			}
@@ -202,12 +203,13 @@ func TestDiagnosticDirectSubtypePolicyIsCompleteAtEveryRuntimeBoundary(t *testin
 	}
 }
 
-func diagnosticDirectContractInput(eventType EventType, producerType EventProducerType, producerID, runID string, envelope EventEnvelope) DiagnosticDirectEventInput {
-	return DiagnosticDirectEventInput{
-		Facts: EventFacts{
-			ID: uuid.NewString(), Type: eventType, Producer: ProducerClaim{Type: producerType, ID: producerID},
-			Payload: []byte(`{}`), Envelope: envelope, CreatedAt: time.Now().UTC().Truncate(time.Microsecond), ExecutionMode: executionmode.Live,
-		},
-		RunID: runID,
+func diagnosticDirectContractEvent(eventType EventType, producerType EventProducerType, producerID, runID string, envelope EventEnvelope) (Event, error) {
+	facts := EventFacts{
+		ID: uuid.NewString(), Type: eventType, Producer: ProducerClaim{Type: producerType, ID: producerID},
+		Payload: []byte(`{}`), Envelope: envelope, CreatedAt: time.Now().UTC().Truncate(time.Microsecond), ExecutionMode: executionmode.Live,
 	}
+	if strings.TrimSpace(runID) == "" {
+		return NewStandaloneDiagnosticDirectEvent(StandaloneRuntimeEventInput{Facts: facts})
+	}
+	return NewRunScopedDiagnosticDirectEvent(RunScopedRuntimeEventInput{Facts: facts, RunID: runID})
 }

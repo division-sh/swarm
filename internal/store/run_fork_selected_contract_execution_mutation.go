@@ -696,6 +696,12 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Cont
 	if err != nil {
 		return nil, fmt.Errorf("load selected-contract source events: %w", err)
 	}
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].CreatedAt.Equal(records[j].CreatedAt) {
+			return records[i].EventID < records[j].EventID
+		}
+		return records[i].CreatedAt.Before(records[j].CreatedAt)
+	})
 	out := make([]RunForkSelectedContractSourceEvent, 0, len(ids))
 	for _, record := range records {
 		admitted, err := decodeEventRecord(record)

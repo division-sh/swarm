@@ -1671,10 +1671,14 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	}
 
 	droppedEventID := uuid.NewString()
-	storetest.InsertCanonicalEventRecord(t, ctx, db, "postgres", eventtest.RuntimeDiagnostic(
+	droppedRunID := uuid.NewString()
+	storetest.CommitSemanticEvent(t, ctx, pg, eventtest.RuntimeDiagnostic(
 		droppedEventID, events.EventType("system.recover.drop"), "runtime", "", []byte(`{}`), 0,
-		"", "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
+		droppedRunID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
 	))
+	if _, err := db.ExecContext(ctx, `UPDATE events SET run_id = NULL WHERE event_id = $1::uuid`, droppedEventID); err != nil {
+		t.Fatalf("plant missing-run recovery corruption: %v", err)
+	}
 
 	rm := runtimepipeline.NewRecoveryManagerWith(pg, bus)
 	if err := rm.Recover(ctx); err != nil {

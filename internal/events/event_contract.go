@@ -235,9 +235,9 @@ func BindManagerOutputIdentity(event Event, eventID string) (Event, error) {
 		}
 		return NewSelectedForkReplayEvent(SelectedForkReplayEventInput{Facts: facts, Lineage: lineage})
 	case EventAdmissionRuntimeControl:
-		return NewRuntimeControlEvent(RuntimeEventInput{Facts: facts, RunID: event.RunID(), ParentEventID: event.ParentEventID()})
+		return restoreRuntimeEvent(EventAdmissionRuntimeControl, facts, event.RunID(), event.ParentEventID())
 	case EventAdmissionRuntimeDiagnostic:
-		return NewRuntimeDiagnosticEvent(RuntimeEventInput{Facts: facts, RunID: event.RunID(), ParentEventID: event.ParentEventID()})
+		return restoreRuntimeEvent(EventAdmissionRuntimeDiagnostic, facts, event.RunID(), event.ParentEventID())
 	case EventAdmissionDiagnosticDirect:
 		return Event{}, fmt.Errorf("diagnostic-direct events cannot be agent-manager outputs")
 	default:
@@ -255,10 +255,6 @@ func IsRuntimePlatformEvent(event Event) bool {
 		return false
 	}
 	return event.AdmissionClass() == EventAdmissionRuntimeControl || event.AdmissionClass() == EventAdmissionRuntimeDiagnostic
-}
-
-func IsStandaloneRuntimePlatformEvent(event Event) bool {
-	return IsStandaloneRuntimePlatformFacts(event.AdmissionClass(), event.Type(), event.Producer())
 }
 
 func IsStandaloneRuntimePlatformFacts(class EventAdmissionClass, eventType EventType, producer ProducerIdentity) bool {

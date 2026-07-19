@@ -8,12 +8,17 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/google/uuid"
 )
 
 func TestBudgetTracker_KeepsTerminalStatesInstanceOwned(t *testing.T) {
@@ -157,6 +162,32 @@ func TestBudgetTrackerProjectsCommittedCompletionIntoThresholdEventAndEmergencyS
 	}
 	if !tracker.IsEmergency("") || !tracker.IsThrottle("") {
 		t.Fatalf("projected budget state emergency=%v throttle=%v, want both true", tracker.IsEmergency(""), tracker.IsThrottle(""))
+	}
+}
+
+func TestBudgetTrackerActiveWorkThresholdPreservesInboundLineage(t *testing.T) {
+	spendStore := &budgetSpendStoreCapture{sum: 0.95}
+	eventStore := &bootSelfCheckDescriptorStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+		"budget_warning_percent": {Value: 50}, "budget_throttle_percent": {Value: 75}, "budget_emergency_percent": {Value: 90},
+	}}})
+	tracker := NewBudgetTracker(spendStore, bus, &config.Config{Extensions: map[string]any{"budget": map[string]any{"system_monthly_cap": 1}}}, nil, nil, source)
+	runID, parentID := uuid.NewString(), uuid.NewString()
+	inbound := eventtest.InExecutionMode(eventtest.RootIngress(parentID, "work.received", "gateway", "task-1", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()), executionmode.Mock)
+	ctx := runtimecorrelation.WithInboundEvent(testAuthorActivityContext(context.Background()), inbound)
+
+	tracker.ProjectCommittedCompletionSpend(ctx, runtimeeffects.CompletionSpendProjection{AttemptID: "attempt-contextual"})
+	published := eventStore.appendedEvents()
+	if len(published) != 1 {
+		t.Fatalf("budget events = %d, want 1", len(published))
+	}
+	got := published[0]
+	if got.RunID() != runID || got.ParentEventID() != parentID || got.TaskID() != "task-1" || got.ExecutionMode() != executionmode.Mock {
+		t.Fatalf("budget lineage = run:%q parent:%q task:%q mode:%q", got.RunID(), got.ParentEventID(), got.TaskID(), got.ExecutionMode())
 	}
 }
 
