@@ -1386,7 +1386,7 @@ func mutatingProbeOriginalEvent(eventID string, subscribers []string, status str
 			Status:         status,
 		})
 	}
-	event := eventtest.PersistedProjectionForProducer(
+	event := eventtest.PersistedChildForProducer(
 		eventID,
 		events.EventType("scan.requested"),
 		eventtest.Producer(events.EventProducerAgent, "origin-agent"),
@@ -1394,8 +1394,8 @@ func mutatingProbeOriginalEvent(eventID string, subscribers []string, status str
 		json.RawMessage(`{"topic":"medicine"}`),
 		0,
 		"00000000-0000-0000-0000-000000000101",
-		"",
-		events.EventEnvelope{EntityID: "entity-1"},
+		eventtest.UUID("mutating-probe-parent:"+eventID),
+		events.EventEnvelope{EntityID: eventtest.UUID("entity-1")},
 		time.Unix(1700000000, 0).UTC(),
 	)
 	view, err := store.NewOperatorEventFull(event)
@@ -1609,7 +1609,7 @@ func newMutatingProbeDecisionCardStore(state *mutatingRuntimeProbeState) *mutati
 		"reject":  {AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
 	})
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		FlowInstance: "review/primary", FlowID: "review", EntityID: "entity-1",
+		FlowInstance: "review/primary", FlowID: "review", EntityID: eventtest.UUID("entity-1"),
 		Stage: "awaiting_review", StageActivationID: "activation-1",
 	})
 	if err != nil {

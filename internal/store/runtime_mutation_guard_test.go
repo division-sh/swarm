@@ -898,7 +898,7 @@ func runtimeWriterRules() []runtimeWriterRule {
 		{
 			name:           "declared event corruption fixture",
 			path:           rx(`^internal/store/testsql/event\.go$`),
-			function:       rx(`^(CorruptEventStore|RejectEventStoreCorruption)$`),
+			function:       rx(`^(CorruptEventStore|RejectEventStoreCorruption|RejectEventStoreCorruptionCategory)$`),
 			kinds:          kinds(primitiveWrite),
 			classification: classDifferentConcept,
 			reason:         "test-only fail-closed corruption owner requires an explicit invariant and reason",

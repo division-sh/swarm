@@ -169,7 +169,21 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 		return eventProcessResult{record: record, err: agentFailure}
 	}
 	for idx, e := range out {
-		_ = idx
+		if e.ID() == "" {
+			var identityErr error
+			e, identityErr = events.BindManagerOutputIdentity(e, deterministicOutputEventID(evt, agent.ID(), idx, e))
+			if identityErr != nil {
+				pubErr := runtimefailures.WrapDetail("event_output_identity_failed", "agent-manager", "process_event.bind_output_identity", map[string]any{
+					"event_type": e.Type(), "agent_id": agent.ID(), "output_index": idx,
+				}, identityErr)
+				failure := runtimefailures.FromError(pubErr, "agent-manager", "process_event.bind_output_identity")
+				am.writeReceipt(ctx, evt, agent.ID(), ReceiptStatusError, &failure.Failure)
+				record.Outcome = startupManagerReplayOutcomeDropped
+				record.ReasonCode = startupManagerReplayReasonPublishFailed
+				record.Failure = runtimefailures.CloneEnvelope(&failure.Failure)
+				return eventProcessResult{record: record, err: pubErr}
+			}
+		}
 		if am.shouldSkipAlreadyPublishedOutput(ctx, e.ID()) {
 			continue
 		}

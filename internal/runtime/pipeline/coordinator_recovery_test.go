@@ -170,7 +170,7 @@ func seedHistoricalReplayRecoverySourceRun(t *testing.T, db *sql.DB, sourceRunID
 		t.Fatalf("seed source run: %v", err)
 	}
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, sourceRunID, "fork.ready",
-		eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
+		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -222,7 +222,7 @@ func TestRecoveryManager_ReplaysPersistedCorrelationEnvelope(t *testing.T) {
 
 	child := eventtest.PersistedProjectionForProducer(childID,
 		events.EventType("system.recover"),
-		parent.Producer(), "", []byte(`{"ok":true}`), 0, runID,
+		eventtest.Producer(events.EventProducerAgent, "recovery-agent"), "", []byte(`{"ok":true}`), 0, runID,
 		parentID, events.EventEnvelope{}, time.Now().Add(-1*time.Minute).UTC())
 
 	commitRecoveryEvent(t, ctx, pg, parent, nil, runtimereplayclaim.CommittedReplayScopeDirect)
@@ -510,7 +510,7 @@ func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing
 	commitRecoveryEvent(t, ctx, pg, goodParent, nil, runtimereplayclaim.CommittedReplayScopeDirect)
 	goodChild := eventtest.PersistedProjectionForProducer(goodEventID,
 		events.EventType("system.recover.good"),
-		goodParent.Producer(), "", []byte(`{"ok":true}`), 0, goodRunID,
+		eventtest.Producer(events.EventProducerAgent, "recovery-agent"), "", []byte(`{"ok":true}`), 0, goodRunID,
 		goodParentID, events.EventEnvelope{}, time.Now().Add(-1*time.Minute).UTC())
 	commitRecoveryEvent(t, ctx, pg, goodChild, []string{goodRecipientID}, runtimereplayclaim.CommittedReplayScopeSubscribed)
 	if err := pg.UpsertPipelineReceipt(ctx, goodParentID, "processed", nil); err != nil {
@@ -580,7 +580,7 @@ func TestRecoveryManager_ClaimsReplayOwnershipUnderOverlap(t *testing.T) {
 	commitRecoveryEvent(t, ctx, pg1, parent, nil, runtimereplayclaim.CommittedReplayScopeDirect)
 	child := eventtest.PersistedProjectionForProducer(childID,
 		events.EventType("system.recover"),
-		parent.Producer(), "", []byte(`{"ok":true}`), 0, runID,
+		eventtest.Producer(events.EventProducerAgent, "recovery-agent"), "", []byte(`{"ok":true}`), 0, runID,
 		parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC())
 	commitRecoveryEvent(t, ctx, pg1, child, []string{"agent-recovery"}, runtimereplayclaim.CommittedReplayScopeSubscribed)
 	if err := pg1.UpsertPipelineReceipt(ctx, parentID, "processed", nil); err != nil {
@@ -659,7 +659,7 @@ func TestRecoveryManager_ExplicitlySkipsReplayWithoutPersistedRecipients(t *test
 
 	child := eventtest.PersistedProjectionForProducer(childID,
 		events.EventType("system.recover.no_recipients"),
-		parent.Producer(), "", []byte(`{"ok":true}`), 0, runID,
+		eventtest.Producer(events.EventProducerAgent, "recovery-agent"), "", []byte(`{"ok":true}`), 0, runID,
 		parentID, events.EventEnvelope{}, time.Now().Add(-1*time.Minute).UTC())
 
 	commitRecoveryEvent(t, ctx, pg, parent, nil, runtimereplayclaim.CommittedReplayScopeDirect)
@@ -767,7 +767,7 @@ func TestRecoveryManager_UsesPersistedDeliveryRecipientsInsteadOfCurrentSubscrip
 	child := eventtest.PersistedProjectionForProducer(
 		eventID,
 		events.EventType("system.recover.explicit"),
-		parent.Producer(),
+		eventtest.Producer(events.EventProducerAgent, "recovery-agent"),
 		"",
 		[]byte(`{"entity_id":"`+entityID+`"}`),
 		0,
@@ -844,7 +844,7 @@ func TestRecoveryManager_ReplaysSubscribedInternalOnlyUsingCommittedReplayScope(
 	}
 	child := eventtest.PersistedProjectionForProducer(eventID,
 		events.EventType("system.recover.internal"),
-		parent.Producer(), "", []byte(`{"ok":true}`), 0, runID,
+		eventtest.Producer(events.EventProducerAgent, "recovery-agent"), "", []byte(`{"ok":true}`), 0, runID,
 		parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC())
 	commitRecoveryEvent(t, ctx, pg, child, nil, runtimereplayclaim.CommittedReplayScopeSubscribed)
 
@@ -893,7 +893,7 @@ func TestRecoveryManager_DirectEmptyManifestDoesNotBroadenToCurrentInternalSubsc
 	}
 	child := eventtest.PersistedProjectionForProducer(eventID,
 		events.EventType("system.recover.direct_empty"),
-		parent.Producer(), "", []byte(`{"ok":true}`), 0, runID,
+		eventtest.Producer(events.EventProducerAgent, "recovery-agent"), "", []byte(`{"ok":true}`), 0, runID,
 		parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC())
 	commitRecoveryEvent(t, ctx, pg, child, nil, runtimereplayclaim.CommittedReplayScopeDirect)
 

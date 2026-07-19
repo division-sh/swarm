@@ -21,7 +21,7 @@ func TestPostgresStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner(t *t
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
-	if err := commitSemanticEventFixture(ctx, store, eventtest.PersistedProjectionForProducer(
+	if err := commitSemanticEventFixture(ctx, store, eventtest.PersistedChildForProducer(
 		eventID,
 		"mailbox.review_requested",
 		eventtest.Producer(events.EventProducerNode, "mailbox-node"),
@@ -29,7 +29,7 @@ func TestPostgresStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner(t *t
 		json.RawMessage(`{"kind":"review"}`),
 		0,
 		runID,
-		"",
+		eventtest.UUID("mailbox-parent:"+eventID),
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "validation/case-1"),
 		time.Now().UTC(),
 	)); err != nil {
@@ -84,7 +84,7 @@ func TestSQLiteRuntimeStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
-	if err := commitSemanticEventFixture(ctx, store, eventtest.PersistedProjectionForProducer(
+	if err := commitSemanticEventFixture(ctx, store, eventtest.PersistedChildForProducer(
 		eventID,
 		"mailbox.review_requested",
 		eventtest.Producer(events.EventProducerNode, "mailbox-node"),
@@ -92,7 +92,7 @@ func TestSQLiteRuntimeStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner
 		json.RawMessage(`{"kind":"review"}`),
 		0,
 		runID,
-		"",
+		eventtest.UUID("mailbox-parent:"+eventID),
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "validation/case-1"),
 		time.Now().UTC(),
 	)); err != nil {

@@ -45,10 +45,13 @@ func seedPostgresStoreEvent(
 ) {
 	t.Helper()
 	envelope := events.EventEnvelope{EntityID: entityID, FlowInstance: flowInstance}
-	event := eventtest.PersistedProjectionForProducer(
-		eventID, events.EventType(eventName), eventtest.Producer(producerType, producerID), "",
-		json.RawMessage(`{}`), 0, runID, "", envelope, createdAt,
-	)
+	producer := eventtest.Producer(producerType, producerID)
+	var event events.Event
+	if producerType == events.EventProducerPlatform {
+		event = eventtest.PersistedRuntimeControlForProducer(eventID, events.EventType(eventName), producer, "", json.RawMessage(`{}`), 0, runID, "", envelope, createdAt)
+	} else {
+		event = eventtest.PersistedChildForProducer(eventID, events.EventType(eventName), producer, "", json.RawMessage(`{}`), 0, runID, eventtest.UUID("postgres-store-parent:"+eventID), envelope, createdAt)
+	}
 	if err := commitSemanticEventFixture(ctx, pg, event); err != nil {
 		t.Fatalf("seed event %s: %v", eventName, err)
 	}
@@ -355,24 +358,25 @@ func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing
 	`, runID, completedAt); err != nil {
 		t.Fatalf("seed completed run: %v", err)
 	}
-	duplicate := eventtest.PersistedProjectionForProducer(
+	parentEventID := eventtest.UUID("completed-run-parent:" + eventID)
+	duplicate := eventtest.PersistedChildForProducer(
 		eventID, "scan.completed", eventtest.Producer(events.EventProducerAgent, "agent-1"), "",
-		json.RawMessage(`{}`), 0, runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), createdAt,
+		json.RawMessage(`{}`), 0, runID, parentEventID, events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), createdAt,
 	)
 	if err := insertCanonicalEventRecordFixture(ctx, pg, duplicate); err != nil {
 		t.Fatalf("seed duplicate event: %v", err)
 	}
 	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
 
-	evt := eventtest.PersistedProjection(
+	evt := eventtest.PersistedChildForProducer(
 		eventID,
 		events.EventType("scan.completed"),
-		"agent-1",
+		eventtest.Producer(events.EventProducerAgent, "agent-1"),
 		"",
 		[]byte(`{}`),
 		0,
 		runID,
-		"",
+		parentEventID,
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 		createdAt,
 	)

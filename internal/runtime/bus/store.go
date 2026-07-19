@@ -319,7 +319,14 @@ type inMemoryCommitPublishTransaction struct {
 }
 
 func (t *inMemoryCommitPublishTransaction) BeginPreparedPublish(_ context.Context, event PreparedPublishEvent) (EventAppendOutcome, error) {
-	eventID := strings.TrimSpace(event.AdmittedEvent().ID())
+	admitted := event.AdmittedEvent()
+	if err := events.ValidateGenericPublishEvent(admitted.Event()); err != nil {
+		return EventAppendOutcomeUnknown, err
+	}
+	if err := events.ValidatePersistentEvent(admitted.Event()); err != nil {
+		return EventAppendOutcomeUnknown, err
+	}
+	eventID := strings.TrimSpace(admitted.ID())
 	if eventID == "" {
 		return EventAppendOutcomeUnknown, errors.New("admitted event is required")
 	}

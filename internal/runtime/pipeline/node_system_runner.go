@@ -297,7 +297,7 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 	}
 	deadLetter, constructErr := events.NewRuntimeDiagnosticEvent(events.RuntimeEventInput{Facts: events.EventFacts{
 		ID: uuid.NewString(), Type: events.EventType("platform.dead_letter"),
-		Producer: events.ProducerClaim{Type: events.EventProducerNode, ID: n.nodeID},
+		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
 		Payload:  mustJSON(payload), Envelope: events.EventEnvelope{EntityID: workflowEventEntityID(evt)},
 		CreatedAt: time.Now().UTC(), ExecutionMode: executionmode.Live,
 	}})

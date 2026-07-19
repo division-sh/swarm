@@ -435,7 +435,7 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 		t.Fatalf("issue selected completion authority: %v", err)
 	}
 	seedEventID := uuid.NewString()
-	seedPostgresRootEventRecordFixture(t, ctx, db, seedEventID, fixture.forkRun, "selected.discard.seed", events.EventProducerPlatform, "selected-discard", "", "", time.Now().UTC())
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, seedEventID, fixture.forkRun, "selected.discard.seed", events.EventProducerPlatform, "selected-discard", "", "", time.Now().UTC())
 	firstRevision := captureRunForkTestRevision(t, db, fixture.forkRun, runforkrevision.FamilyEvents)
 	if _, err := db.ExecContext(ctx, `UPDATE runs SET status=$2 WHERE run_id=$1::uuid`, fixture.forkRun, RunForkMaterializedStatus); err != nil {
 		t.Fatalf("mark selected fork materialized: %v", err)
@@ -447,7 +447,7 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 	}
 	defer func() { _ = allocationTx.Rollback() }()
 	concurrentEventID := uuid.NewString()
-	seedPostgresRootEventRecordFixtureTx(t, ctx, allocationTx, concurrentEventID, fixture.forkRun, "selected.discard.concurrent", events.EventProducerPlatform, "selected-discard", "", "", time.Now().UTC())
+	seedPostgresSemanticEventRecordFixtureTx(t, ctx, allocationTx, concurrentEventID, fixture.forkRun, "selected.discard.concurrent", events.EventProducerPlatform, "selected-discard", "", "", time.Now().UTC())
 	allocatedRevision, err := runforkrevision.Capture(ctx, allocationTx, fixture.forkRun, runforkrevision.FamilyEvents)
 	if err != nil {
 		t.Fatalf("capture competing selected revision: %v", err)
@@ -554,7 +554,7 @@ func TestSelectedForkDiscardRejectsLiveDependentForkPostgres(t *testing.T) {
 	`, sourceRunID, forkRunID, now); err != nil {
 		t.Fatalf("seed selected fork lineage: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, forkEventID, forkRunID, "fork.dependency", events.EventProducerPlatform, "selected-discard", "", "", now)
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkEventID, forkRunID, "fork.dependency", events.EventProducerPlatform, "selected-discard", "", "", now)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id,status,started_at,forked_from_run_id,forked_from_event_id)
 		VALUES ($1::uuid,'paused',$4,$2::uuid,$3::uuid)

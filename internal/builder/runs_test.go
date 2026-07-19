@@ -11,6 +11,7 @@ import (
 	"time"
 
 	eventtypes "github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -99,6 +100,8 @@ func (c *counterPause) pause() error {
 }
 
 func TestRunHubStartRunPublishesTypedEntityEnvelope(t *testing.T) {
+	runID := eventtest.UUID("builder-run-hub-typed-envelope-run")
+	entityID := eventtest.UUID("builder-run-hub-typed-envelope-entity")
 	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -107,9 +110,9 @@ func TestRunHubStartRunPublishesTypedEntityEnvelope(t *testing.T) {
 	hub := newRunHub(func() *runtimepkg.Runtime { return rt }, nil, nil, nil)
 	ch := eb.Subscribe("observer", "review.requested")
 
-	if err := hub.startRun(context.Background(), "run-123", map[string]any{
+	if err := hub.startRun(context.Background(), runID, map[string]any{
 		"review.requested": map[string]any{
-			"entity_id": "ent-001",
+			"entity_id": entityID,
 			"name":      "Telemedicine",
 		},
 	}, nil); err != nil {
@@ -118,8 +121,8 @@ func TestRunHubStartRunPublishesTypedEntityEnvelope(t *testing.T) {
 
 	select {
 	case evt := <-ch:
-		if got := evt.EntityID(); got != "ent-001" {
-			t.Fatalf("event entity_id = %q, want ent-001", got)
+		if got := evt.EntityID(); got != entityID {
+			t.Fatalf("event entity_id = %q, want %q", got, entityID)
 		}
 	case <-time.After(250 * time.Millisecond):
 		t.Fatal("expected run input event to be published")

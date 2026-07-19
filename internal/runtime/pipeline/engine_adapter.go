@@ -710,8 +710,8 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 	case "has_entity_id":
 		return strings.TrimSpace(execCtx.Request.EntityID.String()) != "", true, nil
 	case "has_human_decision":
-		source := strings.TrimSpace(execCtx.Request.Event.SourceAgent())
-		if strings.EqualFold(source, "human") || strings.EqualFold(source, "mailbox") {
+		event := execCtx.Request.Event
+		if hasHumanDecisionProducer(event) {
 			return true, true, nil
 		}
 		if strings.EqualFold(strings.TrimSpace(asString(payload["decision_path"])), "mailbox") {
@@ -767,6 +767,10 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 	default:
 		return false, false, nil
 	}
+}
+
+func hasHumanDecisionProducer(event events.Event) bool {
+	return events.ProducerIs(event, events.EventProducerExternal, "human") || events.ProducerIs(event, events.EventProducerExternal, "mailbox")
 }
 
 type pipelineEngineActionRunner struct {

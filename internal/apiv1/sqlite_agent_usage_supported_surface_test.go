@@ -88,10 +88,10 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	storetest.CommitSemanticEvent(t, ctx, sqliteStore, eventtest.PersistedProjectionForProducer(
+	storetest.CommitSemanticEvent(t, ctx, sqliteStore, eventtest.RootIngress(
 		eventID,
 		events.EventType("task.ready"),
-		eventtest.Producer(events.EventProducerAgent, "runtime"),
+		"agent-usage-fixture",
 		"",
 		[]byte(`{}`),
 		0,

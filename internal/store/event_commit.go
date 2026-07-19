@@ -33,12 +33,11 @@ func (c *sqlPublishCommitter) BeginPreparedPublish(ctx context.Context, event ru
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("event commit transaction is required")
 	}
 	admitted := event.AdmittedEvent()
-	if admitted.ID() == "" {
-		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("admitted event is required")
+	if err := events.ValidateGenericPublishEvent(admitted.Event()); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	switch admitted.Class() {
-	case events.EventAdmissionDiagnosticDirect, events.EventAdmissionSelectedForkReplay:
-		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("event class %q requires its closed named persistence operation", admitted.Class())
+	if err := events.ValidatePersistentEvent(admitted.Event()); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	outcome, err := c.store.appendAdmittedEventTxOutcome(ctx, c.tx, admitted)
 	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
@@ -66,12 +65,12 @@ func (c *sqlPublishCommitter) FinalizePreparedPublish(ctx context.Context, final
 	return nil
 }
 
-func (c sqlPublishCommitter) commitNamedEvent(ctx context.Context, operation string, class events.EventAdmissionClass, req runtimebus.CommitPublishRequest) (runtimebus.EventAppendOutcome, error) {
+func (c sqlPublishCommitter) commitNamedEvent(ctx context.Context, operation string, class events.EventAdmissionClass, eventType events.EventType, req runtimebus.CommitPublishRequest) (runtimebus.EventAppendOutcome, error) {
 	if c.tx == nil || c.store == nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s event commit transaction is required", operation)
 	}
-	if req.Event.ID() == "" || req.Event.Class() != class {
-		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s requires admitted %s event class", operation, class)
+	if err := events.ValidateNamedEvent(req.Event, class, eventType); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s: %w", operation, err)
 	}
 	outcome, err := c.store.appendAdmittedEventTxOutcome(ctx, c.tx, req.Event)
 	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
@@ -112,6 +111,9 @@ type CommitSelectedForkEventRequest struct {
 }
 
 func validateSelectedForkCommitRequest(req CommitSelectedForkEventRequest) error {
+	if err := events.ValidatePersistentEvent(req.Commit.Event.Event()); err != nil {
+		return err
+	}
 	if req.Commit.Event.Class() != events.EventAdmissionSelectedForkReplay {
 		return fmt.Errorf("selected-fork operation requires selected_fork_replay event class")
 	}
@@ -199,8 +201,8 @@ func (s *SQLiteRuntimeStore) CommitPublish(ctx context.Context, plan runtimebus.
 }
 
 func commitRuntimeLogEvent(ctx context.Context, store eventCommitTxStore, run func(context.Context, func(context.Context, *sql.Tx) error) error, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
-	if admitted.Class() != events.EventAdmissionDiagnosticDirect || admitted.Event().Type() != events.EventTypePlatformRuntimeLog {
-		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("runtime-log operation requires a diagnostic_direct platform.runtime_log event")
+	if err := events.ValidateNamedEvent(admitted, events.EventAdmissionDiagnosticDirect, events.EventTypePlatformRuntimeLog); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("runtime-log operation: %w", err)
 	}
 	outcome := runtimebus.EventAppendOutcomeUnknown
 	err := run(ctx, func(txctx context.Context, tx *sql.Tx) error {

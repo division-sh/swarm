@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -159,6 +160,15 @@ func TestEventRecordEveryFieldDuplicateParity(t *testing.T) {
 			if _, err := commitSemanticEventFixtureOutcome(ctx, store, conflict, nil, "direct"); !errors.Is(err, ErrEventIdentityConflict) {
 				t.Fatalf("conflicting duplicate error = %v", err)
 			}
+			nestedID := uuid.NewString()
+			nested := eventtest.RootIngress(nestedID, "duplicate.nested", "gateway", "task", []byte(`{"nested":{"a":null}}`), 0, uuid.NewString(), "", events.EventEnvelope{}, baseEvent.CreatedAt())
+			if outcome, err := commitSemanticEventFixtureOutcome(ctx, store, nested, nil, "direct"); err != nil || outcome != runtimebus.EventAppendInserted {
+				t.Fatalf("nested initial commit: outcome=%v err=%v", outcome, err)
+			}
+			nestedConflict := eventtest.RootIngress(nestedID, nested.Type(), nested.SourceAgent(), nested.TaskID(), []byte(`{"nested":{"b":null}}`), 0, nested.RunID(), "", events.EventEnvelope{}, nested.CreatedAt())
+			if _, err := commitSemanticEventFixtureOutcome(ctx, store, nestedConflict, nil, "direct"); !errors.Is(err, ErrEventIdentityConflict) {
+				t.Fatalf("nested null-key duplicate error = %v", err)
+			}
 		})
 	}
 }
@@ -303,6 +313,47 @@ func TestEventRecordDecoderRejectsMalformedDurableFactsParity(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestEventRecordCanonicalReadbackRejectsDurableScalarRepairParity(t *testing.T) {
+	mutations := []struct {
+		name       string
+		sqlite     string
+		postgres   string
+		value      string
+		wantDetail string
+	}{
+		{name: "event_name", sqlite: `UPDATE events SET event_name = ? WHERE event_id = ?`, postgres: `UPDATE events SET event_name = $1 WHERE event_id = $2::uuid`, value: "  readback.canonical  ", wantDetail: "event_name"},
+		{name: "task_id", sqlite: `UPDATE events SET task_id = ? WHERE event_id = ?`, postgres: `UPDATE events SET task_id = $1 WHERE event_id = $2::uuid`, value: "  task  ", wantDetail: "task_id"},
+		{name: "produced_by", sqlite: `UPDATE events SET produced_by = ? WHERE event_id = ?`, postgres: `UPDATE events SET produced_by = $1 WHERE event_id = $2::uuid`, value: "  gateway  ", wantDetail: "produced_by"},
+		{name: "flow_instance", sqlite: `UPDATE events SET flow_instance = ? WHERE event_id = ?`, postgres: `UPDATE events SET flow_instance = $1 WHERE event_id = $2::uuid`, value: "/flow-a/one/", wantDetail: "flow_instance"},
+		{name: "routing_source_authority", sqlite: `UPDATE events SET routing_source_authority = ? WHERE event_id = ?`, postgres: `UPDATE events SET routing_source_authority = $1 WHERE event_id = $2::uuid`, value: " ", wantDetail: "routing_source_authority"},
+	}
+	for _, backend := range eventRecordContractBackends() {
+		for _, mutation := range mutations {
+			backend, mutation := backend, mutation
+			t.Run(backend.name+"/"+mutation.name, func(t *testing.T) {
+				fixture := backend.open(t)
+				ctx := testAuthorActivityContext()
+				event := eventtest.RootIngress(
+					uuid.NewString(), "readback.canonical", "gateway", "task", []byte(`{"ok":true}`), 0,
+					uuid.NewString(), "", events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()), "flow-a/one"),
+					time.Date(2026, 7, 18, 18, 45, 0, 123456000, time.UTC),
+				)
+				if err := commitSemanticEventFixture(ctx, fixture.store.(semanticEventFixtureStore), event); err != nil {
+					t.Fatalf("commit event: %v", err)
+				}
+				eventtestsql.CorruptEventStore(t, ctx, fixture.db, fixture.dialect, eventtestsql.EventCorruptionClaim{
+					Invariant: "store.event_record.canonical_readback",
+					Reason:    "prove canonical readback rejects durable " + mutation.name + " repair",
+				}, mutation.sqlite, mutation.postgres, mutation.value, event.ID())
+				_, found, err := loadEventProducerIdentityRecord(ctx, fixture, event.ID())
+				if found || !errors.Is(err, eventrecord.ErrCorrupt) || !strings.Contains(err.Error(), mutation.wantDetail) {
+					t.Fatalf("canonical adapter readback = found:%v err:%v, want typed %s corruption", found, err, mutation.wantDetail)
+				}
+			})
+		}
 	}
 }
 

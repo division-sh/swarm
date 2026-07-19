@@ -55,7 +55,7 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 		{id: olderEvent, runID: older, eventType: "scan.failed", entityID: olderEventOnlyA, createdAt: now.Add(-2*time.Hour + time.Second)},
 		{id: uuid.NewString(), runID: older, eventType: "scan.replayed", entityID: olderEventOnlyB, createdAt: now.Add(-2*time.Hour + 2*time.Second)},
 	} {
-		seedPostgresRootEventRecordFixture(
+		seedPostgresSemanticEventRecordFixture(
 			t, ctx, db, fixture.id, fixture.runID, fixture.eventType,
 			events.EventProducerAgent, "test", fixture.entityID, "", fixture.createdAt,
 		)

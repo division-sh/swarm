@@ -68,9 +68,9 @@ func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T
 	`, olderRunID, newerRunID, now.Add(-2*time.Hour), now.Add(-90*time.Minute), now.Add(-1*time.Hour)); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, olderEventID, olderRunID, "scan.requested", events.EventProducerAgent, "test", "", "", now.Add(-119*time.Minute))
-	seedPostgresRootEventRecordFixture(t, ctx, db, uuid.NewString(), olderRunID, "scan.completed", events.EventProducerAgent, "test", "", "", now.Add(-91*time.Minute))
-	seedPostgresRootEventRecordFixture(t, ctx, db, newerEventID, newerRunID, "scan.requested", events.EventProducerAgent, "test", "", "", now.Add(-59*time.Minute))
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, olderEventID, olderRunID, "scan.requested", events.EventProducerAgent, "test", "", "", now.Add(-119*time.Minute))
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, uuid.NewString(), olderRunID, "scan.completed", events.EventProducerAgent, "test", "", "", now.Add(-91*time.Minute))
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, newerEventID, newerRunID, "scan.requested", events.EventProducerAgent, "test", "", "", now.Add(-59*time.Minute))
 	seedPostgresEntityStateRows(t, db, ctx, olderRunID, olderEntityID)
 	seedPostgresEntityStateRows(t, db, ctx, newerRunID, newerEntityA, newerEntityB)
 
@@ -119,8 +119,8 @@ func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t
 	`, targetRunID, olderRunID, emptyRunID, now, now.Add(-1*time.Hour), now.Add(1*time.Hour)); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, uuid.NewString(), targetRunID, "scan.corpus_file_requested", events.EventProducerAgent, "builder", "", "", now.Add(time.Second))
-	seedPostgresRootEventRecordFixture(t, ctx, db, uuid.NewString(), olderRunID, "scan.requested", events.EventProducerAgent, "builder", "", "", now.Add(-59*time.Minute))
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, uuid.NewString(), targetRunID, "scan.corpus_file_requested", events.EventProducerAgent, "builder", "", "", now.Add(time.Second))
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, uuid.NewString(), olderRunID, "scan.requested", events.EventProducerAgent, "builder", "", "", now.Add(-59*time.Minute))
 
 	got, err := pg.ResolveLatestRunDebugRunID(ctx)
 	if err != nil {
@@ -153,8 +153,8 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 			t.Fatalf("seed run %s: %v", runID, err)
 		}
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, targetEventID, targetRunID, "scan.requested", events.EventProducerAgent, "test", targetEntityID, "", now.Add(-4*time.Minute))
-	seedPostgresRootEventRecordFixture(t, ctx, db, otherEventID, otherRunID, "scan.requested", events.EventProducerAgent, "test", otherEntityID, "", now.Add(-3*time.Minute))
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, targetEventID, targetRunID, "scan.requested", events.EventProducerAgent, "test", targetEntityID, "", now.Add(-4*time.Minute))
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, otherEventID, otherRunID, "scan.requested", events.EventProducerAgent, "test", otherEntityID, "", now.Add(-3*time.Minute))
 	seedPostgresEntityStateRows(t, db, ctx, targetRunID, targetEntityID, targetSecondEntityID)
 	seedPostgresEntityStateRows(t, db, ctx, otherRunID, otherEntityID)
 
@@ -173,7 +173,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 		if err != nil {
 			t.Fatalf("marshal runtime log payload: %v", err)
 		}
-		seedPostgresRuntimeDiagnosticEventRecordFixture(t, ctx, db, uuid.NewString(), runID, "", "test", payload, createdAt)
+		seedPostgresRuntimeLogEventRecordFixture(t, ctx, pg, uuid.NewString(), runID, "", payload, createdAt)
 	}
 
 	insertRuntimeLog(targetRunID, otherRunID, "scheduler", "canonical-owner", now)
@@ -292,12 +292,12 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 	`, blockedRunID, readyRunID, now.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, activeEventID, blockedRunID, "quiescence.active_delivery", events.EventProducerPlatform, "test", "", "", now.Add(-50*time.Second))
-	seedPostgresRootEventRecordFixture(t, ctx, db, unsettledEventID, blockedRunID, "quiescence.missing_pipeline_receipt", events.EventProducerPlatform, "test", "", "", now.Add(-40*time.Second))
-	seedPostgresRuntimeDiagnosticEventRecordFixture(t, ctx, db, runtimeLogEventID, blockedRunID, "", "test", []byte(`{}`), now.Add(-30*time.Second))
-	seedPostgresRootEventRecordFixture(t, ctx, db, readyEventID, readyRunID, "quiescence.ready", events.EventProducerPlatform, "test", "", "", now.Add(-20*time.Second))
-	seedPostgresRootEventRecordFixture(t, ctx, db, inboundEvidenceEventID, readyRunID, events.EventTypePlatformInboundRecord, events.EventProducerPlatform, "test", "", "", now.Add(-20*time.Second))
-	seedPostgresRootEventRecordFixture(t, ctx, db, directiveEvidenceEventID, readyRunID, events.EventTypePlatformAgentDirective, events.EventProducerPlatform, "test", "", "", now.Add(-20*time.Second))
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, activeEventID, blockedRunID, "quiescence.active_delivery", events.EventProducerPlatform, "test", "", "", now.Add(-50*time.Second))
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, unsettledEventID, blockedRunID, "quiescence.missing_pipeline_receipt", events.EventProducerPlatform, "test", "", "", now.Add(-40*time.Second))
+	seedPostgresRuntimeLogEventRecordFixture(t, ctx, pg, runtimeLogEventID, blockedRunID, "", []byte(`{}`), now.Add(-30*time.Second))
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, readyEventID, readyRunID, "quiescence.ready", events.EventProducerPlatform, "test", "", "", now.Add(-20*time.Second))
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, inboundEvidenceEventID, readyRunID, events.EventTypePlatformInboundRecord, events.EventProducerPlatform, "test", "", "", now.Add(-20*time.Second))
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, directiveEvidenceEventID, readyRunID, events.EventTypePlatformAgentDirective, events.EventProducerPlatform, "test", "", "", now.Add(-20*time.Second))
 	if err := pg.UpsertPipelineReceipt(ctx, activeEventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt active event: %v", err)
 	}
@@ -386,7 +386,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	`, runID, now.Add(-5*time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", now)
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", now)
 	seedRunDebugAgent(t, pg, ctx, "agent-source", entityID, agentmemory.Authored(true), "flow-a")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
@@ -490,7 +490,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 	`, runID, base.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", base)
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", base)
 	seedRunDebugAgent(t, pg, ctx, "agent-late", entityID, agentmemory.Authored(true), "flow-a")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
@@ -566,7 +566,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 	`, runID, now.Add(-5*time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, eventID, runID, "task.started", events.EventProducerPlatform, "builder", entityID, "", now)
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "task.started", events.EventProducerPlatform, "builder", entityID, "", now)
 	seedRunDebugAgent(t, pg, ctx, "agent-task", entityID, agentmemory.PlatformDefault(), "")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (

@@ -171,7 +171,7 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, base.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
-	producer := eventtest.Producer(events.EventProducerPlatform, "runtime")
+	producer := eventtest.Producer(events.EventProducerExternal, "runtime")
 	for _, fixture := range []struct {
 		id        string
 		eventType events.EventType

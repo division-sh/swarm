@@ -693,6 +693,9 @@ func newSemanticEvent(class EventAdmissionClass, facts EventFacts, runID, parent
 	if !evt.createdAt.IsZero() {
 		evt.createdAt = evt.createdAt.UTC().Truncate(time.Microsecond)
 	}
+	if err := ValidateEventContract(evt); err != nil {
+		return Event{}, err
+	}
 	return evt, nil
 }
 

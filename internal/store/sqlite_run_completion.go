@@ -636,33 +636,24 @@ func sqliteLoadStandaloneRuntimePlatformRunRecord(ctx context.Context, q sqliteR
 	if q == nil || eventID == "" {
 		return standaloneRuntimePlatformRunRecord{}, false, nil
 	}
-	var rec standaloneRuntimePlatformRunRecord
-	err := q.QueryRowContext(ctx, `
-		SELECT
-			COALESCE(r.run_id, ''),
-			COALESCE(r.status, ''),
-			COALESCE(e.event_id, ''),
-			COALESCE(e.event_name, ''),
-			COALESCE(e.produced_by, ''),
-			COALESCE(e.produced_by_type, ''),
-			COALESCE(e.source_event_id, ''),
-			COALESCE(r.trigger_event_id, ''),
-			COALESCE(r.trigger_event_type, '')
-		FROM events e
-		INNER JOIN runs r ON r.run_id = e.run_id
-		WHERE e.event_id = ?
-		LIMIT 1
-	`, eventID).Scan(
-		&rec.RunID,
-		&rec.RunStatus,
-		&rec.EventID,
-		&rec.EventType,
-		&rec.ProducedBy,
-		&rec.ProducedByType,
-		&rec.SourceEventID,
-		&rec.TriggerEventID,
-		&rec.TriggerEventType,
-	)
+	durable, found, err := loadSQLiteEventIdentity(ctx, q, eventID)
+	if err != nil || !found {
+		return standaloneRuntimePlatformRunRecord{}, found, err
+	}
+	admitted, err := decodeEventRecord(durable)
+	if err != nil {
+		return standaloneRuntimePlatformRunRecord{}, false, fmt.Errorf("decode sqlite standalone runtime platform event: %w", err)
+	}
+	event := admitted.Event()
+	rec := standaloneRuntimePlatformRunRecord{
+		RunID: event.RunID(), EventID: event.ID(), EventClass: string(event.AdmissionClass()),
+		EventType: string(event.Type()), ProducedBy: event.SourceAgent(), ProducedByType: string(event.ProducerType()),
+		SourceEventID: event.ParentEventID(),
+	}
+	err = q.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), COALESCE(trigger_event_id, ''), COALESCE(trigger_event_type, '')
+		FROM runs WHERE run_id = ?
+	`, rec.RunID).Scan(&rec.RunStatus, &rec.TriggerEventID, &rec.TriggerEventType)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return standaloneRuntimePlatformRunRecord{}, false, nil

@@ -316,7 +316,7 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 	}
 }
 
-func TestPostgresRuntimeLogSourceFilterMatchesProjectionFallback(t *testing.T) {
+func TestPostgresRuntimeLogSourceFilterUsesCanonicalAgentOrRuntime(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
@@ -326,10 +326,7 @@ func TestPostgresRuntimeLogSourceFilterMatchesProjectionFallback(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	producedByValue := func(value string) *string {
-		return &value
-	}
-	insertLog := func(message, details string, producedBy *string, createdAt time.Time) string {
+	insertLog := func(message, details string, createdAt time.Time) string {
 		t.Helper()
 		eventID := uuid.NewString()
 		payload := `{
@@ -337,17 +334,12 @@ func TestPostgresRuntimeLogSourceFilterMatchesProjectionFallback(t *testing.T) {
 			"message":"` + message + `",
 			"details":` + details + `
 		}`
-		producer := "runtime"
-		if producedBy != nil {
-			producer = strings.TrimSpace(*producedBy)
-		}
-		seedOperatorRuntimeLog(t, ctx, pg, eventID, runID, producer, json.RawMessage(payload), createdAt)
+		seedOperatorRuntimeLog(t, ctx, pg, eventID, runID, "runtime", json.RawMessage(payload), createdAt)
 		return eventID
 	}
-	runtimeFallbackID := insertLog("runtime fallback", `{"component":"source-parity","action":"runtime_fallback"}`, nil, base.Add(time.Second))
-	producedByID := insertLog("producer fallback", `{"component":"source-parity","action":"producer_fallback"}`, producedByValue("operator-runtime"), base.Add(2*time.Second))
-	agentID := insertLog("agent source", `{"component":"source-parity","action":"agent_source","agent_id":"agent-1"}`, producedByValue("runtime"), base.Add(3*time.Second))
-	blankAgentID := insertLog("blank agent fallback", `{"component":"source-parity","action":"blank_agent_fallback","agent_id":"   "}`, producedByValue("operator-runtime-trimmed"), base.Add(5*time.Second))
+	runtimeFallbackID := insertLog("runtime fallback", `{"component":"source-parity","action":"runtime_fallback"}`, base.Add(time.Second))
+	agentID := insertLog("agent source", `{"component":"source-parity","action":"agent_source","agent_id":"agent-1"}`, base.Add(2*time.Second))
+	blankAgentID := insertLog("blank agent fallback", `{"component":"source-parity","action":"blank_agent_fallback","agent_id":"   "}`, base.Add(3*time.Second))
 
 	all, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
 		RunID:     runID,
@@ -359,14 +351,13 @@ func TestPostgresRuntimeLogSourceFilterMatchesProjectionFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListOperatorRuntimeLogs all: %v", err)
 	}
-	if len(all.Logs) != 4 {
-		t.Fatalf("all logs = %#v, want four", all.Logs)
+	if len(all.Logs) != 3 {
+		t.Fatalf("all logs = %#v, want three", all.Logs)
 	}
 	assertRuntimeLogIDsAndSources(t, all.Logs, map[string]string{
 		runtimeFallbackID: "runtime",
-		producedByID:      "operator-runtime",
 		agentID:           "agent-1",
-		blankAgentID:      "operator-runtime-trimmed",
+		blankAgentID:      "runtime",
 	})
 
 	runtimeRows, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
@@ -381,31 +372,8 @@ func TestPostgresRuntimeLogSourceFilterMatchesProjectionFallback(t *testing.T) {
 	}
 	assertRuntimeLogIDsAndSources(t, runtimeRows.Logs, map[string]string{
 		runtimeFallbackID: "runtime",
+		blankAgentID:      "runtime",
 	})
-
-	producerRows, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
-		RunID:     runID,
-		Component: "source-parity",
-		Level:     "warn",
-		Source:    "operator-runtime",
-		Limit:     10,
-	})
-	if err != nil {
-		t.Fatalf("ListOperatorRuntimeLogs produced_by source: %v", err)
-	}
-	assertRuntimeLogIDsAndSources(t, producerRows.Logs, map[string]string{producedByID: "operator-runtime"})
-
-	trimmedProducerRows, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
-		RunID:     runID,
-		Component: "source-parity",
-		Level:     "warn",
-		Source:    "operator-runtime-trimmed",
-		Limit:     10,
-	})
-	if err != nil {
-		t.Fatalf("ListOperatorRuntimeLogs trimmed produced_by source: %v", err)
-	}
-	assertRuntimeLogIDsAndSources(t, trimmedProducerRows.Logs, map[string]string{blankAgentID: "operator-runtime-trimmed"})
 
 	agentRows, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
 		RunID:     runID,
@@ -776,10 +744,13 @@ func seedOperatorObservabilityEvent(
 	if entityID != "" {
 		envelope = events.EnvelopeForEntityID(envelope, entityID)
 	}
-	event := eventtest.PersistedProjectionForProducer(
-		eventID, events.EventType(eventName), eventtest.Producer(producerType, producerID), "",
-		payload, 0, runID, "", envelope, createdAt,
-	)
+	producer := eventtest.Producer(producerType, producerID)
+	var event events.Event
+	if producerType == events.EventProducerPlatform {
+		event = eventtest.PersistedRuntimeControlForProducer(eventID, events.EventType(eventName), producer, "", payload, 0, runID, "", envelope, createdAt)
+	} else {
+		event = eventtest.PersistedChildForProducer(eventID, events.EventType(eventName), producer, "", payload, 0, runID, eventtest.UUID("operator-observability-parent:"+eventID), envelope, createdAt)
+	}
 	if err := commitSemanticEventFixture(ctx, pg, event); err != nil {
 		t.Fatalf("seed operator observability event %s: %v", eventName, err)
 	}

@@ -432,7 +432,7 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	forkAt := at.Add(30 * time.Second)
 	seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, sourceEventID, sessionID, auditID, turnID, at)
-	seedPostgresRootEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "unrelated.started",
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "unrelated.started",
 		events.EventProducerPlatform, "source-runtime", entityID, "", at.Add(10*time.Second))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
@@ -482,7 +482,7 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	at := time.Unix(1700002428, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
 	seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
-	seedPostgresRootEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "unrelated.started",
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "unrelated.started",
 		events.EventProducerPlatform, "source-runtime", entityID, "", at.Add(10*time.Second))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
@@ -609,7 +609,7 @@ func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailC
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 
-	seedPostgresRootEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "unrelated.started",
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "unrelated.started",
 		events.EventProducerPlatform, "source-runtime", entityID, "flow-a/1", at.Add(10*time.Second))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
@@ -1546,7 +1546,7 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 	`, materialized.ForkRunID, forkEventID, at.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed selected agent delivery: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, uuid.NewString(), materialized.ForkRunID, "agent.follow_up",
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, uuid.NewString(), materialized.ForkRunID, "agent.follow_up",
 		events.EventProducerAgent, "agent-a", entityID, "flow-a/1", at.Add(4*time.Second))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
@@ -1674,7 +1674,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
-	seedPostgresRuntimeDiagnosticEventRecordFixture(t, ctx, db, uuid.NewString(), materialized.ForkRunID, forkEventID, "runtime",
+	seedPostgresRuntimeLogEventRecordFixture(t, ctx, pg, uuid.NewString(), materialized.ForkRunID, forkEventID,
 		[]byte(`{"log_level":"warn","message":"selected-fork diagnostic","details":{"component":"eventbus","action":"outbox_replay_scope_unavailable"}}`), at.Add(3*time.Second))
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
@@ -1714,7 +1714,7 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimePlatformContro
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
-	seedPostgresRootEventRecordFixture(t, ctx, db, uuid.NewString(), materialized.ForkRunID, "platform.auth_required",
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, uuid.NewString(), materialized.ForkRunID, "platform.auth_required",
 		events.EventProducerPlatform, "runtime", entityID, "flow-a/1", at.Add(3*time.Second))
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
@@ -1753,7 +1753,7 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic(
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
-	seedPostgresRuntimeDiagnosticEventRecordFixture(t, ctx, db, uuid.NewString(), materialized.ForkRunID, "", "runtime",
+	seedPostgresRuntimeLogEventRecordFixture(t, ctx, pg, uuid.NewString(), materialized.ForkRunID, "",
 		[]byte(`{"log_level":"warn","message":"uncorrelated diagnostic","details":{"component":"eventbus","action":"outbox_replay_scope_unavailable"}}`), at.Add(3*time.Second))
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
@@ -1792,7 +1792,7 @@ func TestSelectedContractActivationRejectsUncausedForkLocalToolExecutorRuntimeLo
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
-	seedPostgresRuntimeDiagnosticEventRecordFixture(t, ctx, db, uuid.NewString(), materialized.ForkRunID, "", "runtime",
+	seedPostgresRuntimeLogEventRecordFixture(t, ctx, pg, uuid.NewString(), materialized.ForkRunID, "",
 		[]byte(`{"log_level":"info","message":"Tool read_validation_case_business_brief executed successfully","details":{"component":"tool-executor","action":"tool_execution_succeeded","tool_name":"read_validation_case_business_brief"}}`), at.Add(3*time.Second))
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
@@ -1976,7 +1976,7 @@ func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourc
 	`, sourceRunID, authorActivityTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(t, ctx, db, eventID, sourceRunID, "item.received",
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "item.received",
 		events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -2065,7 +2065,7 @@ func seedSelectedContractSourceReplayScopeMarker(t *testing.T, db execContextDB,
 
 func seedSelectedContractPostForkSourceEvent(t *testing.T, db *sql.DB, sourceRunID, eventID, entityID string, at time.Time) {
 	t.Helper()
-	seedPostgresRootEventRecordFixture(t, testAuthorActivityContext(), db, eventID, sourceRunID, "source.after",
+	seedPostgresSemanticEventRecordFixture(t, testAuthorActivityContext(), db, eventID, sourceRunID, "source.after",
 		events.EventProducerPlatform, "source-runtime", entityID, "flow-a/1", at)
 }
 

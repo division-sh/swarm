@@ -277,7 +277,7 @@ func seedActivityReplyContext(t *testing.T, db *sql.DB, sqlite bool, runID, requ
 	if sqlite {
 		return
 	}
-	seedPipelineEventRecord(t, context.Background(), db, eventtest.PersistedProjectionForProducer(
+	seedPipelineEventRecord(t, context.Background(), db, eventtest.PersistedRuntimeControlForProducer(
 		requestEventID, events.EventType("provider.requested"),
 		eventtest.Producer(events.EventProducerPlatform, "test"), "", []byte(`{}`), 0,
 		runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),

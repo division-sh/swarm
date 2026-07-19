@@ -36,7 +36,7 @@ func seedNormalRunCompletionFixture(t *testing.T, db *sql.DB, state, flowInstanc
 	`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	seedPostgresRootEventRecordFixture(
+	seedPostgresSemanticEventRecordFixture(
 		t, ctx, db, eventID, runID, events.EventType("example.started"),
 		events.EventProducerExternal, "test", entityID, flowInstance, time.Now().UTC(),
 	)
@@ -102,7 +102,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_MarksCompletedWhenTerminalAnd
 	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
-	if err := insertPostgresCanonicalEventRecordFixture(ctx, db, eventtest.RuntimeDiagnostic(
+	if err := commitDiagnosticRuntimeLogFixture(ctx, pg, eventtest.DiagnosticDirect(
 		uuid.NewString(), events.EventType(runtimeLogEventName), "runtime", "", []byte(`{"message":"diagnostic"}`), 0,
 		fixture.RunID, fixture.EventID, events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
 	)); err != nil {

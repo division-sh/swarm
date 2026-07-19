@@ -61,7 +61,7 @@ func (s *PostgresStore) ReserveDirectiveOperation(ctx context.Context, req runti
 				return fmt.Errorf("remove legacy directive idempotency projection: %w", err)
 			}
 		}
-		outcome, err := (sqlPublishCommitter{tx: tx, store: s}).commitNamedEvent(txctx, "reserve directive operation", events.EventAdmissionOperatorInjected, runtimebus.CommitPublishRequest{
+		outcome, err := (sqlPublishCommitter{tx: tx, store: s}).commitNamedEvent(txctx, "reserve directive operation", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformAgentDirective, runtimebus.CommitPublishRequest{
 			Event: req.Event, ReplayScope: runtimereplayclaim.CommittedReplayScopeDirect,
 		})
 		if err != nil {
@@ -111,7 +111,7 @@ func (s *SQLiteRuntimeStore) ReserveDirectiveOperation(ctx context.Context, req 
 				return fmt.Errorf("remove legacy sqlite directive idempotency projection: %w", err)
 			}
 		}
-		outcome, err := (sqlPublishCommitter{tx: tx, store: s}).commitNamedEvent(txctx, "reserve directive operation", events.EventAdmissionOperatorInjected, runtimebus.CommitPublishRequest{
+		outcome, err := (sqlPublishCommitter{tx: tx, store: s}).commitNamedEvent(txctx, "reserve directive operation", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformAgentDirective, runtimebus.CommitPublishRequest{
 			Event: req.Event, ReplayScope: runtimereplayclaim.CommittedReplayScopeDirect,
 		})
 		if err != nil {
@@ -165,7 +165,7 @@ func validateDirectiveReservation(req runtimeagentcontrol.ReserveDirectiveOperat
 		}
 	}
 	event := req.Event.Event()
-	if event.ID() != op.DirectiveEventID || event.RunID() != op.ResolvedRunID || string(event.Type()) != runtimeagentcontrol.DirectiveEventType || req.Event.Class() != events.EventAdmissionOperatorInjected {
+	if event.ID() != op.DirectiveEventID || event.RunID() != op.ResolvedRunID || event.Type() != events.EventTypePlatformAgentDirective || req.Event.Class() != events.EventAdmissionDiagnosticDirect {
 		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("directive operation event identity mismatch")
 	}
 	if op.State == "" {

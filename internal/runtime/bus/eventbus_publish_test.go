@@ -401,8 +401,8 @@ func assertEventBusDiagnosticDirectRefusal(
 						0, "", "", events.EventEnvelope{}, time.Now().UTC(),
 					)
 					err := publish(context.Background(), evt)
-					if err == nil || !strings.Contains(err.Error(), "diagnostic-direct event") {
-						t.Fatalf("publish error = %v, want diagnostic-direct refusal", err)
+					if err == nil || !strings.Contains(err.Error(), "closed event type") {
+						t.Fatalf("publish error = %v, want closed-event refusal", err)
 					}
 					count, err := loadEventCount(eventID)
 					if err != nil {
@@ -1273,7 +1273,7 @@ func TestEventBusPublish_LogsQueuedDeliveryLifecycleTransition(t *testing.T) {
 		0,
 		"",
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))),
 		time.Now().UTC(),
 	)
 
@@ -1328,7 +1328,7 @@ func TestEventBusPublish_AttachesTypedRuntimeDiagnosticLineage(t *testing.T) {
 		0,
 		runID,
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))),
 		time.Now().UTC(),
 	)); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -1377,7 +1377,7 @@ func TestEventBusPublish_AttachesBundleSourceFactToRuntimeLogs(t *testing.T) {
 		0,
 		uuid.NewString(),
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))),
 		time.Now().UTC(),
 	)); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -1525,7 +1525,7 @@ func TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut(t
 		0,
 		"",
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))),
 		time.Now().UTC(),
 	),
 		[]string{"agent-a"})
@@ -1578,8 +1578,8 @@ func TestEventBusPublishDirect_RejectsAnyExplicitRecipientFilteredByMetadata(t *
 	store := &descriptorAwareEventStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{
 			{AgentID: "control-plane"},
-			{AgentID: "reviewer-ent-1", EntityID: "ent-1"},
-			{AgentID: "reviewer-ent-2", EntityID: "ent-2"},
+			{AgentID: "reviewer-ent-1", EntityID: eventtest.UUID(eventtest.UUID("ent-1"))},
+			{AgentID: "reviewer-ent-2", EntityID: eventtest.UUID("ent-2")},
 		},
 	}
 	eb, err := newScopedTestEventBus(store)
@@ -1599,7 +1599,7 @@ func TestEventBusPublishDirect_RejectsAnyExplicitRecipientFilteredByMetadata(t *
 		0,
 		"",
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))),
 		time.Now().UTC(),
 	),
 		[]string{"control-plane", "reviewer-ent-1", "reviewer-ent-2", "missing-agent"})
@@ -1616,8 +1616,8 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByExplicitMetadata(t *test
 	store := &descriptorAwareEventStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{
 			{AgentID: "control-plane"},
-			{AgentID: "reviewer-ent-1", EntityID: "ent-1"},
-			{AgentID: "reviewer-ent-2", EntityID: "ent-2"},
+			{AgentID: "reviewer-ent-1", EntityID: eventtest.UUID(eventtest.UUID("ent-1"))},
+			{AgentID: "reviewer-ent-2", EntityID: eventtest.UUID("ent-2")},
 		},
 	}
 	eb, err := newScopedTestEventBus(store)
@@ -1637,18 +1637,18 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByExplicitMetadata(t *test
 		0,
 		"",
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))),
 		time.Now().UTC(),
 	)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
 	evt := requireBusEvent(t, controlCh, "explicit metadata delivery to control-plane")
-	if got := evt.EntityID(); got != "ent-1" {
+	if got := evt.EntityID(); got != eventtest.UUID(eventtest.UUID("ent-1")) {
 		t.Fatalf("control event entity_id = %q, want ent-1", got)
 	}
 	evt = requireBusEvent(t, matchCh, "explicit metadata delivery to entity-scoped reviewer")
-	if got := evt.EntityID(); got != "ent-1" {
+	if got := evt.EntityID(); got != eventtest.UUID(eventtest.UUID("ent-1")) {
 		t.Fatalf("matched event entity_id = %q, want ent-1", got)
 	}
 	requireNoBusEvent(t, otherCh, "explicit metadata delivery to filtered entity-scoped reviewer")
@@ -1659,8 +1659,8 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByExplicitMetadata(t *test
 func TestEventBusPublish_FiltersEntityScopedRecipientsByTypedEnvelopeNotPayload(t *testing.T) {
 	store := &descriptorAwareEventStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{
-			{AgentID: "reviewer-ent-1", EntityID: "ent-1"},
-			{AgentID: "reviewer-ent-2", EntityID: "ent-2"},
+			{AgentID: "reviewer-ent-1", EntityID: eventtest.UUID(eventtest.UUID("ent-1"))},
+			{AgentID: "reviewer-ent-2", EntityID: eventtest.UUID("ent-2")},
 		},
 	}
 	eb, err := newScopedTestEventBus(store)
@@ -1679,7 +1679,7 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByTypedEnvelopeNotPayload(
 		0,
 		"",
 		"",
-		events.EventEnvelope{EntityID: "ent-1"},
+		events.EventEnvelope{EntityID: eventtest.UUID(eventtest.UUID("ent-1"))},
 		time.Now().UTC(),
 	))
 	if err != nil {
@@ -1687,7 +1687,7 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByTypedEnvelopeNotPayload(
 	}
 
 	evt := requireBusEvent(t, matchCh, "typed-envelope delivery to entity-scoped reviewer")
-	if got := evt.EntityID(); got != "ent-1" {
+	if got := evt.EntityID(); got != eventtest.UUID(eventtest.UUID("ent-1")) {
 		t.Fatalf("matched event entity_id = %q, want ent-1", got)
 	}
 	requireNoBusEvent(t, otherCh, "typed-envelope delivery to filtered entity-scoped reviewer")
@@ -1716,7 +1716,7 @@ func TestEventBusPublish_DropsRecipientsMissingExplicitDescriptor(t *testing.T) 
 		0,
 		"",
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))),
 		time.Now().UTC(),
 	)); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -1752,22 +1752,22 @@ func TestEventBusPublish_KeepsInternalSubscribersLiveOnlyUnderDescriptorPlanning
 		0,
 		"",
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))),
 		time.Now().UTC(),
 	)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
 	evt := requireBusEvent(t, workflowCh, "internal workflow-runtime descriptor delivery")
-	if got := evt.EntityID(); got != "ent-1" {
+	if got := evt.EntityID(); got != eventtest.UUID(eventtest.UUID("ent-1")) {
 		t.Fatalf("workflow-runtime event entity_id = %q, want ent-1", got)
 	}
 	evt = requireBusEvent(t, nodeCh, "internal system-node descriptor delivery")
-	if got := evt.EntityID(); got != "ent-1" {
+	if got := evt.EntityID(); got != eventtest.UUID(eventtest.UUID("ent-1")) {
 		t.Fatalf("system node event entity_id = %q, want ent-1", got)
 	}
 	evt = requireBusEvent(t, agentCh, "agent descriptor delivery")
-	if got := evt.EntityID(); got != "ent-1" {
+	if got := evt.EntityID(); got != eventtest.UUID(eventtest.UUID("ent-1")) {
 		t.Fatalf("agent event entity_id = %q, want ent-1", got)
 	}
 	requireNoBusEvent(t, missingCh, "descriptor delivery to missing agent")
@@ -1779,7 +1779,7 @@ func TestEventBusPublishDeferred_UsesCanonicalSubscribedRecipientFiltering(t *te
 	store := &descriptorAwareEventStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{
 			{AgentID: "agent-a"},
-			{AgentID: "agent-b", EntityID: "ent-2"},
+			{AgentID: "agent-b", EntityID: eventtest.UUID("ent-2")},
 		},
 	}
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
@@ -1801,18 +1801,18 @@ func TestEventBusPublishDeferred_UsesCanonicalSubscribedRecipientFiltering(t *te
 		0,
 		"",
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))),
 		time.Now().UTC(),
 	)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
 	evt := requireBusEvent(t, workflowCh, "deferred delivery to workflow-runtime")
-	if got := evt.EntityID(); got != "ent-1" {
+	if got := evt.EntityID(); got != eventtest.UUID(eventtest.UUID("ent-1")) {
 		t.Fatalf("workflow-runtime event entity_id = %q, want ent-1", got)
 	}
 	evt = requireBusEvent(t, agentCh, "deferred delivery to agent")
-	if got := evt.EntityID(); got != "ent-1" {
+	if got := evt.EntityID(); got != eventtest.UUID(eventtest.UUID("ent-1")) {
 		t.Fatalf("agent event entity_id = %q, want ent-1", got)
 	}
 	requireNoBusEvent(t, otherCh, "deferred delivery to filtered agent")
@@ -1838,7 +1838,7 @@ func TestEventBusPublishDeferredRestoresEventDeliveryContext(t *testing.T) {
 		0,
 		"",
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))),
 		time.Now().UTC(),
 	)); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -1869,7 +1869,7 @@ func TestEventBusPublish_FailsClosedWhenDescriptorLookupFails(t *testing.T) {
 		0,
 		"",
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))),
 		time.Now().UTC(),
 	))
 	if err == nil || !strings.Contains(err.Error(), "descriptor lookup failed") {
@@ -2371,7 +2371,7 @@ func TestEventBusPublish_InterceptsMultiHopDeferredChains(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.RootIngress("", events.EventType("custom.root"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Now().UTC())); err != nil {
+	if err := eb.Publish(context.Background(), eventtest.RootIngress("", events.EventType("custom.root"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))), time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if got := store.eventTypes(); len(got) < 4 || got[0] != "custom.root" || got[1] != "custom.middle" || got[2] != "custom.leaf" || got[3] != "custom.final" {
@@ -2396,7 +2396,7 @@ func TestEventBusPublishNonTransactional_PersistsBeforeInterceptorsRun(t *testin
 		0,
 		"",
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))),
 		time.Now().UTC(),
 	)); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -2789,16 +2789,16 @@ func TestEventBusPublish_DoesNotInferLineageFromInboundContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ctx := runtimecorrelation.WithInboundEvent(context.Background(), eventtest.RootIngress("evt-parent",
+	ctx := runtimecorrelation.WithInboundEvent(context.Background(), eventtest.RootIngress(eventtest.UUID("evt-parent"),
 		events.EventType("task.started"), "", "", nil, 0, "run-abc", "", events.EventEnvelope{}, time.Time{}))
-	if err := eb.Publish(ctx, eventtest.RootIngress("evt-child",
+	if err := eb.Publish(ctx, eventtest.RootIngress(eventtest.UUID(eventtest.UUID("evt-child")),
 		events.EventType("task.completed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if len(store.events) != 1 {
 		found := false
 		for _, evt := range store.events {
-			if evt.ID() != "evt-child" {
+			if evt.ID() != eventtest.UUID(eventtest.UUID("evt-child")) {
 				continue
 			}
 			found = true
@@ -2828,7 +2828,7 @@ func TestEventBusPublish_ZeroRecipientsDoesNotEmitContradiction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.RootIngress("evt-zero",
+	if err := eb.Publish(context.Background(), eventtest.RootIngress(eventtest.UUID(eventtest.UUID("evt-zero")),
 		events.EventType("custom.no_subscribers"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -2838,19 +2838,21 @@ func TestEventBusPublish_ZeroRecipientsDoesNotEmitContradiction(t *testing.T) {
 	}
 }
 
-func TestEventBusPublish_RuntimeLogBypassesContradictionRouting(t *testing.T) {
+func TestEventBusPublish_RuntimeControlBypassesContradictionRouting(t *testing.T) {
 	store := &recordingEventStore{}
 	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.RootIngress("evt-log",
-		events.EventType("platform.runtime_log"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
+	if err := eb.Publish(context.Background(), eventtest.RuntimeControl(
+		uuid.NewString(), "platform.paused", "runtime", "", nil, 0,
+		uuid.NewString(), "", events.EventEnvelope{}, time.Time{},
+	)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	got := store.eventTypes()
-	if len(got) != 1 || got[0] != "platform.runtime_log" {
-		t.Fatalf("persisted event types = %v, want [platform.runtime_log]", got)
+	if len(got) != 1 || got[0] != "platform.paused" {
+		t.Fatalf("persisted event types = %v, want [platform.paused]", got)
 	}
 }
 
@@ -3219,7 +3221,7 @@ func TestEventBusPublish_RecordsNoRoutedDiagnosticsForRetiredSiblingAutoWire(t *
 	defer eb.Unsubscribe("scan-orchestrator")
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
-	if err := eb.Publish(ctx, eventtest.RootIngress("", "producer/scan.requested", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{})); err != nil {
+	if err := eb.Publish(ctx, eventtest.RootIngress("", "producer/scan.requested", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))), time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	diags := recorder.SnapshotPublishes()
@@ -4058,7 +4060,7 @@ func TestEventBusPublish_RecordsNestedPackageConnectLocalizedEvent(t *testing.T)
 	defer eb.Unsubscribe("child-aggregator")
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
-	if err := eb.Publish(ctx, eventtest.RootIngress("", "child/grandchild/micro.done", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-grandchild"), time.Time{})); err != nil {
+	if err := eb.Publish(ctx, eventtest.RootIngress("", "child/grandchild/micro.done", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-grandchild")), time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	diags := recorder.SnapshotPublishes()
@@ -4124,7 +4126,7 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 		0,
 		"",
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-grandchild"),
+		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-grandchild")),
 		time.Time{},
 	)); err != nil {
 		t.Fatalf("Publish: %v", err)

@@ -693,17 +693,17 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 			uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", json.RawMessage(`{"message":"must remain non-routed"}`),
 			0, runID, "", events.EventEnvelope{}, createdAt.Add(2*time.Second),
 		)
-		if err := harness.append(ctx, candidate); err == nil || !strings.Contains(err.Error(), "closed named persistence operation") {
+		if err := harness.append(ctx, candidate); err == nil || !strings.Contains(err.Error(), "requires its named persistence operation") {
 			t.Fatalf("diagnostic generic persistence error = %v, want named-operation refusal", err)
 		}
 
-		labelOnly := terminalEventAdmissionEvent(uuid.NewString(), runID, `{"message":"not typed"}`, createdAt.Add(2*time.Second))
-		labelOnly = eventtest.PersistedProjection(
-			labelOnly.ID(), events.EventTypePlatformRuntimeLog, "runtime", "", labelOnly.Payload(), 0,
-			runID, "", events.EventEnvelope{}, labelOnly.CreatedAt(),
+		err = events.ValidateEventIdentityContract(
+			events.EventAdmissionRootIngress,
+			events.EventTypePlatformRuntimeLog,
+			eventtest.Producer(events.EventProducerExternal, "runtime"),
 		)
-		if err := harness.append(ctx, labelOnly); err == nil {
-			t.Fatalf("label-only diagnostic error = %v, want typed-constructor rejection", err)
+		if err == nil {
+			t.Fatal("root-ingress constructor accepted a closed diagnostic event type")
 		}
 
 		for _, subtype := range []struct {
@@ -719,7 +719,7 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 					uuid.NewString(), subtype.eventType, "runtime", "", json.RawMessage(`{"evidence":"active-only"}`),
 					0, runID, "", events.EventEnvelope{}, createdAt.Add(3*time.Second),
 				)
-				if err := harness.append(ctx, evt); err == nil || !strings.Contains(err.Error(), "closed named persistence operation") {
+				if err := harness.append(ctx, evt); err == nil || !strings.Contains(err.Error(), "requires its named persistence operation") {
 					t.Fatalf("diagnostic generic persistence error = %v, want named-operation refusal", err)
 				}
 			})
@@ -775,22 +775,28 @@ func TestPostgresDiagnosticDirectEventsRequireClosedTypedOwners(t *testing.T) {
 
 func assertDiagnosticDirectEventsRequireClosedTypedOwners(t *testing.T, appendEvent func(context.Context, events.Event) error) {
 	t.Helper()
-	for _, eventType := range []string{
-		string(events.EventTypePlatformRuntimeLog),
-		string(events.EventTypePlatformInboundRecord),
-		string(events.EventTypePlatformAgentDirective),
-	} {
-		t.Run(eventType, func(t *testing.T) {
-			evt := eventtest.DiagnosticDirect(
-				uuid.NewString(), events.EventType(eventType), "test", "", json.RawMessage(`{"ok":true}`),
-				0, "", "", events.EventEnvelope{}, time.Now().UTC(),
-			)
+	closed := []events.Event{
+		eventtest.DiagnosticDirect(uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", json.RawMessage(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		eventtest.DiagnosticDirect(uuid.NewString(), events.EventTypePlatformInboundRecord, "runtime", "", json.RawMessage(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		eventtest.DiagnosticDirect(uuid.NewString(), events.EventTypePlatformAgentDirective, "runtime", "", json.RawMessage(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+	}
+	lineage, err := events.NewSelectedForkLineage(uuid.NewString(), uuid.NewString(), uuid.NewString(), "selection:generic-refusal", "", executionmode.Live)
+	if err != nil {
+		t.Fatalf("construct selected-fork lineage: %v", err)
+	}
+	closed = append(closed, eventtest.SelectedForkReplay(
+		uuid.NewString(), "selected.generic_refusal", eventtest.Producer(events.EventProducerNode, "fork-node"), "", json.RawMessage(`{"ok":true}`),
+		0, lineage, events.EventEnvelope{}, time.Now().UTC(),
+	))
+	for _, evt := range closed {
+		evt := evt
+		t.Run(string(evt.Type()), func(t *testing.T) {
 			err := appendEvent(context.Background(), evt)
 			if err == nil {
-				t.Fatalf("generic append accepted diagnostic-direct event %s", eventType)
+				t.Fatalf("generic append accepted closed event class %s", evt.AdmissionClass())
 			}
-			if !strings.Contains(err.Error(), "requires its closed named persistence operation") {
-				t.Fatalf("typed diagnostic-direct error = %v", err)
+			if !strings.Contains(err.Error(), "requires its named persistence operation") {
+				t.Fatalf("closed event error = %v", err)
 			}
 		})
 	}

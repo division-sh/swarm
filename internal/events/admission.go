@@ -14,8 +14,8 @@ type AdmissionOptions struct {
 }
 
 func AdmitForPublish(event Event, options AdmissionOptions) (AdmittedEvent, error) {
-	if event.AdmissionClass() == EventAdmissionDiagnosticDirect {
-		return AdmittedEvent{}, fmt.Errorf("diagnostic-direct event requires its closed named persistence operation")
+	if err := ValidateGenericPublishEvent(event); err != nil {
+		return AdmittedEvent{}, err
 	}
 	return admitPersistableEvent(event, options)
 }
@@ -24,7 +24,22 @@ func AdmitForPersistence(event Event, options AdmissionOptions) (AdmittedEvent, 
 	return admitPersistableEvent(event, options)
 }
 
+// RevalidatePersistedEvent restores the opaque admitted carrier at a recovery
+// boundary without allocating or normalizing any durable fact.
+func RevalidatePersistedEvent(event Event) (AdmittedEvent, error) {
+	if event.CreatedAt().IsZero() {
+		return AdmittedEvent{}, fmt.Errorf("persisted event created_at is required")
+	}
+	if err := ValidatePersistentEvent(event); err != nil {
+		return AdmittedEvent{}, err
+	}
+	return newAdmittedEvent(event.Clone()), nil
+}
+
 func admitPersistableEvent(event Event, options AdmissionOptions) (AdmittedEvent, error) {
+	if err := ValidateEventContract(event); err != nil {
+		return AdmittedEvent{}, err
+	}
 	class := event.AdmissionClass()
 	switch class {
 	case EventAdmissionRootIngress,
@@ -84,7 +99,7 @@ func admitPersistableEvent(event Event, options AdmissionOptions) (AdmittedEvent
 			return AdmittedEvent{}, fmt.Errorf("selected-fork replay event requires typed lineage")
 		}
 	case EventAdmissionRuntimeControl, EventAdmissionRuntimeDiagnostic:
-		if isStandaloneRuntimePlatformEvent(admitted.Type(), admitted.SourceAgent()) && admitted.RunID() == "" {
+		if IsStandaloneRuntimePlatformEvent(admitted) && admitted.RunID() == "" {
 			admitted.runID = uuid.NewString()
 		}
 	case EventAdmissionDiagnosticDirect:
@@ -94,6 +109,11 @@ func admitPersistableEvent(event Event, options AdmissionOptions) (AdmittedEvent
 	}
 	if err := validateAdmittedIdentity(admitted.ID(), admitted.RunID(), admitted.ParentEventID(), options.RequirePersistentUUIDIdentity); err != nil {
 		return AdmittedEvent{}, err
+	}
+	if options.RequirePersistentUUIDIdentity {
+		if err := ValidatePersistentEvent(admitted); err != nil {
+			return AdmittedEvent{}, err
+		}
 	}
 	return newAdmittedEvent(admitted), nil
 }
@@ -112,26 +132,4 @@ func validateAdmittedIdentity(eventID, runID, parentEventID string, requirePersi
 		return err
 	}
 	return nil
-}
-
-func isStandaloneRuntimePlatformEvent(eventType EventType, producerID string) bool {
-	if strings.TrimSpace(producerID) != "runtime" {
-		return false
-	}
-	switch strings.TrimSpace(string(eventType)) {
-	case "platform.boot",
-		"platform.recovery_failed",
-		"platform.event_quarantined",
-		"platform.agent_panic",
-		"platform.agent_failed",
-		"platform.auth_required",
-		"platform.paused",
-		"platform.resumed",
-		"platform.dead_letter_escalation",
-		"platform.run_stalled",
-		"platform.budget_threshold_crossed":
-		return true
-	default:
-		return false
-	}
 }

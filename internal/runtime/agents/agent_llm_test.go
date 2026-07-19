@@ -32,9 +32,9 @@ import (
 func testBoardDirective(text string) runtimeagentcontrol.BoardDirective {
 	return runtimeagentcontrol.BoardDirective{
 		Directive: text,
-		Event: eventtest.RootIngress("00000000-0000-0000-0000-000000000101",
+		Event: eventtest.DiagnosticDirect("00000000-0000-0000-0000-000000000101",
 			events.EventType(runtimeagentcontrol.DirectiveEventType),
-			"runtime", "", []byte(`{"directive_text":"`+text+`","mode":"directive","run_id":"00000000-0000-0000-0000-000000000201","run_id_resolution":"new_run_allocated","source":"test"}`), 0, "00000000-0000-0000-0000-000000000201", "", events.EventEnvelope{}, time.Time{}),
+			"runtime", "", []byte(`{"directive_text":"`+text+`","mode":"directive","run_id":"00000000-0000-0000-0000-000000000201","run_id_resolution":"new_run_allocated","source":"test"}`), 0, "00000000-0000-0000-0000-000000000201", "", events.EventEnvelope{}, time.Date(2026, 7, 19, 0, 0, 0, 0, time.UTC)),
 
 		RunIDResolution: runtimeagentcontrol.RunResolutionNewRunAllocated,
 		Source:          "test",

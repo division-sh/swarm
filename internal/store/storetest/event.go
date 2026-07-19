@@ -125,26 +125,6 @@ func InsertChildEventRecord(
 	return event
 }
 
-func InsertRuntimeDiagnosticEventRecord(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
-	eventID string,
-	runID string,
-	parentEventID string,
-	producerID string,
-	payload []byte,
-	createdAt time.Time,
-) events.Event {
-	t.Helper()
-	event, err := eventfixture.RuntimeDiagnostic(ctx, db, dialect, eventID, runID, parentEventID, producerID, payload, createdAt)
-	if err != nil {
-		t.Fatalf("construct canonical runtime diagnostic event record %s: %v", eventID, err)
-	}
-	return event
-}
-
 func InsertDiagnosticDirectEventRecord(
 	t testing.TB,
 	ctx context.Context,
@@ -157,6 +137,26 @@ func InsertDiagnosticDirectEventRecord(
 ) events.Event {
 	t.Helper()
 	event, err := eventfixture.DiagnosticDirect(ctx, db, dialect, eventID, producerID, payload, createdAt)
+	if err != nil {
+		t.Fatalf("construct canonical diagnostic-direct event record %s: %v", eventID, err)
+	}
+	return event
+}
+
+func InsertDiagnosticDirectEventRecordForRun(
+	t testing.TB,
+	ctx context.Context,
+	db *sql.DB,
+	dialect runtimeauthoractivity.Dialect,
+	eventID string,
+	runID string,
+	parentEventID string,
+	producerID string,
+	payload []byte,
+	createdAt time.Time,
+) events.Event {
+	t.Helper()
+	event, err := eventfixture.DiagnosticDirectForRun(ctx, db, dialect, eventID, runID, parentEventID, producerID, payload, createdAt)
 	if err != nil {
 		t.Fatalf("construct canonical diagnostic-direct event record %s: %v", eventID, err)
 	}

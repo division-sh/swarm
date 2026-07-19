@@ -115,7 +115,7 @@ func (m *sqlInboundPublicationMutation) FinalizeInboundPublication(ctx context.C
 		return fmt.Errorf("admit inbound evidence: %w", err)
 	}
 	committer := sqlPublishCommitter{tx: m.tx, store: m.eventStore}
-	if _, err := committer.commitNamedEvent(ctx, "finalize inbound publication evidence", events.EventAdmissionDiagnosticDirect, runtimebus.CommitPublishRequest{Event: evidence, ReplayScope: runtimereplayclaim.CommittedReplayScopeDirect}); err != nil {
+	if _, err := committer.commitNamedEvent(ctx, "finalize inbound publication evidence", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformInboundRecord, runtimebus.CommitPublishRequest{Event: evidence, ReplayScope: runtimereplayclaim.CommittedReplayScopeDirect}); err != nil {
 		return fmt.Errorf("commit inbound evidence: %w", err)
 	}
 	if err := recordInboundAuthorActivity(ctx, finalization.EvidenceEvent, m.request.Provider); err != nil {
@@ -493,7 +493,7 @@ func validateInboundPublicationRecordShape(record *runtimeinbound.Record) error 
 		}
 		fingerprint, err := runtimeinbound.EventIntegrityFingerprint(child.Event, child.Kind, auth)
 		if err != nil || fingerprint != child.EventIntegrityFingerprint {
-			return fmt.Errorf("inbound publication %s child ordinal %d event integrity mismatch", record.PublicationID, index)
+			return fmt.Errorf("inbound publication %s child ordinal %d event integrity mismatch: stored=%s computed=%s", record.PublicationID, index, child.EventIntegrityFingerprint, fingerprint)
 		}
 	}
 	return nil

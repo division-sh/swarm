@@ -88,12 +88,12 @@ func TestImportBoundaryConnectConsumesBindingsForInputAndRootOutputDelivery(t *t
 		recipient string
 		envelope  events.EventEnvelope
 	}{
-		{id: "evt-input-connect", eventType: "parent.lead_captured", recipient: "worker-node"},
+		{id: eventtest.UUID("evt-input-connect"), eventType: "parent.lead_captured", recipient: "worker-node"},
 		{
-			id:        "evt-output-connect",
+			id:        eventtest.UUID("evt-output-connect"),
 			eventType: "worker/work.completed",
 			recipient: "parent-listener",
-			envelope:  events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: "root-entity"}),
+			envelope:  events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: eventtest.UUID("root-entity")}),
 		},
 	} {
 		evt := eventtest.RootIngress(tc.id, events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", tc.envelope, time.Now().UTC())

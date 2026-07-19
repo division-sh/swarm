@@ -40,7 +40,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunUsesCanonicalPlannerJSON(t *testing.T)
 		t.Fatalf("seed run: %v", err)
 	}
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli",
-		eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
+		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(ctx, t.TempDir(), []string{
@@ -91,7 +91,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t 
 		t.Fatalf("seed run: %v", err)
 	}
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli.pending",
-		eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
+		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
@@ -139,7 +139,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 		t.Fatalf("seed run: %v", err)
 	}
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "flow-a/work.begin",
-		eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
+		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
@@ -461,7 +461,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvance
 	at := time.Unix(1700000313, 0).UTC()
 	seedRunForkCLISelectedExecutionSource(t, db, sourceRunID, entityID, sourceEventID, at)
 	storetest.InsertRootEventRecord(t, context.Background(), db, runtimeauthoractivity.DialectPostgres, afterEventID, sourceRunID, "source.after",
-		eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`),
+		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`),
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at.Add(time.Second))
 	captureRunForkCLIRevision(t, db, sourceRunID, runforkrevision.FamilyEvents)
 
@@ -511,7 +511,7 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 		t.Fatalf("seed run: %v", err)
 	}
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli.materialize",
-		eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
+		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -850,7 +850,7 @@ func seedRunForkCLIActivationSourceWithoutRevision(t *testing.T, db *sql.DB, run
 		t.Fatalf("seed run: %v", err)
 	}
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli.activate",
-		eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
+		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -885,7 +885,7 @@ func seedRunForkCLISelectedExecutionSource(t *testing.T, db *sql.DB, runID, enti
 func seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, db *sql.DB, runID, eventID string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	storetest.InsertRuntimeDiagnosticEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "", "pipeline",
+	storetest.InsertDiagnosticDirectEventRecordForRun(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "", "runtime",
 		[]byte(`{"level":"info","message":"diagnostic platform row must remain lineage-only"}`), at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_receipts (

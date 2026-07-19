@@ -1397,7 +1397,7 @@ func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelec
 	deadEventID := uuid.NewString()
 	for _, eventID := range []string{pendingEventID, failedEventID, inProgressNoReceiptEventID, deadEventID} {
 		storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "task.completed",
-			eventtest.Producer(events.EventProducerAgent, "runtime"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC().Add(-5*time.Minute))
+			eventtest.Producer(events.EventProducerExternal, "runtime"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC().Add(-5*time.Minute))
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
@@ -1491,7 +1491,7 @@ func TestSQLAgentReader_ListGenericAgents_UsesFullPendingDeliveryFactHorizon(t *
 		t.Fatalf("seed run: %v", err)
 	}
 	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "task.completed",
-		eventtest.Producer(events.EventProducerAgent, "runtime"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC().Add(-45*24*time.Hour))
+		eventtest.Producer(events.EventProducerExternal, "runtime"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC().Add(-45*24*time.Hour))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, delivered_at, created_at

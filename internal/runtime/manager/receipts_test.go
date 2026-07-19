@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -182,6 +183,96 @@ func (a *traceRecordingAgent) OnEvent(ctx context.Context, evt events.Event) ([]
 
 type outputRecordingAgent struct {
 	calls int
+}
+
+type partialOutputRetryStore struct {
+	receiptReaderStub
+	persisted map[string]bool
+}
+
+func (s *partialOutputRetryStore) EventExists(_ context.Context, eventID string) (bool, error) {
+	return s.persisted[eventID], nil
+}
+
+type partialOutputRetryBus struct {
+	store      *partialOutputRetryStore
+	failSecond bool
+	attempts   []string
+	succeeded  []string
+}
+
+func (b *partialOutputRetryBus) Publish(_ context.Context, event events.Event) error {
+	b.attempts = append(b.attempts, event.ID())
+	if b.failSecond && len(b.attempts) == 2 {
+		return errors.New("second output failed")
+	}
+	b.succeeded = append(b.succeeded, event.ID())
+	b.store.persisted[event.ID()] = true
+	return nil
+}
+
+func (*partialOutputRetryBus) PublishDirect(context.Context, events.Event, []string) error {
+	return nil
+}
+func (*partialOutputRetryBus) PublishPersistedRecipients(context.Context, events.Event, []string) error {
+	return nil
+}
+func (*partialOutputRetryBus) Subscribe(string, ...events.EventType) <-chan events.Event {
+	return make(chan events.Event)
+}
+func (*partialOutputRetryBus) Unsubscribe(string)           {}
+func (*partialOutputRetryBus) Store() runtimebus.EventStore { return runtimebus.InMemoryEventStore{} }
+func (*partialOutputRetryBus) ResetInMemoryState() error    { return nil }
+func (*partialOutputRetryBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error {
+	return nil
+}
+
+type partialOutputRetryAgent struct{ id string }
+
+func (a partialOutputRetryAgent) ID() string                      { return a.id }
+func (partialOutputRetryAgent) Type() string                      { return "test" }
+func (partialOutputRetryAgent) Subscriptions() []events.EventType { return nil }
+func (a partialOutputRetryAgent) OnEvent(_ context.Context, inbound events.Event) ([]events.Event, error) {
+	lineage := events.LineageFromEvent(inbound)
+	build := func(eventType events.EventType) events.Event {
+		return eventtest.ChildWithLineage(
+			"",
+			eventType,
+			a.id,
+			"",
+			nil,
+			0,
+			lineage,
+			events.EventEnvelope{},
+			time.Time{},
+		)
+	}
+	return []events.Event{build("output.first"), build("output.second")}, nil
+}
+
+func TestProcessEventDeterministicOutputIdentitySurvivesPartialSuccessRetry(t *testing.T) {
+	store := &partialOutputRetryStore{persisted: map[string]bool{}}
+	bus := &partialOutputRetryBus{store: store, failSecond: true}
+	manager := NewAgentManager(bus, nil, store)
+	inbound := eventtest.RootIngress(uuid.NewString(), "input.received", "gateway", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	agent := partialOutputRetryAgent{id: "agent-a"}
+
+	first := manager.processEventDetailed(testAuthorActivityContext(context.Background()), agent, inbound)
+	if first.err == nil || len(bus.succeeded) != 1 {
+		t.Fatalf("first attempt err=%v succeeded=%v", first.err, bus.succeeded)
+	}
+	firstOutputID := bus.succeeded[0]
+	bus.failSecond = false
+	second := manager.processEventDetailed(testAuthorActivityContext(context.Background()), agent, inbound)
+	if second.err != nil {
+		t.Fatalf("retry error = %v", second.err)
+	}
+	if len(bus.succeeded) != 2 || bus.succeeded[0] != firstOutputID || bus.succeeded[1] == firstOutputID {
+		t.Fatalf("successful outputs = %v, want one stable first output and one second output", bus.succeeded)
+	}
+	if len(bus.attempts) != 3 || bus.attempts[0] != firstOutputID || bus.attempts[1] != bus.attempts[2] || bus.attempts[1] == firstOutputID {
+		t.Fatalf("publish attempts = %v", bus.attempts)
+	}
 }
 
 func (a *outputRecordingAgent) ID() string                        { return "agent-a" }

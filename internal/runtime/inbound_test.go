@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -2685,9 +2686,11 @@ func TestInboundGateway_ExecutesOnlyCompiledRawAdmissionPolicy(t *testing.T) {
 			req.Header.Set("Stripe-Signature", signature)
 			req.Header.Set("X-GitHub-Event", "push")
 			rec := httptest.NewRecorder()
+			runID := eventtest.UUID("compiled-raw-admission-run-" + tc.name)
+			entityID := eventtest.UUID("compiled-raw-admission-entity-" + tc.name)
 			gateway.HandleResolvedWebhook(rec, req, InboundTarget{
-				BundleHash: "bundle-v1:sha256:" + strings.Repeat("d", 64), FlowID: "partner-flow", RunID: "run-partner",
-				FlowInstance: "partner-flow/standing", EntityID: "entity-partner", Alias: "partner", Provider: "partner-events",
+				BundleHash: "bundle-v1:sha256:" + strings.Repeat("d", 64), FlowID: "partner-flow", RunID: runID,
+				FlowInstance: "partner-flow/standing", EntityID: entityID, Alias: "partner", Provider: "partner-events",
 				SigningSecret: "partner-secret", AdmissionPlan: plan,
 			}, nil)
 			if rec.Code != tc.wantStatus {
@@ -2736,9 +2739,11 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/partner/partner-events", nil)
 	req.Header.Set("X-Partner-Signature", signature)
 	rec := httptest.NewRecorder()
+	runID := eventtest.UUID("compiled-empty-body-run")
+	entityID := eventtest.UUID("compiled-empty-body-entity")
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
-		BundleHash: "bundle-v1:sha256:" + strings.Repeat("e", 64), FlowID: "partner-flow", RunID: "run-partner",
-		FlowInstance: "partner-flow/standing", EntityID: "entity-partner", Alias: "partner", Provider: "partner-events",
+		BundleHash: "bundle-v1:sha256:" + strings.Repeat("e", 64), FlowID: "partner-flow", RunID: runID,
+		FlowInstance: "partner-flow/standing", EntityID: entityID, Alias: "partner", Provider: "partner-events",
 		SigningSecret: "partner-secret", AdmissionPlan: plan,
 	}, nil)
 	if rec.Code != http.StatusAccepted {
@@ -2769,8 +2774,8 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 	jsonReq := httptest.NewRequest(http.MethodPost, "/webhooks/json/json-events", nil)
 	jsonRec := httptest.NewRecorder()
 	jsonGateway.HandleResolvedWebhook(jsonRec, jsonReq, InboundTarget{
-		BundleHash: "bundle-v1:sha256:" + strings.Repeat("f", 64), FlowID: "json-flow", RunID: "run-json",
-		FlowInstance: "json-flow/standing", EntityID: "entity-json", Alias: "json", Provider: "json-events",
+		BundleHash: "bundle-v1:sha256:" + strings.Repeat("f", 64), FlowID: "json-flow", RunID: eventtest.UUID("compiled-empty-json-run"),
+		FlowInstance: "json-flow/standing", EntityID: eventtest.UUID("compiled-empty-json-entity"), Alias: "json", Provider: "json-events",
 		AdmissionPlan: jsonPlan,
 	}, nil)
 	if jsonRec.Code != http.StatusBadRequest || !strings.Contains(jsonRec.Body.String(), "must be valid JSON") {

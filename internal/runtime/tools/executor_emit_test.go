@@ -943,7 +943,7 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 		Role:          "producer",
 		FlowID:        "producer",
 		FlowPath:      "producer",
-		EntityID:      "producer-entity",
+		EntityID:      runtimeflowidentity.EntityID("producer-entity"),
 		EmitEvents:    []string{"deploy.done"},
 	}
 	if tools := emitRegistry.GenerateEmitToolsForActor(actor, nil); !emitToolDefinitionsContain(tools, "emit_deploy_done") {
@@ -952,13 +952,13 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 	exec := NewExecutorWithOptions(eb, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 
 	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RootIngress(
-		"evt-parent",
+		eventtest.UUID("emit-connected-output-parent"),
 		events.EventType("producer/deploy.requested"),
 		"runtime",
 		"",
 		nil,
 		0,
-		"run-1474",
+		eventtest.UUID("emit-connected-output-run"),
 		"",
 		events.EventEnvelope{},
 		time.Now().UTC()))
@@ -1002,14 +1002,14 @@ func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflig
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	emitRegistry := NewEmitRegistry(source, nil)
-	parentRoute := events.RouteIdentity{EntityID: "root-entity"}
+	parentRoute := events.RouteIdentity{EntityID: runtimeflowidentity.EntityID("root-entity")}
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "producer-agent",
 		Role:          "producer",
 		FlowID:        "producer",
 		FlowPath:      "producer/inst-1",
-		EntityID:      "producer-entity",
+		EntityID:      runtimeflowidentity.EntityID("producer-entity"),
 		EmitEvents:    []string{"producer/deploy.done"},
 	}
 	exec := NewExecutorWithOptions(eb, nil, ExecutorOptions{
@@ -1020,13 +1020,13 @@ func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflig
 		}},
 	})
 	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RootIngress(
-		"evt-parent",
+		eventtest.UUID("emit-root-receiver-parent"),
 		events.EventType("producer/deploy.requested"),
 		"runtime",
 		"",
 		nil,
 		0,
-		"run-root-receiver",
+		eventtest.UUID("emit-root-receiver-run"),
 		"",
 		events.EventEnvelope{},
 		time.Now().UTC()))
@@ -1082,7 +1082,7 @@ func TestHandleEmitTool_RootReceiverConnectRejectsMissingOrIncompleteParentIdent
 				Role:          "producer",
 				FlowID:        "producer",
 				FlowPath:      "producer/inst-1",
-				EntityID:      "producer-entity",
+				EntityID:      runtimeflowidentity.EntityID("producer-entity"),
 				EmitEvents:    []string{"producer/deploy.done"},
 			}
 			exec := NewExecutorWithOptions(eb, nil, ExecutorOptions{
@@ -1117,19 +1117,19 @@ func TestHandleEmitTool_FailsClosedForConnectedOutputWithoutCanonicalRouteAuthor
 		Role:          "producer",
 		FlowID:        "producer",
 		FlowPath:      "producer",
-		EntityID:      "producer-entity",
+		EntityID:      runtimeflowidentity.EntityID("producer-entity"),
 		EmitEvents:    []string{"deploy.done"},
 	}
 	exec := NewExecutorWithOptions(eb, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 
 	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RootIngress(
-		"evt-parent",
+		eventtest.UUID("emit-missing-route-parent"),
 		events.EventType("producer/deploy.requested"),
 		"runtime",
 		"",
 		nil,
 		0,
-		"run-1474",
+		eventtest.UUID("emit-missing-route-run"),
 		"",
 		events.EventEnvelope{},
 		time.Now().UTC()))

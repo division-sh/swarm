@@ -132,7 +132,7 @@ func newCompleteEventDispatchFixture(t *testing.T, backend string, decisionOblig
 		FlowID: "source-flow", FlowInstance: "source-flow/one", EntityID: uuid.NewString(),
 	}
 	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute)
-	event := eventtest.InExecutionMode(eventtest.PersistedProjectionForProducer(
+	event := eventtest.InExecutionMode(eventtest.PersistedChildForProducer(
 		eventID,
 		events.EventType("custom.replay.checked"),
 		eventtest.Producer(events.EventProducerNode, "declarative-node"),
@@ -140,7 +140,7 @@ func newCompleteEventDispatchFixture(t *testing.T, backend string, decisionOblig
 		[]byte(`{"task_id":"payload-owned-task","text":"complete snapshot"}`),
 		3,
 		runID,
-		"",
+		uuid.NewString(),
 		envelope,
 		createdAt,
 	), executionmode.Mock)

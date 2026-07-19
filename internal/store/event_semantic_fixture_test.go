@@ -291,7 +291,7 @@ func insertPostgresCanonicalEventRecordFixtureTx(ctx context.Context, tx *sql.Tx
 	return nil
 }
 
-func seedPostgresRootEventRecordFixtureTx(
+func seedPostgresSemanticEventRecordFixtureTx(
 	t testing.TB,
 	ctx context.Context,
 	tx *sql.Tx,
@@ -305,8 +305,8 @@ func seedPostgresRootEventRecordFixtureTx(
 	createdAt time.Time,
 ) events.Event {
 	t.Helper()
-	event := eventtest.PersistedProjectionForProducer(
-		eventID, eventType, eventtest.Producer(producerType, producerID), "", []byte(`{}`), 0, runID, "",
+	event := semanticEventRecordFixture(
+		eventID, runID, eventType, eventtest.Producer(producerType, producerID), []byte(`{}`),
 		semanticEventRecordFixtureEnvelope(entityID, flowInstance), createdAt,
 	)
 	if err := insertPostgresCanonicalEventRecordFixtureTx(ctx, tx, event); err != nil {
@@ -315,7 +315,7 @@ func seedPostgresRootEventRecordFixtureTx(
 	return event
 }
 
-func insertPostgresRootEventRecordFixture(
+func insertPostgresSemanticEventRecordFixture(
 	ctx context.Context,
 	db *sql.DB,
 	eventID string,
@@ -326,13 +326,11 @@ func insertPostgresRootEventRecordFixture(
 	envelope events.EventEnvelope,
 	createdAt time.Time,
 ) (events.Event, error) {
-	event := eventtest.PersistedProjectionForProducer(
-		eventID, eventType, producer, "", payload, 0, runID, "", envelope, createdAt,
-	)
+	event := semanticEventRecordFixture(eventID, runID, eventType, producer, payload, envelope, createdAt)
 	return event, insertPostgresCanonicalEventRecordFixture(ctx, db, event)
 }
 
-func seedPostgresRootEventRecordFixture(
+func seedPostgresSemanticEventRecordFixture(
 	t testing.TB,
 	ctx context.Context,
 	db *sql.DB,
@@ -347,13 +345,36 @@ func seedPostgresRootEventRecordFixture(
 ) events.Event {
 	t.Helper()
 	envelope := semanticEventRecordFixtureEnvelope(entityID, flowInstance)
-	event, err := insertPostgresRootEventRecordFixture(
+	event, err := insertPostgresSemanticEventRecordFixture(
 		ctx, db, eventID, runID, eventType, eventtest.Producer(producerType, producerID), []byte(`{}`), envelope, createdAt,
 	)
 	if err != nil {
 		t.Fatalf("seed canonical event record %s: %v", eventID, err)
 	}
 	return event
+}
+
+func semanticEventRecordFixture(
+	eventID, runID string,
+	eventType events.EventType,
+	producer events.ProducerIdentity,
+	payload []byte,
+	envelope events.EventEnvelope,
+	createdAt time.Time,
+) events.Event {
+	if events.IsDiagnosticDirectEventType(eventType) {
+		return eventtest.DiagnosticDirect(eventID, eventType, producer.ID(), "", payload, 0, runID, "", envelope, createdAt)
+	}
+	switch producer.Type() {
+	case events.EventProducerExternal:
+		return eventtest.RootIngress(eventID, eventType, producer.ID(), "", payload, 0, runID, "", envelope, createdAt)
+	case events.EventProducerPlatform:
+		return eventtest.PersistedRuntimeControlForProducer(eventID, eventType, producer, "", payload, 0, runID, "", envelope, createdAt)
+	case events.EventProducerAgent, events.EventProducerNode:
+		return eventtest.PersistedChildForProducer(eventID, eventType, producer, "", payload, 0, runID, eventtest.UUID("semantic-parent:"+eventID), envelope, createdAt)
+	default:
+		panic("unsupported semantic event fixture producer")
+	}
 }
 
 func seedPostgresChildEventRecordFixture(
@@ -372,7 +393,7 @@ func seedPostgresChildEventRecordFixture(
 	createdAt time.Time,
 ) events.Event {
 	t.Helper()
-	event := eventtest.PersistedProjectionForProducer(
+	event := eventtest.PersistedChildForProducer(
 		eventID, eventType, eventtest.Producer(producerType, producerID), "", payload, 0,
 		runID, parentEventID, semanticEventRecordFixtureEnvelope(entityID, flowInstance), createdAt,
 	)
@@ -382,24 +403,23 @@ func seedPostgresChildEventRecordFixture(
 	return event
 }
 
-func seedPostgresRuntimeDiagnosticEventRecordFixture(
+func seedPostgresRuntimeLogEventRecordFixture(
 	t testing.TB,
 	ctx context.Context,
-	db *sql.DB,
+	store *PostgresStore,
 	eventID string,
 	runID string,
 	parentEventID string,
-	producerID string,
 	payload []byte,
 	createdAt time.Time,
 ) events.Event {
 	t.Helper()
-	event := eventtest.RuntimeDiagnostic(
-		eventID, events.EventTypePlatformRuntimeLog, producerID, "", payload, 0,
+	event := eventtest.DiagnosticDirect(
+		eventID, events.EventTypePlatformRuntimeLog, "runtime", "", payload, 0,
 		runID, parentEventID, events.EventEnvelope{Scope: events.EventScopeGlobal}, createdAt,
 	)
-	if err := insertPostgresCanonicalEventRecordFixture(ctx, db, event); err != nil {
-		t.Fatalf("seed canonical runtime diagnostic event record %s: %v", eventID, err)
+	if err := commitDiagnosticRuntimeLogFixture(ctx, store, event); err != nil {
+		t.Fatalf("seed canonical runtime-log event record %s: %v", eventID, err)
 	}
 	return event
 }

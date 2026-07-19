@@ -171,13 +171,13 @@ func assertSealedPackageConformancePublishPreflight(t *testing.T, source semanti
 		},
 	}
 	evt := eventtest.ChildWithLineage(
-		"evt-sealed-conformance-connect",
+		eventtest.UUID("evt-sealed-conformance-connect"),
 		events.EventType("producer/work.ready"),
 		"producer",
 		"",
 		json.RawMessage(`{"work_id":"work-1"}`),
 		1,
-		events.EventLineage{RunID: "run-sealed-package-conformance", ParentEventID: "evt-sealed-parent", TaskID: "producer-node", ExecutionMode: executionmode.Live},
+		events.EventLineage{RunID: eventtest.UUID("run-sealed-package-conformance"), ParentEventID: eventtest.UUID("evt-sealed-parent"), TaskID: "producer-node", ExecutionMode: executionmode.Live},
 		events.EventEnvelope{},
 		time.Now().UTC(),
 	)
@@ -193,13 +193,13 @@ func assertSealedPackageConformancePublishPreflight(t *testing.T, source semanti
 	}
 
 	sibling := eventtest.ChildWithLineage(
-		"evt-sealed-conformance-sibling",
+		eventtest.UUID("evt-sealed-conformance-sibling"),
 		events.EventType("producer/audit.seen"),
 		"producer",
 		"",
 		json.RawMessage(`{"flow_instance":"consumer"}`),
 		1,
-		events.EventLineage{RunID: "run-sealed-package-conformance", ParentEventID: "evt-sealed-parent", TaskID: "producer-node", ExecutionMode: executionmode.Live},
+		events.EventLineage{RunID: eventtest.UUID("run-sealed-package-conformance"), ParentEventID: eventtest.UUID("evt-sealed-parent"), TaskID: "producer-node", ExecutionMode: executionmode.Live},
 		events.EventEnvelope{},
 		time.Now().UTC(),
 	)

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -142,6 +143,7 @@ func assertBuilderRootInputDiagnostic(t *testing.T, rpcErr *RPCError, eventName,
 
 func TestHandlerRunStartAcceptsDeclaredRoutableInput(t *testing.T) {
 	const eventName = "scan.corpus_file_requested"
+	runID := eventtest.UUID("builder-run-start-accepts-routable-input")
 	source := semanticview.Wrap(runStartInputBundle(eventName))
 	store := &runStartAppendStore{}
 	bus, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
@@ -161,7 +163,7 @@ func TestHandlerRunStartAcceptsDeclaredRoutableInput(t *testing.T) {
 		ID:      "accept",
 		Method:  "run.start",
 		Params: map[string]any{
-			"run_id": "run-123",
+			"run_id": runID,
 			"inputs": map[string]any{
 				eventName: map[string]any{"request": map[string]any{"geography": "US"}},
 			},

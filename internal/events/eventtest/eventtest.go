@@ -12,7 +12,16 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/google/uuid"
 )
+
+// UUID returns a stable UUID for a semantic fixture label.
+func UUID(label string) string {
+	if parsed, err := uuid.Parse(strings.TrimSpace(label)); err == nil {
+		return parsed.String()
+	}
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm-eventtest:"+label)).String()
+}
 
 // RootIngress builds a test fixture for a root ingress event.
 func RootIngress(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
@@ -30,7 +39,7 @@ func RootIngressWithMode(id string, eventType events.EventType, sourceAgent, tas
 
 // OperatorInjected builds a root operator event with optional typed reference provenance.
 func OperatorInjected(id string, eventType events.EventType, producerID, taskID string, payload json.RawMessage, chainDepth int, runID string, provenance *events.OperatorReferenceProvenance, envelope events.EventEnvelope, createdAt time.Time) events.Event {
-	facts := fixtureFacts(id, eventType, events.EventProducerPlatform, producerID, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live)
+	facts := fixtureFacts(id, eventType, events.EventProducerExternal, producerID, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live)
 	return mustEvent(events.NewOperatorInjectedEvent(events.OperatorInjectedEventInput{Facts: facts, RunID: runID, Provenance: provenance}))
 }
 
@@ -68,6 +77,15 @@ func Replay(id string, eventType events.EventType, sourceAgent, taskID string, p
 	return mustEvent(events.NewReplayEvent(events.ReplayEventInput{Facts: fixtureFacts(id, eventType, events.EventProducerAgent, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, lineage.ExecutionMode), Lineage: lineage}))
 }
 
+// ReplayForProducer builds a replay fixture preserving an exact source
+// producer role.
+func ReplayForProducer(id string, eventType events.EventType, producer events.ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, lineage events.EventLineage, envelope events.EventEnvelope, createdAt time.Time) events.Event {
+	return mustEvent(events.NewReplayEvent(events.ReplayEventInput{
+		Facts:   fixtureFacts(id, eventType, producer.Type(), producer.ID(), taskID, payload, chainDepth, envelope, createdAt, lineage.ExecutionMode),
+		Lineage: lineage,
+	}))
+}
+
 // SelectedForkReplay builds a cross-run replay fixture with an exact typed lineage owner.
 func SelectedForkReplay(id string, eventType events.EventType, producer events.ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, lineage events.SelectedForkLineage, envelope events.EventEnvelope, createdAt time.Time) events.Event {
 	facts := fixtureFacts(id, eventType, producer.Type(), producer.ID(), taskID, payload, chainDepth, envelope, createdAt, lineage.ExecutionMode())
@@ -79,7 +97,11 @@ func SelectedForkReplay(id string, eventType events.EventType, producer events.P
 // ChildWithLineage, Replay, RuntimeControl, RuntimeDiagnostic, or
 // DiagnosticDirect instead.
 func PersistedProjection(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
-	return persistedFixture(id, eventType, events.ProducerClaim{Type: events.EventProducerAgent, ID: fixtureProducerID(sourceAgent, "eventtest-agent")}, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+	producerType := events.EventProducerExternal
+	if strings.TrimSpace(parentEventID) != "" {
+		producerType = events.EventProducerAgent
+	}
+	return persistedFixture(id, eventType, events.ProducerClaim{Type: producerType, ID: fixtureProducerID(sourceAgent, "eventtest-producer")}, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
 }
 
 func fixtureProducerID(candidate, fallback string) string {
@@ -94,6 +116,30 @@ func fixtureProducerID(candidate, fallback string) string {
 // exact producer identity.
 func PersistedProjectionForProducer(id string, eventType events.EventType, producer events.ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
 	return persistedFixture(id, eventType, events.ProducerClaim{Type: producer.Type(), ID: producer.ID()}, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+}
+
+// PersistedChildForProducer builds an exact child-event readback fixture for
+// tests that need a non-agent producer role.
+func PersistedChildForProducer(id string, eventType events.EventType, producer events.ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
+	if strings.TrimSpace(parentEventID) == "" {
+		panic("persisted child fixture requires parent_event_id")
+	}
+	facts := fixtureFacts(id, eventType, producer.Type(), producer.ID(), taskID, payload, chainDepth, envelope, createdAt, executionmode.Live)
+	return mustEvent(events.NewChildEvent(events.ChildEventInput{
+		Facts: facts,
+		Lineage: events.EventLineage{
+			RunID: runID, ParentEventID: parentEventID, TaskID: taskID, ExecutionMode: executionmode.Live,
+		},
+	}))
+}
+
+// PersistedRuntimeControlForProducer builds an exact platform runtime-control
+// readback fixture.
+func PersistedRuntimeControlForProducer(id string, eventType events.EventType, producer events.ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
+	facts := fixtureFacts(id, eventType, producer.Type(), producer.ID(), taskID, payload, chainDepth, envelope, createdAt, executionmode.Live)
+	return mustEvent(events.NewRuntimeControlEvent(events.RuntimeEventInput{
+		Facts: facts, RunID: runID, ParentEventID: parentEventID,
+	}))
 }
 
 func Producer(producerType events.EventProducerType, id string) events.ProducerIdentity {
@@ -218,6 +264,9 @@ func persistedFixture(id string, eventType events.EventType, producer events.Pro
 	facts := fixtureFacts(id, eventType, producer.Type, producer.ID, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live)
 	if parentEventID != "" {
 		return mustEvent(events.NewChildEvent(events.ChildEventInput{Facts: facts, Lineage: events.EventLineage{RunID: runID, ParentEventID: parentEventID, TaskID: taskID, ExecutionMode: executionmode.Live}}))
+	}
+	if producer.Type == events.EventProducerPlatform {
+		return mustEvent(events.NewRuntimeControlEvent(events.RuntimeEventInput{Facts: facts, RunID: runID}))
 	}
 	return mustEvent(events.NewRootIngressEvent(events.RootIngressEventInput{Facts: facts, RunID: runID}))
 }

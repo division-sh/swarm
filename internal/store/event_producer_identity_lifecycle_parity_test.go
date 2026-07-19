@@ -51,7 +51,7 @@ func TestEventProducerIdentityPersistenceToReadbackParity(t *testing.T) {
 				FlowInstance: "source-flow/one",
 				EntityID:     uuid.NewString(),
 			})
-			event := eventtest.PersistedProjectionForProducer(
+			event := eventtest.PersistedChildForProducer(
 				eventID,
 				events.EventType("test.node_emitted"),
 				producer,
@@ -59,7 +59,7 @@ func TestEventProducerIdentityPersistenceToReadbackParity(t *testing.T) {
 				[]byte(`{"task_id":"payload-owned-task","text":"how are you"}`),
 				3,
 				runID,
-				"",
+				eventtest.UUID("producer-lifecycle-parent:"+eventID),
 				envelope,
 				createdAt,
 			)
@@ -327,9 +327,9 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 	sourceEventID := uuid.NewString()
 	producer := eventtest.Producer(events.EventProducerNode, "declarative-node")
 	sourceEnvelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "source-flow", FlowInstance: "source-flow/one", EntityID: uuid.NewString()})
-	sourceEvent := eventtest.InExecutionMode(eventtest.PersistedProjectionForProducer(
+	sourceEvent := eventtest.InExecutionMode(eventtest.PersistedChildForProducer(
 		sourceEventID, events.EventType("test.node_emitted"), producer, "event-owned-task",
-		[]byte(`{"task_id":"payload-owned-task"}`), 2, sourceRunID, "", sourceEnvelope, createdAt,
+		[]byte(`{"task_id":"payload-owned-task"}`), 2, sourceRunID, eventtest.UUID("historical-replay-parent:"+sourceEventID), sourceEnvelope, createdAt,
 	), executionmode.Mock)
 	if err := commitSemanticEventFixtureWithAgents(ctx, surface, sourceEvent, nil); err != nil {
 		t.Fatalf("persist source event: %v", err)
