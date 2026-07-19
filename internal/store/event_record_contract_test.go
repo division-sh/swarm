@@ -283,6 +283,61 @@ func TestEventRecordBatchHydrationContractParity(t *testing.T) {
 	}
 }
 
+func TestPostgresEventRecordReadbackNormalizesSessionTimezone(t *testing.T) {
+	fixture := openPostgresAuthorActivityReceiptFixture(t)
+	store := fixture.store.(semanticEventFixtureStore)
+	ctx := testAuthorActivityContext()
+	createdAt := time.Date(2026, 7, 18, 18, 45, 12, 123456000, time.UTC)
+	event := eventtest.RootIngress(
+		uuid.NewString(), "timezone.contract", "gateway", "timezone-task", []byte(`{"timezone":true}`),
+		0, uuid.NewString(), "", events.EventEnvelope{}, createdAt,
+	)
+	if err := commitSemanticEventFixture(ctx, store, event); err != nil {
+		t.Fatalf("commit event: %v", err)
+	}
+
+	conn, err := fixture.db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if _, err := conn.ExecContext(ctx, `SET TIME ZONE 'Pacific/Chatham'`); err != nil {
+		t.Fatalf("set non-UTC session timezone: %v", err)
+	}
+	var rawCreatedAt time.Time
+	if err := conn.QueryRowContext(ctx, `SELECT created_at FROM events WHERE event_id = $1::uuid`, event.ID()).Scan(&rawCreatedAt); err != nil {
+		t.Fatalf("read raw timestamp: %v", err)
+	}
+	if _, offset := rawCreatedAt.Zone(); offset == 0 {
+		t.Fatalf("raw timestamp offset = %d, want non-UTC proof precondition", offset)
+	}
+
+	record, found, err := eventrecordpostgres.Load(ctx, conn, event.ID())
+	if err != nil || !found {
+		t.Fatalf("load canonical record: found=%v err=%v", found, err)
+	}
+	assertCanonicalRecordTime(t, record.CreatedAt, createdAt)
+
+	records, err := eventrecordpostgres.LoadMany(ctx, conn, []string{event.ID()})
+	if err != nil {
+		t.Fatalf("load canonical record batch: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1", len(records))
+	}
+	assertCanonicalRecordTime(t, records[0].CreatedAt, createdAt)
+}
+
+func assertCanonicalRecordTime(t *testing.T, got, want time.Time) {
+	t.Helper()
+	if !got.Equal(want) {
+		t.Fatalf("created_at = %s, want %s", got, want)
+	}
+	if _, offset := got.Zone(); offset != 0 {
+		t.Fatalf("created_at offset = %d, want UTC", offset)
+	}
+}
+
 func TestEventRecordDecoderRejectsMalformedDurableFactsParity(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
