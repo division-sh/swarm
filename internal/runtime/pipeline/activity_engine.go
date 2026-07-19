@@ -841,28 +841,30 @@ func activityRequestEmitIntent(intent runtimeengine.ActivityIntent) (runtimeengi
 	if err != nil {
 		return runtimeengine.EmitIntent{}, err
 	}
-	evt := events.NewChildEventWithLineage(
-		activityRequestEventID(intent),
-		activityRequestEventType,
-		events.PlatformProducer(runtimeWorkflowID),
-		intent.SourceTaskID,
-		raw,
-		intent.ChainDepth+1,
-		events.EventLineage{
+	routingSource, err := events.NewRuntimeRoutingSource(intent.FlowID.String(), intent.FlowInstance, intent.EntityID.String())
+	if err != nil {
+		return runtimeengine.EmitIntent{}, fmt.Errorf("activity request routing source: %w", err)
+	}
+	evt, err := events.NewChildEvent(events.ChildEventInput{
+		Facts: events.EventFacts{
+			ID: activityRequestEventID(intent), Type: activityRequestEventType,
+			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: runtimeWorkflowID},
+			TaskID:   intent.SourceTaskID, Payload: raw, ChainDepth: intent.ChainDepth + 1,
+			Envelope: events.EventEnvelope{
+				EntityID: intent.EntityID.String(), FlowInstance: intent.FlowInstance, Source: routingSource.Route(),
+			},
+			RoutingSource: routingSource, CreatedAt: time.Now().UTC(),
+		},
+		Lineage: events.EventLineage{
 			RunID:         intent.SourceRunID,
 			ParentEventID: firstNonEmptyString(intent.SourceEventID, intent.ParentEventID),
 			TaskID:        intent.SourceTaskID,
 			ExecutionMode: intent.ExecutionMode,
 		},
-		events.EventEnvelope{
-			EntityID: intent.EntityID.String(),
-			Source: events.RouteIdentity{
-				FlowID:   intent.FlowID.String(),
-				EntityID: intent.EntityID.String(),
-			},
-		},
-		time.Now().UTC(),
-	)
+	})
+	if err != nil {
+		return runtimeengine.EmitIntent{}, fmt.Errorf("construct activity request event: %w", err)
+	}
 	return runtimeengine.EmitIntent{Event: evt, Context: intent.Context}, nil
 }
 
@@ -1812,28 +1814,30 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 	if err != nil {
 		return err
 	}
-	evt := events.NewChildEventWithLineage(
-		eventID,
-		events.EventType(eventType),
-		events.NodeProducer(intent.NodeID.String()),
-		intent.SourceTaskID,
-		raw,
-		intent.ChainDepth+1,
-		events.EventLineage{
+	routingSource, err := events.NewRuntimeRoutingSource(intent.FlowID.String(), intent.FlowInstance, intent.EntityID.String())
+	if err != nil {
+		return fmt.Errorf("activity result routing source: %w", err)
+	}
+	evt, err := events.NewChildEvent(events.ChildEventInput{
+		Facts: events.EventFacts{
+			ID: eventID, Type: events.EventType(eventType),
+			Producer: events.ProducerClaim{Type: events.EventProducerNode, ID: intent.NodeID.String()},
+			TaskID:   intent.SourceTaskID, Payload: raw, ChainDepth: intent.ChainDepth + 1,
+			Envelope: events.EventEnvelope{
+				EntityID: intent.EntityID.String(), FlowInstance: intent.FlowInstance, Source: routingSource.Route(),
+			},
+			RoutingSource: routingSource, CreatedAt: time.Now().UTC(),
+		},
+		Lineage: events.EventLineage{
 			RunID:         intent.SourceRunID,
 			ParentEventID: firstNonEmptyString(intent.SourceEventID, intent.ParentEventID),
 			TaskID:        intent.SourceTaskID,
 			ExecutionMode: intent.ExecutionMode,
 		},
-		events.EventEnvelope{
-			EntityID: intent.EntityID.String(),
-			Source: events.RouteIdentity{
-				FlowID:   intent.FlowID.String(),
-				EntityID: intent.EntityID.String(),
-			},
-		},
-		time.Now().UTC(),
-	)
+	})
+	if err != nil {
+		return fmt.Errorf("construct activity result event: %w", err)
+	}
 	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
 		*collector = append(*collector, evt)
 		d.logActivityRuntime(ctx, intent, "result_published", map[string]any{

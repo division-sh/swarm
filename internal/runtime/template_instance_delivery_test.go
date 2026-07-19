@@ -21,15 +21,14 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storetest "github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testsql"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -341,10 +340,13 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	t.Cleanup(cleanup)
 	ctx := seedRuntimeTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	proofStore := &failingDeliveryRouteStore{PostgresStore: pg}
+	testsql.InstallPostgresEventDeliveryFailureAfterFlowMaterialization(t, ctx, db, testsql.EventCorruptionClaim{
+		Invariant: "store.event_record.named_operation_atomicity",
+		Reason:    "prove late delivery failure rolls back the event and connect-created lifecycle facts",
+	}, "consumer")
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	var manager *runtimemanager.AgentManager
-	bus, err := newScopedTestEventBus(t, proofStore, runtimebus.EventBusOptions{
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		TemplateInstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 			if manager == nil {
@@ -360,7 +362,6 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
 	})
-	proofStore.failDeliveryRoutes = true
 	evt := eventtest.RootIngress(
 		"99999999-9999-4999-8999-999999999940",
 		events.EventType("producer/deploy.done"),
@@ -378,17 +379,6 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	if err == nil || !strings.Contains(err.Error(), "injected delivery route persistence failure") {
 		t.Fatalf("Publish error = %v, want injected delivery route persistence failure", err)
 	}
-	if len(proofStore.descriptorsSeenDuringDelivery) != 1 {
-		t.Fatalf("descriptors seen during delivery failure = %#v, want one lifecycle-created descriptor", proofStore.descriptorsSeenDuringDelivery)
-	}
-	descriptor := proofStore.descriptorsSeenDuringDelivery[0]
-	if descriptor.FlowTemplate != "consumer" || descriptor.FlowInstance == "" {
-		t.Fatalf("descriptor seen during delivery failure = %#v, want consumer flow instance", descriptor)
-	}
-	if descriptor.AddressFields["entity.vertical_id"] != "v-1" {
-		t.Fatalf("descriptor address fields = %#v, want entity.vertical_id v-1", descriptor.AddressFields)
-	}
-
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM events
 		WHERE event_id = $1::uuid
@@ -399,20 +389,14 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	`, 0, evt.ID())
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM flow_instances
-		WHERE instance_id = $1
-	`, 0, descriptor.FlowInstance)
+		WHERE flow_template = 'consumer'
+	`, 0)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM entity_state
-		WHERE flow_instance = $1
-	`, 0, descriptor.FlowInstance)
+	`, 0)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM routing_rules
-		WHERE flow_instance = $1
-	`, 0, descriptor.FlowInstance)
-	route := runtimeflowidentity.StoredRoute("", "", descriptor.FlowInstance)
-	if got := bus.RouteTable().MaterializedRoutes(route); len(got) != 0 {
-		t.Fatalf("route table materialized routes after rollback = %#v, want none", got)
-	}
+	`, 0)
 }
 
 func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect(t *testing.T) {
@@ -856,6 +840,12 @@ auto_emit_on_create:
 	}
 }
 
+type providerRollbackBackend interface {
+	runtimebus.EventStore
+	runtimeinbound.Runner
+	runtimepipeline.RuntimeMutationRunner
+}
+
 func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 	checkpoints := []struct {
 		name           string
@@ -876,14 +866,15 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 	}
 	backends := []struct {
 		name  string
-		setup func(*testing.T, providerRollbackMutationCheckpoint) (context.Context, *sql.DB, runtimebus.EventStore)
+		setup func(*testing.T, providerRollbackMutationCheckpoint) (context.Context, *sql.DB, providerRollbackBackend)
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T, checkpoint providerRollbackMutationCheckpoint) (context.Context, *sql.DB, runtimebus.EventStore) {
+			setup: func(t *testing.T, checkpoint providerRollbackMutationCheckpoint) (context.Context, *sql.DB, providerRollbackBackend) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				ctx := seedRuntimeTestRun(t, db)
+				ctx = runtimecorrelation.WithBundleSourceFact(ctx, providerRollbackBundleSourceFact())
 				return ctx, db, &providerRollbackPostgresStore{
 					PostgresStore: storetest.AdmitPostgresRuntimeStore(t, db),
 					proof:         &providerRollbackProof{checkpoint: checkpoint},
@@ -892,9 +883,10 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T, checkpoint providerRollbackMutationCheckpoint) (context.Context, *sql.DB, runtimebus.EventStore) {
+			setup: func(t *testing.T, checkpoint providerRollbackMutationCheckpoint) (context.Context, *sql.DB, providerRollbackBackend) {
 				sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
+				ctx = runtimecorrelation.WithBundleSourceFact(ctx, providerRollbackBundleSourceFact())
 				if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, templateInstanceDeliveryRunID); err != nil {
 					t.Fatalf("seed SQLite rollback run: %v", err)
 				}
@@ -917,7 +909,7 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 				}
 				workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 				if backend.name == "sqlite" {
-					workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStore(db)
+					workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, eventStore)
 				}
 				var manager *runtimemanager.AgentManager
 				bus, err := newScopedTestEventBus(t, eventStore, runtimebus.EventBusOptions{
@@ -936,12 +928,25 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 					WorkflowInstances: workflowStore,
 				})
 
-				batch := providerRollbackInboundBatch()
-				runner := eventStore.(runtimebus.EventMutationRunner)
-				err = runner.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
+				candidate := providerRollbackStandingCandidate(ctx)
+				standing, err := workflowStore.ReconcileStandingService(ctx, candidate)
+				if err != nil {
+					t.Fatalf("ReconcileStandingService: %v", err)
+				}
+				sequence, err := workflowStore.PublishStandingService(ctx, candidate.ServiceID, standing.RunID, standing.Generation)
+				if err != nil {
+					t.Fatalf("PublishStandingService: %v", err)
+				}
+				ctx = runtimecorrelation.WithRunID(ctx, standing.RunID)
+				request := providerRollbackRequest(t, candidate, standing.RunID, sequence)
+				batch := providerRollbackInboundBatch(t, request)
+				_, err = eventStore.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
 					prepareCtx := runtimeauthoractivity.WithInboundProjection(mutation.Context(), runtimeauthoractivity.InboundProjection{})
-					_, prepareErr := bus.PrepareInboundDeliveryBatchInMutation(prepareCtx, batch)
-					return prepareErr
+					prepared, prepareErr := bus.PrepareInboundDeliveryBatchInMutation(prepareCtx, batch)
+					if prepareErr != nil {
+						return prepareErr
+					}
+					return finalizeProviderRollbackBatch(mutation, request, batch, prepared)
 				})
 				if err == nil || !strings.Contains(err.Error(), "injected provider rollback checkpoint") {
 					t.Fatalf("PrepareInboundDeliveryBatchInMutation error = %v, want injected checkpoint", err)
@@ -949,10 +954,13 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 				assertProviderRollbackTablesEmpty(t, ctx, db)
 
 				if checkpoint.retry {
-					err := runner.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
+					_, err := eventStore.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
 						prepareCtx := runtimeauthoractivity.WithInboundProjection(mutation.Context(), runtimeauthoractivity.InboundProjection{})
-						_, prepareErr := bus.PrepareInboundDeliveryBatchInMutation(prepareCtx, batch)
-						return prepareErr
+						prepared, prepareErr := bus.PrepareInboundDeliveryBatchInMutation(prepareCtx, batch)
+						if prepareErr != nil {
+							return prepareErr
+						}
+						return finalizeProviderRollbackBatch(mutation, request, batch, prepared)
 					})
 					if err != nil {
 						t.Fatalf("retry PrepareInboundDeliveryBatchInMutation: %v", err)
@@ -1003,8 +1011,8 @@ func (s *providerRollbackPostgresStore) UpsertFlowInstanceRoute(ctx context.Cont
 	return upsertProviderRollbackFlowInstanceRoute(ctx, route, s.proof, s.PostgresStore.UpsertFlowInstanceRoute)
 }
 
-func (s *providerRollbackPostgresStore) RunEventMutation(ctx context.Context, fn func(runtimebus.EventMutation) error) error {
-	return s.PostgresStore.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
+func (s *providerRollbackPostgresStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
+	return s.PostgresStore.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
 		if err := fn(newProviderRollbackMutation(mutation, s.proof)); err != nil {
 			return err
 		}
@@ -1021,8 +1029,8 @@ func (s *providerRollbackSQLiteStore) UpsertFlowInstanceRoute(ctx context.Contex
 	return upsertProviderRollbackFlowInstanceRoute(ctx, route, s.proof, s.SQLiteRuntimeStore.UpsertFlowInstanceRoute)
 }
 
-func (s *providerRollbackSQLiteStore) RunEventMutation(ctx context.Context, fn func(runtimebus.EventMutation) error) error {
-	return s.SQLiteRuntimeStore.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
+func (s *providerRollbackSQLiteStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
+	return s.SQLiteRuntimeStore.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
 		if err := fn(newProviderRollbackMutation(mutation, s.proof)); err != nil {
 			return err
 		}
@@ -1079,81 +1087,71 @@ func requireProviderRollbackRowVisible(ctx context.Context, table string) error 
 }
 
 type providerRollbackMutation struct {
-	runtimebus.EventMutation
-	proof *providerRollbackProof
+	runtimeinbound.Mutation
+	proof       *providerRollbackProof
+	transaction runtimebus.CommitPublishTransaction
 }
 
-func newProviderRollbackMutation(mutation runtimebus.EventMutation, proof *providerRollbackProof) *providerRollbackMutation {
-	return &providerRollbackMutation{EventMutation: mutation, proof: proof}
+func newProviderRollbackMutation(mutation runtimeinbound.Mutation, proof *providerRollbackProof) *providerRollbackMutation {
+	transaction, _ := runtimebus.CommitPublishTransactionFromContext(mutation.Context())
+	return &providerRollbackMutation{Mutation: mutation, proof: proof, transaction: transaction}
 }
 
 func (m *providerRollbackMutation) Context() context.Context {
-	return runtimebus.WithEventMutationContext(m.EventMutation.Context(), m)
+	return runtimebus.WithCommitPublishTransaction(m.Mutation.Context(), m)
 }
 
-func (m *providerRollbackMutation) AppendEvent(ctx context.Context, evt events.Event) error {
-	_, err := m.AppendEventOutcome(ctx, evt)
-	return err
-}
-
-func (m *providerRollbackMutation) AppendEventOutcome(ctx context.Context, evt events.Event) (runtimebus.EventAppendOutcome, error) {
+func (m *providerRollbackMutation) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
+	if m.transaction == nil {
+		return runtimebus.EventAppendOutcomeUnknown, errors.New("provider rollback proof requires commit transaction")
+	}
 	m.proof.appends++
 	if m.proof.appends == 2 {
 		if err := m.proof.fail(providerRollbackBeforeNormalizedAppend); err != nil {
 			return runtimebus.EventAppendOutcomeUnknown, err
 		}
 	}
-	return m.EventMutation.AppendEventOutcome(ctx, evt)
-}
-
-func (m *providerRollbackMutation) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
-	if err := m.proof.fail(providerRollbackBeforeDelivery); err != nil {
-		return err
+	outcome, err := m.transaction.BeginPreparedPublish(ctx, prepared)
+	if err != nil {
+		return outcome, err
 	}
-	return m.EventMutation.InsertEventDeliveries(ctx, eventID, agentIDs)
-}
-
-func (m *providerRollbackMutation) InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, targets map[string]events.RouteIdentity) error {
-	if err := m.proof.fail(providerRollbackBeforeDelivery); err != nil {
-		return err
-	}
-	return m.EventMutation.InsertEventDeliveriesWithTargets(ctx, eventID, agentIDs, targets)
-}
-
-func (m *providerRollbackMutation) InsertEventDeliveryRoutes(ctx context.Context, eventID string, routes []events.DeliveryRoute) error {
-	if err := m.proof.fail(providerRollbackBeforeDelivery); err != nil {
-		return err
-	}
-	return m.EventMutation.InsertEventDeliveryRoutes(ctx, eventID, routes)
-}
-
-func (m *providerRollbackMutation) UpsertCommittedReplayScope(ctx context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error {
-	m.proof.replays++
-	if m.proof.replays == 1 {
+	if m.proof.appends == 1 {
 		if err := m.proof.fail(providerRollbackAfterRawAppend); err != nil {
+			return runtimebus.EventAppendOutcomeUnknown, err
+		}
+	}
+	return outcome, nil
+}
+
+func (m *providerRollbackMutation) FinalizePreparedPublish(ctx context.Context, finalization runtimebus.PreparedPublishFinalization) error {
+	if m.transaction == nil {
+		return errors.New("provider rollback proof requires commit transaction")
+	}
+	req := finalization.Request()
+	if len(req.DeliveryRoutes) > 0 {
+		if err := m.proof.fail(providerRollbackBeforeDelivery); err != nil {
 			return err
 		}
 	}
-	if m.proof.replays == 2 {
+	if req.PipelineReceipt != nil {
+		if err := m.proof.fail(providerRollbackBeforeReceipt); err != nil {
+			return err
+		}
+	}
+	if req.DeadLetter != nil {
+		if err := m.proof.fail(providerRollbackBeforeDeadLetter); err != nil {
+			return err
+		}
+	}
+	if err := m.transaction.FinalizePreparedPublish(ctx, finalization); err != nil {
+		return err
+	}
+	if m.proof.appends == 2 {
 		if err := m.proof.fail(providerRollbackBeforeNormalizedReplay); err != nil {
 			return err
 		}
 	}
-	return m.EventMutation.UpsertCommittedReplayScope(ctx, eventID, scope)
-}
-
-func (m *providerRollbackMutation) UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
-	if err := m.proof.fail(providerRollbackBeforeReceipt); err != nil {
-		return err
-	}
-	return m.EventMutation.UpsertPipelineReceipt(ctx, eventID, status, failure)
-}
-
-func (m *providerRollbackMutation) RecordDeadLetter(ctx context.Context, record runtimedeadletters.Record) error {
-	if err := m.proof.fail(providerRollbackBeforeDeadLetter); err != nil {
-		return err
-	}
-	return m.EventMutation.RecordDeadLetter(ctx, record)
+	return nil
 }
 
 type providerRollbackSource struct {
@@ -1190,22 +1188,97 @@ func providerRollbackAuthorization() runtimeprovideroutput.Authorization {
 	}
 }
 
-func providerRollbackInboundBatch() runtimebus.InboundDeliveryBatch {
-	entityID := "22222222-2222-4222-8222-222222222222"
+func providerRollbackBundleSourceFact() runtimecorrelation.BundleSourceFact {
+	return runtimecorrelation.BundleSourceFact{
+		BundleHash:        "bundle-v1:sha256:" + strings.Repeat("a", 64),
+		BundleSource:      "ephemeral",
+		BundleFingerprint: "sha256:" + strings.Repeat("a", 64),
+	}
+}
+
+func providerRollbackStandingCandidate(ctx context.Context) runtimepipeline.StandingServiceCandidate {
+	source, _ := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	packageKey := "provider-rollback"
+	flowID := "ingress"
+	return runtimepipeline.StandingServiceCandidate{
+		ServiceID: runtimeflowidentity.StandingServiceID(packageKey, flowID), PackageKey: packageKey,
+		FlowID: flowID, InstanceID: uuid.NewString(), EntityID: "22222222-2222-4222-8222-222222222222", Source: source,
+	}
+}
+
+func providerRollbackRequest(t *testing.T, candidate runtimepipeline.StandingServiceCandidate, runID string, sequence int64) runtimeinbound.Request {
+	t.Helper()
+	providerEventID := "provider-rollback-event"
+	publicationID, markerEventID := runtimeinbound.DeterministicIDs("telegram", candidate.EntityID, providerEventID)
+	fingerprint, err := runtimeinbound.SemanticFingerprint(map[string]any{"provider": "telegram", "provider_event_id": providerEventID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runtimeinbound.Request{
+		PublicationID: publicationID, Provider: "telegram", EntityID: candidate.EntityID, ProviderEventID: providerEventID,
+		RequestFingerprint: fingerprint, RequestProjectionVersion: runtimeinbound.RequestSemanticProjectionVersion,
+		StableServiceID: candidate.ServiceID, PackageKey: candidate.PackageKey, FlowID: candidate.FlowID, InstanceID: candidate.InstanceID,
+		TargetAlias: "telegram", TargetFlowInstance: candidate.FlowID + "/" + candidate.InstanceID,
+		ExpectedPublicationSequence: sequence, ResolvedRunID: runID, MarkerEventID: markerEventID,
+		AcknowledgementMode: runtimeinbound.AcknowledgementDurableBeforeDispatch,
+		OriginalReceivedAt:  time.Now().UTC().Truncate(time.Microsecond), OriginalUserAgent: "rollback-proof", OriginalTransportMetadata: []byte(`{"method":"POST"}`),
+	}
+}
+
+func providerRollbackInboundBatch(t *testing.T, request runtimeinbound.Request) runtimebus.InboundDeliveryBatch {
+	t.Helper()
 	now := time.Now().UTC()
+	rawID, err := runtimeinbound.DeterministicEventID(request.PublicationID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizedID, err := runtimeinbound.DeterministicEventID(request.PublicationID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return runtimebus.InboundDeliveryBatch{
 		Provider: "telegram",
 		Events: []runtimebus.InboundDeliveryEvent{
 			{Event: eventtest.RootIngress(
-				uuid.NewString(), "inbound.telegram", "inbound-gateway", "", []byte(`{"raw":true}`), 0,
-				templateInstanceDeliveryRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now,
+				rawID, "inbound.telegram", "inbound-gateway", "", []byte(`{"raw":true}`), 0,
+				request.ResolvedRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), now,
 			), Kind: runtimeprovideroutput.KindRaw},
 			{Event: eventtest.RootIngress(
-				uuid.NewString(), "inbound.telegram.text_message", "inbound-gateway", "", []byte(`{"chat_id":"42"}`), 0,
-				templateInstanceDeliveryRunID, "", events.EventEnvelope{}, now,
+				normalizedID, "inbound.telegram.text_message", "inbound-gateway", "", []byte(`{"chat_id":"42"}`), 0,
+				request.ResolvedRunID, "", events.EventEnvelope{}, now,
 			), Kind: runtimeprovideroutput.KindNormalized, Authorization: providerRollbackAuthorization()},
 		},
 	}
+}
+
+func finalizeProviderRollbackBatch(mutation runtimeinbound.Mutation, request runtimeinbound.Request, batch runtimebus.InboundDeliveryBatch, prepared []runtimebus.PreparedPublish) error {
+	if len(prepared) != len(batch.Events) {
+		return fmt.Errorf("prepared provider rollback batch size %d does not match %d events", len(prepared), len(batch.Events))
+	}
+	eventIDs := make([]string, len(prepared))
+	eventNames := make([]string, len(prepared))
+	finalization := runtimeinbound.Finalization{Events: make([]runtimeinbound.EventFinalization, len(prepared))}
+	for index := range prepared {
+		manifest, _, _, err := runtimeinbound.CanonicalRecipientManifest(prepared[index].DeliveryRoutes())
+		if err != nil {
+			return err
+		}
+		eventIDs[index] = prepared[index].Event.ID()
+		eventNames[index] = string(prepared[index].Event.Type())
+		finalization.Events[index] = runtimeinbound.EventFinalization{
+			Ordinal: index, Event: prepared[index].Event, Kind: batch.Events[index].Kind,
+			Authorization: batch.Events[index].Authorization, RecipientManifest: manifest,
+		}
+	}
+	payload, err := runtimeinbound.BuildEvidencePayload(request, eventIDs, eventNames)
+	if err != nil {
+		return err
+	}
+	finalization.EvidenceEvent = eventtest.DiagnosticDirect(
+		request.MarkerEventID, events.EventTypePlatformInboundRecord, "runtime", "", payload, 0,
+		request.ResolvedRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), request.OriginalReceivedAt,
+	)
+	return mutation.FinalizeInboundPublication(mutation.Context(), finalization)
 }
 
 func assertProviderRollbackTablesEmpty(t *testing.T, ctx context.Context, db *sql.DB) {
@@ -1223,8 +1296,8 @@ func assertProviderRollbackTablesEmpty(t *testing.T, ctx context.Context, db *sq
 	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runs").Scan(&runs); err != nil {
 		t.Fatalf("count runs after rollback: %v", err)
 	}
-	if runs != 1 {
-		t.Fatalf("runs after rollback = %d, want seeded standing run only", runs)
+	if runs != 2 {
+		t.Fatalf("runs after rollback = %d, want seed plus standing-service run", runs)
 	}
 }
 
@@ -1243,68 +1316,6 @@ func assertProviderRollbackRetryCommitted(t *testing.T, ctx context.Context, db 
 	}
 }
 
-type failingDeliveryRouteStore struct {
-	*store.PostgresStore
-	failDeliveryRoutes            bool
-	descriptorsSeenDuringDelivery []runtimebus.ActiveFlowInstanceDescriptor
-}
-
-func (s *failingDeliveryRouteStore) RunEventMutation(ctx context.Context, fn func(runtimebus.EventMutation) error) error {
-	if s == nil || s.PostgresStore == nil {
-		return errors.New("postgres store is required")
-	}
-	return s.PostgresStore.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
-		return fn(&failingDeliveryRouteMutation{EventMutation: mutation, store: s})
-	})
-}
-
-type failingDeliveryRouteMutation struct {
-	runtimebus.EventMutation
-	store *failingDeliveryRouteStore
-}
-
-func (m *failingDeliveryRouteMutation) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
-	if err := m.captureDescriptorReadback(ctx); err != nil {
-		return err
-	}
-	if m.store.failDeliveryRoutes {
-		return errors.New("injected delivery route persistence failure")
-	}
-	return m.EventMutation.InsertEventDeliveries(ctx, eventID, agentIDs)
-}
-
-func (m *failingDeliveryRouteMutation) InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error {
-	if err := m.captureDescriptorReadback(ctx); err != nil {
-		return err
-	}
-	if m.store.failDeliveryRoutes {
-		return errors.New("injected delivery route persistence failure")
-	}
-	return m.EventMutation.InsertEventDeliveriesWithTargets(ctx, eventID, agentIDs, deliveryTargets)
-}
-
-func (m *failingDeliveryRouteMutation) InsertEventDeliveryRoutes(ctx context.Context, eventID string, routes []events.DeliveryRoute) error {
-	if err := m.captureDescriptorReadback(ctx); err != nil {
-		return err
-	}
-	if m.store.failDeliveryRoutes {
-		return errors.New("injected delivery route persistence failure")
-	}
-	return m.EventMutation.InsertEventDeliveryRoutes(ctx, eventID, routes)
-}
-
-func (m *failingDeliveryRouteMutation) captureDescriptorReadback(ctx context.Context) error {
-	if m == nil || m.store == nil {
-		return errors.New("delivery route mutation store is required")
-	}
-	descriptors, err := m.store.ListActiveFlowInstanceDescriptors(ctx)
-	if err != nil {
-		return err
-	}
-	m.store.descriptorsSeenDuringDelivery = descriptors
-	return nil
-}
-
 type routeMaterializationDBProofStore struct {
 	pg *store.PostgresStore
 }
@@ -1313,20 +1324,8 @@ func (s routeMaterializationDBProofStore) RegisterAuthorActivityEventCatalog(sco
 	return s.pg.RegisterAuthorActivityEventCatalog(scope, descriptors)
 }
 
-func (s routeMaterializationDBProofStore) AppendEvent(ctx context.Context, evt events.Event) error {
-	return s.pg.AppendEvent(ctx, evt)
-}
-
-func (s routeMaterializationDBProofStore) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
-	return s.pg.InsertEventDeliveries(ctx, eventID, agentIDs)
-}
-
-func (s routeMaterializationDBProofStore) InsertEventDeliveryRoutes(ctx context.Context, eventID string, routes []events.DeliveryRoute) error {
-	return s.pg.InsertEventDeliveryRoutes(ctx, eventID, routes)
-}
-
-func (s routeMaterializationDBProofStore) PersistEventWithDeliveryRouteSetAndScope(ctx context.Context, evt events.Event, routes []events.DeliveryRoute, scope runtimereplayclaim.CommittedReplayScope) error {
-	return s.pg.PersistEventWithDeliveryRouteSetAndScope(ctx, evt, routes, scope)
+func (s routeMaterializationDBProofStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return s.pg.CommitPublish(ctx, plan)
 }
 
 func (s routeMaterializationDBProofStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {
@@ -1414,6 +1413,22 @@ func runtimeTestEventDiagnostics(ctx context.Context, db *sql.DB) string {
 			return "event diagnostics scan: " + err.Error()
 		}
 		fmt.Fprintf(&out, "event=%s producer=%s subscriber=%s outcome=%s reason=%s side_effects=%s\n", eventType, producer, subscriber, outcome, reason, sideEffects)
+	}
+	deliveryRows, err := db.QueryContext(ctx, `
+		SELECT e.event_name, d.subscriber_type, d.subscriber_id, d.status
+		FROM event_deliveries d
+		JOIN events e ON e.event_id = d.event_id
+		ORDER BY e.created_at, d.subscriber_type, d.subscriber_id
+	`)
+	if err == nil {
+		defer deliveryRows.Close()
+		for deliveryRows.Next() {
+			var eventType, subscriberType, subscriberID, status string
+			if err := deliveryRows.Scan(&eventType, &subscriberType, &subscriberID, &status); err != nil {
+				break
+			}
+			fmt.Fprintf(&out, "delivery event=%s subscriber=%s[%s] status=%s\n", eventType, subscriberType, subscriberID, status)
+		}
 	}
 	instanceRows, err := db.QueryContext(ctx, `SELECT flow_template, instance_id, status FROM flow_instances ORDER BY created_at, instance_id`)
 	if err == nil {

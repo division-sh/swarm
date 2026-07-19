@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -35,16 +37,10 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
-			execution_mode, run_id, event_id, event_name, entity_id, flow_instance,
-			source_route, target_route, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES
-			('live', $1::uuid, $2::uuid, 'producer/inst-1/scan.requested', $4::uuid, 'consumer/inst-9', $5::jsonb, $6::jsonb, 'flow', '{}'::jsonb, 'producer-node', 'node', $7),
-			('live', $1::uuid, $3::uuid, 'producer/inst-1/scan.requested', $4::uuid, 'consumer/inst-9', $5::jsonb, $6::jsonb, 'flow', '{}'::jsonb, 'producer-node', 'node', $8)
-	`, runID, pendingEventID, completedEventID, targetEntityID, mustJSON(t, sourceRoute), mustJSON(t, targetRoute), at, at.Add(time.Second)); err != nil {
-		t.Fatalf("seed routed events: %v", err)
+	envelope := events.EnvelopeForTargetRoute(events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), targetRoute)
+	for eventID, createdAt := range map[string]time.Time{pendingEventID: at, completedEventID: at.Add(time.Second)} {
+		storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "producer/inst-1/scan.requested",
+			eventtest.Producer(events.EventProducerNode, "producer-node"), []byte(`{}`), envelope, createdAt)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
@@ -139,7 +135,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 		{
 			name:             "explicit template fork point without delivery",
 			eventName:        "producer/inst-1/scan.requested",
-			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"},
+			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "11111111-1111-4111-8111-111111111111"},
 			explicitSelector: true,
 			source:           testContractFrontierTemplateConnectSource,
 			wantHistory:      []string{"consumer-node"}, wantHistoryEvents: 1, wantDynamic: []string{"producer/inst-1"},
@@ -148,7 +144,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 		{
 			name:        "latest template fork point without delivery",
 			eventName:   "producer/inst-1/scan.requested",
-			sourceRoute: events.RouteIdentity{FlowID: " producer ", FlowInstance: " /producer/inst-1/ "},
+			sourceRoute: events.RouteIdentity{FlowID: " producer ", FlowInstance: " /producer/inst-1/ ", EntityID: " 11111111-1111-4111-8111-111111111111 "},
 			source:      testContractFrontierTemplateConnectSource,
 			wantHistory: []string{"consumer-node"}, wantHistoryEvents: 1, wantDynamic: []string{"producer/inst-1"},
 			wantHistoryCodes: []string{nonMutating, flowHistory}, wantRouteFacts: true,
@@ -156,7 +152,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 		{
 			name:             "completed delivery deterministically agrees with fork point",
 			eventName:        "producer/inst-1/scan.requested",
-			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"},
+			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "11111111-1111-4111-8111-111111111111"},
 			explicitSelector: true, deliveryStatus: "completed",
 			source:      testContractFrontierTemplateConnectSource,
 			wantHistory: []string{"consumer-node"}, wantHistoryEvents: 1, wantDynamic: []string{"producer/inst-1"},
@@ -165,7 +161,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 		{
 			name:             "pending delivery remains frontier work",
 			eventName:        "producer/inst-1/scan.requested",
-			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"},
+			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "11111111-1111-4111-8111-111111111111"},
 			explicitSelector: true, deliveryStatus: "pending",
 			source:       testContractFrontierTemplateConnectSource,
 			wantFrontier: []string{"consumer-node"}, wantDynamic: []string{"producer/inst-1"},
@@ -175,7 +171,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 		{
 			name:             "static source preserves static connect",
 			eventName:        "producer/scan.requested",
-			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"},
+			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: "11111111-1111-4111-8111-111111111111"},
 			explicitSelector: true,
 			source:           func() semanticview.Source { return testContractFrontierConnectSource("static") },
 			wantHistory:      []string{"consumer-node"}, wantHistoryEvents: 1,
@@ -184,7 +180,6 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 		{
 			name:             "root source needs no child route identity",
 			eventName:        "root.ready",
-			sourceRoute:      events.RouteIdentity{EntityID: "root-entity"},
 			explicitSelector: true,
 			source:           testContractFrontierRootConnectSource,
 			wantHistory:      []string{"consumer-node"}, wantHistoryEvents: 1,
@@ -201,7 +196,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 		{
 			name:              "conflicting template source route fails closed",
 			eventName:         "producer/inst-1/scan.requested",
-			sourceRoute:       events.RouteIdentity{FlowID: "foreign", FlowInstance: "foreign/inst-9"},
+			sourceRoute:       events.RouteIdentity{FlowID: "foreign", FlowInstance: "foreign/inst-9", EntityID: "22222222-2222-4222-8222-222222222222"},
 			explicitSelector:  true,
 			source:            testContractFrontierTemplateConnectSource,
 			wantHistoryEvents: 1,
@@ -218,23 +213,13 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 				t.Fatalf("seed run: %v", err)
 			}
 			if !tc.explicitSelector {
-				if _, err := db.ExecContext(ctx, `
-					INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-					VALUES ('live', $1::uuid, $2::uuid, 'platform.precursor', 'global', '{}'::jsonb, 'platform', 'platform', $3)
-				`, runID, uuid.NewString(), at.Add(-time.Second)); err != nil {
-					t.Fatalf("seed precursor event: %v", err)
-				}
+				storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, uuid.NewString(), runID, "platform.precursor",
+					eventtest.Producer(events.EventProducerPlatform, "platform"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at.Add(-time.Second))
 				captureRunForkRevision(t, ctx, db, runID)
 			}
-			if _, err := db.ExecContext(ctx, `
-				INSERT INTO events (
-					execution_mode, run_id, event_id, event_name, source_route, scope, payload,
-					produced_by, produced_by_type, created_at
-				)
-				VALUES ('live', $1::uuid, $2::uuid, $3, $4::jsonb, 'flow', '{}'::jsonb, 'producer-node', 'node', $5)
-			`, runID, eventID, tc.eventName, mustJSON(t, tc.sourceRoute), at); err != nil {
-				t.Fatalf("seed fork point event: %v", err)
-			}
+			eventEnvelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, tc.sourceRoute)
+			storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, events.EventType(tc.eventName),
+				eventtest.Producer(events.EventProducerNode, "producer-node"), []byte(`{}`), eventEnvelope, at)
 			if tc.deliveryStatus != "" {
 				deliveryID := uuid.NewString()
 				status := "pending"

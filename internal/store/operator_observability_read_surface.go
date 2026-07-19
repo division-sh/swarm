@@ -47,19 +47,20 @@ type OperatorEventListResult struct {
 }
 
 type OperatorEventFull struct {
-	EventID       string                     `json:"event_id"`
-	EventName     string                     `json:"event_name"`
-	ExecutionMode executionmode.Mode         `json:"execution_mode"`
-	EntityID      string                     `json:"entity_id,omitempty"`
-	RunID         string                     `json:"run_id,omitempty"`
-	SourceEventID string                     `json:"source_event_id,omitempty"`
-	CreatedAt     time.Time                  `json:"created_at"`
-	Source        string                     `json:"source"`
-	ProducerType  events.EventProducerType   `json:"producer_type"`
-	Payload       map[string]any             `json:"payload"`
-	Deliveries    []OperatorEventDelivery    `json:"deliveries"`
-	DeadLetters   []OperatorDeadLetterRecord `json:"dead_letters"`
-	event         events.Event
+	EventID                  string                     `json:"event_id"`
+	EventName                string                     `json:"event_name"`
+	ExecutionMode            executionmode.Mode         `json:"execution_mode"`
+	EntityID                 string                     `json:"entity_id,omitempty"`
+	RunID                    string                     `json:"run_id,omitempty"`
+	SourceEventID            string                     `json:"source_event_id,omitempty"`
+	OperatorReferenceEventID string                     `json:"operator_reference_event_id,omitempty"`
+	CreatedAt                time.Time                  `json:"created_at"`
+	Source                   string                     `json:"source"`
+	ProducerType             events.EventProducerType   `json:"producer_type"`
+	Payload                  map[string]any             `json:"payload"`
+	Deliveries               []OperatorEventDelivery    `json:"deliveries"`
+	DeadLetters              []OperatorDeadLetterRecord `json:"dead_letters"`
+	event                    events.Event
 }
 
 func NewOperatorEventFull(event events.Event) (OperatorEventFull, error) {
@@ -67,26 +68,32 @@ func NewOperatorEventFull(event events.Event) (OperatorEventFull, error) {
 	if err != nil {
 		return OperatorEventFull{}, fmt.Errorf("decode operator event payload: %w", err)
 	}
+	operatorReferenceEventID := ""
+	if provenance, ok := event.OperatorReference(); ok {
+		operatorReferenceEventID = provenance.ReferencedEventID()
+	}
 	return OperatorEventFull{
-		EventID:       event.ID(),
-		EventName:     strings.TrimSpace(string(event.Type())),
-		ExecutionMode: event.ExecutionMode(),
-		EntityID:      event.EntityID(),
-		RunID:         event.RunID(),
-		SourceEventID: event.ParentEventID(),
-		CreatedAt:     event.CreatedAt(),
-		Source:        event.SourceAgent(),
-		ProducerType:  event.ProducerType(),
-		Payload:       payload,
-		Deliveries:    []OperatorEventDelivery{},
-		DeadLetters:   []OperatorDeadLetterRecord{},
-		event:         event.Clone(),
+		EventID:                  event.ID(),
+		EventName:                strings.TrimSpace(string(event.Type())),
+		ExecutionMode:            event.ExecutionMode(),
+		EntityID:                 event.EntityID(),
+		RunID:                    event.RunID(),
+		SourceEventID:            event.ParentEventID(),
+		OperatorReferenceEventID: operatorReferenceEventID,
+		CreatedAt:                event.CreatedAt(),
+		Source:                   event.SourceAgent(),
+		ProducerType:             event.ProducerType(),
+		Payload:                  payload,
+		Deliveries:               []OperatorEventDelivery{},
+		DeadLetters:              []OperatorDeadLetterRecord{},
+		event:                    event.Clone(),
 	}, nil
 }
 
 func (e OperatorEventFull) EventSnapshot() (events.Event, error) {
 	if strings.TrimSpace(e.event.ID()) == "" {
-		return events.EmptyEvent(), fmt.Errorf("operator event %s has no canonical event snapshot", strings.TrimSpace(e.EventID))
+		var event events.Event
+		return event, fmt.Errorf("operator event %s has no canonical event snapshot", strings.TrimSpace(e.EventID))
 	}
 	return e.event.Clone(), nil
 }
@@ -404,11 +411,11 @@ func (r *OperatorObservabilityReadSurface) LoadOperatorEvent(ctx context.Context
 	if !found {
 		return OperatorEventFull{}, ErrEventNotFound
 	}
-	decoded, err := eventFromPersistedIdentity(row)
+	decoded, err := decodeEventRecord(row)
 	if err != nil {
 		return OperatorEventFull{}, fmt.Errorf("load operator event: %w", err)
 	}
-	event, err := NewOperatorEventFull(decoded)
+	event, err := NewOperatorEventFull(decoded.Event())
 	if err != nil {
 		return OperatorEventFull{}, err
 	}
@@ -447,6 +454,10 @@ func (r *OperatorObservabilityReadSurface) loadOperatorEventDeliveries(ctx conte
 				d.delivered_at
 			FROM event_deliveries d
 		WHERE d.event_id::text = $1
+		  AND NOT (
+			d.subscriber_type = 'node'
+			AND d.subscriber_id = '__runtime_replay_scope__'
+		  )
 		ORDER BY d.created_at ASC, d.delivery_id::text ASC
 	`, eventID)
 	if err != nil {

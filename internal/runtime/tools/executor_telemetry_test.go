@@ -17,6 +17,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -380,7 +381,7 @@ func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) 
 		"task-inbound",
 		[]byte(`{"entity_id":"entity-inbound"}`),
 		0,
-		"",
+		"22222222-2222-4222-8222-222222222222",
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-inbound"),
 		testTime(),
@@ -537,7 +538,7 @@ func TestExecutorTelemetry_EmitToolLogsUndeclaredFieldSchemaValidationFailure(t 
 		"task-inbound",
 		[]byte(`{"entity_id":"entity-inbound"}`),
 		0,
-		"",
+		"22222222-2222-4222-8222-222222222222",
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-inbound"),
 		testTime(),
@@ -602,6 +603,7 @@ func TestExecutorTelemetry_EmitToolLogsPublishFailureWithCanonicalEventIdentity(
 		ID:            "agent-emit-3",
 		EmitEvents:    []string{"category.assessed"},
 	})
+	ctx = runtimebus.WithInboundEvent(ctx, toolTestInboundEvent("trigger.input", nil, events.EventEnvelope{}, executionmode.Live))
 
 	if _, err := exec.Execute(ctx, "emit_category_assessed", map[string]any{"category": "finops"}); err == nil {
 		t.Fatal("expected publish failure")

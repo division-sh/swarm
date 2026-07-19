@@ -229,6 +229,8 @@ func assertUnavailableBundlePreservationFailedDeliveryUntouched(t *testing.T, ct
 		SELECT status, COALESCE(reason_code, '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = 'agent-a'
 	`, eventID).Scan(&status, &reason); err != nil {
 		t.Fatalf("load untouched delivery %s: %v", eventID, err)
 	}

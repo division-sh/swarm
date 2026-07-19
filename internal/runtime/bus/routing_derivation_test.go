@@ -75,7 +75,12 @@ type routePersistenceTestStore struct {
 	upsertAfterWrite bool
 }
 
-func (*routePersistenceTestStore) AppendEvent(context.Context, events.Event) error { return nil }
+func (s *routePersistenceTestStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return prepareTestCommitPublish(ctx, plan, &testCommitPublishTransaction{finalize: func(ctx context.Context, req runtimebus.CommitPublishRequest) error {
+		return s.InsertEventDeliveryRoutes(ctx, req.Event.ID(), req.DeliveryRoutes)
+	}})
+}
+
 func (s *routePersistenceTestStore) InsertEventDeliveries(_ context.Context, eventID string, agentIDs []string) error {
 	if s.deliveries == nil {
 		s.deliveries = map[string][]string{}

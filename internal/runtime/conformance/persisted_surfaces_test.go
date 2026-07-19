@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
@@ -269,12 +270,9 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		"runtime", "", []byte(`{"turn":2}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-1*time.Minute).UTC())
 
 	for _, evt := range []events.Event{event1, event2} {
-		if err := pg.AppendEvent(ctx, evt); err != nil {
-			t.Fatalf("AppendEvent(%s): %v", evt.ID(), err)
-		}
-		if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{"agent-1"}); err != nil {
-			t.Fatalf("InsertEventDeliveries(%s): %v", evt.ID(), err)
-		}
+		storetest.CommitSemanticEventWithRoutes(t, ctx, pg, evt,
+			[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-1"}},
+			runtimereplayclaim.CommittedReplayScopeSubscribed)
 	}
 
 	previousTransport := http.DefaultTransport
@@ -433,12 +431,9 @@ func TestCLISessionFailureDoesNotRotateFromStderrProse(t *testing.T) {
 		events.EventType("review.requested"),
 		"runtime", "", []byte(`{"turn":1}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 
-	if err := pg.AppendEvent(ctx, evt); err != nil {
-		t.Fatalf("AppendEvent: %v", err)
-	}
-	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{"agent-1"}); err != nil {
-		t.Fatalf("InsertEventDeliveries: %v", err)
-	}
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, evt,
+		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-1"}},
+		runtimereplayclaim.CommittedReplayScopeSubscribed)
 
 	dockerState := filepath.Join(t.TempDir(), "fake-docker-count")
 	fakeDocker := filepath.Join(t.TempDir(), "docker")
@@ -638,7 +633,6 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
 	entityID := uuid.NewString()
-	parentEventID := uuid.NewString()
 	logger := runtimepkg.NewRuntimeLogger(pg)
 	failure := runtimefailures.Normalize(runtimefailures.New(
 		runtimefailures.ClassAuthorizationDenied,
@@ -660,10 +654,9 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 		Failure:    &failure,
 		DurationUS: 1200,
 		Detail: map[string]any{
-			"tool_name":       "save_entity_field",
-			"denial_layer":    "executor",
-			"handler_id":      "tool-handler",
-			"parent_event_id": parentEventID,
+			"tool_name":    "save_entity_field",
+			"denial_layer": "executor",
+			"handler_id":   "tool-handler",
 		},
 	}); err != nil {
 		t.Fatalf("logger.Log() error = %v", err)
@@ -877,12 +870,8 @@ func (s conformanceTimerRecoveryEventStore) RegisterAuthorActivityEventCatalog(s
 	return s.store.RegisterAuthorActivityEventCatalog(scope, descriptors)
 }
 
-func (conformanceTimerRecoveryEventStore) AppendEvent(context.Context, events.Event) error {
-	return nil
-}
-
-func (conformanceTimerRecoveryEventStore) InsertEventDeliveries(context.Context, string, []string) error {
-	return nil
+func (conformanceTimerRecoveryEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return runtimebustest.CommitPublishNoop(ctx, plan)
 }
 
 func (conformanceTimerRecoveryEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
@@ -907,12 +896,8 @@ func (conformanceRecoveryReplayLease) Key() string                   { return "c
 func (conformanceRecoveryReplayLease) Refresh(context.Context) error { return nil }
 func (conformanceRecoveryReplayLease) Release(context.Context) error { return nil }
 
-func (s conformanceRecoveryFailureEventStore) AppendEvent(ctx context.Context, evt events.Event) error {
-	return s.store.AppendEvent(ctx, evt)
-}
-
-func (s conformanceRecoveryFailureEventStore) InsertEventDeliveries(ctx context.Context, eventID string, recipients []string) error {
-	return s.store.InsertEventDeliveries(ctx, eventID, recipients)
+func (s conformanceRecoveryFailureEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return s.store.CommitPublish(ctx, plan)
 }
 
 func (s conformanceRecoveryFailureEventStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {
@@ -1658,23 +1643,15 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	replayRunID := uuid.NewString()
 	replayParentID := uuid.NewString()
 	replayChildID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(replayParentID,
+	storetest.CommitSemanticEvent(t, ctx, pg, eventtest.PersistedProjection(replayParentID,
 		events.EventType("system.parent"),
-		"runtime", "", []byte(`{"ok":true}`), 0, replayRunID, "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC())); err != nil {
-		t.Fatalf("AppendEvent(replay parent): %v", err)
-	}
-	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(replayChildID,
+		"runtime", "", []byte(`{"ok":true}`), 0, replayRunID, "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC()))
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, eventtest.PersistedProjection(replayChildID,
 		events.EventType("system.recover.replay"),
 		"runtime", "", []byte(`{"ok":true}`), 0, replayRunID,
-		replayParentID, events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())); err != nil {
-		t.Fatalf("AppendEvent(replay child): %v", err)
-	}
-	if err := pg.InsertEventDeliveries(ctx, replayChildID, []string{replayRecipient}); err != nil {
-		t.Fatalf("InsertEventDeliveries(replay child): %v", err)
-	}
-	if err := pg.UpsertCommittedReplayScope(ctx, replayChildID, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
-		t.Fatalf("UpsertCommittedReplayScope(replay child): %v", err)
-	}
+		replayParentID, events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
+		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: replayRecipient}},
+		runtimereplayclaim.CommittedReplayScopeSubscribed)
 	if err := pg.UpsertPipelineReceipt(ctx, replayParentID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(replay parent): %v", err)
 	}
@@ -1682,34 +1659,22 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	skipRunID := uuid.NewString()
 	skipParentID := uuid.NewString()
 	skipChildID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(skipParentID,
+	storetest.CommitSemanticEvent(t, ctx, pg, eventtest.PersistedProjection(skipParentID,
 		events.EventType("system.parent"),
-		"runtime", "", []byte(`{"ok":true}`), 0, skipRunID, "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC())); err != nil {
-		t.Fatalf("AppendEvent(skip parent): %v", err)
-	}
-	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(skipChildID,
+		"runtime", "", []byte(`{"ok":true}`), 0, skipRunID, "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC()))
+	storetest.CommitSemanticEvent(t, ctx, pg, eventtest.PersistedProjection(skipChildID,
 		events.EventType("system.recover.skip"),
 		"runtime", "", []byte(`{"ok":true}`), 0, skipRunID,
-		skipParentID, events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())); err != nil {
-		t.Fatalf("AppendEvent(skip child): %v", err)
-	}
-	if err := pg.UpsertCommittedReplayScope(ctx, skipChildID, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
-		t.Fatalf("UpsertCommittedReplayScope(skip child): %v", err)
-	}
+		skipParentID, events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()))
 	if err := pg.UpsertPipelineReceipt(ctx, skipParentID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(skip parent): %v", err)
 	}
 
 	droppedEventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES ('live',
-			$1::uuid, 'system.recover.drop', 'global', '{}'::jsonb, 'runtime', 'platform', now()
-		)
-	`, droppedEventID); err != nil {
-		t.Fatalf("seed dropped replay event: %v", err)
-	}
+	storetest.InsertCanonicalEventRecord(t, ctx, db, "postgres", eventtest.RuntimeDiagnostic(
+		droppedEventID, events.EventType("system.recover.drop"), "runtime", "", []byte(`{}`), 0,
+		"", "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
+	))
 
 	rm := runtimepipeline.NewRecoveryManagerWith(pg, bus)
 	if err := rm.Recover(ctx); err != nil {

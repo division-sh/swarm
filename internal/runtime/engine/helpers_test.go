@@ -16,7 +16,7 @@ import (
 )
 
 func TestArrivalIdentifier_PriorityOrder(t *testing.T) {
-	evt := eventtest.RootIngress("evt-1", events.EventType(""), "agent-source", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	evt := eventtest.RootIngress("evt-1", events.EventType("test.arrival"), "agent-source", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 	payload := map[string]any{
 		"id":       "payload-id",
 		"event_id": "payload-event",
@@ -30,19 +30,19 @@ func TestArrivalIdentifier_PriorityOrder(t *testing.T) {
 		t.Fatalf("arrivalIdentifier = %q", got)
 	}
 
-	if got := arrivalIdentifier(eventtest.RootIngress("", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), payload); got != "payload-event" {
+	if got := arrivalIdentifier(eventtest.RootIngress("", events.EventType("test.arrival"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), payload); got != "payload-event" {
 		t.Fatalf("arrivalIdentifier payload event fallback = %q", got)
 	}
 	delete(payload, "event_id")
-	if got := arrivalIdentifier(eventtest.RootIngress("", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), payload); got != "payload-id" {
+	if got := arrivalIdentifier(eventtest.RootIngress("", events.EventType("test.arrival"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), payload); got != "payload-id" {
 		t.Fatalf("arrivalIdentifier payload id fallback = %q", got)
 	}
 	delete(payload, "id")
-	if got := arrivalIdentifier(eventtest.RootIngress("", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), payload); got != "payload-item" {
+	if got := arrivalIdentifier(eventtest.RootIngress("", events.EventType("test.arrival"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), payload); got != "payload-item" {
 		t.Fatalf("arrivalIdentifier item fallback = %q", got)
 	}
 
-	if got := arrivalIdentifier(eventtest.RootIngress("evt-2", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), map[string]any{"dimension": "not-identity"}); got != "evt-2" {
+	if got := arrivalIdentifier(eventtest.RootIngress("evt-2", events.EventType("test.arrival"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), map[string]any{"dimension": "not-identity"}); got != "evt-2" {
 		t.Fatalf("arrivalIdentifier should ignore dimension payloads, got %q", got)
 	}
 }
@@ -52,7 +52,7 @@ func TestDedupIdentifier_UsesContractConfiguredKey(t *testing.T) {
 		"dimension": "retention_architecture",
 		"from":      "legacy-sender",
 	})}
-	got := dedupIdentifier(base, ExecutionState{}, eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), &runtimecontracts.AccumulateSpec{
+	got := dedupIdentifier(base, ExecutionState{}, eventtest.RootIngress("evt-1", events.EventType("test.arrival"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), &runtimecontracts.AccumulateSpec{
 		DedupBy:   "payload.dimension",
 		DedupPath: paths.Parse("payload.dimension"),
 	})
@@ -66,7 +66,7 @@ func TestDedupIdentifier_DefaultsToEventIdentityBeforeSource(t *testing.T) {
 		"item_id": "payload-item",
 		"source":  "legacy-source",
 	})}
-	got := dedupIdentifier(base, ExecutionState{}, eventtest.RootIngress("evt-1", events.EventType(""), "agent-source", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), nil)
+	got := dedupIdentifier(base, ExecutionState{}, eventtest.RootIngress("evt-1", events.EventType("test.arrival"), "agent-source", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), nil)
 	if got != "evt-1" {
 		t.Fatalf("dedupIdentifier default = %q", got)
 	}

@@ -309,7 +309,7 @@ type publishSelectedContractForkEventsRequest struct {
 	ExecutionOwner    string
 }
 
-func selectedContractForkEvent(forkRunID, forkEventID string, sourceEvent store.RunForkSelectedContractSourceEvent, producerID string) events.Event {
+func selectedContractForkEvent(sourceRunID, forkRunID, forkEventID string, sourceEvent store.RunForkSelectedContractSourceEvent, producerID string) (events.Event, error) {
 	payload := json.RawMessage("{}")
 	if len(sourceEvent.Payload) > 0 && json.Valid(sourceEvent.Payload) {
 		payload = append(json.RawMessage(nil), sourceEvent.Payload...)
@@ -319,20 +319,33 @@ func selectedContractForkEvent(forkRunID, forkEventID string, sourceEvent store.
 		FlowInstance: strings.Trim(strings.TrimSpace(sourceEvent.FlowInstance), "/"),
 		Scope:        events.EventScope(strings.TrimSpace(sourceEvent.Scope)),
 	}
-	return events.NewReplayEvent(
-		strings.TrimSpace(forkEventID),
-		events.EventType(strings.TrimSpace(sourceEvent.EventName)),
-		events.PlatformProducer(producerID),
-		"",
-		payload,
-		0,
-		events.EventLineage{
-			RunID:         strings.TrimSpace(forkRunID),
-			ExecutionMode: sourceEvent.ExecutionMode,
+	routingSource := events.NoRoutingSource()
+	sourceRoute := events.RouteIdentity{
+		FlowID: strings.TrimSpace(sourceEvent.SourceFlowID), FlowInstance: strings.Trim(strings.TrimSpace(sourceEvent.SourceFlowInstance), "/"), EntityID: strings.TrimSpace(sourceEvent.SourceEntityID),
+	}.Normalized()
+	if !sourceRoute.Empty() {
+		candidate, sourceErr := events.NewRuntimeRoutingSource(sourceRoute.FlowID, sourceRoute.FlowInstance, sourceRoute.EntityID)
+		if sourceErr != nil {
+			var event events.Event
+			return event, fmt.Errorf("selected-fork source routing: %w", sourceErr)
+		}
+		routingSource = candidate
+		envelope = events.EnvelopeForSourceRoute(envelope, sourceRoute)
+	}
+	lineage, err := events.NewSelectedForkLineage(forkRunID, sourceRunID, sourceEvent.SourceEventID, producerID, "", sourceEvent.ExecutionMode)
+	if err != nil {
+		var event events.Event
+		return event, err
+	}
+	return events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{
+		Facts: events.EventFacts{
+			ID: strings.TrimSpace(forkEventID), Type: events.EventType(strings.TrimSpace(sourceEvent.EventName)),
+			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: producerID},
+			Payload:  payload, Envelope: envelope, RoutingSource: routingSource,
+			CreatedAt: time.Now().UTC(), ExecutionMode: sourceEvent.ExecutionMode,
 		},
-		envelope,
-		time.Now().UTC(),
-	)
+		Lineage: lineage,
+	})
 }
 
 func newSelectedContractPipeline(

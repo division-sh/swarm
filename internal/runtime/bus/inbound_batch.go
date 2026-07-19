@@ -55,9 +55,9 @@ func (eb *EventBus) PrepareInboundDeliveryBatchInMutation(ctx context.Context, b
 	if projection != wantProjection {
 		return nil, fmt.Errorf("typed inbound author projection context does not match the validated inbound delivery batch")
 	}
-	mutation, ok := eb.eventMutationFromContext(ctx)
-	if !ok || mutation == nil {
-		return nil, fmt.Errorf("typed event mutation context is required for inbound delivery")
+	_, ok = CommitPublishTransactionFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("typed CommitPublish transaction context is required for inbound delivery")
 	}
 	txctx, err := eb.withTransactionRouteOverlay(ctx)
 	if err != nil {

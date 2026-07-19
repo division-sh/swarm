@@ -33,7 +33,7 @@ func TestRecordDeadLetter_PersistsAndDedupes(t *testing.T) {
 		time.Now().UTC(),
 	)
 
-	if err := pg.AppendEvent(ctx, evt); err != nil {
+	if err := commitSemanticEventFixture(ctx, pg, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	rec := runtimedeadletters.Record{
@@ -78,7 +78,7 @@ func TestRecordDeadLetter_AllowsNonUUIDEntityIDViaSourceEventPayload(t *testing.
 		"deadletter.test",
 		"runtime", "", []byte(`{"entity_id":"ent-001","x":1}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	if err := pg.AppendEvent(ctx, evt); err != nil {
+	if err := commitSemanticEventFixture(ctx, pg, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	rec := runtimedeadletters.Record{
@@ -128,7 +128,7 @@ func TestRecordDeadLetter_PersistsTargetResolutionFailureContext(t *testing.T) {
 		time.Now().UTC(),
 	)
 
-	if err := pg.AppendEvent(ctx, evt); err != nil {
+	if err := commitSemanticEventFixture(ctx, pg, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	rec := runtimedeadletters.Record{

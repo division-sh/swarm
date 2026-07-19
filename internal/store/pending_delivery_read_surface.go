@@ -243,22 +243,6 @@ func (s *PostgresStore) listPendingAgentDeliveryRecordsSpec(ctx context.Context,
 		SELECT
 			d.subscriber_id,
 			e.event_id::text,
-			COALESCE(e.run_id::text, ''),
-			e.event_name,
-			COALESCE(e.task_id, ''),
-			COALESCE(e.entity_id::text, ''),
-			COALESCE(e.flow_instance, ''),
-			COALESCE(e.scope, 'global'),
-			e.payload,
-			COALESCE(e.chain_depth, 0),
-			COALESCE(e.produced_by, ''),
-			COALESCE(e.produced_by_type, ''),
-			COALESCE(e.source_event_id::text, ''),
-			e.created_at,
-			e.execution_mode,
-			COALESCE(e.source_route, '{}'::jsonb),
-			COALESCE(e.target_route, '{}'::jsonb),
-			COALESCE(e.target_set, '[]'::jsonb),
 			TRUE,
 			COALESCE(d.status, ''),
 			COALESCE(d.retry_count, 0),
@@ -282,8 +266,54 @@ func (s *PostgresStore) listPendingAgentDeliveryRecordsSpec(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf("query pending agent delivery records: %w", err)
 	}
-	defer rows.Close()
-	return scanPendingAgentDeliveryRecords(rows)
+	out := make([]pendingAgentDeliveryRecord, 0)
+	eventIDs := make([]string, 0)
+	for rows.Next() {
+		var record pendingAgentDeliveryRecord
+		var eventID string
+		if err := rows.Scan(
+			&record.AgentID, &eventID, &record.DeliveryFound, &record.DeliveryStatus,
+			&record.DeliveryRetryCount, &record.DeliveryCreatedAt, &record.DeliveryDeliveredAt,
+			&record.ReceiptFound,
+		); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan pending agent delivery record: %w", err)
+		}
+		record.AgentID = strings.TrimSpace(record.AgentID)
+		out = append(out, record)
+		eventIDs = append(eventIDs, strings.TrimSpace(eventID))
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("read pending agent delivery records: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close pending agent delivery records: %w", err)
+	}
+	uniqueIDs, err := pendingDeliveryEventRecordIDs(eventIDs)
+	if err != nil {
+		return nil, err
+	}
+	records, err := loadPostgresEventIdentities(ctx, s.DB, uniqueIDs)
+	if err != nil {
+		return nil, err
+	}
+	eventsByID := make(map[string]events.Event, len(records))
+	for _, durable := range records {
+		event, err := decodeEventRecord(durable)
+		if err != nil {
+			return nil, err
+		}
+		eventsByID[durable.EventID] = event.Event()
+	}
+	for index, eventID := range eventIDs {
+		event, ok := eventsByID[eventID]
+		if !ok {
+			return nil, fmt.Errorf("pending agent delivery event %s was not hydrated", eventID)
+		}
+		out[index].Event = event
+	}
+	return out, nil
 }
 
 func pendingDeliverySinceArg(since time.Time) any {
@@ -291,57 +321,6 @@ func pendingDeliverySinceArg(since time.Time) any {
 		return nil
 	}
 	return since
-}
-
-func scanPendingAgentDeliveryRecords(rows *sql.Rows) ([]pendingAgentDeliveryRecord, error) {
-	out := make([]pendingAgentDeliveryRecord, 0)
-	for rows.Next() {
-		var (
-			record  pendingAgentDeliveryRecord
-			eventID string
-			row     persistedEventIdentity
-		)
-		if err := rows.Scan(
-			&record.AgentID,
-			&eventID,
-			&row.RunID,
-			&row.EventName,
-			&row.TaskID,
-			&row.EntityID,
-			&row.FlowInstance,
-			&row.Scope,
-			&row.Payload,
-			&row.ChainDepth,
-			&row.ProducedBy,
-			&row.ProducedByType,
-			&row.SourceEventID,
-			&row.CreatedAt,
-			&row.ExecutionMode,
-			&row.SourceRoute,
-			&row.TargetRoute,
-			&row.TargetSet,
-			&record.DeliveryFound,
-			&record.DeliveryStatus,
-			&record.DeliveryRetryCount,
-			&record.DeliveryCreatedAt,
-			&record.DeliveryDeliveredAt,
-			&record.ReceiptFound,
-		); err != nil {
-			return nil, fmt.Errorf("scan pending agent delivery record: %w", err)
-		}
-		record.AgentID = strings.TrimSpace(record.AgentID)
-		row.EventID = eventID
-		var err error
-		record.Event, err = eventFromPersistedIdentity(row)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, record)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read pending agent delivery records: %w", err)
-	}
-	return out, nil
 }
 
 func pendingAgentDeliveryPageFromRecords(records []pendingAgentDeliveryRecord, now time.Time, limit int, cursor *pendingAgentDeliveryCursorPosition) (PendingAgentDeliveryPage, error) {

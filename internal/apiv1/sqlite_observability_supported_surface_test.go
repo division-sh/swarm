@@ -13,6 +13,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	storepkg "github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -170,14 +171,17 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, base.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, entity_id, scope, payload, execution_mode, produced_by, produced_by_type, created_at)
-		VALUES
-			(?, ?, 'trace.event_only', NULL, 'global', '{}', 'live', 'runtime', 'platform', ?),
-			(?, ?, 'trace.late_delivery', NULL, 'global', '{}', 'live', 'runtime', 'platform', ?),
-			(?, ?, 'trace.second_delivery', NULL, 'global', '{}', 'live', 'runtime', 'platform', ?)
-	`, runID, eventOnlyID, base, runID, lateDeliveryID, base, runID, secondDeliveryID, base.Add(time.Second)); err != nil {
-		t.Fatalf("seed sqlite events: %v", err)
+	producer := eventtest.Producer(events.EventProducerPlatform, "runtime")
+	for _, fixture := range []struct {
+		id        string
+		eventType events.EventType
+		createdAt time.Time
+	}{
+		{id: eventOnlyID, eventType: "trace.event_only", createdAt: base},
+		{id: lateDeliveryID, eventType: "trace.late_delivery", createdAt: base},
+		{id: secondDeliveryID, eventType: "trace.second_delivery", createdAt: base.Add(time.Second)},
+	} {
+		storetest.InsertRootEventRecord(t, ctx, sqliteStore.DB, "sqlite", fixture.id, runID, fixture.eventType, producer, []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, fixture.createdAt)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
@@ -272,7 +276,6 @@ func newPostgresObservabilitySurfaceFixture(t *testing.T, ctx context.Context) o
 
 type observabilityFixtureStore interface {
 	ObservabilityReadStore
-	PersistEventWithDeliveries(context.Context, events.Event, []string) error
 	MarkEventDeliveryInProgress(context.Context, string, string, string) error
 	runtimepkg.RuntimeLogPersistence
 }
@@ -288,14 +291,11 @@ func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store obs
 	now := time.Now().UTC().Add(-2 * time.Minute)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	if err := store.PersistEventWithDeliveries(ctx, eventtest.PersistedProjection(eventID,
-
+	storetest.CommitSemanticEventWithRoutes(t, ctx, store, eventtest.PersistedProjection(eventID,
 		events.EventType("trace.visible"),
 		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now),
-
-		[]string{"agent-1"}); err != nil {
-		t.Fatalf("PersistEventWithDeliveries: %v", err)
-	}
+		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-1"}},
+		runtimereplayclaim.CommittedReplayScopeSubscribed)
 	if err := store.MarkEventDeliveryInProgress(ctx, eventID, "agent-1", "session-1"); err != nil {
 		t.Fatalf("MarkEventDeliveryInProgress: %v", err)
 	}

@@ -1327,32 +1327,15 @@ func persistWorkflowTimerEvent(
 	createdAt time.Time,
 ) {
 	t.Helper()
+	dialect := runtimeauthoractivity.DialectPostgres
 	if store.isSQLite() {
-		_, err := store.db.ExecContext(ctx, `
-			INSERT INTO events (
-				event_id, execution_mode, run_id, event_name, entity_id, flow_instance,
-				scope, payload, chain_depth, produced_by_type, created_at
-			) VALUES (?, 'live', ?, ?, ?, NULL, 'entity', ?, 0, 'external', ?)
-			ON CONFLICT(event_id) DO NOTHING
-		`, eventID, runID, eventType, entityID, string(payload), createdAt.UTC())
-		if err != nil {
-			t.Fatalf("persist SQLite loop event: %v", err)
-		}
-		return
+		dialect = runtimeauthoractivity.DialectSQLite
 	}
-	_, err := store.db.ExecContext(ctx, `
-		INSERT INTO events (
-			event_id, run_id, event_name, entity_id, source_route, target_route, target_set,
-			scope, payload, execution_mode, chain_depth, produced_by, produced_by_type, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, $3, $4::uuid, '{}'::jsonb, '{}'::jsonb, '[]'::jsonb,
-			'entity', $5::jsonb, 'live', 0, 'operator', 'external', $6
-		)
-		ON CONFLICT(event_id) DO NOTHING
-	`, eventID, runID, eventType, entityID, string(payload), createdAt.UTC())
-	if err != nil {
-		t.Fatalf("persist PostgreSQL loop event: %v", err)
-	}
+	event := eventtest.RootIngress(
+		eventID, events.EventType(eventType), "operator", "", payload, 0, runID, "",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), createdAt.UTC(),
+	)
+	seedPipelineEventRecordForDialect(t, ctx, store.db, dialect, event)
 }
 
 func workflowTimerOwnerBundle(recurring bool) *runtimecontracts.WorkflowContractBundle {

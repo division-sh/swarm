@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
 )
 
@@ -143,28 +144,29 @@ type BoardDirective struct {
 }
 
 func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, operationID, eventID string, now time.Time) (events.Event, error) {
+	var none events.Event
 	agentID := strings.TrimSpace(req.AgentID)
 	directive := strings.TrimSpace(req.Directive)
 	target = target.Normalized()
 	if agentID == "" {
-		return events.EmptyEvent(), errors.New("agent id is required")
+		return none, errors.New("agent id is required")
 	}
 	if directive == "" {
-		return events.EmptyEvent(), errors.New("directive is required")
+		return none, errors.New("directive is required")
 	}
 	if target.RunID == "" {
-		return events.EmptyEvent(), errors.New("run_id is required")
+		return none, errors.New("run_id is required")
 	}
 	operationID = strings.TrimSpace(operationID)
 	if _, err := uuid.Parse(operationID); err != nil {
-		return events.EmptyEvent(), fmt.Errorf("operation_id must be a UUID: %w", err)
+		return none, fmt.Errorf("operation_id must be a UUID: %w", err)
 	}
 	eventID = strings.TrimSpace(eventID)
 	if _, err := uuid.Parse(eventID); err != nil {
-		return events.EmptyEvent(), fmt.Errorf("directive_event_id must be a UUID: %w", err)
+		return none, fmt.Errorf("directive_event_id must be a UUID: %w", err)
 	}
 	if _, err := uuid.Parse(target.RunID); err != nil {
-		return events.EmptyEvent(), fmt.Errorf("run_id must be a UUID: %w", err)
+		return none, fmt.Errorf("run_id must be a UUID: %w", err)
 	}
 	source := strings.TrimSpace(req.Source)
 	if source == "" {
@@ -191,9 +193,16 @@ func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, ope
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return events.EmptyEvent(), err
+		return none, err
 	}
-	return events.NewDiagnosticDirectEvent(eventID, events.EventType(DirectiveEventType), events.PlatformProducer("runtime"), "", raw, 0, target.RunID, "", events.EventEnvelope{}, now), nil
+	return events.NewOperatorInjectedEvent(events.OperatorInjectedEventInput{
+		Facts: events.EventFacts{
+			ID: eventID, Type: events.EventType(DirectiveEventType),
+			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
+			Payload:  raw, ExecutionMode: executionmode.Live, CreatedAt: now,
+		},
+		RunID: target.RunID,
+	})
 }
 
 func ValidateBoardDirective(d BoardDirective) error {

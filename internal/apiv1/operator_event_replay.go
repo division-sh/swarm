@@ -348,21 +348,19 @@ func ensureEventReplayAudit(
 	if err != nil {
 		return err
 	}
-	if err := publisher.Publish(ctx, events.NewReplayEvent(
-		stored.AuditEventID,
-		events.EventType(eventReplaySyntheticEventName),
-		events.PlatformProducer(eventReplayActorSource(req)),
-		"",
-		auditPayload,
-		0,
-		events.EventLineage{
-			RunID:         original.RunID,
-			ParentEventID: original.EventID,
-			ExecutionMode: original.ExecutionMode,
+	auditEvent, err := events.NewReplayEvent(events.ReplayEventInput{
+		Facts: events.EventFacts{
+			ID: stored.AuditEventID, Type: events.EventType(eventReplaySyntheticEventName),
+			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: eventReplayActorSource(req)},
+			Payload:  auditPayload, Envelope: events.EventEnvelope{EntityID: original.EntityID},
+			CreatedAt: now, ExecutionMode: original.ExecutionMode,
 		},
-		events.EventEnvelope{EntityID: original.EntityID},
-		now,
-	)); err != nil {
+		Lineage: events.EventLineage{RunID: original.RunID, ParentEventID: original.EventID, ExecutionMode: original.ExecutionMode},
+	})
+	if err != nil {
+		return err
+	}
+	if err := publisher.Publish(ctx, auditEvent); err != nil {
 		return eventReplayPublishError(eventReplaySyntheticEventName, err)
 	}
 	return nil
@@ -438,27 +436,19 @@ func deliveriesForSubscribers(eventID string, index map[string]store.OperatorEve
 func replayEventFromOriginal(original store.OperatorEventFull, replayEventID string, now time.Time) (events.Event, error) {
 	snapshot, err := original.EventSnapshot()
 	if err != nil {
-		return events.EmptyEvent(), err
+		var event events.Event
+		return event, err
 	}
-	if !snapshot.ExecutionMode().Valid() {
-		return events.EmptyEvent(), fmt.Errorf("event %s carries invalid execution mode %q", snapshot.ID(), snapshot.ExecutionMode())
-	}
-	evt := events.NewReplayEvent(
-		replayEventID,
-		snapshot.Type(),
-		snapshot.Producer(),
-		snapshot.TaskID(),
-		snapshot.Payload(),
-		snapshot.ChainDepth()+1,
-		events.EventLineage{
-			RunID:         snapshot.RunID(),
-			ParentEventID: snapshot.ID(),
+	return events.NewReplayEvent(events.ReplayEventInput{
+		Facts: events.EventFacts{
+			ID: replayEventID, Type: snapshot.Type(),
+			Producer: events.ProducerClaim{Type: snapshot.ProducerType(), ID: snapshot.SourceAgent()},
+			TaskID:   snapshot.TaskID(), Payload: snapshot.Payload(), ChainDepth: snapshot.ChainDepth() + 1,
+			Envelope: snapshot.Envelope(), RoutingSource: snapshot.RoutingSource(), CreatedAt: now,
 			ExecutionMode: snapshot.ExecutionMode(),
 		},
-		snapshot.Envelope(),
-		now,
-	)
-	return evt, nil
+		Lineage: events.EventLineage{RunID: snapshot.RunID(), ParentEventID: snapshot.ID(), TaskID: snapshot.TaskID(), ExecutionMode: snapshot.ExecutionMode()},
+	})
 }
 
 func eventReplayAuditPayload(

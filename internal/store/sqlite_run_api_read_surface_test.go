@@ -1,10 +1,13 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -35,21 +38,41 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 		)
 		VALUES
 			(?, 'running', ?, 'ephemeral', ?, 'scan.requested', NULL, 3, 0, NULL, ?, NULL),
-			(?, 'completed', ?, 'ephemeral', ?, 'scan.completed', ?, 5, 0, NULL, ?, ?)
-	`, newer, bundleA, newerEvent, now, older, bundleB, olderEvent, newer, now.Add(-time.Hour), now.Add(-30*time.Minute)); err != nil {
+			(?, 'running', ?, 'ephemeral', ?, 'scan.completed', ?, 5, 0, NULL, ?, NULL)
+	`, newer, bundleA, newerEvent, now, older, bundleB, olderEvent, newer, now.Add(-time.Hour)); err != nil {
 		t.Fatalf("seed sqlite runs: %v", err)
 	}
+	for _, fixture := range []struct {
+		id, runID, name, entityID string
+		at                        time.Time
+	}{
+		{newerEvent, newer, "scan.requested", "", now.Add(time.Second)},
+		{newerMiddleEvent, newer, "scan.progressed", "", now.Add(2 * time.Second)},
+		{newerLatestEvent, newer, "scan.finished", "", now.Add(3 * time.Second)},
+		{olderEvent, older, "scan.completed", olderEntity, now.Add(-time.Hour + time.Second)},
+		{uuid.NewString(), older, "scan.replayed", olderEventOnly, now.Add(-time.Hour + 2*time.Second)},
+	} {
+		envelope := events.EventEnvelope{}
+		if fixture.entityID != "" {
+			envelope = events.EnvelopeForEntityID(envelope, fixture.entityID)
+		}
+		if err := commitSemanticEventFixture(ctx, sqliteStore, eventtest.PersistedProjection(
+			fixture.id, events.EventType(fixture.name), "test", "", json.RawMessage(`{}`), 0,
+			fixture.runID, "", envelope, fixture.at,
+		)); err != nil {
+			t.Fatalf("seed sqlite event %s: %v", fixture.name, err)
+		}
+	}
+	if err := commitDiagnosticRuntimeLogFixture(ctx, sqliteStore, eventtest.DiagnosticDirect(
+		uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", json.RawMessage(runtimeLogPayload), 0,
+		newer, "", events.EventEnvelope{}, now.Add(4*time.Second),
+	)); err != nil {
+		t.Fatalf("seed sqlite runtime log: %v", err)
+	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES
-			('live', ?, ?, 'scan.requested', NULL, 'global', '{}', 'test', 'agent', ?),
-			('live', ?, ?, 'scan.progressed', NULL, 'global', '{}', 'test', 'agent', ?),
-			('live', ?, ?, 'scan.finished', NULL, 'global', '{}', 'test', 'agent', ?),
-			('live', ?, ?, 'scan.completed', ?, 'global', '{}', 'test', 'agent', ?),
-			('live', ?, ?, 'scan.replayed', ?, 'global', '{}', 'test', 'agent', ?),
-			('live', ?, ?, 'platform.runtime_log', NULL, 'global', ?, 'runtime', 'platform', ?)
-	`, newer, newerEvent, now.Add(time.Second), newer, newerMiddleEvent, now.Add(2*time.Second), newer, newerLatestEvent, now.Add(3*time.Second), older, olderEvent, olderEntity, now.Add(-time.Hour+time.Second), older, uuid.NewString(), olderEventOnly, now.Add(-time.Hour+2*time.Second), newer, uuid.NewString(), runtimeLogPayload, now.Add(4*time.Second)); err != nil {
-		t.Fatalf("seed sqlite events: %v", err)
+		UPDATE runs SET status = 'completed', ended_at = ? WHERE run_id = ?
+	`, now.Add(-30*time.Minute), older); err != nil {
+		t.Fatalf("terminalize older sqlite run: %v", err)
 	}
 	seedSQLiteEntityStateRows(t, sqliteStore.DB, ctx, newer, newerEntityA, newerEntityB)
 	seedSQLiteEntityStateRows(t, sqliteStore.DB, ctx, older, olderEntity)
@@ -210,8 +233,6 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 	unsettledEventID := uuid.NewString()
 	runtimeLogEventID := uuid.NewString()
 	readyEventID := uuid.NewString()
-	inboundEvidenceEventID := uuid.NewString()
-	directiveEvidenceEventID := uuid.NewString()
 
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, started_at)
@@ -221,24 +242,26 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 	`, blockedRunID, now.Add(-time.Minute), readyRunID, now.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed sqlite runs: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES
-			('live', ?, ?, 'quiescence.active_delivery', 'global', '{}', 'test', 'platform', ?),
-			('live', ?, ?, 'quiescence.missing_pipeline_receipt', 'global', '{}', 'test', 'platform', ?),
-			('live', ?, ?, ?, 'global', '{}', 'test', 'platform', ?),
-			('live', ?, ?, 'quiescence.ready', 'global', '{}', 'test', 'platform', ?),
-			('live', ?, ?, ?, 'global', '{}', 'test', 'platform', ?),
-			('live', ?, ?, ?, 'global', '{}', 'test', 'platform', ?)
-	`, blockedRunID, activeEventID, now.Add(-50*time.Second),
-		blockedRunID, unsettledEventID, now.Add(-40*time.Second),
-		blockedRunID, runtimeLogEventID, runtimeLogEventName, now.Add(-30*time.Second),
-		readyRunID, readyEventID, now.Add(-20*time.Second),
-		readyRunID, inboundEvidenceEventID, diagnosticDirectInboundRecord, now.Add(-10*time.Second),
-		readyRunID, directiveEvidenceEventID, diagnosticDirectAgentDirective, now.Add(-5*time.Second)); err != nil {
-		t.Fatalf("seed sqlite events: %v", err)
+	for _, fixture := range []struct {
+		id, runID, name string
+		at              time.Time
+	}{
+		{activeEventID, blockedRunID, "quiescence.active_delivery", now.Add(-50 * time.Second)},
+		{unsettledEventID, blockedRunID, "quiescence.missing_pipeline_receipt", now.Add(-40 * time.Second)},
+		{readyEventID, readyRunID, "quiescence.ready", now.Add(-20 * time.Second)},
+	} {
+		if err := commitSemanticEventFixture(ctx, sqliteStore, eventtest.PersistedProjection(
+			fixture.id, events.EventType(fixture.name), "test", "", json.RawMessage(`{}`), 0,
+			fixture.runID, "", events.EventEnvelope{}, fixture.at,
+		)); err != nil {
+			t.Fatalf("seed sqlite event %s: %v", fixture.name, err)
+		}
+	}
+	if err := commitDiagnosticRuntimeLogFixture(ctx, sqliteStore, eventtest.DiagnosticDirect(
+		runtimeLogEventID, events.EventTypePlatformRuntimeLog, "runtime", "", json.RawMessage(`{}`), 0,
+		blockedRunID, "", events.EventEnvelope{}, now.Add(-30*time.Second),
+	)); err != nil {
+		t.Fatalf("seed sqlite runtime log: %v", err)
 	}
 	if err := sqliteStore.UpsertPipelineReceipt(ctx, activeEventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt active event: %v", err)
@@ -252,10 +275,8 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 		)
 		VALUES
 			(?, ?, ?, 'agent', 'agent-active', 'pending', 0, 'matched_agent_subscription', ?),
-			(?, ?, ?, ?, ?, 'pending', 0, 'replay_scope_marker', ?),
 			(?, ?, ?, 'agent', 'agent-done', 'delivered', 0, 'handled', ?)
 	`, uuid.NewString(), blockedRunID, activeEventID, now,
-		uuid.NewString(), blockedRunID, activeEventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, now,
 		uuid.NewString(), readyRunID, readyEventID, now); err != nil {
 		t.Fatalf("seed sqlite deliveries: %v", err)
 	}

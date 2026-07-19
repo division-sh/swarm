@@ -14,14 +14,17 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -178,6 +181,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				entityID := uuid.NewString()
 				deliveryTarget := events.RouteIdentity{FlowID: "target-flow", FlowInstance: "target-flow/instance", EntityID: entityID}
 				createdAt := time.Unix(1700001300, 123456000).UTC()
+				seedCompleteReplayRun(t, ctx, f.db, f.sqlite, runID, createdAt.Add(-time.Minute))
 				envelope := routeShape.envelope(entityID)
 				if err := f.store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 					Config: runtimeactors.AgentConfig{
@@ -188,23 +192,18 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				}); err != nil {
 					t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 				}
-				parent := events.Project(eventtest.PersistedProjectionForProducer(
-					parentID, events.EventType("filler.event"), events.PlatformProducer("replay-proof"), "parent-task",
+				parent := eventtest.InExecutionMode(eventtest.PersistedProjectionForProducer(
+					parentID, events.EventType("filler.event"), eventtest.Producer(events.EventProducerPlatform, "replay-proof"), "parent-task",
 					json.RawMessage(`{"parent":true}`), 0, runID, "", events.EventEnvelope{}, createdAt.Add(-time.Minute),
-				), events.ProjectExecutionMode("mock"))
-				original := events.Project(eventtest.PersistedProjectionForProducer(
-					originalID, events.EventType("scan.requested"), events.AgentProducer("origin-agent"), "event-owned-task",
+				), "mock")
+				original := eventtest.InExecutionMode(eventtest.PersistedProjectionForProducer(
+					originalID, events.EventType("scan.requested"), eventtest.Producer(events.EventProducerAgent, "origin-agent"), "event-owned-task",
 					json.RawMessage(`{"task_id":"payload-owned-task","topic":"medicine"}`), 4, runID, parentID, envelope, createdAt,
-				), events.ProjectExecutionMode("mock"))
-				if err := f.store.AppendEvent(ctx, parent); err != nil {
-					t.Fatalf("AppendEvent parent: %v", err)
-				}
-				if err := f.store.AppendEvent(ctx, original); err != nil {
-					t.Fatalf("AppendEvent original: %v", err)
-				}
-				if err := f.store.InsertEventDeliveries(ctx, originalID, []string{agentID}); err != nil {
-					t.Fatalf("InsertEventDeliveries: %v", err)
-				}
+				), "mock")
+				storetest.CommitSemanticEvent(t, ctx, f.store, parent)
+				storetest.CommitSemanticEventWithRoutes(t, ctx, f.store, original,
+					[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: agentID}},
+					runtimereplayclaim.CommittedReplayScopeSubscribed)
 				markOperatorReplayDeliveryTerminal(t, ctx, f.db, f.sqlite, originalID, agentID)
 				persistedOriginal, err := f.store.LoadOperatorEvent(ctx, originalID)
 				if err != nil {
@@ -218,11 +217,19 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 
 				replayAt := createdAt.Add(2 * time.Minute)
 				handler := completeOperatorReplayTestHandler(t, f.store, bus, replayAt)
-				if _, err := updateCompleteReplayChainDepth(ctx, f.db, f.sqlite, originalID, -1); err != nil {
-					t.Fatalf("corrupt original chain_depth: %v", err)
+				if _, err := updateCompleteReplayChainDepth(ctx, f.db, f.sqlite, originalID, -1); err == nil {
+					t.Fatal("event schema admitted negative chain_depth")
 				}
-				if _, err := f.store.LoadOperatorEvent(ctx, originalID); err == nil || !strings.Contains(err.Error(), "chain_depth") {
-					t.Fatalf("canonical corrupt read error = %v, want chain_depth failure", err)
+				dialect := runtimeauthoractivity.DialectPostgres
+				if f.sqlite {
+					dialect = runtimeauthoractivity.DialectSQLite
+				}
+				eventtestsql.CorruptEventStore(t, ctx, f.db, dialect, eventtestsql.EventCorruptionClaim{
+					Invariant: "store.event_record.canonical_readback",
+					Reason:    "prove operator replay rejects a durable target route that is valid JSON but not a route object",
+				}, `UPDATE events SET target_route = ? WHERE event_id = ?`, `UPDATE events SET target_route = $1::jsonb WHERE event_id = $2::uuid`, `"bad"`, originalID)
+				if _, err := f.store.LoadOperatorEvent(ctx, originalID); err == nil || !strings.Contains(err.Error(), "target_route") {
+					t.Fatalf("canonical corrupt read error = %v, want target_route failure", err)
 				}
 				failed := rpcCall(t, handler, eventReplayBody(originalID, nil, "complete-corrupt-"+tc.name+"-"+routeShape.name))
 				if failed.Error == nil {
@@ -233,21 +240,29 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					t.Fatalf("event rows after corrupt replay = %d, want parent+original", got)
 				}
 
-				if _, err := updateCompleteReplayChainDepth(ctx, f.db, f.sqlite, originalID, 4); err != nil {
-					t.Fatalf("restore original chain_depth: %v", err)
+				targetRoute, err := json.Marshal(original.Envelope().Target)
+				if err != nil {
+					t.Fatalf("encode original target route: %v", err)
+				}
+				if err := updateCompleteReplayTargetRoute(ctx, f.db, f.sqlite, originalID, targetRoute); err != nil {
+					t.Fatalf("restore original target route: %v", err)
 				}
 				response := rpcCall(t, handler, eventReplayBody(originalID, nil, "complete-success-"+tc.name+"-"+routeShape.name))
 				if response.Error != nil {
 					t.Fatalf("event.replay error = %#v", response.Error)
 				}
 				replayID := stringValue(t, asMap(t, response.Result)["replay_event_id"], "replay_event_id")
-				want := eventtest.Replay(
+				persistedWant := eventtest.Replay(
 					replayID, original.Type(), original.SourceAgent(), original.TaskID(), original.Payload(), original.ChainDepth()+1,
 					events.EventLineage{RunID: runID, ParentEventID: originalID, TaskID: original.TaskID(), ExecutionMode: original.ExecutionMode()},
 					original.Envelope(), replayAt,
 				)
 				got := requireAPIV1RuntimeBusEvent(t, ch, "complete operator replay")
-				deliveryWant := events.Project(want, events.ProjectEnvelope(events.EnvelopeForTargetRoute(want.Envelope(), deliveryTarget)))
+				deliveryWant := eventtest.Replay(
+					replayID, original.Type(), original.SourceAgent(), original.TaskID(), original.Payload(), original.ChainDepth()+1,
+					events.EventLineage{RunID: runID, ParentEventID: originalID, TaskID: original.TaskID(), ExecutionMode: original.ExecutionMode()},
+					events.EnvelopeForTargetRoute(original.Envelope(), deliveryTarget), replayAt,
+				)
 				assertOperatorReplaySnapshot(t, got, deliveryWant)
 				persisted, err := f.store.LoadOperatorEvent(ctx, replayID)
 				if err != nil {
@@ -257,7 +272,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				if err != nil {
 					t.Fatalf("EventSnapshot replay: %v", err)
 				}
-				assertOperatorReplaySnapshot(t, persistedSnapshot, want)
+				assertOperatorReplaySnapshot(t, persistedSnapshot, persistedWant)
 			})
 		}
 	}
@@ -368,6 +383,15 @@ func updateCompleteReplayChainDepth(ctx context.Context, db *sql.DB, sqlite bool
 	return db.ExecContext(ctx, `UPDATE events SET chain_depth = $1 WHERE event_id = $2::uuid`, depth, eventID)
 }
 
+func updateCompleteReplayTargetRoute(ctx context.Context, db *sql.DB, sqlite bool, eventID string, route []byte) error {
+	query := `UPDATE events SET target_route = $1::jsonb WHERE event_id = $2::uuid`
+	if sqlite {
+		query = `UPDATE events SET target_route = ? WHERE event_id = ?`
+	}
+	_, err := db.ExecContext(ctx, query, string(route), eventID)
+	return err
+}
+
 func countOperatorReplayEvents(t *testing.T, ctx context.Context, db *sql.DB) int {
 	t.Helper()
 	var count int
@@ -403,10 +427,10 @@ func TestReplayEventFromOriginalUsesCanonicalEventEntityOnly(t *testing.T) {
 		events.EventEnvelope{EntityID: "canonical-entity"},
 		events.RouteIdentity{FlowID: "source-flow", FlowInstance: "source-flow/one", EntityID: "source-entity"},
 	)
-	snapshot := events.Project(eventtest.PersistedProjectionForProducer(
+	snapshot := eventtest.InExecutionMode(eventtest.PersistedProjectionForProducer(
 		"evt-original",
 		events.EventType("scan.requested"),
-		events.AgentProducer("origin-agent"),
+		eventtest.Producer(events.EventProducerAgent, "origin-agent"),
 		"event-task",
 		json.RawMessage(`{"entity_id":"payload-entity","topic":"medicine"}`),
 		4,
@@ -414,7 +438,7 @@ func TestReplayEventFromOriginalUsesCanonicalEventEntityOnly(t *testing.T) {
 		"parent-before-replay",
 		envelope,
 		now.Add(-time.Minute),
-	), events.ProjectExecutionMode("mock"))
+	), "mock")
 	original, err := store.NewOperatorEventFull(snapshot)
 	if err != nil {
 		t.Fatalf("NewOperatorEventFull: %v", err)
@@ -466,13 +490,16 @@ func TestReplayEventFromOriginalUsesCanonicalEventEntityOnly(t *testing.T) {
 		t.Fatalf("audit entity_id = %#v, want canonical-entity", audit["entity_id"])
 	}
 
-	invalidSnapshot := events.Project(snapshot, events.ProjectExecutionMode(""))
-	invalidOriginal, err := store.NewOperatorEventFull(invalidSnapshot)
-	if err != nil {
-		t.Fatalf("NewOperatorEventFull invalid mode: %v", err)
+}
+
+func seedCompleteReplayRun(t testing.TB, ctx context.Context, db *sql.DB, sqlite bool, runID string, startedAt time.Time) {
+	t.Helper()
+	query := `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`
+	if sqlite {
+		query = `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`
 	}
-	if _, err := replayEventFromOriginal(invalidOriginal, "evt-invalid-replay", now); err == nil || !strings.Contains(err.Error(), "invalid execution mode") {
-		t.Fatalf("replayEventFromOriginal missing mode error = %v", err)
+	if _, err := db.ExecContext(ctx, query, runID, startedAt); err != nil {
+		t.Fatalf("seed complete replay run: %v", err)
 	}
 }
 
@@ -632,7 +659,7 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 		bus := eventReplayTestBus(t, pg)
 		eventID := uuid.NewString()
 		runID := uuid.NewString()
-		if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(
+		storetest.CommitSemanticEvent(t, ctx, pg, eventtest.PersistedProjection(
 			eventID,
 			events.EventType("scan.requested"),
 			"workflow-runtime",
@@ -642,9 +669,7 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 			runID,
 			"",
 			events.EventEnvelope{EntityID: runID},
-			time.Now().UTC())); err != nil {
-			t.Fatalf("AppendEvent: %v", err)
-		}
+			time.Now().UTC()))
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO event_deliveries (
 				run_id, event_id, subscriber_type, subscriber_id, status, retry_count, created_at
@@ -1005,7 +1030,7 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 	t.Helper()
 	eventID := uuid.NewString()
 	runID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(
+	semanticEvent := eventtest.PersistedProjection(
 		eventID,
 		events.EventType(eventName),
 		"origin-agent",
@@ -1016,12 +1041,16 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, runID),
 		time.Now().UTC(),
-	)); err != nil {
-		t.Fatalf("AppendEvent: %v", err)
+	)
+	routes := make([]events.DeliveryRoute, 0, len(subscribers))
+	for _, subscriber := range subscribers {
+		routes = append(routes, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: subscriber})
 	}
-	if err := pg.InsertEventDeliveries(ctx, eventID, subscribers); err != nil {
-		t.Fatalf("InsertEventDeliveries: %v", err)
+	scope := runtimereplayclaim.CommittedReplayScopeDirect
+	if len(routes) > 0 {
+		scope = runtimereplayclaim.CommittedReplayScopeSubscribed
 	}
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, semanticEvent, routes, scope)
 	for _, subscriber := range subscribers {
 		sessionID := uuid.NewString()
 		if _, err := pg.DB.ExecContext(ctx, `

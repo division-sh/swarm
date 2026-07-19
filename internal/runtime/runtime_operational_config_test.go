@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
@@ -59,9 +60,12 @@ type recoveryGuardEventStore struct {
 	directiveReconcileErr   error
 }
 
-func (*recoveryGuardEventStore) AppendEvent(context.Context, events.Event) error { return nil }
-func (*recoveryGuardEventStore) InsertEventDeliveries(context.Context, string, []string) error {
-	return nil
+type recoveryGuardEventLease struct{}
+
+func (recoveryGuardEventLease) Release(context.Context) error { return nil }
+
+func (*recoveryGuardEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return runtimebustest.CommitPublishNoop(ctx, plan)
 }
 func (*recoveryGuardEventStore) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {
 	return nil
@@ -69,6 +73,7 @@ func (*recoveryGuardEventStore) UpsertCommittedReplayScope(context.Context, stri
 func (*recoveryGuardEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return nil, nil
 }
+func (*recoveryGuardEventStore) SupportsPersistedReplay() bool { return true }
 func (*recoveryGuardEventStore) UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error {
 	return nil
 }
@@ -82,10 +87,11 @@ func (s *recoveryGuardEventStore) ListEventsMissingPipelineReceipt(context.Conte
 	return append([]events.PersistedReplayEvent(nil), s.missing...), nil
 }
 func (*recoveryGuardEventStore) ClaimPipelineReplay(context.Context, string) (runtimeownership.Lease, bool, error) {
-	return nil, true, nil
+	return recoveryGuardEventLease{}, true, nil
 }
-func (*recoveryGuardEventStore) SupportsPersistedReplay() bool { return false }
-
+func (*recoveryGuardEventStore) ClaimPipelinePublication(context.Context, string) (runtimeownership.Lease, bool, error) {
+	return recoveryGuardEventLease{}, true, nil
+}
 func (s *recoveryGuardEventStore) ReconcileDirectiveOperations(context.Context, time.Time, time.Duration) (runtimeagentcontrol.DirectiveOperationReconcileResult, error) {
 	s.directiveReconcileCalls.Add(1)
 	return runtimeagentcontrol.DirectiveOperationReconcileResult{}, s.directiveReconcileErr
@@ -93,13 +99,13 @@ func (s *recoveryGuardEventStore) ReconcileDirectiveOperations(context.Context, 
 
 type minimalRuntimeEventStore struct{}
 
-func (*minimalRuntimeEventStore) AppendEvent(context.Context, events.Event) error { return nil }
-func (*minimalRuntimeEventStore) InsertEventDeliveries(context.Context, string, []string) error {
-	return nil
+func (*minimalRuntimeEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return runtimebustest.CommitPublishNoop(ctx, plan)
 }
 func (*minimalRuntimeEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return nil, nil
 }
+func (*minimalRuntimeEventStore) SupportsPersistedReplay() bool { return false }
 
 type recoveryDisabledScheduleStore struct {
 	recordingRuntimeScheduleStore

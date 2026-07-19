@@ -49,7 +49,10 @@ func TestFlowInstanceIdentity_CreateEntityUsesScopeKeyForPathAndLogicalInstanceF
 		Metadata: map[string]any{},
 	}
 
-	entityID, _ := resolveHandlerEntityIDForFlow(source, "child", handler, state.EntityID, mustEvent("child/validate.start", state.EntityID), state)
+	entityID, _, err := resolveHandlerEntityIDForFlow(source, "child", handler, state.EntityID, mustEvent("child/validate.start", state.EntityID), state)
+	if err != nil {
+		t.Fatalf("resolveHandlerEntityIDForFlow: %v", err)
+	}
 
 	if got := strings.TrimSpace(state.EntityID); got != entityID {
 		t.Fatalf("state.EntityID = %q, want %q", got, entityID)

@@ -9,11 +9,43 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/google/uuid"
 )
 
 const testPipelineRunID = "77777777-7777-7777-7777-777777777777"
+
+func seedPipelineEventRecord(t testing.TB, ctx context.Context, db *sql.DB, event events.Event) {
+	seedPipelineEventRecordForDialect(t, ctx, db, runtimeauthoractivity.DialectPostgres, event)
+}
+
+func seedPipelineEventRecordForDialect(t testing.TB, ctx context.Context, db *sql.DB, dialect runtimeauthoractivity.Dialect, event events.Event) {
+	t.Helper()
+	if runID := strings.TrimSpace(event.RunID()); runID != "" {
+		var (
+			query string
+			args  []any
+		)
+		switch dialect {
+		case runtimeauthoractivity.DialectPostgres:
+			query = `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running') ON CONFLICT (run_id) DO NOTHING`
+			args = []any{runID}
+		case runtimeauthoractivity.DialectSQLite:
+			query = `INSERT INTO runs (run_id, status) VALUES (?, 'running') ON CONFLICT (run_id) DO NOTHING`
+			args = []any{runID}
+		default:
+			t.Fatalf("seed canonical pipeline event %s: unsupported dialect %q", event.ID(), dialect)
+		}
+		if _, err := db.ExecContext(ctx, query, args...); err != nil {
+			t.Fatalf("seed canonical pipeline run %s: %v", runID, err)
+		}
+	}
+	if err := eventfixture.Insert(ctx, db, dialect, event); err != nil {
+		t.Fatalf("seed canonical pipeline event %s: %v", event.ID(), err)
+	}
+}
 
 func testPipelineRunContext(t *testing.T, db *sql.DB) context.Context {
 	t.Helper()
@@ -107,47 +139,32 @@ func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Even
 	`, runID); err != nil {
 		t.Fatalf("seed pipeline node delivery authority run: %v", err)
 	}
-	var entityID any
+	entityID := ""
 	if raw := strings.TrimSpace(evt.EntityID()); raw != "" {
 		if _, err := uuid.Parse(raw); err == nil {
 			entityID = raw
 		}
 	}
-	payload := strings.TrimSpace(string(evt.Payload()))
-	if payload == "" {
-		payload = "{}"
-	}
-	eventType := strings.TrimSpace(string(evt.Type()))
-	if eventType == "" {
-		eventType = "test.event"
-	}
-	flowInstance := strings.TrimSpace(evt.FlowInstance())
-	if flowInstance == "" {
-		flowInstance = "runtime"
-	}
-	scope := strings.TrimSpace(string(evt.Scope()))
-	if scope == "" {
-		scope = "entity"
-	}
-	sourceAgent := strings.TrimSpace(evt.SourceAgent())
-	if sourceAgent == "" {
-		sourceAgent = "test"
-	}
 	createdAt := evt.CreatedAt()
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
-			produced_by, produced_by_type, created_at
-		) VALUES ('live',
-			$1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7::jsonb,
-			$8, 'agent', $9
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events WHERE event_id = $1::uuid)`, eventID).Scan(&exists); err != nil {
+		t.Fatalf("load pipeline node delivery authority event: %v", err)
+	}
+	if !exists {
+		envelope := events.EventEnvelope{Scope: events.EventScopeGlobal}
+		if entityID != "" {
+			envelope = events.EnvelopeForEntityID(events.EventEnvelope{}, entityID)
+			if flowInstance := strings.TrimSpace(evt.FlowInstance()); flowInstance != "" {
+				envelope = events.EnvelopeForFlowInstance(envelope, flowInstance)
+			}
+		}
+		fixture := eventtest.PersistedProjectionForProducer(
+			eventID, evt.Type(), evt.Producer(), evt.TaskID(), evt.Payload(), evt.ChainDepth(), runID, evt.ParentEventID(), envelope, createdAt,
 		)
-		ON CONFLICT (event_id) DO NOTHING
-	`, eventID, runID, eventType, entityID, flowInstance, scope, payload, sourceAgent, createdAt); err != nil {
-		t.Fatalf("seed pipeline node delivery authority event: %v", err)
+		seedPipelineEventRecord(t, ctx, db, fixture)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,18 +25,16 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -1221,36 +1220,6 @@ type processIngressMutation struct {
 }
 
 func (m *processIngressMutation) Context() context.Context { return m.ctx }
-func (m *processIngressMutation) AppendEvent(ctx context.Context, evt events.Event) error {
-	return m.store.AppendEvent(ctx, evt)
-}
-func (m *processIngressMutation) AppendEventOutcome(ctx context.Context, evt events.Event) (runtimebus.EventAppendOutcome, error) {
-	if owner, ok := m.store.(runtimebus.EventAppendOutcomePersistence); ok {
-		return owner.AppendEventOutcome(ctx, evt)
-	}
-	if err := m.store.AppendEvent(ctx, evt); err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	return runtimebus.EventAppendInserted, nil
-}
-func (m *processIngressMutation) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
-	return m.store.InsertEventDeliveries(ctx, eventID, agentIDs)
-}
-func (m *processIngressMutation) InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, _ map[string]events.RouteIdentity) error {
-	return m.InsertEventDeliveries(ctx, eventID, agentIDs)
-}
-func (*processIngressMutation) InsertEventDeliveryRoutes(context.Context, string, []events.DeliveryRoute) error {
-	return nil
-}
-func (*processIngressMutation) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {
-	return nil
-}
-func (*processIngressMutation) UpsertPipelineReceipt(context.Context, string, string, *runtimefailures.Envelope) error {
-	return nil
-}
-func (*processIngressMutation) RecordDeadLetter(context.Context, runtimedeadletters.Record) error {
-	return nil
-}
 
 func (m *processIngressMutation) FinalizeInboundPublication(_ context.Context, finalization runtimeinbound.Finalization) error {
 	m.finalization = finalization
@@ -1261,7 +1230,11 @@ func (m *processIngressMutation) FinalizeInboundPublication(_ context.Context, f
 func (s *processIngressProofStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
 	s.recorded = true
 	mutation := &processIngressMutation{store: s.store}
-	mutation.ctx = runtimebus.WithEventMutationContext(ctx, mutation)
+	transaction, ok := s.store.(runtimebus.CommitPublishTransaction)
+	if !ok {
+		return runtimeinbound.Record{}, errors.New("process ingress store does not expose its test commit transaction")
+	}
+	mutation.ctx = runtimebus.WithCommitPublishTransaction(ctx, transaction)
 	if err := fn(mutation); err != nil {
 		return runtimeinbound.Record{}, err
 	}
@@ -1303,14 +1276,45 @@ func (*processIngressProofStore) ValidateInboundPublicationIntegrity(context.Con
 	return nil
 }
 
-type processIngressEventStore struct{ events []events.Event }
+type processIngressEventStore struct {
+	events []events.Event
+	active []string
+}
 
-func (s *processIngressEventStore) AppendEvent(_ context.Context, event events.Event) error {
+func (s *processIngressEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return runtimebustest.CommitPublish(ctx, plan, s.beginPublish, s.finalizePublish)
+}
+
+func (s *processIngressEventStore) beginPublish(_ context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
+	event := admitted.Event()
+	for _, existing := range s.events {
+		if existing.ID() != event.ID() {
+			continue
+		}
+		if !reflect.DeepEqual(existing, event) {
+			return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("event %s conflicts with its committed fixture", event.ID())
+		}
+		return runtimebus.EventAppendExactDuplicate, nil
+	}
 	s.events = append(s.events, event)
+	s.active = append(s.active, event.ID())
+	return runtimebus.EventAppendInserted, nil
+}
+
+func (s *processIngressEventStore) finalizePublish(_ context.Context, req runtimebus.CommitPublishRequest) error {
+	if len(s.active) == 0 || s.active[len(s.active)-1] != req.Event.ID() {
+		return errors.New("prepared event finalization does not match active process ingress event")
+	}
+	s.active = s.active[:len(s.active)-1]
 	return nil
 }
-func (*processIngressEventStore) InsertEventDeliveries(context.Context, string, []string) error {
-	return nil
+
+func (s *processIngressEventStore) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
+	return s.beginPublish(ctx, prepared.AdmittedEvent())
+}
+
+func (s *processIngressEventStore) FinalizePreparedPublish(ctx context.Context, finalization runtimebus.PreparedPublishFinalization) error {
+	return s.finalizePublish(ctx, finalization.Request())
 }
 func (*processIngressEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return nil, nil

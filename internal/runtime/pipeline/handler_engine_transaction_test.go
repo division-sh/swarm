@@ -27,6 +27,15 @@ import (
 	"github.com/google/uuid"
 )
 
+func handlerTestRootIngress(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
+	candidate := eventtest.RootIngress(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+	admitted, err := events.AdmitForPublish(candidate, events.AdmissionOptions{Now: time.Now().UTC()})
+	if err != nil {
+		panic(err)
+	}
+	return admitted.Event()
+}
+
 type recordingPipelineBus struct {
 	mu                    sync.Mutex
 	publishes             []events.Event
@@ -265,7 +274,7 @@ func TestExecuteNodeContractHandlerLogsComputeModuleReplayEvidenceBeforeFailureR
 			},
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress(
+		Event: handlerTestRootIngress(
 			"evt-failure",
 			events.EventType("render.requested"),
 			"",
@@ -403,7 +412,7 @@ func TestExecuteNodeContractHandlerFlushesCollectedEventsToParentCollector(t *te
 	result, err := pc.executeNodeContractHandler(ctx, "node-a", runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
+		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
@@ -434,7 +443,7 @@ func TestExecuteNodeContractHandlerPublishesCollectedEventsWithoutParentCollecto
 	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
+		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
@@ -459,7 +468,7 @@ func TestExecuteNodeContractHandlerUsesTypedEnvelopeIdentityOverPayload(t *testi
 	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress(
+		Event: handlerTestRootIngress(
 			"",
 			events.EventType("custom.trigger"),
 			"",
@@ -544,7 +553,7 @@ node-a:
 		},
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		State: WorkflowState{Stage: WorkflowStateID(""), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
@@ -579,7 +588,7 @@ func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIs
 	}
 
 	ctx := testPipelineCoordinatorRunContext(t, pc)
-	evt := eventtest.RootIngress(
+	evt := handlerTestRootIngress(
 		uuid.NewString(), events.EventType("research.completed"), "", "", mustJSON(map[string]any{}), 0,
 		runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
 	)
@@ -642,7 +651,7 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 	}
 
 	ctx := testPipelineCoordinatorRunContext(t, pc)
-	evt := eventtest.RootIngress(
+	evt := handlerTestRootIngress(
 		uuid.NewString(), events.EventType("research.completed"), "", "",
 		mustJSON(map[string]any{"business_brief": map[string]any{"summary": "validated"}}), 0,
 		runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
@@ -731,26 +740,18 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	trigger := handlerTestRootIngress("", events.EventType("validation.spec_requested"), "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{})
+	seedPipelineEventRecord(t, ctx, db, trigger)
+	_, err := pc.executeNodeContractHandler(ctx, "node-a", runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "revision_count", Value: runtimecontracts.CELExpression("entity.revision_count + 1")},
 			},
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress(
-			"",
-			events.EventType("validation.spec_requested"),
-			"",
-			"",
-			nil,
-			0,
-			"",
-			"",
-			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-			time.Time{},
-		),
-		State: pc.currentWorkflowState(testPipelineCoordinatorRunContext(t, pc), entityID),
+		Event: trigger,
+		State: pc.currentWorkflowState(ctx, entityID),
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -811,26 +812,18 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	trigger := handlerTestRootIngress("", events.EventType("validation.spec_requested"), "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{})
+	seedPipelineEventRecord(t, ctx, db, trigger)
+	_, err := pc.executeNodeContractHandler(ctx, "node-a", runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "revision_count", Value: runtimecontracts.CELExpression("entity.revision_count + 1")},
 			},
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress(
-			"",
-			events.EventType("validation.spec_requested"),
-			"",
-			"",
-			nil,
-			0,
-			"",
-			"",
-			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-			time.Time{},
-		),
-		State: pc.currentWorkflowState(testPipelineCoordinatorRunContext(t, pc), entityID),
+		Event: trigger,
+		State: pc.currentWorkflowState(ctx, entityID),
 	}, false)
 	if err == nil {
 		t.Fatal("expected executeNodeContractHandler to fail on data accumulation CEL runtime error")
@@ -886,26 +879,18 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	trigger := handlerTestRootIngress("", events.EventType("validation.spec_requested"), "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{})
+	seedPipelineEventRecord(t, ctx, db, trigger)
+	_, err := pc.executeNodeContractHandler(ctx, "node-a", runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "kill_reason_missing", Value: runtimecontracts.CELExpression("entity.kill_reason == null")},
 			},
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress(
-			"",
-			events.EventType("validation.spec_requested"),
-			"",
-			"",
-			nil,
-			0,
-			"",
-			"",
-			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-			time.Time{},
-		),
-		State: pc.currentWorkflowState(testPipelineCoordinatorRunContext(t, pc), entityID),
+		Event: trigger,
+		State: pc.currentWorkflowState(ctx, entityID),
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -948,7 +933,7 @@ func TestResolveHandlerEntityIDForFlowKeepsSameFlowEntity(t *testing.T) {
 	const entityID = "ent-1"
 	state := WorkflowState{EntityID: entityID}
 
-	gotID, gotEvt := resolveHandlerEntityIDForFlow(source, "scoring", handler, entityID, eventtest.RootIngress(
+	gotID, gotEvt, _ := resolveHandlerEntityIDForFlow(source, "scoring", handler, entityID, handlerTestRootIngress(
 		"",
 		events.EventType("vertical.discovered"),
 		"",
@@ -1039,7 +1024,7 @@ func TestResolveHandlerEntityIDForFlowPreservesCrossFlowEntityWithoutCreateEntit
 	const incomingEntityID = "ent-discovery"
 	state := WorkflowState{EntityID: incomingEntityID}
 
-	gotID, gotEvt := resolveHandlerEntityIDForFlow(source, "scoring", handler, incomingEntityID, eventtest.RootIngress(
+	gotID, gotEvt, _ := resolveHandlerEntityIDForFlow(source, "scoring", handler, incomingEntityID, handlerTestRootIngress(
 		"",
 		events.EventType("vertical.discovered"),
 		"",
@@ -1074,7 +1059,7 @@ func TestResolveHandlerEntityIDForRootKeepsFlowScopedInboundEntity(t *testing.T)
 		Metadata: map[string]any{},
 	}
 
-	gotID, gotEvt := resolveHandlerEntityIDForFlow(nil, "", handler, inboundEntityID, eventtest.RootIngress(
+	gotID, gotEvt, _ := resolveHandlerEntityIDForFlow(nil, "", handler, inboundEntityID, handlerTestRootIngress(
 		"",
 		events.EventType("child/grandchild/task.done"),
 		"",
@@ -1113,7 +1098,7 @@ func TestResolveHandlerEntityIDForFlowKeepsInboundEntityForDescendantScopedInbou
 		},
 	}
 
-	gotID, gotEvt := resolveHandlerEntityIDForFlow(nil, "child", handler, inboundEntityID, eventtest.RootIngress(
+	gotID, gotEvt, _ := resolveHandlerEntityIDForFlow(nil, "child", handler, inboundEntityID, handlerTestRootIngress(
 		"",
 		events.EventType("child/grandchild/micro.done"),
 		"",
@@ -1154,7 +1139,7 @@ func TestResolveHandlerEntityIDForFlowDoesNotRetargetSameFlowInstancePath(t *tes
 		},
 	}
 
-	gotID, gotEvt := resolveHandlerEntityIDForFlow(nil, "child", handler, entityID, eventtest.RootIngress(
+	gotID, gotEvt, _ := resolveHandlerEntityIDForFlow(nil, "child", handler, entityID, handlerTestRootIngress(
 		"",
 		events.EventType("child/grandchild/micro.done"),
 		"",
@@ -1215,7 +1200,7 @@ vertical:
 		Status:   "active",
 		Metadata: map[string]any{"name": "Parent"},
 	}
-	inbound := eventtest.RootIngress(
+	inbound := handlerTestRootIngress(
 		"",
 		events.EventType("vertical.discovered"),
 		"",
@@ -1228,7 +1213,7 @@ vertical:
 		time.Time{},
 	)
 
-	gotID, gotEvt := resolveHandlerEntityIDForFlow(source, "scoring", handler, inboundEntityID, inbound, &state)
+	gotID, gotEvt, _ := resolveHandlerEntityIDForFlow(source, "scoring", handler, inboundEntityID, inbound, &state)
 
 	if gotID != FlowInstanceEntityID("scoring/scoring") {
 		t.Fatalf("entityID = %q, want canonical flow primary %q", gotID, FlowInstanceEntityID("scoring/scoring"))
@@ -1322,7 +1307,7 @@ func TestExecuteNodeContractHandlerRejectsMalformedPersistedGateShape(t *testing
 	}
 
 	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
-		Event: eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
+		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
 		State: WorkflowState{
 			Stage:    WorkflowStateID("queued"),
 			Metadata: map[string]any{"gates": "invalid"},
@@ -1340,7 +1325,7 @@ func TestResolveHandlerEntityIDForFlowCreateEntityDoesNotSeedSubjectID(t *testin
 	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
 	state := WorkflowState{}
 
-	gotID, _ := resolveHandlerEntityIDForFlow(nil, "scoring", handler, "", eventtest.RootIngress("", events.EventType("vertical.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), &state)
+	gotID, _, _ := resolveHandlerEntityIDForFlow(nil, "scoring", handler, "", handlerTestRootIngress("", events.EventType("vertical.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), &state)
 
 	if want := FlowInstanceEntityID("scoring/scoring"); gotID != want {
 		t.Fatalf("entityID = %q, want canonical flow primary %q", gotID, want)
@@ -1406,7 +1391,10 @@ node-a:
 		},
 	}
 
-	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	trigger := handlerTestRootIngress("", events.EventType("candidate.discovered"), "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{})
+	seedPipelineEventRecord(t, ctx, db, trigger)
+	result, err := pc.executeNodeContractHandler(ctx, "node-a", runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
 		Guard:        &runtimecontracts.GuardSpec{Check: `entity.revision_count == 0 && entity.kill_reason == ""`},
 		Emit: runtimecontracts.EmitSpec{
@@ -1416,7 +1404,7 @@ node-a:
 			},
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress("", events.EventType("candidate.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event: trigger,
 		State: WorkflowState{},
 	}, false)
 	if err != nil {
@@ -1558,7 +1546,7 @@ node-a:
 	}
 	runHandler := func(entityID, requestID string) error {
 		_, err := pc.executeNodeContractHandler(ctx, "node-a", handler, workflowTriggerContext{
-			Event: eventtest.RootIngress(
+			Event: handlerTestRootIngress(
 				"evt-"+requestID,
 				events.EventType("request.received"),
 				"",
@@ -1662,7 +1650,10 @@ node-a:
 		},
 	}
 
-	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	trigger := handlerTestRootIngress("", events.EventType("candidate.ready"), "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{})
+	seedPipelineEventRecord(t, ctx, db, trigger)
+	result, err := pc.executeNodeContractHandler(ctx, "node-a", runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
 		Guard:        &runtimecontracts.GuardSpec{Check: `entity.status == "pending"`},
 		Emit: runtimecontracts.EmitSpec{
@@ -1672,7 +1663,7 @@ node-a:
 			},
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress("", events.EventType("candidate.ready"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event: trigger,
 		State: WorkflowState{},
 	}, false)
 	if err != nil {
@@ -1793,12 +1784,15 @@ node-a:
 		},
 	}
 
-	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	trigger := handlerTestRootIngress("", events.EventType("candidate.discovered"), "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{})
+	seedPipelineEventRecord(t, ctx, db, trigger)
+	result, err := pc.executeNodeContractHandler(ctx, "node-a", runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
 		Clear:        &runtimecontracts.ClearSpec{Targets: []string{"entity.revision_count"}},
 		Emit:         runtimecontracts.EmitSpec{Event: "entity.created"},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress("", events.EventType("candidate.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event: trigger,
 		State: WorkflowState{},
 	}, false)
 	if err != nil {
@@ -1899,7 +1893,7 @@ node-a:
 		t.Fatal("expected temp workflow bundle")
 	}
 
-	preview, err := PreviewContractHandlerExecution(testAuthorActivityContext(context.Background()), bundle, "node-a", eventtest.RootIngress("", events.EventType("candidate.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), WorkflowState{}, nil)
+	preview, err := PreviewContractHandlerExecution(testAuthorActivityContext(context.Background()), bundle, "node-a", handlerTestRootIngress("", events.EventType("candidate.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), WorkflowState{}, nil)
 	if err != nil {
 		t.Fatalf("PreviewContractHandlerExecution: %v", err)
 	}
@@ -1956,7 +1950,7 @@ func TestExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntity(t *tes
 	}
 
 	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
-		Event: eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
+		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
 		State: WorkflowState{Stage: WorkflowStateID("done"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
@@ -1989,7 +1983,7 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsToEmittedEvent(t *testing.T)
 			},
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress(
+		Event: handlerTestRootIngress(
 			"",
 			events.EventType("custom.trigger"),
 			"",
@@ -2049,7 +2043,7 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsSparseFieldPresenceCheck(t *
 			},
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress(
+		Event: handlerTestRootIngress(
 			"",
 			events.EventType("custom.trigger"),
 			"",
@@ -2131,7 +2125,7 @@ node-a:
 			},
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", mustJSON(map[string]any{"reason": "active"}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", mustJSON(map[string]any{"reason": "active"}), 0, "", "", events.EventEnvelope{}, time.Time{}),
 
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
@@ -2210,7 +2204,7 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 	}); err != nil {
 		t.Fatalf("seed grandchild instance: %v", err)
 	}
-	if consume, handled, err := pc.workflowNodeInterceptPolicy(testAuthorActivityContext(context.Background()), "child/grandchild/micro.done", eventtest.RootIngress(
+	if consume, handled, err := pc.workflowNodeInterceptPolicy(testAuthorActivityContext(context.Background()), "child/grandchild/micro.done", handlerTestRootIngress(
 		"",
 		events.EventType("child/grandchild/micro.done"),
 		"",
@@ -2225,7 +2219,7 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 		t.Fatalf("workflowNodeInterceptPolicy handled = %v, consume = %v, err = %v, want handled", handled, consume, err)
 	}
 
-	evt := eventtest.RootIngress(
+	evt := handlerTestRootIngress(
 		uuid.NewString(),
 		events.EventType("child/grandchild/micro.done"),
 		"",
@@ -2275,7 +2269,7 @@ func TestExecuteNodeContractHandlerRejectsAmbiguousHandlerTopLevelEmitWithRules(
 			{ID: "pick-rule", Condition: "true", Emit: runtimecontracts.EmitSpec{Event: "rule.emitted"}},
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress(
+		Event: handlerTestRootIngress(
 			"",
 			events.EventType("custom.trigger"),
 			"",
@@ -2312,7 +2306,7 @@ func TestExecuteNodeContractHandlerRejectsAmbiguousHandlerTopLevelEmitWithRulesW
 			{ID: "pick-rule", Condition: "true", AdvancesTo: "done"},
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress(
+		Event: handlerTestRootIngress(
 			"",
 			events.EventType("custom.trigger"),
 			"",
@@ -2353,7 +2347,7 @@ func TestExecuteNodeContractHandlerOnCompleteDoesNotSeeCurrentHandlerTopLevelWri
 			{ID: "too-early", Condition: `"branch_target" in entity && entity.branch_target == "handler"`, Emit: runtimecontracts.EmitSpec{Event: "branch.selected"}},
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
+		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
 
 		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
@@ -2375,7 +2369,7 @@ func TestExecuteNodeContractHandlerExecutesEmitInsideEngine(t *testing.T) {
 	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress("00000000-0000-0000-0000-000000000002", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Unix(2, 0).UTC()),
+		Event: handlerTestRootIngress("00000000-0000-0000-0000-000000000002", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Unix(2, 0).UTC()),
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
@@ -2402,7 +2396,7 @@ func TestExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrder(t *testing.T) 
 			{ID: "pick-rule", Condition: "true", Emit: runtimecontracts.EmitSpec{Event: "rule.emitted"}},
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{}),
+		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{}),
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
@@ -2458,7 +2452,7 @@ func TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent(t *t
 			},
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress(
+		Event: handlerTestRootIngress(
 			"",
 			events.EventType("account.scored"),
 			"",
@@ -2513,7 +2507,7 @@ func TestExecuteNodeContractHandlerOnSuccessOutboxFailureDoesNotPartiallyPublish
 			{ID: "pick-rule", Condition: "true", Emit: runtimecontracts.EmitSpec{Event: "rule.emitted"}},
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
+		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err == nil || !strings.Contains(err.Error(), "outbox failed") {
@@ -2627,7 +2621,7 @@ func TestExecuteNodeContractHandler_UsesEmitFieldsAsOnlyBusinessPayloadSource(t 
 			},
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress(
+		Event: handlerTestRootIngress(
 			"",
 			events.EventType("custom.trigger"),
 			"",
@@ -2689,7 +2683,7 @@ func TestExecuteNodeContractHandler_GuardEscalateUsesOnlyRuntimeOwnedEnvelope(t 
 			OnFail: "escalate:guard.failed",
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress(
+		Event: handlerTestRootIngress(
 			"",
 			events.EventType("custom.trigger"),
 			"",
@@ -2763,7 +2757,7 @@ func TestExecuteNodeContractHandler_GuardEscalateObjectFieldsUseExplicitPayloadO
 			},
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.RootIngress(
+		Event: handlerTestRootIngress(
 			"",
 			events.EventType("custom.trigger"),
 			"",
@@ -2813,7 +2807,7 @@ func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossSuppor
 	}{
 		{
 			name:  "handler top level",
-			event: eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
+			event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
 			state: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 			handler: runtimecontracts.SystemNodeEventHandler{
 				Emit: runtimecontracts.EmitSpec{
@@ -2827,7 +2821,7 @@ func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossSuppor
 		},
 		{
 			name:  "rules",
-			event: eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
+			event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
 			state: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 			handler: runtimecontracts.SystemNodeEventHandler{
 				Rules: []runtimecontracts.HandlerRuleEntry{{
@@ -2845,7 +2839,7 @@ func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossSuppor
 		},
 		{
 			name:  "on_complete",
-			event: eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
+			event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
 			state: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 			handler: runtimecontracts.SystemNodeEventHandler{
 				OnComplete: []runtimecontracts.HandlerRuleEntry{{
@@ -2863,7 +2857,7 @@ func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossSuppor
 		},
 		{
 			name: "fan_out",
-			event: eventtest.RootIngress(
+			event: handlerTestRootIngress(
 				"",
 				events.EventType("batch.submitted"),
 				"",

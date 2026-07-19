@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -105,7 +106,14 @@ func TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores(t *t
 			insertProposedEffectAPIRun(t, db, tc.name, runID)
 			cards := persistence.(decisioncard.Store)
 			card, continuation := proposedEffectAPICard(t, runID, entityID, fact, source.WorkflowVersion())
-			if err := cards.(decisioncard.ProposedEffectStore).CreateProposedEffectCard(testAuthorActivityContextForSource(context.Background(), fact), card, continuation); err != nil {
+			fixtureCtx := testAuthorActivityContextForSource(context.Background(), fact)
+			storetest.CommitSemanticEvent(t, fixtureCtx, persistence, eventtest.RootIngress(
+				continuation.SourceEventID, events.EventType("thing.created"), "operator", continuation.SourceTaskID,
+				[]byte(`{"amount":250,"who":"alice"}`), 0, runID, "",
+				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), continuation.FlowInstance),
+				continuation.CreatedAt.Add(-time.Second),
+			))
+			if err := cards.(decisioncard.ProposedEffectStore).CreateProposedEffectCard(fixtureCtx, card, continuation); err != nil {
 				t.Fatal(err)
 			}
 
@@ -227,7 +235,7 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 	sourceEventID := uuid.NewString()
 	requestEventID := activityidentity.RequestEventID(activityidentity.Fact{
 		RunID: runID, SourceEventID: sourceEventID, EntityID: entityID,
-		NodeID: "activity-runtime", HandlerEventKey: "support.reply_drafted",
+		FlowID: "root", NodeID: "activity-runtime", HandlerEventKey: "support.reply_drafted",
 		ActivityID: "send_support_reply", Tool: "provider_write", Attempt: 1,
 	})
 	input, err := canonicaljson.FromGo(map[string]any{"text": "Exact operator-approved content"})
@@ -242,7 +250,7 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 		SuccessEvent: "send_support_reply.succeeded", FailureEvent: "send_support_reply.failed",
 		RevisionEvent: "send_support_reply.revision_requested", RejectedEvent: "send_support_reply.rejected",
 		RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
-		EntityID: entityID, NodeID: "activity-runtime", FlowInstance: "root", HandlerEventKey: "support.reply_drafted",
+		EntityID: entityID, NodeID: "activity-runtime", FlowID: "root", FlowInstance: "root", HandlerEventKey: "support.reply_drafted",
 		SourceEventID: sourceEventID, SourceRunID: runID, SourceTaskID: "task-1",
 		ExecutionMode: "live", State: decisioncard.ProposedEffectPending, CreatedAt: now, UpdatedAt: now,
 	}.Canonical()

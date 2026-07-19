@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
@@ -23,9 +24,10 @@ type engineDispatcher struct {
 }
 
 type pendingOutboxOperation struct {
-	sequence uint64
-	intent   runtimeengine.EmitIntent
-	outcome  EventAppendOutcome
+	sequence         uint64
+	intent           runtimeengine.EmitIntent
+	outcome          EventAppendOutcome
+	publicationClaim *pipelinePublicationClaim
 }
 
 func (eb *EventBus) EngineOutbox() runtimeengine.OutboxWriter {
@@ -46,11 +48,10 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 	if o.bus == nil || len(intents) == 0 {
 		return nil
 	}
-	mutation, ok := o.bus.eventMutationFromContext(ctx)
-	if !ok || mutation == nil {
-		return nil
+	transaction, ok := CommitPublishTransactionFromContext(ctx)
+	if !ok || transaction == nil {
+		return fmt.Errorf("engine outbox requires typed event commit transaction")
 	}
-	ctx = mutation.Context()
 	for i := range intents {
 		intent := &intents[i]
 		if strings.TrimSpace(string(intent.Event.Type())) == "" {
@@ -58,39 +59,48 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 		}
 		intentCtx := events.WithDeliveryContext(ctx, intent.Context)
 		var err error
-		intent.Event, err = normalizeOutboxEvent(intentCtx, intent.Event)
+		_, admitted, err := admitEventForPublish(intentCtx, intent.Event, time.Now().UTC())
 		if err != nil {
 			return err
 		}
+		intent.Event = admitted.Event()
 		intentCtx, err = o.bus.withAuthorActivityEventDescriptor(intentCtx, intent.Event)
 		if err != nil {
 			return err
 		}
-		appendOutcome, err := appendEventMutationOutcome(intentCtx, mutation, intent.Event)
+		publicationClaim, err := o.bus.claimPipelinePublication(intentCtx, intent.Event.ID())
+		if err != nil {
+			return err
+		}
+		intentCtx = publicationClaim.BindContext(intentCtx)
+		if publicationClaim != nil && !runtimepipeline.QueuePipelineRollbackAction(intentCtx, func() { publicationClaim.Release(intentCtx) }) {
+			publicationClaim.Release(intentCtx)
+			return errors.New("engine outbox requires event publication rollback ownership")
+		}
+		appendOutcome, err := beginPreparedPublish(intentCtx, transaction, admitted)
 		if err != nil {
 			return fmt.Errorf("persist event: %w", err)
 		}
 		if appendOutcome == EventAppendExactDuplicate {
-			o.bus.stagePendingOutboxOperation(ctx, *intent, appendOutcome)
+			o.bus.stagePendingOutboxOperation(ctx, *intent, appendOutcome, publicationClaim)
 			continue
 		}
 		plan, err := o.deliveryPlanForIntent(intentCtx, *intent)
 		if err != nil {
 			return err
 		}
-		if err := o.bus.insertEventDeliveriesMutation(ctx, mutation, intent.Event.ID(), plan.PersistedRecipientIDs(), plan.DeliveryTargets(), plan.DeliveryRoutes()); err != nil {
-			return fmt.Errorf("persist event deliveries: %w", err)
-		}
-		if err := o.bus.upsertCommittedReplayScopeMutation(ctx, mutation, intent.Event.ID(), replayScopeForEmitIntent(*intent)); err != nil {
-			return err
-		}
+		var receipt *InitialPipelineReceipt
+		var deadLetter *runtimedeadletters.Record
 		if plan.TargetFailure != "" {
-			if err := mutation.UpsertPipelineReceipt(ctx, intent.Event.ID(), "dead_letter", targetDeliveryFailureEnvelope(plan.TargetFailure)); err != nil {
-				return fmt.Errorf("persist pipeline receipt: %w", err)
-			}
-			if err := o.bus.recordTargetDeliveryFailureMutation(ctx, mutation, intent.Event, plan); err != nil {
-				return err
-			}
+			receipt = &InitialPipelineReceipt{Status: "dead_letter", Failure: targetDeliveryFailureEnvelope(plan.TargetFailure)}
+			_, _, record := targetDeliveryFailureRecord(intent.Event, plan, plan.TargetFailure)
+			deadLetter = &record
+		}
+		if err := finalizePreparedPublish(intentCtx, transaction, CommitPublishRequest{
+			Event: admitted, DeliveryRoutes: plan.DeliveryRoutes(), ReplayScope: replayScopeForEmitIntent(*intent),
+			PipelineReceipt: receipt, DeadLetter: deadLetter,
+		}); err != nil {
+			return fmt.Errorf("finalize event publish: %w", err)
 		}
 		if o.bus.testLifecycleProbe != nil {
 			event := intent.Event
@@ -100,7 +110,7 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 			})
 		}
 		o.bus.setPendingInternalDeliveryRoutes(intent.Event.ID(), plan.InternalDeliveryRoutes())
-		o.bus.stagePendingOutboxOperation(ctx, *intent, appendOutcome)
+		o.bus.stagePendingOutboxOperation(ctx, *intent, appendOutcome, publicationClaim)
 	}
 	return nil
 }
@@ -122,11 +132,11 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 			continue
 		}
 		intent := intents[i]
-		var err error
-		intent.Event, err = normalizeOutboxEvent(ctx, intent.Event)
+		_, admitted, err := admitEventForPublish(ctx, intent.Event, time.Now().UTC())
 		if err != nil {
 			return err
 		}
+		intent.Event = admitted.Event()
 		normalized = append(normalized, intent)
 	}
 	intents = normalized
@@ -140,7 +150,7 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 		queuedIntents := clonePostCommitEmitIntents(intents)
 		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
 			postCommitActions := make([]func(), 0, 4)
-			dispatchCtx := runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx))
+			dispatchCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)))
 			dispatchCtx = runtimepipeline.WithPipelinePostCommitActions(dispatchCtx, &postCommitActions)
 			if err := d.DispatchPostCommit(dispatchCtx, queuedIntents); err != nil {
 				d.bus.logRuntime(dispatchCtx, "error", "Post-commit outbox dispatch failed", "eventbus", "post_commit_outbox_dispatch_failed", "", "", "", "", "", nil, map[string]any{
@@ -173,6 +183,8 @@ func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fa
 	if !ok {
 		return false, nil
 	}
+	ctx = operation.publicationClaim.BindContext(ctx)
+	defer operation.publicationClaim.Release(ctx)
 	if operation.intent.Event.Type() != fallback.Event.Type() {
 		return true, fmt.Errorf("pending outbox event type mismatch for %s: persisted=%s dispatch=%s", fallback.Event.ID(), operation.intent.Event.Type(), fallback.Event.Type())
 	}
@@ -206,7 +218,7 @@ func clonePostCommitEmitIntents(intents []runtimeengine.EmitIntent) []runtimeeng
 	cloned := make([]runtimeengine.EmitIntent, 0, len(intents))
 	for _, intent := range intents {
 		copyIntent := intent
-		copyIntent.Event = clonePostCommitEvent(intent.Event)
+		copyIntent.Event = clonePostCommitPublish(intent.Event)
 		if intent.Recipients != nil {
 			copyIntent.Recipients = append([]string(nil), intent.Recipients...)
 		}
@@ -215,7 +227,7 @@ func clonePostCommitEmitIntents(intents []runtimeengine.EmitIntent) []runtimeeng
 	return cloned
 }
 
-func clonePostCommitEvent(evt events.Event) events.Event {
+func clonePostCommitPublish(evt events.Event) events.Event {
 	return evt.Clone()
 }
 
@@ -322,11 +334,6 @@ func (d engineDispatcher) dispatchExplicitDirectIntent(ctx context.Context, inte
 	return nil
 }
 
-func normalizeOutboxEvent(ctx context.Context, evt events.Event) (events.Event, error) {
-	_, admitted, err := admitEventForPublish(ctx, evt, time.Now().UTC())
-	return admitted, err
-}
-
 func replayScopeForEmitIntent(intent runtimeengine.EmitIntent) runtimereplayclaim.CommittedReplayScope {
 	if len(intent.Recipients) > 0 {
 		return runtimereplayclaim.CommittedReplayScopeDirect
@@ -375,11 +382,11 @@ func (eb *EventBus) clearPendingInternalDeliveryRoutes(eventID string) {
 	delete(eb.pendingInternalByID, eventID)
 }
 
-func (eb *EventBus) stagePendingOutboxOperation(ctx context.Context, intent runtimeengine.EmitIntent, outcome EventAppendOutcome) {
+func (eb *EventBus) stagePendingOutboxOperation(ctx context.Context, intent runtimeengine.EmitIntent, outcome EventAppendOutcome, publicationClaim *pipelinePublicationClaim) {
 	if eb == nil {
 		return
 	}
-	intent.Event = clonePostCommitEvent(intent.Event)
+	intent.Event = clonePostCommitPublish(intent.Event)
 	if intent.Recipients != nil {
 		intent.Recipients = append([]string(nil), intent.Recipients...)
 	}
@@ -390,7 +397,9 @@ func (eb *EventBus) stagePendingOutboxOperation(ctx context.Context, intent runt
 	eb.mu.Lock()
 	eb.pendingOutboxSequence++
 	sequence := eb.pendingOutboxSequence
-	eb.pendingOutboxByID[eventID] = append(eb.pendingOutboxByID[eventID], pendingOutboxOperation{sequence: sequence, intent: intent, outcome: outcome})
+	eb.pendingOutboxByID[eventID] = append(eb.pendingOutboxByID[eventID], pendingOutboxOperation{
+		sequence: sequence, intent: intent, outcome: outcome, publicationClaim: publicationClaim,
+	})
 	eb.mu.Unlock()
 	_ = runtimepipeline.QueuePipelineRollbackAction(ctx, func() {
 		eb.removePendingOutboxOperation(eventID, sequence)
@@ -444,6 +453,10 @@ func (eb *EventBus) clearPendingOutboxOperation(eventID string) {
 		return
 	}
 	eb.mu.Lock()
+	operations := eb.pendingOutboxByID[strings.TrimSpace(eventID)]
 	delete(eb.pendingOutboxByID, strings.TrimSpace(eventID))
 	eb.mu.Unlock()
+	for _, operation := range operations {
+		operation.publicationClaim.Release(context.Background())
+	}
 }

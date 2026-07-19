@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
@@ -287,8 +288,18 @@ func expireHumanTaskCards(ctx context.Context, tx *sql.Tx, now time.Time, limit 
 		if err != nil {
 			return nil, err
 		}
-		evt := events.NewRuntimeControlEvent(eventID, events.EventType("mailbox.card_expired"), events.PlatformProducer("platform"), "", payload, 0, card.RunID, "",
-			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance), now)
+		evt, err := events.NewRuntimeControlEvent(events.RuntimeEventInput{
+			Facts: events.EventFacts{
+				ID: eventID, Type: events.EventType("mailbox.card_expired"),
+				Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "platform"},
+				Payload:  payload, Envelope: events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance),
+				CreatedAt: now, ExecutionMode: executionmode.Live,
+			},
+			RunID: card.RunID,
+		})
+		if err != nil {
+			return nil, err
+		}
 		expiredEvents = append(expiredEvents, evt)
 	}
 	return expiredEvents, nil

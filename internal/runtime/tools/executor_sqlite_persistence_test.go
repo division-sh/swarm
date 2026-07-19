@@ -344,25 +344,18 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at) VALUES ($1::uuid, 'running', $2, $3, $4, $5)`, runID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint, now); err != nil {
 			t.Fatalf("seed postgres reply tool run: %v", err)
 		}
-		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `
-			INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ('live', $1::uuid, $2::uuid, 'provider.requested', 'global', '{}'::jsonb, 'requester', 'node', $3)
-		`, runID, requestEventID, now); err != nil {
-			t.Fatalf("seed postgres reply tool event: %v", err)
-		}
 	case *store.SQLiteRuntimeStore:
 		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at) VALUES (?, 'running', ?, ?, ?, ?)`, runID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint, now); err != nil {
 			t.Fatalf("seed sqlite reply tool run: %v", err)
 		}
-		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `
-			INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ('live', ?, ?, 'provider.requested', 'global', '{}', 'requester', 'node', ?)
-		`, runID, requestEventID, now); err != nil {
-			t.Fatalf("seed sqlite reply tool event: %v", err)
-		}
 	default:
 		t.Fatalf("unsupported reply tool store %T", persistence)
 	}
+	storetest.CommitSemanticEvent(t, unmanagedToolTestContext(), persistence, eventtest.PersistedProjectionForProducer(
+		requestEventID, events.EventType("provider.requested"),
+		eventtest.Producer(events.EventProducerNode, "requester"), "", []byte(`{}`), 0,
+		runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, now,
+	))
 	record := runtimereplycontext.Record{
 		RunID:                runID,
 		RequestEventID:       requestEventID,
@@ -391,7 +384,7 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 		0,
 		runID,
 		"",
-		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "provider", FlowInstance: "provider"}),
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "provider", FlowInstance: "provider", EntityID: record.Origin.EntityID}),
 		now,
 	)
 	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(unmanagedToolTestContext(), runID), inbound)

@@ -12,6 +12,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -205,20 +206,30 @@ func TestExecAgentReconfigure_UsesAuthorizedManagerLifecyclePath(t *testing.T) {
 }
 
 func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
-	provider := runtimeauthority.NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"control": {
-				ID:    "control",
-				Role:  "control",
-				Tools: []string{"message_flow"},
-			},
-			"reviewer": {
-				ID:    "reviewer",
-				Role:  "reviewer",
-				Tools: []string{"message_peers"},
-			},
+	agents := map[string]runtimecontracts.AgentRegistryEntry{
+		"control": {
+			ID:    "control",
+			Role:  "control",
+			Tools: []string{"message_flow"},
 		},
-	}))
+		"reviewer": {
+			ID:    "reviewer",
+			Role:  "reviewer",
+			Tools: []string{"message_peers"},
+		},
+	}
+	reviewFlow := &runtimecontracts.FlowContractView{
+		Paths:  runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
+		Path:   "review",
+		Agents: agents,
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: reviewFlow,
+			ByID: map[string]*runtimecontracts.FlowContractView{"review": reviewFlow},
+		},
+	})
+	provider := runtimeauthority.NewSourceProvider(source)
 
 	bus := &publishDirectBusStub{}
 	manager := managerStub{
@@ -232,24 +243,19 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 			},
 		},
 	}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
-	ctx := runtimeeffects.WithExecutionMode(WithActor(unmanagedToolTestContext(), models.AgentConfig{
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider, WorkflowSource: source})
+	actor := models.AgentConfig{
 		ExecutionMode: "mock",
 		ID:            "control",
 		Role:          "control",
 		Permissions:   []string{"message_flow"},
 		EntityID:      "entity-a",
+		FlowID:        "review",
 		FlowPath:      "review/inst-1",
-	}), runtimeeffects.ExecutionModeMock)
+	}
+	ctx := runtimeeffects.WithExecutionMode(WithActor(toolEventTestContext(actor), actor), runtimeeffects.ExecutionModeMock)
 
-	if _, err := exec.execAgentMessage(ctx, models.AgentConfig{
-		ExecutionMode: "mock",
-		ID:            "control",
-		Role:          "control",
-		Permissions:   []string{"message_flow"},
-		EntityID:      "entity-a",
-		FlowPath:      "review/inst-1",
-	}, map[string]any{
+	if _, err := exec.execAgentMessage(ctx, actor, map[string]any{
 		"target_agent_id": "target-1",
 		"message":         "hello",
 	}); err != nil {

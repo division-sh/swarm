@@ -29,6 +29,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -717,18 +718,17 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 	waitForInboundBusQuiescence(t, bus)
 	requireInboundPostCommitSnapshot(t, requireInboundBusEvent(t, ch, "Telegram PostgreSQL post-commit dispatch"), inboundPublicationEvent(t, record, eventID))
 
-	if _, err := db.ExecContext(ctx, `UPDATE events SET chain_depth = -1 WHERE event_id = $1::uuid`, eventID); err != nil {
-		t.Fatalf("corrupt Telegram PostgreSQL event lineage: %v", err)
-	}
+	eventtestsql.CorruptEventStore(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventtestsql.EventCorruptionClaim{
+		Invariant: "store.event_record.duplicate_integrity",
+		Reason:    "prove inbound duplicate comparison rejects a schema-valid durable payload conflict",
+	}, "", `UPDATE events SET payload = '{"corrupt":true}'::jsonb WHERE event_id = $1::uuid`, eventID)
 	duplicate := httptest.NewRecorder()
 	handleBoundedProviderDelivery(t, g, bus, pg, duplicate, newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body), runID, entityID, provider, webhookSecret)
 	if duplicate.Code != http.StatusServiceUnavailable {
 		t.Fatalf("corrupt duplicate status = %d, want 503 body=%s", duplicate.Code, duplicate.Body.String())
 	}
 	requireNoInboundBusEvent(t, ch, "corrupt Telegram PostgreSQL duplicate")
-	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
-		t.Fatalf("provider event rows after corrupt duplicate = %d, want 1", got)
-	}
+	eventtestsql.RequireEventRowCount(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, 1)
 }
 
 func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *testing.T) {
@@ -788,18 +788,17 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 	waitForInboundBusQuiescence(t, bus)
 	requireInboundPostCommitSnapshot(t, requireInboundBusEvent(t, ch, "Telegram SQLite post-commit dispatch"), inboundPublicationEvent(t, record, eventID))
 
-	if _, err := sqliteStore.DB.ExecContext(ctx, `UPDATE events SET chain_depth = -1 WHERE event_id = ?`, eventID); err != nil {
-		t.Fatalf("corrupt Telegram SQLite event lineage: %v", err)
-	}
+	eventtestsql.CorruptEventStore(t, ctx, sqliteStore.DB, runtimeauthoractivity.DialectSQLite, eventtestsql.EventCorruptionClaim{
+		Invariant: "store.event_record.duplicate_integrity",
+		Reason:    "prove inbound duplicate comparison rejects a schema-valid durable payload conflict",
+	}, `UPDATE events SET payload = '{"corrupt":true}' WHERE event_id = ?`, "", eventID)
 	duplicate := httptest.NewRecorder()
 	handleBoundedProviderDelivery(t, g, bus, sqliteStore, duplicate, newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body), runID, entityID, provider, webhookSecret)
 	if duplicate.Code != http.StatusServiceUnavailable {
 		t.Fatalf("corrupt duplicate status = %d, want 503 body=%s", duplicate.Code, duplicate.Body.String())
 	}
 	requireNoInboundBusEvent(t, ch, "corrupt Telegram SQLite duplicate")
-	if got := countSQLiteInboundProviderEvents(t, ctx, sqliteStore, runID, entityID, providerEventName, providerEventID); got != 1 {
-		t.Fatalf("provider event rows after corrupt duplicate = %d, want 1", got)
-	}
+	eventtestsql.RequireEventRowCount(t, ctx, sqliteStore.DB, runtimeauthoractivity.DialectSQLite, eventID, 1)
 }
 
 func inboundPublicationEvent(t testing.TB, record runtimeinbound.Record, eventID string) events.Event {
@@ -810,7 +809,7 @@ func inboundPublicationEvent(t testing.TB, record runtimeinbound.Record, eventID
 		}
 	}
 	t.Fatalf("inbound publication does not contain event %s: %#v", eventID, record.Events)
-	return events.EmptyEvent()
+	return events.Event{}
 }
 
 func requireInboundPostCommitSnapshot(t testing.TB, got, want events.Event) {
@@ -1422,7 +1421,7 @@ func requireInboundBusEvent(t testing.TB, ch <-chan events.Event, context string
 		return evt
 	default:
 		t.Fatalf("%s: expected queued bus event", context)
-		return events.EmptyEvent()
+		return events.Event{}
 	}
 }
 

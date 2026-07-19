@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
@@ -171,12 +172,8 @@ func (startupRecoveryMinimalEventStore) RegisterAuthorActivityEventCatalog(scope
 	return runtimeauthoractivity.NewEventCatalogRegistry().Register(scope, descriptors)
 }
 
-func (startupRecoveryMinimalEventStore) AppendEvent(context.Context, events.Event) error {
-	return nil
-}
-
-func (startupRecoveryMinimalEventStore) InsertEventDeliveries(context.Context, string, []string) error {
-	return nil
+func (startupRecoveryMinimalEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return runtimebustest.CommitPublishNoop(ctx, plan)
 }
 
 func (startupRecoveryMinimalEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
@@ -195,10 +192,8 @@ func (startupRecoveryEventStore) RegisterAuthorActivityEventCatalog(scope runtim
 	return runtimeauthoractivity.NewEventCatalogRegistry().Register(scope, descriptors)
 }
 
-func (startupRecoveryEventStore) AppendEvent(context.Context, events.Event) error { return nil }
-
-func (startupRecoveryEventStore) InsertEventDeliveries(context.Context, string, []string) error {
-	return nil
+func (startupRecoveryEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return runtimebustest.CommitPublishNoop(ctx, plan)
 }
 
 func (startupRecoveryEventStore) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {

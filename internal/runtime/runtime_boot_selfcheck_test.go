@@ -11,6 +11,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -60,19 +61,22 @@ func TestRuntimeStart_PipelineMaintenanceFailureUsesCanonicalBootStepIdentity(t 
 	}
 }
 
-func (s *bootSelfCheckDescriptorStore) AppendEvent(_ context.Context, evt events.Event) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.events = append(s.events, evt)
-	return nil
+func (s *bootSelfCheckDescriptorStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.events = append(s.events, req.Event.Event())
+		s.deliveries = s.deliveries[:0]
+		for _, route := range req.DeliveryRoutes {
+			if route.SubscriberType == "agent" {
+				s.deliveries = append(s.deliveries, route.SubscriberID)
+			}
+		}
+		return nil
+	})
 }
 
-func (s *bootSelfCheckDescriptorStore) InsertEventDeliveries(_ context.Context, _ string, recipients []string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.deliveries = append([]string(nil), recipients...)
-	return nil
-}
+func (*bootSelfCheckDescriptorStore) SupportsPersistedReplay() bool { return false }
 
 func (s *bootSelfCheckDescriptorStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	s.mu.Lock()

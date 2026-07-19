@@ -74,15 +74,15 @@ func TestExecutorBoundedLoopEscapesAtStampedCapAndRejectsPriorRevision(t *testin
 	}
 	state = loopTestNextState(result)
 
-	_, err = exec.Execute(context.Background(), loopTestRequest(state, repeat, "00000000-0000-0000-0000-000000000104", map[string]any{"revision_id": firstRevision}))
+	_, err = exec.ExecuteSemanticFixture(context.Background(), loopTestRequest(state, repeat, "00000000-0000-0000-0000-000000000104", map[string]any{"revision_id": firstRevision}))
 	if envelope, ok := failures.As(err); !ok || envelope.Failure.Class != failures.ClassStaleArrival {
 		t.Fatalf("prior revision at wrong stage error = %v, want stale_arrival", err)
 	}
-	_, err = exec.Execute(context.Background(), loopTestRequest(state, repeat, "00000000-0000-0000-0000-000000000107", map[string]any{"revision_id": secondRevision}))
+	_, err = exec.ExecuteSemanticFixture(context.Background(), loopTestRequest(state, repeat, "00000000-0000-0000-0000-000000000107", map[string]any{"revision_id": secondRevision}))
 	if envelope, ok := failures.As(err); !ok || envelope.Failure.Class != failures.ClassEarlyArrival {
 		t.Fatalf("current revision at wrong stage error = %v, want early_arrival", err)
 	}
-	_, err = exec.Execute(context.Background(), loopTestRequest(state, repeat, "00000000-0000-0000-0000-000000000109", map[string]any{"revision_id": "00000000-0000-0000-0000-999999999999"}))
+	_, err = exec.ExecuteSemanticFixture(context.Background(), loopTestRequest(state, repeat, "00000000-0000-0000-0000-000000000109", map[string]any{"revision_id": "00000000-0000-0000-0000-999999999999"}))
 	if envelope, ok := failures.As(err); !ok || envelope.Failure.Class != failures.ClassUnexpectedArrival {
 		t.Fatalf("unknown revision error = %v, want unexpected_arrival", err)
 	}
@@ -97,11 +97,11 @@ func TestExecutorBoundedLoopEscapesAtStampedCapAndRejectsPriorRevision(t *testin
 		t.Fatalf("cap escape emitted ordinary repeat work: %#v", result.EmitIntents)
 	}
 	closedState := loopTestNextState(result)
-	_, err = exec.Execute(context.Background(), loopTestRequest(closedState, repeat, "00000000-0000-0000-0000-000000000108", map[string]any{"revision_id": secondRevision}))
+	_, err = exec.ExecuteSemanticFixture(context.Background(), loopTestRequest(closedState, repeat, "00000000-0000-0000-0000-000000000108", map[string]any{"revision_id": secondRevision}))
 	if envelope, ok := failures.As(err); !ok || envelope.Failure.Class != failures.ClassStaleArrival {
 		t.Fatalf("post-close revision error = %v, want stale_arrival", err)
 	}
-	_, err = exec.Execute(context.Background(), loopTestRequest(closedState, repeat, "00000000-0000-0000-0000-000000000110", map[string]any{"revision_id": "00000000-0000-0000-0000-999999999999"}))
+	_, err = exec.ExecuteSemanticFixture(context.Background(), loopTestRequest(closedState, repeat, "00000000-0000-0000-0000-000000000110", map[string]any{"revision_id": "00000000-0000-0000-0000-999999999999"}))
 	if envelope, ok := failures.As(err); !ok || envelope.Failure.Class != failures.ClassUnexpectedArrival {
 		t.Fatalf("post-close unknown revision error = %v, want unexpected_arrival", err)
 	}
@@ -109,7 +109,7 @@ func TestExecutorBoundedLoopEscapesAtStampedCapAndRejectsPriorRevision(t *testin
 
 func executeLoopTestHandler(t *testing.T, exec *Executor, state StateSnapshot, handler runtimecontracts.SystemNodeEventHandler, eventID string, payload map[string]any) ExecutionResult {
 	t.Helper()
-	result, err := exec.Execute(context.Background(), loopTestRequest(state, handler, eventID, payload))
+	result, err := exec.ExecuteSemanticFixture(context.Background(), loopTestRequest(state, handler, eventID, payload))
 	if err != nil {
 		t.Fatalf("execute %s: %v", eventID, err)
 	}
@@ -235,12 +235,12 @@ func TestLoopReturningCarrierAdmissionRejectsPriorAndAcceptsCurrentGeneration(t 
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stalePayload := map[string]any{"revision_id": priorRevision, "items": []any{map[string]any{"id": "one"}}}
-			_, err := exec.Execute(context.Background(), loopCarrierTestRequest(baseState, tc.handler, tc.eventType, uuidForLoopCarrier(tc.name, 1), stalePayload))
+			_, err := exec.ExecuteSemanticFixture(context.Background(), loopCarrierTestRequest(baseState, tc.handler, tc.eventType, uuidForLoopCarrier(tc.name, 1), stalePayload))
 			if envelope, ok := failures.As(err); !ok || envelope.Failure.Class != failures.ClassStaleArrival {
 				t.Fatalf("prior generation error = %v, want stale_arrival", err)
 			}
 			currentPayload := map[string]any{"revision_id": activation.RevisionID, "items": []any{map[string]any{"id": "one"}}}
-			result, err := exec.Execute(context.Background(), loopCarrierTestRequest(baseState, tc.handler, tc.eventType, uuidForLoopCarrier(tc.name, 2), currentPayload))
+			result, err := exec.ExecuteSemanticFixture(context.Background(), loopCarrierTestRequest(baseState, tc.handler, tc.eventType, uuidForLoopCarrier(tc.name, 2), currentPayload))
 			if err != nil {
 				t.Fatalf("current generation: %v", err)
 			}

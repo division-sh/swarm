@@ -960,6 +960,10 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 		FROM events e
 		LEFT JOIN event_deliveries d
 			ON d.event_id = e.event_id
+		   AND NOT (
+				d.subscriber_type = 'node'
+				AND d.subscriber_id = '__runtime_replay_scope__'
+		   )
 		LEFT JOIN agent_turns t
 			ON t.run_id = e.run_id
 		   AND t.trigger_event_id = e.event_id

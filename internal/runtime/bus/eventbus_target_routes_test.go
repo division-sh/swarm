@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -32,6 +34,11 @@ type targetRouteMemoryStore struct {
 	receipts    map[string]string
 	receiptErrs map[string]*runtimefailures.Envelope
 	claimed     map[string]bool
+	active      map[string]bool
+}
+
+type targetRouteMemoryPublishTransaction struct {
+	store *targetRouteMemoryStore
 }
 
 func newTargetRouteMemoryStore() *targetRouteMemoryStore {
@@ -39,25 +46,67 @@ func newTargetRouteMemoryStore() *targetRouteMemoryStore {
 		events: map[string]events.Event{},
 		routes: map[string][]events.DeliveryRoute{},
 		scopes: map[string]replayclaim.CommittedReplayScope{},
+		active: map[string]bool{},
 	}
 }
 
-func (s *targetRouteMemoryStore) AppendEvent(_ context.Context, evt events.Event) error {
-	_, err := s.AppendEventOutcome(context.Background(), evt)
-	return err
+func (s *targetRouteMemoryStore) CommitPublish(ctx context.Context, plan CommitPublishPlan) (PreparedPublish, error) {
+	if plan == nil {
+		return PreparedPublish{}, errors.New("event publish plan is required")
+	}
+	return commitPublishInMemory(ctx, plan, &targetRouteMemoryPublishTransaction{store: s})
 }
 
-func (s *targetRouteMemoryStore) AppendEventOutcome(_ context.Context, evt events.Event) (EventAppendOutcome, error) {
+func (t *targetRouteMemoryPublishTransaction) BeginPreparedPublish(ctx context.Context, prepared PreparedPublishEvent) (EventAppendOutcome, error) {
+	return t.store.BeginPreparedPublish(ctx, prepared)
+}
+
+func (s *targetRouteMemoryStore) BeginPreparedPublish(ctx context.Context, prepared PreparedPublishEvent) (EventAppendOutcome, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	evt := prepared.AdmittedEvent().Event()
 	if _, exists := s.events[evt.ID()]; exists {
 		return EventAppendExactDuplicate, nil
 	}
 	s.events[evt.ID()] = evt
+	s.active[evt.ID()] = true
+	_ = runtimepipeline.QueuePipelineRollbackAction(ctx, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		delete(s.events, evt.ID())
+		delete(s.routes, evt.ID())
+		delete(s.scopes, evt.ID())
+		delete(s.receipts, evt.ID())
+		delete(s.receiptErrs, evt.ID())
+	})
 	return EventAppendInserted, nil
 }
 
-func (s *targetRouteMemoryStore) InsertEventDeliveries(_ context.Context, _ string, _ []string) error {
+func (t *targetRouteMemoryPublishTransaction) FinalizePreparedPublish(_ context.Context, finalization PreparedPublishFinalization) error {
+	return t.store.FinalizePreparedPublish(context.Background(), finalization)
+}
+
+func (s *targetRouteMemoryStore) FinalizePreparedPublish(_ context.Context, finalization PreparedPublishFinalization) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	req := finalization.Request()
+	evt := req.Event.Event()
+	if !s.active[evt.ID()] {
+		return errors.New("prepared event finalization does not match the active event")
+	}
+	s.routes[evt.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
+	s.scopes[evt.ID()] = req.ReplayScope
+	if req.PipelineReceipt != nil {
+		if s.receipts == nil {
+			s.receipts = map[string]string{}
+		}
+		if s.receiptErrs == nil {
+			s.receiptErrs = map[string]*runtimefailures.Envelope{}
+		}
+		s.receipts[evt.ID()] = req.PipelineReceipt.Status
+		s.receiptErrs[evt.ID()] = runtimefailures.CloneEnvelope(req.PipelineReceipt.Failure)
+	}
+	delete(s.active, evt.ID())
 	return nil
 }
 
@@ -74,23 +123,6 @@ func (s *targetRouteMemoryStore) ListEventDeliveryRecipients(_ context.Context, 
 }
 
 func (s *targetRouteMemoryStore) SupportsPersistedReplay() bool { return true }
-
-func (s *targetRouteMemoryStore) PersistEventWithDeliveryRouteSetAndScope(_ context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, scope replayclaim.CommittedReplayScope) error {
-	_, err := s.PersistEventWithDeliveryRouteSetAndScopeOutcome(context.Background(), evt, deliveryRoutes, scope)
-	return err
-}
-
-func (s *targetRouteMemoryStore) PersistEventWithDeliveryRouteSetAndScopeOutcome(_ context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, scope replayclaim.CommittedReplayScope) (EventAppendOutcome, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, exists := s.events[evt.ID()]; exists {
-		return EventAppendExactDuplicate, nil
-	}
-	s.events[evt.ID()] = evt
-	s.routes[evt.ID()] = events.NormalizeDeliveryRoutes(deliveryRoutes)
-	s.scopes[evt.ID()] = scope
-	return EventAppendInserted, nil
-}
 
 func (s *targetRouteMemoryStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {
 	s.mu.Lock()
@@ -185,7 +217,8 @@ func (i *targetRouteConsumingInterceptor) Intercept(_ context.Context, evt event
 	return false, nil, nil
 }
 
-func (i *targetRouteConsumingInterceptor) InterceptDeliveryRoute(_ context.Context, evt events.Event, route events.DeliveryRoute) (bool, []events.Event, error) {
+func (i *targetRouteConsumingInterceptor) InterceptDeliveryRoute(_ context.Context, delivery events.DeliveryEvent, route events.DeliveryRoute) (bool, []events.Event, error) {
+	evt := delivery.Event()
 	if route.Target.Normalized().Empty() {
 		return true, nil, nil
 	}
@@ -1876,7 +1909,7 @@ func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *te
 }
 
 func TestEventBusPublish_NodeRouteFailsClosedWithoutRouteSetPersistence(t *testing.T) {
-	eb, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{
+	eb, err := newScopedTestEventBus(rejectingDeliveryRouteStore{}, EventBusOptions{
 		ContractBundle: semanticview.Wrap(routedTopLevelProjectNodeBundle()),
 	})
 	if err != nil {
@@ -1886,6 +1919,28 @@ func TestEventBusPublish_NodeRouteFailsClosedWithoutRouteSetPersistence(t *testi
 		events.EventType("thing.created"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err == nil || !strings.Contains(err.Error(), "typed delivery route persistence") {
 		t.Fatalf("Publish error = %v, want typed delivery route persistence failure", err)
 	}
+}
+
+type rejectingDeliveryRouteStore struct{}
+
+func (s rejectingDeliveryRouteStore) CommitPublish(ctx context.Context, plan CommitPublishPlan) (PreparedPublish, error) {
+	return commitPublishInMemory(ctx, plan, s)
+}
+
+func (rejectingDeliveryRouteStore) BeginPreparedPublish(context.Context, PreparedPublishEvent) (EventAppendOutcome, error) {
+	return EventAppendInserted, nil
+}
+
+func (rejectingDeliveryRouteStore) FinalizePreparedPublish(_ context.Context, finalization PreparedPublishFinalization) error {
+	req := finalization.Request()
+	if len(req.DeliveryRoutes) > 0 {
+		return errors.New("typed delivery route persistence is unavailable")
+	}
+	return nil
+}
+
+func (rejectingDeliveryRouteStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
+	return nil, replayclaim.ErrAuthoritativeRecipientManifestUnavailable
 }
 
 func assertTargetRouteDeliveries(t *testing.T, ch <-chan events.Event, wantEntityIDs ...string) {

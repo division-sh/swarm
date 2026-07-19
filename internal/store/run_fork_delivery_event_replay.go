@@ -71,7 +71,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, store *Pos
 		forkEventID, ok := insertedEvents[sourceEventID]
 		if !ok {
 			forkEventID = deterministicRunForkReplayEventID(lineage.ForkRunID, sourceEventID)
-			replayed, err := projectRunForkReplayEvent(sourceEvent, lineage.ForkRunID, forkEventID, now)
+			replayed, err := projectRunForkReplayEvent(sourceEvent, lineage, forkEventID, now)
 			if err != nil {
 				return result, err
 			}
@@ -150,37 +150,48 @@ func validateRunForkDeliveryEventReplayWorkAgainstPlan(pending []RunForkPendingW
 func loadRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceRunID, sourceEventID string) (events.Event, error) {
 	row, found, err := loadPostgresEventIdentity(ctx, tx, sourceEventID)
 	if err != nil {
-		return events.EmptyEvent(), fmt.Errorf("load fork delivery/event replay source event: %w", err)
+		var event events.Event
+		return event, fmt.Errorf("load fork delivery/event replay source event: %w", err)
 	}
 	if !found || row.RunID != strings.TrimSpace(sourceRunID) {
-		return events.EmptyEvent(), fmt.Errorf("fork delivery/event replay source event %s not found in run %s", sourceEventID, sourceRunID)
+		var event events.Event
+		return event, fmt.Errorf("fork delivery/event replay source event %s not found in run %s", sourceEventID, sourceRunID)
 	}
-	event, err := eventFromPersistedIdentity(row)
+	event, err := decodeEventRecord(row)
 	if err != nil {
-		return events.EmptyEvent(), fmt.Errorf("load fork delivery/event replay source event: %w", err)
+		var empty events.Event
+		return empty, fmt.Errorf("load fork delivery/event replay source event: %w", err)
 	}
-	return event, nil
+	return event.Event(), nil
 }
 
-func projectRunForkReplayEvent(source events.Event, forkRunID, forkEventID string, now time.Time) (events.Event, error) {
-	replayed := events.NewReplayEvent(
-		forkEventID,
-		source.Type(),
-		source.Producer(),
+func projectRunForkReplayEvent(source events.Event, lineage runForkActivationLineage, forkEventID string, now time.Time) (events.AdmittedEvent, error) {
+	selected, err := events.NewSelectedForkLineage(
+		lineage.ForkRunID,
+		lineage.SourceRunID,
+		source.ID(),
+		RunForkDeliveryEventReplayOwner,
 		source.TaskID(),
-		source.Payload(),
-		0,
-		events.EventLineage{RunID: forkRunID, ExecutionMode: source.ExecutionMode()},
-		source.Envelope(),
-		now,
+		source.ExecutionMode(),
 	)
-	admitted, err := events.AdmitForPersistence(replayed, events.AdmissionOptions{
-		Class:                         events.EventAdmissionReplay,
-		SelectedForkLineageOwner:      RunForkDeliveryEventReplayOwner,
-		RequirePersistentUUIDIdentity: true,
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	replayed, err := events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{
+		Facts: events.EventFacts{
+			ID: forkEventID, Type: source.Type(),
+			Producer: events.ProducerClaim{Type: source.ProducerType(), ID: source.SourceAgent()},
+			TaskID:   source.TaskID(), Payload: source.Payload(), Envelope: source.Envelope(),
+			RoutingSource: source.RoutingSource(), CreatedAt: now, ExecutionMode: source.ExecutionMode(),
+		},
+		Lineage: selected,
 	})
 	if err != nil {
-		return events.EmptyEvent(), fmt.Errorf("project fork replay event %s from source event %s: %w", forkEventID, source.ID(), err)
+		return events.AdmittedEvent{}, err
+	}
+	admitted, err := events.AdmitForPersistence(replayed, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		return events.AdmittedEvent{}, fmt.Errorf("project fork replay event %s from source event %s: %w", forkEventID, source.ID(), err)
 	}
 	return admitted, nil
 }
@@ -228,15 +239,18 @@ func insertRunForkReplayDelivery(ctx context.Context, tx *sql.Tx, lineage runFor
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO run_fork_delivery_event_replays (
-			fork_run_id, source_run_id, source_event_id, source_delivery_id,
-			fork_event_id, fork_delivery_id, subscriber_type, subscriber_id, created_at
+			replay_id, fork_run_id, source_run_id, source_event_id, source_delivery_id,
+			fork_event_id, fork_delivery_id, subscriber_type, subscriber_id,
+			selection_authority, created_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, $3::uuid, $4::uuid,
-			$5::uuid, $6::uuid, $7, $8, $9
+			$1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
+			$6::uuid, $7::uuid, $8, $9, $10, $11
 		)
 		ON CONFLICT (fork_run_id, source_delivery_id) DO NOTHING
-	`, lineage.ForkRunID, lineage.SourceRunID, sourceEventID, item.SourceDeliveryID, forkEventID, forkDeliveryID, item.SubscriberType, item.SubscriberID, now); err != nil {
+	`, deterministicRunForkReplayLineageID(lineage.ForkRunID, item.SourceDeliveryID), lineage.ForkRunID, lineage.SourceRunID,
+		sourceEventID, item.SourceDeliveryID, forkEventID, forkDeliveryID, item.SubscriberType, item.SubscriberID,
+		RunForkDeliveryEventReplayOwner, now); err != nil {
 		return false, fmt.Errorf("insert fork delivery/event replay lineage for source delivery %s: %w", item.SourceDeliveryID, err)
 	}
 	return inserted, nil
@@ -270,6 +284,10 @@ func deterministicRunForkReplayEventID(forkRunID, sourceEventID string) string {
 
 func deterministicRunForkReplayDeliveryID(forkRunID, sourceDeliveryID string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm/run-fork/delivery-event-replay/delivery/"+strings.TrimSpace(forkRunID)+"/"+strings.TrimSpace(sourceDeliveryID))).String()
+}
+
+func deterministicRunForkReplayLineageID(forkRunID, sourceDeliveryID string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm/run-fork/delivery-event-replay/lineage/"+strings.TrimSpace(forkRunID)+"/"+strings.TrimSpace(sourceDeliveryID))).String()
 }
 
 func deterministicRunForkReplayScopeMarkerDeliveryID(forkRunID, forkEventID string) string {

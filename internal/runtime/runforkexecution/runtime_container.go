@@ -284,10 +284,14 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	out := make([]SelectedContractExecutionForkEvent, 0, len(sourceEvents))
 	for _, sourceEvent := range sourceEvents {
 		forkEventID := activityidentity.ForkLineageEventID(req.ForkRunID, sourceEvent.SourceEventID)
-		evt := selectedContractForkEvent(req.ForkRunID, forkEventID, sourceEvent, c.proof.ExecutionOwner)
+		evt, err := selectedContractForkEvent(req.SourceRunID, req.ForkRunID, forkEventID, sourceEvent, c.proof.ExecutionOwner)
+		if err != nil {
+			return out, err
+		}
 		guard.ExpectForkEvent(forkEventID, sourceEvent.SourceEventID)
 		eventCtx := runtimecorrelation.WithRuntimeLineageSubject(runCtx, forkEventID, sourceEvent.EventName)
-		if err := bus.Publish(eventCtx, evt); err != nil {
+		prepared, err := bus.PrepareSelectedForkPublish(eventCtx, evt)
+		if err != nil {
 			return out, fmt.Errorf("%s execute selected-contract fork event %s as %s: %w",
 				store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
 				sourceEvent.SourceEventID,
@@ -296,16 +300,34 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 			)
 		}
 		lineage := store.RunForkSelectedContractExecutionLineage{
-			Owner:         c.proof.ExecutionOwner,
-			ForkRunID:     req.ForkRunID,
-			SourceRunID:   req.SourceRunID,
-			SourceEventID: sourceEvent.SourceEventID,
-			ForkEventID:   forkEventID,
-			EventName:     sourceEvent.EventName,
-			CreatedAt:     time.Now().UTC(),
+			ForkRunID:          req.ForkRunID,
+			SourceRunID:        req.SourceRunID,
+			SourceEventID:      sourceEvent.SourceEventID,
+			ForkEventID:        forkEventID,
+			EventName:          sourceEvent.EventName,
+			SelectionAuthority: c.proof.ExecutionOwner,
+			CreatedAt:          prepared.Event.CreatedAt(),
 		}
-		if err := req.Store.RecordRunForkSelectedContractExecutionLineage(ctx, lineage); err != nil {
+		outcome, err := req.Store.CommitSelectedForkEvent(eventCtx, store.CommitSelectedForkEventRequest{
+			Commit: prepared.CommitRequest(), Lineage: lineage,
+		})
+		if err != nil {
+			bus.AbandonPreparedPublish(eventCtx, prepared)
 			return out, err
+		}
+		committedPrepared, err := prepared.WithCommitOutcome(outcome)
+		if err != nil {
+			bus.AbandonPreparedPublish(eventCtx, prepared)
+			return out, err
+		}
+		prepared = committedPrepared
+		if err := bus.DispatchPreparedPublish(eventCtx, prepared); err != nil {
+			return out, fmt.Errorf("%s dispatch committed selected-contract fork event %s as %s: %w",
+				store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+				sourceEvent.SourceEventID,
+				forkEventID,
+				err,
+			)
 		}
 		out = append(out, SelectedContractExecutionForkEvent{
 			SourceEventID: sourceEvent.SourceEventID,

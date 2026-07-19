@@ -572,47 +572,7 @@ func (s *PostgresStore) ServeAbandonDeliveryQuiesced(ctx context.Context, eventI
 }
 
 func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, agentID string, subscriptions []events.EventType, since time.Time, limit int) ([]events.Event, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT
-			$1,
-			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.task_id, ''),
-			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
-			e.payload, COALESCE(e.chain_depth, 0), COALESCE(e.produced_by, ''), COALESCE(e.produced_by_type, ''),
-			COALESCE(e.source_event_id::text, ''),
-			e.created_at, e.execution_mode,
-			COALESCE(e.source_route, '{}'::jsonb), COALESCE(e.target_route, '{}'::jsonb),
-			COALESCE(e.target_set, '[]'::jsonb),
-			CASE WHEN d.delivery_id IS NULL THEN FALSE ELSE TRUE END,
-			COALESCE(d.status, ''),
-			COALESCE(d.retry_count, 0),
-			COALESCE(d.created_at, e.created_at),
-			d.delivered_at,
-			CASE WHEN r.event_id IS NULL THEN FALSE ELSE TRUE END
-		FROM events e
-		LEFT JOIN event_deliveries d
-			ON d.event_id = e.event_id
-			AND d.subscriber_type = 'agent'
-			AND d.subscriber_id = $1
-		LEFT JOIN event_receipts r
-			ON r.event_id = e.event_id
-			AND r.subscriber_type = 'agent'
-			AND r.subscriber_id = $1
-		WHERE e.created_at >= $2
-		  AND EXISTS (
-				SELECT 1
-				FROM event_deliveries d_me
-				WHERE d_me.event_id = e.event_id
-				  AND d_me.subscriber_type = 'agent'
-				  AND d_me.subscriber_id = $1
-			)
-		  AND `+canonicalPendingDeliveryPredicateSQL("d", "r")+`
-		ORDER BY e.created_at ASC
-	`, agentID, since)
-	if err != nil {
-		return nil, fmt.Errorf("query pending subscribed events for %s: %w", agentID, err)
-	}
-	defer rows.Close()
-	records, err := scanPendingAgentDeliveryRecords(rows)
+	records, err := s.listPendingAgentDeliveryRecordsSpec(ctx, []string{agentID}, since)
 	if err != nil {
 		return nil, err
 	}

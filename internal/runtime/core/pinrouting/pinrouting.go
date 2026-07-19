@@ -307,7 +307,12 @@ func rootPinDeclaredOutput(source semanticview.Source, eventType string) bool {
 
 func Resolve(input ResolutionInput, evt events.Event) Resolution {
 	resolution := ResolveEnvelope(input, evt.NormalizedEnvelope())
-	resolution.Event = events.Project(evt, events.ProjectEnvelope(resolution.Envelope))
+	resolved, err := events.ResolveEnvelope(evt, resolution.Envelope)
+	if err != nil {
+		resolution.Failure = FailureTargetMalformed
+		return resolution
+	}
+	resolution.Event = resolved
 	return resolution
 }
 

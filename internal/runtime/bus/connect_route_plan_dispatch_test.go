@@ -18,7 +18,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
-	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
@@ -103,7 +102,7 @@ func (*connectRoutePlanNodeInterceptor) Intercept(context.Context, events.Event)
 	return true, nil, nil
 }
 
-func (i *connectRoutePlanNodeInterceptor) InterceptDeliveryRoute(context.Context, events.Event, events.DeliveryRoute) (bool, []events.Event, error) {
+func (i *connectRoutePlanNodeInterceptor) InterceptDeliveryRoute(context.Context, events.DeliveryEvent, events.DeliveryRoute) (bool, []events.Event, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	i.count++
@@ -114,11 +113,6 @@ func (i *connectRoutePlanNodeInterceptor) Count() int {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	return i.count
-}
-
-type targetRouteMemoryEventMutation struct {
-	ctx   context.Context
-	store *connectRoutePlanMutationStore
 }
 
 func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
@@ -133,7 +127,7 @@ func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
 		want      bool
 	}{
 		{name: "root accepts root event", endpoint: runtimepinrouting.ConnectRoutePlanEndpoint{Root: true, Mode: "root", Event: "deploy.done", ResolvedEvent: "deploy.done"}, eventType: "deploy.done", want: true},
-		{name: "root rejects child evidence", endpoint: runtimepinrouting.ConnectRoutePlanEndpoint{Root: true, Mode: "root", Event: "deploy.done", ResolvedEvent: "deploy.done"}, eventType: "deploy.done", source: events.RouteIdentity{FlowID: "producer"}},
+		{name: "root rejects child evidence", endpoint: runtimepinrouting.ConnectRoutePlanEndpoint{Root: true, Mode: "root", Event: "deploy.done", ResolvedEvent: "deploy.done"}, eventType: "deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}},
 		{name: "static accepts exact scope", endpoint: connectRoutePlanEndpointWithMode(baseEndpoint, "static"), eventType: "producer/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}, want: true},
 		{name: "static rejects descendant", endpoint: connectRoutePlanEndpointWithMode(baseEndpoint, "static"), eventType: "producer/inst-1/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}},
 		{name: "singleton accepts exact scope", endpoint: connectRoutePlanEndpointWithMode(baseEndpoint, "singleton"), eventType: "producer/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}, want: true},
@@ -142,6 +136,9 @@ func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
 		{name: "template rejects base scope", endpoint: connectRoutePlanEndpointWithMode(baseEndpoint, "template"), eventType: "producer/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}},
 	} {
 		t.Run("plan/"+tc.name, func(t *testing.T) {
+			if !tc.source.Empty() {
+				tc.source.EntityID = "entity-1"
+			}
 			evt := eventtest.RootIngress("", events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: tc.source}, time.Unix(1, 0).UTC())
 			plan := runtimepinrouting.ConnectRoutePlan{Source: tc.endpoint}
 			if got := connectRoutePlanMatchesEvent(context.Background(), plan, evt); got != tc.want {
@@ -163,6 +160,9 @@ func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
 		{name: "template base scope", mode: "template", eventType: "producer/deploy.done", source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}},
 	} {
 		t.Run("issue/"+tc.name, func(t *testing.T) {
+			if !tc.source.Empty() {
+				tc.source.EntityID = "entity-1"
+			}
 			source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
 				id: "producer", mode: tc.mode,
 				outputs: []runtimecontracts.FlowOutputEventPin{{Name: "deploy_done", Event: "deploy.done"}},
@@ -234,7 +234,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 						}
 					}
 					eventType := events.EventType("producer/work.ready")
-					sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}
+					sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: "producer-entity"}
 					if producerMode == "template" {
 						eventType = "producer/inst-1/work.ready"
 						sourceRoute.FlowInstance = "producer/inst-1"
@@ -305,7 +305,7 @@ func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplica
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := eventtest.RootIngress(uuid.NewString(), "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}}, time.Now().UTC())
+	evt := eventtest.RootIngress(uuid.NewString(), "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: "producer-entity"}}, time.Now().UTC())
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -329,7 +329,7 @@ func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplica
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			eventID := uuid.NewString()
-			evt := eventtest.RootIngress(eventID, "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"}}, time.Now().UTC())
+			evt := eventtest.RootIngress(eventID, "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: "producer-entity"}}, time.Now().UTC())
 			plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 			if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -580,63 +580,17 @@ func connectReceiverPinAddressCollisionSource(subscriberType string, distinctEve
 	}))
 }
 
-func (s *connectRoutePlanMutationStore) RunEventMutation(ctx context.Context, fn func(EventMutation) error) error {
+func runConnectRoutePlanCommitScope(ctx context.Context, transaction CommitPublishTransaction, fn func(context.Context) error) error {
 	postCommit := make([]func(), 0, 2)
 	rollback := make([]func(), 0, 2)
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
 	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
-	mutation := &targetRouteMemoryEventMutation{store: s}
-	mutation.ctx = WithEventMutationContext(ctx, mutation)
-	if err := fn(mutation); err != nil {
+	ctx = WithCommitPublishTransaction(ctx, transaction)
+	if err := fn(ctx); err != nil {
 		runtimepipeline.FlushPipelineRollbackActions(rollback)
 		return err
 	}
 	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	return nil
-}
-
-func (m *targetRouteMemoryEventMutation) Context() context.Context {
-	if m == nil || m.ctx == nil {
-		return context.Background()
-	}
-	return m.ctx
-}
-
-func (m *targetRouteMemoryEventMutation) AppendEvent(ctx context.Context, evt events.Event) error {
-	_, err := m.AppendEventOutcome(ctx, evt)
-	return err
-}
-
-func (m *targetRouteMemoryEventMutation) AppendEventOutcome(ctx context.Context, evt events.Event) (EventAppendOutcome, error) {
-	return m.store.AppendEventOutcome(ctx, evt)
-}
-
-func (m *targetRouteMemoryEventMutation) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
-	return m.store.InsertEventDeliveries(ctx, eventID, agentIDs)
-}
-
-func (m *targetRouteMemoryEventMutation) InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error {
-	return m.InsertEventDeliveryRoutes(ctx, eventID, deliveryRoutesFromTargetMap(agentIDs, routePlanSubscriberAgent, deliveryTargets))
-}
-
-func (m *targetRouteMemoryEventMutation) InsertEventDeliveryRoutes(_ context.Context, eventID string, deliveryRoutes []events.DeliveryRoute) error {
-	if m.store.routes == nil {
-		m.store.routes = map[string][]events.DeliveryRoute{}
-	}
-	m.store.routes[eventID] = events.NormalizeDeliveryRoutes(deliveryRoutes)
-	return nil
-}
-
-func (m *targetRouteMemoryEventMutation) UpsertCommittedReplayScope(_ context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error {
-	m.store.scopes[eventID] = scope
-	return nil
-}
-
-func (m *targetRouteMemoryEventMutation) UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
-	return m.store.UpsertPipelineReceipt(ctx, eventID, status, failure)
-}
-
-func (*targetRouteMemoryEventMutation) RecordDeadLetter(context.Context, runtimedeadletters.Record) error {
 	return nil
 }
 
@@ -1133,8 +1087,8 @@ func TestEventBusPublishInMutation_ConnectRoutePlanPersistsSharedRoutePlan(t *te
 	postCommitActions := make([]func(), 0, 1)
 	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommitActions)
 
-	if err := store.RunEventMutation(ctx, func(mutation EventMutation) error {
-		return eb.PublishInMutation(mutation.Context(), evt)
+	if err := runConnectRoutePlanCommitScope(ctx, store, func(commitCtx context.Context) error {
+		return eb.PublishInMutation(commitCtx, evt)
 	}); err != nil {
 		t.Fatalf("PublishInMutation: %v", err)
 	}
@@ -1177,8 +1131,8 @@ func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 		t.Fatalf("outbox route plan delivery routes = %#v, want %#v", planned.DeliveryRoutes(), want)
 	}
 
-	if err := store.RunEventMutation(context.Background(), func(mutation EventMutation) error {
-		return eb.EngineOutbox().WriteOutbox(mutation.Context(), []runtimeengine.EmitIntent{{Event: evt}})
+	if err := runConnectRoutePlanCommitScope(context.Background(), store, func(commitCtx context.Context) error {
+		return eb.EngineOutbox().WriteOutbox(commitCtx, []runtimeengine.EmitIntent{{Event: evt}})
 	}); err != nil {
 		t.Fatalf("WriteOutbox: %v", err)
 	}

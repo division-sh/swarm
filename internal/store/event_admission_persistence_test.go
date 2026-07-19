@@ -13,44 +13,17 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
-func TestPostgresEventAdmissionRejectsMalformedChildDirectAppend(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-
-	err := pg.AppendEvent(ctx, eventtest.MalformedChildWithoutRunLineage(
-		events.EventType("task.completed"),
-		"agent-1",
-		json.RawMessage(`{"ok":true}`),
-	))
-	if err == nil {
-		t.Fatal("expected malformed child event to fail admission")
-	}
-	if !strings.Contains(err.Error(), "requires admitted run_id") {
-		t.Fatalf("AppendEvent error = %v, want missing run_id admission error", err)
-	}
-
-	var count int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_name = 'task.completed'`).Scan(&count); err != nil {
-		t.Fatalf("count events: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("persisted malformed child rows = %d, want 0", count)
-	}
-}
-
-func TestEventAdmissionRejectsMalformedCompleteFactsBeforeEveryMutationParity(t *testing.T) {
+func TestEventAdmissionRejectsMalformedDurableIdentityBeforeEveryMutationParity(t *testing.T) {
 	type malformedCase struct {
 		name string
 		want string
@@ -78,55 +51,6 @@ func TestEventAdmissionRejectsMalformedCompleteFactsBeforeEveryMutationParity(t 
 				return eventtest.PersistedProjection(eventID, "test.invalid", "agent-1", "task", json.RawMessage(`{}`), 1, runID, "not-a-parent-uuid", events.EventEnvelope{}, createdAt)
 			},
 		},
-		{
-			name: "negative_chain_depth",
-			want: "chain_depth",
-			make: func(eventID, runID string, createdAt time.Time) events.Event {
-				return eventtest.PersistedProjection(eventID, "test.invalid", "agent-1", "task", json.RawMessage(`{}`), -1, runID, "", events.EventEnvelope{}, createdAt)
-			},
-		},
-		{
-			name: "invalid_payload",
-			want: "valid JSON",
-			make: func(eventID, runID string, createdAt time.Time) events.Event {
-				return eventtest.PersistedProjection(eventID, "test.invalid", "agent-1", "task", json.RawMessage(`{"unterminated":`), 0, runID, "", events.EventEnvelope{}, createdAt)
-			},
-		},
-		{
-			name: "invalid_envelope_entity",
-			want: "entity_id",
-			make: func(eventID, runID string, createdAt time.Time) events.Event {
-				return eventtest.PersistedProjection(eventID, "test.invalid", "agent-1", "task", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{EntityID: "not-an-entity-uuid", Scope: events.EventScopeEntity}, createdAt)
-			},
-		},
-		{
-			name: "target_and_target_set",
-			want: "cannot declare both target and target_set",
-			make: func(eventID, runID string, createdAt time.Time) events.Event {
-				target := events.RouteIdentity{FlowID: "target-flow", FlowInstance: "target-flow/one", EntityID: uuid.NewString()}
-				return eventtest.PersistedProjection(eventID, "test.invalid", "agent-1", "task", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{
-					EntityID: target.EntityID, FlowInstance: target.FlowInstance, Scope: events.EventScopeEntity,
-					Target: target, TargetSet: []events.RouteIdentity{{FlowID: "other-flow", FlowInstance: "other-flow/one", EntityID: uuid.NewString()}},
-				}, createdAt)
-			},
-		},
-		{
-			name: "unknown_scope",
-			want: `scope "workspace" is invalid`,
-			make: func(eventID, runID string, createdAt time.Time) events.Event {
-				return eventtest.PersistedProjection(eventID, "test.invalid", "agent-1", "task", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScope("workspace")}, createdAt)
-			},
-		},
-		{
-			name: "target_projection_mismatch",
-			want: "target route must exactly match",
-			make: func(eventID, runID string, createdAt time.Time) events.Event {
-				return eventtest.PersistedProjection(eventID, "test.invalid", "agent-1", "task", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{
-					EntityID: uuid.NewString(), FlowInstance: "target-flow/two", Scope: events.EventScopeEntity,
-					Target: events.RouteIdentity{FlowID: "target-flow", FlowInstance: "target-flow/one", EntityID: uuid.NewString()},
-				}, createdAt)
-			},
-		},
 	}
 
 	for _, backend := range []struct {
@@ -144,7 +68,7 @@ func TestEventAdmissionRejectsMalformedCompleteFactsBeforeEveryMutationParity(t 
 				before := eventMutationSurfaceCounts(t, fixture.db, ctx)
 				eventID := uuid.NewString()
 				candidate := test.make(eventID, uuid.NewString(), time.Now().UTC().Truncate(time.Microsecond))
-				err := fixture.store.PersistEventWithDeliveries(ctx, candidate, []string{"agent-1"})
+				err := commitSemanticEventFixtureWithAgents(ctx, fixture.store, candidate, []string{"agent-1"})
 				if err == nil || !strings.Contains(err.Error(), test.want) {
 					t.Fatalf("malformed event error = %v, want %q", err, test.want)
 				}
@@ -180,11 +104,12 @@ type terminalEventAdmissionState struct {
 }
 
 type terminalEventAdmissionHarness struct {
-	append          func(context.Context, events.Event) error
-	appendTx        func(context.Context, events.Event) error
-	markTerminal    func(context.Context, string, string, string) error
-	loadState       func(context.Context, string, string) (terminalEventAdmissionState, error)
-	persistVariants map[string]func(context.Context, events.Event, string) error
+	append           func(context.Context, events.Event) error
+	appendTx         func(context.Context, events.Event) error
+	appendDiagnostic func(context.Context, events.Event) error
+	markTerminal     func(context.Context, string, string, string) error
+	loadState        func(context.Context, string, string) (terminalEventAdmissionState, error)
+	persistVariants  map[string]func(context.Context, events.Event, string) error
 }
 
 type runtimeLogStatusState struct {
@@ -275,10 +200,12 @@ func TestPostgresTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	harness := terminalEventAdmissionHarness{
-		append: pg.AppendEvent,
+		append: func(ctx context.Context, evt events.Event) error {
+			return commitSemanticEventFixture(ctx, pg, evt)
+		},
 		appendTx: func(ctx context.Context, evt events.Event) error {
-			return pg.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-				return pg.AppendEventTx(txctx, tx, evt)
+			return pg.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+				return commitSemanticEventFixtureTx(txctx, pg, tx, evt)
 			})
 		},
 		markTerminal: func(ctx context.Context, runID, eventID, status string) error {
@@ -308,12 +235,10 @@ func TestPostgresTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 			}
 			return state, nil
 		},
-		persistVariants: terminalEventAdmissionPersistVariants(
-			pg.PersistEventWithDeliveries,
-			pg.PersistEventWithDeliveriesAndScope,
-			pg.PersistEventWithDeliveryRoutesAndScope,
-			pg.PersistEventWithDeliveryRouteSetAndScope,
-		),
+		appendDiagnostic: func(ctx context.Context, evt events.Event) error {
+			return commitDiagnosticRuntimeLogFixture(ctx, pg, evt)
+		},
+		persistVariants: terminalEventAdmissionPersistVariants(pg),
 	}
 	assertTerminalEventAdmission(t, harness)
 }
@@ -321,10 +246,12 @@ func TestPostgresTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 func TestSQLiteTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	harness := terminalEventAdmissionHarness{
-		append: sqliteStore.AppendEvent,
+		append: func(ctx context.Context, evt events.Event) error {
+			return commitSemanticEventFixture(ctx, sqliteStore, evt)
+		},
 		appendTx: func(ctx context.Context, evt events.Event) error {
-			return sqliteStore.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-				return sqliteStore.AppendEventTx(txctx, tx, evt)
+			return sqliteStore.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+				return commitSemanticEventFixtureTx(txctx, sqliteStore, tx, evt)
 			})
 		},
 		markTerminal: func(ctx context.Context, runID, eventID, status string) error {
@@ -354,12 +281,10 @@ func TestSQLiteTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 			}
 			return state, nil
 		},
-		persistVariants: terminalEventAdmissionPersistVariants(
-			sqliteStore.PersistEventWithDeliveries,
-			sqliteStore.PersistEventWithDeliveriesAndScope,
-			sqliteStore.PersistEventWithDeliveryRoutesAndScope,
-			sqliteStore.PersistEventWithDeliveryRouteSetAndScope,
-		),
+		appendDiagnostic: func(ctx context.Context, evt events.Event) error {
+			return commitDiagnosticRuntimeLogFixture(ctx, sqliteStore, evt)
+		},
+		persistVariants: terminalEventAdmissionPersistVariants(sqliteStore),
 	}
 	assertTerminalEventAdmission(t, harness)
 }
@@ -368,7 +293,9 @@ func TestPostgresRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := newTestPostgresStore(t, db)
 	assertRuntimeLogAdmissionPreservesEveryRunStatus(t, runtimeLogStatusHarness{
-		appendOrdinary: store.AppendEvent,
+		appendOrdinary: func(ctx context.Context, evt events.Event) error {
+			return commitSemanticEventFixture(ctx, store, evt)
+		},
 		transition: func(ctx context.Context, runID, eventID, status string) error {
 			switch status {
 			case "running":
@@ -451,7 +378,9 @@ func TestPostgresRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	assertRuntimeLogAdmissionPreservesEveryRunStatus(t, runtimeLogStatusHarness{
-		appendOrdinary: store.AppendEvent,
+		appendOrdinary: func(ctx context.Context, evt events.Event) error {
+			return commitSemanticEventFixture(ctx, store, evt)
+		},
 		transition: func(ctx context.Context, runID, eventID, status string) error {
 			switch status {
 			case "running":
@@ -563,7 +492,7 @@ func assertRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T, harness runt
 			if err != nil {
 				t.Fatalf("marshal runtime log payload: %v", err)
 			}
-			if err := harness.persistLog(ctx, runtimepkg.RuntimeLogPersistenceRecord{RunID: runID, Payload: payload}); err != nil {
+			if err := harness.persistLog(ctx, runtimepkg.RuntimeLogPersistenceRecord{RunID: runID, Payload: payload, ExecutionMode: executionmode.Live}); err != nil {
 				t.Fatalf("persist runtime log for %s: %v", status, err)
 			}
 			after, err := harness.loadState(ctx, runID)
@@ -588,24 +517,10 @@ func assertRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T, harness runt
 	}
 }
 
-func terminalEventAdmissionPersistVariants(
-	withDeliveries func(context.Context, events.Event, []string) error,
-	withScope func(context.Context, events.Event, []string, runtimereplayclaim.CommittedReplayScope) error,
-	withRoutes func(context.Context, events.Event, []string, map[string]events.RouteIdentity, runtimereplayclaim.CommittedReplayScope) error,
-	withRouteSet func(context.Context, events.Event, []events.DeliveryRoute, runtimereplayclaim.CommittedReplayScope) error,
-) map[string]func(context.Context, events.Event, string) error {
+func terminalEventAdmissionPersistVariants(store semanticEventFixtureStore) map[string]func(context.Context, events.Event, string) error {
 	return map[string]func(context.Context, events.Event, string) error{
-		"deliveries": func(ctx context.Context, evt events.Event, recipient string) error {
-			return withDeliveries(ctx, evt, []string{recipient})
-		},
-		"deliveries_and_scope": func(ctx context.Context, evt events.Event, recipient string) error {
-			return withScope(ctx, evt, []string{recipient}, runtimereplayclaim.CommittedReplayScopeSubscribed)
-		},
-		"delivery_routes_and_scope": func(ctx context.Context, evt events.Event, recipient string) error {
-			return withRoutes(ctx, evt, []string{recipient}, map[string]events.RouteIdentity{recipient: {}}, runtimereplayclaim.CommittedReplayScopeSubscribed)
-		},
-		"delivery_route_set_and_scope": func(ctx context.Context, evt events.Event, recipient string) error {
-			return withRouteSet(ctx, evt, []events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: recipient}}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+		"commit_event": func(ctx context.Context, evt events.Event, recipient string) error {
+			return commitSemanticEventFixtureWithAgents(ctx, store, evt, []string{recipient})
 		},
 	}
 }
@@ -657,11 +572,11 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 			if err := harness.appendTx(ctx, conflicting); !errors.Is(err, ErrEventIdentityConflict) {
 				t.Fatalf("conflicting transactional duplicate error = %v, want event identity conflict", err)
 			}
-			taskConflict := events.Project(original, events.ProjectTaskID("different-task"))
+			taskConflict := terminalEventAdmissionEventWithFacts(original.ID(), runID, "different-task", executionmode.Live, `{"value":"original"}`, createdAt)
 			if err := harness.append(ctx, taskConflict); !errors.Is(err, ErrEventIdentityConflict) {
 				t.Fatalf("different-task duplicate error = %v, want event identity conflict", err)
 			}
-			modeConflict := events.Project(original, events.ProjectExecutionMode(executionmode.Mock))
+			modeConflict := terminalEventAdmissionEventWithFacts(original.ID(), runID, "", executionmode.Mock, `{"value":"original"}`, createdAt)
 			if err := harness.appendTx(ctx, modeConflict); !errors.Is(err, ErrEventIdentityConflict) {
 				t.Fatalf("different-mode duplicate error = %v, want event identity conflict", err)
 			}
@@ -705,7 +620,7 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 				if err != nil {
 					t.Fatalf("load exact duplicate state: %v", err)
 				}
-				if seedState.Status != status || seedState.RunEventCount != 1 || seedState.EventExists != 1 || seedState.DeliveryCount != 0 {
+				if seedState.Status != status || seedState.RunEventCount != 1 || seedState.EventExists != 1 || seedState.DeliveryCount != 1 {
 					t.Fatalf("state after exact duplicate atomic no-op = %+v", seedState)
 				}
 
@@ -764,7 +679,7 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 			uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", json.RawMessage(`{"message":"late evidence"}`),
 			0, runID, "", events.EventEnvelope{}, createdAt.Add(time.Second),
 		)
-		if err := harness.append(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), diagnostic); err != nil {
+		if err := harness.appendDiagnostic(ctx, diagnostic); err != nil {
 			t.Fatalf("append typed diagnostic-direct event: %v", err)
 		}
 		state, err := harness.loadState(ctx, runID, diagnostic.ID())
@@ -774,25 +689,12 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 		if state.Status != "completed" || state.RunEventCount != 2 || state.EventExists != 1 || state.DeliveryCount != 0 {
 			t.Fatalf("state after diagnostic append = %+v", state)
 		}
-		for name, persist := range harness.persistVariants {
-			name, persist := name, persist
-			t.Run("diagnostic_rejects_"+name, func(t *testing.T) {
-				candidate := eventtest.DiagnosticDirect(
-					uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", json.RawMessage(`{"message":"must remain non-routed"}`),
-					0, runID, "", events.EventEnvelope{}, createdAt.Add(2*time.Second),
-				)
-				err := persist(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), candidate, "agent-diagnostic")
-				if err == nil || !strings.Contains(err.Error(), "cannot use generic event delivery persistence") {
-					t.Fatalf("diagnostic atomic persistence error = %v, want non-routed refusal", err)
-				}
-				state, err := harness.loadState(ctx, runID, candidate.ID())
-				if err != nil {
-					t.Fatalf("load diagnostic refusal state: %v", err)
-				}
-				if state.Status != "completed" || state.RunEventCount != 2 || state.EventExists != 0 || state.DeliveryCount != 0 {
-					t.Fatalf("state after diagnostic atomic refusal = %+v", state)
-				}
-			})
+		candidate := eventtest.DiagnosticDirect(
+			uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", json.RawMessage(`{"message":"must remain non-routed"}`),
+			0, runID, "", events.EventEnvelope{}, createdAt.Add(2*time.Second),
+		)
+		if err := harness.append(ctx, candidate); err == nil || !strings.Contains(err.Error(), "closed named persistence operation") {
+			t.Fatalf("diagnostic generic persistence error = %v, want named-operation refusal", err)
 		}
 
 		labelOnly := terminalEventAdmissionEvent(uuid.NewString(), runID, `{"message":"not typed"}`, createdAt.Add(2*time.Second))
@@ -800,17 +702,16 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 			labelOnly.ID(), events.EventTypePlatformRuntimeLog, "runtime", "", labelOnly.Payload(), 0,
 			runID, "", events.EventEnvelope{}, labelOnly.CreatedAt(),
 		)
-		if err := harness.append(withDiagnosticDirectOwner(ctx, diagnosticDirectRuntimeLog), labelOnly); err == nil || !strings.Contains(err.Error(), "requires its typed constructor and persistence owner") {
+		if err := harness.append(ctx, labelOnly); err == nil {
 			t.Fatalf("label-only diagnostic error = %v, want typed-constructor rejection", err)
 		}
 
 		for _, subtype := range []struct {
 			name      string
 			eventType events.EventType
-			owner     string
 		}{
-			{name: "inbound_recorded", eventType: events.EventTypePlatformInboundRecord, owner: diagnosticDirectInboundRecord},
-			{name: "agent_directive", eventType: events.EventTypePlatformAgentDirective, owner: diagnosticDirectAgentDirective},
+			{name: "inbound_recorded", eventType: events.EventTypePlatformInboundRecord},
+			{name: "agent_directive", eventType: events.EventTypePlatformAgentDirective},
 		} {
 			subtype := subtype
 			t.Run(subtype.name+"_still_requires_active_run", func(t *testing.T) {
@@ -818,8 +719,8 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 					uuid.NewString(), subtype.eventType, "runtime", "", json.RawMessage(`{"evidence":"active-only"}`),
 					0, runID, "", events.EventEnvelope{}, createdAt.Add(3*time.Second),
 				)
-				if err := harness.append(withDiagnosticDirectOwner(ctx, subtype.owner), evt); !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
-					t.Fatalf("active-only diagnostic error = %v, want inactive-run rejection", err)
+				if err := harness.append(ctx, evt); err == nil || !strings.Contains(err.Error(), "closed named persistence operation") {
+					t.Fatalf("diagnostic generic persistence error = %v, want named-operation refusal", err)
 				}
 			})
 		}
@@ -835,135 +736,32 @@ func terminalEventAdmissionFailure(status string) *runtimefailures.Envelope {
 }
 
 func terminalEventAdmissionEvent(eventID, runID, payload string, createdAt time.Time) events.Event {
+	return terminalEventAdmissionEventWithFacts(eventID, runID, "", executionmode.Live, payload, createdAt)
+}
+
+func terminalEventAdmissionEventWithFacts(eventID, runID, taskID string, mode executionmode.Mode, payload string, createdAt time.Time) events.Event {
 	if !json.Valid([]byte(payload)) {
 		panic(fmt.Sprintf("invalid terminal event admission test payload %q", payload))
 	}
-	return eventtest.PersistedProjection(
+	return eventtest.RootIngressWithMode(
 		eventID,
 		events.EventType("test.terminal_admission"),
 		"agent-1",
-		"",
+		taskID,
 		json.RawMessage(payload),
 		0,
 		runID,
 		"",
 		events.EventEnvelope{},
 		createdAt,
+		mode,
 	)
-}
-
-func TestPostgresEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritativeFacts(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-
-	err := pg.AppendEvent(ctx, eventtest.MalformedProjectionWithoutAuthoritativeFacts(
-		events.EventType("task.completed"),
-		"agent-1",
-		json.RawMessage(`{"ok":true}`),
-	))
-	if err == nil {
-		t.Fatal("expected malformed projection event to fail admission")
-	}
-	if !strings.Contains(err.Error(), "authoritative event_id") {
-		t.Fatalf("AppendEvent error = %v, want missing authoritative event_id admission error", err)
-	}
-
-	err = pg.AppendEvent(runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
-		RunID: uuid.NewString(),
-	}), eventtest.MalformedProjectionWithoutAuthoritativeRun(
-		uuid.NewString(),
-		events.EventType("task.completed"),
-		"agent-1",
-		json.RawMessage(`{"ok":true}`),
-		time.Date(2026, 6, 6, 10, 11, 12, 0, time.UTC)),
-	)
-	if err == nil {
-		t.Fatal("expected projection event missing own run_id to fail admission")
-	}
-	if !strings.Contains(err.Error(), "authoritative run_id") {
-		t.Fatalf("AppendEvent error = %v, want missing authoritative run_id admission error", err)
-	}
-
-	var count int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_name = 'task.completed'`).Scan(&count); err != nil {
-		t.Fatalf("count events: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("persisted malformed projection rows = %d, want 0", count)
-	}
-}
-
-func TestSQLiteEventAdmissionRejectsMalformedChildDirectAppend(t *testing.T) {
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	ctx := testAuthorActivityContext()
-
-	err := sqliteStore.AppendEvent(ctx, eventtest.MalformedChildWithoutRunLineage(
-		events.EventType("task.completed"),
-		"agent-1",
-		json.RawMessage(`{"ok":true}`),
-	))
-	if err == nil {
-		t.Fatal("expected malformed child event to fail admission")
-	}
-	if !strings.Contains(err.Error(), "requires admitted run_id") {
-		t.Fatalf("AppendEvent error = %v, want missing run_id admission error", err)
-	}
-
-	var count int
-	if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_name = 'task.completed'`).Scan(&count); err != nil {
-		t.Fatalf("count sqlite events: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("persisted malformed sqlite child rows = %d, want 0", count)
-	}
-}
-
-func TestSQLiteEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritativeFacts(t *testing.T) {
-	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	ctx := testAuthorActivityContext()
-
-	err := sqliteStore.AppendEvent(ctx, eventtest.MalformedProjectionWithoutAuthoritativeFacts(
-		events.EventType("task.completed"),
-		"agent-1",
-		json.RawMessage(`{"ok":true}`),
-	))
-	if err == nil {
-		t.Fatal("expected malformed projection event to fail admission")
-	}
-	if !strings.Contains(err.Error(), "authoritative event_id") {
-		t.Fatalf("AppendEvent error = %v, want missing authoritative event_id admission error", err)
-	}
-
-	err = sqliteStore.AppendEvent(runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
-		RunID: uuid.NewString(),
-	}), eventtest.MalformedProjectionWithoutAuthoritativeRun(
-		uuid.NewString(),
-		events.EventType("task.completed"),
-		"agent-1",
-		json.RawMessage(`{"ok":true}`),
-		time.Date(2026, 6, 6, 10, 11, 12, 0, time.UTC)),
-	)
-	if err == nil {
-		t.Fatal("expected projection event missing own run_id to fail admission")
-	}
-	if !strings.Contains(err.Error(), "authoritative run_id") {
-		t.Fatalf("AppendEvent error = %v, want missing authoritative run_id admission error", err)
-	}
-
-	var count int
-	if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_name = 'task.completed'`).Scan(&count); err != nil {
-		t.Fatalf("count sqlite events: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("persisted malformed sqlite projection rows = %d, want 0", count)
-	}
 }
 
 func TestSQLiteDiagnosticDirectEventsRequireClosedTypedOwners(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	assertDiagnosticDirectEventsRequireClosedTypedOwners(t, func(ctx context.Context, evt events.Event) error {
-		return store.AppendEvent(ctx, evt)
+		return commitSemanticEventFixture(ctx, store, evt)
 	})
 }
 
@@ -971,17 +769,16 @@ func TestPostgresDiagnosticDirectEventsRequireClosedTypedOwners(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := admitTestPostgresStore(t, db)
 	assertDiagnosticDirectEventsRequireClosedTypedOwners(t, func(ctx context.Context, evt events.Event) error {
-		return store.AppendEvent(ctx, evt)
+		return commitSemanticEventFixture(ctx, store, evt)
 	})
 }
 
 func assertDiagnosticDirectEventsRequireClosedTypedOwners(t *testing.T, appendEvent func(context.Context, events.Event) error) {
 	t.Helper()
 	for _, eventType := range []string{
-		diagnosticDirectRuntimeLog,
-		diagnosticDirectInboundRecord,
-		diagnosticDirectAgentDirective,
-		"platform.unregistered_diagnostic",
+		string(events.EventTypePlatformRuntimeLog),
+		string(events.EventTypePlatformInboundRecord),
+		string(events.EventTypePlatformAgentDirective),
 	} {
 		t.Run(eventType, func(t *testing.T) {
 			evt := eventtest.DiagnosticDirect(
@@ -992,13 +789,7 @@ func assertDiagnosticDirectEventsRequireClosedTypedOwners(t *testing.T, appendEv
 			if err == nil {
 				t.Fatalf("generic append accepted diagnostic-direct event %s", eventType)
 			}
-			if eventType == "platform.unregistered_diagnostic" {
-				if !strings.Contains(err.Error(), "not in the closed catalog") {
-					t.Fatalf("unknown diagnostic-direct error = %v", err)
-				}
-				return
-			}
-			if !strings.Contains(err.Error(), "requires its typed persistence owner") {
+			if !strings.Contains(err.Error(), "requires its closed named persistence operation") {
 				t.Fatalf("typed diagnostic-direct error = %v", err)
 			}
 		})
@@ -1025,11 +816,11 @@ func TestPostgresGlobalRuntimeLogIdentityIsIdempotentAndNonRouted(t *testing.T) 
 	_, db, _ := testutil.StartPostgres(t)
 	store := admitTestPostgresStore(t, db)
 	assertGlobalRuntimeLogIdentity(t, globalRuntimeLogIdentityHarness{
-		append: store.AppendEvent,
+		append: func(ctx context.Context, evt events.Event) error {
+			return commitDiagnosticRuntimeLogFixture(ctx, store, evt)
+		},
 		appendTx: func(ctx context.Context, evt events.Event) error {
-			return store.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-				return store.AppendEventTx(txctx, tx, evt)
-			})
+			return commitDiagnosticRuntimeLogFixture(ctx, store, evt)
 		},
 		loadState: func(ctx context.Context, eventID string) (globalRuntimeLogIdentityState, error) {
 			var state globalRuntimeLogIdentityState
@@ -1057,11 +848,11 @@ func TestPostgresGlobalRuntimeLogIdentityIsIdempotentAndNonRouted(t *testing.T) 
 func TestSQLiteGlobalRuntimeLogIdentityIsIdempotentAndNonRouted(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	assertGlobalRuntimeLogIdentity(t, globalRuntimeLogIdentityHarness{
-		append: store.AppendEvent,
+		append: func(ctx context.Context, evt events.Event) error {
+			return commitDiagnosticRuntimeLogFixture(ctx, store, evt)
+		},
 		appendTx: func(ctx context.Context, evt events.Event) error {
-			return store.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-				return store.AppendEventTx(txctx, tx, evt)
-			})
+			return commitDiagnosticRuntimeLogFixture(ctx, store, evt)
 		},
 		loadState: func(ctx context.Context, eventID string) (globalRuntimeLogIdentityState, error) {
 			var state globalRuntimeLogIdentityState
@@ -1088,7 +879,7 @@ func TestSQLiteGlobalRuntimeLogIdentityIsIdempotentAndNonRouted(t *testing.T) {
 
 func assertGlobalRuntimeLogIdentity(t *testing.T, harness globalRuntimeLogIdentityHarness) {
 	t.Helper()
-	ctx := withDiagnosticDirectOwner(context.Background(), diagnosticDirectRuntimeLog)
+	ctx := context.Background()
 	eventID := uuid.NewString()
 	createdAt := time.Now().UTC().Truncate(time.Microsecond)
 	evt := eventtest.DiagnosticDirect(
@@ -1124,7 +915,9 @@ func assertGlobalRuntimeLogIdentity(t *testing.T, harness globalRuntimeLogIdenti
 func TestPostgresRunScopedRuntimeLogRequiresExistingRun(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := admitTestPostgresStore(t, db)
-	assertRunScopedRuntimeLogRequiresExistingRun(t, store.AppendEvent, func(ctx context.Context, runID, eventID string) (int, int, error) {
+	assertRunScopedRuntimeLogRequiresExistingRun(t, func(ctx context.Context, evt events.Event) error {
+		return commitDiagnosticRuntimeLogFixture(ctx, store, evt)
+	}, func(ctx context.Context, runID, eventID string) (int, int, error) {
 		var runCount, eventCount int
 		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE run_id = $1::uuid`, runID).Scan(&runCount); err != nil {
 			return 0, 0, err
@@ -1138,7 +931,9 @@ func TestPostgresRunScopedRuntimeLogRequiresExistingRun(t *testing.T) {
 
 func TestSQLiteRunScopedRuntimeLogRequiresExistingRun(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	assertRunScopedRuntimeLogRequiresExistingRun(t, store.AppendEvent, func(ctx context.Context, runID, eventID string) (int, int, error) {
+	assertRunScopedRuntimeLogRequiresExistingRun(t, func(ctx context.Context, evt events.Event) error {
+		return commitDiagnosticRuntimeLogFixture(ctx, store, evt)
+	}, func(ctx context.Context, runID, eventID string) (int, int, error) {
 		var runCount, eventCount int
 		if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE run_id = ?`, runID).Scan(&runCount); err != nil {
 			return 0, 0, err
@@ -1156,7 +951,7 @@ func assertRunScopedRuntimeLogRequiresExistingRun(
 	loadCounts func(context.Context, string, string) (int, int, error),
 ) {
 	t.Helper()
-	ctx := withDiagnosticDirectOwner(context.Background(), diagnosticDirectRuntimeLog)
+	ctx := context.Background()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	evt := eventtest.DiagnosticDirect(
@@ -1178,7 +973,7 @@ func assertRunScopedRuntimeLogRequiresExistingRun(
 func TestPostgresRuntimeLogWriterUsesAdmissionFactsAndRemainsNonRouted(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
 
 	logger := runtimepkg.NewRuntimeLogger(pg)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
@@ -1205,7 +1000,7 @@ func TestPostgresRuntimeLogWriterUsesAdmissionFactsAndRemainsNonRouted(t *testin
 
 func TestSQLiteRuntimeLogDiagnosticDirectUsesAdmissionFacts(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	ctx := testAuthorActivityContext()
+	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
 
 	logger := runtimepkg.NewRuntimeLogger(sqliteStore)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{

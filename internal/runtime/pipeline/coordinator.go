@@ -18,6 +18,7 @@ import (
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -92,6 +93,10 @@ type ChannelActivityTarget struct {
 	PlanGeneration string
 }
 
+type runtimeMutationRunnerProvider interface {
+	RuntimeMutationRunner() RuntimeMutationRunner
+}
+
 func copyActivityToolEntries(in map[string]ChannelActivityTarget) map[string]ChannelActivityTarget {
 	out := make(map[string]ChannelActivityTarget, len(in))
 	for name, target := range in {
@@ -111,6 +116,9 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 	workflowStore := opts.WorkflowStore
 	if workflowStore == nil {
 		workflowStore = NewWorkflowInstanceStore(db)
+	}
+	if provider, ok := bus.(runtimeMutationRunnerProvider); ok {
+		workflowStore.ConfigureRuntimeMutationRunner(provider.RuntimeMutationRunner())
 	}
 	if publisher, ok := bus.(workflowGateMutationPublisher); ok {
 		workflowStore.ConfigureDecisionCardLifecycle(opts.DecisionCards, publisher)
@@ -334,7 +342,8 @@ func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) 
 	return !consume, emitted, nil
 }
 
-func (pc *PipelineCoordinator) InterceptDeliveryRoute(ctx context.Context, evt events.Event, route events.DeliveryRoute) (bool, []events.Event, error) {
+func (pc *PipelineCoordinator) InterceptDeliveryRoute(ctx context.Context, delivery events.DeliveryEvent, route events.DeliveryRoute) (bool, []events.Event, error) {
+	evt := delivery.Event()
 	route = route.Normalized()
 	if route.SubscriberType != "node" || route.SubscriberID == "" {
 		return true, nil, nil
@@ -465,6 +474,7 @@ func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context,
 			EntityID:  workflowEventEntityID(evt),
 			Detail: map[string]any{
 				"node_id": nodeID,
+				"error":   err.Error(),
 			},
 			Failure: &failure.Failure,
 		})
@@ -528,18 +538,12 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			"timestamp":        time.Now().UTC().Format(time.RFC3339Nano),
 		}
 		if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
-			*collector = append(*collector, events.NewRuntimeDiagnosticEvent(
-				uuid.NewString(),
-				events.EventType("platform.dead_letter"),
-				events.PlatformProducer(runtimeWorkflowID),
-				"",
-				mustJSON(deadLetterPayload),
-				0,
-				"",
-				"",
-				events.EventEnvelope{EntityID: entityID},
-				time.Now().UTC(),
-			))
+			emitted, err := newPipelineRuntimeDiagnostic("platform.dead_letter", entityID, "", deadLetterPayload)
+			if err != nil {
+				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_construct_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, nil, err)
+				continue
+			}
+			*collector = append(*collector, emitted)
 			continue
 		}
 		publishDeadLetter := func() {
@@ -627,21 +631,10 @@ func (pc *PipelineCoordinator) publish(ctx context.Context, eventType, entityID 
 		payload = map[string]any{}
 	}
 	flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/")
-	emitted := events.NewRuntimeDiagnosticEvent(
-		uuid.NewString(),
-		events.EventType(strings.TrimSpace(eventType)),
-		events.PlatformProducer(runtimeWorkflowID),
-		"",
-		mustJSON(payload),
-		0,
-		"",
-		"",
-		events.EventEnvelope{
-			EntityID:     entityID,
-			FlowInstance: flowInstance,
-		},
-		time.Now().UTC(),
-	)
+	emitted, err := newPipelineRuntimeDiagnostic(eventType, entityID, flowInstance, payload)
+	if err != nil {
+		return err
+	}
 	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
 		*collector = append(*collector, emitted)
 		return nil
@@ -663,21 +656,10 @@ func (pc *PipelineCoordinator) publishDirect(ctx context.Context, eventType, ent
 		return pc.publish(ctx, eventType, entityID, payload)
 	}
 	flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/")
-	emitted := events.NewRuntimeDiagnosticEvent(
-		uuid.NewString(),
-		events.EventType(strings.TrimSpace(eventType)),
-		events.PlatformProducer(runtimeWorkflowID),
-		"",
-		mustJSON(payload),
-		0,
-		"",
-		"",
-		events.EventEnvelope{
-			EntityID:     entityID,
-			FlowInstance: flowInstance,
-		},
-		time.Now().UTC(),
-	)
+	emitted, err := newPipelineRuntimeDiagnostic(eventType, entityID, flowInstance, payload)
+	if err != nil {
+		return err
+	}
 	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
 		*collector = append(*collector, emitted)
 		return nil
@@ -688,4 +670,14 @@ func (pc *PipelineCoordinator) publishDirect(ctx context.Context, eventType, ent
 		}
 	}
 	return nil
+}
+
+func newPipelineRuntimeDiagnostic(eventType, entityID, flowInstance string, payload map[string]any) (events.Event, error) {
+	return events.NewRuntimeDiagnosticEvent(events.RuntimeEventInput{Facts: events.EventFacts{
+		ID: uuid.NewString(), Type: events.EventType(strings.TrimSpace(eventType)),
+		Producer:  events.ProducerClaim{Type: events.EventProducerPlatform, ID: runtimeWorkflowID},
+		Payload:   mustJSON(payload),
+		Envelope:  events.EventEnvelope{EntityID: entityID, FlowInstance: flowInstance},
+		CreatedAt: time.Now().UTC(), ExecutionMode: executionmode.Live,
+	}})
 }

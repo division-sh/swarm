@@ -15,12 +15,14 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -655,6 +657,7 @@ func newActivityBoringSourceEvent(entityID, runID, inputURL string) events.Event
 }
 
 func activityBoringExpectedIntentForSourceEvent(evt events.Event, inputURL string) runtimeengine.ActivityIntent {
+	flowInstance := "research/" + evt.EntityID()
 	site := runtimecontracts.ActivitySite{
 		FlowID:          "research",
 		NodeID:          "scanner",
@@ -682,6 +685,7 @@ func activityBoringExpectedIntentForSourceEvent(evt events.Event, inputURL strin
 		EntityID:         identity.NormalizeEntityID(evt.EntityID()),
 		NodeID:           identity.NormalizeNodeID("scanner"),
 		FlowID:           identity.NormalizeFlowID("research"),
+		FlowInstance:     flowInstance,
 		HandlerEventKey:  "source.requested",
 		SourceEventID:    evt.ID(),
 		SourceRunID:      evt.RunID(),
@@ -697,6 +701,7 @@ func newActivityBoringIntent(inputURL, runID string) runtimeengine.ActivityInten
 	if strings.TrimSpace(runID) == "" {
 		runID = testPipelineRunID
 	}
+	entityID := uuid.NewString()
 	return runtimeengine.ActivityIntent{
 		ActivityID:       "scanner_source_scrape",
 		Tool:             "source_scrape",
@@ -707,9 +712,10 @@ func newActivityBoringIntent(inputURL, runID string) runtimeengine.ActivityInten
 		RetryMaxAttempts: 3,
 		RetryBackoff:     "none",
 		ForkPolicy:       runtimecontracts.ActivityForkReexecuteRead,
-		EntityID:         identity.NormalizeEntityID(uuid.NewString()),
+		EntityID:         identity.NormalizeEntityID(entityID),
 		NodeID:           identity.NormalizeNodeID("scanner"),
 		FlowID:           identity.NormalizeFlowID("research"),
+		FlowInstance:     "research/" + entityID,
 		HandlerEventKey:  "source.requested",
 		SourceEventID:    uuid.NewString(),
 		SourceRunID:      runID,
@@ -782,12 +788,12 @@ func (d persistingActivityBoringDispatcher) DispatchPostCommit(ctx context.Conte
 	}
 	for _, intent := range intents {
 		if len(intent.Recipients) > 0 {
-			if err := d.bus.PublishDirect(ctx, intent.Event, intent.Recipients); err != nil {
+			if err := d.bus.recordingPipelineBus.PublishDirect(ctx, intent.Event, intent.Recipients); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := d.bus.Publish(ctx, intent.Event); err != nil {
+		if err := d.bus.recordingPipelineBus.Publish(ctx, intent.Event); err != nil {
 			return err
 		}
 		if d.bus.handleActivityRequests && intent.Event.Type() == activityRequestEventType && d.bus.coordinator != nil {
@@ -814,6 +820,7 @@ func appendActivityBoringEvent(ctx context.Context, db *sql.DB, kind activityBor
 	}
 	execer := interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
+		QueryRowContext(context.Context, string, ...any) *sql.Row
 	}(db)
 	if tx, ok := PipelineSQLTxFromContext(ctx); ok {
 		execer = tx
@@ -829,41 +836,18 @@ func appendActivityBoringEvent(ctx context.Context, db *sql.DB, kind activityBor
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
-	payload := strings.TrimSpace(string(evt.Payload()))
-	if payload == "" {
-		payload = "{}"
-	}
-	scope := strings.TrimSpace(string(evt.Scope()))
-	if scope == "" {
-		scope = "global"
-	}
-	flowInstance := strings.TrimSpace(evt.FlowInstance())
-	if flowInstance == "" {
-		flowInstance = "runtime"
-	}
-	var entityID any
-	if raw := strings.TrimSpace(evt.EntityID()); raw != "" {
-		if _, err := uuid.Parse(raw); err == nil {
-			entityID = raw
-		}
-	}
+	var dialect runtimeauthoractivity.Dialect
 	switch kind {
 	case activityBoringStoreSQLite:
+		dialect = runtimeauthoractivity.DialectSQLite
 		if _, err := execer.ExecContext(ctx, `
 			INSERT OR IGNORE INTO runs (run_id, status, started_at)
 			VALUES (?, 'running', ?)
 		`, runID, createdAt); err != nil {
 			return err
 		}
-		_, err := execer.ExecContext(ctx, `
-			INSERT OR IGNORE INTO events (
-				execution_mode, event_id, run_id, event_name, entity_id, flow_instance, scope,
-				payload, chain_depth, produced_by_type, created_at
-			)
-			VALUES ('live', ?, ?, ?, ?, ?, ?, ?, ?, 'platform', ?)
-		`, evt.ID(), runID, strings.TrimSpace(string(evt.Type())), entityID, flowInstance, scope, payload, evt.ChainDepth(), createdAt)
-		return err
 	case activityBoringStorePostgres:
+		dialect = runtimeauthoractivity.DialectPostgres
 		if _, err := execer.ExecContext(ctx, `
 			INSERT INTO runs (run_id, status, started_at)
 			VALUES ($1::uuid, 'running', $2)
@@ -871,18 +855,10 @@ func appendActivityBoringEvent(ctx context.Context, db *sql.DB, kind activityBor
 		`, runID, createdAt); err != nil {
 			return err
 		}
-		_, err := execer.ExecContext(ctx, `
-			INSERT INTO events (execution_mode,
-				event_id, run_id, event_name, entity_id, flow_instance, scope,
-				payload, chain_depth, produced_by_type, created_at
-			)
-			VALUES ('live', $1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7::jsonb, $8, 'platform', $9)
-			ON CONFLICT (event_id) DO NOTHING
-		`, evt.ID(), runID, strings.TrimSpace(string(evt.Type())), entityID, flowInstance, scope, payload, evt.ChainDepth(), createdAt)
-		return err
 	default:
 		return nil
 	}
+	return eventfixture.Insert(ctx, execer, dialect, evt)
 }
 
 func seedActivityBoringSourceFlow(t *testing.T, fixture activityBoringFixture, kind activityBoringStoreKind, evt events.Event) {
@@ -975,54 +951,11 @@ func loadActivityBoringPersistedEvent(t *testing.T, db *sql.DB, kind activityBor
 	if kind != activityBoringStorePostgres {
 		t.Fatalf("persisted crash readback proof requires Postgres, got %s", kind)
 	}
-	var (
-		id            string
-		runID         string
-		eventName     string
-		entityID      string
-		flowInstance  string
-		scope         string
-		payload       string
-		chainDepth    int
-		producedBy    string
-		sourceEventID string
-		createdAt     time.Time
-	)
-	if err := db.QueryRow(`
-		SELECT
-			event_id::text,
-			COALESCE(run_id::text, ''),
-			event_name,
-			COALESCE(entity_id::text, ''),
-			COALESCE(flow_instance, ''),
-			COALESCE(scope, ''),
-			payload::text,
-			COALESCE(chain_depth, 0),
-			COALESCE(produced_by, ''),
-			COALESCE(source_event_id::text, ''),
-			created_at
-		FROM events
-		WHERE event_id = $1::uuid
-	`, eventID).Scan(&id, &runID, &eventName, &entityID, &flowInstance, &scope, &payload, &chainDepth, &producedBy, &sourceEventID, &createdAt); err != nil {
+	event, err := eventfixture.Load(context.Background(), db, runtimeauthoractivity.DialectPostgres, eventID)
+	if err != nil {
 		t.Fatalf("load persisted event %s: %v", eventID, err)
 	}
-	envelope := events.EventEnvelope{
-		EntityID:     entityID,
-		FlowInstance: flowInstance,
-		Scope:        events.EventScope(scope),
-	}
-	return eventtest.PersistedProjection(
-		id,
-		events.EventType(eventName),
-		producedBy,
-		"",
-		json.RawMessage(payload),
-		chainDepth,
-		runID,
-		sourceEventID,
-		envelope,
-		createdAt,
-	)
+	return event
 }
 
 func assertActivityBoringPersistedRequestMatches(t *testing.T, evt events.Event, want runtimeengine.ActivityIntent) {

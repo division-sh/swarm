@@ -31,7 +31,10 @@ type sweeperMissingClaimStore struct {
 	deliveries map[string][]string
 }
 
-func (s *sweeperTestStore) AppendEvent(context.Context, events.Event) error { return nil }
+func (s *sweeperTestStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return (runtimebus.InMemoryEventStore{}).CommitPublish(ctx, plan)
+}
+func (*sweeperTestStore) SupportsPersistedReplay() bool { return true }
 func (s *sweeperTestStore) InsertEventDeliveries(context.Context, string, []string) error {
 	return nil
 }
@@ -76,7 +79,10 @@ func (s *sweeperTestStore) ClaimPipelinePublication(ctx context.Context, eventID
 	return s.ClaimPipelineReplay(ctx, eventID)
 }
 
-func (s *sweeperMissingClaimStore) AppendEvent(context.Context, events.Event) error { return nil }
+func (s *sweeperMissingClaimStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return (runtimebus.InMemoryEventStore{}).CommitPublish(ctx, plan)
+}
+func (*sweeperMissingClaimStore) SupportsPersistedReplay() bool { return true }
 func (s *sweeperMissingClaimStore) InsertEventDeliveries(context.Context, string, []string) error {
 	return nil
 }

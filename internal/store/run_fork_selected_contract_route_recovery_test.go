@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
@@ -9,12 +10,21 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+func seedSelectedRouteRecoveryEvent(t testing.TB, ctx context.Context, db *sql.DB, runID, eventID string) {
+	t.Helper()
+	seedPostgresRootEventRecordFixture(
+		t, ctx, db, eventID, runID, "item.received",
+		events.EventProducerPlatform, "route-recovery", "", "", time.Now().UTC(),
+	)
+}
 
 func TestNormalizeRunForkSelectedContractRouteRecoveryRejectsCurrentRouteOwner(t *testing.T) {
 	selection := RunForkContractSelection{
@@ -63,12 +73,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence(t
 	`, sourceRunID, forkRunID); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type, execution_mode)
-		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform', 'live')
-	`, sourceRunID, eventID); err != nil {
-		t.Fatalf("seed fork point event: %v", err)
-	}
+	seedSelectedRouteRecoveryEvent(t, ctx, db, sourceRunID, eventID)
 
 	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
 
@@ -118,12 +123,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection
 	`, sourceRunID, forkRunID); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type, execution_mode)
-		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform', 'live')
-	`, sourceRunID, eventID); err != nil {
-		t.Fatalf("seed fork point event: %v", err)
-	}
+	seedSelectedRouteRecoveryEvent(t, ctx, db, sourceRunID, eventID)
 
 	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
 	targetHash := "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
@@ -180,12 +180,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJS
 	`, sourceRunID, forkRunID); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type, execution_mode)
-		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform', 'live')
-	`, sourceRunID, eventID); err != nil {
-		t.Fatalf("seed fork point event: %v", err)
-	}
+	seedSelectedRouteRecoveryEvent(t, ctx, db, sourceRunID, eventID)
 	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
 	if _, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID:         forkRunID,
@@ -239,12 +234,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 	`, sourceRunID, forkRunID); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type, execution_mode)
-		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform', 'live')
-	`, sourceRunID, eventID); err != nil {
-		t.Fatalf("seed fork point event: %v", err)
-	}
+	seedSelectedRouteRecoveryEvent(t, ctx, db, sourceRunID, eventID)
 	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
 	targetHash := "bundle-v1:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 	selection = RunForkContractSelection{
@@ -307,12 +297,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRejectsJSONBTamperDuringManag
 	`, sourceRunID, forkRunID); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type, execution_mode)
-		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform', 'live')
-	`, sourceRunID, eventID); err != nil {
-		t.Fatalf("seed fork point event: %v", err)
-	}
+	seedSelectedRouteRecoveryEvent(t, ctx, db, sourceRunID, eventID)
 	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
 	if _, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID:         forkRunID,
@@ -440,6 +425,9 @@ type selectedRouteRecoveryStoreWrapper struct {
 
 func (s selectedRouteRecoveryStoreWrapper) AppendEvent(context.Context, events.Event) error {
 	return nil
+}
+func (s selectedRouteRecoveryStoreWrapper) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return runtimebustest.CommitPublishNoop(ctx, plan)
 }
 func (s selectedRouteRecoveryStoreWrapper) InsertEventDeliveries(context.Context, string, []string) error {
 	return nil

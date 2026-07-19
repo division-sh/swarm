@@ -27,11 +27,11 @@ type snapshotRunStore struct {
 	terminalCalls int
 }
 
-func (s *snapshotRunStore) AppendEvent(ctx context.Context, evt eventtypes.Event) error {
+func (s *snapshotRunStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
 	if s.appendErr != nil {
-		return s.appendErr
+		return runtimebus.PreparedPublish{}, s.appendErr
 	}
-	return s.InMemoryEventStore.AppendEvent(ctx, evt)
+	return s.InMemoryEventStore.CommitPublish(ctx, plan)
 }
 
 func (s *snapshotRunStore) MarkRunTerminal(_ context.Context, runID, status string, failure *runtimefailures.Envelope, endedAt time.Time) (runtimebus.RunLifecycleSnapshot, error) {

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -20,11 +21,11 @@ import (
 )
 
 type eventPublishResult struct {
-	EventID       string                 `json:"event_id"`
-	RunID         string                 `json:"run_id"`
-	SourceEventID string                 `json:"source_event_id,omitempty"`
-	NewRunCreated bool                   `json:"new_run_created"`
-	Deliveries    []eventPublishDelivery `json:"deliveries"`
+	EventID                  string                 `json:"event_id"`
+	RunID                    string                 `json:"run_id"`
+	OperatorReferenceEventID string                 `json:"operator_reference_event_id,omitempty"`
+	NewRunCreated            bool                   `json:"new_run_created"`
+	Deliveries               []eventPublishDelivery `json:"deliveries"`
 }
 
 type eventPublishDelivery struct {
@@ -114,11 +115,11 @@ func executeEventPublish(ctx context.Context, req Request, opts OperatorReadOpti
 		publishError:                   eventPublishPublishError,
 		buildCompletion: func(_ context.Context, _ OperatorReadOptions, params eventPublicationParams) (any, string, error) {
 			return eventPublishResult{
-				EventID:       params.EventID,
-				RunID:         params.RunID,
-				SourceEventID: params.SourceEventID,
-				NewRunCreated: params.NewRunCreated,
-				Deliveries:    []eventPublishDelivery{},
+				EventID:                  params.EventID,
+				RunID:                    params.RunID,
+				OperatorReferenceEventID: params.SourceEventID,
+				NewRunCreated:            params.NewRunCreated,
+				Deliveries:               []eventPublishDelivery{},
 			}, params.EventID, nil
 		},
 	}
@@ -165,11 +166,11 @@ func eventPublishResultFromStore(ctx context.Context, opts OperatorReadOptions, 
 		runID = strings.TrimSpace(stored.RunID)
 	}
 	return eventPublishResult{
-		EventID:       strings.TrimSpace(event.EventID),
-		RunID:         runID,
-		SourceEventID: strings.TrimSpace(event.SourceEventID),
-		NewRunCreated: stored.NewRunCreated,
-		Deliveries:    eventPublishDeliveries(event.Deliveries),
+		EventID:                  strings.TrimSpace(event.EventID),
+		RunID:                    runID,
+		OperatorReferenceEventID: strings.TrimSpace(event.OperatorReferenceEventID),
+		NewRunCreated:            stored.NewRunCreated,
+		Deliveries:               eventPublishDeliveries(event.Deliveries),
 	}, nil
 }
 
@@ -214,7 +215,11 @@ func executeOperatorEventPublication(
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}
-		if err := publishEventPublication(ctx, selectedOpts.Events, eventPublicationEvent(params, now), cfg); err != nil {
+		publication, err := eventPublicationEvent(params, now)
+		if err != nil {
+			return store.APIIdempotencyCompletion{}, err
+		}
+		if err := publishEventPublication(ctx, selectedOpts.Events, publication, cfg); err != nil {
 			if cfg.publishError != nil {
 				return store.APIIdempotencyCompletion{}, cfg.publishError(params, err)
 			}
@@ -420,7 +425,7 @@ func eventPublicationPayload(params map[string]any) (json.RawMessage, bool, erro
 	return encoded, payloadEntityIDPresent, nil
 }
 
-func eventPublicationEvent(params eventPublicationParams, createdAt time.Time) events.Event {
+func eventPublicationEvent(params eventPublicationParams, createdAt time.Time) (events.Event, error) {
 	envelope := events.EventEnvelope{EntityID: params.EntityID}
 	if flowInstance := strings.Trim(strings.TrimSpace(params.FlowInstance), "/"); flowInstance != "" {
 		envelope.FlowInstance = flowInstance
@@ -428,7 +433,20 @@ func eventPublicationEvent(params eventPublicationParams, createdAt time.Time) e
 	if params.TargetRouteSet {
 		envelope = events.EnvelopeForTargetRoute(envelope, params.TargetRoute)
 	}
-	return events.NewRootIngressEvent(params.EventID, events.EventType(params.EventName), events.ExternalProducer(params.Emitter), "", params.Payload, 0, params.RunID, params.SourceEventID, envelope, createdAt)
+	facts := events.EventFacts{
+		ID: params.EventID, Type: events.EventType(params.EventName),
+		Producer: events.ProducerClaim{Type: events.EventProducerExternal, ID: params.Emitter},
+		Payload:  params.Payload, Envelope: envelope, CreatedAt: createdAt, ExecutionMode: executionmode.Live,
+	}
+	if sourceEventID := strings.TrimSpace(params.SourceEventID); sourceEventID != "" {
+		provenance, err := events.NewOperatorReferenceProvenance(sourceEventID)
+		if err != nil {
+			var event events.Event
+			return event, err
+		}
+		return events.NewOperatorInjectedEvent(events.OperatorInjectedEventInput{Facts: facts, RunID: params.RunID, Provenance: &provenance})
+	}
+	return events.NewRootIngressEvent(events.RootIngressEventInput{Facts: facts, RunID: params.RunID})
 }
 
 func validateEventPublication(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams, cfg eventPublicationConfig) (eventPublicationParams, error) {
@@ -662,7 +680,11 @@ func validateExistingRunEventPublicationRecipientPlan(ctx context.Context, opts 
 			"reason":     "recipient planning unavailable: event publisher does not expose subscribed recipient planning",
 		})
 	}
-	plan, err := checker.CheckPublishRecipientPlan(ctx, eventPublicationEvent(params, time.Time{}))
+	publication, err := eventPublicationEvent(params, time.Time{})
+	if err != nil {
+		return err
+	}
+	plan, err := checker.CheckPublishRecipientPlan(ctx, publication)
 	if err != nil {
 		if cfg.publishError != nil {
 			return cfg.publishError(params, err)

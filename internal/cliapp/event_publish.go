@@ -45,11 +45,11 @@ type eventPublishCommandOptions struct {
 }
 
 type eventPublishResult struct {
-	EventID       string                 `json:"event_id"`
-	RunID         string                 `json:"run_id"`
-	SourceEventID string                 `json:"source_event_id,omitempty"`
-	NewRunCreated *bool                  `json:"new_run_created"`
-	Deliveries    []eventPublishDelivery `json:"deliveries"`
+	EventID                  string                 `json:"event_id"`
+	RunID                    string                 `json:"run_id"`
+	OperatorReferenceEventID string                 `json:"operator_reference_event_id,omitempty"`
+	NewRunCreated            *bool                  `json:"new_run_created"`
+	Deliveries               []eventPublishDelivery `json:"deliveries"`
 }
 
 type eventPublishDelivery struct {
@@ -336,8 +336,8 @@ func writeEventPublishResult(out io.Writer, eventName string, result eventPublis
 			len(delivery.DeadLetters),
 		)
 	}
-	if sourceEventID := strings.TrimSpace(result.SourceEventID); sourceEventID != "" {
-		fmt.Fprintf(out, "source_event_id=%s\n", sourceEventID)
+	if referenceEventID := strings.TrimSpace(result.OperatorReferenceEventID); referenceEventID != "" {
+		fmt.Fprintf(out, "operator_reference_event_id=%s\n", referenceEventID)
 	}
 }
 

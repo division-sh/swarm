@@ -200,12 +200,13 @@ func WithInboundEvent(ctx context.Context, evt events.Event) context.Context {
 }
 
 func InboundEventFromContext(ctx context.Context) (events.Event, bool) {
+	var none events.Event
 	if ctx == nil {
-		return events.EmptyEvent(), false
+		return none, false
 	}
 	v := ctx.Value(inboundEventContextKey{})
 	if v == nil {
-		return events.EmptyEvent(), false
+		return none, false
 	}
 	evt, ok := v.(events.Event)
 	return evt, ok
@@ -296,37 +297,4 @@ func BundleSourceFactFromContext(ctx context.Context) (BundleSourceFact, bool) {
 		return BundleSourceFact{}, false
 	}
 	return fact, true
-}
-
-func CorrelateEvent(ctx context.Context, evt events.Event) (context.Context, events.Event) {
-	runID := evt.RunID()
-	if runID == "" {
-		runID = RunIDFromContext(ctx)
-	}
-	if runID == "" {
-		if lineage, ok := RuntimeLineageFromContext(ctx); ok {
-			runID = strings.TrimSpace(lineage.RunID)
-		}
-	}
-	if runID == "" {
-		if inbound, ok := InboundEventFromContext(ctx); ok {
-			runID = inbound.RunID()
-		}
-	}
-	if runID != "" {
-		ctx = WithRunID(ctx, runID)
-	}
-
-	parentEventID := evt.ParentEventID()
-	if parentEventID == "" {
-		if parentID := RuntimeLineageParentForEvent(ctx, evt.ID()); parentID != "" {
-			parentEventID = parentID
-		} else if inbound, ok := InboundEventFromContext(ctx); ok {
-			parentID := inbound.ID()
-			if parentID != "" && parentID != evt.ID() {
-				parentEventID = parentID
-			}
-		}
-	}
-	return ctx, events.Project(evt, events.ProjectLineage(runID, parentEventID))
 }

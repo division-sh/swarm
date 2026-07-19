@@ -50,18 +50,23 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 			producerRoute: events.RouteIdentity{
 				FlowID:       "repo-scaffold",
 				FlowInstance: "repo-scaffold",
-				EntityID:     "stale-ent",
+				EntityID:     "ent-repo",
 			},
 			wantFlowPath: "repo-scaffold",
 		},
 		{
-			name:            "failure uses admitted delivery target route over stale inbound flow instance",
+			name:            "failure ignores delivery target in favor of exact producer route",
 			eventType:       "repo_scaffold.repo_commit_failed",
 			inboundFlowPath: "component-scaffold/component-a",
+			producerRoute: events.RouteIdentity{
+				FlowID:       "repo-scaffold",
+				FlowInstance: "repo-scaffold",
+				EntityID:     "ent-repo",
+			},
 			targetRoute: events.RouteIdentity{
 				FlowID:       "repo-scaffold",
 				FlowInstance: "repo-scaffold",
-				EntityID:     "stale-ent",
+				EntityID:     "target-ent",
 			},
 			wantFlowPath: "repo-scaffold",
 		},

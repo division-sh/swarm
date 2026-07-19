@@ -35,11 +35,9 @@ func TestConnectSourceEndpointMatchesEventUsesImmutableSourceAcrossTargetProject
 		{name: "different template target", target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/inst-9", EntityID: "consumer-entity"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			evt := eventtest.RootIngress("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
-				FlowInstance: tc.target.FlowInstance,
-				Source:       source,
-				Target:       tc.target,
-			}, time.Unix(1, 0).UTC())
+			envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, source)
+			evt := eventtest.RootIngress("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", envelope, time.Unix(1, 0).UTC())
+			evt = eventtest.TargetRouted(evt, tc.target)
 			if !ConnectSourceEndpointMatchesEvent(endpoint, evt) {
 				t.Fatalf("source endpoint did not match immutable producer route; envelope = %#v", evt.NormalizedEnvelope())
 			}
@@ -55,11 +53,9 @@ func TestConnectSourceEndpointMatchesEventRejectsTargetIdentityAsSource(t *testi
 		ResolvedEvent: "consumer/deploy.done",
 	}
 	target := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/inst-9", EntityID: "consumer-entity"}
-	evt := eventtest.RootIngress("", "deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
-		FlowInstance: target.FlowInstance,
-		Source:       events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "producer-entity"},
-		Target:       target,
-	}, time.Unix(1, 0).UTC())
+	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "producer-entity"})
+	evt := eventtest.RootIngress("", "deploy.done", "", "", []byte(`{}`), 0, "", "", envelope, time.Unix(1, 0).UTC())
+	evt = eventtest.TargetRouted(evt, target)
 	if ConnectSourceEndpointMatchesEvent(endpoint, evt) {
 		t.Fatalf("consumer target matched as producer source; envelope = %#v", evt.NormalizedEnvelope())
 	}
@@ -110,42 +106,35 @@ func TestConnectSourceEndpointMatchesEventEnforcesRootSourceContextMatrix(t *tes
 		{name: "concrete child context without source", endpoint: rootEndpoint, eventType: "root.ready", flowInstance: "child/inst-1"},
 		{name: "static child context without source", endpoint: rootEndpoint, eventType: "root.ready", flowInstance: "child"},
 		{
-			name:      "entity-only root source projected to child target",
-			endpoint:  rootEndpoint,
-			eventType: "root.ready",
-			source:    events.RouteIdentity{EntityID: "root-entity"},
-			target:    events.RouteIdentity{FlowID: "child", FlowInstance: "child/inst-1", EntityID: "child-entity"},
-			want:      true,
-		},
-		{
 			name:         "explicit child source remains authoritative",
 			endpoint:     rootEndpoint,
 			eventType:    "root.ready",
 			flowInstance: "11111111-1111-4111-8111-111111111111",
-			source:       events.RouteIdentity{FlowID: "child", FlowInstance: "child/inst-1"},
+			source:       events.RouteIdentity{FlowID: "child", FlowInstance: "child/inst-1", EntityID: "child-entity"},
 		},
 		{
 			name:      "static source control",
 			endpoint:  staticEndpoint,
 			eventType: "producer/deploy.done",
-			source:    events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"},
+			source:    events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: "producer-entity"},
 			want:      true,
 		},
 		{
 			name:      "template source control",
 			endpoint:  templateEndpoint,
 			eventType: "producer/inst-1/deploy.done",
-			source:    events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"},
+			source:    events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "producer-entity"},
 			want:      true,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			evt := eventtest.RootIngress("", events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
-				FlowInstance: tc.flowInstance,
-				Source:       tc.source,
-				Target:       tc.target,
-			}, time.Unix(1, 0).UTC())
+			envelope := events.EventEnvelope{FlowInstance: tc.flowInstance}
+			envelope = events.EnvelopeForSourceRoute(envelope, tc.source)
+			evt := eventtest.RootIngress("", events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", envelope, time.Unix(1, 0).UTC())
+			if !tc.target.Empty() {
+				evt = eventtest.TargetRouted(evt, tc.target)
+			}
 			if got := ConnectSourceEndpointMatchesEvent(tc.endpoint, evt); got != tc.want {
 				t.Fatalf("ConnectSourceEndpointMatchesEvent = %v, want %v; envelope = %#v", got, tc.want, evt.NormalizedEnvelope())
 			}

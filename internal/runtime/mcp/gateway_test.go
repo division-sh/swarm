@@ -2421,7 +2421,7 @@ func TestGatewayExecutionContext_UsesInboundTraceNotRequestTraceOnResolvedTurn(t
 	putTestTurnContext(t, registry, "ctx-trace", TurnContext{
 		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
 		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "get_entity"),
-		Inbound:           eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{}),
+		Inbound:           eventtest.RootIngress("evt-1", events.EventType("analysis.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{}),
 		HasInbound:        true,
 		CreatedAt:         time.Now().UTC(),
 		ExpiresAt:         time.Now().UTC().Add(time.Hour),

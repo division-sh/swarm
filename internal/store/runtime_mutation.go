@@ -34,11 +34,20 @@ func (s *SQLiteRuntimeStore) RunRuntimeMutationContext(ctx context.Context, fn f
 	})
 }
 
-func (s *SQLiteRuntimeStore) RunEventTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+func (s *PostgresStore) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
+	if fn == nil {
+		return nil
+	}
+	return s.runAuthorActivityMutation(ctx, "postgres pipeline mutation", func(txctx context.Context, _ *sql.Tx) error {
+		return fn(txctx)
+	})
+}
+
+func (s *SQLiteRuntimeStore) runEventTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
 	return s.runAuthorActivityMutation(ctx, "sqlite event transaction", fn)
 }
 
-func (s *PostgresStore) RunEventTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+func (s *PostgresStore) runEventTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
 	return s.runAuthorActivityMutation(ctx, "postgres event transaction", fn)
 }
 
@@ -75,6 +84,12 @@ func (s *PostgresStore) runPostgresRuntimeMutation(ctx context.Context, fn func(
 	rollbackActions := make([]func(), 0, 4)
 	txctx := runtimepipeline.WithPipelineSQLConnContext(ctx, conn)
 	txctx = runtimepipeline.WithPipelineSQLTxContext(txctx, tx)
+	if eventCtx, ok := eventCommitterForPipelineContext(txctx, s); ok {
+		txctx = eventCtx
+	} else {
+		_ = tx.Rollback()
+		return fmt.Errorf("postgres runtime mutation could not attach the event commit owner")
+	}
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
 	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
 	if err := fn(txctx, tx); err != nil {
@@ -104,7 +119,11 @@ func (s *SQLiteRuntimeStore) runRuntimeMutation(ctx context.Context, label strin
 		ctx = context.Background()
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return fn(ctx, tx)
+		eventCtx, attached := eventCommitterForPipelineContext(ctx, s)
+		if !attached {
+			return fmt.Errorf("%s could not attach the event commit owner", label)
+		}
+		return fn(eventCtx, tx)
 	}
 	retryDeadline := time.Now().Add(sqliteRuntimeMutationRetryBudget)
 	ctxDeadline, hasCtxDeadline := ctx.Deadline()
@@ -193,6 +212,12 @@ func (s *SQLiteRuntimeStore) runRuntimeMutationOnceLocked(ctx context.Context, f
 	postCommit := make([]func(), 0, 4)
 	rollbackActions := make([]func(), 0, 4)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	if eventCtx, ok := eventCommitterForPipelineContext(txctx, s); ok {
+		txctx = eventCtx
+	} else {
+		_ = tx.Rollback()
+		return nil, fmt.Errorf("sqlite runtime mutation could not attach the event commit owner")
+	}
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
 	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
 	if err := fn(txctx, tx); err != nil {

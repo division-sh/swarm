@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -55,15 +58,9 @@ func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *tes
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES ('live',
-			$1::uuid, $2::uuid, 'task.completed', $3::uuid, 'entity', '{"entity_id": "`+entityID+`"}'::jsonb, 'runtime', 'agent', $4
-		)
-	`, eventID, runID, entityID, time.Unix(1700000000, 0).UTC()); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+		eventID, runID, "task.completed", eventtest.Producer(events.EventProducerAgent, "runtime"),
+		[]byte(`{"entity_id":"`+entityID+`"}`), events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, time.Unix(1700000000, 0).UTC())
 
 	seedDelivery := func(subscriberID, status string, retryCount int, failureCode string, createdAt time.Time) {
 		t.Helper()
@@ -140,15 +137,9 @@ func TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity(t *tes
 	seedEvent := func(eventName string, at time.Time, deliveries ...deliverySeed) string {
 		t.Helper()
 		eventID := uuid.NewString()
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (execution_mode,
-				event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-			) VALUES ('live',
-				$1::uuid, $2::uuid, $3, 'global', '{}'::jsonb, 'runtime', 'agent', $4
-			)
-		`, eventID, runID, eventName, at.UTC()); err != nil {
-			t.Fatalf("seed event %s: %v", eventName, err)
-		}
+		storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+			eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerAgent, "runtime"),
+			[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at.UTC())
 		for _, delivery := range deliveries {
 			if _, err := db.ExecContext(ctx, `
 				INSERT INTO event_deliveries (
@@ -197,15 +188,9 @@ func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T)
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES ('live',
-			$1::uuid, $2::uuid, 'task.completed', 'global', '{}'::jsonb, 'runtime', 'agent', now()
-		)
-	`, eventID, runID); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+		eventID, runID, "task.completed", eventtest.Producer(events.EventProducerAgent, "runtime"),
+		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, failure, created_at
@@ -256,22 +241,13 @@ func TestSQLObservabilityReader_EventIdentityDoesNotPromotePayloadEntity(t *test
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ('live', $1::uuid, $2::uuid, 'task.payload_only', 'global',
-			jsonb_build_object('entity_id', $3::text, 'marker', 'payload-only'),
-			'agent-a', 'agent', $4)
-	`, payloadOnlyEventID, runID, targetEntityID, base); err != nil {
-		t.Fatalf("seed payload-only event: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ('live', $1::uuid, $2::uuid, 'task.canonical_entity', $3::uuid, 'entity',
-			jsonb_build_object('entity_id', 'payload-business-value', 'marker', 'canonical'),
-			'agent-b', 'agent', $4)
-	`, canonicalEventID, runID, targetEntityID, base.Add(time.Second)); err != nil {
-		t.Fatalf("seed canonical event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+		payloadOnlyEventID, runID, "task.payload_only", eventtest.Producer(events.EventProducerAgent, "agent-a"),
+		[]byte(`{"entity_id":"`+targetEntityID+`","marker":"payload-only"}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, base)
+	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+		canonicalEventID, runID, "task.canonical_entity", eventtest.Producer(events.EventProducerAgent, "agent-b"),
+		[]byte(`{"entity_id":"payload-business-value","marker":"canonical"}`),
+		events.EventEnvelope{EntityID: targetEntityID, Scope: events.EventScopeEntity}, base.Add(time.Second))
 
 	filtered, err := reader.ListEvents(ctx, EventFilter{EntityID: targetEntityID}, 10)
 	if err != nil {
@@ -379,15 +355,8 @@ func TestSQLObservabilityReader_ListRuntimeLogs_ProjectsDeliveryLifecycleFields(
 				"retry_count":` + fmt.Sprintf("%d", retryCount) + `
 			}
 		}`
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (execution_mode,
-				event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-			) VALUES ('live',
-				gen_random_uuid(), 'platform.runtime_log', 'global', $1::jsonb, 'runtime', 'platform', $2
-			)
-		`, payload, createdAt); err != nil {
-			t.Fatalf("insert runtime_log: %v", err)
-		}
+		storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+			uuid.NewString(), "runtime", []byte(payload), createdAt)
 	}
 
 	insertRuntimeLog("evt-retry", "retrying", "active", "boom", "", 1, time.Unix(1700000100, 0).UTC())
@@ -422,15 +391,8 @@ func TestSQLObservabilityReader_ListRuntimeLogs_FailsClosedOnMalformedCanonicalP
 		"message":"malformed runtime log",
 		"details":"not-an-object"
 	}`
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES ('live',
-			gen_random_uuid(), 'platform.runtime_log', 'global', $1::jsonb, 'runtime', 'platform', now()
-		)
-	`, payload); err != nil {
-		t.Fatalf("insert malformed runtime_log: %v", err)
-	}
+	storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+		uuid.NewString(), "runtime", []byte(payload), time.Now().UTC())
 
 	_, err := reader.ListRuntimeLogs(ctx, RuntimeLogFilter{}, 10)
 	if err == nil || !strings.Contains(err.Error(), "runtime log details must be an object") {
@@ -446,15 +408,8 @@ func TestSQLObservabilityReader_ListIncidents_UsesCanonicalRuntimeLogPayloads(t 
 	insertRuntimeLog := func(component, action, agentID string, createdAt time.Time) {
 		t.Helper()
 		payload := canonicalRuntimeLogTestPayload(t, component, action, "retry_exhausted", "runtime incident", agentID)
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (execution_mode,
-				event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-			) VALUES ('live',
-				gen_random_uuid(), 'platform.runtime_log', 'global', $1::jsonb, 'runtime', 'platform', $2
-			)
-		`, payload, createdAt); err != nil {
-			t.Fatalf("insert runtime_log: %v", err)
-		}
+		storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+			uuid.NewString(), "runtime", []byte(payload), createdAt)
 	}
 
 	now := time.Now().UTC()
@@ -488,15 +443,8 @@ func TestSQLObservabilityReader_ListIncidents_FailsClosedOnMissingCanonicalCompo
 	ctx := context.Background()
 
 	payload := canonicalRuntimeLogTestPayload(t, "", "request_failed", "retry_exhausted", "incomplete runtime incident", "")
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES ('live',
-			gen_random_uuid(), 'platform.runtime_log', 'global', $1::jsonb, 'runtime', 'platform', now()
-		)
-	`, payload); err != nil {
-		t.Fatalf("insert malformed runtime_log: %v", err)
-	}
+	storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+		uuid.NewString(), "runtime", []byte(payload), time.Now().UTC())
 
 	_, err := reader.ListIncidents(ctx, IncidentFilter{SinceHours: 24})
 	if err == nil || !strings.Contains(err.Error(), "runtime log component is required") {
@@ -517,15 +465,8 @@ func TestSQLObservabilityReader_ListIncidents_IgnoresErrorLogsWithoutCanonicalFa
 			"action":"fallback_case"
 		}
 	}`
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES ('live',
-			gen_random_uuid(), 'platform.runtime_log', 'global', $1::jsonb, 'runtime', 'platform', now()
-		)
-	`, payload); err != nil {
-		t.Fatalf("insert runtime_log: %v", err)
-	}
+	storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+		uuid.NewString(), "runtime", []byte(payload), time.Now().UTC())
 
 	rows, err := reader.ListIncidents(ctx, IncidentFilter{SinceHours: 24})
 	if err != nil {
@@ -545,15 +486,8 @@ func TestSQLObservabilityReader_ListIncidents_SortsByRawLastSeenBeforeLimit(t *t
 	insertRuntimeLog := func(code, message string, createdAt time.Time) {
 		t.Helper()
 		payload := canonicalRuntimeLogTestPayload(t, "diagnostics", "same_second_order", code, message, "")
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (execution_mode,
-				event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-			) VALUES ('live',
-				gen_random_uuid(), 'platform.runtime_log', 'global', $1::jsonb, 'runtime', 'platform', $2
-			)
-		`, payload, createdAt); err != nil {
-			t.Fatalf("insert runtime_log: %v", err)
-		}
+		storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+			uuid.NewString(), "runtime", []byte(payload), createdAt)
 	}
 
 	insertRuntimeLog("older_code", "older", base.Add(100*time.Millisecond))

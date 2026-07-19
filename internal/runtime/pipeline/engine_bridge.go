@@ -165,7 +165,11 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	originalEntityID := entityID
 	originalStateEntityID := strings.TrimSpace(triggerCtx.State.EntityID)
-	entityID, triggerCtx.Event = resolveHandlerEntityIDForFlow(source, flowID, handler, entityID, triggerCtx.Event, &triggerCtx.State)
+	resolvedEntityID, resolvedEvent, err := resolveHandlerEntityIDForFlow(source, flowID, handler, entityID, triggerCtx.Event, &triggerCtx.State)
+	if err != nil {
+		return contractHandlerExecutionResult{}, err
+	}
+	entityID, triggerCtx.Event = resolvedEntityID, resolvedEvent
 	if !handler.CreateEntity && entityID != "" && originalStateEntityID != "" && originalStateEntityID != entityID {
 		triggerCtx.State = pc.currentWorkflowState(ctx, entityID)
 		if strings.TrimSpace(triggerCtx.State.EntityID) == "" {
@@ -222,7 +226,14 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
-	producerRoute := actionResultProducerRoute(source, flowID, entityID, triggerCtx.Event, stateSnapshot, triggerCtx.Event.TargetRoute())
+	producerRoute := actionResultProducerRoute(
+		source,
+		flowID,
+		entityID,
+		triggerCtx.Event,
+		stateSnapshot,
+		workflowNodeProducerRoute(source, nodeID, flowID, entityID, stateSnapshot),
+	)
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
 		EntityID:        identity.NormalizeEntityID(entityID),
 		NodeID:          identity.NormalizeNodeID(nodeID),
@@ -302,7 +313,7 @@ func resolveHandlerEntityIDForFlow(
 	entityID string,
 	evt events.Event,
 	state *WorkflowState,
-) (string, events.Event) {
+) (string, events.Event, error) {
 	entityID = strings.TrimSpace(entityID)
 	if handler.CreateEntity {
 		sourceEntityID := strings.TrimSpace(firstNonEmptyString(entityID, evt.EntityID()))
@@ -316,16 +327,20 @@ func resolveHandlerEntityIDForFlow(
 			state.Status = ""
 			state.Metadata = workflowCreateEntityMetadata(source, flowID, instance)
 		}
-		return entityID, evt
+		return entityID, evt, nil
 	}
-	entityID, evt = ensureHandlerEntityID(source, flowID, handler, entityID, evt)
+	var err error
+	entityID, evt, err = ensureHandlerEntityID(source, flowID, handler, entityID, evt)
+	if err != nil {
+		return "", evt, err
+	}
 	if state != nil && handlerMaterializesEntity(source, flowID, handler) {
 		state.Metadata = workflowMaterializeEntityMetadata(source, flowID, state.Metadata)
 	}
 	if state != nil && strings.TrimSpace(state.EntityID) == "" {
 		state.EntityID = entityID
 	}
-	return entityID, evt
+	return entityID, evt, nil
 }
 
 func canonicalHandlerInstanceID(flowID string, evt events.Event) string {

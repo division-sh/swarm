@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -272,12 +274,10 @@ func TestRunForkSourceFreezeBlocksOnlyLiveExecutionAuthority(t *testing.T) {
 func seedRunForkFreezeDeliveryAuthority(t *testing.T, ctx context.Context, db *sql.DB, lineage runForkActivationLineage, now time.Time, live bool) {
 	t.Helper()
 	eventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ('live', $1::uuid, $2::uuid, 'freeze.delivery', 'global', '{}'::jsonb, 'test', 'platform', $3)
-	`, lineage.SourceRunID, eventID, now); err != nil {
-		t.Fatal(err)
-	}
+	seedPostgresRootEventRecordFixture(
+		t, ctx, db, eventID, lineage.SourceRunID, events.EventType("freeze.delivery"),
+		events.EventProducerPlatform, "test", "", "", now,
+	)
 	status := "pending"
 	activeSession := any(nil)
 	startedAt := any(nil)
@@ -339,10 +339,10 @@ func seedRunForkFreezeActivityAuthority(t *testing.T, ctx context.Context, db *s
 func seedRunForkFreezeDirectiveAuthority(t *testing.T, ctx context.Context, db *sql.DB, lineage runForkActivationLineage, now time.Time, live bool) {
 	t.Helper()
 	eventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ('live', $1::uuid, $2::uuid, 'agent.directive', 'global', '{}'::jsonb, 'operator', 'platform', $3)
-	`, lineage.SourceRunID, eventID, now); err != nil {
+	if err := insertPostgresCanonicalEventRecordFixture(ctx, db, eventtest.DiagnosticDirect(
+		eventID, events.EventTypePlatformAgentDirective, "operator", "", []byte(`{}`), 0,
+		lineage.SourceRunID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, now,
+	)); err != nil {
 		t.Fatal(err)
 	}
 	state := "succeeded"

@@ -89,9 +89,7 @@ type proposedEffectRouteProofBus struct {
 	publishContexts []events.DeliveryContext
 	outbox          []runtimeengine.EmitIntent
 	dispatched      []runtimeengine.EmitIntent
-	eventStore      interface {
-		AppendEventTx(context.Context, *sql.Tx, events.Event) error
-	}
+	eventBus        *runtimebus.EventBus
 }
 
 type proposedEffectRouteProofOutbox struct{ bus *proposedEffectRouteProofBus }
@@ -114,30 +112,34 @@ func (b *proposedEffectRouteProofBus) EngineOutbox() runtimeengine.OutboxWriter 
 func (b *proposedEffectRouteProofBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return proposedEffectRouteProofDispatcher{bus: b}
 }
+func (b *proposedEffectRouteProofBus) RuntimeMutationRunner() runtimepipeline.RuntimeMutationRunner {
+	if b == nil || b.eventBus == nil {
+		return nil
+	}
+	return b.eventBus.RuntimeMutationRunner()
+}
 func (b *proposedEffectRouteProofBus) PublishInMutation(ctx context.Context, evt events.Event) error {
 	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
 	if !ok || tx == nil {
 		return errors.New("proposed-effect proof publication requires pipeline transaction")
 	}
-	if b.eventStore == nil {
-		return errors.New("proposed-effect proof publication requires event store")
+	if b.eventBus == nil {
+		return errors.New("proposed-effect proof publication requires event bus")
 	}
-	if err := b.eventStore.AppendEventTx(ctx, tx, evt); err != nil {
+	if err := b.eventBus.PublishInMutation(ctx, evt); err != nil {
 		return err
 	}
-	b.published = append(b.published, evt)
+	b.published = append(b.published, events.NewContextDeliveryEvent(evt, events.DeliveryContextFromContext(ctx)).Event())
 	b.publishContexts = append(b.publishContexts, events.DeliveryContextFromContext(ctx))
 	return nil
 }
 func (o proposedEffectRouteProofOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.EmitIntent) error {
 	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil || o.bus.eventStore == nil {
+	if !ok || tx == nil || o.bus.eventBus == nil {
 		return errors.New("proposed-effect proof outbox requires pipeline event mutation")
 	}
-	for _, intent := range intents {
-		if err := o.bus.eventStore.AppendEventTx(ctx, tx, intent.Event); err != nil {
-			return err
-		}
+	if err := o.bus.eventBus.EngineOutbox().WriteOutbox(ctx, intents); err != nil {
+		return err
 	}
 	o.bus.outbox = append(o.bus.outbox, intents...)
 	return nil
@@ -363,7 +365,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			}
 			items, _, err := selected.cards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: runID, AnchorKind: string(decisioncard.AnchorKindProposedEffect), Limit: 10})
 			if err != nil || len(items) != 1 {
-				t.Fatalf("pending proposed-effect cards = %#v, %v", items, err)
+				t.Fatalf("pending proposed-effect cards = %#v, %v; handler failure: %s", items, err, proposedEffectProofFailure(t, selected, sourceEvent.ID()))
 			}
 			card, err := selected.cards.GetDecisionCard(ctx, items[0].CardID)
 			if err != nil {
@@ -424,7 +426,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			bus.SetInterceptors()
 			forward, emitted, err = coordinator.Intercept(ctx, decisionEvent)
 			if err != nil {
-				t.Fatalf("route approval decision: %v", err)
+				t.Fatalf("route approval decision: %v; continuation route=%s/%s/%s", err, deferred.FlowID, deferred.FlowInstance, deferred.EntityID)
 			}
 			if forward {
 				t.Fatal("approval decision was not consumed by the proposed-effect authority")
@@ -558,10 +560,6 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 		for _, verdict := range []string{"approve", "revise", "reject"} {
 			t.Run(storeCase.name+"/"+verdict, func(t *testing.T) {
 				selected := storeCase.open(t)
-				registerDifferentTestAuthorActivityEvents(t, selected.events,
-					"send_support_reply.revision_requested",
-					"send_support_reply.rejected",
-				)
 				ctx := testAuthorActivityContext(context.Background())
 				runID, entityID := uuid.NewString(), uuid.NewString()
 				insertGateRecoveryRun(t, selected, runID)
@@ -572,7 +570,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				}
 				sourceEventID := uuid.NewString()
 				requestEventID := activityidentity.RequestEventID(activityidentity.Fact{
-					RunID: runID, SourceEventID: sourceEventID, EntityID: entityID, NodeID: "support",
+					RunID: runID, SourceEventID: sourceEventID, EntityID: entityID, FlowID: "support", NodeID: "support",
 					HandlerEventKey: "support.reply_drafted", ActivityID: "send_support_reply", Tool: "provider_write", Attempt: 1,
 				})
 				continuation := decisioncard.ProposedEffectContinuation{
@@ -583,7 +581,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					SuccessEvent: "send_support_reply.succeeded", FailureEvent: "send_support_reply.failed",
 					RevisionEvent: "send_support_reply.revision_requested", RejectedEvent: "send_support_reply.rejected",
 					RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
-					EntityID: entityID, NodeID: "support", FlowInstance: "root", HandlerEventKey: "support.reply_drafted",
+					EntityID: entityID, NodeID: "support", FlowID: "support", FlowInstance: "root", HandlerEventKey: "support.reply_drafted",
 					SourceEventID: sourceEventID, SourceRunID: runID, SourceTaskID: "task-1",
 					ExecutionMode: executionmode.Live, ReplyContextID: "reply-context-route-proof", State: decisioncard.ProposedEffectPending,
 					CreatedAt: now, UpdatedAt: now,
@@ -641,9 +639,12 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				decisionEvent := eventtest.RuntimeControl(decisionEventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
 					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "root"), now.Add(time.Minute))
 				source := semanticview.Wrap(proposedEffectProofBundle("http://127.0.0.1:1"))
-				bus := &proposedEffectRouteProofBus{eventStore: selected.cards.(interface {
-					AppendEventTx(context.Context, *sql.Tx, events.Event) error
-				})}
+				canonicalBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source},
+					"platform.activity_requested", "send_support_reply.revision_requested", "send_support_reply.rejected")
+				if err != nil {
+					t.Fatal(err)
+				}
+				bus := &proposedEffectRouteProofBus{eventBus: canonicalBus}
 				coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
 					Module: gateRecoveryModule{source: source}, WorkflowStore: selected.workflowStore,
 					DecisionCards: selected.cards, BundleHash: gateRecoveryBundle,
@@ -918,7 +919,7 @@ func TestDecisionRouteSettlementFailureDefersAndDoesNotStarveOnBothStores(t *tes
 		name string
 		open func(*testing.T) gateRecoveryStoreCase
 	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
-		for _, form := range []string{"synchronous", "acknowledged", "mutation_bound"} {
+		for _, form := range []string{"synchronous", "acknowledged"} {
 			for _, recovery := range []string{"periodic", "startup"} {
 				t.Run(tc.name+"/"+form+"/"+recovery, func(t *testing.T) {
 					testDecisionRouteSettlementFailureFairness(t, tc.open(t), form, recovery)
@@ -967,16 +968,6 @@ func testDecisionRouteSettlementFailureFairness(t *testing.T, selected gateRecov
 	case "acknowledged":
 		if err := bus.PublishAcknowledged(ctx, failing.event); err != nil {
 			t.Fatalf("acknowledged failing settlement: %v", err)
-		}
-	case "mutation_bound":
-		runner, ok := failingStore.(runtimebus.EventMutationRunner)
-		if !ok {
-			t.Fatalf("event store %T lacks mutation runner", failingStore)
-		}
-		if err := runner.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
-			return bus.PublishInMutation(mutation.Context(), failing.event)
-		}); err != nil {
-			t.Fatalf("mutation-bound failing settlement: %v", err)
 		}
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -1117,7 +1108,7 @@ func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForm
 		name string
 		open func(*testing.T) gateRecoveryStoreCase
 	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
-		for _, form := range []string{"synchronous", "acknowledged", "mutation_bound"} {
+		for _, form := range []string{"synchronous", "acknowledged"} {
 			t.Run(tc.name+"/"+form, func(t *testing.T) {
 				selected := tc.open(t)
 				runID := uuid.NewString()
@@ -1145,16 +1136,6 @@ func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForm
 					defer cancel()
 					if err := bus.WaitForQuiescence(waitCtx); err != nil {
 						t.Fatalf("wait for acknowledged poison route: %v", err)
-					}
-				case "mutation_bound":
-					runner, ok := selected.events.(runtimebus.EventMutationRunner)
-					if !ok {
-						t.Fatalf("event store %T lacks mutation runner", selected.events)
-					}
-					if err := runner.RunEventMutation(testAuthorActivityContext(context.Background()), func(mutation runtimebus.EventMutation) error {
-						return bus.PublishInMutation(mutation.Context(), fixture.event)
-					}); err != nil {
-						t.Fatalf("mutation-bound poison route publish: %v", err)
 					}
 				}
 
@@ -1281,35 +1262,13 @@ func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, run
 	stageAnchor := recoveryStageAnchor(t, card)
 	evt := eventtest.RuntimeControl(eventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, stageAnchor.EntityID), stageAnchor.FlowInstance), at)
-	if err := tc.events.AppendEvent(testAuthorActivityContext(context.Background()), evt); err != nil {
-		t.Fatal(err)
-	}
-	scopeWriter, ok := tc.events.(interface {
-		UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error
-	})
-	if !ok {
-		t.Fatalf("event store %T lacks replay scope writer", tc.events)
-	}
-	if err := scopeWriter.UpsertCommittedReplayScope(testAuthorActivityContext(context.Background()), eventID, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
-		t.Fatal(err)
-	}
+	storetest.CommitSemanticEventWithRoutes(t, testAuthorActivityContext(context.Background()), tc.events, evt, nil, runtimereplayclaim.CommittedReplayScopeSubscribed)
 	return eventID
 }
 
 func persistGateRecoveryRouteEvent(t *testing.T, tc gateRecoveryStoreCase, evt events.Event) {
 	t.Helper()
-	if err := tc.events.AppendEvent(testAuthorActivityContext(context.Background()), evt); err != nil {
-		t.Fatal(err)
-	}
-	scopeWriter, ok := tc.events.(interface {
-		UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error
-	})
-	if !ok {
-		t.Fatalf("event store %T lacks replay scope writer", tc.events)
-	}
-	if err := scopeWriter.UpsertCommittedReplayScope(testAuthorActivityContext(context.Background()), evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
-		t.Fatal(err)
-	}
+	storetest.CommitSemanticEventWithRoutes(t, testAuthorActivityContext(context.Background()), tc.events, evt, nil, runtimereplayclaim.CommittedReplayScopeSubscribed)
 }
 
 func setGateRecoveryRouteAttempt(t *testing.T, tc gateRecoveryStoreCase, eventID string, attempt int) {
@@ -1675,18 +1634,23 @@ func assertProposedEffectOutcomeCount(t *testing.T, selected gateRecoveryStoreCa
 func seedProposedEffectProofDelivery(t *testing.T, selected gateRecoveryStoreCase, evt events.Event, nodeID string) {
 	t.Helper()
 	ctx := testAuthorActivityContext(context.Background())
-	if err := selected.events.AppendEvent(ctx, evt); err != nil {
-		t.Fatal(err)
-	}
-	query := `INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, created_at) VALUES (?, ?, ?, 'node', ?, 'pending', 0, ?)`
-	args := []any{uuid.NewString(), evt.RunID(), evt.ID(), nodeID, time.Now().UTC()}
+	storetest.CommitSemanticEventWithRoutes(t, ctx, selected.events, evt, []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: nodeID}}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+}
+
+func proposedEffectProofFailure(t *testing.T, selected gateRecoveryStoreCase, eventID string) string {
+	t.Helper()
+	query := `SELECT COALESCE(CAST(failure AS TEXT), '') FROM dead_letters WHERE original_event_id = ? ORDER BY created_at DESC LIMIT 1`
 	if selected.postgres {
-		query = `INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, retry_count, created_at) VALUES ($1::uuid, $2::uuid, 'node', $3, 'pending', 0, $4)`
-		args = []any{evt.RunID(), evt.ID(), nodeID, time.Now().UTC()}
+		query = `SELECT COALESCE(failure::text, '') FROM dead_letters WHERE original_event_id = $1::uuid ORDER BY created_at DESC LIMIT 1`
 	}
-	if _, err := selected.db.ExecContext(ctx, query, args...); err != nil {
-		t.Fatal(err)
+	var failure string
+	if err := selected.db.QueryRowContext(testAuthorActivityContext(context.Background()), query, eventID).Scan(&failure); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "<no dead letter>"
+		}
+		return err.Error()
 	}
+	return failure
 }
 
 func loadProposedEffectProofRequest(t *testing.T, selected gateRecoveryStoreCase, runID string) events.Event {

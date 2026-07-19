@@ -436,9 +436,7 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) == 0 {
 		t.Fatalf("source root preflight = failure:%s routes:%#v", preflight.TargetFailure, preflight.DeliveryRoutes)
 	}
-	if err := pg.PersistEventWithDeliveryRouteSetAndScope(sourceCtx, sourceEvent, preflight.DeliveryRoutes, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
-		t.Fatalf("persist source fork frontier event: %v", err)
-	}
+	commitRunForkTestEvent(t, sourceCtx, pg, sourceEvent, preflight.DeliveryRoutes)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -501,9 +499,7 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 	if controlPreflight.TargetFailure != "" || len(controlPreflight.DeliveryRoutes) == 0 {
 		t.Fatalf("control root preflight = failure:%s routes:%#v", controlPreflight.TargetFailure, controlPreflight.DeliveryRoutes)
 	}
-	if err := pg.PersistEventWithDeliveryRouteSetAndScope(controlCtx, controlEvent, controlPreflight.DeliveryRoutes, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
-		t.Fatalf("persist control event: %v", err)
-	}
+	commitRunForkTestEvent(t, controlCtx, pg, controlEvent, controlPreflight.DeliveryRoutes)
 	sourceBus.SetInterceptors(sourcePipeline)
 	if err := sourceBus.RecoverPersistedPipeline(controlCtx, controlEvent, nil); err != nil {
 		t.Fatalf("execute control delivery: %v", err)
@@ -1442,9 +1438,8 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at) VALUES ($1::uuid,'running',$3),($2::uuid,'paused',$3)`, sourceRunID, forkRunID, now); err != nil {
 		t.Fatalf("seed selected-fork proof runs: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO events (event_id,run_id,event_name,scope,execution_mode,created_at) VALUES ($1::uuid,$2::uuid,'selected.proof','global','live',$3)`, forkEventID, sourceRunID, now); err != nil {
-		t.Fatalf("seed selected-fork proof event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, forkEventID, sourceRunID, "selected.proof",
+		eventtest.Producer(events.EventProducerPlatform, "selected-proof"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings
 			(binding_id,fork_run_id,source_run_id,fork_event_id,mode,contracts_root,workflow_name,workflow_version,created_at)
@@ -1725,9 +1720,8 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at) VALUES ($1::uuid,'running',$3),($2::uuid,'paused',$3)`, sourceRunID, forkRunID, now); err != nil {
 		t.Fatalf("seed selected-contract container competition runs: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO events (execution_mode, event_id,run_id,event_name,scope,created_at) VALUES ('live', $1::uuid,$2::uuid,'selected.test','global',$3)`, forkEventID, sourceRunID, now); err != nil {
-		t.Fatalf("seed selected-contract container competition event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, forkEventID, sourceRunID, "selected.test",
+		eventtest.Producer(events.EventProducerPlatform, "selected-test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings
 			(binding_id,fork_run_id,source_run_id,fork_event_id,mode,contracts_root,workflow_name,workflow_version,created_at)
@@ -2537,19 +2531,9 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	`, sourceRunID, sourceEventID, at.Add(5*time.Second)); err != nil {
 		t.Fatalf("seed in-progress source delivery: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
-			produced_by, produced_by_type, source_event_id, created_at
-		)
-		VALUES ('live',
-			$1::uuid, $2::uuid, 'item.received', $3::uuid,
-			'flow-a/1', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
-			$4::uuid, $5
-		)
-	`, sourceRunID, forkPointEventID, entityID, sourceEventID, forkAt); err != nil {
-		t.Fatalf("seed fork point event: %v", err)
-	}
+	storetest.InsertChildEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, forkPointEventID, sourceRunID, sourceEventID,
+		"item.received", eventtest.Producer(events.EventProducerAgent, "validation-coordinator"), []byte(`{}`),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), forkAt)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -3026,14 +3010,9 @@ func TestExecuteSelectedContractRunForkBranchesWhenSourceAdvancedAfterForkPoint(
 	at := time.Unix(1700002350, 0).UTC()
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'source.after', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'source-runtime', 'platform', $4)
-	`, sourceRunID, afterEventID, entityID, at.Add(time.Second)); err != nil {
-		t.Fatalf("seed post-fork source event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, afterEventID, sourceRunID, "source.after",
+		eventtest.Producer(events.EventProducerPlatform, "source-runtime"), []byte(`{}`),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at.Add(time.Second))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
@@ -3598,7 +3577,7 @@ func (a *selectedContractForkTestAgent) OnEvent(ctx context.Context, evt events.
 	a.mu.Unlock()
 
 	return []events.Event{
-		eventtest.RootIngress("", events.EventType("task.completed"), agentID, "", json.RawMessage(`{}`), 0, evt.RunID(), evt.ID(), evt.NormalizedEnvelope(), time.Now().UTC()),
+		eventtest.Child("", events.EventType("task.completed"), agentID, "", json.RawMessage(`{}`), 0, evt, evt.NormalizedEnvelope(), time.Now().UTC()),
 	}, nil
 }
 
@@ -3701,14 +3680,9 @@ func seedSelectedExecutionSourceRun(t *testing.T, db *sql.DB, sourceRunID, entit
 	`, sourceRunID, runForkTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, $3, $4::uuid, 'flow-a/1', 'entity', $5::jsonb, 'source-runtime', 'platform', $6)
-	`, sourceRunID, sourceEventID, eventName, entityID, string(payload), at); err != nil {
-		t.Fatalf("seed source event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, sourceEventID, sourceRunID, events.EventType(eventName),
+		eventtest.Producer(events.EventProducerPlatform, "source-runtime"), payload,
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
@@ -3776,17 +3750,7 @@ func seedSelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, db *sql.DB,
 		"level":   "info",
 		"message": "diagnostic platform row must remain lineage-only",
 	})
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live',
-			$1::uuid, $2::uuid, 'platform.runtime_log', NULL, NULL, 'global',
-			$3::jsonb, 'pipeline', 'platform', $4
-		)
-	`, sourceRunID, diagnosticEventID, string(payload), at); err != nil {
-		t.Fatalf("seed diagnostic platform event: %v", err)
-	}
+	storetest.InsertRuntimeDiagnosticEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, diagnosticEventID, sourceRunID, "", "pipeline", payload, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, entity_id, flow_instance, outcome, reason_code, side_effects, processed_at
@@ -3818,18 +3782,9 @@ func seedSelectedExecutionSourceReplayScopeMarker(t *testing.T, db *sql.DB, sour
 
 func seedSelectedExecutionPostForkSourceEvent(t *testing.T, db *sql.DB, sourceRunID, sourceEventID, entityID string, at time.Time) {
 	t.Helper()
-	if _, err := db.ExecContext(context.Background(), `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope,
-			payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live',
-			$1::uuid, $2::uuid, 'source.after', $3::uuid, 'flow-a/1', 'entity',
-			'{}'::jsonb, 'source-runtime', 'platform', $4
-		)
-	`, sourceRunID, sourceEventID, entityID, at); err != nil {
-		t.Fatalf("seed post-fork source event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, context.Background(), db, runtimeauthoractivity.DialectPostgres, sourceEventID, sourceRunID, "source.after",
+		eventtest.Producer(events.EventProducerPlatform, "source-runtime"), []byte(`{}`),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at)
 }
 
 func assertNoForkExecutionRowsForRun(t *testing.T, db *sql.DB, forkRunID string) {
@@ -3930,13 +3885,22 @@ func selectedExecutionResultHasBlocker(result SelectedContractExecutionResult, c
 }
 
 func TestSelectedContractForkEventPreservesSourceExecutionMode(t *testing.T) {
-	evt := selectedContractForkEvent("fork-run", "fork-event", store.RunForkSelectedContractSourceEvent{
-		SourceEventID: "source-event",
+	sourceRunID, forkRunID, sourceEventID, forkEventID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	evt, err := selectedContractForkEvent(sourceRunID, forkRunID, forkEventID, store.RunForkSelectedContractSourceEvent{
+		SourceEventID: sourceEventID,
 		EventName:     "task.started",
 		ExecutionMode: runtimeeffects.ExecutionModeMock,
 		Payload:       json.RawMessage(`{"ok":true}`),
 	}, "selected-contract")
+	if err != nil {
+		t.Fatalf("selectedContractForkEvent: %v", err)
+	}
 	if evt.ExecutionMode() != runtimeeffects.ExecutionModeMock {
 		t.Fatalf("fork event execution mode = %q, want mock", evt.ExecutionMode())
 	}
+}
+
+func commitRunForkTestEvent(t testing.TB, ctx context.Context, pg *store.PostgresStore, event events.Event, routes []events.DeliveryRoute) {
+	t.Helper()
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, routes, runtimereplayclaim.CommittedReplayScopeSubscribed)
 }

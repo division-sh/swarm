@@ -599,7 +599,7 @@ func routedNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscr
 			SubscriberID:   recipient,
 			Target: events.RouteIdentity{
 				FlowInstance: flowInstance,
-				EntityID:     eventEntityID,
+				EntityID:     routedNodeTargetEntityID(eventEntityID, flowInstance),
 			},
 		})
 	}
@@ -634,7 +634,7 @@ func routedConcreteNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscri
 			SubscriberID:   recipient,
 			Target: events.RouteIdentity{
 				FlowInstance: flowInstance,
-				EntityID:     eventEntityID,
+				EntityID:     routedNodeTargetEntityID(eventEntityID, flowInstance),
 			},
 		})
 	}
@@ -665,7 +665,7 @@ func routedScopedNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscribe
 			SubscriberID:   strings.TrimSpace(subscriber.ID),
 			Target: events.RouteIdentity{
 				FlowInstance: targetFlowInstance,
-				EntityID:     eventEntityID,
+				EntityID:     routedNodeTargetEntityID(eventEntityID, targetFlowInstance),
 			},
 		})
 	}
@@ -703,7 +703,7 @@ func routedWildcardStaticServiceNoTargetNodeDeliveryRoutes(evt events.Event, rou
 			SubscriberID:   id,
 			Target: events.RouteIdentity{
 				FlowInstance: path,
-				EntityID:     eventEntityID,
+				EntityID:     routedNodeTargetEntityID(eventEntityID, path),
 			},
 		})
 	}
@@ -806,11 +806,18 @@ func routedNodeDeliveryIntentsForNoRecipientFlowInstanceEvent(evt events.Event, 
 			SubscriberID:   recipient,
 			Target: events.RouteIdentity{
 				FlowInstance: flowInstance,
-				EntityID:     eventEntityID,
+				EntityID:     routedNodeTargetEntityID(eventEntityID, flowInstance),
 			},
 		})
 	}
 	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerConcreteNodeRoute)
+}
+
+func routedNodeTargetEntityID(eventEntityID, targetFlowInstance string) string {
+	if eventEntityID = strings.TrimSpace(eventEntityID); eventEntityID != "" {
+		return eventEntityID
+	}
+	return runtimeflowidentity.EntityID(targetFlowInstance)
 }
 
 func routedRootNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {

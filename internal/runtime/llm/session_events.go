@@ -8,8 +8,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
 )
 
@@ -55,26 +58,46 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 	}
 	entityID := actor.EffectiveEntityID()
 	flowInstance := strings.TrimSpace(asString(payload["flow_instance"]))
-	evt := events.NewRuntimeDiagnosticEvent(
-		uuid.NewString(),
-		eventType,
-		events.PlatformProducer("runtime"),
-		"",
-		raw,
-		0,
-		"",
-		"",
-		events.EventEnvelope{
+	eventID := uuid.NewString()
+	runID, parentEventID, mode := agentStartedEventContext(ctx, eventID)
+	evt, err := events.NewRuntimeDiagnosticEvent(events.RuntimeEventInput{Facts: events.EventFacts{
+		ID: eventID, Type: eventType, Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
+		Payload: raw, CreatedAt: time.Now(), ExecutionMode: mode,
+		Envelope: events.EventEnvelope{
 			EntityID:     entityID,
 			FlowInstance: flowInstance,
 		},
-		time.Now(),
-	)
+	}, RunID: runID, ParentEventID: parentEventID})
+	if err != nil {
+		logPublisherRuntime(ctx, publisher, "error", "construct_agent_started_failed", "Constructing the agent-started event failed", session.AgentID, session.ID, entityID, map[string]any{"event_type": strings.TrimSpace(string(eventType))}, err)
+		return
+	}
 	if err := publisher.Publish(ctx, evt); err != nil {
 		logPublisherRuntime(ctx, publisher, "error", "publish_agent_started_failed", "Publishing the agent-started event failed", session.AgentID, session.ID, evt.EntityID(), map[string]any{
 			"event_type": strings.TrimSpace(string(eventType)),
 		}, err)
 	}
+}
+
+func agentStartedEventContext(ctx context.Context, eventID string) (string, string, executionmode.Mode) {
+	runID := runtimecorrelation.RunIDFromContext(ctx)
+	parentEventID := runtimecorrelation.RuntimeLineageParentForEvent(ctx, eventID)
+	mode := executionmode.Live
+	if contextualMode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
+		mode = executionmode.Mode(contextualMode)
+	}
+	if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
+		if runID == "" {
+			runID = inbound.RunID()
+		}
+		if parentEventID == "" {
+			parentEventID = inbound.ID()
+		}
+		if _, hasContextMode := runtimeeffects.ExecutionModeFromContext(ctx); !hasContextMode && inbound.ExecutionMode().Valid() {
+			mode = inbound.ExecutionMode()
+		}
+	}
+	return strings.TrimSpace(runID), strings.TrimSpace(parentEventID), mode
 }
 
 func markInboundDeliveryActiveForSession(ctx context.Context, publisher EventPublisher, session *Session) (bool, error) {

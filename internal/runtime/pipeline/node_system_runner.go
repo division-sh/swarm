@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
@@ -294,18 +295,17 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 			}
 		}
 	}
-	if err := n.bus.Publish(ctx, events.NewRuntimeDiagnosticEvent(
-		uuid.NewString(),
-		events.EventType("platform.dead_letter"),
-		events.NodeProducer(n.nodeID),
-		"",
-		mustJSON(payload),
-		0,
-		"",
-		"",
-		events.EventEnvelope{EntityID: workflowEventEntityID(evt)},
-		time.Now().UTC(),
-	)); err != nil {
+	deadLetter, constructErr := events.NewRuntimeDiagnosticEvent(events.RuntimeEventInput{Facts: events.EventFacts{
+		ID: uuid.NewString(), Type: events.EventType("platform.dead_letter"),
+		Producer: events.ProducerClaim{Type: events.EventProducerNode, ID: n.nodeID},
+		Payload:  mustJSON(payload), Envelope: events.EventEnvelope{EntityID: workflowEventEntityID(evt)},
+		CreatedAt: time.Now().UTC(), ExecutionMode: executionmode.Live,
+	}})
+	if constructErr != nil {
+		slog.Error("system node dead letter construction failed", "node_id", n.nodeID, "event_id", strings.TrimSpace(evt.ID()), "error", constructErr)
+		return
+	}
+	if err := n.bus.Publish(ctx, deadLetter); err != nil {
 		slog.Error("system node dead letter publish failed", "node_id", n.nodeID, "event_id", strings.TrimSpace(evt.ID()), "error", err)
 		if logger, ok := n.bus.(systemNodeRuntimeLogger); ok && logger != nil {
 			logger.LogRuntime(ctx, RuntimeLogEntry{

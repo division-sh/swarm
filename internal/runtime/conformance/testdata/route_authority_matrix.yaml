@@ -475,7 +475,7 @@ rows:
     proof_refs:
       - {kind: issue, issue: 1496}
       - {kind: go_test, name: TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut}
-      - {kind: go_test, name: TestEventBusPublishDirect_FiltersEntityScopedRecipientsByExplicitMetadata}
+      - {kind: go_test, name: TestEventBusPublishDirect_RejectsAnyExplicitRecipientFilteredByMetadata}
       - {kind: go_test, name: TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest}
       - {kind: go_test, name: TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency}
       - {kind: go_test, name: TestOperatorEventReplaySubsetAndFailClosedCases}

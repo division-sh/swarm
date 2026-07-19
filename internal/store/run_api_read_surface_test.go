@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -41,16 +42,23 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 	`, newer, bundleA, newerEvent, now, middle, bundleB, middleEvent, now.Add(-time.Hour), now.Add(-30*time.Minute), older, olderEvent, now.Add(-2*time.Hour), now.Add(-90*time.Minute), failedRunFailure); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES
-			('live', $1::uuid, $2::uuid, 'scan.requested', NULL, 'global', '{}'::jsonb, 'test', 'agent', $3),
-			('live', $1::uuid, gen_random_uuid(), 'scan.completed', NULL, 'global', '{}'::jsonb, 'test', 'agent', $4),
-			('live', $5::uuid, $6::uuid, 'scan.requested', NULL, 'global', '{}'::jsonb, 'test', 'agent', $7),
-			('live', $8::uuid, $9::uuid, 'scan.failed', $10::uuid, 'global', '{}'::jsonb, 'test', 'agent', $12),
-			('live', $8::uuid, gen_random_uuid(), 'scan.replayed', $11::uuid, 'global', '{}'::jsonb, 'test', 'agent', $13)
-	`, newer, newerEvent, now.Add(time.Second), now.Add(2*time.Second), middle, middleEvent, now.Add(-time.Hour+time.Second), older, olderEvent, olderEventOnlyA, olderEventOnlyB, now.Add(-2*time.Hour+time.Second), now.Add(-2*time.Hour+2*time.Second)); err != nil {
-		t.Fatalf("seed events: %v", err)
+	for _, fixture := range []struct {
+		id        string
+		runID     string
+		eventType events.EventType
+		entityID  string
+		createdAt time.Time
+	}{
+		{id: newerEvent, runID: newer, eventType: "scan.requested", createdAt: now.Add(time.Second)},
+		{id: uuid.NewString(), runID: newer, eventType: "scan.completed", createdAt: now.Add(2 * time.Second)},
+		{id: middleEvent, runID: middle, eventType: "scan.requested", createdAt: now.Add(-time.Hour + time.Second)},
+		{id: olderEvent, runID: older, eventType: "scan.failed", entityID: olderEventOnlyA, createdAt: now.Add(-2*time.Hour + time.Second)},
+		{id: uuid.NewString(), runID: older, eventType: "scan.replayed", entityID: olderEventOnlyB, createdAt: now.Add(-2*time.Hour + 2*time.Second)},
+	} {
+		seedPostgresRootEventRecordFixture(
+			t, ctx, db, fixture.id, fixture.runID, fixture.eventType,
+			events.EventProducerAgent, "test", fixture.entityID, "", fixture.createdAt,
+		)
 	}
 	seedPostgresEntityStateRows(t, db, ctx, newer, newerEntityA, newerEntityB)
 	seedPostgresEntityStateRows(t, db, ctx, middle, middleEntity)

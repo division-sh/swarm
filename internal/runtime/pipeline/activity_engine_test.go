@@ -119,20 +119,6 @@ func TestActivityRequestAndResultPreserveMockExecutionMode(t *testing.T) {
 		t.Fatalf("result events = %#v, want one mock event", emitted)
 	}
 
-	missingMode := eventtest.ChildWithLineage(
-		request.Event.ID(),
-		request.Event.Type(),
-		request.Event.SourceAgent(),
-		request.Event.TaskID(),
-		request.Event.Payload(),
-		request.Event.ChainDepth(),
-		events.EventLineage{RunID: request.Event.RunID(), ParentEventID: request.Event.ParentEventID()},
-		request.Event.Envelope(),
-		request.Event.CreatedAt(),
-	)
-	if _, err := activityIntentFromRequestEvent(missingMode); err == nil || !strings.Contains(err.Error(), "invalid execution mode") {
-		t.Fatalf("activityIntentFromRequestEvent missing mode error = %v", err)
-	}
 }
 
 func TestActivityExecutionContextRejectsCausalModeConflict(t *testing.T) {
@@ -1761,6 +1747,7 @@ func testActivityIntent(inputURL string) runtimeengine.ActivityIntent {
 		EntityID:      identity.NormalizeEntityID("entity-1"),
 		NodeID:        identity.NormalizeNodeID("scanner"),
 		FlowID:        identity.NormalizeFlowID("research"),
+		FlowInstance:  "research/entity-1",
 		SourceEventID: "evt-1",
 		SourceRunID:   "run-1",
 		SourceTaskID:  "task-1",
@@ -1895,6 +1882,7 @@ func acceptedTelegramInboundDeliveryEvent(t *testing.T, entityID, runID string) 
 		events.EventEnvelope{
 			EntityID: entityID,
 			Source: events.RouteIdentity{
+				FlowID:   "telegram",
 				EntityID: entityID,
 			},
 		},

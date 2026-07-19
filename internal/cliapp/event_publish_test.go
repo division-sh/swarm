@@ -71,7 +71,7 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 		"subscriber=agent/agent-1",
 		"session_id=session-1",
 		"attempt=2",
-		"source_event_id=event-parent-1",
+		"operator_reference_event_id=event-parent-1",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
@@ -696,10 +696,10 @@ func TestEventPublishMalformedResultsFailClosed(t *testing.T) {
 
 func eventPublishTestResult(newRunCreated bool) map[string]any {
 	return map[string]any{
-		"event_id":        "event-1",
-		"run_id":          "run-1",
-		"source_event_id": "event-parent-1",
-		"new_run_created": newRunCreated,
+		"event_id":                    "event-1",
+		"run_id":                      "run-1",
+		"operator_reference_event_id": "event-parent-1",
+		"new_run_created":             newRunCreated,
 		"deliveries": []any{
 			map[string]any{
 				"delivery_id":     "delivery-1",

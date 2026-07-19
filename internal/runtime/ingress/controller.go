@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -285,7 +286,14 @@ func (c *Controller) publishTransitionEvent(ctx context.Context, target Status, 
 		return "", err
 	}
 	eventID := uuid.NewString()
-	if err := c.publisher.Publish(ctx, events.NewRuntimeControlEvent(eventID, eventType, events.PlatformProducer("runtime"), "", raw, 0, "", "", events.EventEnvelope{}, now)); err != nil {
+	evt, err := events.NewRuntimeControlEvent(events.RuntimeEventInput{Facts: events.EventFacts{
+		ID: eventID, Type: eventType, Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
+		Payload: raw, CreatedAt: now, ExecutionMode: executionmode.Live,
+	}})
+	if err != nil {
+		return "", err
+	}
+	if err := c.publisher.Publish(ctx, evt); err != nil {
 		return "", err
 	}
 	return eventID, nil

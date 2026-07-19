@@ -25,7 +25,7 @@ func seedSQLiteNormalRunCompletionFixture(t *testing.T, store *SQLiteRuntimeStor
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
-	if err := store.AppendEvent(ctx, eventtest.PersistedProjection(
+	if err := commitSemanticEventFixture(ctx, store, eventtest.PersistedProjection(
 		eventID,
 		events.EventType("example.started"),
 		"test",
@@ -81,13 +81,12 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionMarksCompletedAndIgnoresRu
 	if err := store.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, entity_id, flow_instance, source_route, target_route, target_set,
-			scope, payload, chain_depth, produced_by, produced_by_type, source_event_id, created_at
-		)
-		VALUES ('live', ?, ?, ?, NULL, NULL, '{}', '{}', '[]', 'global', ?, 0, 'runtime', 'platform', ?, ?)
-	`, uuid.NewString(), fixture.RunID, runtimeLogEventName, `{"message":"diagnostic"}`, fixture.EventID, time.Now().UTC()); err != nil {
+	runtimeLog := eventtest.DiagnosticDirect(
+		uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "",
+		json.RawMessage(`{"message":"diagnostic"}`), 0, fixture.RunID, "",
+		events.EventEnvelope{}, time.Now().UTC(),
+	)
+	if err := commitDiagnosticRuntimeLogFixture(ctx, store, runtimeLog); err != nil {
 		t.Fatalf("seed sqlite runtime log: %v", err)
 	}
 
@@ -153,13 +152,19 @@ func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	`, runID, now); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES
-			('live', ?, ?, 'scan.requested', ?, 'entity', '{}', 'test', 'agent', ?),
-			('live', ?, ?, 'scan.replayed', ?, 'entity', '{}', 'test', 'agent', ?)
-	`, uuid.NewString(), runID, eventEntityA, now.Add(time.Second), uuid.NewString(), runID, eventEntityB, now.Add(2*time.Second)); err != nil {
-		t.Fatalf("seed sqlite events: %v", err)
+	for _, fixture := range []struct {
+		id, name, entityID string
+		at                 time.Time
+	}{
+		{uuid.NewString(), "scan.requested", eventEntityA, now.Add(time.Second)},
+		{uuid.NewString(), "scan.replayed", eventEntityB, now.Add(2 * time.Second)},
+	} {
+		if err := commitSemanticEventFixture(ctx, store, eventtest.PersistedProjection(
+			fixture.id, events.EventType(fixture.name), "test", "", json.RawMessage(`{}`), 0,
+			runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, fixture.entityID), fixture.at,
+		)); err != nil {
+			t.Fatalf("seed sqlite event %s: %v", fixture.name, err)
+		}
 	}
 	seedSQLiteEntityStateRows(t, store.DB, ctx, runID, currentEntity)
 

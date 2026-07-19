@@ -34,6 +34,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -974,14 +975,18 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			}
 			return
 		}
-		if err := rt.Bus.Publish(callbackCtx, scheduledEvent(sc)); err != nil {
+		scheduled, constructErr := scheduledEvent(sc)
+		if constructErr == nil {
+			constructErr = rt.Bus.Publish(callbackCtx, scheduled)
+		}
+		if constructErr != nil {
 			if rt.Logger != nil {
 				handleRuntimeLogPersistenceError("scheduler", "publish_failed", rt.Logger.Error(callbackCtx, "scheduler", "publish_failed", map[string]any{
 					"agent_id":   sc.AgentID,
 					"event_type": sc.EventType,
 					"run_id":     sc.EffectiveRunID(),
 					"entity_id":  sc.EffectiveEntityID(),
-				}, err))
+				}, constructErr))
 			}
 		}
 		if stores.ScheduleStore != nil {
@@ -1277,22 +1282,15 @@ func scheduleEventPayload(sc runtimepipeline.Schedule) []byte {
 	return encoded
 }
 
-func scheduledEvent(sc runtimepipeline.Schedule) events.Event {
-	return events.NewRuntimeControlEvent(
-		uuid.NewString(),
-		events.EventType(sc.EventType),
-		events.AgentProducer(sc.AgentID),
-		sc.TaskID,
-		scheduleEventPayload(sc),
-		0,
-		sc.EffectiveRunID(),
-		"",
-		events.EventEnvelope{
+func scheduledEvent(sc runtimepipeline.Schedule) (events.Event, error) {
+	return events.NewRuntimeControlEvent(events.RuntimeEventInput{Facts: events.EventFacts{
+		ID: uuid.NewString(), Type: events.EventType(sc.EventType), Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime.scheduler"},
+		TaskID: sc.TaskID, Payload: scheduleEventPayload(sc), CreatedAt: time.Now(), ExecutionMode: executionmode.Live,
+		Envelope: events.EventEnvelope{
 			EntityID:     sc.EffectiveEntityID(),
 			FlowInstance: sc.EffectiveFlowInstance(),
 		},
-		time.Now(),
-	)
+	}, RunID: sc.EffectiveRunID()})
 }
 
 func (rt *Runtime) Start(ctx context.Context) error {
@@ -1685,9 +1683,11 @@ func (rt *Runtime) recordStartupManagerRecoveryFailure(ctx context.Context, deci
 		"failure": *decision.Failure, "failed_event_id": nil, "timestamp": time.Now().UTC().Format(time.RFC3339Nano),
 	})
 	if rt.Bus != nil {
-		if publishErr := rt.Bus.Publish(ctx, events.NewRuntimeDiagnosticEvent(
-			uuid.NewString(), events.EventType("platform.recovery_failed"), events.PlatformProducer("runtime"), "", payload, 0, "", "", events.EventEnvelope{}, time.Now(),
-		)); publishErr != nil && rt.Logger != nil {
+		recoveryEvent, publishErr := newRuntimePlatformDiagnosticEvent(events.EventType("platform.recovery_failed"), payload, events.EventEnvelope{}, time.Now())
+		if publishErr == nil {
+			publishErr = rt.Bus.Publish(ctx, recoveryEvent)
+		}
+		if publishErr != nil && rt.Logger != nil {
 			handleRuntimeLogPersistenceError("runtime", "recovery_failed_publish_failed", rt.Logger.Error(ctx, "runtime", "recovery_failed_publish_failed", nil, publishErr))
 		}
 	}
@@ -1978,18 +1978,13 @@ func (rt *Runtime) publishBootCompleted(ctx context.Context, report bootComplete
 		"self_check_passed":            nil,
 	})
 	eventID := uuid.NewString()
-	evt := events.NewRuntimeControlEvent(
-		eventID,
-		t,
-		events.PlatformProducer("runtime"),
-		"",
-		payload,
-		0,
-		"",
-		"",
-		events.EventEnvelope{},
-		time.Now(),
-	)
+	evt, err := events.NewRuntimeControlEvent(events.RuntimeEventInput{Facts: events.EventFacts{
+		ID: eventID, Type: t, Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
+		Payload: payload, CreatedAt: time.Now(), ExecutionMode: executionmode.Live,
+	}})
+	if err != nil {
+		return "", err
+	}
 	return eventID, rt.Bus.Publish(ctx, evt)
 }
 

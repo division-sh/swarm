@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -1019,20 +1020,15 @@ func newReplyConformanceStore() *replyConformanceStore {
 
 func (s *replyConformanceStore) SupportsPersistedReplay() bool { return true }
 
-func (s *replyConformanceStore) PersistEventWithDeliveryRouteSetAndScope(_ context.Context, evt events.Event, routes []events.DeliveryRoute, scope runtimereplayclaim.CommittedReplayScope) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.events[evt.ID()] = evt
-	s.routes[evt.ID()] = events.NormalizeDeliveryRoutes(routes)
-	s.scopes[evt.ID()] = scope
-	return nil
-}
-
-func (s *replyConformanceStore) InsertEventDeliveryRoutes(_ context.Context, eventID string, routes []events.DeliveryRoute) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.routes[eventID] = events.NormalizeDeliveryRoutes(routes)
-	return nil
+func (s *replyConformanceStore) CommitPublish(ctx context.Context, plan bus.CommitPublishPlan) (bus.PreparedPublish, error) {
+	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req bus.CommitPublishRequest) error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.events[req.Event.ID()] = req.Event.Event()
+		s.routes[req.Event.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
+		s.scopes[req.Event.ID()] = req.ReplayScope
+		return nil
+	})
 }
 
 func (s *replyConformanceStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {

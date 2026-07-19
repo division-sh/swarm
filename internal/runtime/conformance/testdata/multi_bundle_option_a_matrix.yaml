@@ -392,7 +392,7 @@ rows:
     proof_refs:
       - {kind: go_test, name: TestActivateFlowInstancePublishesAutoEmitEvent}
       - {kind: go_test, name: TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable}
-      - {kind: go_test, name: TestCorrelateEvent_PreservesExplicitEventRunID}
+      - {kind: go_test, name: TestEventConstructionClassInvariantMatrix}
 
   - id: empire_post_commit_delivery
     category: runtime_lifecycle

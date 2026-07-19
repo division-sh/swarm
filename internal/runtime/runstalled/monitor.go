@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
 const (
@@ -167,32 +168,33 @@ func (m *Monitor) CheckOnce(ctx context.Context, now time.Time) (CheckResult, er
 }
 
 func (m *Monitor) eventForSnapshot(snapshot RunSnapshot, now time.Time) (events.Event, EscalationKey, bool, error) {
+	var none events.Event
 	runID := strings.TrimSpace(snapshot.RunID)
 	if runID == "" {
-		return events.EmptyEvent(), EscalationKey{}, false, nil
+		return none, EscalationKey{}, false, nil
 	}
 	if strings.ToLower(strings.TrimSpace(snapshot.RunTableStatus)) != runningRunTableStatus {
-		return events.EmptyEvent(), EscalationKey{}, false, nil
+		return none, EscalationKey{}, false, nil
 	}
 	if strings.ToLower(strings.TrimSpace(snapshot.Diagnosis.OperationalState)) != stalledOperationalStatus {
-		return events.EmptyEvent(), EscalationKey{}, false, nil
+		return none, EscalationKey{}, false, nil
 	}
 	if snapshot.LastProgressAt.IsZero() {
-		return events.EmptyEvent(), EscalationKey{}, false, nil
+		return none, EscalationKey{}, false, nil
 	}
 	policy := m.resolvePolicy(snapshot.FlowInstance)
 	if !policy.Enabled || policy.Threshold <= 0 {
-		return events.EmptyEvent(), EscalationKey{}, false, nil
+		return none, EscalationKey{}, false, nil
 	}
 	lastProgressAt := snapshot.LastProgressAt.UTC()
 	stalledFor := now.Sub(lastProgressAt)
 	if stalledFor < policy.Threshold {
-		return events.EmptyEvent(), EscalationKey{}, false, nil
+		return none, EscalationKey{}, false, nil
 	}
 	blockingLayer := strings.TrimSpace(snapshot.Diagnosis.BlockingLayer)
 	blockingReason := strings.TrimSpace(snapshot.Diagnosis.BlockingReason)
 	if blockingLayer == "" || blockingReason == "" {
-		return events.EmptyEvent(), EscalationKey{}, false, nil
+		return none, EscalationKey{}, false, nil
 	}
 	key := EscalationKey{
 		RunID:          runID,
@@ -212,9 +214,19 @@ func (m *Monitor) eventForSnapshot(snapshot RunSnapshot, now time.Time) (events.
 		"emitted_at":          now.UTC().Format(time.RFC3339Nano),
 	})
 	if err != nil {
-		return events.EmptyEvent(), EscalationKey{}, false, err
+		return none, EscalationKey{}, false, err
 	}
-	evt := events.NewRuntimeDiagnosticEvent("", events.EventType(EventType), events.PlatformProducer("runtime"), "", payload, 0, runID, "", events.EventEnvelope{FlowInstance: snapshot.FlowInstance}, now.UTC())
+	evt, err := events.NewRuntimeDiagnosticEvent(events.RuntimeEventInput{
+		Facts: events.EventFacts{
+			Type: events.EventType(EventType), Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
+			Payload: payload, Envelope: events.EventEnvelope{FlowInstance: snapshot.FlowInstance},
+			CreatedAt: now.UTC(), ExecutionMode: executionmode.Live,
+		},
+		RunID: runID,
+	})
+	if err != nil {
+		return none, EscalationKey{}, false, err
+	}
 	return evt, key, true, nil
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
@@ -22,8 +23,6 @@ type processedPipelineReceiptReader interface {
 }
 
 type EventStore interface {
-	AppendEvent(ctx context.Context, evt events.Event) error
-	InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error
 	runtimereplayclaim.RecipientReader
 }
 
@@ -135,6 +134,7 @@ func logStartupRecoveryPipelineReplayAftermath(ctx context.Context, logger recov
 	if evt.Type() == events.EventType("platform.runtime_log") {
 		return
 	}
+	ctx = runtimecorrelation.WithRunID(ctx, evt.RunID())
 	_ = logger.LogRuntime(ctx, RuntimeLogEntry{
 		Level:     startupRecoveryPipelineReplayLevel(outcome),
 		Component: "pipeline-recovery",

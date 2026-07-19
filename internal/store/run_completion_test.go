@@ -3,7 +3,10 @@ package store
 import (
 	"database/sql"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -33,17 +36,10 @@ func seedNormalRunCompletionFixture(t *testing.T, db *sql.DB, state, flowInstanc
 	`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
-			chain_depth, produced_by, produced_by_type, created_at
-		) VALUES ('live',
-			$1::uuid, $2::uuid, 'example.started', $3::uuid, NULLIF($4,''), 'entity', '{}'::jsonb,
-			0, 'test', 'external', now()
-		)
-	`, eventID, runID, entityID, flowInstance); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	seedPostgresRootEventRecordFixture(
+		t, ctx, db, eventID, runID, events.EventType("example.started"),
+		events.EventProducerExternal, "test", entityID, flowInstance, time.Now().UTC(),
+	)
 	if _, err := db.ExecContext(ctx, `
 		UPDATE runs
 		SET trigger_event_id = $2::uuid,
@@ -106,15 +102,10 @@ func TestPostgresStore_ConvergeNormalRunCompletion_MarksCompletedWhenTerminalAnd
 	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
-			chain_depth, produced_by, produced_by_type, source_event_id, created_at
-		) VALUES ('live',
-			gen_random_uuid(), $1::uuid, $2, NULL, NULL, 'global', '{"message":"diagnostic"}'::jsonb,
-			0, 'runtime', 'platform', $3::uuid, now()
-		)
-	`, fixture.RunID, runtimeLogEventName, fixture.EventID); err != nil {
+	if err := insertPostgresCanonicalEventRecordFixture(ctx, db, eventtest.RuntimeDiagnostic(
+		uuid.NewString(), events.EventType(runtimeLogEventName), "runtime", "", []byte(`{"message":"diagnostic"}`), 0,
+		fixture.RunID, fixture.EventID, events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("seed runtime log: %v", err)
 	}
 	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, map[string][]string{"review": []string{"done"}}); err != nil {

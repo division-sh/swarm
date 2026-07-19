@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -42,7 +43,7 @@ func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {
 	trigger := eventtest.RootIngress(
 		"",
 		events.EventType("custom.triggered"),
-		"",
+		testPipelineRunID,
 		"",
 		[]byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42","name":"alpha"}`),
 		0,
@@ -250,15 +251,14 @@ func TestCreateFlowInstanceResolvesConfigFromHandlerEventContext(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := eventtest.RootIngress(
+	trigger := eventtest.ChildWithLineage(
 		"evt-123",
 		events.EventType("spawn.requested"),
 		"",
 		"",
 		[]byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`),
 		0,
-		"",
-		"source-evt-1",
+		events.EventLineage{RunID: testPipelineRunID, ParentEventID: "source-evt-1", ExecutionMode: executionmode.Live},
 		events.EventEnvelope{
 			EntityID: "ent-1",
 			Source: events.RouteIdentity{
@@ -700,7 +700,7 @@ opco.ceo_ready:
 		"",
 		[]byte(`{"entity_id":"ent-operating"}`),
 		0,
-		"",
+		testPipelineRunID,
 		"",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-operating"), "operating/inst-1"),
 		time.Time{},

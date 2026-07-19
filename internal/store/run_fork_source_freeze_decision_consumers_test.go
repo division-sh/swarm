@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -158,13 +159,17 @@ func TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance(t *t
 
 func insertForkedConsumerEvent(t *testing.T, fixture *forkedConsumerTestBackend, eventID, eventName string, at time.Time) {
 	t.Helper()
-	query := `INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ('live', ?, ?, ?, 'global', '{}', 'test', 'platform', ?)`
+	event := eventtest.PersistedProjectionForProducer(
+		eventID, events.EventType(eventName), eventtest.Producer(events.EventProducerPlatform, "test"),
+		"", []byte(`{}`), 0, fixture.sourceRun, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, at,
+	)
 	if fixture.postgres != nil {
-		query = `INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-			VALUES ('live', $1::uuid, $2::uuid, $3, 'global', '{}'::jsonb, 'test', 'platform', $4)`
+		if err := insertCanonicalEventRecordFixture(context.Background(), fixture.postgres, event); err != nil {
+			t.Fatal(err)
+		}
+		return
 	}
-	if _, err := fixture.db.ExecContext(context.Background(), query, fixture.sourceRun, eventID, eventName, at); err != nil {
+	if err := insertCanonicalEventRecordFixture(context.Background(), fixture.sqlite, event); err != nil {
 		t.Fatal(err)
 	}
 }

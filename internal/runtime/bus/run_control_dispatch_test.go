@@ -277,17 +277,11 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 			time.Now().UTC(),
 		),
 	}
-	if err := pg.RunEventTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
-		return eb.EngineOutbox().WriteOutbox(txctx, []runtimeengine.EmitIntent{intent})
-	}); err != nil {
-		t.Fatalf("WriteOutbox: %v", err)
-	}
-
 	if _, err := controller.Pause(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test"}); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
-	if err := eb.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
-		t.Fatalf("DispatchPostCommit while paused: %v", err)
+	if err := eb.PublishAcknowledged(ctx, intent.Event); err != nil {
+		t.Fatalf("PublishAcknowledged while paused: %v", err)
 	}
 	requireNoBusEvent(t, ch, "paused post-commit dispatch before continue")
 	if got := recorder.count(); got != 0 {

@@ -29,7 +29,7 @@ type EventInterceptor interface {
 // routes so Pipeline receives "execute this node for this route" semantics
 // instead of inferring route authority from an event-wide context.
 type DeliveryRouteInterceptor interface {
-	InterceptDeliveryRoute(ctx context.Context, evt events.Event, route events.DeliveryRoute) (passthrough bool, deferred []events.Event, err error)
+	InterceptDeliveryRoute(ctx context.Context, evt events.DeliveryEvent, route events.DeliveryRoute) (passthrough bool, deferred []events.Event, err error)
 }
 
 // PayloadValidator validates canonical event-store admission before an event is
@@ -76,6 +76,14 @@ type EventBus struct {
 }
 
 type transactionRouteOverlayKey struct{}
+
+func (eb *EventBus) RuntimeMutationRunner() runtimepipeline.RuntimeMutationRunner {
+	if eb == nil {
+		return nil
+	}
+	runner, _ := eb.store.(runtimepipeline.RuntimeMutationRunner)
+	return runner
+}
 
 type transactionRouteOverlay struct {
 	table *RouteTable
@@ -372,7 +380,7 @@ func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowIns
 			}
 		}
 		if !hadStagedRoute {
-			postCommitCtx := runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx))
+			postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)))
 			if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
 				if err := table.AddFlowInstanceRoute(req); err != nil {
 					_ = eb.LogRuntime(postCommitCtx, runtimepipeline.RuntimeLogEntry{
@@ -482,7 +490,12 @@ func (eb *EventBus) ResetInMemoryState() error {
 		return nil
 	}
 	eb.mu.Lock()
-	defer eb.mu.Unlock()
+	pendingClaims := make([]*pipelinePublicationClaim, 0, len(eb.pendingOutboxByID))
+	for _, operations := range eb.pendingOutboxByID {
+		for _, operation := range operations {
+			pendingClaims = append(pendingClaims, operation.publicationClaim)
+		}
+	}
 	for _, route := range eb.agentRouteHandles {
 		route.deactivate()
 	}
@@ -496,6 +509,10 @@ func (eb *EventBus) ResetInMemoryState() error {
 	eb.inFlightEventIDs = make(map[string]int)
 	routeTable, err := eb.deriveBootRouteTableLocked()
 	if err != nil {
+		eb.mu.Unlock()
+		for _, claim := range pendingClaims {
+			claim.Release(context.Background())
+		}
 		return err
 	}
 	eb.routeTable = routeTable
@@ -504,6 +521,10 @@ func (eb *EventBus) ResetInMemoryState() error {
 	eb.agentRouteDeliveryMu.Lock()
 	eb.agentRouteDeliveries = make(map[runtimeeffects.LifecycleToken]int)
 	eb.agentRouteDeliveryMu.Unlock()
+	eb.mu.Unlock()
+	for _, claim := range pendingClaims {
+		claim.Release(context.Background())
+	}
 	return nil
 }
 

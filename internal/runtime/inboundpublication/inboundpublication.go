@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/google/uuid"
 )
@@ -156,7 +155,7 @@ type Finalization struct {
 }
 
 type Mutation interface {
-	runtimebus.EventMutation
+	Context() context.Context
 	FinalizeInboundPublication(ctx context.Context, finalization Finalization) error
 }
 

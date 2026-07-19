@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -275,12 +277,11 @@ func seedActivityReplyContext(t *testing.T, db *sql.DB, sqlite bool, runID, requ
 	if sqlite {
 		return
 	}
-	if _, err := db.Exec(`
-		INSERT INTO events (execution_mode, run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ('live', $1::uuid, $2::uuid, 'provider.requested', 'global', '{}'::jsonb, 'test', 'platform', now())
-	`, runID, requestEventID); err != nil {
-		t.Fatalf("seed postgres reply request event: %v", err)
-	}
+	seedPipelineEventRecord(t, context.Background(), db, eventtest.PersistedProjectionForProducer(
+		requestEventID, events.EventType("provider.requested"),
+		eventtest.Producer(events.EventProducerPlatform, "test"), "", []byte(`{}`), 0,
+		runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
+	))
 	if _, err := db.Exec(`
 		INSERT INTO reply_contexts (
 			reply_context_id, run_id, request_event_id, requester_flow_id, request_output_pin,

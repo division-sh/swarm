@@ -248,7 +248,7 @@ func TestPostgresStore_RunEventTransactionSerializesStoryCommitOrder(t *testing.
 	firstRelease := make(chan struct{})
 	firstDone := make(chan error, 1)
 	go func() {
-		firstDone <- store.RunEventTransaction(ctx, func(context.Context, *sql.Tx) error {
+		firstDone <- store.runEventTransaction(ctx, func(context.Context, *sql.Tx) error {
 			close(firstStarted)
 			select {
 			case <-firstRelease:
@@ -267,7 +267,7 @@ func TestPostgresStore_RunEventTransactionSerializesStoryCommitOrder(t *testing.
 	secondStarted := make(chan struct{})
 	secondDone := make(chan error, 1)
 	go func() {
-		secondDone <- store.RunEventTransaction(ctx, func(context.Context, *sql.Tx) error {
+		secondDone <- store.runEventTransaction(ctx, func(context.Context, *sql.Tx) error {
 			close(secondStarted)
 			return nil
 		})

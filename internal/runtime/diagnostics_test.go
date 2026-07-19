@@ -3,25 +3,34 @@ package runtime
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store/eventfixture"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 type runtimeLogPersistenceStub struct {
-	db *sql.DB
+	db      *sql.DB
+	capture *runtimeLogPersistenceCapture
+}
+
+type runtimeLogPersistenceCapture struct {
+	records []RuntimeLogPersistenceRecord
+	err     error
 }
 
 func (s runtimeLogPersistenceStub) RuntimeLogLineageParentEventID(ctx context.Context, runID, explicitParentEventID, subjectEventID string) (string, error) {
@@ -58,38 +67,27 @@ func (s runtimeLogPersistenceStub) RuntimeLogLineageParentEventID(ctx context.Co
 }
 
 func (s runtimeLogPersistenceStub) PersistRuntimeLog(ctx context.Context, record RuntimeLogPersistenceRecord) error {
+	if s.capture != nil {
+		s.capture.records = append(s.capture.records, record)
+		return s.capture.err
+	}
 	if s.db == nil {
 		return nil
 	}
+	constructed := eventtest.InExecutionMode(eventtest.DiagnosticDirect(
+		"", events.EventTypePlatformRuntimeLog, "runtime", "", record.Payload, 0,
+		strings.TrimSpace(record.RunID), strings.TrimSpace(record.ParentEventID),
+		events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Time{},
+	), record.ExecutionMode)
 	runID := strings.TrimSpace(record.RunID)
-	parentEventID := strings.TrimSpace(record.ParentEventID)
 	if runID == "" {
-		_, err := s.db.ExecContext(ctx, `
-			INSERT INTO events (execution_mode,
-				event_id, event_name, entity_id, flow_instance, scope, payload,
-				chain_depth, produced_by, produced_by_type, source_event_id, created_at
-			)
-			VALUES ('live',
-				gen_random_uuid(), 'platform.runtime_log', NULL, NULL, 'global', $1::jsonb,
-				0, 'runtime', 'platform', NULLIF($2,'')::uuid, now()
-			)
-		`, string(record.Payload), parentEventID)
-		return err
+		return eventfixture.Insert(ctx, s.db, runtimeauthoractivity.DialectPostgres, constructed)
 	}
 	return runRuntimeLogStoryForTest(ctx, s.db, func(storyctx context.Context, tx *sql.Tx) error {
 		if err := ensureRuntimeLogRunRowInStoryForTest(storyctx, tx, runID); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(storyctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
-			chain_depth, produced_by, produced_by_type, source_event_id, created_at
-		)
-		VALUES ('live',
-			NULLIF($1,'')::uuid, gen_random_uuid(), 'platform.runtime_log', NULL, NULL, 'global', $2::jsonb,
-			0, 'runtime', 'platform', NULLIF($3,'')::uuid, now()
-		)
-		`, runID, string(record.Payload), parentEventID); err != nil {
+		if err := eventfixture.Insert(storyctx, tx, runtimeauthoractivity.DialectPostgres, constructed); err != nil {
 			return err
 		}
 		return storerunlifecycle.SyncCounts(storyctx, tx, runID)
@@ -99,6 +97,20 @@ func (s runtimeLogPersistenceStub) PersistRuntimeLog(ctx context.Context, record
 func newTestRuntimeLogger(db *sql.DB, stub runtimeLogPersistenceStub) *RuntimeLogger {
 	stub.db = db
 	return NewRuntimeLogger(stub)
+}
+
+func assertCapturedRuntimeLog(t testing.TB, capture *runtimeLogPersistenceCapture, want runtimeLogPayloadArg, wantRunID, wantParentEventID string) {
+	t.Helper()
+	if capture == nil || len(capture.records) != 1 {
+		t.Fatalf("captured runtime logs = %#v, want one", capture)
+	}
+	record := capture.records[0]
+	if record.RunID != wantRunID || record.ParentEventID != wantParentEventID {
+		t.Fatalf("captured runtime log scope = run:%q parent:%q, want run:%q parent:%q", record.RunID, record.ParentEventID, wantRunID, wantParentEventID)
+	}
+	if !want.MatchPayload(record.Payload) {
+		t.Fatalf("captured runtime log payload = %s, want %#v", record.Payload, want)
+	}
 }
 
 func expectRuntimeLogStoryBegin(mock sqlmock.Sqlmock) {
@@ -135,29 +147,28 @@ func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
 	}
 	defer db.Close()
 
-	mock.ExpectExec(`INSERT INTO events`).
-		WithArgs(runtimeLogPayloadArg{
-			level:        "warn",
-			message:      "Tool execution was denied for save_entity_field",
-			component:    "tool-executor",
-			action:       "tool_execution_denied",
-			eventID:      "evt-1",
-			eventType:    "validation/requested",
-			agentID:      "agent-1",
-			entityID:     "entity-1",
-			sessionID:    "session-1",
-			failureCode:  "cross_flow_write_forbidden",
-			failureClass: runtimefailures.ClassAuthorizationDenied,
-			durationUS:   1200,
-			detail: map[string]any{
-				"tool_name":     "save_entity_field",
-				"denial_layer":  "executor",
-				"denial_reason": "cross_flow_write_forbidden",
-			},
-		}, "").
-		WillReturnResult(sqlmock.NewResult(0, 1))
+	capture := &runtimeLogPersistenceCapture{}
+	wantPersisted := runtimeLogPayloadArg{
+		level:        "warn",
+		message:      "Tool execution was denied for save_entity_field",
+		component:    "tool-executor",
+		action:       "tool_execution_denied",
+		eventID:      "evt-1",
+		eventType:    "validation/requested",
+		agentID:      "agent-1",
+		entityID:     "entity-1",
+		sessionID:    "session-1",
+		failureCode:  "cross_flow_write_forbidden",
+		failureClass: runtimefailures.ClassAuthorizationDenied,
+		durationUS:   1200,
+		detail: map[string]any{
+			"tool_name":     "save_entity_field",
+			"denial_layer":  "executor",
+			"denial_reason": "cross_flow_write_forbidden",
+		},
+	}
 
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
+	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{capture: capture})
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(testAuthorActivityContext(context.Background()), recorder)
 	failure := runtimefailures.Normalize(runtimefailures.New(
@@ -188,6 +199,7 @@ func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("logger.Log() error = %v", err)
 	}
+	assertCapturedRuntimeLog(t, capture, wantPersisted, "", "")
 
 	entries := recorder.SnapshotFlightRecorder()
 	if len(entries) != 1 {
@@ -242,17 +254,16 @@ func TestRuntimeLogger_Log_AppendsCanonicalFlightRecorderDefaults(t *testing.T) 
 	}
 	defer db.Close()
 
-	mock.ExpectExec(`INSERT INTO events`).
-		WithArgs(runtimeLogPayloadArg{
-			level:     "warn",
-			message:   "runtime warning",
-			component: "runtime",
-			action:    "unknown",
-			eventType: "diagnostic/actual",
-		}, "").
-		WillReturnResult(sqlmock.NewResult(0, 1))
+	capture := &runtimeLogPersistenceCapture{}
+	wantPersisted := runtimeLogPayloadArg{
+		level:     "warn",
+		message:   "runtime warning",
+		component: "runtime",
+		action:    "unknown",
+		eventType: "diagnostic/actual",
+	}
 
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
+	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{capture: capture})
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(testAuthorActivityContext(context.Background()), recorder)
 
@@ -271,6 +282,7 @@ func TestRuntimeLogger_Log_AppendsCanonicalFlightRecorderDefaults(t *testing.T) 
 	}); err != nil {
 		t.Fatalf("logger.Log() error = %v", err)
 	}
+	assertCapturedRuntimeLog(t, capture, wantPersisted, "", "")
 
 	entries := recorder.SnapshotFlightRecorder()
 	if len(entries) != 1 {
@@ -311,29 +323,28 @@ func TestRuntimeLogger_Log_PersistsRuntimeLogPayloadViaCapabilityOwner(t *testin
 	}
 	defer db.Close()
 
-	mock.ExpectExec(`INSERT INTO events`).
-		WithArgs(runtimeLogPayloadArg{
-			level:        "warn",
-			message:      "Tool execution was denied for save_entity_field",
-			component:    "tool-executor",
-			action:       "tool_execution_denied",
-			eventID:      "evt-1",
-			eventType:    "validation/requested",
-			agentID:      "agent-1",
-			entityID:     "entity-1",
-			sessionID:    "session-1",
-			failureCode:  "cross_flow_write_forbidden",
-			failureClass: runtimefailures.ClassAuthorizationDenied,
-			durationUS:   1200,
-			detail: map[string]any{
-				"tool_name":     "save_entity_field",
-				"denial_layer":  "executor",
-				"denial_reason": "cross_flow_write_forbidden",
-			},
-		}, "").
-		WillReturnResult(sqlmock.NewResult(0, 1))
+	capture := &runtimeLogPersistenceCapture{}
+	wantPersisted := runtimeLogPayloadArg{
+		level:        "warn",
+		message:      "Tool execution was denied for save_entity_field",
+		component:    "tool-executor",
+		action:       "tool_execution_denied",
+		eventID:      "evt-1",
+		eventType:    "validation/requested",
+		agentID:      "agent-1",
+		entityID:     "entity-1",
+		sessionID:    "session-1",
+		failureCode:  "cross_flow_write_forbidden",
+		failureClass: runtimefailures.ClassAuthorizationDenied,
+		durationUS:   1200,
+		detail: map[string]any{
+			"tool_name":     "save_entity_field",
+			"denial_layer":  "executor",
+			"denial_reason": "cross_flow_write_forbidden",
+		},
+	}
 
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
+	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{capture: capture})
 	failure := runtimefailures.Normalize(runtimefailures.New(
 		runtimefailures.ClassAuthorizationDenied,
 		"cross_flow_write_forbidden",
@@ -361,12 +372,13 @@ func TestRuntimeLogger_Log_PersistsRuntimeLogPayloadViaCapabilityOwner(t *testin
 	}); err != nil {
 		t.Fatalf("logger.Log() error = %v", err)
 	}
+	assertCapturedRuntimeLog(t, capture, wantPersisted, "", "")
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("ExpectationsWereMet() error = %v", err)
 	}
 }
 
-func TestRuntimeLogger_Log_EnsuresRunRowBeforePersistingRunScopedEntry(t *testing.T) {
+func TestRuntimeLogger_Log_PassesRunScopeToPersistenceOwner(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
@@ -378,22 +390,8 @@ func TestRuntimeLogger_Log_EnsuresRunRowBeforePersistingRunScopedEntry(t *testin
 	ctx := runtimebus.WithEmittedEventsRecorder(testAuthorActivityContext(context.Background()), recorder)
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 
-	mock.ExpectBegin()
-	expectRuntimeLogStoryBegin(mock)
-	expectRuntimeLogRunAbsent(mock, runID)
-	mock.ExpectExec(`INSERT INTO runs`).
-		WithArgs(runID).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`INSERT INTO events`).
-		WithArgs(runID, sqlmock.AnyArg(), "").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`UPDATE runs`).
-		WithArgs(runID).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	expectRuntimeLogStoryFinalize(mock, runID)
-	mock.ExpectCommit()
-
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
+	capture := &runtimeLogPersistenceCapture{}
+	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{capture: capture})
 	if err := logger.Log(ctx, RuntimeLogEntry{
 		Level:     "error",
 		Message:   "runtime log",
@@ -402,6 +400,10 @@ func TestRuntimeLogger_Log_EnsuresRunRowBeforePersistingRunScopedEntry(t *testin
 	}); err != nil {
 		t.Fatalf("logger.Log() error = %v", err)
 	}
+	assertCapturedRuntimeLog(t, capture, runtimeLogPayloadArg{
+		level: "error", message: "runtime log", component: "workflow-runtime", action: "handler_error",
+		detail: map[string]any{"run_id": runID},
+	}, runID, "")
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("ExpectationsWereMet() error = %v", err)
 	}
@@ -493,13 +495,11 @@ func TestRuntimeLogger_Log_ReturnsPersistenceFailure(t *testing.T) {
 	defer db.Close()
 
 	writeErr := errors.New("insert failed")
-	mock.ExpectExec(`INSERT INTO events`).
-		WithArgs(sqlmock.AnyArg(), "").
-		WillReturnError(writeErr)
+	capture := &runtimeLogPersistenceCapture{err: writeErr}
 
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(testAuthorActivityContext(context.Background()), recorder)
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
+	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{capture: capture})
 	err = logger.Log(ctx, RuntimeLogEntry{
 		Level:     "error",
 		Message:   "Persisting the pipeline receipt failed",
@@ -524,26 +524,25 @@ func TestRuntimeLogger_Log_AllowsEmptyCanonicalMessageWhenDetailsExist(t *testin
 	}
 	defer db.Close()
 
-	mock.ExpectExec(`INSERT INTO events`).
-		WithArgs(runtimeLogPayloadArg{
-			level:     "info",
-			message:   "",
-			component: "agent-manager",
-			action:    "delivery_lifecycle_transition",
-			eventID:   "evt-1",
-			agentID:   "agent-a",
-			detail: map[string]any{
-				"delivery_state":          "launching",
-				"delivery_transition":     "launching",
-				"delivery_previous_state": "queued",
-				"delivery_reason":         "agent_processing",
-				"subscriber_type":         "agent",
-				"subscriber_id":           "agent-a",
-			},
-		}, "").
-		WillReturnResult(sqlmock.NewResult(0, 1))
+	capture := &runtimeLogPersistenceCapture{}
+	wantPersisted := runtimeLogPayloadArg{
+		level:     "info",
+		message:   "",
+		component: "agent-manager",
+		action:    "delivery_lifecycle_transition",
+		eventID:   "evt-1",
+		agentID:   "agent-a",
+		detail: map[string]any{
+			"delivery_state":          "launching",
+			"delivery_transition":     "launching",
+			"delivery_previous_state": "queued",
+			"delivery_reason":         "agent_processing",
+			"subscriber_type":         "agent",
+			"subscriber_id":           "agent-a",
+		},
+	}
 
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
+	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{capture: capture})
 	if err := logger.Log(testAuthorActivityContext(context.Background()), RuntimeLogEntry{
 		Level:     "debug",
 		Message:   "",
@@ -562,6 +561,7 @@ func TestRuntimeLogger_Log_AllowsEmptyCanonicalMessageWhenDetailsExist(t *testin
 	}); err != nil {
 		t.Fatalf("logger.Log() error = %v, want nil", err)
 	}
+	assertCapturedRuntimeLog(t, capture, wantPersisted, "", "")
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("ExpectationsWereMet() error = %v", err)
 	}
@@ -654,7 +654,7 @@ func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnLineageLookupFailure(t *
 	}
 }
 
-func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnRunRowFailure(t *testing.T) {
+func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnRunOwnerFailure(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
@@ -663,18 +663,12 @@ func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnRunRowFailure(t *testing
 
 	runID := uuid.NewString()
 	runRowErr := errors.New("run row failed")
-	mock.ExpectBegin()
-	expectRuntimeLogStoryBegin(mock)
-	expectRuntimeLogRunAbsent(mock, runID)
-	mock.ExpectExec(`INSERT INTO runs`).
-		WithArgs(runID).
-		WillReturnError(runRowErr)
-	mock.ExpectRollback()
+	capture := &runtimeLogPersistenceCapture{err: runRowErr}
 
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(testAuthorActivityContext(context.Background()), recorder)
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
+	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{capture: capture})
 	err = logger.Log(ctx, RuntimeLogEntry{
 		Level:     "error",
 		Message:   "runtime log",
@@ -692,7 +686,7 @@ func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnRunRowFailure(t *testing
 	}
 }
 
-func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnSyncCountsFailure(t *testing.T) {
+func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnPostAppendOwnerFailure(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
@@ -701,24 +695,12 @@ func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnSyncCountsFailure(t *tes
 
 	runID := uuid.NewString()
 	syncErr := errors.New("sync failed")
-	mock.ExpectBegin()
-	expectRuntimeLogStoryBegin(mock)
-	expectRuntimeLogRunAbsent(mock, runID)
-	mock.ExpectExec(`INSERT INTO runs`).
-		WithArgs(runID).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`INSERT INTO events`).
-		WithArgs(runID, sqlmock.AnyArg(), "").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`UPDATE runs`).
-		WithArgs(runID).
-		WillReturnError(syncErr)
-	mock.ExpectRollback()
+	capture := &runtimeLogPersistenceCapture{err: syncErr}
 
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(testAuthorActivityContext(context.Background()), recorder)
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
+	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{capture: capture})
 	err = logger.Log(ctx, RuntimeLogEntry{
 		Level:     "error",
 		Message:   "runtime log",
@@ -816,15 +798,11 @@ func TestRuntimeLogger_Log_DerivesLineageFromPersistedSubjectEvent(t *testing.T)
 	if err := ensureRuntimeLogRunRowForTest(ctx, db, runID); err != nil {
 		t.Fatalf("ensure run row: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type
-		)
-		VALUES ('live',
-			$1::uuid, $2::uuid, 'validation/validation.package_ready', 'global', '{}'::jsonb,
-			'runtime.run_fork.selected_contract_execution', 'agent'
-		)
-	`, runID, subjectEventID); err != nil {
+	if err := eventfixture.Insert(ctx, db, runtimeauthoractivity.DialectPostgres, eventtest.PersistedProjectionForProducer(
+		subjectEventID, events.EventType("validation/validation.package_ready"),
+		eventtest.Producer(events.EventProducerAgent, "runtime.run_fork.selected_contract_execution"),
+		"", []byte(`{}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("seed subject event: %v", err)
 	}
 
@@ -908,15 +886,11 @@ func TestRuntimeLogger_Log_PersistsTypedRuntimeLineage(t *testing.T) {
 	if err := ensureRuntimeLogRunRowForTest(ctx, db, runID); err != nil {
 		t.Fatalf("ensure run row: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type
-		)
-		VALUES ('live',
-			$1::uuid, $2::uuid, 'validation/validation.package_ready', 'global', '{}'::jsonb,
-			'runtime.run_fork.selected_contract_execution', 'agent'
-		)
-	`, runID, subjectEventID); err != nil {
+	if err := eventfixture.Insert(ctx, db, runtimeauthoractivity.DialectPostgres, eventtest.PersistedProjectionForProducer(
+		subjectEventID, events.EventType("validation/validation.package_ready"),
+		eventtest.Producer(events.EventProducerAgent, "runtime.run_fork.selected_contract_execution"),
+		"", []byte(`{}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("seed subject event: %v", err)
 	}
 
@@ -1095,13 +1069,9 @@ type runtimeLogPayloadArg struct {
 	detail       map[string]any
 }
 
-func (m runtimeLogPayloadArg) Match(v driver.Value) bool {
-	text, ok := v.(string)
-	if !ok {
-		return false
-	}
+func (m runtimeLogPayloadArg) MatchPayload(payload []byte) bool {
 	decoded := map[string]any{}
-	if err := json.Unmarshal([]byte(text), &decoded); err != nil {
+	if err := json.Unmarshal(payload, &decoded); err != nil {
 		return false
 	}
 	if strings.TrimSpace(asString(decoded["log_level"])) != m.level {

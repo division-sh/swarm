@@ -24,8 +24,8 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 	if !exists {
 		return nil, "", ErrRunNotFound
 	}
-	where := []string{"e.run_id = ?", "NOT (COALESCE(d.subscriber_type, '') = ? AND COALESCE(d.subscriber_id, '') = ?)"}
-	args := []any{runID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID}
+	where := []string{"e.run_id = ?"}
+	args := []any{runID}
 	if opts.Cursor != "" {
 		cursor, err := decodeRunDebugTraceCursor(opts.Cursor)
 		if err != nil {
@@ -46,30 +46,34 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 			return nil, "", err
 		}
 		turnID := strings.TrimSpace(cursor.TurnID)
+		eventCreatedSQL := sqliteRunTraceSQLTime(eventCreatedAt)
+		deliveryCreatedSQL := sqliteRunTraceSQLTime(deliveryCreatedAt)
+		turnCreatedSQL := sqliteRunTraceSQLTime(turnCreatedAt)
+		floorSQL := sqliteRunTraceSQLTime(sqliteRunTraceCursorFloorTime())
 		where = append(where, `(
-			e.created_at > ?
-			OR (e.created_at = ? AND e.event_id > ?)
-			OR (e.created_at = ? AND e.event_id = ? AND COALESCE(d.created_at, ?) > ?)
-			OR (e.created_at = ? AND e.event_id = ? AND COALESCE(d.created_at, ?) = ? AND COALESCE(d.delivery_id, '') > ?)
-			OR (e.created_at = ? AND e.event_id = ? AND COALESCE(d.created_at, ?) = ? AND COALESCE(d.delivery_id, '') = ? AND COALESCE(t.created_at, ?) > ?)
-			OR (e.created_at = ? AND e.event_id = ? AND COALESCE(d.created_at, ?) = ? AND COALESCE(d.delivery_id, '') = ? AND COALESCE(t.created_at, ?) = ? AND COALESCE(t.turn_id, '') > ?)
+			COALESCE(julianday(e.created_at), julianday(substr(CAST(e.created_at AS TEXT), 1, instr(CAST(e.created_at AS TEXT), ' +') - 1))) > julianday(?)
+			OR (COALESCE(julianday(e.created_at), julianday(substr(CAST(e.created_at AS TEXT), 1, instr(CAST(e.created_at AS TEXT), ' +') - 1))) = julianday(?) AND e.event_id > ?)
+			OR (COALESCE(julianday(e.created_at), julianday(substr(CAST(e.created_at AS TEXT), 1, instr(CAST(e.created_at AS TEXT), ' +') - 1))) = julianday(?) AND e.event_id = ? AND COALESCE(julianday(COALESCE(d.created_at, ?)), julianday(substr(CAST(COALESCE(d.created_at, ?) AS TEXT), 1, instr(CAST(COALESCE(d.created_at, ?) AS TEXT), ' +') - 1))) > julianday(?))
+			OR (COALESCE(julianday(e.created_at), julianday(substr(CAST(e.created_at AS TEXT), 1, instr(CAST(e.created_at AS TEXT), ' +') - 1))) = julianday(?) AND e.event_id = ? AND COALESCE(julianday(COALESCE(d.created_at, ?)), julianday(substr(CAST(COALESCE(d.created_at, ?) AS TEXT), 1, instr(CAST(COALESCE(d.created_at, ?) AS TEXT), ' +') - 1))) = julianday(?) AND COALESCE(d.delivery_id, '') > ?)
+			OR (COALESCE(julianday(e.created_at), julianday(substr(CAST(e.created_at AS TEXT), 1, instr(CAST(e.created_at AS TEXT), ' +') - 1))) = julianday(?) AND e.event_id = ? AND COALESCE(julianday(COALESCE(d.created_at, ?)), julianday(substr(CAST(COALESCE(d.created_at, ?) AS TEXT), 1, instr(CAST(COALESCE(d.created_at, ?) AS TEXT), ' +') - 1))) = julianday(?) AND COALESCE(d.delivery_id, '') = ? AND COALESCE(julianday(COALESCE(t.created_at, ?)), julianday(substr(CAST(COALESCE(t.created_at, ?) AS TEXT), 1, instr(CAST(COALESCE(t.created_at, ?) AS TEXT), ' +') - 1))) > julianday(?))
+			OR (COALESCE(julianday(e.created_at), julianday(substr(CAST(e.created_at AS TEXT), 1, instr(CAST(e.created_at AS TEXT), ' +') - 1))) = julianday(?) AND e.event_id = ? AND COALESCE(julianday(COALESCE(d.created_at, ?)), julianday(substr(CAST(COALESCE(d.created_at, ?) AS TEXT), 1, instr(CAST(COALESCE(d.created_at, ?) AS TEXT), ' +') - 1))) = julianday(?) AND COALESCE(d.delivery_id, '') = ? AND COALESCE(julianday(COALESCE(t.created_at, ?)), julianday(substr(CAST(COALESCE(t.created_at, ?) AS TEXT), 1, instr(CAST(COALESCE(t.created_at, ?) AS TEXT), ' +') - 1))) = julianday(?) AND COALESCE(t.turn_id, '') > ?)
 		)`)
 		args = append(args,
-			eventCreatedAt,
-			eventCreatedAt, eventID,
-			eventCreatedAt, eventID, sqliteRunTraceCursorFloorTime(), deliveryCreatedAt,
-			eventCreatedAt, eventID, sqliteRunTraceCursorFloorTime(), deliveryCreatedAt, deliveryID,
-			eventCreatedAt, eventID, sqliteRunTraceCursorFloorTime(), deliveryCreatedAt, deliveryID, sqliteRunTraceCursorFloorTime(), turnCreatedAt,
-			eventCreatedAt, eventID, sqliteRunTraceCursorFloorTime(), deliveryCreatedAt, deliveryID, sqliteRunTraceCursorFloorTime(), turnCreatedAt, turnID,
+			eventCreatedSQL,
+			eventCreatedSQL, eventID,
+			eventCreatedSQL, eventID, floorSQL, floorSQL, floorSQL, deliveryCreatedSQL,
+			eventCreatedSQL, eventID, floorSQL, floorSQL, floorSQL, deliveryCreatedSQL, deliveryID,
+			eventCreatedSQL, eventID, floorSQL, floorSQL, floorSQL, deliveryCreatedSQL, deliveryID, floorSQL, floorSQL, floorSQL, turnCreatedSQL,
+			eventCreatedSQL, eventID, floorSQL, floorSQL, floorSQL, deliveryCreatedSQL, deliveryID, floorSQL, floorSQL, floorSQL, turnCreatedSQL, turnID,
 		)
 	}
 	if opts.Since != nil {
-		where = append(where, sqliteRunTraceWatermarkExpression()+" > ?")
-		args = append(args, opts.Since.UTC())
+		where = append(where, sqliteRunTraceWatermarkExpression()+" > julianday(?)")
+		args = append(args, sqliteRunTraceSQLTime(opts.Since.UTC()))
 	}
 	if opts.Until != nil {
-		where = append(where, sqliteRunTraceWatermarkExpression()+" <= ?")
-		args = append(args, opts.Until.UTC())
+		where = append(where, sqliteRunTraceWatermarkExpression()+" <= julianday(?)")
+		args = append(args, sqliteRunTraceSQLTime(opts.Until.UTC()))
 	}
 	appendIn := func(column string, values []string) {
 		if len(values) == 0 {
@@ -127,7 +131,12 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 			COALESCE(t.task_id, ''), COALESCE(t.parse_ok, 0), COALESCE(t.retry_count, 0),
 			COALESCE(t.failure, 'null'), t.created_at
 		FROM events e
-		LEFT JOIN event_deliveries d ON d.event_id = e.event_id
+		LEFT JOIN event_deliveries d
+			ON d.event_id = e.event_id
+		   AND NOT (
+				d.subscriber_type = 'node'
+				AND d.subscriber_id = '__runtime_replay_scope__'
+		   )
 		LEFT JOIN agent_turns t
 			ON t.run_id = e.run_id
 		   AND t.trigger_event_id = e.event_id
@@ -146,7 +155,13 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 				OR ses.run_id IS NULL
 		   )
 		WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY e.created_at ASC, e.event_id ASC, d.created_at ASC, d.delivery_id ASC, t.created_at ASC, t.turn_id ASC
+		ORDER BY
+			COALESCE(julianday(e.created_at), julianday(substr(CAST(e.created_at AS TEXT), 1, instr(CAST(e.created_at AS TEXT), ' +') - 1))) ASC,
+			e.event_id ASC,
+			COALESCE(julianday(d.created_at), julianday(substr(CAST(d.created_at AS TEXT), 1, instr(CAST(d.created_at AS TEXT), ' +') - 1))) ASC,
+			d.delivery_id ASC,
+			COALESCE(julianday(t.created_at), julianday(substr(CAST(t.created_at AS TEXT), 1, instr(CAST(t.created_at AS TEXT), ' +') - 1))) ASC,
+			t.turn_id ASC
 		LIMIT ?
 	`, args...)
 	if err != nil {
@@ -212,6 +227,10 @@ func sqliteRunTraceCursorFloorTime() time.Time {
 	return time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC)
 }
 
+func sqliteRunTraceSQLTime(value time.Time) string {
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
 func sqliteRunTraceCursorTime(raw string) (time.Time, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -234,12 +253,12 @@ func sqliteRunTraceCursorOptionalTime(raw string) (time.Time, error) {
 
 func sqliteRunTraceWatermarkExpression() string {
 	return `max(
-		e.created_at,
-		COALESCE(d.created_at, '` + sqliteRunTraceCursorFloor + `'),
-		COALESCE(d.started_at, '` + sqliteRunTraceCursorFloor + `'),
-		COALESCE(d.delivered_at, '` + sqliteRunTraceCursorFloor + `'),
-		COALESCE(ses.updated_at, '` + sqliteRunTraceCursorFloor + `'),
-		COALESCE(t.created_at, '` + sqliteRunTraceCursorFloor + `')
+		COALESCE(julianday(e.created_at), julianday(substr(CAST(e.created_at AS TEXT), 1, instr(CAST(e.created_at AS TEXT), ' +') - 1))),
+		COALESCE(julianday(COALESCE(d.created_at, '` + sqliteRunTraceCursorFloor + `')), julianday(substr(CAST(COALESCE(d.created_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), 1, instr(CAST(COALESCE(d.created_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), ' +') - 1))),
+		COALESCE(julianday(COALESCE(d.started_at, '` + sqliteRunTraceCursorFloor + `')), julianday(substr(CAST(COALESCE(d.started_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), 1, instr(CAST(COALESCE(d.started_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), ' +') - 1))),
+		COALESCE(julianday(COALESCE(d.delivered_at, '` + sqliteRunTraceCursorFloor + `')), julianday(substr(CAST(COALESCE(d.delivered_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), 1, instr(CAST(COALESCE(d.delivered_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), ' +') - 1))),
+		COALESCE(julianday(COALESCE(ses.updated_at, '` + sqliteRunTraceCursorFloor + `')), julianday(substr(CAST(COALESCE(ses.updated_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), 1, instr(CAST(COALESCE(ses.updated_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), ' +') - 1))),
+		COALESCE(julianday(COALESCE(t.created_at, '` + sqliteRunTraceCursorFloor + `')), julianday(substr(CAST(COALESCE(t.created_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), 1, instr(CAST(COALESCE(t.created_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), ' +') - 1)))
 	)`
 }
 
@@ -339,11 +358,11 @@ func (s *SQLiteRuntimeStore) LoadOperatorEvent(ctx context.Context, eventID stri
 	if !found {
 		return OperatorEventFull{}, ErrEventNotFound
 	}
-	decoded, err := eventFromPersistedIdentity(row)
+	decoded, err := decodeEventRecord(row)
 	if err != nil {
 		return OperatorEventFull{}, fmt.Errorf("load sqlite operator event: %w", err)
 	}
-	event, err := NewOperatorEventFull(decoded)
+	event, err := NewOperatorEventFull(decoded.Event())
 	if err != nil {
 		return OperatorEventFull{}, err
 	}
@@ -476,6 +495,10 @@ func (s *SQLiteRuntimeStore) sqliteOperatorEventDeliveries(ctx context.Context, 
 		       created_at, started_at, delivered_at
 		FROM event_deliveries
 		WHERE event_id = ?
+		  AND NOT (
+			subscriber_type = 'node'
+			AND subscriber_id = '__runtime_replay_scope__'
+		  )
 		ORDER BY created_at ASC, delivery_id ASC
 	`, eventID)
 	if err != nil {

@@ -3,12 +3,15 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -432,12 +435,7 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 		t.Fatalf("issue selected completion authority: %v", err)
 	}
 	seedEventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,event_id,run_id,event_name,scope,produced_by_type)
-		VALUES ('live',$1::uuid,$2::uuid,'selected.discard.seed','global','platform')
-	`, seedEventID, fixture.forkRun); err != nil {
-		t.Fatalf("seed selected discard event: %v", err)
-	}
+	seedPostgresRootEventRecordFixture(t, ctx, db, seedEventID, fixture.forkRun, "selected.discard.seed", events.EventProducerPlatform, "selected-discard", "", "", time.Now().UTC())
 	firstRevision := captureRunForkTestRevision(t, db, fixture.forkRun, runforkrevision.FamilyEvents)
 	if _, err := db.ExecContext(ctx, `UPDATE runs SET status=$2 WHERE run_id=$1::uuid`, fixture.forkRun, RunForkMaterializedStatus); err != nil {
 		t.Fatalf("mark selected fork materialized: %v", err)
@@ -449,12 +447,7 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 	}
 	defer func() { _ = allocationTx.Rollback() }()
 	concurrentEventID := uuid.NewString()
-	if _, err := allocationTx.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,event_id,run_id,event_name,scope,produced_by_type)
-		VALUES ('live',$1::uuid,$2::uuid,'selected.discard.concurrent','global','platform')
-	`, concurrentEventID, fixture.forkRun); err != nil {
-		t.Fatalf("stage competing selected event: %v", err)
-	}
+	seedPostgresRootEventRecordFixtureTx(t, ctx, allocationTx, concurrentEventID, fixture.forkRun, "selected.discard.concurrent", events.EventProducerPlatform, "selected-discard", "", "", time.Now().UTC())
 	allocatedRevision, err := runforkrevision.Capture(ctx, allocationTx, fixture.forkRun, runforkrevision.FamilyEvents)
 	if err != nil {
 		t.Fatalf("capture competing selected revision: %v", err)
@@ -561,12 +554,7 @@ func TestSelectedForkDiscardRejectsLiveDependentForkPostgres(t *testing.T) {
 	`, sourceRunID, forkRunID, now); err != nil {
 		t.Fatalf("seed selected fork lineage: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id,run_id,event_name,scope,execution_mode,produced_by_type,created_at)
-		VALUES ($1::uuid,$2::uuid,'fork.dependency','global','live','platform',$3)
-	`, forkEventID, forkRunID, now); err != nil {
-		t.Fatalf("seed selected fork event: %v", err)
-	}
+	seedPostgresRootEventRecordFixture(t, ctx, db, forkEventID, forkRunID, "fork.dependency", events.EventProducerPlatform, "selected-discard", "", "", now)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id,status,started_at,forked_from_run_id,forked_from_event_id)
 		VALUES ($1::uuid,'paused',$4,$2::uuid,$3::uuid)
@@ -663,23 +651,35 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 	forkRun := uuid.NewString()
 	eventID := uuid.NewString()
 	bindingID := uuid.NewString()
+	registrar, ok := any(store).(testAuthorActivityCatalogRegistrar)
+	if !ok {
+		t.Fatal("selected completion fixture store has no author activity catalog")
+	}
+	registerTestAuthorActivityCatalog(t, registrar)
 	if sqlite {
 		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at) VALUES (?,'running',?),(?,'paused',?)`, sourceRun, now, forkRun, now); err != nil {
 			t.Fatalf("seed selected runs: %v", err)
-		}
-		if _, err := db.ExecContext(ctx, `INSERT INTO events (event_id,run_id,event_name,scope,execution_mode,created_at) VALUES (?,?,'selected.test','global','live',?)`, eventID, sourceRun, now); err != nil {
-			t.Fatalf("seed selected event: %v", err)
-		}
-		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_event_id,mode,contracts_root,workflow_name,workflow_version,created_at) VALUES (?,?,?,?,'selected_contracts','/tmp/contracts','workflow','v1',?)`, bindingID, forkRun, sourceRun, eventID, now); err != nil {
-			t.Fatalf("seed selected binding: %v", err)
 		}
 	} else {
 		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at) VALUES ($1::uuid,'running',$3),($2::uuid,'paused',$3)`, sourceRun, forkRun, now); err != nil {
 			t.Fatalf("seed selected runs: %v", err)
 		}
-		if _, err := db.ExecContext(ctx, `INSERT INTO events (event_id,run_id,event_name,scope,execution_mode,created_at) VALUES ($1::uuid,$2::uuid,'selected.test','global','live',$3)`, eventID, sourceRun, now); err != nil {
-			t.Fatalf("seed selected event: %v", err)
+	}
+	eventStore, ok := any(store).(semanticEventFixtureStore)
+	if !ok {
+		t.Fatal("selected completion fixture store has no event commit owner")
+	}
+	if err := commitSemanticEventFixture(ctx, eventStore, eventtest.PersistedProjection(
+		eventID, events.EventType("selected.test"), "test", "", json.RawMessage(`{}`), 0,
+		sourceRun, "", events.EventEnvelope{}, now,
+	)); err != nil {
+		t.Fatalf("seed selected event: %v", err)
+	}
+	if sqlite {
+		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_event_id,mode,contracts_root,workflow_name,workflow_version,created_at) VALUES (?,?,?,?,'selected_contracts','/tmp/contracts','workflow','v1',?)`, bindingID, forkRun, sourceRun, eventID, now); err != nil {
+			t.Fatalf("seed selected binding: %v", err)
 		}
+	} else {
 		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_event_id,mode,contracts_root,workflow_name,workflow_version,created_at) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'selected_contracts','/tmp/contracts','workflow','v1',$5)`, bindingID, forkRun, sourceRun, eventID, now); err != nil {
 			t.Fatalf("seed selected binding: %v", err)
 		}

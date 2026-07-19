@@ -23,7 +23,7 @@ func (s *SQLiteRuntimeStore) RunInboundPublicationMutation(ctx context.Context, 
 		return runtimeinbound.Record{}, fmt.Errorf("inbound publication mutation callback is required")
 	}
 	var result runtimeinbound.Record
-	err := s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		existing, found, err := loadSQLiteInboundPublicationTx(txctx, tx, request.Provider, request.EntityID, request.ProviderEventID)
 		if err != nil {
 			return err
@@ -279,14 +279,6 @@ func insertSQLiteInboundPublicationPreparedTx(ctx context.Context, tx *sql.Tx, r
 	return nil
 }
 
-func (s *SQLiteRuntimeStore) appendInboundEvidenceTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
-	ctx = withDiagnosticDirectOwner(ctx, diagnosticDirectInboundRecord)
-	if err := s.AppendEventTx(ctx, tx, evt); err != nil {
-		return fmt.Errorf("append sqlite inbound evidence: %w", err)
-	}
-	return recordInboundAuthorActivity(ctx, evt, evt.SourceAgent())
-}
-
 func (s *SQLiteRuntimeStore) linkInboundPublicationEventTx(ctx context.Context, tx *sql.Tx, request runtimeinbound.Request, child runtimeinbound.EventRecord) error {
 	auth := child.Authorization.Normalized()
 	_, err := tx.ExecContext(ctx, `
@@ -406,29 +398,21 @@ func loadSQLiteInboundPublicationRoutes(ctx context.Context, db inboundPublicati
 }
 
 func loadSQLiteInboundPublicationEvent(ctx context.Context, db inboundPublicationQueryer, eventID string) (events.Event, error) {
-	var row persistedEventIdentity
-	var createdAtValue any
-	err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(run_id, ''), event_name, COALESCE(task_id, ''), COALESCE(entity_id, ''), COALESCE(flow_instance, ''),
-		       scope, payload, COALESCE(chain_depth, 0), COALESCE(produced_by, ''), COALESCE(produced_by_type, ''),
-		       COALESCE(source_event_id, ''), created_at, execution_mode, source_route, target_route, target_set
-		FROM events WHERE event_id = ?
-	`, eventID).Scan(&row.RunID, &row.EventName, &row.TaskID, &row.EntityID, &row.FlowInstance, &row.Scope, &row.Payload,
-		&row.ChainDepth, &row.ProducedBy, &row.ProducedByType, &row.SourceEventID, &createdAtValue, &row.ExecutionMode,
-		&row.SourceRoute, &row.TargetRoute, &row.TargetSet)
+	row, found, err := loadSQLiteEventIdentity(ctx, db, eventID)
 	if err != nil {
-		return events.EmptyEvent(), fmt.Errorf("load sqlite inbound publication event: %w", err)
+		var event events.Event
+		return event, fmt.Errorf("load sqlite inbound publication event: %w", err)
 	}
-	createdAt, ok, err := sqliteTimeValue(createdAtValue)
+	if !found {
+		var event events.Event
+		return event, fmt.Errorf("load sqlite inbound publication event: event %s not found", strings.TrimSpace(eventID))
+	}
+	admitted, err := decodeEventRecord(row)
 	if err != nil {
-		return events.EmptyEvent(), fmt.Errorf("load sqlite inbound publication event created_at: %w", err)
+		var event events.Event
+		return event, err
 	}
-	if !ok {
-		return events.EmptyEvent(), fmt.Errorf("load sqlite inbound publication event created_at is missing")
-	}
-	row.CreatedAt = createdAt
-	row.EventID = eventID
-	return eventFromPersistedIdentity(row)
+	return admitted.Event(), nil
 }
 
 var _ runtimeinbound.Runner = (*SQLiteRuntimeStore)(nil)

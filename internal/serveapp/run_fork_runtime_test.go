@@ -13,6 +13,9 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/store"
@@ -36,14 +39,8 @@ func TestRunForkRuntimeOwnerHarness_DryRunUsesCanonicalPlannerJSON(t *testing.T)
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'fork.cli', 'global', '{}'::jsonb, 'test', 'platform', $3)
-	`, runID, eventID, at); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli",
+		eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(ctx, t.TempDir(), []string{
@@ -93,14 +90,8 @@ func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t 
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'fork.cli.pending', 'global', '{}'::jsonb, 'test', 'platform', $3)
-	`, runID, eventID, at); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli.pending",
+		eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
@@ -147,14 +138,8 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'flow-a/work.begin', 'global', '{}'::jsonb, 'test', 'platform', $3)
-	`, runID, eventID, at); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "flow-a/work.begin",
+		eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
@@ -475,14 +460,9 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvance
 	afterEventID := uuid.NewString()
 	at := time.Unix(1700000313, 0).UTC()
 	seedRunForkCLISelectedExecutionSource(t, db, sourceRunID, entityID, sourceEventID, at)
-	if _, err := db.ExecContext(context.Background(), `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'source.after', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
-	`, sourceRunID, afterEventID, entityID, at.Add(time.Second)); err != nil {
-		t.Fatalf("seed post-fork source event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, context.Background(), db, runtimeauthoractivity.DialectPostgres, afterEventID, sourceRunID, "source.after",
+		eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at.Add(time.Second))
 	captureRunForkCLIRevision(t, db, sourceRunID, runforkrevision.FamilyEvents)
 
 	var buf bytes.Buffer
@@ -530,14 +510,8 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'fork.cli.materialize', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
-	`, runID, eventID, entityID, at); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli.materialize",
+		eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -875,14 +849,8 @@ func seedRunForkCLIActivationSourceWithoutRevision(t *testing.T, db *sql.DB, run
 	`, runID, "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live', $1::uuid, $2::uuid, 'fork.cli.activate', $3::uuid, '', 'entity', '{}'::jsonb, 'test', 'platform', $4)
-	`, runID, eventID, entityID, at); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli.activate",
+		eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -917,18 +885,8 @@ func seedRunForkCLISelectedExecutionSource(t *testing.T, db *sql.DB, runID, enti
 func seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, db *sql.DB, runID, eventID string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode,
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES ('live',
-			$1::uuid, $2::uuid, 'platform.runtime_log', NULL, NULL, 'global',
-			'{"level":"info","message":"diagnostic platform row must remain lineage-only"}'::jsonb,
-			'pipeline', 'platform', $3
-		)
-	`, runID, eventID, at); err != nil {
-		t.Fatalf("seed diagnostic platform event: %v", err)
-	}
+	storetest.InsertRuntimeDiagnosticEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "", "pipeline",
+		[]byte(`{"level":"info","message":"diagnostic platform row must remain lineage-only"}`), at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, entity_id, flow_instance, outcome, reason_code, side_effects, processed_at

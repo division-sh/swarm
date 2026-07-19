@@ -58,15 +58,20 @@ func registerTestAuthorActivityCatalogForContext(t *testing.T, target testAuthor
 	}
 	eventTypes := []string{
 		"child.event", "child/output.done", "company.scanned", "example.started", "fork.ready",
+		"contract.child", "contract.control", "contract.diagnostic", "contract.operator", "contract.replay", "contract.root", "contract.selected_fork",
 		"deadletter.test", "inbound.alert", "inbound.child", "inbound.root", "inbound.test", "item.failed", "item.received",
 		"foreign/task.ready",
 		"github.push.normalized", "inbound.github.push",
 		"human_task.approved", "human_task.expired", "human_task.rejected",
 		"launch.completed", "legacy.filled", "legacy.followup", "legacy.requested", "mailbox.card_superseded", "mailbox.review_requested", "parent.event", "pin.output",
-		"phrase.completed", "review.requested", "review/inst-1/task.ready", "scan.completed", "scan.dev", "scan.followup", "scan.requested", "scoring.requested",
+		"first.event", "second.event", "phrase.completed", "review.requested", "review/inst-1/task.ready", "scan.completed", "scan.dev", "scan.followup", "scan.requested", "scoring.requested", "scoring/scoring.requested",
 		"subscription.visible", "support_reply.rejected", "support_reply.revision_requested", "system.directive", "system.parent", "system.started", "task.completed",
-		"test.delivery_receipt", "test.delivery_requested", "test.direct_dead_letter", "test.event", "test.started", "test.terminal_admission", "test.terminal_delivery",
-		"test.node_emitted",
+		"custom.stop", "quiescence.active_delivery", "quiescence.missing_pipeline_receipt", "quiescence.ready",
+		"scan.finished", "scan.progressed", "scan.replayed", "selected.test", "standing.unsettled", "standing.work",
+		"task.canonical_entity", "task.dead", "task.dead_letter", "task.delivered", "task.failed", "task.failed.new", "task.failed.old", "task.in_progress", "task.other", "task.other_agent", "task.payload_only", "task.pending",
+		"trace.event_only", "trace.failed", "trace.late_delivered", "trace.second_delivered", "trace.task_audit", "trace.tie",
+		"test.delivery_receipt", "test.delivery_requested", "test.direct_dead_letter", "test.event", "test.receipts.typed_identity", "test.started", "test.terminal_admission", "test.terminal_delivery",
+		"atomic.selected", "atomic.source", "batch.contract", "duplicate.base", "test.node_emitted",
 		"trace.visible", "validation/validation.package_ready", "workflow.executable",
 	}
 	sort.Strings(eventTypes)
@@ -76,7 +81,7 @@ func registerTestAuthorActivityCatalogForContext(t *testing.T, target testAuthor
 		if eventType == "test.delivery_receipt" {
 			descriptor.Disposition = runtimeauthoractivity.StoryAuthored
 			descriptor.AuthorSummaryField = "text"
-		} else if eventType == "test.node_emitted" {
+		} else if eventType == "test.node_emitted" || eventType == "atomic.selected" {
 			descriptor.Disposition = runtimeauthoractivity.StoryAuthored
 		}
 		descriptors = append(descriptors, descriptor)

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -506,15 +508,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 		{deadEventID, "task.dead"},
 		{otherAgentEventID, "task.other"},
 	} {
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (execution_mode,
-				event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
-			) VALUES ('live',
-				$1::uuid, $2::uuid, $3, $4::uuid, 'global', '{}'::jsonb, 'runtime', 'agent', $5
-			)
-		`, event.id, runID, event.name, entityID, now.Add(-10*time.Minute)); err != nil {
-			t.Fatalf("seed event %s: %v", event.name, err)
-		}
+		seedOperatorAgentEvent(t, ctx, pg, event.id, runID, event.name, entityID, now.Add(-10*time.Minute))
 	}
 	failedNewDeliveryID := uuid.NewString()
 	failedOldDeliveryID := uuid.NewString()
@@ -900,15 +894,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 		{failedOtherRunEventID, otherRunID, "task.failed"},
 		{otherAgentEventID, runID, "task.other_agent"},
 	} {
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (execution_mode,
-				event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
-			) VALUES ('live',
-				$1::uuid, $2::uuid, $3, $4::uuid, 'global', '{}'::jsonb, 'runtime', 'agent', $5
-			)
-		`, event.id, event.runID, event.name, entityID, base.Add(-10*time.Minute)); err != nil {
-			t.Fatalf("seed event %s: %v", event.name, err)
-		}
+		seedOperatorAgentEvent(t, ctx, pg, event.id, event.runID, event.name, entityID, base.Add(-10*time.Minute))
 	}
 	pendingDeliveryID := uuid.NewString()
 	inProgressDeliveryID := uuid.NewString()
@@ -1101,13 +1087,11 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 		{failedOtherRunEventID, otherRunID, "task.failed"},
 		{otherAgentEventID, runID, "task.other_agent"},
 	} {
-		if _, err := sqliteStore.DB.ExecContext(ctx, `
-			INSERT INTO events (execution_mode,
-				event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
-			) VALUES ('live',
-				?, ?, ?, ?, 'global', '{}', 'runtime', 'agent', ?
-			)
-		`, event.id, event.runID, event.name, entityID, base.Add(-10*time.Minute)); err != nil {
+		fixture := eventtest.PersistedProjection(
+			event.id, events.EventType(event.name), "runtime", "", json.RawMessage(`{}`), 0,
+			event.runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), base.Add(-10*time.Minute),
+		)
+		if err := commitSemanticEventFixture(ctx, sqliteStore, fixture); err != nil {
 			t.Fatalf("seed sqlite event %s: %v", event.name, err)
 		}
 	}
@@ -1317,12 +1301,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsFailsClosedOnDeadLe
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (execution_mode, event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
-		VALUES ('live', $1::uuid, $2::uuid, 'task.dead', 'global', '{}'::jsonb, 'runtime', 'agent', now())
-	`, eventID, runID); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
+	seedOperatorAgentEvent(t, ctx, pg, eventID, runID, "task.dead", "", time.Now().UTC())
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, delivered_at, created_at
@@ -1339,6 +1318,21 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsFailsClosedOnDeadLe
 	}
 	if !strings.Contains(err.Error(), "without a dead_letters record") {
 		t.Fatalf("error = %v, want dead_letters reconciliation failure", err)
+	}
+}
+
+func seedOperatorAgentEvent(t *testing.T, ctx context.Context, pg *PostgresStore, eventID, runID, eventName, entityID string, createdAt time.Time) {
+	t.Helper()
+	envelope := events.EventEnvelope{}
+	if entityID != "" {
+		envelope = events.EnvelopeForEntityID(envelope, entityID)
+	}
+	event := eventtest.PersistedProjectionForProducer(
+		eventID, events.EventType(eventName), eventtest.Producer(events.EventProducerAgent, "runtime"), "",
+		json.RawMessage(`{}`), 0, runID, "", envelope, createdAt,
+	)
+	if err := commitSemanticEventFixture(ctx, pg, event); err != nil {
+		t.Fatalf("seed operator-agent event %s: %v", eventName, err)
 	}
 }
 

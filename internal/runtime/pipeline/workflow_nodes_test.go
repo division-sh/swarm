@@ -378,6 +378,7 @@ func TestWorkflowNodeConnectedInputEventHandlerResolution_RootSourceRejectsEmpty
 func TestWorkflowNodeConnectedInputHandlerMatchesConcreteTemplateProducer(t *testing.T) {
 	source := testWorkflowNodeConnectedInputSource("template")
 	evt := eventtest.RootIngress("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+		EntityID:     "receiver-entity",
 		FlowInstance: "receiver",
 		Source:       events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "producer-entity"},
 		Target:       events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: "receiver-entity"},
@@ -404,9 +405,14 @@ func TestWorkflowNodeConnectedInputHandlerEnforcesProducerMode(t *testing.T) {
 		{name: "template concrete name without route", mode: "template", eventType: "producer/inst-1/deploy.done"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			sourceRoute := tc.source
+			if !sourceRoute.Empty() {
+				sourceRoute.EntityID = "producer-entity"
+			}
 			evt := eventtest.RootIngress("", events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+				EntityID:     "receiver-entity",
 				FlowInstance: "receiver",
-				Source:       tc.source,
+				Source:       sourceRoute,
 				Target:       events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: "receiver-entity"},
 			}, time.Unix(1, 0).UTC())
 			resolved := workflowNodeEventHandlerResolutionForDelivery(testWorkflowNodeConnectedInputSource(tc.mode), "receiver-node", evt)
@@ -420,8 +426,10 @@ func TestWorkflowNodeConnectedInputHandlerEnforcesProducerMode(t *testing.T) {
 func TestWorkflowNodeConnectedInputHandlerRejectsAmbiguousReceiverPins(t *testing.T) {
 	source := testWorkflowNodeConnectedInputCollisionSource()
 	evt := eventtest.RootIngress("", "producer/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
-		Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer"},
-		Target: events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: "receiver-entity"},
+		EntityID:     "receiver-entity",
+		FlowInstance: "receiver",
+		Source:       events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: "producer-entity"},
+		Target:       events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: "receiver-entity"},
 	}, time.Unix(1, 0).UTC())
 
 	resolved := workflowNodeConnectedInputEventHandlerResolution(source, "receiver-node", evt)

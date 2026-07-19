@@ -1,7 +1,6 @@
 package events
 
 import (
-	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -9,9 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
 type eventConstructorCallsite struct {
@@ -19,125 +15,10 @@ type eventConstructorCallsite struct {
 	Scope string
 }
 
-var productionProjectionEventAllowlist = map[eventConstructorCallsite]int{
-	{Path: "internal/store/event_persistence_identity.go", Scope: "eventFromPersistedIdentity"}: 1,
-}
+var productionProjectionEventAllowlist = map[eventConstructorCallsite]int{}
 
 var productionRouteProbeEventAllowlist = map[eventConstructorCallsite]int{
-	{Path: "internal/runtime/bus/eventbus_routing.go", Scope: "EventBus.resolveRoutedRecipients"}:  1,
 	{Path: "internal/runtime/bus/eventbus_routing.go", Scope: "EventBus.resolveRoutedSubscribers"}: 1,
-	{Path: "internal/runtime/bus/sweeper.go", Scope: "EventBus.SweepUndispatched"}:                 1,
-}
-
-func TestNewChildEventWithLineageOwnsRuntimeFields(t *testing.T) {
-	parent := NewRootIngressEvent(
-		"parent-event",
-		EventType("root.started"),
-		ExternalProducer("test-root"),
-		"task-1",
-		json.RawMessage(`{"ok":true}`),
-		0,
-		"run-1",
-		"",
-		EventEnvelope{},
-		time.Date(2026, 1, 2, 3, 4, 5, 0, time.FixedZone("test", 3600)),
-	)
-
-	child := NewChildEvent(
-		"child-event",
-		EventType("child.done"),
-		AgentProducer("test-child"),
-		"",
-		json.RawMessage(`{"done":true}`),
-		0,
-		parent,
-		EventEnvelope{EntityID: "entity-1", FlowInstance: "flow/root"},
-		parent.CreatedAt().Add(time.Second),
-	)
-
-	if child.RunID() != "run-1" {
-		t.Fatalf("RunID = %q, want %q", child.RunID(), "run-1")
-	}
-	if child.ParentEventID() != "parent-event" {
-		t.Fatalf("ParentEventID = %q, want %q", child.ParentEventID(), "parent-event")
-	}
-	if child.TaskID() != "task-1" {
-		t.Fatalf("TaskID = %q, want %q", child.TaskID(), "task-1")
-	}
-	if child.EntityID() != "entity-1" || child.FlowInstance() != "flow/root" {
-		t.Fatalf("context = entity %q flow %q, want entity-1 flow/root", child.EntityID(), child.FlowInstance())
-	}
-}
-
-func TestLineageConstructorsPreserveMockExecutionMode(t *testing.T) {
-	parent := NewRootIngressEvent(
-		"parent-event",
-		EventType("root.started"),
-		ExternalProducer("test-root"),
-		"task-1",
-		nil,
-		0,
-		"run-1",
-		"",
-		EventEnvelope{},
-		time.Now().UTC(),
-	).WithExecutionMode(executionmode.Mock)
-
-	lineage := LineageFromEvent(parent)
-	if lineage.ExecutionMode != executionmode.Mock {
-		t.Fatalf("lineage execution mode = %q, want mock", lineage.ExecutionMode)
-	}
-	child := NewChildEvent("child-event", EventType("child.done"), AgentProducer("test-child"), "", nil, 0, parent, EventEnvelope{}, time.Now().UTC())
-	if child.ExecutionMode() != executionmode.Mock {
-		t.Fatalf("child execution mode = %q, want mock", child.ExecutionMode())
-	}
-	replay := NewReplayEvent("replay-event", EventType("child.done"), AgentProducer("test-child"), "", nil, 0, lineage, EventEnvelope{}, time.Now().UTC())
-	if replay.ExecutionMode() != executionmode.Mock {
-		t.Fatalf("replay execution mode = %q, want mock", replay.ExecutionMode())
-	}
-}
-
-func TestNewRootIngressEventPreservesExplicitCheckpointLineage(t *testing.T) {
-	evt := NewRootIngressEvent(
-		"evt-1",
-		EventType("operator.checkpoint"),
-		ExternalProducer("operator"),
-		"",
-		json.RawMessage(`{"checkpoint":true}`),
-		0,
-		"run-1",
-		"source-1",
-		EventEnvelope{},
-		time.Time{},
-	)
-
-	if evt.RunID() != "run-1" {
-		t.Fatalf("RunID = %q, want run-1", evt.RunID())
-	}
-	if evt.ParentEventID() != "source-1" {
-		t.Fatalf("ParentEventID = %q, want source-1", evt.ParentEventID())
-	}
-}
-
-func TestNewRuntimeDiagnosticEventCopiesPayload(t *testing.T) {
-	payload := json.RawMessage(`{"level":"warn"}`)
-	evt := NewRuntimeDiagnosticEvent(
-		"diag-1",
-		EventType("platform.diagnostic"),
-		PlatformProducer("runtime"),
-		"",
-		payload,
-		0,
-		"",
-		"",
-		EventEnvelope{},
-		time.Time{},
-	)
-	payload[10] = 'e'
-
-	if string(evt.Payload()) != `{"level":"warn"}` {
-		t.Fatalf("Payload = %s, want original payload copy", evt.Payload())
-	}
 }
 
 func TestProductionEventConstructionUsesPublicAPI(t *testing.T) {
@@ -203,6 +84,41 @@ func TestTestEventFixturesUseFixtureBuilders(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("walk %s: %v", root, err)
 		}
+	}
+}
+
+func TestRemovedEventConstructionAliasesStayDeleted(t *testing.T) {
+	repoRoot := repositoryRoot(t)
+	removed := map[string]struct{}{
+		"NodeProducer": {}, "AgentProducer": {}, "PlatformProducer": {}, "ExternalProducer": {},
+		"EmptyEvent": {}, "NewProjectionEvent": {}, "NewRouteProbeEvent": {},
+	}
+	root := filepath.Join(repoRoot, "internal", "events")
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return err
+		}
+		for _, declaration := range file.Decls {
+			fn, ok := declaration.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			if _, forbidden := removed[fn.Name.Name]; forbidden {
+				t.Fatalf("%s:%d reintroduces removed event construction alias %s", slashPath(repoRoot, path), fset.Position(fn.Pos()).Line, fn.Name.Name)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk internal/events: %v", err)
 	}
 }
 
@@ -467,7 +383,7 @@ func isNewProjectionEventCall(call *ast.CallExpr, eventAliases map[string]struct
 
 func isNewRouteProbeEventCall(call *ast.CallExpr, eventAliases map[string]struct{}) bool {
 	selector, ok := call.Fun.(*ast.SelectorExpr)
-	return ok && selector.Sel.Name == "NewRouteProbeEvent" && isEventsPackageIdent(selector.X, eventAliases)
+	return ok && selector.Sel.Name == "NewRouteProbe" && isEventsPackageIdent(selector.X, eventAliases)
 }
 
 func testEventConstructorCallName(call *ast.CallExpr, eventAliases map[string]struct{}) (string, bool) {

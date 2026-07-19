@@ -19,12 +19,10 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -1354,7 +1352,7 @@ func TestOperatorEventPublishSQLiteRejectsCallerEntityIDForCreateEntityBeforePer
 	}
 }
 
-func TestOperatorEventPublishSourceEventIDValidatesSameRunLineage(t *testing.T) {
+func TestOperatorEventPublishOperatorReferenceValidatesSameRunProvenance(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
@@ -1375,7 +1373,7 @@ func TestOperatorEventPublishSourceEventIDValidatesSameRunLineage(t *testing.T) 
 	parentResult := asMap(t, parent.Result)
 	parentEventID := stringValue(t, parentResult["event_id"], "event_id")
 	parentRunID := stringValue(t, parentResult["run_id"], "run_id")
-	requireAPIV1RuntimeBusEvent(t, ch, "parent source_event_id delivery")
+	requireAPIV1RuntimeBusEvent(t, ch, "referenced event delivery")
 
 	child := rpcCall(t, handler, eventPublishBodyWithSource(parentRunID, parentEventID, runStartTestFingerprint, "scan.requested", `{"topic":"checkpoint"}`, "operator-test", "idem-source-child"))
 	if child.Error != nil {
@@ -1386,23 +1384,26 @@ func TestOperatorEventPublishSourceEventIDValidatesSameRunLineage(t *testing.T) 
 	if childResult["run_id"] != parentRunID || childResult["new_run_created"] != false {
 		t.Fatalf("child result = %#v, want existing run", childResult)
 	}
-	if childResult["source_event_id"] != parentEventID {
-		t.Fatalf("child source_event_id = %#v, want %s", childResult["source_event_id"], parentEventID)
+	if _, present := childResult["source_event_id"]; present {
+		t.Fatalf("operator-injected event exposed causal source_event_id: %#v", childResult)
 	}
-	assertEventSourceEventID(t, db, childEventID, parentEventID)
+	if childResult["operator_reference_event_id"] != parentEventID {
+		t.Fatalf("child operator_reference_event_id = %#v, want %s", childResult["operator_reference_event_id"], parentEventID)
+	}
+	assertOperatorEventReference(t, db, childEventID, parentEventID)
 	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
 		t.Fatalf("scan.requested events after sourced publish = %d, want 2", count)
 	}
 	if count := countAPIIdempotencyRows(t, db); count != 2 {
 		t.Fatalf("api_idempotency rows after sourced publish = %d, want 2", count)
 	}
-	got := requireAPIV1RuntimeBusEvent(t, ch, "child source_event_id delivery")
+	got := requireAPIV1RuntimeBusEvent(t, ch, "operator-injected event delivery")
 	if got.ID() != childEventID || got.RunID() != parentRunID {
 		t.Fatalf("child delivered event id/run = %s/%s, want %s/%s", got.ID(), got.RunID(), childEventID, parentRunID)
 	}
 }
 
-func TestOperatorEventPublishSourceEventIDRejectsInvalidLineageBeforePersistence(t *testing.T) {
+func TestOperatorEventPublishOperatorReferenceRejectsInvalidReferenceBeforePersistence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
@@ -1795,65 +1796,11 @@ type failCommittedReplayScopeStore struct {
 	err error
 }
 
-type failCommittedReplayScopeMutation struct {
-	ctx   context.Context
-	tx    *sql.Tx
-	store *failCommittedReplayScopeStore
-}
-
-func (s *failCommittedReplayScopeStore) RunEventMutation(ctx context.Context, fn func(runtimebus.EventMutation) error) error {
-	if fn == nil {
-		return nil
-	}
-	return s.PostgresStore.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		mutation := &failCommittedReplayScopeMutation{tx: tx, store: s}
-		mutation.ctx = runtimebus.WithEventMutationContext(txctx, mutation)
-		return fn(mutation)
-	})
-}
-
-func (m *failCommittedReplayScopeMutation) Context() context.Context {
-	return m.ctx
-}
-
-func (m *failCommittedReplayScopeMutation) AppendEvent(ctx context.Context, evt events.Event) error {
-	_, err := m.AppendEventOutcome(ctx, evt)
-	return err
-}
-
-func (m *failCommittedReplayScopeMutation) AppendEventOutcome(ctx context.Context, evt events.Event) (runtimebus.EventAppendOutcome, error) {
-	return m.store.AppendEventTxOutcome(ctx, m.tx, evt)
-}
-
-func (m *failCommittedReplayScopeMutation) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
-	return m.store.InsertEventDeliveriesTx(ctx, m.tx, eventID, agentIDs)
-}
-
-func (m *failCommittedReplayScopeMutation) InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error {
-	return m.store.InsertEventDeliveriesWithTargetsTx(ctx, m.tx, eventID, agentIDs, deliveryTargets)
-}
-
-func (m *failCommittedReplayScopeMutation) InsertEventDeliveryRoutes(ctx context.Context, eventID string, routes []events.DeliveryRoute) error {
-	return m.store.InsertEventDeliveryRoutesTx(ctx, m.tx, eventID, routes)
-}
-
-func (m *failCommittedReplayScopeMutation) UpsertCommittedReplayScope(ctx context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error {
-	return m.store.UpsertCommittedReplayScopeTx(ctx, m.tx, eventID, scope)
-}
-
-func (m *failCommittedReplayScopeMutation) UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
-	return m.store.UpsertPipelineReceiptTx(ctx, m.tx, eventID, status, failure)
-}
-
-func (m *failCommittedReplayScopeMutation) RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error {
-	return m.store.RecordDeadLetterTx(ctx, m.tx, rec)
-}
-
-func (s *failCommittedReplayScopeStore) UpsertCommittedReplayScopeTx(ctx context.Context, tx *sql.Tx, eventID string, scope runtimereplayclaim.CommittedReplayScope) error {
+func (s *failCommittedReplayScopeStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
 	if s.err != nil {
-		return s.err
+		return runtimebus.PreparedPublish{}, s.err
 	}
-	return s.PostgresStore.UpsertCommittedReplayScopeTx(ctx, tx, eventID, scope)
+	return s.PostgresStore.CommitPublish(ctx, plan)
 }
 
 type failNormalRunCompletionStore struct {
@@ -2436,6 +2383,20 @@ func assertEventSourceEventID(t *testing.T, db *sql.DB, eventID, wantSourceEvent
 	}
 	if got != wantSourceEventID {
 		t.Fatalf("event source_event_id = %q, want %q", got, wantSourceEventID)
+	}
+}
+
+func assertOperatorEventReference(t *testing.T, db *sql.DB, eventID, wantReferenceEventID string) {
+	t.Helper()
+	var sourceEventID, referenceEventID string
+	if err := db.QueryRow(`
+		SELECT COALESCE(source_event_id::text, ''), COALESCE(operator_reference_event_id::text, '')
+		FROM events WHERE event_id = $1::uuid
+	`, eventID).Scan(&sourceEventID, &referenceEventID); err != nil {
+		t.Fatalf("load operator event provenance: %v", err)
+	}
+	if sourceEventID != "" || referenceEventID != wantReferenceEventID {
+		t.Fatalf("operator event causal/reference ids = %q/%q, want empty/%q", sourceEventID, referenceEventID, wantReferenceEventID)
 	}
 }
 

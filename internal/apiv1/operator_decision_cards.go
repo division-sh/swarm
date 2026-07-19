@@ -14,12 +14,26 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
 
 const decisionCardEventName = "mailbox.card_decided"
+
+func newMailboxRuntimeControlEvent(eventID, eventName, runID string, payload []byte, entityID, flowInstance string, createdAt time.Time, mode executionmode.Mode) (events.Event, error) {
+	return events.NewRuntimeControlEvent(events.RuntimeEventInput{
+		Facts: events.EventFacts{
+			ID: eventID, Type: events.EventType(eventName),
+			Producer:  events.ProducerClaim{Type: events.EventProducerPlatform, ID: "platform"},
+			Payload:   payload,
+			Envelope:  events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), flowInstance),
+			CreatedAt: createdAt, ExecutionMode: mode,
+		},
+		RunID: runID,
+	})
+}
 
 type mailboxProjectionListResult struct {
 	Items      []any  `json:"items"`
@@ -138,8 +152,10 @@ func decisionCardHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 					if err != nil {
 						return nil, err
 					}
-					evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_deferred"), events.PlatformProducer("platform"), "", payload, 0, card.RunID, "",
-						events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance), now().UTC())
+					evt, err := newMailboxRuntimeControlEvent(uuid.NewString(), "mailbox.card_deferred", card.RunID, payload, scope.EntityID, scope.FlowInstance, now().UTC(), card.ExecutionMode)
+					if err != nil {
+						return nil, err
+					}
 					if err := publisher.PublishInMutation(txctx, evt); err != nil {
 						return nil, fmt.Errorf("publish budget-deferred decision card event: %w", err)
 					}
@@ -168,8 +184,10 @@ func decisionCardHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 				if err != nil {
 					return nil, err
 				}
-				evt := events.NewRuntimeControlEvent(eventID, events.EventType(decisionCardEventName), events.PlatformProducer("platform"), "", payload, 0, card.RunID, "",
-					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance), now().UTC())
+				evt, err := newMailboxRuntimeControlEvent(eventID, decisionCardEventName, card.RunID, payload, scope.EntityID, scope.FlowInstance, now().UTC(), card.ExecutionMode)
+				if err != nil {
+					return nil, err
+				}
 				if err := publisher.PublishInMutation(txctx, evt); err != nil {
 					return nil, fmt.Errorf("publish decision card event: %w", err)
 				}
@@ -199,8 +217,10 @@ func decisionCardHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 				if err != nil {
 					return nil, err
 				}
-				evt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("mailbox.card_deferred"), events.PlatformProducer("platform"), "", payload, 0,
-					outcome.Card.RunID, "", events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance), now().UTC())
+				evt, err := newMailboxRuntimeControlEvent(uuid.NewString(), "mailbox.card_deferred", outcome.Card.RunID, payload, scope.EntityID, scope.FlowInstance, now().UTC(), outcome.Card.ExecutionMode)
+				if err != nil {
+					return nil, err
+				}
 				if err := publisher.PublishInMutation(txctx, evt); err != nil {
 					return nil, fmt.Errorf("publish decision card deferred event: %w", err)
 				}

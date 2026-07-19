@@ -15,6 +15,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -22,6 +23,14 @@ import (
 )
 
 const retryPolicyEntityStateRunID = "22222222-2222-2222-2222-222222222222"
+
+func commitSemanticEventFixture(ctx context.Context, pg *store.PostgresStore, event events.Event) error {
+	eventBus, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		return err
+	}
+	return eventBus.Publish(ctx, event)
+}
 
 func TestUpsertEventReceipt_DeadLettersAfterOneRetry_V2(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
@@ -394,6 +403,10 @@ func TestUpsertEventReceipt_ConcurrentTerminalReceiptsConvergeStandaloneRuntimeR
 		t.Fatalf("seed second agent: %v", err)
 	}
 	payload, _ := json.Marshal(map[string]any{"k": "v"})
+	runID := uuid.NewString()
+	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed standalone runtime run: %v", err)
+	}
 	evt := eventtest.RuntimeControl(
 		uuid.NewString(),
 		events.EventType("platform.paused"),
@@ -401,16 +414,21 @@ func TestUpsertEventReceipt_ConcurrentTerminalReceiptsConvergeStandaloneRuntimeR
 		"",
 		payload,
 		0,
+		runID,
 		"",
-		"",
-		events.EventEnvelope{EntityID: entityID},
+		events.EventEnvelope{},
 		time.Now().Add(-1*time.Hour),
 	)
-	if err := pg.AppendEvent(ctx, evt); err != nil {
-		t.Fatalf("AppendEvent: %v", err)
-	}
-	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentA, agentB}); err != nil {
-		t.Fatalf("insert deliveries: %v", err)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, evt, []events.DeliveryRoute{
+		{SubscriberType: "agent", SubscriberID: agentA},
+		{SubscriberType: "agent", SubscriberID: agentB},
+	}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	if _, err := pg.DB.ExecContext(ctx, `
+		UPDATE runs
+		SET trigger_event_id = $2::uuid, trigger_event_type = $3
+		WHERE run_id = $1::uuid
+	`, runID, evt.ID(), evt.Type()); err != nil {
+		t.Fatalf("bind standalone runtime trigger: %v", err)
 	}
 
 	if _, err := pg.DB.ExecContext(ctx, `
@@ -1205,7 +1223,7 @@ func seedEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, entit
 		time.Now().Add(-1*time.Hour),
 	)
 
-	if err := pg.AppendEvent(ctx, evt); err != nil {
+	if err := commitSemanticEventFixture(ctx, pg, evt); err != nil {
 		t.Fatalf("append event: %v", err)
 	}
 	return evt

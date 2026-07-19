@@ -141,9 +141,10 @@ func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown
 	}
 
 	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress("evt-in-1",
+	inbound := eventtest.RootIngress("evt-in-1",
 		events.EventType("test.in"),
-		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
+		"tester", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Now().UTC())
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -220,9 +221,10 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 	}
 
 	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress("evt-in-1",
+	inbound := eventtest.RootIngress("evt-in-1",
 		events.EventType("test.in"),
-		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
+		"tester", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Now().UTC())
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -234,7 +236,7 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 
 	breakerDone := make(chan struct{})
 	go func() {
-		am.maybeTripAuthCircuitBreaker(testAuthorActivityContext(context.Background()), agent.id, "evt-in-1", testAuthFailure())
+		am.maybeTripAuthCircuitBreaker(testAuthorActivityContext(context.Background()), agent.id, inbound, testAuthFailure())
 		close(breakerDone)
 	}()
 
