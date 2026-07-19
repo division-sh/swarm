@@ -35,6 +35,7 @@ func Load(ctx context.Context, q RowQueryer, eventID string) (eventrecord.Record
 	if err != nil {
 		return eventrecord.Record{}, false, fmt.Errorf("load event record: %w", err)
 	}
+	record.CreatedAt = record.CreatedAt.UTC()
 	if err := record.Validate(); err != nil {
 		return eventrecord.Record{}, false, fmt.Errorf("load event record: %w", eventrecord.Corrupt(record.EventID, err))
 	}
@@ -154,6 +155,7 @@ func scanRows(rows *sql.Rows, loaded map[string]eventrecord.Record) error {
 		if err := rows.Scan(scanTargets(&record)...); err != nil {
 			return fmt.Errorf("scan event record batch: %w", err)
 		}
+		record.CreatedAt = record.CreatedAt.UTC()
 		if err := record.Validate(); err != nil {
 			return fmt.Errorf("validate event record batch: %w", eventrecord.Corrupt(record.EventID, err))
 		}
