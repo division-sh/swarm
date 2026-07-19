@@ -84,13 +84,13 @@ func (a delayedRunStatusAgent) OnEvent(ctx context.Context, evt events.Event) ([
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	return []events.Event{eventtest.RootIngress(uuid.NewString(), events.EventType("scan.completed"), a.id, "", []byte(`{}`), 0, evt.RunID(), "", events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()), time.Now().UTC())}, nil
+	return []events.Event{eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("scan.completed"), a.id, "", []byte(`{}`), 0, evt.RunID(), "", events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()), time.Now().UTC())}, nil
 }
 
 func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, entityID string) string {
 	t.Helper()
 	eventID := uuid.NewString()
-	if err := bus.Publish(context.Background(), eventtest.RootIngress(
+	if err := bus.Publish(context.Background(), eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("scan.requested"),
 		"api.v1",

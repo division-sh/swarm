@@ -15,7 +15,7 @@ func TestWorkflowEventEntityIDPrefersTypedDeliveryTarget(t *testing.T) {
 		FlowInstance: "child",
 		EntityID:     "receiver-entity",
 	})
-	evt := eventtest.RootIngress("", "task.ready", "", "", nil, 0, "", "", envelope, time.Time{})
+	evt := eventtest.RunCreatingRootIngress("", "task.ready", "", "", nil, 0, "", "", envelope, time.Time{})
 
 	if got := workflowEventEntityID(evt); got != "receiver-entity" {
 		t.Fatalf("workflowEventEntityID = %q, want receiver-entity", got)
@@ -23,7 +23,7 @@ func TestWorkflowEventEntityIDPrefersTypedDeliveryTarget(t *testing.T) {
 }
 
 func TestWorkflowEventEntityIDFallsBackToJournalEntity(t *testing.T) {
-	evt := eventtest.RootIngress("", "task.ready", "", "", nil, 0, "", "",
+	evt := eventtest.RunCreatingRootIngress("", "task.ready", "", "", nil, 0, "", "",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "source-entity"), time.Time{})
 
 	if got := workflowEventEntityID(evt); got != "source-entity" {

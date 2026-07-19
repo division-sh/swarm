@@ -11,7 +11,7 @@ import (
 )
 
 func TestHumanDecisionProducerRequiresExactTypedExternalIdentity(t *testing.T) {
-	external := eventtest.RootIngress(
+	external := eventtest.RunCreatingRootIngress(
 		uuid.NewString(), "decision.recorded", "human", "", nil, 0,
 		uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
 	)

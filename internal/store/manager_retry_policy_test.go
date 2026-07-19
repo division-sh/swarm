@@ -1085,14 +1085,14 @@ func seedEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, entit
 	t.Helper()
 
 	payload, _ := json.Marshal(map[string]any{"k": "v"})
-	evt := eventtest.PersistedProjection(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType(eventType),
 		"store-test",
 		"",
 		payload,
 		0,
-		"",
+		eventtest.UUID("persisted-projection-run"),
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 		time.Now().Add(-1*time.Hour),

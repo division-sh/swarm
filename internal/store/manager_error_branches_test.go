@@ -41,9 +41,9 @@ func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 		Status: "active", HiredBy: "t", StartedAt: time.Now(),
 	})
 	evtID := uuid.NewString()
-	if err := commitSemanticEventFixture(ctx, pg, eventtest.PersistedProjection(evtID,
+	if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(evtID,
 		"test.event",
-		"tester", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now())); err != nil {
+		"tester", "", []byte(`{}`), 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now())); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	if err := pg.InsertEventDeliveries(ctx, evtID, []string{aid}); err != nil {

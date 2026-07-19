@@ -93,7 +93,7 @@ func testPipelineCoordinatorRunContext(t *testing.T, pc *PipelineCoordinator) co
 }
 
 func testWorkflowStateTransitionContext(ctx context.Context, entityID, eventType string) context.Context {
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(), events.EventType(strings.TrimSpace(eventType)), "test", "", []byte(`{}`), 0,
 		runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
 	)

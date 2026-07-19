@@ -516,7 +516,7 @@ func assertServeAbandonReceipt(t *testing.T, ctx context.Context, pg *PostgresSt
 func seedSQLiteServeAbandonEvent(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, runID, name string, at time.Time) string {
 	t.Helper()
 	eventID := uuid.NewString()
-	event := eventtest.RootIngress(
+	event := eventtest.RunCreatingRootIngress(
 		eventID, events.EventType("test.event"), "test", "", json.RawMessage(`{}`), 0,
 		runID, "", events.EventEnvelope{}, at.UTC(),
 	)
@@ -580,7 +580,7 @@ func assertSQLiteServeAbandonReceipt(t *testing.T, ctx context.Context, store *S
 func seedDestructiveResetEvent(t *testing.T, ctx context.Context, pg *PostgresStore, runID, name string) string {
 	t.Helper()
 	eventID := uuid.NewString()
-	event := eventtest.RootIngress(
+	event := eventtest.RunCreatingRootIngress(
 		eventID, events.EventType("test.event"), "test", "", json.RawMessage(`{}`), 0,
 		runID, "", events.EventEnvelope{}, time.Now().UTC(),
 	)
@@ -593,7 +593,7 @@ func seedDestructiveResetEvent(t *testing.T, ctx context.Context, pg *PostgresSt
 func seedDestructiveResetPersistedEvent(t *testing.T, ctx context.Context, pg *PostgresStore, runID, name string) string {
 	t.Helper()
 	eventID := uuid.NewString()
-	event := eventtest.RootIngress(
+	event := eventtest.RunCreatingRootIngress(
 		eventID, events.EventType("test.event"), "test", "", json.RawMessage(`{}`), 0,
 		runID, "", events.EventEnvelope{}, time.Now().UTC(),
 	)

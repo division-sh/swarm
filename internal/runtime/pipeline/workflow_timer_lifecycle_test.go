@@ -220,7 +220,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("child/task.done"),
 		"cataloge2e",
@@ -294,7 +294,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	trigger := eventtest.RootIngress(
+	trigger := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("work.requested"),
 		"cataloge2e",
@@ -324,7 +324,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	}
 
 	listenerCtx := withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), "child")
-	completion := eventtest.RootIngress(
+	completion := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("work.completed"),
 		"cataloge2e",
@@ -400,7 +400,7 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	completion := eventtest.RootIngress(
+	completion := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("work.completed"),
 		"cataloge2e",
@@ -480,7 +480,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 		t.Fatalf("seed grandchild instance: %v", err)
 	}
 
-	completion := eventtest.RootIngress(
+	completion := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("child/grandchild/micro.done"),
 		"cataloge2e",
@@ -566,7 +566,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRo
 	}); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}
-	if consume, handled, err := pc.workflowNodeInterceptPolicy(testAuthorActivityContext(context.Background()), "child/grandchild/micro.done", eventtest.RootIngress(
+	if consume, handled, err := pc.workflowNodeInterceptPolicy(testAuthorActivityContext(context.Background()), "child/grandchild/micro.done", eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("child/grandchild/micro.done"),
 		"",
@@ -581,7 +581,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRo
 		t.Fatalf("workflowNodeInterceptPolicy handled = %v, consume = %v, err = %v, want handled", handled, consume, err)
 	}
 
-	completion := eventtest.RootIngress(
+	completion := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("child/grandchild/micro.done"),
 		"cataloge2e",
@@ -663,7 +663,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDo
 	t.Cleanup(func() { _ = tx.Rollback() })
 	ctx := WithPipelineSQLTxContext(testPipelineCoordinatorRunContext(t, pc), tx)
 
-	completion := eventtest.RootIngress(
+	completion := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("child/grandchild/micro.done"),
 		"cataloge2e",

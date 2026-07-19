@@ -17,7 +17,7 @@ func TestPreviewContractHandlerExecution_DeniesImportBoundaryWildcardRawFallback
 		testAuthorActivityContext(context.Background()),
 		bundle,
 		"worker-listener",
-		eventtest.RootIngress("", "producer/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		eventtest.RunCreatingRootIngress("", "producer/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		WorkflowState{},
 		nil,
 	)
@@ -35,7 +35,7 @@ func TestPreviewContractHandlerExecution_AllowsGrantedImportBoundaryWildcard(t *
 		testAuthorActivityContext(context.Background()),
 		bundle,
 		"worker-listener",
-		eventtest.RootIngress("", "producer/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		eventtest.RunCreatingRootIngress("", "producer/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		WorkflowState{},
 		nil,
 	)

@@ -39,7 +39,7 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	`, sessionID, runID, agentID, base.Add(-5*time.Minute), base); err != nil {
 		t.Fatalf("seed sqlite session: %v", err)
 	}
-	storetest.InsertRootEventRecord(
+	storetest.InsertExistingRunRootEventRecord(
 		t, ctx, sqliteStore.DB, "sqlite", eventID, runID, events.EventType("operator.read"),
 		eventtest.Producer(events.EventProducerExternal, "operator-read-fixture"), []byte(`{}`),
 		events.EventEnvelope{Scope: events.EventScopeGlobal}, base.Add(-4*time.Minute),

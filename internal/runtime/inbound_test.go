@@ -217,6 +217,7 @@ func (failingInboundEventStore) ListEventDeliveryRecipients(context.Context, str
 
 type capturingInboundEventStore struct {
 	events          []events.Event
+	dispositions    []events.AdmittedRunDisposition
 	seen            map[string]struct{}
 	duplicate       bool
 	recorded        bool
@@ -235,6 +236,7 @@ func (s *capturingInboundEventStore) beginPublish(_ context.Context, admitted ev
 		return runtimebus.EventAppendExactDuplicate, nil
 	}
 	s.events = append(s.events, admitted.Event())
+	s.dispositions = append(s.dispositions, admitted.RunDisposition())
 	s.active = append(s.active, admitted.ID())
 	s.recorded = true
 	return runtimebus.EventAppendInserted, nil
@@ -283,6 +285,11 @@ func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 	}
 	if len(eventStore.events) != 2 {
 		t.Fatalf("persisted events = %d, want raw plus normalized", len(eventStore.events))
+	}
+	for index, disposition := range eventStore.dispositions {
+		if disposition != events.AdmittedRunRequireActive {
+			t.Fatalf("standing event %d disposition = %q, want require_active", index, disposition)
+		}
 	}
 	evt := eventStore.events[0]
 	if evt.RunID() != "41000000-0000-0000-0000-000000000001" || evt.FlowInstance() != "chat-flow/a" || evt.EntityID() != "41000000-0000-0000-0000-000000000002" {

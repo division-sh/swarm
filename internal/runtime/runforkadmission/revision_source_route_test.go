@@ -39,7 +39,7 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 	}
 	envelope := events.EnvelopeForTargetRoute(events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), targetRoute)
 	for eventID, createdAt := range map[string]time.Time{pendingEventID: at, completedEventID: at.Add(time.Second)} {
-		storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "producer/inst-1/scan.requested",
+		storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "producer/inst-1/scan.requested",
 			eventtest.Producer(events.EventProducerExternal, "producer-node"), []byte(`{}`), envelope, createdAt)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -213,12 +213,12 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 				t.Fatalf("seed run: %v", err)
 			}
 			if !tc.explicitSelector {
-				storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, uuid.NewString(), runID, "platform.precursor",
+				storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, uuid.NewString(), runID, "platform.precursor",
 					eventtest.Producer(events.EventProducerExternal, "platform"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at.Add(-time.Second))
 				captureRunForkRevision(t, ctx, db, runID)
 			}
 			eventEnvelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, tc.sourceRoute)
-			storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, events.EventType(tc.eventName),
+			storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, events.EventType(tc.eventName),
 				eventtest.Producer(events.EventProducerExternal, "producer-node"), []byte(`{}`), eventEnvelope, at)
 			if tc.deliveryStatus != "" {
 				deliveryID := uuid.NewString()

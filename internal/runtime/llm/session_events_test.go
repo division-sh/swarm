@@ -354,7 +354,7 @@ func TestPublishAgentStartedPreservesExactContextualLineage(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runID := "10000000-0000-4000-8000-000000000001"
 	parentID := "20000000-0000-4000-8000-000000000002"
-	inbound := eventtest.InExecutionMode(eventtest.RootIngress(
+	inbound := eventtest.RunCreatingRootIngressWithMode(
 		parentID,
 		events.EventType("work.requested"),
 		"gateway",
@@ -365,7 +365,8 @@ func TestPublishAgentStartedPreservesExactContextualLineage(t *testing.T) {
 		"",
 		events.EventEnvelope{EntityID: "entity-1", FlowInstance: "review/inst-1"},
 		time.Now().UTC(),
-	), executionmode.Mock)
+		executionmode.Mock,
+	)
 	ctx := runtimecorrelation.WithInboundEvent(unmanagedLLMTestContext(), inbound)
 	ctx = runtimeactors.WithActor(ctx, runtimeactors.AgentConfig{
 		ExecutionMode: "mock",
@@ -390,7 +391,7 @@ func TestPublishAgentStartedPreservesExactContextualLineage(t *testing.T) {
 }
 
 func TestEnrichTurnRecord_CarriesInboundFlowInstance(t *testing.T) {
-	ctx := runtimebus.WithInboundEvent(unmanagedLLMTestContext(), eventtest.RootIngress(
+	ctx := runtimebus.WithInboundEvent(unmanagedLLMTestContext(), eventtest.RunCreatingRootIngress(
 		"11111111-1111-1111-1111-111111111111",
 		events.EventType("analysis.requested"),
 		"tester",
@@ -625,7 +626,7 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			withTestMemory(effects.Context("anthropic-reused-session"), "agent-1", "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType("session.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			withTestMemory(effects.Context("anthropic-reused-session"), "agent-1", "support/inst-1"), eventtest.RunCreatingRootIngress("evt-1", events.EventType("session.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
 			ExecutionMode: "live",
@@ -669,7 +670,7 @@ func TestAnthropicAPIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(
 
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			withTestMemory(unmanagedLLMTestContext(), "agent-1", "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType("session.requested"), "", "", nil, 0, testMemoryRunID, "", events.EventEnvelope{}, time.Time{}),
+			withTestMemory(unmanagedLLMTestContext(), "agent-1", "support/inst-1"), eventtest.RunCreatingRootIngress("evt-1", events.EventType("session.requested"), "", "", nil, 0, testMemoryRunID, "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
 			ExecutionMode: "live",
@@ -704,7 +705,7 @@ func TestClaudeCLIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(t *
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, publisher)
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			withTestMemory(unmanagedLLMTestContext(), "agent-1", "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType("session.requested"), "", "", nil, 0, testMemoryRunID, "", events.EventEnvelope{}, time.Time{}),
+			withTestMemory(unmanagedLLMTestContext(), "agent-1", "support/inst-1"), eventtest.RunCreatingRootIngress("evt-1", events.EventType("session.requested"), "", "", nil, 0, testMemoryRunID, "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
 			ExecutionMode: "live",
@@ -736,7 +737,7 @@ func TestClaudeCLIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(t *
 
 func TestEnrichTurnRecordIncludesTriggerToolsAndEmits(t *testing.T) {
 	ctx := runtimecorrelation.WithRunID(unmanagedLLMTestContext(), "run-123")
-	ctx = runtimebus.WithInboundEvent(ctx, eventtest.RootIngress(
+	ctx = runtimebus.WithInboundEvent(ctx, eventtest.RunCreatingRootIngress(
 		"11111111-1111-1111-1111-111111111111",
 		events.EventType("scan.requested"),
 		"",
@@ -749,9 +750,9 @@ func TestEnrichTurnRecordIncludesTriggerToolsAndEmits(t *testing.T) {
 		time.Time{},
 	))
 	recorder := runtimebus.NewEmittedEventsRecorder()
-	recorder.Append(eventtest.RootIngress("", events.EventType("discovery/category.assessed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
-	recorder.Append(eventtest.RootIngress("", events.EventType("discovery/category.assessed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
-	recorder.Append(eventtest.RootIngress("", events.EventType("discovery/scan_complete"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	recorder.Append(eventtest.RunCreatingRootIngress("", events.EventType("discovery/category.assessed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	recorder.Append(eventtest.RunCreatingRootIngress("", events.EventType("discovery/category.assessed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	recorder.Append(eventtest.RunCreatingRootIngress("", events.EventType("discovery/scan_complete"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	recorder.AppendPublish(runtimebus.PublishDiagnostic{
 		EventID:   "44444444-4444-4444-4444-444444444444",
 		EventType: "discovery/category.assessed",

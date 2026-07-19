@@ -98,7 +98,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 			if err != nil {
 				t.Fatalf("marshal request payload: %v", err)
 			}
-			requestEvent := eventtest.RootIngress(
+			requestEvent := eventtest.RunCreatingRootIngress(
 				tc.requestEventID,
 				events.EventType("repo-scaffold/inst-1/repo_scaffold.repo_commit_requested"),
 				"test",
@@ -253,7 +253,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			if err != nil {
 				t.Fatalf("marshal request payload: %v", err)
 			}
-			requestEvent := eventtest.RootIngress(
+			requestEvent := eventtest.RunCreatingRootIngress(
 				tc.requestEventID,
 				events.EventType("repo-scaffold/repo_scaffold.repo_commit_requested"),
 				"test",

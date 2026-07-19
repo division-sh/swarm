@@ -169,7 +169,7 @@ func seedHistoricalReplayRecoverySourceRun(t *testing.T, db *sql.DB, sourceRunID
 	`, sourceRunID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, sourceRunID, "fork.ready",
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, sourceRunID, "fork.ready",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -216,7 +216,7 @@ func TestRecoveryManager_ReplaysPersistedCorrelationEnvelope(t *testing.T) {
 	childID := uuid.NewString()
 	seedRecoveryRun(t, ctx, db, runID)
 
-	parent := eventtest.RootIngress(parentID,
+	parent := eventtest.RunCreatingRootIngress(parentID,
 		events.EventType("system.parent"),
 		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())
 
@@ -504,7 +504,7 @@ func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing
 			NULL, now(), '', NULL, '{}'::jsonb, '{}'::jsonb, '[]'::jsonb, NULL
 		)
 	`, badEventID)
-	goodParent := eventtest.RootIngress(goodParentID,
+	goodParent := eventtest.RunCreatingRootIngress(goodParentID,
 		events.EventType("system.parent"),
 		"runtime", "", []byte(`{"ok":true}`), 0, goodRunID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())
 	commitRecoveryEvent(t, ctx, pg, goodParent, nil, runtimereplayclaim.CommittedReplayScopeDirect)
@@ -574,7 +574,7 @@ func TestRecoveryManager_ClaimsReplayOwnershipUnderOverlap(t *testing.T) {
 	parentID := uuid.NewString()
 	childID := uuid.NewString()
 	seedRecoveryRun(t, ctx, db, runID)
-	parent := eventtest.RootIngress(parentID,
+	parent := eventtest.RunCreatingRootIngress(parentID,
 		events.EventType("system.parent"),
 		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())
 	commitRecoveryEvent(t, ctx, pg1, parent, nil, runtimereplayclaim.CommittedReplayScopeDirect)
@@ -653,7 +653,7 @@ func TestRecoveryManager_ExplicitlySkipsReplayWithoutPersistedRecipients(t *test
 	childID := uuid.NewString()
 	seedRecoveryRun(t, ctx, db, runID)
 
-	parent := eventtest.RootIngress(parentID,
+	parent := eventtest.RunCreatingRootIngress(parentID,
 		events.EventType("system.parent"),
 		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())
 
@@ -748,7 +748,7 @@ func TestRecoveryManager_UsesPersistedDeliveryRecipientsInsteadOfCurrentSubscrip
 	entityID := uuid.NewString()
 	seedRecoveryRun(t, ctx, db, runID)
 
-	parent := eventtest.RootIngress(
+	parent := eventtest.RunCreatingRootIngress(
 		parentID,
 		events.EventType("system.parent"),
 		"runtime",
@@ -835,7 +835,7 @@ func TestRecoveryManager_ReplaysSubscribedInternalOnlyUsingCommittedReplayScope(
 	eventID := uuid.NewString()
 	seedRecoveryRun(t, ctx, db, runID)
 
-	parent := eventtest.RootIngress(parentID,
+	parent := eventtest.RunCreatingRootIngress(parentID,
 		events.EventType("system.parent"),
 		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())
 	commitRecoveryEvent(t, ctx, pg, parent, nil, runtimereplayclaim.CommittedReplayScopeDirect)
@@ -884,7 +884,7 @@ func TestRecoveryManager_DirectEmptyManifestDoesNotBroadenToCurrentInternalSubsc
 	eventID := uuid.NewString()
 	seedRecoveryRun(t, ctx, db, runID)
 
-	parent := eventtest.RootIngress(parentID,
+	parent := eventtest.RunCreatingRootIngress(parentID,
 		events.EventType("system.parent"),
 		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())
 	commitRecoveryEvent(t, ctx, pg, parent, nil, runtimereplayclaim.CommittedReplayScopeDirect)
@@ -917,7 +917,7 @@ func TestRecoveryManager_DirectEmptyManifestDoesNotBroadenToCurrentInternalSubsc
 func TestRecoveryManager_FailsClosedWithoutReplayClaimOwner(t *testing.T) {
 	store := &recoveryMissingClaimStore{
 		events: []events.PersistedReplayEvent{
-			{Event: eventtest.RootIngress("evt-missing-claim",
+			{Event: eventtest.RunCreatingRootIngress("evt-missing-claim",
 				events.EventType("system.recover"), "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())},
 		},
 		deliveries: map[string][]string{"evt-missing-claim": {"agent-a"}},

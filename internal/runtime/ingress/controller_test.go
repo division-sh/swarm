@@ -31,9 +31,10 @@ func (p *transitionFailurePublisher) ReleaseRuntimeIngressQueue(context.Context,
 
 func TestSafetyPauseAndResumePreserveInboundLineage(t *testing.T) {
 	runID, parentID := uuid.NewString(), uuid.NewString()
-	inbound := eventtest.InExecutionMode(eventtest.RootIngress(
+	inbound := eventtest.RunCreatingRootIngressWithMode(
 		parentID, "work.received", "gateway", "task-1", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC(),
-	), executionmode.Mock)
+		executionmode.Mock,
+	)
 	ctx := runtimecorrelation.WithInboundEvent(context.Background(), inbound)
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 	publisher := &transitionFailurePublisher{}

@@ -523,7 +523,7 @@ func publishCatalogTrigger(t testing.TB, h *runtimeHarness, step catalogTriggerS
 	if flowInstance = strings.TrimSpace(flowInstance); flowInstance != "" {
 		eventEnvelope = events.EnvelopeForFlowInstance(eventEnvelope, flowInstance)
 	}
-	evt := eventtest.RootIngress(eventID,
+	evt := eventtest.RunCreatingRootIngress(eventID,
 		events.EventType(strings.TrimSpace(step.Event)),
 		"cataloge2e", "", raw, 0, catalogRuntimeRunID, "", eventEnvelope, time.Now().UTC())
 	ctx, cancel := context.WithTimeout(h.ctx, timeout)

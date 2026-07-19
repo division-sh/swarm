@@ -220,7 +220,7 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	eventStore := &recoveryGuardEventStore{
 		missing: []events.PersistedReplayEvent{{
-			Event: eventtest.RootIngress("evt-1",
+			Event: eventtest.RunCreatingRootIngress("evt-1",
 				"support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		}},
 		routes: []runtimeflowidentity.Route{

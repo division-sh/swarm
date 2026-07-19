@@ -28,7 +28,7 @@ import (
 )
 
 func handlerTestRootIngress(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
-	candidate := eventtest.RootIngress(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+	candidate := eventtest.RunCreatingRootIngress(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
 	admitted, err := events.AdmitForPublish(candidate, events.AdmissionOptions{Now: time.Now().UTC()})
 	if err != nil {
 		panic(err)
@@ -195,7 +195,7 @@ func TestLogComputeModuleReplayEvidenceEmitsRuntimeLogCarrier(t *testing.T) {
 		"",
 		json.RawMessage(`{"component":"api"}`),
 		0,
-		"",
+		eventtest.UUID("persisted-projection-run"),
 		"",
 		events.EventEnvelope{EntityID: "ent-1"},
 		time.Now().UTC(),

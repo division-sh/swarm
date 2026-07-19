@@ -181,7 +181,7 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 		{id: lateDeliveryID, eventType: "trace.late_delivery", createdAt: base},
 		{id: secondDeliveryID, eventType: "trace.second_delivery", createdAt: base.Add(time.Second)},
 	} {
-		storetest.InsertRootEventRecord(t, ctx, sqliteStore.DB, "sqlite", fixture.id, runID, fixture.eventType, producer, []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, fixture.createdAt)
+		storetest.InsertExistingRunRootEventRecord(t, ctx, sqliteStore.DB, "sqlite", fixture.id, runID, fixture.eventType, producer, []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, fixture.createdAt)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO event_deliveries (

@@ -282,8 +282,8 @@ func inboundBatchProjectionContext(ctx context.Context, batch InboundDeliveryBat
 }
 
 func inboundBatchPreflightEvent(eventName string) events.Event {
-	return eventtest.RootIngress(
+	return eventtest.ExistingRunRootIngress(
 		eventtest.UUID("inbound-batch:"+eventName), events.EventType(eventName), "inbound-gateway", "", []byte(`{"chat_id":"42"}`), 0,
-		eventtest.UUID("inbound-batch-run"), "", events.EventEnvelope{}, time.Unix(1, 0).UTC(),
+		eventtest.UUID("inbound-batch-run"), events.EventEnvelope{}, time.Unix(1, 0).UTC(),
 	)
 }

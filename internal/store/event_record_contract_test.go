@@ -35,7 +35,7 @@ func TestEventRecordExactPersistenceParity(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			now := time.Date(2026, 7, 18, 16, 0, 0, 123456000, time.UTC)
 			runID := uuid.NewString()
-			root := eventtest.RootIngress(uuid.NewString(), "contract.root", "gateway", "root-task", []byte(`{"root":true}`), 1, runID, "", events.EventEnvelope{}, now)
+			root := eventtest.RunCreatingRootIngress(uuid.NewString(), "contract.root", "gateway", "root-task", []byte(`{"root":true}`), 1, runID, "", events.EventEnvelope{}, now)
 			if err := commitSemanticEventFixture(ctx, store, root); err != nil {
 				t.Fatalf("commit root event: %v", err)
 			}
@@ -65,7 +65,7 @@ func TestEventRecordExactPersistenceParity(t *testing.T) {
 			assertExactEventRecord(t, ctx, fixture, diagnostic)
 
 			forkRunID := uuid.NewString()
-			forkRoot := eventtest.RootIngress(
+			forkRoot := eventtest.RunCreatingRootIngress(
 				uuid.NewString(), "contract.fork_root", "fixture", "", []byte(`{}`), 0,
 				forkRunID, "", events.EventEnvelope{}, now.Add(6*time.Microsecond),
 			)
@@ -99,7 +99,7 @@ func TestEventRecordExactPersistenceParity(t *testing.T) {
 }
 
 func TestEventRecordEveryFieldDuplicateParity(t *testing.T) {
-	baseEvent := eventtest.RootIngress(uuid.NewString(), "duplicate.base", "gateway", "task", []byte(`{"value":1}`), 2, uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 18, 17, 0, 0, 0, time.UTC))
+	baseEvent := eventtest.RunCreatingRootIngress(uuid.NewString(), "duplicate.base", "gateway", "task", []byte(`{"value":1}`), 2, uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 18, 17, 0, 0, 0, time.UTC))
 	admitted, err := events.AdmitForPersistence(baseEvent, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		t.Fatal(err)
@@ -163,16 +163,16 @@ func TestEventRecordEveryFieldDuplicateParity(t *testing.T) {
 			if err != nil || outcome != runtimebus.EventAppendExactDuplicate {
 				t.Fatalf("exact duplicate: outcome=%v err=%v", outcome, err)
 			}
-			conflict := eventtest.RootIngress(baseEvent.ID(), baseEvent.Type(), baseEvent.SourceAgent(), baseEvent.TaskID(), []byte(`{"value":2}`), baseEvent.ChainDepth(), baseEvent.RunID(), "", baseEvent.NormalizedEnvelope(), baseEvent.CreatedAt())
+			conflict := eventtest.RunCreatingRootIngress(baseEvent.ID(), baseEvent.Type(), baseEvent.SourceAgent(), baseEvent.TaskID(), []byte(`{"value":2}`), baseEvent.ChainDepth(), baseEvent.RunID(), "", baseEvent.NormalizedEnvelope(), baseEvent.CreatedAt())
 			if _, err := commitSemanticEventFixtureOutcome(ctx, store, conflict, nil, "direct"); !errors.Is(err, ErrEventIdentityConflict) {
 				t.Fatalf("conflicting duplicate error = %v", err)
 			}
 			nestedID := uuid.NewString()
-			nested := eventtest.RootIngress(nestedID, "duplicate.nested", "gateway", "task", []byte(`{"nested":{"a":null}}`), 0, uuid.NewString(), "", events.EventEnvelope{}, baseEvent.CreatedAt())
+			nested := eventtest.RunCreatingRootIngress(nestedID, "duplicate.nested", "gateway", "task", []byte(`{"nested":{"a":null}}`), 0, uuid.NewString(), "", events.EventEnvelope{}, baseEvent.CreatedAt())
 			if outcome, err := commitSemanticEventFixtureOutcome(ctx, store, nested, nil, "direct"); err != nil || outcome != runtimebus.EventAppendInserted {
 				t.Fatalf("nested initial commit: outcome=%v err=%v", outcome, err)
 			}
-			nestedConflict := eventtest.RootIngress(nestedID, nested.Type(), nested.SourceAgent(), nested.TaskID(), []byte(`{"nested":{"b":null}}`), 0, nested.RunID(), "", events.EventEnvelope{}, nested.CreatedAt())
+			nestedConflict := eventtest.RunCreatingRootIngress(nestedID, nested.Type(), nested.SourceAgent(), nested.TaskID(), []byte(`{"nested":{"b":null}}`), 0, nested.RunID(), "", events.EventEnvelope{}, nested.CreatedAt())
 			if _, err := commitSemanticEventFixtureOutcome(ctx, store, nestedConflict, nil, "direct"); !errors.Is(err, ErrEventIdentityConflict) {
 				t.Fatalf("nested null-key duplicate error = %v", err)
 			}
@@ -202,7 +202,7 @@ func TestEventRecordBatchHydrationContractParity(t *testing.T) {
 			ids := make([]string, batchSize*2+3)
 			for index := range ids {
 				ids[index] = uuid.NewString()
-				event := eventtest.RootIngress(
+				event := eventtest.RunCreatingRootIngress(
 					ids[index], "batch.contract", "gateway", fmt.Sprintf("task-%d", index),
 					[]byte(fmt.Sprintf(`{"index":%d}`, index)), 0, runID, "", events.EventEnvelope{}, createdAt.Add(time.Duration(index)*time.Microsecond),
 				)
@@ -288,7 +288,7 @@ func TestPostgresEventRecordReadbackNormalizesSessionTimezone(t *testing.T) {
 	store := fixture.store.(semanticEventFixtureStore)
 	ctx := testAuthorActivityContext()
 	createdAt := time.Date(2026, 7, 18, 18, 45, 12, 123456000, time.UTC)
-	event := eventtest.RootIngress(
+	event := eventtest.RunCreatingRootIngress(
 		uuid.NewString(), "timezone.contract", "gateway", "timezone-task", []byte(`{"timezone":true}`),
 		0, uuid.NewString(), "", events.EventEnvelope{}, createdAt,
 	)
@@ -343,7 +343,7 @@ func TestEventRecordDecoderRejectsMalformedDurableFactsParity(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
-			event := eventtest.RootIngress(
+			event := eventtest.RunCreatingRootIngress(
 				uuid.NewString(), "decoder.contract", "gateway", "task", []byte(`{"ok":true}`), 0,
 				uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 18, 18, 30, 0, 0, time.UTC),
 			)
@@ -394,7 +394,7 @@ func TestEventRecordCanonicalReadbackRejectsDurableScalarRepairParity(t *testing
 			t.Run(backend.name+"/"+mutation.name, func(t *testing.T) {
 				fixture := backend.open(t)
 				ctx := testAuthorActivityContext()
-				event := eventtest.RootIngress(
+				event := eventtest.RunCreatingRootIngress(
 					uuid.NewString(), "readback.canonical", "gateway", "task", []byte(`{"ok":true}`), 0,
 					uuid.NewString(), "", events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()), "flow-a/one"),
 					time.Date(2026, 7, 18, 18, 45, 0, 123456000, time.UTC),

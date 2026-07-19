@@ -46,7 +46,7 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	}
 
 	pausedEventID := uuid.NewString()
-	if err := eb.Publish(ctx, eventtest.RootIngress(
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
 		pausedEventID,
 		eventType,
 		"api.v1",
@@ -66,7 +66,7 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	}
 
 	otherEventID := uuid.NewString()
-	if err := eb.Publish(ctx, eventtest.RootIngress(
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
 		otherEventID,
 		eventType,
 		"api.v1",
@@ -127,7 +127,7 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 	}
 
 	eventID := uuid.NewString()
-	if err := eb.Publish(ctx, eventtest.RootIngress(
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
 		eventID,
 		eventType,
 		"api.v1",
@@ -195,7 +195,7 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 	}
 
 	queuedEventID := uuid.NewString()
-	if err := eb.Publish(ctx, eventtest.RootIngress(
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
 		queuedEventID,
 		eventType,
 		"api.v1",
@@ -264,7 +264,7 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 	seedRunControlTestRun(t, ctx, db, runID)
 
 	intent := runtimeengine.EmitIntent{
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			uuid.NewString(),
 			eventType,
 			"runtime",
@@ -331,7 +331,7 @@ func (i *runControlRecordingInterceptor) Intercept(_ context.Context, evt events
 	i.mu.Lock()
 	i.seen = append(i.seen, evt.ID())
 	i.mu.Unlock()
-	return true, []events.Event{eventtest.RootIngress(
+	return true, []events.Event{eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		i.deferredType,
 		"runtime",

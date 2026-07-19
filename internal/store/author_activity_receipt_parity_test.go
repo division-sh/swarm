@@ -102,7 +102,7 @@ func TestAuthoredNodeEventProducerTypeParity(t *testing.T) {
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			parentID := eventtest.UUID("authored-node-parent:" + eventID)
-			parent := eventtest.RootIngress(
+			parent := eventtest.RunCreatingRootIngress(
 				parentID, events.EventType("test.node_parent"), "test-ingress", "", []byte(`{}`), 0,
 				runID, "", events.EventEnvelope{}, time.Date(2026, 7, 16, 2, 59, 59, 0, time.UTC),
 			)

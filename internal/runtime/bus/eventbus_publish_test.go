@@ -130,7 +130,7 @@ func TestCommittedPublishDispatchDropsTransactionConnectionCapability(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	event := eventtest.RootIngress(uuid.NewString(), "work.requested", "provider", "", []byte(`{}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.requested", "provider", "", []byte(`{}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	if err := bus.Publish(testAuthorActivityContext(context.Background()), event); err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func assertEventBusExactDuplicateIsOperationNoOp(
 }
 
 func exactDuplicateEventBusEvent(runID string) events.Event {
-	return eventtest.RootIngress(
+	return eventtest.RunCreatingRootIngress(
 		uuid.NewString(), events.EventType("custom.exact_duplicate_noop"), "api.v1", "", []byte(`{"attempt":"duplicate"}`),
 		0, runID, "", events.EventEnvelope{}, time.Now().UTC().Truncate(time.Microsecond),
 	)
@@ -445,7 +445,7 @@ func assertEventBusTerminalRunRefusal(
 		name, publish := name, publish
 		t.Run(name, func(t *testing.T) {
 			eventID := uuid.NewString()
-			evt := eventtest.RootIngress(
+			evt := eventtest.RunCreatingRootIngress(
 				eventID,
 				events.EventType("custom.terminal_refusal"),
 				"api.v1",
@@ -584,7 +584,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	}
 	defer eb.Unsubscribe(agentID)
 
-	evt := eventtest.RootIngress(uuid.NewString(), events.EventType("producer/account.ready"), "producer", "", json.RawMessage(`{"account_id":"acct-agent"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("producer/account.ready"), "producer", "", json.RawMessage(`{"account_id":"acct-agent"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	plan, err := eb.CheckPublishRecipientPlan(ctx, evt)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -670,7 +670,7 @@ func (deferredChainInterceptor) Intercept(_ context.Context, evt events.Event) (
 	default:
 		return true, nil, nil
 	}
-	return false, []events.Event{eventtest.RootIngress("", events.EventType(next), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()), time.Now().UTC())}, nil
+	return false, []events.Event{eventtest.RunCreatingRootIngress("", events.EventType(next), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()), time.Now().UTC())}, nil
 }
 
 type singleDeferredInterceptor struct{}
@@ -679,7 +679,7 @@ func (singleDeferredInterceptor) Intercept(_ context.Context, evt events.Event) 
 	if evt.Type() != events.EventType("custom.root") {
 		return true, nil, nil
 	}
-	return false, []events.Event{eventtest.RootIngress(
+	return false, []events.Event{eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("custom.middle"),
 		"",
@@ -702,7 +702,7 @@ func (i deliveryContextDeferredInterceptor) Intercept(ctx context.Context, evt e
 	i.t.Helper()
 	switch evt.Type() {
 	case events.EventType("custom.root"):
-		next := eventtest.ForDelivery(eventtest.RootIngress(
+		next := eventtest.ForDelivery(eventtest.RunCreatingRootIngress(
 			"",
 			events.EventType("custom.middle"),
 			"",
@@ -819,7 +819,7 @@ func (i deferredEventVisibleInterceptor) Intercept(ctx context.Context, evt even
 	i.t.Helper()
 	if evt.Type() == events.EventType("custom.root") {
 		return false, []events.Event{
-			eventtest.RootIngress(i.eventID, i.checkFor, "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+			eventtest.RunCreatingRootIngress(i.eventID, i.checkFor, "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		}, nil
 	}
 	if evt.Type() != i.checkFor {
@@ -1072,7 +1072,7 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 	ch := eb.Subscribe(agentID, events.EventType("custom.receipt_failure"))
 	defer eb.Unsubscribe(agentID)
 
-	if err := eb.Publish(ctx, eventtest.RootIngress(
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("custom.receipt_failure"),
 		"api.v1",
@@ -1137,7 +1137,7 @@ func TestEventBusPublishTransactionalPostCommitCompletionFailureIsRecoverable(t 
 	ch := eb.Subscribe(agentID, events.EventType("custom.completion_failure"))
 	defer eb.Unsubscribe(agentID)
 
-	if err := eb.Publish(ctx, eventtest.RootIngress(
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("custom.completion_failure"),
 		"api.v1",
@@ -1268,7 +1268,7 @@ func TestEventBusPublish_LogsQueuedDeliveryLifecycleTransition(t *testing.T) {
 	}
 	ch := bus.Subscribe("agent-1", events.EventType("task.requested"))
 
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("task.requested"),
 		"",
@@ -1323,7 +1323,7 @@ func TestEventBusPublish_AttachesTypedRuntimeDiagnosticLineage(t *testing.T) {
 	})
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 
-	if err := bus.Publish(ctx, eventtest.RootIngress(
+	if err := bus.Publish(ctx, eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("task.requested"),
 		"",
@@ -1372,7 +1372,7 @@ func TestEventBusPublish_AttachesBundleSourceFactToRuntimeLogs(t *testing.T) {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	ch := bus.Subscribe("agent-1", events.EventType("task.requested"))
-	if err := bus.Publish(context.Background(), eventtest.RootIngress(
+	if err := bus.Publish(context.Background(), eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("task.requested"),
 		"",
@@ -1410,7 +1410,7 @@ func TestEventBusPublish_UsesPayloadValidator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.RootIngress("", "task.completed", "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
+	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 }
@@ -1424,7 +1424,7 @@ func TestEventBusPublish_PayloadValidatorFailureAbortsPublish(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	err = eb.Publish(context.Background(), eventtest.RootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}))
+	err = eb.Publish(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload validator failure, got %v", err)
 	}
@@ -1438,7 +1438,7 @@ func TestEventBusPublish_FailsClosedWhenReplayCapableAtomicStoreOmitsCommittedRe
 	}
 	eb.Subscribe("agent-a", events.EventType("custom.replay.checked"))
 
-	err = eb.Publish(context.Background(), eventtest.RootIngress(uuid.NewString(),
+	err = eb.Publish(context.Background(), eventtest.RunCreatingRootIngress(uuid.NewString(),
 		events.EventType("custom.replay.checked"), "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()))
 	if !errors.Is(err, runtimereplayclaim.ErrMissingCommittedReplayScope) {
 		t.Fatalf("Publish error = %v, want missing committed replay scope", err)
@@ -1454,7 +1454,7 @@ func TestEventBusPublishDirect_PayloadValidatorFailureAbortsPublish(t *testing.T
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	err = eb.PublishDirect(context.Background(), eventtest.RootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}), []string{"agent-a"})
+	err = eb.PublishDirect(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}), []string{"agent-a"})
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload validator failure, got %v", err)
 	}
@@ -1470,7 +1470,7 @@ func TestEventBusCheckDirectRecipients_PayloadValidatorFailureAbortsBeforeRecipi
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 
-	status, err := eb.CheckDirectRecipients(context.Background(), eventtest.RootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}), []string{"agent-a"})
+	status, err := eb.CheckDirectRecipients(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}), []string{"agent-a"})
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload validator failure, got %v", err)
 	}
@@ -1489,7 +1489,7 @@ func TestEventBusCheckPublishRecipientPlanReportsSubscribedPublishWithoutDeliver
 	}
 	ch := eb.Subscribe("agent-a", events.EventType("task.completed"))
 
-	plan, err := eb.CheckPublishRecipientPlan(context.Background(), eventtest.RootIngress("", "task.completed", "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Time{}))
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
 	}
@@ -1520,7 +1520,7 @@ func TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut(t
 		t.Fatalf("NewEventBus: %v", err)
 	}
 
-	err = eb.PublishDirect(context.Background(), eventtest.RootIngress(
+	err = eb.PublishDirect(context.Background(), eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("custom.direct"),
 		"",
@@ -1552,7 +1552,7 @@ func TestEventBusPublishDirect_PreservesContextOnPersistedAndLiveDelivery(t *tes
 	deliveryContext := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:direct-context"}}
 	ctx := events.WithDeliveryContext(context.Background(), deliveryContext)
 
-	if err := eb.PublishDirect(ctx, eventtest.RootIngress(
+	if err := eb.PublishDirect(ctx, eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("custom.direct"),
 		"",
@@ -1594,7 +1594,7 @@ func TestEventBusPublishDirect_RejectsAnyExplicitRecipientFilteredByMetadata(t *
 	matchCh := eb.Subscribe("reviewer-ent-1")
 	otherCh := eb.Subscribe("reviewer-ent-2")
 
-	err = eb.PublishDirect(context.Background(), eventtest.RootIngress(
+	err = eb.PublishDirect(context.Background(), eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("custom.direct"),
 		"",
@@ -1632,7 +1632,7 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByExplicitMetadata(t *test
 	matchCh := eb.Subscribe("reviewer-ent-1", events.EventType("custom.trigger"))
 	otherCh := eb.Subscribe("reviewer-ent-2", events.EventType("custom.trigger"))
 
-	if err := eb.Publish(context.Background(), eventtest.RootIngress(
+	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("custom.trigger"),
 		"",
@@ -1674,7 +1674,7 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByTypedEnvelopeNotPayload(
 	matchCh := eb.Subscribe("reviewer-ent-1", events.EventType("custom.trigger"))
 	otherCh := eb.Subscribe("reviewer-ent-2", events.EventType("custom.trigger"))
 
-	err = eb.Publish(context.Background(), eventtest.RootIngress(
+	err = eb.Publish(context.Background(), eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("custom.trigger"),
 		"",
@@ -1711,7 +1711,7 @@ func TestEventBusPublish_DropsRecipientsMissingExplicitDescriptor(t *testing.T) 
 	controlCh := eb.Subscribe("control-plane", events.EventType("custom.trigger"))
 	missingCh := eb.Subscribe("reviewer-ent-1", events.EventType("custom.trigger"))
 
-	if err := eb.Publish(context.Background(), eventtest.RootIngress(
+	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("custom.trigger"),
 		"",
@@ -1747,7 +1747,7 @@ func TestEventBusPublish_KeepsInternalSubscribersLiveOnlyUnderDescriptorPlanning
 	agentCh := eb.Subscribe("agent-a", events.EventType("custom.trigger"))
 	missingCh := eb.Subscribe("agent-missing", events.EventType("custom.trigger"))
 
-	if err := eb.Publish(context.Background(), eventtest.RootIngress(
+	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("custom.trigger"),
 		"",
@@ -1796,7 +1796,7 @@ func TestEventBusPublishDeferred_UsesCanonicalSubscribedRecipientFiltering(t *te
 	agentCh := eb.Subscribe("agent-a", events.EventType("custom.middle"))
 	otherCh := eb.Subscribe("agent-b", events.EventType("custom.middle"))
 
-	if err := eb.Publish(context.Background(), eventtest.RootIngress(
+	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("custom.root"),
 		"",
@@ -1833,7 +1833,7 @@ func TestEventBusPublishDeferredRestoresEventDeliveryContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.RootIngress(
+	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("custom.root"),
 		"",
@@ -1864,7 +1864,7 @@ func TestEventBusPublish_FailsClosedWhenDescriptorLookupFails(t *testing.T) {
 	}
 	ch := eb.Subscribe("reviewer-ent-1", events.EventType("custom.trigger"))
 
-	err = eb.Publish(context.Background(), eventtest.RootIngress(
+	err = eb.Publish(context.Background(), eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("custom.trigger"),
 		"",
@@ -1897,7 +1897,7 @@ func TestEventBusWaitForQuiescenceWaitsForPublishCompletion(t *testing.T) {
 
 	publishDone := make(chan error, 1)
 	go func() {
-		publishDone <- eb.Publish(context.Background(), eventtest.RootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}))
+		publishDone <- eb.Publish(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}))
 	}()
 
 	requireSignalBefore(t, started, 500*time.Millisecond, "interceptor start")
@@ -1941,7 +1941,7 @@ func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *
 
 	publishDone := make(chan error, 1)
 	go func() {
-		publishDone <- eb.PublishAcknowledged(ctx, eventtest.RootIngress(
+		publishDone <- eb.PublishAcknowledged(ctx, eventtest.RunCreatingRootIngress(
 			eventID,
 			events.EventType("task.completed"),
 			"api.v1",
@@ -2045,7 +2045,7 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 			}
 			publishDone := make(chan error, 1)
 			go func() {
-				publishDone <- foreground.PublishAcknowledged(context.Background(), eventtest.RootIngress(
+				publishDone <- foreground.PublishAcknowledged(context.Background(), eventtest.RunCreatingRootIngress(
 					eventID, events.EventType("custom.shared_claim"), "test", "", []byte(`{}`), 0, runID, "",
 					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()))
 			}()
@@ -2190,7 +2190,7 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 				runID := runIDs[i]
 				go func() {
 					<-start
-					evt := eventtest.RootIngress(
+					evt := eventtest.RunCreatingRootIngress(
 						eventID, events.EventType("custom.pool_saturation"), "test", "", []byte(`{}`), 0, runID, "",
 						events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()), time.Now().UTC(),
 					)
@@ -2361,7 +2361,7 @@ func seedReplayPoolEvent(t *testing.T, selected *store.PostgresStore, runID stri
 		eventType = events.EventType("mailbox.card_decided")
 		payload = []byte(`{"card_id":"` + card.CardID + `"}`)
 	}
-	evt := eventtest.RootIngress(eventID, eventType, "test", "", payload, 0, runID, "",
+	evt := eventtest.RunCreatingRootIngress(eventID, eventType, "test", "", payload, 0, runID, "",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
 	storetest.CommitSemanticEventWithRoutes(t, testAuthorActivityContext(context.Background()), selected, evt, nil, runtimereplayclaim.CommittedReplayScopeSubscribed)
 	return eventID
@@ -2375,7 +2375,7 @@ func TestEventBusPublish_InterceptsMultiHopDeferredChains(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.RootIngress("", events.EventType("custom.root"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))), time.Now().UTC())); err != nil {
+	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngress("", events.EventType("custom.root"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))), time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if got := store.eventTypes(); len(got) < 4 || got[0] != "custom.root" || got[1] != "custom.middle" || got[2] != "custom.leaf" || got[3] != "custom.final" {
@@ -2391,7 +2391,7 @@ func TestEventBusPublishNonTransactional_PersistsBeforeInterceptorsRun(t *testin
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.RootIngress(
+	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("custom.non_transactional"),
 		"",
@@ -2431,7 +2431,7 @@ func TestEventBusPublishTransactional_RunsInterceptorsAfterCommit(t *testing.T) 
 	}
 	ch := eb.Subscribe(agentID, events.EventType("task.completed"))
 	defer eb.Unsubscribe(agentID)
-	if err := eb.Publish(ctx, eventtest.RootIngress(
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("task.completed"),
 		"api.v1",
@@ -2523,7 +2523,7 @@ func TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecord
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	err = eb.Publish(ctx, eventtest.RootIngress(
+	err = eb.Publish(ctx, eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("task.failed"),
 		"",
@@ -2563,7 +2563,7 @@ func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.
 	ctx := context.Background()
 	eventID := uuid.NewString()
 	targetEntityID := uuid.NewString()
-	if err := eb.Publish(ctx, eventtest.RootIngress(
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("child/output.done"),
 		"",
@@ -2624,7 +2624,7 @@ func TestEventBusPublishInMutationSQLiteRecordsTargetFailureDeadLetter(t *testin
 	}
 	eventID := uuid.NewString()
 	targetEntityID := uuid.NewString()
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("task.completed"),
 		"",
@@ -2697,7 +2697,7 @@ func TestEventBusPublish_ClassifiesCanonicalRunBundleSourceThroughRunLifecycleOw
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.RootIngress(uuid.NewString(),
+	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngress(uuid.NewString(),
 
 		events.EventType("scan.requested"),
 		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
@@ -2744,7 +2744,7 @@ func TestEventBusPublishDirect_StampsBundleSourceFactOnRunRow(t *testing.T) {
 		t.Fatalf("seed direct recipient: %v", err)
 	}
 	eb.Subscribe("agent-a")
-	if err := eb.PublishDirect(context.Background(), eventtest.RootIngress(uuid.NewString(),
+	if err := eb.PublishDirect(context.Background(), eventtest.RunCreatingRootIngress(uuid.NewString(),
 
 		events.EventType("scan.requested"),
 		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()),
@@ -2780,7 +2780,7 @@ func TestEventBusPublishDeferred_RunsInterceptorsAfterDeferredEventCommit(t *tes
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.RootIngress("11111111-1111-1111-1111-111111111111",
+	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngress("11111111-1111-1111-1111-111111111111",
 		events.EventType("custom.root"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 	); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -2793,9 +2793,9 @@ func TestEventBusPublish_DoesNotInferLineageFromInboundContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ctx := runtimecorrelation.WithInboundEvent(context.Background(), eventtest.RootIngress(eventtest.UUID("evt-parent"),
+	ctx := runtimecorrelation.WithInboundEvent(context.Background(), eventtest.RunCreatingRootIngress(eventtest.UUID("evt-parent"),
 		events.EventType("task.started"), "", "", nil, 0, "run-abc", "", events.EventEnvelope{}, time.Time{}))
-	if err := eb.Publish(ctx, eventtest.RootIngress(eventtest.UUID(eventtest.UUID("evt-child")),
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(eventtest.UUID(eventtest.UUID("evt-child")),
 		events.EventType("task.completed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -2832,7 +2832,7 @@ func TestEventBusPublish_ZeroRecipientsDoesNotEmitContradiction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.RootIngress(eventtest.UUID(eventtest.UUID("evt-zero")),
+	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngress(eventtest.UUID(eventtest.UUID("evt-zero")),
 		events.EventType("custom.no_subscribers"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -3067,7 +3067,7 @@ func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 	}
 
 	eventID := "21000000-0000-0000-0000-000000000001"
-	if err := eb.Publish(ctx, eventtest.RootIngress(
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
 		eventID,
 		eventType,
 		"api.v1",
@@ -3117,7 +3117,7 @@ func TestEventBusPublish_HumanTaskEventsRouteBySubscriptionOnly(t *testing.T) {
 	ch := eb.Subscribe("requester")
 	defer eb.Unsubscribe("requester")
 
-	if err := eb.Publish(context.Background(), eventtest.RootIngress("", events.EventType("human_task.approved"), "", "", []byte(`{"requesting_agent":"requester"}`), 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
+	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngress("", events.EventType("human_task.approved"), "", "", []byte(`{"requesting_agent":"requester"}`), 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -3170,7 +3170,7 @@ func TestEventBusSubscribe_RejectsUnadmittedQualifiedAgentRoute(t *testing.T) {
 	if ch := eb.Subscribe("direct-agent", events.EventType("producer/scan.requested")); ch != nil {
 		t.Fatal("unadmitted qualified subscription installed a live agent route")
 	}
-	evt := eventtest.RootIngress("", events.EventType("producer/scan.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	evt := eventtest.RunCreatingRootIngress("", events.EventType("producer/scan.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -3225,7 +3225,7 @@ func TestEventBusPublish_RecordsNoRoutedDiagnosticsForRetiredSiblingAutoWire(t *
 	defer eb.Unsubscribe("scan-orchestrator")
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
-	if err := eb.Publish(ctx, eventtest.RootIngress("", "producer/scan.requested", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))), time.Time{})); err != nil {
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress("", "producer/scan.requested", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))), time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	diags := recorder.SnapshotPublishes()
@@ -3312,7 +3312,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		}
 	}
 
-	if err := eb.Publish(ctx, eventtest.RootIngress(
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
 		"11111111-2222-3333-4444-555555555555",
 		events.EventType("child/grandchild/micro.done"),
 		"cataloge2e",
@@ -3453,7 +3453,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 
 	live := eb.SubscribeInternal("workflow-runtime", events.EventType(eventType))
 	defer eb.Unsubscribe("workflow-runtime")
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType(eventType),
 		"source",
@@ -3709,7 +3709,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 			t.Fatalf("seed workflow instance %q: %v", instance.InstanceID, err)
 		}
 	}
-	rootConnectProbe := eventtest.RootIngress(
+	rootConnectProbe := eventtest.RunCreatingRootIngress(
 		"bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
 		events.EventType("step.begin"),
 		"cataloge2e",
@@ -3734,7 +3734,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	childTarget := rootConnectPlan.DeliveryRoutes[0].Target.Normalized()
 	previewEnvelope := events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID)
 	previewEnvelope = events.EnvelopeForTargetRoute(previewEnvelope, childTarget)
-	previewEvent := eventtest.RootIngress(rootConnectProbe.ID(), events.EventType("step.begin"), "cataloge2e", "", []byte(`{"entity_id":"`+rootEntityID+`"}`), 0,
+	previewEvent := eventtest.RunCreatingRootIngress(rootConnectProbe.ID(), events.EventType("step.begin"), "cataloge2e", "", []byte(`{"entity_id":"`+rootEntityID+`"}`), 0,
 		eventBusTestRunID, "", previewEnvelope, time.Now().UTC())
 	if _, err := runtimepipeline.PreviewContractHandlerExecution(ctx, bundle, "child-relay", previewEvent, runtimepipeline.WorkflowState{
 		EntityID: childTarget.EntityID,
@@ -3742,7 +3742,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	}, nil); err != nil {
 		t.Fatalf("preview child connect delivery: %v", err)
 	}
-	grandchildConnectProbe := eventtest.RootIngress(
+	grandchildConnectProbe := eventtest.RunCreatingRootIngress(
 		"cccccccc-dddd-eeee-ffff-000000000000",
 		events.EventType("child/micro.start"),
 		"child-relay",
@@ -3774,7 +3774,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatalf("grandchild stored identity = %#v, want child/grandchild scope; instance=%#v", storedGrandchildIdentity, storedGrandchild)
 	}
 	grandchildPreviewEnvelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, grandchildTarget)
-	grandchildPreviewEvent := eventtest.RootIngress(grandchildConnectProbe.ID(), events.EventType("micro.start"), "child-relay", "", nil, 0,
+	grandchildPreviewEvent := eventtest.RunCreatingRootIngress(grandchildConnectProbe.ID(), events.EventType("micro.start"), "child-relay", "", nil, 0,
 		eventBusTestRunID, "", grandchildPreviewEnvelope, time.Now().UTC())
 	if _, err := runtimepipeline.PreviewContractHandlerExecution(ctx, bundle, "grandchild-worker", grandchildPreviewEvent, runtimepipeline.WorkflowState{
 		EntityID: grandchildTarget.EntityID,
@@ -3786,7 +3786,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	rootReturnEnvelope = events.EnvelopeForTargetRoute(rootReturnEnvelope, events.RouteIdentity{
 		EntityID: rootEntityID,
 	})
-	rootReturnProbe := eventtest.RootIngress(
+	rootReturnProbe := eventtest.RunCreatingRootIngress(
 		"dddddddd-eeee-ffff-0000-111111111111",
 		events.EventType("child/micro.relayed"),
 		"child-relay",
@@ -3809,7 +3809,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatalf("root return preflight subscriber = %q, want root-collector", got)
 	}
 
-	if err := eb.Publish(ctx, eventtest.RootIngress(
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
 		"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
 		events.EventType("pipeline.start"),
 		"cataloge2e",
@@ -3960,7 +3960,7 @@ func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
 		t.Fatalf("seed root instance: %v", err)
 	}
 
-	if err := eb.Publish(ctx, eventtest.RootIngress(
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
 		"11111111-2222-3333-4444-555555555555",
 		events.EventType("validate.requested"),
 		"cataloge2e",
@@ -4064,7 +4064,7 @@ func TestEventBusPublish_RecordsNestedPackageConnectLocalizedEvent(t *testing.T)
 	defer eb.Unsubscribe("child-aggregator")
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
-	if err := eb.Publish(ctx, eventtest.RootIngress("", "child/grandchild/micro.done", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-grandchild")), time.Time{})); err != nil {
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress("", "child/grandchild/micro.done", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-grandchild")), time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	diags := recorder.SnapshotPublishes()
@@ -4121,7 +4121,7 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 	defer eb.Unsubscribe("worker-inst-1")
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
-	if err := eb.Publish(ctx, eventtest.RootIngress(
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
 		"",
 		"child/grandchild/inst-1/micro.done",
 		"",

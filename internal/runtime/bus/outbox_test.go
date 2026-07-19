@@ -211,7 +211,7 @@ func (interceptingTestHandler) Intercept(_ context.Context, evt events.Event) (b
 	if evt.Type() != events.EventType("custom.emitted") {
 		return true, nil, nil
 	}
-	return false, []events.Event{eventtest.RootIngress(
+	return false, []events.Event{eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("custom.followup"),
 		"runtime",
@@ -262,7 +262,7 @@ func TestEngineDispatcherCollectsEmitIntentsWithChainDepth(t *testing.T) {
 	ctx := runtimepipeline.WithPipelineEmitCollectors(context.Background(), &eventCollector, &intentCollector)
 
 	intent := runtimeengine.EmitIntent{
-		Event:      eventtest.RootIngress("", events.EventType("custom.emitted"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Time{}),
+		Event:      eventtest.RunCreatingRootIngress("", events.EventType("custom.emitted"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Time{}),
 		ChainDepth: 3,
 	}
 	if err := eb.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
@@ -306,7 +306,7 @@ func TestEngineDispatcherQueuesWhenPipelineSQLTxActive(t *testing.T) {
 	defer eb.Unsubscribe("agent-a")
 
 	intent := runtimeengine.EmitIntent{
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			eventtest.UUID("evt-post-commit-dispatch"),
 			events.EventType("custom.emitted"),
 			"",
@@ -378,7 +378,7 @@ func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t 
 	targetSet := []events.RouteIdentity{{FlowInstance: "flow-original", EntityID: eventtest.UUID("entity-original")}}
 	recipients := []string{"agent-original"}
 	intents := []runtimeengine.EmitIntent{{
-		Event: eventtest.RootIngress(eventtest.UUID("evt-queued-snapshot"),
+		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("evt-queued-snapshot"),
 			events.EventType("custom.snapshot"), "", "", payload, 0, "", "", events.EventEnvelope{TargetSet: targetSet},
 			time.Now().UTC()),
 
@@ -399,7 +399,7 @@ func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t 
 	copy(payload, []byte(`{"value":"mutated!"}`))
 	targetSet[0] = events.RouteIdentity{FlowInstance: "flow-mutated", EntityID: "entity-mutated"}
 	recipients[0] = "agent-mutated"
-	intents[0].Event = eventtest.RootIngress(
+	intents[0].Event = eventtest.RunCreatingRootIngress(
 		intents[0].Event.ID(),
 		intents[0].Event.Type(),
 		intents[0].Event.SourceAgent(),
@@ -451,7 +451,7 @@ func TestEngineDispatcherFailsClosedWithSQLTxAndNoPostCommitQueue(t *testing.T) 
 	}
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
 	err = eb.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{{
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			eventtest.UUID("evt-no-post-commit-queue"),
 			events.EventType("custom.emitted"),
 			"",
@@ -507,7 +507,7 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
 	ctx = runtimebus.WithCommitPublishTransaction(ctx, recordingStore)
 	intent := runtimeengine.EmitIntent{
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			eventtest.UUID("evt-1"),
 			events.EventType("custom.emitted"),
 			"",
@@ -567,7 +567,7 @@ func TestEngineOutboxExactDuplicateDispatchIsOperationNoOp(t *testing.T) {
 	reviewer := eb.Subscribe("reviewer")
 	lateReviewer := eb.Subscribe("late-reviewer")
 	intent := runtimeengine.EmitIntent{
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			eventtest.UUID("evt-exact-duplicate-operation"),
 			events.EventType("custom.emitted"),
 			"",
@@ -647,7 +647,7 @@ func TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack(t *testin
 			}
 			reviewer := eb.Subscribe("reviewer")
 			intent := runtimeengine.EmitIntent{
-				Event: eventtest.RootIngress(
+				Event: eventtest.RunCreatingRootIngress(
 					eventtest.UUID("evt-outbox-claim-"+name),
 					events.EventType("custom.emitted"),
 					"",
@@ -725,7 +725,7 @@ func TestEngineOutboxPreservesAppendOutcomeForEveryIntentInBatch(t *testing.T) {
 	}
 	reviewer := eb.Subscribe("reviewer")
 	intent := runtimeengine.EmitIntent{
-		Event:      eventtest.RootIngress(eventtest.UUID("evt-same-batch"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()),
+		Event:      eventtest.RunCreatingRootIngress(eventtest.UUID("evt-same-batch"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()),
 		Recipients: []string{"reviewer"},
 	}
 
@@ -771,7 +771,7 @@ func TestEngineOutboxPreexistingExactDuplicateBatchDispatchesZero(t *testing.T) 
 	}
 	reviewer := eb.Subscribe("reviewer")
 	intent := runtimeengine.EmitIntent{
-		Event:      eventtest.RootIngress(eventtest.UUID("evt-preexisting-batch"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()),
+		Event:      eventtest.RunCreatingRootIngress(eventtest.UUID("evt-preexisting-batch"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()),
 		Recipients: []string{"reviewer"},
 	}
 	writeAndDispatch := func(intents []runtimeengine.EmitIntent) {
@@ -820,11 +820,11 @@ func TestEngineOutboxConflictingSameIDBatchRollsBackOrderedOutcomes(t *testing.T
 	}
 	reviewer := eb.Subscribe("reviewer")
 	intent := runtimeengine.EmitIntent{
-		Event:      eventtest.RootIngress(eventtest.UUID("evt-conflicting-batch"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1","value":"first"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()),
+		Event:      eventtest.RunCreatingRootIngress(eventtest.UUID("evt-conflicting-batch"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1","value":"first"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()),
 		Recipients: []string{"reviewer"},
 	}
 	conflict := intent
-	conflict.Event = eventtest.RootIngress(intent.Event.ID(), events.EventType("custom.conflicting"), "", "", []byte(`{"entity_id":"ent-1","value":"conflict"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), intent.Event.CreatedAt())
+	conflict.Event = eventtest.RunCreatingRootIngress(intent.Event.ID(), events.EventType("custom.conflicting"), "", "", []byte(`{"entity_id":"ent-1","value":"conflict"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), intent.Event.CreatedAt())
 
 	mock.ExpectBegin()
 	mock.ExpectRollback()
@@ -891,8 +891,8 @@ func TestEngineOutboxDistinctIntentBatchDispatchesEachOnce(t *testing.T) {
 	}
 	reviewer := eb.Subscribe("reviewer")
 	intents := []runtimeengine.EmitIntent{
-		{Event: eventtest.RootIngress(eventtest.UUID("evt-distinct-1"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1","ordinal":1}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()), Recipients: []string{"reviewer"}},
-		{Event: eventtest.RootIngress(eventtest.UUID("evt-distinct-2"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1","ordinal":2}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()), Recipients: []string{"reviewer"}},
+		{Event: eventtest.RunCreatingRootIngress(eventtest.UUID("evt-distinct-1"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1","ordinal":1}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()), Recipients: []string{"reviewer"}},
+		{Event: eventtest.RunCreatingRootIngress(eventtest.UUID("evt-distinct-2"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1","ordinal":2}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()), Recipients: []string{"reviewer"}},
 	}
 	mock.ExpectBegin()
 	mock.ExpectCommit()
@@ -971,7 +971,7 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	intent := runtimeengine.EmitIntent{
-		Event: eventtest.RootIngress(eventtest.UUID("evt-outbox-materialized-route"),
+		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("evt-outbox-materialized-route"),
 			events.EventType("review/inst-1/task.started"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 	}
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
@@ -1023,7 +1023,7 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 	otherCh := eb.Subscribe("reviewer-ent-2")
 
 	intent := runtimeengine.EmitIntent{
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			eventtest.UUID("evt-direct-intent"),
 			events.EventType("custom.direct"),
 			"",
@@ -1093,7 +1093,7 @@ func TestEngineOutbox_TargetFailureDeadLetterErrorFailsClosed(t *testing.T) {
 	}
 
 	intent := runtimeengine.EmitIntent{
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			eventtest.UUID("evt-outbox-target-failure"),
 			events.EventType("child/output.done"),
 			"",
@@ -1147,7 +1147,7 @@ func TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedMan
 	agentCh := eb.Subscribe("agent-a", events.EventType("custom.emitted"))
 
 	intent := runtimeengine.EmitIntent{
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			eventtest.UUID("evt-internal-live"),
 			events.EventType("custom.emitted"),
 			"",
@@ -1220,7 +1220,7 @@ func TestEngineOutboxAndDispatcher_RoutesPendingInternalDeliveriesToRouteInterce
 	defer eb.Unsubscribe("workflow-runtime")
 
 	intent := runtimeengine.EmitIntent{
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			eventtest.UUID("evt-pending-internal-route"),
 			events.EventType("custom.emitted"),
 			"",
@@ -1265,7 +1265,7 @@ func TestEngineDispatcherRunsInterceptorsForPersistedEmitIntents(t *testing.T) {
 	eb.SetInterceptors(interceptingTestHandler{})
 
 	intent := runtimeengine.EmitIntent{
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			eventtest.UUID("evt-1"),
 			events.EventType("custom.emitted"),
 			"",
@@ -1294,7 +1294,7 @@ func TestEngineDispatcher_FailsClosedWithoutAuthoritativeRecipientManifestOnInMe
 	}
 
 	intent := runtimeengine.EmitIntent{
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			eventtest.UUID("evt-missing-manifest"),
 			events.EventType("custom.emitted"),
 			"",
@@ -1325,7 +1325,7 @@ func TestEngineDispatcher_DirectIntentUsesExplicitRecipientsWhenManifestWasNotPe
 	recipientCh := eb.Subscribe("agent-a")
 
 	intent := runtimeengine.EmitIntent{
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			eventtest.UUID("evt-direct-no-tx"),
 			events.EventType("custom.emitted"),
 			"",
@@ -1377,7 +1377,7 @@ func TestEngineDispatcher_TransactionalDirectIntentHonorsEmptyPersistedManifest(
 	filteredCh := eb.Subscribe("reviewer-ent-2")
 
 	intent := runtimeengine.EmitIntent{
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			eventtest.UUID("evt-empty-direct-manifest"),
 			events.EventType("custom.direct"),
 			"",
@@ -1441,7 +1441,7 @@ func TestPublishDirectInMutationRejectsFilteredExplicitRecipient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("evt-filtered-direct-mutation"), events.EventType("human_task.approved"), "runtime", "", []byte(`{}`), 0, "", "",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: eventtest.UUID("wrong-entity"), FlowInstance: "wrong-flow"}),
 		time.Now().UTC(),

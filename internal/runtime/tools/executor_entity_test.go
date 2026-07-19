@@ -71,7 +71,7 @@ func selectedForkEntityToolRuntimeContext(actor models.AgentConfig) context.Cont
 		Classification:      runtimecorrelation.RuntimeLineageClassificationForkLocal,
 		SelectedForkContext: true,
 	})
-	return runtimebus.WithInboundEvent(ctx, eventtest.RootIngress(
+	return runtimebus.WithInboundEvent(ctx, eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("validation/validation.package_ready"),
 		"",
@@ -493,7 +493,7 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 		"status": "root",
 	}, time.Now().UTC())
 
-	validCtx := runtimebus.WithInboundEvent(ctx, eventtest.RootIngress(
+	validCtx := runtimebus.WithInboundEvent(ctx, eventtest.RunCreatingRootIngress(
 		"evt-current",
 		events.EventType("validation.started"),
 		"",
@@ -505,7 +505,7 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, currentID), "validation/inst-1"),
 		time.Time{},
 	))
-	invalidCtx := runtimebus.WithInboundEvent(ctx, eventtest.RootIngress(
+	invalidCtx := runtimebus.WithInboundEvent(ctx, eventtest.RunCreatingRootIngress(
 		"evt-root",
 		events.EventType("validation.started"),
 		"",
@@ -569,7 +569,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "before", "confidence": 1},
 	}, time.Now().UTC())
-	currentCtx := runtimebus.WithInboundEvent(ctx, eventtest.RootIngress(
+	currentCtx := runtimebus.WithInboundEvent(ctx, eventtest.RunCreatingRootIngress(
 		"evt-current",
 		events.EventType("validation.started"),
 		"",
@@ -634,7 +634,7 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 	seedEntityStateRow(t, db, foreignID, "", "other/inst-1", "other_case", "queued", map[string]any{
 		"status": "foreign",
 	}, time.Now().UTC())
-	currentCtx := runtimebus.WithInboundEvent(ctx, eventtest.RootIngress(
+	currentCtx := runtimebus.WithInboundEvent(ctx, eventtest.RunCreatingRootIngress(
 		"evt-current",
 		events.EventType("validation.started"),
 		"",
@@ -670,7 +670,7 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 	if _, err := exec.Execute(ctx, "read_validation_case", map[string]any{}); err == nil {
 		t.Fatalf("read_validation_case succeeded without current inbound entity")
 	}
-	foreignCtx := runtimebus.WithInboundEvent(ctx, eventtest.RootIngress(
+	foreignCtx := runtimebus.WithInboundEvent(ctx, eventtest.RunCreatingRootIngress(
 		"evt-foreign",
 		events.EventType("other.started"),
 		"",
@@ -711,7 +711,7 @@ func TestRoleScopedEntityTools_ReadsLargeValidationCaseWithoutLoss(t *testing.T)
 			"technical_approach": specApproach,
 		},
 	}, time.Now().UTC())
-	currentCtx := runtimebus.WithInboundEvent(ctx, eventtest.RootIngress(
+	currentCtx := runtimebus.WithInboundEvent(ctx, eventtest.RunCreatingRootIngress(
 		"evt-current",
 		events.EventType("validation.started"),
 		"",

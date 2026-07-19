@@ -120,15 +120,14 @@ func (l sweeperClaimLease) Release(context.Context) error {
 func TestSweepUndispatchedUsesPersistedDeliveryRecipients(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
-			{Event: eventtest.RootIngress(
+			{Event: eventtest.ExistingRunRootIngress(
 				eventtest.UUID("evt-1"),
 				events.EventType("custom.emitted"),
 				"",
 				"",
 				[]byte(`{"entity_id":"ent-1"}`),
 				0,
-				"",
-				"",
+				eventtest.UUID("sweeper-persisted-run"),
 				events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")),
 				time.Now().UTC(),
 			)},
@@ -161,15 +160,14 @@ func TestSweepUndispatchedUsesPersistedDeliveryRecipients(t *testing.T) {
 func TestSweepUndispatched_UsesAuthoritativeEmptyFanOutWithoutSubscribedFallback(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
-			{Event: eventtest.RootIngress(
+			{Event: eventtest.ExistingRunRootIngress(
 				eventtest.UUID("evt-2"),
 				events.EventType("custom.routed"),
 				"",
 				"",
 				[]byte(`{"entity_id":"ent-2"}`),
 				0,
-				"",
-				"",
+				eventtest.UUID("sweeper-persisted-run"),
 				events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-2")),
 				time.Now().UTC(),
 			)},
@@ -199,15 +197,14 @@ func TestSweepUndispatched_UsesAuthoritativeEmptyFanOutWithoutSubscribedFallback
 func TestSweepUndispatched_ReplaysSubscribedInternalOnlyUsingReplayScope(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
-			{Event: eventtest.RootIngress(
+			{Event: eventtest.ExistingRunRootIngress(
 				eventtest.UUID("evt-internal-only"),
 				events.EventType("custom.internal"),
 				"",
 				"",
 				[]byte(`{"entity_id":"ent-internal"}`),
 				0,
-				"",
-				"",
+				eventtest.UUID("sweeper-persisted-run"),
 				events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-internal")),
 				time.Now().UTC(),
 			)},
@@ -240,15 +237,14 @@ func TestSweepUndispatched_ReplaysSubscribedInternalOnlyUsingReplayScope(t *test
 func TestSweepUndispatched_ReplaysSubscribedMixedRecipientsUsingReplayScope(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
-			{Event: eventtest.RootIngress(
+			{Event: eventtest.ExistingRunRootIngress(
 				eventtest.UUID("evt-mixed"),
 				events.EventType("custom.mixed"),
 				"",
 				"",
 				[]byte(`{"entity_id":"ent-mixed"}`),
 				0,
-				"",
-				"",
+				eventtest.UUID("sweeper-persisted-run"),
 				events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-mixed")),
 				time.Now().UTC(),
 			)},
@@ -283,15 +279,14 @@ func TestSweepUndispatched_ReplaysSubscribedMixedRecipientsUsingReplayScope(t *t
 func TestSweepUndispatched_DirectScopeDoesNotBroadenToCurrentInternalSubscribers(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
-			{Event: eventtest.RootIngress(
+			{Event: eventtest.ExistingRunRootIngress(
 				eventtest.UUID("evt-direct-mixed"),
 				events.EventType("custom.direct"),
 				"",
 				"",
 				[]byte(`{"entity_id":"ent-direct"}`),
 				0,
-				"",
-				"",
+				eventtest.UUID("sweeper-persisted-run"),
 				events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-direct")),
 				time.Now().UTC(),
 			)},
@@ -325,15 +320,14 @@ func TestSweepUndispatched_DirectScopeDoesNotBroadenToCurrentInternalSubscribers
 func TestSweepUndispatched_DirectEmptyManifestDoesNotBroadenToCurrentInternalSubscribers(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
-			{Event: eventtest.RootIngress(
+			{Event: eventtest.ExistingRunRootIngress(
 				eventtest.UUID("evt-direct-empty"),
 				events.EventType("custom.direct.empty"),
 				"",
 				"",
 				[]byte(`{"entity_id":"ent-direct-empty"}`),
 				0,
-				"",
-				"",
+				eventtest.UUID("sweeper-persisted-run"),
 				events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-direct-empty")),
 				time.Now().UTC(),
 			)},
@@ -373,21 +367,20 @@ func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
 			{
-				Event: eventtest.RootIngress(eventtest.UUID("evt-bad"),
-					events.EventType("custom.bad"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+				Event: eventtest.ExistingRunRootIngress(eventtest.UUID("evt-bad"),
+					events.EventType("custom.bad"), "", "", nil, 0, eventtest.UUID("sweeper-persisted-run"), events.EventEnvelope{}, time.Now().UTC()),
 
 				ReplayFailure: &replayFailure,
 			},
 			{
-				Event: eventtest.RootIngress(
+				Event: eventtest.ExistingRunRootIngress(
 					eventtest.UUID("evt-good"),
 					events.EventType("custom.good"),
 					"",
 					"",
 					[]byte(`{"entity_id":"ent-good"}`),
 					0,
-					"",
-					"",
+					eventtest.UUID("sweeper-persisted-run"),
 					events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-good")),
 					time.Now().UTC(),
 				),
@@ -427,10 +420,10 @@ func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
 func TestSweepUndispatched_TerminallyMarksMissingCommittedReplayScopeAndContinues(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
-			{Event: eventtest.RootIngress(eventtest.UUID("evt-markerless"),
-				events.EventType("custom.markerless"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())},
-			{Event: eventtest.RootIngress(eventtest.UUID("evt-good-after-markerless"),
-				events.EventType("custom.good"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())},
+			{Event: eventtest.ExistingRunRootIngress(eventtest.UUID("evt-markerless"),
+				events.EventType("custom.markerless"), "", "", nil, 0, eventtest.UUID("sweeper-persisted-run"), events.EventEnvelope{}, time.Now().UTC())},
+			{Event: eventtest.ExistingRunRootIngress(eventtest.UUID("evt-good-after-markerless"),
+				events.EventType("custom.good"), "", "", nil, 0, eventtest.UUID("sweeper-persisted-run"), events.EventEnvelope{}, time.Now().UTC())},
 		},
 		deliveries: map[string][]string{
 			eventtest.UUID("evt-markerless"):            {"agent-missing"},
@@ -486,15 +479,14 @@ func TestSweepUndispatched_TerminallyMarksMissingCommittedReplayScopeAndContinue
 func TestSweepUndispatched_ClaimsReplayOwnershipBeforeDispatch(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
-			{Event: eventtest.RootIngress(
+			{Event: eventtest.ExistingRunRootIngress(
 				eventtest.UUID("evt-claim"),
 				events.EventType("custom.claimed"),
 				"",
 				"",
 				[]byte(`{"entity_id":"ent-claim"}`),
 				0,
-				"",
-				"",
+				eventtest.UUID("sweeper-persisted-run"),
 				events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-claim")),
 				time.Now().UTC(),
 			)},
@@ -541,8 +533,8 @@ func TestSweepUndispatched_ClaimsReplayOwnershipBeforeDispatch(t *testing.T) {
 func TestSweepUndispatched_FailsClosedWithoutReplayClaimOwner(t *testing.T) {
 	store := &sweeperMissingClaimStore{
 		events: []events.PersistedReplayEvent{
-			{Event: eventtest.RootIngress(eventtest.UUID("evt-claim-missing"),
-				events.EventType("custom.claimed"), "", "", []byte(`{"entity_id":"ent-claim"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())},
+			{Event: eventtest.ExistingRunRootIngress(eventtest.UUID("evt-claim-missing"),
+				events.EventType("custom.claimed"), "", "", []byte(`{"entity_id":"ent-claim"}`), 0, eventtest.UUID("sweeper-persisted-run"), events.EventEnvelope{}, time.Now().UTC())},
 		},
 		deliveries: map[string][]string{eventtest.UUID("evt-claim-missing"): {"agent-a"}},
 	}

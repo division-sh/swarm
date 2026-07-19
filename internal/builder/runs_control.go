@@ -89,7 +89,7 @@ func (h *runHub) startRun(ctx context.Context, runID string, inputs map[string]a
 			h.deleteRun(runID)
 			return err
 		}
-		evt, err := events.NewRootIngressEvent(events.RootIngressEventInput{Facts: events.EventFacts{
+		evt, err := events.NewRunCreatingRootIngressEvent(events.RunCreatingRootIngressEventInput{Facts: events.EventFacts{
 			ID: uuid.NewString(), Type: events.EventType(eventName),
 			Producer: events.ProducerClaim{Type: events.EventProducerExternal, ID: "builder"},
 			Payload:  encoded, Envelope: events.EventEnvelope{EntityID: entityID},

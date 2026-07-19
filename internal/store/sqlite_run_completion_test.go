@@ -25,7 +25,7 @@ func seedSQLiteNormalRunCompletionFixture(t *testing.T, store *SQLiteRuntimeStor
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
-	if err := commitSemanticEventFixture(ctx, store, eventtest.PersistedProjection(
+	if err := commitSemanticEventFixture(ctx, store, eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("example.started"),
 		"test",

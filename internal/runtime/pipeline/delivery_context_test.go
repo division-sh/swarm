@@ -35,7 +35,7 @@ func TestAppendEmitIntentsAsEventsPreservesIntentDeliveryContext(t *testing.T) {
 			"",
 			nil,
 			0,
-			"",
+			eventtest.UUID("persisted-projection-run"),
 			"",
 			events.EventEnvelope{},
 			time.Now().UTC(),

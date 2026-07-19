@@ -270,7 +270,7 @@ func TestLoadWorkflowNodes_ImportInputBindingRequiresEffectiveConnect(t *testing
 	if workflowNodeHasSubscriptionForTest(*worker, "parent.lead_captured") {
 		t.Fatalf("worker-node subscriptions = %#v, bind must not add producer authority", worker.Subscriptions)
 	}
-	evt := eventtest.RootIngress("", "parent.lead_captured", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt := eventtest.RunCreatingRootIngress("", "parent.lead_captured", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "worker-node", evt)
 	if resolved.Matched {
 		t.Fatalf("bind-only producer event resolved handler: %#v", resolved)
@@ -290,7 +290,7 @@ func TestLoadWorkflowNodes_ImportOutputBindingRequiresEffectiveConnect(t *testin
 	if !workflowNodeHasSubscriptionForTest(*parent, "parent.lead_enriched") {
 		t.Fatalf("parent-listener subscriptions = %#v, want receiver-local parent.lead_enriched", parent.Subscriptions)
 	}
-	evt := eventtest.RootIngress("", "worker/work.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt := eventtest.RunCreatingRootIngress("", "worker/work.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "parent-listener", evt)
 	if resolved.Matched {
 		t.Fatalf("bind-only child event resolved parent handler: %#v", resolved)
@@ -310,7 +310,7 @@ func TestLoadWorkflowNodes_ImportOutputWildcardRequiresEffectiveConnect(t *testi
 	if workflowNodeHasSubscriptionForTest(*parent, "worker/work.completed") {
 		t.Fatalf("parent-listener subscriptions = %#v, bind must not authorize child output", parent.Subscriptions)
 	}
-	evt := eventtest.RootIngress("", "worker/work.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt := eventtest.RunCreatingRootIngress("", "worker/work.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "parent-listener", evt)
 	if resolved.Matched {
 		t.Fatalf("bind-only child event resolved wildcard parent handler: %#v", resolved)
@@ -327,7 +327,7 @@ func TestWorkflowNodeHandlerResolution_ConnectConsumesImportBindings(t *testing.
 		{nodeID: "worker-node", eventType: "parent.lead_captured", wantKey: "work.requested"},
 		{nodeID: "parent-listener", eventType: "worker/work.completed", wantKey: "parent.lead_enriched"},
 	} {
-		evt := eventtest.RootIngress("", tc.eventType, "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+		evt := eventtest.RunCreatingRootIngress("", tc.eventType, "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 		resolved := workflowNodeEventHandlerResolutionForDelivery(source, tc.nodeID, evt)
 		if !resolved.Matched || resolved.HandlerEventKey != tc.wantKey {
 			t.Fatalf("handler resolution for %s = %#v, want %s", tc.eventType, resolved, tc.wantKey)
@@ -343,7 +343,7 @@ func TestWorkflowNodeConnectedInputEventHandlerResolution_ConsumesLoweredPackage
 		t.Fatalf("producer event %q must differ from receiver event %q for this proof", producerEvent, receiverEvent)
 	}
 
-	evt := eventtest.RootIngress("", events.EventType(producerEvent), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt := eventtest.RunCreatingRootIngress("", events.EventType(producerEvent), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	resolved := workflowNodeConnectedInputEventHandlerResolution(source, "child-relay", evt)
 	if !resolved.Matched || resolved.HandlerEventKey != "micro.done" {
 		t.Fatalf("package-root connect handler resolution = %#v, want child-relay micro.done", resolved)
@@ -361,7 +361,7 @@ func TestWorkflowNodeConnectedInputEventHandlerResolution_RootSourceRejectsEmpty
 		{name: "UUID root context", flowInstance: "11111111-1111-4111-8111-111111111111", wantMatched: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			evt := eventtest.RootIngress("", "step.begin", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+			evt := eventtest.RunCreatingRootIngress("", "step.begin", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
 				FlowInstance: tc.flowInstance,
 			}, time.Unix(1, 0).UTC())
 			resolved := workflowNodeConnectedInputEventHandlerResolution(source, "child-relay", evt)
@@ -377,7 +377,7 @@ func TestWorkflowNodeConnectedInputEventHandlerResolution_RootSourceRejectsEmpty
 
 func TestWorkflowNodeConnectedInputHandlerMatchesConcreteTemplateProducer(t *testing.T) {
 	source := testWorkflowNodeConnectedInputSource("template")
-	evt := eventtest.RootIngress("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+	evt := eventtest.RunCreatingRootIngress("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
 		EntityID:     "receiver-entity",
 		FlowInstance: "receiver",
 		Source:       events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "producer-entity"},
@@ -409,7 +409,7 @@ func TestWorkflowNodeConnectedInputHandlerEnforcesProducerMode(t *testing.T) {
 			if !sourceRoute.Empty() {
 				sourceRoute.EntityID = "producer-entity"
 			}
-			evt := eventtest.RootIngress("", events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+			evt := eventtest.RunCreatingRootIngress("", events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
 				EntityID:     "receiver-entity",
 				FlowInstance: "receiver",
 				Source:       sourceRoute,
@@ -425,7 +425,7 @@ func TestWorkflowNodeConnectedInputHandlerEnforcesProducerMode(t *testing.T) {
 
 func TestWorkflowNodeConnectedInputHandlerRejectsAmbiguousReceiverPins(t *testing.T) {
 	source := testWorkflowNodeConnectedInputCollisionSource()
-	evt := eventtest.RootIngress("", "producer/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+	evt := eventtest.RunCreatingRootIngress("", "producer/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
 		EntityID:     "receiver-entity",
 		FlowInstance: "receiver",
 		Source:       events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: "producer-entity"},
@@ -594,7 +594,7 @@ func TestWorkflowNodeHandlerResolution_LocalizesProducerScopedEventThroughTarget
 			},
 		},
 	})
-	evt := eventtest.RootIngress("", "intake/account.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt := eventtest.RunCreatingRootIngress("", "intake/account.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	evt = eventtest.TargetRouted(evt, events.RouteIdentity{
 		FlowID:       "account_case",
 		FlowInstance: "account_case/ti-1",
@@ -624,7 +624,7 @@ func TestWorkflowNodeHandlerResolution_PreservesAuthoredKeyForCanonicalCrossFlow
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	source := semanticview.Wrap(bundle)
-	evt := eventtest.RootIngress("", "operating/operating.reported", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt := eventtest.RunCreatingRootIngress("", "operating/operating.reported", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	evt = eventtest.TargetRouted(evt, events.RouteIdentity{
 		FlowID:       "portfolio",
 		FlowInstance: "portfolio",
@@ -642,7 +642,7 @@ func TestWorkflowNodeHandlerResolution_PreservesAuthoredKeyForCanonicalCrossFlow
 
 func TestWorkflowNodeHandlerResolution_DeniesImportBoundaryWildcardRawFallback(t *testing.T) {
 	source := loadPipelineImportBoundaryWildcardSource(t, canonicalrouting.ImportBoundaryWildcardDenied)
-	evt := eventtest.RootIngress("", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt := eventtest.RunCreatingRootIngress("", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "worker-listener", evt)
 	if resolved.Matched {
 		t.Fatalf("worker-listener matched ungranted sibling event through raw wildcard fallback: %#v", resolved)
@@ -654,7 +654,7 @@ func TestWorkflowNodeHandlerResolution_DeniesImportBoundaryWildcardRawFallback(t
 
 func TestWorkflowNodeHandlerResolution_AllowsGrantedImportBoundaryWildcard(t *testing.T) {
 	source := loadPipelineImportBoundaryWildcardSource(t, canonicalrouting.ImportBoundaryWildcardObserveGranted)
-	evt := eventtest.RootIngress("", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt := eventtest.RunCreatingRootIngress("", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "worker-listener", evt)
 	if !resolved.Matched {
 		t.Fatal("worker-listener did not match granted sibling event")

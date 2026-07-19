@@ -35,7 +35,7 @@ func (s *inFlightSweepStore) ClaimPipelineReplay(context.Context, string) (runti
 }
 
 func TestSweepUndispatchedSkipsForegroundInFlightEvent(t *testing.T) {
-	evt := eventtest.RootIngress(
+	evt := eventtest.ExistingRunRootIngress(
 		"evt-in-flight",
 		events.EventType("custom.in_flight"),
 		"test",
@@ -43,7 +43,6 @@ func TestSweepUndispatchedSkipsForegroundInFlightEvent(t *testing.T) {
 		[]byte(`{}`),
 		0,
 		"run-in-flight",
-		"",
 		events.EventEnvelope{},
 		time.Now().UTC(),
 	)

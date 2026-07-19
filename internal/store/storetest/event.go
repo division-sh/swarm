@@ -109,7 +109,7 @@ func LoadCanonicalEventRecord(t testing.TB, ctx context.Context, selectedStore a
 	return admitted.Event()
 }
 
-func InsertRootEventRecord(
+func InsertExistingRunRootEventRecord(
 	t testing.TB,
 	ctx context.Context,
 	db *sql.DB,
@@ -123,7 +123,7 @@ func InsertRootEventRecord(
 	createdAt time.Time,
 ) events.Event {
 	t.Helper()
-	event, err := eventfixture.Root(ctx, db, dialect, eventID, runID, eventType, producer, payload, envelope, createdAt)
+	event, err := eventfixture.ExistingRunRoot(ctx, db, dialect, eventID, runID, eventType, producer, payload, envelope, createdAt)
 	if err != nil {
 		t.Fatalf("construct canonical root event record %s: %v", eventID, err)
 	}

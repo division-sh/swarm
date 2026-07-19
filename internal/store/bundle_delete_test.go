@@ -290,7 +290,7 @@ func TestPostgresStore_BundleDeleteFinalMutationBlocksPostDeletePersistedSourceR
 		BundleSource:      storerunlifecycle.BundleSourcePersisted,
 		BundleFingerprint: testBootBundleFingerprint,
 	})
-	err = commitSemanticEventFixture(publishCtx, pg, eventtest.PersistedProjection(eventID,
+	err = commitSemanticEventFixture(publishCtx, pg, eventtest.RunCreatingRootIngress(eventID,
 
 		"scan.requested",
 		"api.v1", "", []byte(`{"topic":"medicine"}`), 0, runID, "", events.EventEnvelope{}, time.Date(2026, 5, 31, 12, 1, 0, 0, time.UTC)))

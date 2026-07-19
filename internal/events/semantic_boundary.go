@@ -55,7 +55,7 @@ func RestoreAdmittedEvent(input RestoredEventInput) (AdmittedEvent, error) {
 	)
 	switch input.Class {
 	case EventAdmissionRootIngress:
-		event, err = NewRootIngressEvent(RootIngressEventInput{Facts: input.Facts, RunID: input.RunID})
+		event, err = NewExistingRunRootIngressEvent(ExistingRunRootIngressEventInput{Facts: input.Facts, RunID: input.RunID})
 	case EventAdmissionOperatorInjected:
 		event, err = NewOperatorInjectedEvent(OperatorInjectedEventInput{Facts: input.Facts, RunID: input.RunID, Provenance: input.OperatorRef})
 	case EventAdmissionChild:

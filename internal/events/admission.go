@@ -27,6 +27,9 @@ func AdmitForPersistence(event Event, options AdmissionOptions) (AdmittedEvent, 
 // RevalidatePersistedEvent restores the opaque admitted carrier at a recovery
 // boundary without allocating or normalizing any durable fact.
 func RevalidatePersistedEvent(event Event) (AdmittedEvent, error) {
+	if event.AdmissionClass() == EventAdmissionRootIngress {
+		event.rootIntent = rootIngressExistingRun
+	}
 	if event.CreatedAt().IsZero() {
 		return AdmittedEvent{}, fmt.Errorf("persisted event created_at is required")
 	}
@@ -83,8 +86,17 @@ func admitPersistableEvent(event Event, options AdmissionOptions) (AdmittedEvent
 
 	switch class {
 	case EventAdmissionRootIngress:
-		if admitted.RunID() == "" {
-			admitted.runID = uuid.NewString()
+		switch admitted.rootIntent {
+		case rootIngressRunCreating:
+			if admitted.RunID() == "" {
+				admitted.runID = uuid.NewString()
+			}
+		case rootIngressExistingRun:
+			if admitted.RunID() == "" {
+				return AdmittedEvent{}, fmt.Errorf("existing-run root ingress requires run_id")
+			}
+		default:
+			return AdmittedEvent{}, fmt.Errorf("root ingress requires explicit run intent")
 		}
 	case EventAdmissionOperatorInjected:
 		if admitted.RunID() == "" {
@@ -128,7 +140,12 @@ func admitPersistableEvent(event Event, options AdmissionOptions) (AdmittedEvent
 func freshRunDisposition(event Event) (AdmittedRunDisposition, error) {
 	switch event.AdmissionClass() {
 	case EventAdmissionRootIngress:
-		return AdmittedRunCreateAuthorized, nil
+		switch event.rootIntent {
+		case rootIngressRunCreating:
+			return AdmittedRunCreateAuthorized, nil
+		case rootIngressExistingRun:
+			return AdmittedRunRequireActive, nil
+		}
 	case EventAdmissionOperatorInjected, EventAdmissionChild, EventAdmissionReplay, EventAdmissionSelectedForkReplay:
 		return AdmittedRunRequireActive, nil
 	case EventAdmissionRuntimeControl, EventAdmissionRuntimeDiagnostic:

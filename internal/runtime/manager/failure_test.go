@@ -82,7 +82,7 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 			am := NewAgentManager(bus, nil, store)
 			err := tt.newFailure()
 			expected := runtimeengine.NormalizeFailure(err, "agent-manager", "process_event.on_event").Failure
-			evt := eventtest.RootIngress("evt-"+tt.name, events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
+			evt := eventtest.RunCreatingRootIngress("evt-"+tt.name, events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
 			result := am.processEventDetailed(testAuthorActivityContext(context.Background()), failureReturningAgent{id: "agent-a", err: err}, evt)
 
 			if result.err == nil {
@@ -111,7 +111,7 @@ func TestProcessEventOutcomeUncertainTerminalReceiptSuppressesReplay(t *testing.
 	am := NewAgentManager(&recordingReceiptBus{}, nil, store)
 	err := runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "claude_cli_attempt_outcome_unconfirmed", "claude-cli-adapter", "wait", nil)
 	agent := &countingFailureAgent{failureReturningAgent: failureReturningAgent{id: "agent-a", err: err}}
-	evt := eventtest.RootIngress("evt-uncertain", events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
+	evt := eventtest.RunCreatingRootIngress("evt-uncertain", events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
 	first := am.processEventDetailed(testAuthorActivityContext(context.Background()), agent, evt)
 	if first.err == nil || agent.calls != 1 || store.lastStatus != ReceiptStatusTerminal || store.lastFailure == nil {
 		t.Fatalf("first result err=%v calls=%d status=%s failure=%#v", first.err, agent.calls, store.lastStatus, store.lastFailure)
@@ -129,7 +129,7 @@ func TestQuarantineCarriesTriggeringPanicFailureWithoutReclassification(t *testi
 	am := NewAgentManager(bus, nil)
 	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassInternalFailure, "agent_event_panic", "agent-manager", "process_event", map[string]any{"agent_id": "agent-a"}), "agent-manager", "process_event")
 	for i := 0; i < poisonEventEntityThreshold; i++ {
-		evt := eventtest.RootIngress("evt-quarantine", events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{EntityID: "entity-" + string(rune('a'+i))}, time.Time{})
+		evt := eventtest.RunCreatingRootIngress("evt-quarantine", events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{EntityID: "entity-" + string(rune('a'+i))}, time.Time{})
 		am.quarantinePoisonEvent(testAuthorActivityContext(context.Background()), "agent-a", evt, poisonPanicQuarantineAt, failure)
 	}
 	if len(bus.published) != 1 || bus.published[0].Type() != events.EventType("platform.event_quarantined") {

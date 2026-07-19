@@ -951,7 +951,7 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 	}
 	exec := NewExecutorWithOptions(eb, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 
-	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RootIngress(
+	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RunCreatingRootIngress(
 		eventtest.UUID("emit-connected-output-parent"),
 		events.EventType("producer/deploy.requested"),
 		"runtime",
@@ -1019,7 +1019,7 @@ func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflig
 			"producer/inst-1": {Metadata: map[string]any{"parent_entity_id": parentRoute.EntityID}},
 		}},
 	})
-	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RootIngress(
+	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RunCreatingRootIngress(
 		eventtest.UUID("emit-root-receiver-parent"),
 		events.EventType("producer/deploy.requested"),
 		"runtime",
@@ -1122,7 +1122,7 @@ func TestHandleEmitTool_FailsClosedForConnectedOutputWithoutCanonicalRouteAuthor
 	}
 	exec := NewExecutorWithOptions(eb, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 
-	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RootIngress(
+	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RunCreatingRootIngress(
 		eventtest.UUID("emit-missing-route-parent"),
 		events.EventType("producer/deploy.requested"),
 		"runtime",

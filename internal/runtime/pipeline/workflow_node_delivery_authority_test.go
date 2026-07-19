@@ -103,7 +103,7 @@ func TestPipelineCoordinatorInterceptDeliveryRouteRejectsAmbiguousConnectedInput
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	target := events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: entityID}
-	evt := eventtest.RootIngress(eventID, "producer/deploy.done", "producer", "", []byte(`{}`), 0, testPipelineRunID, "", events.EventEnvelope{
+	evt := eventtest.RunCreatingRootIngress(eventID, "producer/deploy.done", "producer", "", []byte(`{}`), 0, testPipelineRunID, "", events.EventEnvelope{
 		EntityID:     target.EntityID,
 		FlowInstance: target.FlowInstance,
 		Source:       events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()},
@@ -294,7 +294,7 @@ func newDeliveryAuthorityCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordin
 func seedDeliveryAuthorityEvent(t *testing.T, db *sql.DB, ctx context.Context) events.Event {
 	t.Helper()
 	entityID := uuid.NewString()
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("source.evt"),
 		"src",

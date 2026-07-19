@@ -107,7 +107,7 @@ func TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores(t *t
 			cards := persistence.(decisioncard.Store)
 			card, continuation := proposedEffectAPICard(t, runID, entityID, fact, source.WorkflowVersion())
 			fixtureCtx := testAuthorActivityContextForSource(context.Background(), fact)
-			storetest.CommitSemanticEvent(t, fixtureCtx, persistence, eventtest.RootIngress(
+			storetest.CommitSemanticEvent(t, fixtureCtx, persistence, eventtest.RunCreatingRootIngress(
 				continuation.SourceEventID, events.EventType("thing.created"), "operator", continuation.SourceTaskID,
 				[]byte(`{"amount":250,"who":"alice"}`), 0, runID, "",
 				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), continuation.FlowInstance),

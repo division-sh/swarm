@@ -292,7 +292,7 @@ func publishNotifyAllChildrenEvent(t *testing.T, ctx context.Context, eventBus *
 		t.Fatalf("marshal %s payload: %v", localEvent, err)
 	}
 	id := uuid.NewString()
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		id,
 		events.EventType(source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, localEvent)),
 		notifyallchildren.OwnerFlowID,

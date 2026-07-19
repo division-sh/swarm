@@ -12,7 +12,7 @@ import (
 
 func validRecord(t *testing.T) Record {
 	t.Helper()
-	event := eventtest.RootIngress(uuid.NewString(), "record.valid", "gateway", "task-1", []byte(`{"nested":{"a":null}}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 19, 2, 0, 0, 123456000, time.UTC))
+	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "record.valid", "gateway", "task-1", []byte(`{"nested":{"a":null}}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 19, 2, 0, 0, 123456000, time.UTC))
 	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		t.Fatal(err)

@@ -184,7 +184,7 @@ func TestSameLabelCausalAndRunScopedEventsCannotConvergeExistingRunParity(t *tes
 				ctx := testAuthorActivityContext()
 				at := time.Date(2026, 7, 19, 20, 30, 0, 0, time.UTC)
 				runID := uuid.NewString()
-				root := eventtest.RootIngress(uuid.NewString(), "test.trigger", "ingress", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, at)
+				root := eventtest.RunCreatingRootIngress(uuid.NewString(), "test.trigger", "ingress", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, at)
 				if err := commitSemanticEventFixture(ctx, fixture.store, root); err != nil {
 					t.Fatalf("commit root: %v", err)
 				}

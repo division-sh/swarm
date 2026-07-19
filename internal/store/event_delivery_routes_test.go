@@ -18,10 +18,10 @@ func TestPostgresStore_EventDeliveryRoutesPersistNodeTargetRows(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	pg := newTestPostgresStore(t, db)
 	entityA, entityB := uuid.NewString(), uuid.NewString()
-	evt := eventtest.PersistedProjectionForProducer(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("child/output.done"),
-		eventtest.Producer(events.EventProducerExternal, "workflow-ingress"),
+		"workflow-ingress",
 		"",
 		[]byte(`{}`),
 		0,

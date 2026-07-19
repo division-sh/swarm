@@ -31,10 +31,11 @@ func (b *contextualLineagePipelineBus) PublishDirect(_ context.Context, event ev
 
 func TestPipelineRuntimeDiagnosticsPreserveExactContextualLineage(t *testing.T) {
 	runID, parentID := uuid.NewString(), uuid.NewString()
-	parent := eventtest.InExecutionMode(eventtest.RootIngress(
+	parent := eventtest.RunCreatingRootIngressWithMode(
 		parentID, "work.received", "gateway", "task-1", []byte(`{}`), 0, runID, "",
 		events.EventEnvelope{}, time.Now().UTC(),
-	), executionmode.Mock)
+		executionmode.Mock,
+	)
 	ctx := runtimecorrelation.WithInboundEvent(context.Background(), parent)
 	bus := &contextualLineagePipelineBus{}
 	coordinator := &PipelineCoordinator{bus: bus}

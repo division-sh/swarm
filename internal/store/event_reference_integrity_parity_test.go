@@ -67,7 +67,7 @@ func TestEventOwnedReferencesRequireExistingSameRunEventParity(t *testing.T) {
 					runID := uuid.NewString()
 					referenceID := uuid.NewString()
 					seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-					parent := eventtest.RootIngress(referenceID, "test.reference", "test-ingress", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, at)
+					parent := eventtest.RunCreatingRootIngress(referenceID, "test.reference", "test-ingress", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, at)
 					if err := insertCanonicalEventRecordFixture(ctx, fixture.store, parent); err != nil {
 						t.Fatalf("seed same-run reference: %v", err)
 					}
@@ -97,7 +97,7 @@ func TestEventOwnedReferencesRequireExistingSameRunEventParity(t *testing.T) {
 						if hostile == "cross_run" {
 							referenceRunID := uuid.NewString()
 							seedAuthorActivityReceiptRun(t, fixture, ctx, referenceRunID)
-							parent := eventtest.RootIngress(referenceID, "test.reference", "test-ingress", "", json.RawMessage(`{}`), 0, referenceRunID, "", events.EventEnvelope{}, at)
+							parent := eventtest.RunCreatingRootIngress(referenceID, "test.reference", "test-ingress", "", json.RawMessage(`{}`), 0, referenceRunID, "", events.EventEnvelope{}, at)
 							if err := insertCanonicalEventRecordFixture(ctx, fixture.store, parent); err != nil {
 								t.Fatalf("seed cross-run reference: %v", err)
 							}

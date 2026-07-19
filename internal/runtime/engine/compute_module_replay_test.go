@@ -221,7 +221,7 @@ func computeModuleReplayExecutionRequest(t *testing.T) runtimeengine.ExecutionRe
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 		NodeID:   identity.NormalizeNodeID("render-node"),
 		FlowID:   identity.NormalizeFlowID("render"),
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			events.EventType("render.requested"),
 			"",

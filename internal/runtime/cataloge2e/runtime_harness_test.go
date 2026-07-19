@@ -338,7 +338,7 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 		} else {
 			eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID))
 		}
-		evt := eventtest.RootIngress(uuid.NewString(),
+		evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
 			events.EventType(strings.TrimSpace(step.Event)),
 			"cataloge2e", "", raw, 0, catalogRuntimeRunID, "", eventEnvelope, time.Now().UTC())
 		if preview, ok := h.previewHandlerOutcome(evt); ok {
@@ -401,7 +401,7 @@ func (h *runtimeHarness) publishRuntimeEventResult(eventType, sourceAgent string
 	} else {
 		eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID))
 	}
-	evt := eventtest.RootIngress(uuid.NewString(),
+	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
 		events.EventType(strings.TrimSpace(eventType)),
 		strings.TrimSpace(sourceAgent), "", raw, 0, catalogRuntimeRunID, "", eventEnvelope, time.Now().UTC())
 	if recordOutcome {

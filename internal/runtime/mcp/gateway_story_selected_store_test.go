@@ -323,7 +323,7 @@ func seedGatewayStoryRuntime(t *testing.T, selected gatewayStorySelectedStore, r
 }
 
 func gatewayStoryInboundEvent(runID string, actor models.AgentConfig) events.Event {
-	return eventtest.RootIngress(
+	return eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("story.review_requested"),
 		"runtime",

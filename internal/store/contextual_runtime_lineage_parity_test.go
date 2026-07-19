@@ -56,7 +56,7 @@ func TestContextualRuntimeProducerLineageReadbackParity(t *testing.T) {
 					t.Run(string(mode)+"/"+manifestation.name, func(t *testing.T) {
 						eventID, runID, parentID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 						createdAt := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
-						parent := eventtest.InExecutionMode(eventtest.RootIngress(parentID, "context.started", "context-proof", "task-contextual", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, createdAt.Add(-time.Second)), mode)
+						parent := eventtest.RunCreatingRootIngressWithMode(parentID, "context.started", "context-proof", "task-contextual", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, createdAt.Add(-time.Second), mode)
 						ctx := context.Background()
 						storetest.CommitSemanticEvent(t, ctx, selectedStore, parent)
 						var event events.Event

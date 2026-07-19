@@ -439,7 +439,7 @@ func eventPublicationEvent(params eventPublicationParams, createdAt time.Time) (
 		Payload:  params.Payload, Envelope: envelope, CreatedAt: createdAt, ExecutionMode: executionmode.Live,
 	}
 	if params.NewRunCreated {
-		return events.NewRootIngressEvent(events.RootIngressEventInput{Facts: facts, RunID: params.RunID})
+		return events.NewRunCreatingRootIngressEvent(events.RunCreatingRootIngressEventInput{Facts: facts, RunID: params.RunID})
 	}
 	var provenance *events.OperatorReferenceProvenance
 	if sourceEventID := strings.TrimSpace(params.SourceEventID); sourceEventID != "" {

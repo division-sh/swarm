@@ -20,7 +20,7 @@ func TestEventContractRejectsHostileClassCatalogProducerCombinations(t *testing.
 		{"root platform producer", func() (Event, error) {
 			f := base
 			f.Producer.Type = EventProducerPlatform
-			return NewRootIngressEvent(RootIngressEventInput{Facts: f, RunID: runID})
+			return NewRunCreatingRootIngressEvent(RunCreatingRootIngressEventInput{Facts: f, RunID: runID})
 		}, "requires external producer"},
 		{"runtime external producer", func() (Event, error) {
 			return NewRunScopedRuntimeControlEvent(RunScopedRuntimeEventInput{Facts: base, RunID: runID})
@@ -28,7 +28,7 @@ func TestEventContractRejectsHostileClassCatalogProducerCombinations(t *testing.
 		{"closed label under root", func() (Event, error) {
 			f := base
 			f.Type = EventTypePlatformRuntimeLog
-			return NewRootIngressEvent(RootIngressEventInput{Facts: f, RunID: runID})
+			return NewRunCreatingRootIngressEvent(RunCreatingRootIngressEventInput{Facts: f, RunID: runID})
 		}, "requires diagnostic_direct class"},
 		{"unregistered diagnostic direct", func() (Event, error) {
 			f := base
@@ -40,6 +40,45 @@ func TestEventContractRejectsHostileClassCatalogProducerCombinations(t *testing.
 		t.Run(test.name, func(t *testing.T) {
 			if _, err := test.build(); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestBindManagerOutputIdentityPreservesExactRootIntent(t *testing.T) {
+	runID := uuid.NewString()
+	facts := EventFacts{
+		Type: "work.received", Producer: ProducerClaim{Type: EventProducerExternal, ID: "gateway"},
+		Payload: []byte(`{}`), CreatedAt: time.Now().UTC(), ExecutionMode: executionmode.Live,
+	}
+	tests := []struct {
+		name  string
+		build func() (Event, error)
+		want  AdmittedRunDisposition
+	}{
+		{name: "run creating", build: func() (Event, error) {
+			return NewRunCreatingRootIngressEvent(RunCreatingRootIngressEventInput{Facts: facts, RunID: runID})
+		}, want: AdmittedRunCreateAuthorized},
+		{name: "existing run", build: func() (Event, error) {
+			return NewExistingRunRootIngressEvent(ExistingRunRootIngressEventInput{Facts: facts, RunID: runID})
+		}, want: AdmittedRunRequireActive},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			event, err := test.build()
+			if err != nil {
+				t.Fatal(err)
+			}
+			bound, err := BindManagerOutputIdentity(event, uuid.NewString())
+			if err != nil {
+				t.Fatalf("BindManagerOutputIdentity: %v", err)
+			}
+			admitted, err := AdmitForPersistence(bound, AdmissionOptions{RequirePersistentUUIDIdentity: true})
+			if err != nil {
+				t.Fatalf("AdmitForPersistence: %v", err)
+			}
+			if admitted.RunDisposition() != test.want {
+				t.Fatalf("run disposition = %q, want %q", admitted.RunDisposition(), test.want)
 			}
 		})
 	}
@@ -81,7 +120,7 @@ func TestPersistentContractValidatesNestedDurableUUIDFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	event, err := NewRootIngressEvent(RootIngressEventInput{Facts: EventFacts{
+	event, err := NewRunCreatingRootIngressEvent(RunCreatingRootIngressEventInput{Facts: EventFacts{
 		ID: uuid.NewString(), Type: "work.received", Producer: ProducerClaim{Type: EventProducerExternal, ID: "gateway"},
 		Payload: []byte(`{}`), RoutingSource: source, CreatedAt: time.Now().UTC(), ExecutionMode: executionmode.Live,
 	}, RunID: runID})

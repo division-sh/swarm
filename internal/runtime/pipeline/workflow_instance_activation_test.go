@@ -40,7 +40,7 @@ func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := eventtest.RootIngress(
+	trigger := eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("custom.triggered"),
 		testPipelineRunID,
@@ -104,7 +104,7 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 		},
 	}
 	pc.workflowTimers = newWorkflowTimerLifecycle(pc)
-	trigger := eventtest.RootIngress(
+	trigger := eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("spawn.requested"),
 		"",
@@ -157,7 +157,7 @@ func TestCreateFlowInstanceResolvesConfigFromBindings(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := eventtest.RootIngress(
+	trigger := eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("spawn.requested"),
 		"",
@@ -204,7 +204,7 @@ func TestCreateFlowInstancePreservesNullConfigFromValues(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := eventtest.RootIngress(
+	trigger := eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("spawn.requested"),
 		"",
@@ -311,7 +311,7 @@ func TestCreateFlowInstanceRejectsUnknownEventConfigRef(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := eventtest.RootIngress(
+	trigger := eventtest.RunCreatingRootIngress(
 		"evt-123",
 		events.EventType("spawn.requested"),
 		"",
@@ -354,7 +354,7 @@ func TestCreateFlowInstanceRejectsUnsupportedConfigRefRoot(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := eventtest.RootIngress(
+	trigger := eventtest.RunCreatingRootIngress(
 		"evt-123",
 		events.EventType("spawn.requested"),
 		"",
@@ -397,7 +397,7 @@ func TestCreateFlowInstanceDoesNotResolveInstanceIDFromEventRef(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := eventtest.RootIngress(
+	trigger := eventtest.RunCreatingRootIngress(
 		"evt-123",
 		events.EventType("spawn.requested"),
 		"",
@@ -434,7 +434,7 @@ func TestCreateFlowInstanceRejectsMissingRequiredSiblingFields(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := eventtest.RootIngress(
+	trigger := eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("spawn.requested"),
 		"",
@@ -463,7 +463,7 @@ func TestCreateFlowInstanceRejectsGeneratedFallbackWithoutInstanceIDFrom(t *test
 			return nil
 		},
 	}
-	trigger := eventtest.RootIngress(
+	trigger := eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("spawn.requested"),
 		"",
@@ -497,7 +497,7 @@ func TestCreateFlowInstanceRejectsEmptyConfigFromBindings(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := eventtest.RootIngress(
+	trigger := eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("spawn.requested"),
 		"",
@@ -531,7 +531,7 @@ func TestCreateFlowInstanceRejectsEmptyResolvedConfig(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := eventtest.RootIngress(
+	trigger := eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("spawn.requested"),
 		"",
@@ -568,7 +568,7 @@ func TestHandlerEmitEnvelope_KeepsLocalEntityAcrossOutputBoundaries(t *testing.T
 	}
 	pc := &PipelineCoordinator{module: module}
 	trigger := workflowTriggerContext{
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"",
 			events.EventType("child/child.start"),
 			"",
@@ -635,7 +635,7 @@ pins:
 	})
 	pc := &PipelineCoordinator{module: staticSemanticWorkflowModule{source: source}}
 	trigger := workflowTriggerContext{
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"",
 			events.EventType("vertical.discovered"),
 			"",
@@ -693,7 +693,7 @@ opco.ceo_ready:
       emit: opco.ceo_ready
 `,
 	})
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("operating/inst-1/opco.product_initialization_requested"),
 		"",
@@ -772,7 +772,7 @@ states: [initializing, ready]
 `,
 	})
 	const entityID = "11111111-1111-1111-1111-111111111111"
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("operating/inst-1/build_progress"),
 		"",

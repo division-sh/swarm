@@ -28,7 +28,7 @@ type recordingReceiptBus struct {
 }
 
 func receiptTestEvent(id string) events.Event {
-	return eventtest.RootIngress(id, events.EventType("work.requested"), "source", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
+	return eventtest.RunCreatingRootIngress(id, events.EventType("work.requested"), "source", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
 }
 
 func (b *recordingReceiptBus) Publish(_ context.Context, evt events.Event) error {
@@ -71,11 +71,11 @@ func (projectedEmergencyBudgetGuard) IsThrottle(string) bool        { return tru
 func TestProjectedBudgetEmergencySuppressesDeliveryButNotThresholdEvent(t *testing.T) {
 	am := NewAgentManagerWithOptions(&recordingReceiptBus{}, nil, AgentManagerOptions{Budget: projectedEmergencyBudgetGuard{}})
 	registerReceiptTestAgent(t, am, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-a", EntityID: "entity-a"})
-	work := eventtest.RootIngress("evt-work", events.EventType("work.requested"), "source", "", nil, 0, "", "", events.EventEnvelope{}, time.Now())
+	work := eventtest.RunCreatingRootIngress("evt-work", events.EventType("work.requested"), "source", "", nil, 0, "", "", events.EventEnvelope{}, time.Now())
 	if suppressed, reason := am.shouldSuppressForBudget("agent-a", work); !suppressed || reason != "suppressed by budget emergency guardrail" {
 		t.Fatalf("projected emergency suppression=%v reason=%q", suppressed, reason)
 	}
-	threshold := eventtest.RootIngress("evt-budget", events.EventType("platform.budget_threshold_crossed"), "runtime", "", nil, 0, "", "", events.EventEnvelope{}, time.Now())
+	threshold := eventtest.RunCreatingRootIngress("evt-budget", events.EventType("platform.budget_threshold_crossed"), "runtime", "", nil, 0, "", "", events.EventEnvelope{}, time.Now())
 	if suppressed, reason := am.shouldSuppressForBudget("agent-a", threshold); suppressed || reason != "" {
 		t.Fatalf("threshold event suppression=%v reason=%q, want exempt", suppressed, reason)
 	}
@@ -255,7 +255,7 @@ func TestProcessEventDeterministicOutputIdentitySurvivesPartialSuccessRetry(t *t
 	store := &partialOutputRetryStore{persisted: map[string]bool{}}
 	bus := &partialOutputRetryBus{store: store, failSecond: true}
 	manager := NewAgentManager(bus, nil, store)
-	inbound := eventtest.RootIngress(uuid.NewString(), "input.received", "gateway", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	inbound := eventtest.RunCreatingRootIngress(uuid.NewString(), "input.received", "gateway", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 	agent := partialOutputRetryAgent{id: "agent-a"}
 
 	first := manager.processEventDetailed(testAuthorActivityContext(context.Background()), agent, inbound)
@@ -282,7 +282,7 @@ func (a *outputRecordingAgent) Subscriptions() []events.EventType { return nil }
 func (a *outputRecordingAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
 	a.calls++
 	return []events.Event{
-		eventtest.RootIngress("out-1", events.EventType("task.done"), "agent-a", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		eventtest.RunCreatingRootIngress("out-1", events.EventType("task.done"), "agent-a", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 	}, nil
 }
 
@@ -324,7 +324,7 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 		FlowPath:      "review/inst-1",
 	})
 
-	inbound := eventtest.RootIngress("evt-1",
+	inbound := eventtest.RunCreatingRootIngress("evt-1",
 		events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
 
 	ctx := runtimecorrelation.WithInboundEvent(testAuthorActivityContext(context.Background()), inbound)
@@ -380,7 +380,7 @@ func TestMaybeTripAuthCircuitBreaker_PreservesCanceledEventLineage(t *testing.T)
 	bus := &recordingReceiptBus{}
 	am := NewAgentManager(bus, nil)
 
-	inbound := eventtest.RootIngress("evt-canceled",
+	inbound := eventtest.RunCreatingRootIngress("evt-canceled",
 		events.EventType("work.requested"), "", "", nil, 0, "run-canceled", "", events.EventEnvelope{}, time.Time{})
 
 	ctx := runtimecorrelation.WithInboundEvent(testAuthorActivityContext(context.Background()), inbound)
@@ -533,7 +533,7 @@ func TestHandleAgentLoopPanic_PublishesTypedFlowInstanceEnvelope(t *testing.T) {
 	})
 
 	runID, parentID := uuid.NewString(), uuid.NewString()
-	inbound := eventtest.InExecutionMode(eventtest.RootIngress(
+	inbound := eventtest.RunCreatingRootIngressWithMode(
 		parentID,
 		events.EventType("scan.requested"),
 		"gateway",
@@ -544,7 +544,8 @@ func TestHandleAgentLoopPanic_PublishesTypedFlowInstanceEnvelope(t *testing.T) {
 		"",
 		events.EventEnvelope{EntityID: "ent-123", FlowInstance: "review/inst-1"},
 		time.Now().UTC(),
-	), executionmode.Mock)
+		executionmode.Mock,
+	)
 	ctx := runtimecorrelation.WithInboundEvent(testAuthorActivityContext(context.Background()), inbound)
 	am.handleAgentLoopPanic(ctx, panicStubAgent{id: "agent-a"}, 5, "scan.requested", "boom", "stack")
 
@@ -599,7 +600,7 @@ func TestRecordPoisonQuarantine_RequiresDistinctEntities(t *testing.T) {
 func TestProcessEvent_PropagatesInboundParentWithoutTraceSeeding(t *testing.T) {
 	agent := &traceRecordingAgent{}
 	am := NewAgentManager(nil, nil)
-	evt := eventtest.RootIngress("evt-123",
+	evt := eventtest.RunCreatingRootIngress("evt-123",
 		events.EventType("discovery/market_research.scan_assigned"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 	evt = eventtest.ForDelivery(evt, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:agent-delivery"}})
 
@@ -639,7 +640,7 @@ func TestProcessEvent_LogsLaunchingDeliveryLifecycleTransition(t *testing.T) {
 	bus := &recordingReceiptBus{}
 	store := &deliveryLifecycleStoreStub{}
 	am := NewAgentManager(bus, nil, store)
-	evt := eventtest.RootIngress("evt-1", events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	evt := eventtest.RunCreatingRootIngress("evt-1", events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 	agent := traceRecordingAgent{parent: ""}
 
 	if err := am.processEvent(testAuthorActivityContext(context.Background()), &agent, evt); err != nil {
@@ -667,7 +668,7 @@ func TestProcessEvent_SkipsLateOutputAndReceiptAfterDestructiveResetQuiescence(t
 	am := NewAgentManager(bus, nil, store)
 	agent := &outputRecordingAgent{}
 
-	result := am.processEventDetailed(testAuthorActivityContext(context.Background()), agent, eventtest.RootIngress(uuid.NewString(), events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	result := am.processEventDetailed(testAuthorActivityContext(context.Background()), agent, eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if result.err != nil {
 		t.Fatalf("processEventDetailed error = %v", result.err)
 	}

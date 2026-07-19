@@ -208,7 +208,7 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 		WorkflowSource:    semanticview.Wrap(bundle),
 		AuthorityProvider: allowHumanTaskAuthority{},
 	})
-	currentCtx := runtimetools.WithActor(runtimebus.WithInboundEvent(ctx, eventtest.RootIngress(
+	currentCtx := runtimetools.WithActor(runtimebus.WithInboundEvent(ctx, eventtest.RunCreatingRootIngress(
 		"evt-current",
 		events.EventType("validation.started"),
 		"",
@@ -375,7 +375,7 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 	if err := persistence.CreateReplyContext(unmanagedToolTestContext(), record); err != nil {
 		t.Fatalf("seed reply tool context: %v", err)
 	}
-	inbound := eventtest.RootIngress(
+	inbound := eventtest.RunCreatingRootIngress(
 		requestEventID,
 		events.EventType("provider.requested"),
 		"",

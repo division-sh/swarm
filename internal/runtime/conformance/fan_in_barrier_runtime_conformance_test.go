@@ -268,7 +268,7 @@ func publishFanInBarrierEvent(t *testing.T, ctx context.Context, eventBus *runti
 	if err != nil {
 		t.Fatalf("marshal %s payload: %v", localEvent, err)
 	}
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType(source.ResolveFlowEventReference(flowID, localEvent)),
 		flowID,

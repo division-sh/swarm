@@ -51,7 +51,7 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 		WorkflowInstances: workflowStore,
 	})
 
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		"99999999-9999-4999-8999-999999999952",
 		events.EventType("producer/account.ready"),
 		"producer",
@@ -160,7 +160,7 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 			}
 			raw := bus.Subscribe("raw-source-listener", events.EventType("producer/account.ready"), events.EventType("account.ready"))
 			defer bus.Unsubscribe("raw-source-listener")
-			evt := eventtest.RootIngress(
+			evt := eventtest.RunCreatingRootIngress(
 				"99999999-9999-4999-8999-999999999953",
 				events.EventType("producer/account.ready"),
 				"producer",

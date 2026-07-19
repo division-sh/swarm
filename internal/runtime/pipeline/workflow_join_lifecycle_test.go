@@ -372,10 +372,10 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 				t.Fatal(err)
 			}
 			handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
-			member := eventtest.RootIngress("member-a", events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now)
+			member := eventtest.RunCreatingRootIngress("member-a", events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now)
 			ref := timeridentity.NewJoinRef("join-node", "item.completed", "awaiting", "awaiting", "")
 			handle := timeridentity.JoinTimeoutHandle(ref)
-			timeout := eventtest.RootIngress("timeout-a", events.EventType(joinTimeoutEvent), "", handle.TaskID(), mustJSON(handle.PayloadMetadata()), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now.Add(time.Hour))
+			timeout := eventtest.RunCreatingRootIngress("timeout-a", events.EventType(joinTimeoutEvent), "", handle.TaskID(), mustJSON(handle.PayloadMetadata()), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now.Add(time.Hour))
 			triggerState := pc.currentWorkflowState(ctx, entityID)
 			type raceResult struct {
 				result contractHandlerExecutionResult
@@ -461,7 +461,7 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
-			arrival := eventtest.RootIngress("member-a", events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
+			arrival := eventtest.RunCreatingRootIngress("member-a", events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
 			triggerState := pc.currentWorkflowState(ctx, entityID)
 			start := make(chan struct{})
 			armErr := make(chan error, 1)
@@ -548,7 +548,7 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 			}
 			handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
 			deliver := func(coordinator *PipelineCoordinator, id, member, result string) error {
-				evt := eventtest.RootIngress(id, events.EventType("item.completed"), "", "", mustJSON(map[string]any{"member_id": member, "result": map[string]any{"value": result}}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
+				evt := eventtest.RunCreatingRootIngress(id, events.EventType("item.completed"), "", "", mustJSON(map[string]any{"member_id": member, "result": map[string]any{"value": result}}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
 				_, err := coordinator.executeNodeContractHandler(ctx, "join-node", handler, workflowTriggerContext{Event: evt, State: coordinator.currentWorkflowState(ctx, entityID), HandlerEventKey: "item.completed"}, false)
 				return err
 			}
@@ -638,7 +638,7 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 				t.Fatal(err)
 			}
 			dispatchHandler := bundle.Nodes["dispatcher"].EventHandlers["order.accepted"]
-			dispatch := eventtest.RootIngress("fan-out-empty", events.EventType("order.accepted"), "", "", json.RawMessage(`{"line_items":[]}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
+			dispatch := eventtest.RunCreatingRootIngress("fan-out-empty", events.EventType("order.accepted"), "", "", json.RawMessage(`{"line_items":[]}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
 			result, err := pc.executeNodeContractHandler(ctx, "dispatcher", dispatchHandler, workflowTriggerContext{Event: dispatch, State: pc.currentWorkflowState(ctx, entityID), HandlerEventKey: "order.accepted"}, false)
 			if err != nil || !result.Handled || result.Outcome == nil || result.Outcome.FanOutCount != 0 {
 				t.Fatalf("empty fan_out = handled:%v outcome:%#v err:%v", result.Handled, result.Outcome, err)
@@ -662,7 +662,7 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			}
 			schedule := schedules.schedules[0]
 			pc = newCoordinator()
-			fire := eventtest.RootIngress("join-zero-fire", events.EventType(schedule.EventType), "", schedule.TaskID, schedule.Payload, 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
+			fire := eventtest.RunCreatingRootIngress("join-zero-fire", events.EventType(schedule.EventType), "", schedule.TaskID, schedule.Payload, 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
 			result, err = pc.executeAuthoritativeNodeHandler(ctx, fire, workflowTriggerContext{Event: fire, State: pc.currentWorkflowState(ctx, entityID)})
 			if err != nil || !result.Handled {
 				t.Fatalf("completion fire = handled:%v err:%v", result.Handled, err)
@@ -756,7 +756,7 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 				t.Fatalf("exited zero activation = %#v, %v, %v", activation, ok, err)
 			}
 
-			fire := eventtest.RootIngress("join-zero-after-exit", events.EventType(completion.EventType), "", completion.TaskID, completion.Payload, 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
+			fire := eventtest.RunCreatingRootIngress("join-zero-after-exit", events.EventType(completion.EventType), "", completion.TaskID, completion.Payload, 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
 			result, err := pc.executeAuthoritativeNodeHandler(ctx, fire, workflowTriggerContext{Event: fire, State: pc.currentWorkflowState(ctx, entityID)})
 			if err != nil || result.Handled {
 				t.Fatalf("late discarded completion fire = handled:%v err:%v, want unhandled", result.Handled, err)
@@ -787,7 +787,7 @@ func TestWorkflowJoinFailurePersistsCanonicalReceiptAndRuntimeLog(t *testing.T) 
 	if err := store.Upsert(ctx, WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{"a"}}}); err != nil {
 		t.Fatal(err)
 	}
-	evt := eventtest.RootIngress(uuid.NewString(), events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
+	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
 	seedExactOnceEventDelivery(t, store, ctx, evt, "join-node")
 	if resolved := workflowNodeEventHandlerResolutionForDelivery(pc.SemanticSource(), "join-node", evt); !resolved.Matched {
 		t.Fatalf("join handler did not resolve: %#v", resolved)

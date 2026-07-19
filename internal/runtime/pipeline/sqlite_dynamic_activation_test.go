@@ -21,7 +21,7 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 	pc, bus := newSQLiteDynamicActivationCoordinator(t, db, workflowStore)
 	parentEntityID := uuid.NewString()
 
-	parent := eventtest.RootIngress(
+	parent := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("component_scaffold.batch_requested"),
 		"",

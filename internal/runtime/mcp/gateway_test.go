@@ -1378,7 +1378,7 @@ func TestGatewayMCPToolsForRequest_FiltersRoleScopedToolsByTurnEntityEligibility
 	putTestTurnContext(t, registry, "ctx-invalid-current-entity", TurnContext{
 		Actor:             actor,
 		CapabilitySurface: testCapabilitySurface(t, actor, "emit_market_research_scan_complete"),
-		Inbound: eventtest.RootIngress(
+		Inbound: eventtest.RunCreatingRootIngress(
 			"evt-root",
 			events.EventType("discovery/market_research.corpus_file_assigned"),
 			"",
@@ -1398,7 +1398,7 @@ func TestGatewayMCPToolsForRequest_FiltersRoleScopedToolsByTurnEntityEligibility
 	putTestTurnContext(t, registry, "ctx-valid-current-entity", TurnContext{
 		Actor:             actor,
 		CapabilitySurface: testCapabilitySurface(t, actor, "read_scan_campaign", "save_scan_campaign_mode", "emit_market_research_scan_complete"),
-		Inbound: eventtest.RootIngress(
+		Inbound: eventtest.RunCreatingRootIngress(
 			"evt-scan",
 			events.EventType("discovery/market_research.corpus_file_assigned"),
 			"",
@@ -2421,7 +2421,7 @@ func TestGatewayExecutionContext_UsesInboundTraceNotRequestTraceOnResolvedTurn(t
 	putTestTurnContext(t, registry, "ctx-trace", TurnContext{
 		Actor:             models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
 		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "analysis-agent", Role: "analysis"}, "get_entity"),
-		Inbound:           eventtest.RootIngress("evt-1", events.EventType("analysis.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{}),
+		Inbound:           eventtest.RunCreatingRootIngress("evt-1", events.EventType("analysis.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{}),
 		HasInbound:        true,
 		CreatedAt:         time.Now().UTC(),
 		ExpiresAt:         time.Now().UTC().Add(time.Hour),
@@ -2445,7 +2445,7 @@ func TestGatewayExecutionContext_RestoresTypedRuntimeLineageOnResolvedTurn(t *te
 	putTestTurnContext(t, registry, "ctx-lineage", TurnContext{
 		Actor:             models.AgentConfig{ID: "validation-coordinator", Role: "validation"},
 		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "validation-coordinator", Role: "validation"}, "get_entity"),
-		Inbound: eventtest.RootIngress("3134bdf0-2ce0-4260-93bd-f0a45371b7d7",
+		Inbound: eventtest.RunCreatingRootIngress("3134bdf0-2ce0-4260-93bd-f0a45371b7d7",
 			events.EventType("validation/validation.package_ready"), "", "", nil, 0, "a6f6861a-d154-4d38-a2d6-1388f5bb6daf", "", events.EventEnvelope{}, time.Time{}),
 
 		HasInbound: true,

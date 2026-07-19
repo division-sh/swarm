@@ -71,7 +71,7 @@ func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 	})
 	runner.SetRetryPolicyForTest(2, func(int) time.Duration { return 0 })
 
-	evt := eventtest.RootIngress(uuid.NewString(),
+	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
 		"source.evt",
 		"src", "", []byte(`{"entity_id":"`+uuid.NewString()+`"}`), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -131,7 +131,7 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testPipelineRunContext(t, db)
 	entityID := uuid.NewString()
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		"chain.start",
 		"src",
@@ -195,7 +195,7 @@ func TestSystemNodeRunner_SkipsQuiescedDestructiveResetDelivery(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testPipelineRunContext(t, db)
 	eventID := uuid.NewString()
-	evt := eventtest.RootIngress(eventID, "source.evt", "src", "", []byte(`{}`), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	evt := eventtest.RunCreatingRootIngress(eventID, "source.evt", "src", "", []byte(`{}`), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	seedPipelineEventRecord(t, ctx, db, evt)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
@@ -241,9 +241,9 @@ func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *test
 	runner.SetRetryPolicyForTest(5, func(int) time.Duration { return 0 })
 
 	runID := uuid.NewString()
-	evt := eventtest.InExecutionMode(eventtest.RootIngress(uuid.NewString(),
+	evt := eventtest.RunCreatingRootIngressWithMode(uuid.NewString(),
 		"source.evt",
-		"src", "task-1", []byte(`{"entity_id":"ent-1"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()), executionmode.Mock)
+		"src", "task-1", []byte(`{"entity_id":"ent-1"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC(), executionmode.Mock)
 
 	runner.ProcessEventForTest(testAuthorActivityContext(context.Background()), evt)
 
@@ -280,7 +280,7 @@ func TestSystemNodeRunner_UsesAdmittedEventReceiptsForIdempotency(t *testing.T) 
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testAuthorActivityContext(context.Background())
 	entityID := uuid.NewString()
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		"source.evt",
 		"src",
@@ -325,7 +325,7 @@ func TestSystemNodeRunner_SkipsWithoutPersistedNodeDeliveryAuthority(t *testing.
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testAuthorActivityContext(context.Background())
 	entityID := uuid.NewString()
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		"source.evt",
 		"src",
@@ -378,7 +378,7 @@ func TestSystemNodeRunner_UsesTypedReceiptOwnerWithoutRawDB(t *testing.T) {
 		attempts++
 		return nil
 	}, 0)
-	evt := eventtest.RootIngress(uuid.NewString(),
+	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
 		"source.evt", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	runner.ProcessEventForTest(ctx, evt)
@@ -420,7 +420,7 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 			},
 		},
 	})
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("score.dimension_complete"),
 		"analysis-agent",

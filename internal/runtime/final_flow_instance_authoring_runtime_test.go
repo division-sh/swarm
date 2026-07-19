@@ -64,7 +64,7 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		WorkflowStore:     workflowStore,
 	})
 
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		"99999999-9999-4999-8999-999999999955",
 		events.EventType(finalflowinstanceauthoring.ProducerFlowID+"/"+finalflowinstanceauthoring.ProducerOutput),
 		finalflowinstanceauthoring.ProducerFlowID,

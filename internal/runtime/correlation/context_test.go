@@ -15,7 +15,7 @@ func TestWithInboundEvent_RefinesTypedRuntimeLineageSubject(t *testing.T) {
 		RunID:               "run-fork",
 		SelectedForkContext: true,
 	})
-	ctx = WithInboundEvent(ctx, eventtest.RootIngress("evt-selected",
+	ctx = WithInboundEvent(ctx, eventtest.RunCreatingRootIngress("evt-selected",
 		events.EventType("task.assigned"), "", "", nil, 0, "run-fork", "", events.EventEnvelope{}, time.Time{}))
 
 	lineage, ok := RuntimeLineageFromContext(ctx)

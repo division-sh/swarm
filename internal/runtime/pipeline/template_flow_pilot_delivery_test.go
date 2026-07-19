@@ -45,7 +45,7 @@ func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *tes
 	}
 
 	target := events.RouteIdentity{FlowID: "account", FlowInstance: flowInstance, EntityID: entityID}
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("producer/account.ready"),
 		"producer",

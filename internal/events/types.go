@@ -420,6 +420,7 @@ type DeliveryRoute struct {
 
 type Event struct {
 	admissionClass  EventAdmissionClass
+	rootIntent      rootIngressRunIntent
 	runtimeIntent   runtimeLineageIntent
 	id              string
 	eventType       EventType
@@ -496,7 +497,12 @@ type EventFacts struct {
 	ExecutionMode executionmode.Mode
 }
 
-type RootIngressEventInput struct {
+type RunCreatingRootIngressEventInput struct {
+	Facts EventFacts
+	RunID string
+}
+
+type ExistingRunRootIngressEventInput struct {
 	Facts EventFacts
 	RunID string
 }
@@ -543,22 +549,34 @@ type StandaloneRuntimeEventInput struct {
 
 type runtimeLineageIntent string
 
+type rootIngressRunIntent string
+
 const (
+	rootIngressRunCreating rootIngressRunIntent = "run_creating"
+	rootIngressExistingRun rootIngressRunIntent = "existing_run"
+
 	runtimeLineageCausal      runtimeLineageIntent = "causal"
 	runtimeLineageRunScoped   runtimeLineageIntent = "run_scoped"
 	runtimeLineageRunCreating runtimeLineageIntent = "run_creating"
 	runtimeLineageStandalone  runtimeLineageIntent = "standalone"
 )
 
-func NewRootIngressEvent(input RootIngressEventInput) (Event, error) {
-	return newSemanticEvent(EventAdmissionRootIngress, input.Facts, input.RunID, "", nil, nil)
+func NewRunCreatingRootIngressEvent(input RunCreatingRootIngressEventInput) (Event, error) {
+	return newSemanticEvent(EventAdmissionRootIngress, rootIngressRunCreating, input.Facts, input.RunID, "", nil, nil)
+}
+
+func NewExistingRunRootIngressEvent(input ExistingRunRootIngressEventInput) (Event, error) {
+	if strings.TrimSpace(input.RunID) == "" {
+		return Event{}, fmt.Errorf("existing-run root ingress requires run_id")
+	}
+	return newSemanticEvent(EventAdmissionRootIngress, rootIngressExistingRun, input.Facts, input.RunID, "", nil, nil)
 }
 
 func NewOperatorInjectedEvent(input OperatorInjectedEventInput) (Event, error) {
 	if strings.TrimSpace(input.RunID) == "" {
 		return Event{}, fmt.Errorf("operator-injected event requires target run_id")
 	}
-	return newSemanticEvent(EventAdmissionOperatorInjected, input.Facts, input.RunID, "", input.Provenance, nil)
+	return newSemanticEvent(EventAdmissionOperatorInjected, "", input.Facts, input.RunID, "", input.Provenance, nil)
 }
 
 func NewChildEvent(input ChildEventInput) (Event, error) {
@@ -570,7 +588,7 @@ func NewChildEvent(input ChildEventInput) (Event, error) {
 		input.Facts.TaskID = lineage.TaskID
 	}
 	input.Facts.ExecutionMode = lineage.ExecutionMode
-	return newSemanticEvent(EventAdmissionChild, input.Facts, lineage.RunID, lineage.ParentEventID, nil, nil)
+	return newSemanticEvent(EventAdmissionChild, "", input.Facts, lineage.RunID, lineage.ParentEventID, nil, nil)
 }
 
 func NewReplayEvent(input ReplayEventInput) (Event, error) {
@@ -582,7 +600,7 @@ func NewReplayEvent(input ReplayEventInput) (Event, error) {
 		input.Facts.TaskID = lineage.TaskID
 	}
 	input.Facts.ExecutionMode = lineage.ExecutionMode
-	return newSemanticEvent(EventAdmissionReplay, input.Facts, lineage.RunID, lineage.ParentEventID, nil, nil)
+	return newSemanticEvent(EventAdmissionReplay, "", input.Facts, lineage.RunID, lineage.ParentEventID, nil, nil)
 }
 
 func NewSelectedForkReplayEvent(input SelectedForkReplayEventInput) (Event, error) {
@@ -594,7 +612,7 @@ func NewSelectedForkReplayEvent(input SelectedForkReplayEventInput) (Event, erro
 		input.Facts.TaskID = lineage.TaskID()
 	}
 	input.Facts.ExecutionMode = lineage.ExecutionMode()
-	return newSemanticEvent(EventAdmissionSelectedForkReplay, input.Facts, lineage.DestinationRunID(), "", nil, &lineage)
+	return newSemanticEvent(EventAdmissionSelectedForkReplay, "", input.Facts, lineage.DestinationRunID(), "", nil, &lineage)
 }
 
 func NewCausalRuntimeControlEvent(input CausalRuntimeEventInput) (Event, error) {
@@ -663,7 +681,7 @@ func newCausalRuntimeEvent(class EventAdmissionClass, input CausalRuntimeEventIn
 		input.Facts.TaskID = lineage.TaskID
 	}
 	input.Facts.ExecutionMode = lineage.ExecutionMode
-	event, err := newSemanticEvent(class, input.Facts, lineage.RunID, lineage.ParentEventID, nil, nil)
+	event, err := newSemanticEvent(class, "", input.Facts, lineage.RunID, lineage.ParentEventID, nil, nil)
 	if err != nil {
 		return Event{}, err
 	}
@@ -676,7 +694,7 @@ func newRunScopedRuntimeEvent(class EventAdmissionClass, input RunScopedRuntimeE
 	if runID == "" {
 		return Event{}, fmt.Errorf("%s run-scoped event requires run_id", class)
 	}
-	event, err := newSemanticEvent(class, input.Facts, runID, "", nil, nil)
+	event, err := newSemanticEvent(class, "", input.Facts, runID, "", nil, nil)
 	if err != nil {
 		return Event{}, err
 	}
@@ -689,7 +707,7 @@ func newRunCreatingRuntimeEvent(class EventAdmissionClass, input RunCreatingRunt
 	if runID == "" {
 		return Event{}, fmt.Errorf("%s run-creating event requires run_id", class)
 	}
-	event, err := newSemanticEvent(class, input.Facts, runID, "", nil, nil)
+	event, err := newSemanticEvent(class, "", input.Facts, runID, "", nil, nil)
 	if err != nil {
 		return Event{}, err
 	}
@@ -698,7 +716,7 @@ func newRunCreatingRuntimeEvent(class EventAdmissionClass, input RunCreatingRunt
 }
 
 func newStandaloneRuntimeEvent(class EventAdmissionClass, input StandaloneRuntimeEventInput) (Event, error) {
-	event, err := newSemanticEvent(class, input.Facts, "", "", nil, nil)
+	event, err := newSemanticEvent(class, "", input.Facts, "", "", nil, nil)
 	if err != nil {
 		return Event{}, err
 	}
@@ -755,7 +773,7 @@ func (l EventLineage) Normalized() EventLineage {
 	}
 }
 
-func newSemanticEvent(class EventAdmissionClass, facts EventFacts, runID, parentEventID string, operatorRef *OperatorReferenceProvenance, selectedFork *SelectedForkLineage) (Event, error) {
+func newSemanticEvent(class EventAdmissionClass, rootIntent rootIngressRunIntent, facts EventFacts, runID, parentEventID string, operatorRef *OperatorReferenceProvenance, selectedFork *SelectedForkLineage) (Event, error) {
 	producer, err := NewProducerIdentity(facts.Producer.Type, facts.Producer.ID)
 	if err != nil {
 		return Event{}, fmt.Errorf("event producer identity: %w", err)
@@ -804,6 +822,7 @@ func newSemanticEvent(class EventAdmissionClass, facts EventFacts, runID, parent
 	}
 	evt := Event{
 		admissionClass: EventAdmissionClass(strings.TrimSpace(string(class))),
+		rootIntent:     rootIntent,
 		id:             strings.TrimSpace(facts.ID),
 		eventType:      eventType,
 		producer:       producer,

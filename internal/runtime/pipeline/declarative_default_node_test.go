@@ -24,7 +24,7 @@ func TestCoordinatorHandlerExecutionEngineUsesRuntimeEnginePath(t *testing.T) {
 	}
 	outcome, err := engine.ExecuteHandlerSteps(testAuthorActivityContext(context.Background()), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
-	}, eventtest.RootIngress("00000000-0000-0000-0000-000000000001", events.EventType("custom.trigger"), "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Unix(1, 0).UTC()), "custom.trigger")
+	}, eventtest.RunCreatingRootIngress("00000000-0000-0000-0000-000000000001", events.EventType("custom.trigger"), "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Unix(1, 0).UTC()), "custom.trigger")
 	if err != nil {
 		t.Fatalf("ExecuteHandlerSteps: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestEnsureHandlerEntityIDUsesCanonicalPrimaryForEntityMaterializingHandler(
 		},
 	}
 
-	entityID, evt, resolveErr := ensureHandlerEntityID(source, "", handler, "", eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	entityID, evt, resolveErr := ensureHandlerEntityID(source, "", handler, "", eventtest.RunCreatingRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if resolveErr != nil {
 		t.Fatalf("ensureHandlerEntityID: %v", resolveErr)
 	}
@@ -86,7 +86,7 @@ func TestEnsureHandlerEntityIDUsesCanonicalPrimaryForEntityMaterializingHandler(
 
 func TestEnsureHandlerEntityIDCreateEntityUsesInboundPrimaryReference(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
-	inbound := eventtest.RootIngress(
+	inbound := eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("custom.trigger"),
 		"",

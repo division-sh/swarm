@@ -952,7 +952,7 @@ func (e *directiveSurfaceToolExecutor) Execute(ctx context.Context, name string,
 	e.executed = append(e.executed, strings.TrimSpace(name))
 	if strings.HasPrefix(strings.TrimSpace(name), "emit_") {
 		if rec, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && rec != nil {
-			rec.Append(eventtest.PersistedProjection("", events.EventType(strings.TrimPrefix(strings.TrimSpace(name), "emit_")), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+			rec.Append(eventtest.PersistedProjection("", events.EventType(strings.TrimPrefix(strings.TrimSpace(name), "emit_")), "", "", nil, 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Time{}))
 		}
 		return map[string]any{"status": "published"}, nil
 	}
@@ -1396,7 +1396,7 @@ func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelec
 	inProgressNoReceiptEventID := uuid.NewString()
 	deadEventID := uuid.NewString()
 	for _, eventID := range []string{pendingEventID, failedEventID, inProgressNoReceiptEventID, deadEventID} {
-		storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "task.completed",
+		storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "task.completed",
 			eventtest.Producer(events.EventProducerExternal, "runtime"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC().Add(-5*time.Minute))
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -1490,7 +1490,7 @@ func TestSQLAgentReader_ListGenericAgents_UsesFullPendingDeliveryFactHorizon(t *
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "task.completed",
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "task.completed",
 		eventtest.Producer(events.EventProducerExternal, "runtime"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC().Add(-45*24*time.Hour))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (

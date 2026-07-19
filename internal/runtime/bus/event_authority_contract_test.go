@@ -14,7 +14,7 @@ import (
 )
 
 func TestRuntimeIngressDispatchBypassRequiresTypedPlatformRuntimeAuthority(t *testing.T) {
-	hostile := eventtest.RootIngress(
+	hostile := eventtest.RunCreatingRootIngress(
 		uuid.NewString(), "platform.paused", "runtime", "", nil, 0,
 		uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
 	)
