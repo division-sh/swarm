@@ -963,7 +963,7 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	`, advancedSourceRunID, projection.BundleHash, storerunlifecycle.BundleSourcePersisted); err != nil {
 		t.Fatalf("stamp advanced source run bundle identity: %v", err)
 	}
-	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
 		advancedAfterEventID, advancedSourceRunID, "source.after", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{EntityID: advancedEntityID, FlowInstance: "flow-a/1", Scope: events.EventScopeEntity}, advancedAt.Add(time.Second))
 	captureRunForkCLIRevision(t, db, advancedSourceRunID, runforkrevision.FamilyEvents)
@@ -3261,7 +3261,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	default:
 		t.Fatalf("unknown decision-card proof backend %q", rt.Backend)
 	}
-	evt := eventtest.RootIngress(sourceEventID, "item.received", "", "", json.RawMessage(`{"item_id":"review"}`), 0, runID, "",
+	evt := eventtest.RunCreatingRootIngress(sourceEventID, "item.received", "", "", json.RawMessage(`{"item_id":"review"}`), 0, runID, "",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "root"), now)
 	if err := seedEvent(ctx, evt); err != nil {
 		t.Fatalf("seed decision-card source event: %v", err)
@@ -7451,7 +7451,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 		_ = sqliteStore.Close()
 		t.Fatalf("seed sqlite active run: %v", err)
 	}
-	storetest.InsertRootEventRecord(t, ctx, sqliteStore.DB, runtimeauthoractivity.DialectSQLite,
+	storetest.InsertExistingRunRootEventRecord(t, ctx, sqliteStore.DB, runtimeauthoractivity.DialectSQLite,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
@@ -7540,7 +7540,7 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 	`, runID, source, fingerprint); err != nil {
 		t.Fatalf("seed unavailable bundle run %s: %v", source, err)
 	}
-	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
 		eventID, runID, events.EventType("startup."+source+".event"), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
 	if _, err := db.ExecContext(ctx, `
@@ -7836,7 +7836,7 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
 		eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)),
 		events.EventEnvelope{EntityID: entityID, FlowInstance: "flow-a/1", Scope: events.EventScopeEntity}, at)
@@ -8754,7 +8754,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	`, runID, bundleHash, storerunlifecycle.BundleSourceEphemeral, mismatchFingerprint); err != nil {
 		t.Fatalf("seed active mismatched run: %v", err)
 	}
-	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
 	if _, err := db.ExecContext(ctx, `
@@ -9102,7 +9102,7 @@ func (a delayedRunStatusAgent) OnEvent(ctx context.Context, evt events.Event) ([
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	return []events.Event{eventtest.RootIngress(uuid.NewString(), events.EventType("scan.completed"), a.id, "", []byte(`{}`), 0, evt.RunID(), "", events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()), time.Now().UTC())}, nil
+	return []events.Event{eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("scan.completed"), a.id, "", []byte(`{}`), 0, evt.RunID(), "", events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()), time.Now().UTC())}, nil
 }
 
 func writeServedEventPublishFollowUpFixture(t *testing.T) string {

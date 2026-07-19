@@ -38,7 +38,10 @@ func TestEventConstructionClassInvariantMatrix(t *testing.T) {
 		baseFacts EventFacts
 		build     func(EventFacts) error
 	}{
-		{name: "root", baseFacts: validFacts(), build: func(f EventFacts) error { _, err := NewRootIngressEvent(RootIngressEventInput{Facts: f}); return err }},
+		{name: "root", baseFacts: validFacts(), build: func(f EventFacts) error {
+			_, err := NewRunCreatingRootIngressEvent(RunCreatingRootIngressEventInput{Facts: f})
+			return err
+		}},
 		{name: "operator", baseFacts: validFacts(), build: func(f EventFacts) error {
 			_, err := NewOperatorInjectedEvent(OperatorInjectedEventInput{Facts: f, RunID: testRunID})
 			return err
@@ -114,7 +117,7 @@ func TestEventConstructionClassInvariantMatrix(t *testing.T) {
 
 func TestAdmissionAllocatesOnlyAuthorizedFacts(t *testing.T) {
 	now := time.Date(2026, 7, 18, 10, 11, 12, 123456789, time.UTC)
-	rootCandidate, constructErr := NewRootIngressEvent(RootIngressEventInput{Facts: validFactsWithoutIdentity()})
+	rootCandidate, constructErr := NewRunCreatingRootIngressEvent(RunCreatingRootIngressEventInput{Facts: validFactsWithoutIdentity()})
 	root := mustConstruct(t, rootCandidate, constructErr)
 	admitted, err := AdmitForPublish(root, AdmissionOptions{Now: now})
 	if err != nil {
@@ -153,8 +156,11 @@ func TestAdmissionCarriesExactRunDispositionAndReadbackNeverRegainsCreation(t *t
 		want  AdmittedRunDisposition
 	}{
 		{name: "root create", build: func() (Event, error) {
-			return NewRootIngressEvent(RootIngressEventInput{Facts: validFacts(), RunID: testRunID})
+			return NewRunCreatingRootIngressEvent(RunCreatingRootIngressEventInput{Facts: validFacts(), RunID: testRunID})
 		}, want: AdmittedRunCreateAuthorized},
+		{name: "root existing requires active", build: func() (Event, error) {
+			return NewExistingRunRootIngressEvent(ExistingRunRootIngressEventInput{Facts: validFacts(), RunID: testRunID})
+		}, want: AdmittedRunRequireActive},
 		{name: "operator requires active", build: func() (Event, error) {
 			return NewOperatorInjectedEvent(OperatorInjectedEventInput{Facts: validFacts(), RunID: testRunID})
 		}, want: AdmittedRunRequireActive},
@@ -202,6 +208,12 @@ func TestAdmissionCarriesExactRunDispositionAndReadbackNeverRegainsCreation(t *t
 				t.Fatalf("restored run disposition = %q, want %q", restored.RunDisposition(), wantRestored)
 			}
 		})
+	}
+}
+
+func TestExistingRunRootIngressRequiresExactRun(t *testing.T) {
+	if _, err := NewExistingRunRootIngressEvent(ExistingRunRootIngressEventInput{Facts: validFacts()}); err == nil || !strings.Contains(err.Error(), "requires run_id") {
+		t.Fatalf("missing-run error = %v, want run_id failure", err)
 	}
 }
 
@@ -437,9 +449,9 @@ func TestRevalidatePersistedEventPreservesSelectedForkFactsWithoutAllocation(t *
 }
 
 func TestRevalidatePersistedEventRejectsMissingDurableTimestamp(t *testing.T) {
-	candidate, err := NewRootIngressEvent(RootIngressEventInput{Facts: validFactsWithoutIdentity()})
+	candidate, err := NewRunCreatingRootIngressEvent(RunCreatingRootIngressEventInput{Facts: validFactsWithoutIdentity()})
 	if err != nil {
-		t.Fatalf("NewRootIngressEvent: %v", err)
+		t.Fatalf("NewRunCreatingRootIngressEvent: %v", err)
 	}
 	if _, err := RevalidatePersistedEvent(candidate); err == nil || !strings.Contains(err.Error(), "created_at") {
 		t.Fatalf("RevalidatePersistedEvent error = %v, want missing created_at", err)

@@ -369,7 +369,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			}
 			waitWorkflowTimerEventCount(t, selected, fireErrors, runID, runtimecontracts.WorkflowStageTimerInternalEvent, beforeRestart+1)
 
-			cancelEvent := eventtest.RootIngress(
+			cancelEvent := eventtest.RunCreatingRootIngress(
 				uuid.NewString(), "timer-proof/timer.cancel", "operator", "", []byte(`{}`), 0, runID, "",
 				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "timer-proof"), time.Now().UTC(),
 			)

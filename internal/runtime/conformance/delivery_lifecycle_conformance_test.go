@@ -252,7 +252,7 @@ func (fx *deliveryLifecycleFixture) publishDirectEvent(t *testing.T, ctx context
 	ch := fx.bus.Subscribe(fx.agentID)
 	defer fx.bus.Unsubscribe(fx.agentID)
 
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("review.requested"),
 		"runtime",

@@ -98,7 +98,7 @@ func TestExecutorRejectsAccumulateWithHandlerOnCompleteWithoutBootverify(t *test
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "item.arrived", "", "", json.RawMessage(`{"item_id":"a"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "item.arrived", "", "", json.RawMessage(`{"item_id":"a"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
 			OnComplete: []runtimecontracts.HandlerRuleEntry{{Condition: "accumulated.count >= 2", AdvancesTo: "complete"}},
@@ -134,7 +134,7 @@ func TestExecutor_RejectsInvalidAdvancesToTransition(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "unreachable_state",
 		},
@@ -181,7 +181,7 @@ func TestExecutor_GuardBlocksTransitionForTerminalState(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard:      &runtimecontracts.GuardSpec{ID: "not_in_terminal_state"},
 			AdvancesTo: "reopened",
@@ -221,7 +221,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
 				Check:  "entity.score >= 75",
@@ -241,7 +241,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-2", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		Event:    eventtest.RunCreatingRootIngress("evt-2", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
 				Check:  "entity.score >= 75",
@@ -295,7 +295,7 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "ent-1",
 		NodeID:   "node-1",
-		Event: eventtest.RootIngress("evt-1",
+		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"item.evaluated", "", "", json.RawMessage(`{"entity_id":"ent-1","score":80}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 
 		Handler: runtimecontracts.SystemNodeEventHandler{
@@ -373,7 +373,7 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event: eventtest.RootIngress("evt-1",
+		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"task.completed", "", "", json.RawMessage(`{"item_id":"item-1","marker":"first"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: handler,
 	}
@@ -385,7 +385,7 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 		t.Fatalf("first emit intents = %d, want 1", len(firstResult.EmitIntents))
 	}
 	duplicate := first
-	duplicate.Event = eventtest.RootIngress("evt-2",
+	duplicate.Event = eventtest.RunCreatingRootIngress("evt-2",
 		"task.completed", "", "", json.RawMessage(`{"item_id":"item-1","marker":"duplicate"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	duplicateResult, err := exec.ExecuteSemanticFixture(context.Background(), duplicate)
 	if err != nil {
@@ -458,7 +458,7 @@ func TestExecutor_FanInInputOwnsWindowAndDedupAtRuntime(t *testing.T) {
 			FlowID:          templatefanin.ReceiverFlowID,
 			HandlerEventKey: templatefanin.ReceiverEvent,
 			Handler:         handler,
-			Event: eventtest.RootIngress(
+			Event: eventtest.RunCreatingRootIngress(
 				eventID,
 				events.EventType(templatefanin.ReceiverEvent),
 				"operating",

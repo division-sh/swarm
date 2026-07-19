@@ -450,7 +450,7 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	eventStore := &startupRecoveryEventStore{
 		missing: []events.PersistedReplayEvent{{
-			Event: eventtest.RootIngress("evt-1", "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			Event: eventtest.RunCreatingRootIngress("evt-1", "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		}},
 		routes: []runtimeflowidentity.Route{
 			runtimeflowidentity.DeriveRoute("child", "inst-1"),
@@ -736,10 +736,10 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 		}},
 		pending: map[string][]events.Event{
 			"agent-a": {
-				eventtest.RootIngress("evt-replay", events.EventType("support.replay.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-4*time.Minute).UTC()),
-				eventtest.RootIngress("evt-skip", events.EventType("support.replay.skip"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC()),
-				eventtest.RootIngress("evt-leased", events.EventType("support.replay.leased"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
-				eventtest.RootIngress("evt-drop", events.EventType("support.replay.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
+				eventtest.RunCreatingRootIngress("evt-replay", events.EventType("support.replay.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-4*time.Minute).UTC()),
+				eventtest.RunCreatingRootIngress("evt-skip", events.EventType("support.replay.skip"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC()),
+				eventtest.RunCreatingRootIngress("evt-leased", events.EventType("support.replay.leased"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
+				eventtest.RunCreatingRootIngress("evt-drop", events.EventType("support.replay.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
 			},
 		},
 		receipts: map[string]runtimemanager.EventReceipt{
@@ -847,7 +847,7 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	eventStore := &startupRecoveryEventStore{
 		missing: []events.PersistedReplayEvent{{
-			Event: eventtest.RootIngress("evt-1", "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			Event: eventtest.RunCreatingRootIngress("evt-1", "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		}},
 		claimErr: errors.New("claim failed"),
 	}

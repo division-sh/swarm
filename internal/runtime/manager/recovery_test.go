@@ -667,11 +667,11 @@ func TestRecoverWithStartupReplayDiagnostics_LogsCanonicalManagerReplayAftermath
 		},
 		pending: map[string][]events.Event{
 			"agent-a": {
-				eventtest.RootIngress("evt-replay", events.EventType("system.recover.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-5*time.Minute)),
-				eventtest.RootIngress("evt-receipt", events.EventType("system.recover.receipt"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-4*time.Minute)),
-				eventtest.RootIngress("evt-inflight", events.EventType("system.recover.inflight"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-3*time.Minute)),
-				eventtest.RootIngress("evt-leased", events.EventType("system.recover.leased"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-2*time.Minute)),
-				eventtest.RootIngress("evt-drop", events.EventType("system.recover.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-time.Minute)),
+				eventtest.RunCreatingRootIngress("evt-replay", events.EventType("system.recover.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-5*time.Minute)),
+				eventtest.RunCreatingRootIngress("evt-receipt", events.EventType("system.recover.receipt"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-4*time.Minute)),
+				eventtest.RunCreatingRootIngress("evt-inflight", events.EventType("system.recover.inflight"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-3*time.Minute)),
+				eventtest.RunCreatingRootIngress("evt-leased", events.EventType("system.recover.leased"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-2*time.Minute)),
+				eventtest.RunCreatingRootIngress("evt-drop", events.EventType("system.recover.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-time.Minute)),
 			},
 		},
 		receipts: map[string]EventReceipt{
@@ -738,7 +738,7 @@ func TestReplayAgentBacklog_DoesNotEmitStartupAftermathOutsideStartupRecovery(t 
 	store := &startupReplayTestStore{
 		pending: map[string][]events.Event{
 			"agent-a": {
-				eventtest.RootIngress("evt-drop", events.EventType("system.recover.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-time.Minute)),
+				eventtest.RunCreatingRootIngress("evt-drop", events.EventType("system.recover.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-time.Minute)),
 			},
 		},
 	}
@@ -774,8 +774,8 @@ func TestReplayBacklogReportsDirectReplayCount(t *testing.T) {
 	store := &startupReplayTestStore{
 		pending: map[string][]events.Event{
 			"agent-a": {
-				eventtest.RootIngress("evt-1", events.EventType("system.recover.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-2*time.Minute)),
-				eventtest.RootIngress("evt-2", events.EventType("system.recover.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-time.Minute)),
+				eventtest.RunCreatingRootIngress("evt-1", events.EventType("system.recover.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-2*time.Minute)),
+				eventtest.RunCreatingRootIngress("evt-2", events.EventType("system.recover.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-time.Minute)),
 			},
 		},
 	}

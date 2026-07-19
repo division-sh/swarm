@@ -25,7 +25,7 @@ func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	if err := commitSemanticEventFixture(ctx, store, eventtest.PersistedProjection(subjectEventID,
+	if err := commitSemanticEventFixture(ctx, store, eventtest.RunCreatingRootIngress(subjectEventID,
 
 		events.EventType("validation/validation.package_ready"),
 		"agent-1", "", json.RawMessage(`{"ready":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
@@ -320,7 +320,7 @@ func TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage(t *testing.T)
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
-	if err := commitSemanticEventFixture(ctx, pg, eventtest.PersistedProjection(subjectEventID,
+	if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(subjectEventID,
 
 		events.EventType("validation/validation.package_ready"),
 		"agent-1", "", json.RawMessage(`{"ready":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
@@ -375,7 +375,7 @@ func TestPostgresRuntimeLogPersistenceReusesAmbientEventTransaction(t *testing.T
 	logger := runtimepkg.NewRuntimeLogger(pg)
 
 	if err := pg.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if err := commitSemanticEventFixtureTx(txctx, pg, tx, eventtest.PersistedProjection(
+		if err := commitSemanticEventFixtureTx(txctx, pg, tx, eventtest.RunCreatingRootIngress(
 			subjectEventID, events.EventType("validation/validation.package_ready"),
 			"agent-1", "", json.RawMessage(`{"ready":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 			return err

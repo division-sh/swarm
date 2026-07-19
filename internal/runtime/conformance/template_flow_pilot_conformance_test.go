@@ -274,7 +274,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
-	parent := eventtest.RootIngress(
+	parent := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("evt-notify-all-children-parent"),
 		events.EventType("portfolio/portfolio.notify.requested"),
 		"",
@@ -419,7 +419,7 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			evt := eventtest.RootIngress(
+			evt := eventtest.RunCreatingRootIngress(
 				eventtest.UUID("evt-notify-all-children-negative-"+tc.name),
 				events.EventType("portfolio/account.notify.requested"),
 				"",

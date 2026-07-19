@@ -20,14 +20,14 @@ func TestRecordDeadLetter_PersistsAndDedupes(t *testing.T) {
 	ctx := testAuthorActivityContext()
 
 	entityID := uuid.NewString()
-	evt := eventtest.PersistedProjection(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		"deadletter.test",
 		"runtime",
 		"",
 		[]byte(`{"x":1}`),
 		0,
-		"",
+		eventtest.UUID("persisted-projection-run"),
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 		time.Now().UTC(),
@@ -74,9 +74,9 @@ func TestRecordDeadLetter_AllowsNonUUIDEntityIDViaSourceEventPayload(t *testing.
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
-	evt := eventtest.PersistedProjection(uuid.NewString(),
+	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
 		"deadletter.test",
-		"runtime", "", []byte(`{"entity_id":"ent-001","x":1}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+		"runtime", "", []byte(`{"entity_id":"ent-001","x":1}`), 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now().UTC())
 
 	if err := commitSemanticEventFixture(ctx, pg, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
@@ -115,14 +115,14 @@ func TestRecordDeadLetter_PersistsTargetResolutionFailureContext(t *testing.T) {
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
-	evt := eventtest.PersistedProjection(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		"pin.output",
 		"runtime",
 		"",
 		[]byte(`{"x":1}`),
 		0,
-		"",
+		eventtest.UUID("persisted-projection-run"),
 		"",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: uuid.NewString(), FlowInstance: "flow/target"}),
 		time.Now().UTC(),

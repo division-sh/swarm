@@ -342,7 +342,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				t.Fatal(err)
 			}
 			const replyContextID = "reply-context-proposed-effect"
-			sourceEvent := eventtest.ForDelivery(eventtest.RootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-1",
+			sourceEvent := eventtest.ForDelivery(eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-1",
 				[]byte(`{"chat_id":"support-room","text":"Exact frozen reply"}`), 0, runID, "",
 				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()),
 				events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
@@ -489,7 +489,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 
 			routeWithoutDispatch := func(verdict, wantEvent string, fields map[string]any) {
 				t.Helper()
-				proposal := eventtest.ForDelivery(eventtest.RootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-1",
+				proposal := eventtest.ForDelivery(eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-1",
 					[]byte(`{"chat_id":"support-room","text":"Needs another operator outcome"}`), 0, runID, "",
 					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()),
 					events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
@@ -571,7 +571,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					t.Fatal(err)
 				}
 				sourceEventID := uuid.NewString()
-				sourceEvent := eventtest.RootIngress(sourceEventID, events.EventType("support.reply_drafted"), "support-agent", "task-1",
+				sourceEvent := eventtest.RunCreatingRootIngress(sourceEventID, events.EventType("support.reply_drafted"), "support-agent", "task-1",
 					[]byte(`{"chat_id":"support-room","text":"Exact approved text"}`), 0, runID, "",
 					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now)
 				storetest.CommitSemanticEvent(t, ctx, selected.events, sourceEvent)
@@ -746,7 +746,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			}
 			installProposedEffectCreateFailure(t, selected)
 
-			event := eventtest.RootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-rollback",
+			event := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-rollback",
 				[]byte(`{"chat_id":"support-room","text":"must roll back"}`), 0, runID, "",
 				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
 			seedProposedEffectProofDelivery(t, selected, event, "support")

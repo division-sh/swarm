@@ -562,7 +562,7 @@ func publishClaudeAttemptProofEvent(t *testing.T, eventBus *runtimebus.EventBus,
 		surface = surfaces[0]
 	}
 	eventID := uuid.NewString()
-	evt := eventtest.RootIngress(eventID, claudeAttemptProofEventType, "proof", "", json.RawMessage(`{"request":"run"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	evt := eventtest.RunCreatingRootIngress(eventID, claudeAttemptProofEventType, "proof", "", json.RawMessage(`{"request":"run"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	if err := eventBus.PublishDirect(claudeAttemptProofContext(), evt, []string{claudeAttemptProofAgentConfig(surface).ID}); err != nil {
 		t.Fatalf("publish Claude proof event: %v", err)
 	}

@@ -130,7 +130,7 @@ func Insert(ctx context.Context, exec Executor, dialect runtimeauthoractivity.Di
 	return nil
 }
 
-func Root(
+func ExistingRunRoot(
 	ctx context.Context,
 	db *sql.DB,
 	dialect runtimeauthoractivity.Dialect,
@@ -146,7 +146,7 @@ func Root(
 	if err != nil {
 		return event, err
 	}
-	event, err = events.NewRootIngressEvent(events.RootIngressEventInput{Facts: facts, RunID: runID})
+	event, err = events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: facts, RunID: runID})
 	if err != nil {
 		return event, err
 	}

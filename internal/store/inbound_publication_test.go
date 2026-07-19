@@ -32,6 +32,13 @@ func commitInboundPublicationTestEvent(store runtimebus.EventStore, mutation run
 	if publication == nil {
 		return errors.New("inbound publication test event is required")
 	}
+	admitted, err := events.AdmitForPublish(publication.Event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		return err
+	}
+	if admitted.RunDisposition() != events.AdmittedRunRequireActive {
+		return fmt.Errorf("standing inbound root disposition = %q, want require_active", admitted.RunDisposition())
+	}
 	eventBus, err := runtimebus.NewEventBus(store)
 	if err != nil {
 		return err
@@ -556,8 +563,8 @@ func inboundPublicationProofEventsCount(t *testing.T, request runtimeinbound.Req
 		t.Fatal(err)
 	}
 	payload := []byte(`{"value":{"z":2,"a":1},"provider":"github"}`)
-	raw := eventtest.RootIngress(rawID, "inbound.github.push", "inbound-gateway", "", payload, 0, request.ResolvedRunID, "", envelope, request.OriginalReceivedAt)
-	normalized := eventtest.RootIngress(normalizedID, "github.push.normalized", "inbound-gateway", "", payload, 0, request.ResolvedRunID, "", events.EventEnvelope{}, request.OriginalReceivedAt)
+	raw := eventtest.ExistingRunRootIngress(rawID, "inbound.github.push", "inbound-gateway", "", payload, 0, request.ResolvedRunID, envelope, request.OriginalReceivedAt)
+	normalized := eventtest.ExistingRunRootIngress(normalizedID, "github.push.normalized", "inbound-gateway", "", payload, 0, request.ResolvedRunID, events.EventEnvelope{}, request.OriginalReceivedAt)
 	authorization := runtimeprovideroutput.Authorization{
 		Provider: request.Provider, Event: string(normalized.Type()), PackID: "provider.github", PackVersion: "1.0.0",
 		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "proof-generation",

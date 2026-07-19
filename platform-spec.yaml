@@ -845,8 +845,10 @@ contract_formats:
         every persisted event/run/parent and envelope entity identity. Missing,
         partial, or invalid producer identity fails admission. It may materialize
         explicitly admitted event_id and created_at defaults. It may allocate
-        root-ingress run_id when the ingress class permits server allocation, and
-        may allocate a fresh run only for an explicitly standalone runtime-control
+        root-ingress run_id only for the exact run-creating-root constructor. An
+        existing-run-root constructor MUST carry a non-empty exact run_id and MUST
+        never allocate or reopen that run. A fresh run may otherwise be allocated
+        only for an explicitly standalone runtime-control
         or runtime-diagnostic constructor or the exact typed run-creating
         platform.agent_directive constructor consumed by its named operation.
         Labels, payloads, context, run_id_resolution strings, and missing facts
@@ -867,12 +869,14 @@ contract_formats:
 
         Admission MUST retain one opaque immutable run disposition with the admitted
         event until persistence. `create_authorized` belongs only to freshly admitted
-        root ingress, explicitly standalone runtime-control/runtime-diagnostic events,
+        run-creating root ingress, explicitly standalone runtime-control/runtime-diagnostic events,
         and the exact typed run-creating platform.agent_directive produced after
         new-run target resolution; it permits creation of the event's exact run.
-        `require_active` belongs
-        to operator, child, replay, selected-fork, causal runtime, and run-scoped
-        runtime events; their run MUST already exist in running or paused status.
+        `require_active` belongs to existing-run root ingress, operator, child, replay,
+        selected-fork, causal runtime, and run-scoped runtime events; their run MUST
+        already exist in running or paused status. The durable `root_ingress` class,
+        a non-empty run_id, standing-service context, labels, and payload never infer
+        which fresh root intent applies.
         `require_present` belongs only to run-bearing diagnostic-direct
         `platform.runtime_log` evidence; its run MUST exist but may be terminal.
         `runless` belongs only to events with no run and MUST NOT read or mutate run
@@ -911,6 +915,10 @@ contract_formats:
         runtime.event.runtime_lineage_intent_explicit_at_construction:
           owner: internal/events causal, run-scoped, run-creating, and standalone runtime/control/diagnostic constructors
           rule: Every runtime/control/diagnostic producer explicitly chooses causal, run-scoped unparented, standalone unparented, or the one closed run-creating platform.agent_directive intent. Causal construction requires one typed EventLineage carrying run, parent, task where applicable, and execution mode; EventBus validates and never infers or mutates those facts.
+          negative_proof: TestProductionEventConstructionUsesPublicAPI
+        runtime.event.root_run_intent_explicit_at_construction:
+          owner: internal/events run-creating-root and existing-run-root constructors
+          rule: Every root producer explicitly chooses whether the event may create its exact run or requires an already-active run. Builder and API new-run roots are run-creating; standing-provider roots are existing-run. Canonical readback always reconstructs existing-run intent, and manager identity binding preserves the private fresh intent without inference.
           negative_proof: TestProductionEventConstructionUsesPublicAPI
         runtime.event.routing_source_typed_at_construction:
           owner: internal/events RoutingSource
@@ -1002,8 +1010,12 @@ contract_formats:
           cannot create or converge a run.
       constructor_classes:
         root_ingress:
-          rule: External/operator/root run ingress events carry their final
-            explicit run, source, envelope, and timestamp facts at construction.
+          rule: External root ingress events carry their final source, envelope,
+            timestamp, and exact run-lifecycle intent at construction. A run-creating
+            root may supply its exact run_id or let admission allocate it. An
+            existing-run root must supply its exact run_id and admits only as
+            require-active. The durable event class remains root_ingress for both;
+            class, labels, payload, context, and run-id presence never select intent.
         child:
           rule: Child/runtime emits inherit lineage from the supplied parent or
             explicit EventLineage at construction. EventLineage is the canonical
@@ -9613,8 +9625,9 @@ flow_model:
         and run, requires an active publication sequence and running or paused run, appends the executable event, performs
         transaction-local route/template/reply planning, and commits the immutable recipient manifest with its evidence event,
         replay scope, deliveries, receipts, and counters. The gateway stamps the resolved standing run_id, flow_instance,
-        entity_id, service_id, generation, and publication sequence; root ingress MUST preserve that owner and MUST NOT mint
-        a run per webhook. An exact committed retry returns the same operation without invoking EventBus or replanning.
+        entity_id, service_id, generation, and publication sequence. Standing-provider root ingress MUST use the
+        existing-run-root constructor, preserve that owner, and admit as require-active; it MUST NOT mint a run per webhook.
+        An exact committed retry returns the same operation without invoking EventBus or replanning.
       replacement_policy: >
         Provider-trigger pack directories are re-read and re-verified for every reload. One candidate catalog generation must
         successfully recompile every surviving loaded context and the replacement context before readiness changes.

@@ -16,6 +16,19 @@ func ValidateEventContract(event Event) error {
 	if err := ValidateEventStructuralContract(class, eventType, producer, event.RunID(), event.Scope()); err != nil {
 		return err
 	}
+	if class == EventAdmissionRootIngress {
+		switch event.rootIntent {
+		case rootIngressRunCreating:
+		case rootIngressExistingRun:
+			if event.RunID() == "" {
+				return fmt.Errorf("existing-run root ingress requires run_id")
+			}
+		default:
+			return fmt.Errorf("root ingress requires explicit run-creating or existing-run intent")
+		}
+	} else if event.rootIntent != "" {
+		return fmt.Errorf("root ingress run intent is only valid for root-ingress events")
+	}
 
 	if class == EventAdmissionOperatorInjected {
 		if event.RunID() == "" {
@@ -217,7 +230,14 @@ func BindManagerOutputIdentity(event Event, eventID string) (Event, error) {
 	}
 	switch event.AdmissionClass() {
 	case EventAdmissionRootIngress:
-		return NewRootIngressEvent(RootIngressEventInput{Facts: facts, RunID: event.RunID()})
+		switch event.rootIntent {
+		case rootIngressRunCreating:
+			return NewRunCreatingRootIngressEvent(RunCreatingRootIngressEventInput{Facts: facts, RunID: event.RunID()})
+		case rootIngressExistingRun:
+			return NewExistingRunRootIngressEvent(ExistingRunRootIngressEventInput{Facts: facts, RunID: event.RunID()})
+		default:
+			return Event{}, fmt.Errorf("manager root output is missing explicit run intent")
+		}
 	case EventAdmissionOperatorInjected:
 		var provenance *OperatorReferenceProvenance
 		if value, ok := event.OperatorReference(); ok {

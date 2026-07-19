@@ -343,7 +343,7 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 		t.Fatalf("persist source event: %v", err)
 	}
 	forkRunID := uuid.NewString()
-	forkOwner := eventtest.RootIngress(
+	forkOwner := eventtest.RunCreatingRootIngress(
 		uuid.NewString(), events.EventType("test.fork_root"), "fixture", "", []byte(`{}`), 0,
 		forkRunID, "", events.EventEnvelope{}, createdAt.Add(time.Minute),
 	)

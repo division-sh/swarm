@@ -160,7 +160,7 @@ func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *test
 	}
 	event := eventtest.PersistedProjection(
 		uuid.NewString(), events.EventType(dynamic.EventType), "sender", "", []byte(`{"text":"hello"}`), 0,
-		"", "", events.EventEnvelope{}, time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
+		uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
 	)
 
 	tx, err := db.BeginTx(base, nil)
@@ -199,7 +199,7 @@ func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *test
 	}
 	stale := eventtest.PersistedProjection(
 		uuid.NewString(), events.EventType(dynamic.EventType), "sender", "", []byte(`{"text":"stale"}`), 0,
-		"", "", events.EventEnvelope{}, time.Date(2026, 7, 14, 12, 0, 1, 0, time.UTC),
+		uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 14, 12, 0, 1, 0, time.UTC),
 	)
 	if err := recordPersistedEventAuthorActivity(story, resolver, stale, "sender", "agent"); err == nil || !strings.Contains(err.Error(), "no live registry lease") {
 		t.Fatalf("stale lease error = %v", err)
@@ -224,7 +224,7 @@ func TestDynamicAuthorActivityEventDescriptorRejectsStaticConflict(t *testing.T)
 	}
 	event := eventtest.PersistedProjection(
 		uuid.NewString(), events.EventType("message.sent"), "sender", "", []byte(`{"text":"hello"}`), 0,
-		"", "", events.EventEnvelope{}, time.Now(),
+		uuid.NewString(), "", events.EventEnvelope{}, time.Now(),
 	)
 	if err := recordPersistedEventAuthorActivity(ctx, dynamicAuthoredEventDescriptorResolver{registry: registry}, event, "sender", "agent"); err == nil || !strings.Contains(err.Error(), "conflicts") {
 		t.Fatalf("descriptor conflict error = %v", err)
@@ -247,7 +247,7 @@ func TestAuthorActivityEventAndEffectAdaptersRenderExactSubjects(t *testing.T) {
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 	event := eventtest.PersistedProjection(
 		uuid.NewString(), events.EventType("phrase.completed"), "phrase-completer", "", []byte(`{}`), 0,
-		"", "", events.EventEnvelope{}, now,
+		uuid.NewString(), "", events.EventEnvelope{}, now,
 	)
 	if err := recordPersistedEventAuthorActivity(story, authoredEventOutputClassifier{}, event, "phrase-completer", "agent"); err != nil {
 		_ = tx.Rollback()

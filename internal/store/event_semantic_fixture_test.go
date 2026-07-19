@@ -48,7 +48,7 @@ func commitSemanticEventFixtureWithAgents(ctx context.Context, store any, event 
 }
 
 func commitSemanticParentFixture(ctx context.Context, store any, runID, parentEventID string, createdAt time.Time) error {
-	parent := eventtest.RootIngress(
+	parent := eventtest.RunCreatingRootIngress(
 		parentEventID, "test.fixture_parent", "fixture", "", []byte(`{}`), 0,
 		runID, "", events.EventEnvelope{}, createdAt,
 	)
@@ -66,7 +66,7 @@ func commitSemanticParentFixture(ctx context.Context, store any, runID, parentEv
 }
 
 func commitSemanticParentFixtureTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, runID, parentEventID string, createdAt time.Time) error {
-	parent := eventtest.RootIngress(
+	parent := eventtest.RunCreatingRootIngress(
 		parentEventID, "test.fixture_parent", "fixture", "", []byte(`{}`), 0,
 		runID, "", events.EventEnvelope{}, createdAt,
 	)
@@ -413,7 +413,7 @@ func semanticEventRecordFixture(
 	}
 	switch producer.Type() {
 	case events.EventProducerExternal:
-		return eventtest.RootIngress(eventID, eventType, producer.ID(), "", payload, 0, runID, "", envelope, createdAt)
+		return eventtest.RunCreatingRootIngress(eventID, eventType, producer.ID(), "", payload, 0, runID, "", envelope, createdAt)
 	case events.EventProducerPlatform:
 		return eventtest.PersistedRuntimeControlForProducer(eventID, eventType, producer, "", payload, 0, runID, "", envelope, createdAt)
 	case events.EventProducerAgent, events.EventProducerNode:

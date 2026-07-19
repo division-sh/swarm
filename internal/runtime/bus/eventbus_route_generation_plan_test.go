@@ -198,7 +198,7 @@ func TestEventBusIdentityRouteAuthorityDominatesDuplicateExactSubscription(t *te
 }
 
 func routeGenerationTestEvent(id, eventType string) events.Event {
-	return eventtest.RootIngress(
+	return eventtest.RunCreatingRootIngress(
 		eventtest.UUID(id),
 		events.EventType(eventType),
 		"route-generation-test",

@@ -745,7 +745,7 @@ func terminalEventAdmissionEventWithFacts(eventID, runID, taskID string, mode ex
 	if !json.Valid([]byte(payload)) {
 		panic(fmt.Sprintf("invalid terminal event admission test payload %q", payload))
 	}
-	return eventtest.RootIngressWithMode(
+	return eventtest.RunCreatingRootIngressWithMode(
 		eventID,
 		events.EventType("test.terminal_admission"),
 		"agent-1",

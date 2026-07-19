@@ -89,7 +89,7 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 			} else if tc.inboundFlowPath != "" {
 				parentEnvelope = events.EnvelopeForFlowInstance(parentEnvelope, tc.inboundFlowPath)
 			}
-			parent := eventtest.RootIngress(
+			parent := eventtest.RunCreatingRootIngress(
 				"evt-parent",
 				"repo_scaffold.repo_commit_requested",
 				"workflow-runtime",
@@ -223,7 +223,7 @@ func TestActionResultProducerRouteCoversCurrentRouteShapes(t *testing.T) {
 			if len(tc.targetSet) > 0 {
 				eventEnvelope = events.EnvelopeForTargetSet(eventEnvelope, tc.targetSet)
 			}
-			evt := eventtest.RootIngress(
+			evt := eventtest.RunCreatingRootIngress(
 				"evt-parent",
 				"repo_scaffold.repo_commit_requested",
 				"workflow-runtime",

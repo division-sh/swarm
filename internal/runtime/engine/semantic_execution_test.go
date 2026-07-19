@@ -18,7 +18,7 @@ func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequ
 		if req.Event.ProducerType() == "" {
 			return ExecutionResult{}, fmt.Errorf("complete engine root fixture: producer type is required")
 		}
-		req.Event = eventtest.RootIngressWithMode(
+		req.Event = eventtest.RunCreatingRootIngressWithMode(
 			req.Event.ID(), req.Event.Type(), req.Event.Producer().ID(), req.Event.TaskID(),
 			req.Event.Payload(), req.Event.ChainDepth(), semanticExecutionFixtureRunID, "",
 			req.Event.NormalizedEnvelope(), req.Event.CreatedAt(), req.Event.ExecutionMode(),

@@ -39,7 +39,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunUsesCanonicalPlannerJSON(t *testing.T)
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli",
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 	var buf bytes.Buffer
@@ -90,7 +90,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t 
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli.pending",
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli.pending",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
@@ -138,7 +138,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "flow-a/work.begin",
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "flow-a/work.begin",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
@@ -460,7 +460,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvance
 	afterEventID := uuid.NewString()
 	at := time.Unix(1700000313, 0).UTC()
 	seedRunForkCLISelectedExecutionSource(t, db, sourceRunID, entityID, sourceEventID, at)
-	storetest.InsertRootEventRecord(t, context.Background(), db, runtimeauthoractivity.DialectPostgres, afterEventID, sourceRunID, "source.after",
+	storetest.InsertExistingRunRootEventRecord(t, context.Background(), db, runtimeauthoractivity.DialectPostgres, afterEventID, sourceRunID, "source.after",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`),
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at.Add(time.Second))
 	captureRunForkCLIRevision(t, db, sourceRunID, runforkrevision.FamilyEvents)
@@ -510,7 +510,7 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli.materialize",
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli.materialize",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -849,7 +849,7 @@ func seedRunForkCLIActivationSourceWithoutRevision(t *testing.T, db *sql.DB, run
 	`, runID, "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli.activate",
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli.activate",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (

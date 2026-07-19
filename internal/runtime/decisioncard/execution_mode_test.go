@@ -13,7 +13,7 @@ import (
 )
 
 func TestCausalExecutionModeUsesExecutorModeOverLiveSourceEvent(t *testing.T) {
-	event := eventtest.RootIngress("source-event", "message.received", "external", "", []byte(`{"text":"hello"}`), 0, "run-1", "", events.EventEnvelope{}, time.Now().UTC())
+	event := eventtest.RunCreatingRootIngress("source-event", "message.received", "external", "", []byte(`{"text":"hello"}`), 0, "run-1", "", events.EventEnvelope{}, time.Now().UTC())
 	ctx := runtimecorrelation.WithInboundEvent(context.Background(), event)
 	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Mock)
 	mode, err := CausalExecutionMode(ctx)
@@ -26,7 +26,7 @@ func TestCausalExecutionModeUsesExecutorModeOverLiveSourceEvent(t *testing.T) {
 }
 
 func TestCausalExecutionModeUsesEventForEventOnlyWork(t *testing.T) {
-	event := eventtest.RootIngress("source-event", "message.received", "external", "", []byte(`{"text":"hello"}`), 0, "run-1", "", events.EventEnvelope{}, time.Now().UTC())
+	event := eventtest.RunCreatingRootIngress("source-event", "message.received", "external", "", []byte(`{"text":"hello"}`), 0, "run-1", "", events.EventEnvelope{}, time.Now().UTC())
 	mode, err := CausalExecutionMode(runtimecorrelation.WithInboundEvent(context.Background(), event))
 	if err != nil {
 		t.Fatalf("CausalExecutionMode: %v", err)

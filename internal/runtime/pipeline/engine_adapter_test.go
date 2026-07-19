@@ -321,7 +321,7 @@ func assertMutationParentRoutePinOutputFailure(t *testing.T, metadata map[string
 			FlowInstance: route.FlowInstance,
 			EntityID:     route.EntityID,
 		},
-	}, eventtest.RootIngress("", events.EventType("child.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.RunCreatingRootIngress("", events.EventType("child.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if result.Failure != want {
 		t.Fatalf("pin output failure = %q, want %q (metadata=%#v)", result.Failure, want, metadata)
 	}
@@ -788,7 +788,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceReturnsMutationError(t *testin
 		Request: runtimeengine.ExecutionRequest{
 			EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 			NodeID:   identity.NormalizeNodeID("node-a"),
-			Event: eventtest.RootIngress(
+			Event: eventtest.RunCreatingRootIngress(
 				"",
 				"research.completed",
 				"",
@@ -883,7 +883,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTarg
 				Request: runtimeengine.ExecutionRequest{
 					EntityID: identity.NormalizeEntityID(tt.entityID),
 					NodeID:   identity.NormalizeNodeID("build-orchestrator"),
-					Event: eventtest.RootIngress(
+					Event: eventtest.RunCreatingRootIngress(
 						"",
 						tt.concreteEvent,
 						"",
@@ -1023,7 +1023,7 @@ func TestPipelineEngineActionRunner_MailboxWriteMaterializesIdempotentRow(t *tes
 			},
 		},
 	}
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		eventID,
 		"mailbox.review_requested",
 		"",
@@ -1105,7 +1105,7 @@ func TestPipelineEngineActionRunner_MailboxWriteFailsClosedOnMissingRequiredExpr
 			Summary:  runtimecontracts.RefExpression("payload.missing_summary"),
 		},
 	}
-	evt := eventtest.RootIngress(eventID, "mailbox.review_requested", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{})
+	evt := eventtest.RunCreatingRootIngress(eventID, "mailbox.review_requested", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{})
 	base := values.NewContext()
 	base.Event = values.Wrap(evt.ContextMap(""))
 	base.Payload = values.Wrap(parsePayloadMap(evt.Payload()))
@@ -1293,8 +1293,8 @@ func TestPipelineEngineActionRunner_MockArtifactRepoCommitStopsBeforeActionLaunc
 				"33333333-3333-3333-3333-333333333333",
 				"44444444-4444-4444-4444-444444444444",
 				"name: Demo\n",
+				executionmode.Mock,
 			)
-			execCtx.Request.Event = eventtest.InExecutionMode(execCtx.Request.Event, executionmode.Mock)
 			launches := 0
 			runner := pipelineEngineActionRunner{
 				coordinator: pc,
@@ -2375,7 +2375,7 @@ func TestArtifactRepoPathRejectsUnsafeGenericSegments(t *testing.T) {
 }
 
 func testProjectionEventWithSourceAgent(evt events.Event, sourceAgent string) events.Event {
-	return eventtest.RootIngress(
+	return eventtest.RunCreatingRootIngress(
 		evt.ID(),
 		evt.Type(),
 		sourceAgent,
@@ -2489,13 +2489,17 @@ func requireArtifactRepoFailure(t testing.TB, value any, class runtimefailures.C
 	return failure
 }
 
-func testArtifactRepoActionAndContext(entityID string, entity map[string]any, eventID, requestID, content string) (runtimecontracts.ActionSpec, runtimeengine.ExecutionContext) {
+func testArtifactRepoActionAndContext(entityID string, entity map[string]any, eventID, requestID, content string, modes ...executionmode.Mode) (runtimecontracts.ActionSpec, runtimeengine.ExecutionContext) {
+	mode := executionmode.Live
+	if len(modes) > 0 {
+		mode = modes[0]
+	}
 	payload := map[string]any{
 		"request_id": requestID,
 		"mvp_yaml":   content,
 	}
 	payloadBytes, _ := json.Marshal(payload)
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngressWithMode(
 		eventID,
 		"artifact_repo.commit_requested",
 		"",
@@ -2506,6 +2510,7 @@ func testArtifactRepoActionAndContext(entityID string, entity map[string]any, ev
 		"",
 		events.EventEnvelope{EntityID: entityID},
 		time.Unix(1_700_000_000, 0).UTC(),
+		mode,
 	)
 
 	base := values.NewContext()
@@ -2644,7 +2649,7 @@ func TestPipelineEnginePayloadShaper_UsesParentEntityForCrossFlowOutputs(t *test
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"",
 			events.EventType("child/child.internal"),
 			"",
@@ -2698,7 +2703,7 @@ func TestPipelineEnginePayloadShaper_RejectsUndeclaredFieldsAcrossCrossFlowOutpu
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"",
 			events.EventType("child/child.internal"),
 			"",
@@ -2746,7 +2751,7 @@ func TestPipelineEnginePayloadShaper_AllowsDeclaredPayloadOnActionSurface(t *tes
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"",
 			events.EventType("child/child.internal"),
 			"",
@@ -2799,7 +2804,7 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnActionSurface
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"",
 			events.EventType("child/child.start"),
 			"",
@@ -2854,7 +2859,7 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemp
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"",
 			events.EventType("child/child.start"),
 			"",
@@ -2910,7 +2915,7 @@ func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnActionSur
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"",
 			events.EventType("child/child.start"),
 			"",
@@ -2987,7 +2992,7 @@ func TestPipelineEnginePayloadShaper_UsesRootNamedTypeSchemaForChildOutput(t *te
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"",
 			events.EventType("child/child.internal"),
 			"",
@@ -3052,7 +3057,7 @@ func TestPipelineEnginePayloadShaper_RejectsUndeclaredFieldsOnActionSurface(t *t
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"",
 			events.EventType("child/child.internal"),
 			"",

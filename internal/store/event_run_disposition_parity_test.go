@@ -38,6 +38,9 @@ func TestExistingRunEventClassesNeverCreateOrReopenRunsParity(t *testing.T) {
 		{name: "operator", make: func(in runDispositionFixtureInput) events.Event {
 			return eventtest.OperatorInjected(in.EventID, "test.operator", "operator", "", json.RawMessage(`{}`), 0, in.RunID, nil, events.EventEnvelope{}, in.OccurredAt)
 		}, exactDuplicate: true},
+		{name: "existing_run_root", make: func(in runDispositionFixtureInput) events.Event {
+			return eventtest.ExistingRunRootIngress(in.EventID, "test.existing_root", "ingress", "", json.RawMessage(`{}`), 0, in.RunID, events.EventEnvelope{}, in.OccurredAt)
+		}, exactDuplicate: true},
 		{name: "child", make: func(in runDispositionFixtureInput) events.Event {
 			return eventtest.ChildWithLineage(in.EventID, "test.child", "worker", "", json.RawMessage(`{}`), 1, events.EventLineage{RunID: in.RunID, ParentEventID: in.ParentID, ExecutionMode: executionmode.Live}, events.EventEnvelope{}, in.OccurredAt)
 		}, needsSameRunParent: true, exactDuplicate: true},
@@ -150,8 +153,8 @@ func TestOnlyRootAndStandaloneAdmissionCreateRunsParity(t *testing.T) {
 				make         func(runID string, at time.Time) events.Event
 				wantRunDelta int
 			}{
-				{name: "root", make: func(runID string, at time.Time) events.Event {
-					return eventtest.RootIngress(uuid.NewString(), "test.root", "ingress", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, at)
+				{name: "run_creating_root", make: func(runID string, at time.Time) events.Event {
+					return eventtest.RunCreatingRootIngress(uuid.NewString(), "test.root", "ingress", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, at)
 				}, wantRunDelta: 1},
 				{name: "standalone_runtime", make: func(_ string, at time.Time) events.Event {
 					return eventtest.RuntimeControl(uuid.NewString(), "platform.reset", "runtime", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, at)
@@ -181,6 +184,32 @@ func TestOnlyRootAndStandaloneAdmissionCreateRunsParity(t *testing.T) {
 					}
 				})
 			}
+		})
+	}
+}
+
+func TestRunCreatingRootRejectsTerminalRunParity(t *testing.T) {
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) authorActivityReceiptFixture
+	}{
+		{name: "sqlite", open: openSQLiteAuthorActivityReceiptFixture},
+		{name: "postgres", open: openPostgresAuthorActivityReceiptFixture},
+	} {
+		backend := backend
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			ctx := testAuthorActivityContext()
+			in := newRunDispositionFixtureInput()
+			seedAuthorActivityReceiptRun(t, fixture, ctx, in.RunID)
+			setRunDispositionFixtureStatus(t, fixture, ctx, in.RunID, "completed")
+			before := eventMutationSurfaceCounts(t, fixture.db, ctx)
+			event := eventtest.RunCreatingRootIngress(in.EventID, "test.root", "ingress", "", json.RawMessage(`{}`), 0, in.RunID, "", events.EventEnvelope{}, in.OccurredAt)
+			_, _, err := appendAdmittedBoundaryFixture(ctx, fixture.store, event)
+			if !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+				t.Fatalf("terminal-run error = %v, want run not active", err)
+			}
+			assertEventMutationCountsUnchanged(t, fixture.db, ctx, before, "terminal run-creating root refusal")
 		})
 	}
 }
@@ -348,7 +377,7 @@ func appendAdmittedBoundaryFixture(ctx context.Context, selected any, event even
 
 func seedRunDispositionParent(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context, runID, eventID string, at time.Time) {
 	t.Helper()
-	parent := eventtest.RootIngress(eventID, "test.parent", "ingress", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, at)
+	parent := eventtest.RunCreatingRootIngress(eventID, "test.parent", "ingress", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, at)
 	if err := insertCanonicalEventRecordFixture(ctx, fixture.store, parent); err != nil {
 		t.Fatalf("seed same-run parent: %v", err)
 	}

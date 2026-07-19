@@ -59,7 +59,7 @@ func registerRunStatusEventCatalog(t *testing.T, registrar runStatusEventCatalog
 func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, entityID string) string {
 	t.Helper()
 	eventID := uuid.NewString()
-	if err := bus.Publish(runStatusAuthorActivityContext(), eventtest.RootIngress(
+	if err := bus.Publish(runStatusAuthorActivityContext(), eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("scan.requested"),
 		"api.v1",

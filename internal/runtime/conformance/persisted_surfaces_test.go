@@ -1126,7 +1126,7 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 		store: pg,
 		missing: []events.PersistedReplayEvent{{
 			Event: eventtest.PersistedProjection(uuid.NewString(),
-				events.EventType("support.item_created"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
+				events.EventType("support.item_created"), "", "", nil, 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
 		}},
 		claimErr: errors.New("claim failed"),
 	}
@@ -1501,10 +1501,10 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		}},
 		pending: map[string][]events.Event{
 			"agent-a": {
-				eventtest.PersistedProjection("evt-replay", events.EventType("support.replay.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-4*time.Minute).UTC()),
-				eventtest.PersistedProjection("evt-skip", events.EventType("support.replay.skip"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC()),
-				eventtest.PersistedProjection("evt-leased", events.EventType("support.replay.leased"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
-				eventtest.PersistedProjection("evt-drop", events.EventType("support.replay.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
+				eventtest.PersistedProjection("evt-replay", events.EventType("support.replay.ok"), "", "", nil, 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now().Add(-4*time.Minute).UTC()),
+				eventtest.PersistedProjection("evt-skip", events.EventType("support.replay.skip"), "", "", nil, 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC()),
+				eventtest.PersistedProjection("evt-leased", events.EventType("support.replay.leased"), "", "", nil, 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
+				eventtest.PersistedProjection("evt-drop", events.EventType("support.replay.drop"), "", "", nil, 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
 			},
 		},
 		receipts: map[string]runtimemanager.EventReceipt{

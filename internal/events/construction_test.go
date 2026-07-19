@@ -62,11 +62,19 @@ var productionRuntimeConstructorAllowlist = map[runtimeConstructorCallsite]int{
 	{Path: "internal/store/runtime_log_persistence.go", Scope: "runtimeLogEvent", Constructor: "NewStandaloneDiagnosticDirectEvent"}:                                             1,
 }
 
+var productionRootConstructorAllowlist = map[runtimeConstructorCallsite]int{
+	{Path: "internal/apiv1/operator_event_publish.go", Scope: "eventPublicationEvent", Constructor: "NewRunCreatingRootIngressEvent"}: 1,
+	{Path: "internal/builder/runs_control.go", Scope: "runHub.startRun", Constructor: "NewRunCreatingRootIngressEvent"}:               1,
+	{Path: "internal/runtime/inbound.go", Scope: "projectInboundPublication", Constructor: "NewExistingRunRootIngressEvent"}:          1,
+	{Path: "internal/store/eventfixture/event.go", Scope: "ExistingRunRoot", Constructor: "NewExistingRunRootIngressEvent"}:           1,
+}
+
 func TestProductionEventConstructionUsesPublicAPI(t *testing.T) {
 	repoRoot := repositoryRoot(t)
 	projectionCallCounts := map[eventConstructorCallsite]int{}
 	routeProbeCallCounts := map[eventConstructorCallsite]int{}
 	runtimeCallCounts := map[runtimeConstructorCallsite]int{}
+	rootCallCounts := map[runtimeConstructorCallsite]int{}
 	for _, dir := range []string{"internal", "cmd"} {
 		root := filepath.Join(repoRoot, dir)
 		if _, err := os.Stat(root); err != nil {
@@ -88,7 +96,7 @@ func TestProductionEventConstructionUsesPublicAPI(t *testing.T) {
 			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 				return nil
 			}
-			checkProductionEventConstructionFile(t, repoRoot, path, projectionCallCounts, routeProbeCallCounts, runtimeCallCounts)
+			checkProductionEventConstructionFile(t, repoRoot, path, projectionCallCounts, routeProbeCallCounts, runtimeCallCounts, rootCallCounts)
 			return nil
 		}); err != nil {
 			t.Fatalf("walk %s: %v", root, err)
@@ -97,6 +105,7 @@ func TestProductionEventConstructionUsesPublicAPI(t *testing.T) {
 	assertExactConstructorAllowlist(t, "NewProjectionEvent", productionProjectionEventAllowlist, projectionCallCounts)
 	assertExactConstructorAllowlist(t, "NewRouteProbeEvent", productionRouteProbeEventAllowlist, routeProbeCallCounts)
 	assertExactRuntimeConstructorAllowlist(t, runtimeCallCounts)
+	assertExactRootConstructorAllowlist(t, rootCallCounts)
 }
 
 func TestTestEventFixturesUseFixtureBuilders(t *testing.T) {
@@ -136,9 +145,10 @@ func TestRemovedEventConstructionAliasesStayDeleted(t *testing.T) {
 		"NodeProducer": {}, "AgentProducer": {}, "PlatformProducer": {}, "ExternalProducer": {},
 		"EmptyEvent": {}, "NewProjectionEvent": {}, "NewRouteProbeEvent": {},
 		"NewRuntimeControlEvent": {}, "NewRuntimeDiagnosticEvent": {}, "NewDiagnosticDirectEvent": {},
+		"NewRootIngressEvent": {},
 	}
 	removedTypes := map[string]struct{}{
-		"RuntimeEventInput": {}, "DiagnosticDirectEventInput": {},
+		"RuntimeEventInput": {}, "DiagnosticDirectEventInput": {}, "RootIngressEventInput": {},
 	}
 	root := filepath.Join(repoRoot, "internal", "events")
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
@@ -206,6 +216,20 @@ func assertExactRuntimeConstructorAllowlist(t *testing.T, counts map[runtimeCons
 	}
 }
 
+func assertExactRootConstructorAllowlist(t *testing.T, counts map[runtimeConstructorCallsite]int) {
+	t.Helper()
+	for site, want := range productionRootConstructorAllowlist {
+		if got := counts[site]; got != want {
+			t.Fatalf("%s in %s has %d %s calls, want %d; classify every root lifecycle intent exactly", site.Scope, site.Path, got, site.Constructor, want)
+		}
+	}
+	for site, got := range counts {
+		if _, ok := productionRootConstructorAllowlist[site]; !ok {
+			t.Fatalf("%s in %s has %d unclassified %s calls; choose exact run-creating or existing-run root intent", site.Scope, site.Path, got, site.Constructor)
+		}
+	}
+}
+
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
 	wd, err := os.Getwd()
@@ -215,7 +239,7 @@ func repositoryRoot(t *testing.T) string {
 	return filepath.Clean(filepath.Join(wd, "..", ".."))
 }
 
-func checkProductionEventConstructionFile(t *testing.T, repoRoot, path string, projectionCallCounts, routeProbeCallCounts map[eventConstructorCallsite]int, runtimeCallCounts map[runtimeConstructorCallsite]int) {
+func checkProductionEventConstructionFile(t *testing.T, repoRoot, path string, projectionCallCounts, routeProbeCallCounts map[eventConstructorCallsite]int, runtimeCallCounts, rootCallCounts map[runtimeConstructorCallsite]int) {
 	t.Helper()
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, 0)
@@ -282,6 +306,13 @@ func checkProductionEventConstructionFile(t *testing.T, repoRoot, path string, p
 					}
 				}
 			case *ast.CallExpr:
+				if constructor, ok := rootConstructorCallName(node, eventAliases); ok {
+					site := runtimeConstructorCallsite{Path: relativePath, Scope: scope, Constructor: constructor}
+					if _, classified := productionRootConstructorAllowlist[site]; !classified {
+						t.Fatalf("%s:%d calls %s from unclassified production scope %s", relativePath, fset.Position(node.Pos()).Line, constructor, scope)
+					}
+					rootCallCounts[site]++
+				}
 				if constructor, ok := runtimeConstructorCallName(node, eventAliases); ok {
 					site := runtimeConstructorCallsite{Path: relativePath, Scope: scope, Constructor: constructor}
 					if _, classified := productionRuntimeConstructorAllowlist[site]; !classified {
@@ -337,7 +368,7 @@ func checkTestEventFixtureFile(t *testing.T, repoRoot, path string) {
 		if isPublishSurfaceCall(call) {
 			for _, arg := range call.Args {
 				if exprContainsEventtestPersistedProjection(arg, eventtestAliases, persistedProjectionVars) {
-					t.Fatalf("%s:%d passes eventtest.PersistedProjection to a publish/runtime producer API; use a runtime-intent fixture such as eventtest.RootIngress", relativePath, fset.Position(call.Pos()).Line)
+					t.Fatalf("%s:%d passes eventtest.PersistedProjection to a publish/runtime producer API; use a runtime-intent fixture such as eventtest.RunCreatingRootIngress", relativePath, fset.Position(call.Pos()).Line)
 				}
 			}
 		}
@@ -351,7 +382,7 @@ func checkTestEventFixtureFile(t *testing.T, repoRoot, path string) {
 			t.Fatalf("%s:%d calls events.%s directly in a test; use the matching internal/events/eventtest fixture builder outside internal/events constructor unit tests", relativePath, fset.Position(call.Pos()).Line, constructor)
 		}
 		if isEventtestProjectionCall(call, eventtestAliases) {
-			t.Fatalf("%s:%d calls eventtest.Projection in a test; choose eventtest.RootIngress, eventtest.ChildWithLineage, eventtest.Replay, runtime diagnostic/control helpers, or eventtest.PersistedProjection for persisted/readback fixtures", relativePath, fset.Position(call.Pos()).Line)
+			t.Fatalf("%s:%d calls eventtest.Projection in a test; choose eventtest.RunCreatingRootIngress, eventtest.ChildWithLineage, eventtest.Replay, runtime diagnostic/control helpers, or eventtest.PersistedProjection for persisted/readback fixtures", relativePath, fset.Position(call.Pos()).Line)
 		}
 		sel, ok := call.Fun.(*ast.SelectorExpr)
 		if !ok || !isEventProjectionMethod(sel.Sel.Name) {
@@ -485,13 +516,27 @@ func runtimeConstructorCallName(call *ast.CallExpr, eventAliases map[string]stru
 	}
 }
 
+func rootConstructorCallName(call *ast.CallExpr, eventAliases map[string]struct{}) (string, bool) {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || !isEventsPackageIdent(selector.X, eventAliases) {
+		return "", false
+	}
+	switch selector.Sel.Name {
+	case "NewRunCreatingRootIngressEvent", "NewExistingRunRootIngressEvent":
+		return selector.Sel.Name, true
+	default:
+		return "", false
+	}
+}
+
 func testEventConstructorCallName(call *ast.CallExpr, eventAliases map[string]struct{}) (string, bool) {
 	selector, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok || !isEventsPackageIdent(selector.X, eventAliases) {
 		return "", false
 	}
 	switch selector.Sel.Name {
-	case "NewRootIngressEvent",
+	case "NewRunCreatingRootIngressEvent",
+		"NewExistingRunRootIngressEvent",
 		"NewCausalRuntimeControlEvent",
 		"NewRunScopedRuntimeControlEvent",
 		"NewStandaloneRuntimeControlEvent",
@@ -618,7 +663,7 @@ func rhsProducesEventsEvent(expr ast.Expr, eventAliases map[string]struct{}) boo
 	case *ast.SelectorExpr:
 		if isEventsPackageIdent(fun.X, eventAliases) {
 			name := fun.Sel.Name
-			return name == "EmptyEvent" || name == "NewRootIngressEvent" || name == "NewCausalRuntimeControlEvent" ||
+			return name == "EmptyEvent" || name == "NewRunCreatingRootIngressEvent" || name == "NewExistingRunRootIngressEvent" || name == "NewCausalRuntimeControlEvent" ||
 				name == "NewRunScopedRuntimeControlEvent" || name == "NewStandaloneRuntimeControlEvent" ||
 				name == "NewCausalRuntimeDiagnosticEvent" || name == "NewRunScopedRuntimeDiagnosticEvent" || name == "NewStandaloneRuntimeDiagnosticEvent" ||
 				name == "NewCausalDiagnosticDirectEvent" || name == "NewRunCreatingDiagnosticDirectEvent" || name == "NewRunScopedDiagnosticDirectEvent" || name == "NewStandaloneDiagnosticDirectEvent" ||

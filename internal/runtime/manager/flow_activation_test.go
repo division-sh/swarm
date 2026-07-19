@@ -433,7 +433,7 @@ func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, temp
 	return runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: semanticview.Wrap(bundle),
 		Instance:       instance,
-		TriggerEvent: eventtest.RootIngress(
+		TriggerEvent: eventtest.RunCreatingRootIngress(
 			"77777777-7777-4777-8777-777777777777", events.EventType("spawn.requested"),
 			"spawner", "", json.RawMessage(`{}`), 0,
 			"77777777-7777-4777-8777-777777777778", "", events.EventEnvelope{}, time.Now().UTC(),
@@ -442,13 +442,17 @@ func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, temp
 }
 
 func testFlowActivationTriggerEvent(eventID string, runIDs ...string) events.Event {
+	return testFlowActivationTriggerEventWithMode(eventID, executionmode.Live, runIDs...)
+}
+
+func testFlowActivationTriggerEventWithMode(eventID string, mode executionmode.Mode, runIDs ...string) events.Event {
 	runID := "77777777-7777-4777-8777-777777777778"
 	if len(runIDs) > 0 {
 		runID = strings.TrimSpace(runIDs[0])
 	}
-	return eventtest.RootIngress(strings.TrimSpace(eventID),
+	return eventtest.RunCreatingRootIngressWithMode(strings.TrimSpace(eventID),
 		events.EventType("spawn.requested"),
-		"spawner", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+		"spawner", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC(), mode)
 
 }
 
@@ -472,7 +476,7 @@ func findPublishedFlowActivationEvent(t *testing.T, bus *flowActivationTestBus, 
 		}
 	}
 	t.Fatalf("published events = %#v, want %s", bus.published, eventType)
-	return eventtest.RootIngress("", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	return eventtest.RunCreatingRootIngress("", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 }
 
 func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
@@ -626,7 +630,7 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	const triggerEventID = "33333333-3333-3333-3333-333333333333"
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.TriggerEvent = eventtest.InExecutionMode(testFlowActivationTriggerEvent(triggerEventID, runID), executionmode.Mock)
+	req.TriggerEvent = testFlowActivationTriggerEventWithMode(triggerEventID, executionmode.Mock, runID)
 
 	err := am.ActivateFlowInstance(ctx, req)
 	if err != nil {

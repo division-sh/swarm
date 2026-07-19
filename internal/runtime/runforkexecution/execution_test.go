@@ -401,7 +401,7 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 
 	sourceEventID := uuid.NewString()
 	payload := json.RawMessage(`{"candidate":"candidate-1"}`)
-	sourceEvent := eventtest.RootIngress(
+	sourceEvent := eventtest.RunCreatingRootIngress(
 		sourceEventID,
 		events.EventType(loaded.Source.ResolveFlowEventReference("producer", "validation.triggered")),
 		sourceRunID,
@@ -480,7 +480,7 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 		t.Fatalf("seed control run: %v", err)
 	}
 	controlEventID := uuid.NewString()
-	controlEvent := eventtest.RootIngress(
+	controlEvent := eventtest.RunCreatingRootIngress(
 		controlEventID,
 		events.EventType(loaded.Source.ResolveFlowEventReference("producer", "validation.triggered")),
 		controlRunID,
@@ -1505,7 +1505,7 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at) VALUES ($1::uuid,'running',$3),($2::uuid,'paused',$3)`, sourceRunID, forkRunID, now); err != nil {
 		t.Fatalf("seed selected-fork proof runs: %v", err)
 	}
-	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, forkEventID, sourceRunID, "selected.proof",
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, forkEventID, sourceRunID, "selected.proof",
 		eventtest.Producer(events.EventProducerExternal, "selected-proof"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings
@@ -1787,7 +1787,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at) VALUES ($1::uuid,'running',$3),($2::uuid,'paused',$3)`, sourceRunID, forkRunID, now); err != nil {
 		t.Fatalf("seed selected-contract container competition runs: %v", err)
 	}
-	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, forkEventID, sourceRunID, "selected.test",
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, forkEventID, sourceRunID, "selected.test",
 		eventtest.Producer(events.EventProducerExternal, "selected-test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings
@@ -3077,7 +3077,7 @@ func TestExecuteSelectedContractRunForkBranchesWhenSourceAdvancedAfterForkPoint(
 	at := time.Unix(1700002350, 0).UTC()
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
-	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, afterEventID, sourceRunID, "source.after",
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, afterEventID, sourceRunID, "source.after",
 		eventtest.Producer(events.EventProducerExternal, "source-runtime"), []byte(`{}`),
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at.Add(time.Second))
 	if _, err := db.ExecContext(ctx, `
@@ -3765,7 +3765,7 @@ func seedSelectedExecutionSourceRun(t *testing.T, db *sql.DB, sourceRunID, entit
 	`, sourceRunID, runForkTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	storetest.InsertRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, sourceEventID, sourceRunID, events.EventType(eventName),
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, sourceEventID, sourceRunID, events.EventType(eventName),
 		eventtest.Producer(events.EventProducerExternal, "source-runtime"), payload,
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at)
 	if _, err := db.ExecContext(ctx, `
@@ -3867,7 +3867,7 @@ func seedSelectedExecutionSourceReplayScopeMarker(t *testing.T, db *sql.DB, sour
 
 func seedSelectedExecutionPostForkSourceEvent(t *testing.T, db *sql.DB, sourceRunID, sourceEventID, entityID string, at time.Time) {
 	t.Helper()
-	storetest.InsertRootEventRecord(t, context.Background(), db, runtimeauthoractivity.DialectPostgres, sourceEventID, sourceRunID, "source.after",
+	storetest.InsertExistingRunRootEventRecord(t, context.Background(), db, runtimeauthoractivity.DialectPostgres, sourceEventID, sourceRunID, "source.after",
 		eventtest.Producer(events.EventProducerExternal, "source-runtime"), []byte(`{}`),
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at)
 }

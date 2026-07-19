@@ -36,7 +36,7 @@ func TestConnectSourceEndpointMatchesEventUsesImmutableSourceAcrossTargetProject
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, source)
-			evt := eventtest.RootIngress("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", envelope, time.Unix(1, 0).UTC())
+			evt := eventtest.RunCreatingRootIngress("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", envelope, time.Unix(1, 0).UTC())
 			evt = eventtest.TargetRouted(evt, tc.target)
 			if !ConnectSourceEndpointMatchesEvent(endpoint, evt) {
 				t.Fatalf("source endpoint did not match immutable producer route; envelope = %#v", evt.NormalizedEnvelope())
@@ -54,7 +54,7 @@ func TestConnectSourceEndpointMatchesEventRejectsTargetIdentityAsSource(t *testi
 	}
 	target := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/inst-9", EntityID: "consumer-entity"}
 	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "producer-entity"})
-	evt := eventtest.RootIngress("", "deploy.done", "", "", []byte(`{}`), 0, "", "", envelope, time.Unix(1, 0).UTC())
+	evt := eventtest.RunCreatingRootIngress("", "deploy.done", "", "", []byte(`{}`), 0, "", "", envelope, time.Unix(1, 0).UTC())
 	evt = eventtest.TargetRouted(evt, target)
 	if ConnectSourceEndpointMatchesEvent(endpoint, evt) {
 		t.Fatalf("consumer target matched as producer source; envelope = %#v", evt.NormalizedEnvelope())
@@ -69,7 +69,7 @@ func TestConnectSourceEndpointMatchesEventRejectsConcreteInstanceWithoutSourceRo
 		Event:         "deploy.done",
 		ResolvedEvent: "producer/deploy.done",
 	}
-	evt := eventtest.RootIngress("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt := eventtest.RunCreatingRootIngress("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	if ConnectSourceEndpointMatchesEvent(endpoint, evt) {
 		t.Fatalf("concrete instance event matched without authoritative source route; envelope = %#v", evt.NormalizedEnvelope())
 	}
@@ -131,7 +131,7 @@ func TestConnectSourceEndpointMatchesEventEnforcesRootSourceContextMatrix(t *tes
 		t.Run(tc.name, func(t *testing.T) {
 			envelope := events.EventEnvelope{FlowInstance: tc.flowInstance}
 			envelope = events.EnvelopeForSourceRoute(envelope, tc.source)
-			evt := eventtest.RootIngress("", events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", envelope, time.Unix(1, 0).UTC())
+			evt := eventtest.RunCreatingRootIngress("", events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", envelope, time.Unix(1, 0).UTC())
 			if !tc.target.Empty() {
 				evt = eventtest.TargetRouted(evt, tc.target)
 			}

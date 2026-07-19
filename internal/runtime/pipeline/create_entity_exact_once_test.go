@@ -45,7 +45,7 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			bus := pc.bus.(*recordingPipelineBus)
 			mailbox := pc.mailboxMaterializer.(*recordingMailboxWriteMaterializer)
 			eventID := uuid.NewString()
-			evt := eventtest.RootIngress(eventID,
+			evt := eventtest.RunCreatingRootIngress(eventID,
 				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EventEnvelope{}, time.Now().UTC())
 
 			seedExactOnceEvent(t, pc.workflowStore, ctx, evt)
@@ -140,7 +140,7 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 			bus := pc.bus.(*recordingPipelineBus)
 			mailbox := pc.mailboxMaterializer.(*recordingMailboxWriteMaterializer)
 			eventID := uuid.NewString()
-			evt := eventtest.RootIngress(eventID,
+			evt := eventtest.RunCreatingRootIngress(eventID,
 				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EventEnvelope{}, time.Now().UTC())
 
 			seedExactOnceEventDelivery(t, pc.workflowStore, ctx, evt, "w-node")

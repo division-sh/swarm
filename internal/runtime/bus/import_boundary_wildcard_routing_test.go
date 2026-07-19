@@ -44,14 +44,14 @@ func TestImportBoundaryWildcardScopesImportedPackageToOwnSubtreeByDefault(t *tes
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	local := eventtest.RootIngress(eventtest.UUID("evt-worker-local"), "worker/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	local := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-worker-local"), "worker/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	if err := eb.Publish(context.Background(), local); err != nil {
 		t.Fatalf("Publish local: %v", err)
 	}
 	if got := store.deliveries[eventtest.UUID("evt-worker-local")]; len(got) != 1 || got[0] != "worker-listener" {
 		t.Fatalf("local persisted deliveries = %#v, want worker-listener", got)
 	}
-	sibling := eventtest.RootIngress(eventtest.UUID("evt-producer-sibling"), "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	sibling := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-producer-sibling"), "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	if err := eb.Publish(context.Background(), sibling); err != nil {
 		t.Fatalf("Publish sibling: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestImportBoundaryWildcardObserveGrantAddsNarrowSiblingCandidate(t *testing
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := eventtest.RootIngress(eventtest.UUID("evt-granted-sibling"), "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-granted-sibling"), "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -175,7 +175,7 @@ func TestImportBoundaryWildcardBoundedGrantDeliversAcrossSurfaces(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	nonIntersecting := eventtest.RootIngress(eventtest.UUID("evt-bounded-grant-non-intersection"), "producer/task.failed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	nonIntersecting := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-bounded-grant-non-intersection"), "producer/task.failed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	if err := eb.Publish(context.Background(), nonIntersecting); err != nil {
 		t.Fatalf("Publish non-intersecting bounded grant event: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 			if eb.RouteTable().HasFlowInstanceRoute(collisionIdentity) {
 				t.Fatal("colliding EventBus instance route was installed")
 			}
-			staticEvent := eventtest.RootIngress(eventtest.UUID(eventtest.UUID("evt-static-descendant-")+strings.ReplaceAll(tc.name, " ", "-")), "producer/child/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+			staticEvent := eventtest.RunCreatingRootIngress(eventtest.UUID(eventtest.UUID("evt-static-descendant-")+strings.ReplaceAll(tc.name, " ", "-")), "producer/child/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 			staticPlan, err := eb.CheckPublishRecipientPlan(context.Background(), staticEvent)
 			if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan static descendant: %v", err)
@@ -360,7 +360,7 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 				t.Fatalf("existing sibling route after rejected collision = %#v, want unchanged authority", got)
 			}
 
-			evt := eventtest.RootIngress(eventtest.UUID(eventtest.UUID("evt-template-grant-")+strings.ReplaceAll(tc.name, " ", "-")), "producer/inst-1/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+			evt := eventtest.RunCreatingRootIngress(eventtest.UUID(eventtest.UUID("evt-template-grant-")+strings.ReplaceAll(tc.name, " ", "-")), "producer/inst-1/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 			plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 			if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -504,7 +504,7 @@ func assertImportBoundaryWildcardAuthorizationDeliversAcrossSurfaces(t *testing.
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := eventtest.RootIngress(eventtest.UUID("evt-grant-delivery"), "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-grant-delivery"), "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)

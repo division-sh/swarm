@@ -63,7 +63,7 @@ func selectedForkToolContext(actor models.AgentConfig) context.Context {
 		Classification:      runtimecorrelation.RuntimeLineageClassificationForkLocal,
 		SelectedForkContext: true,
 	})
-	return runtimebus.WithInboundEvent(ctx, eventtest.RootIngress(
+	return runtimebus.WithInboundEvent(ctx, eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("validation/validation.package_ready"),
 		"",
@@ -374,7 +374,7 @@ func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) 
 			"category.assessed",
 		},
 	})
-	ctx = runtimebus.WithInboundEvent(ctx, eventtest.RootIngress(
+	ctx = runtimebus.WithInboundEvent(ctx, eventtest.RunCreatingRootIngress(
 		"evt-inbound",
 		events.EventType("trigger.input"),
 		"",
@@ -531,7 +531,7 @@ func TestExecutorTelemetry_EmitToolLogsUndeclaredFieldSchemaValidationFailure(t 
 			"category.assessed",
 		},
 	})
-	ctx = runtimebus.WithInboundEvent(ctx, eventtest.RootIngress(
+	ctx = runtimebus.WithInboundEvent(ctx, eventtest.RunCreatingRootIngress(
 		"evt-inbound",
 		events.EventType("trigger.input"),
 		"",

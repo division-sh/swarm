@@ -31,7 +31,7 @@ func TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback
 		FlowInstance: singletoncoordinatorpilot.FlowInstance,
 		EntityID:     entityID,
 	}
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType(singletoncoordinatorpilot.InputEvent),
 		singletoncoordinatorpilot.FlowID,

@@ -1870,7 +1870,7 @@ func acceptedTelegramInboundDeliveryEvent(t *testing.T, entityID, runID string) 
 	if err != nil {
 		t.Fatalf("marshal inbound delivery payload: %v", err)
 	}
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewSHA1(uuid.NameSpaceURL, []byte("swarm:telegram-inbound:"+delivery.ProviderEventID)).String(),
 		delivery.Events[0].Name,
 		"telegram",

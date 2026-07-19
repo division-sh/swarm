@@ -209,5 +209,5 @@ func TestWorkflowInstanceOwnedByFlow_UsesExactSemanticScope(t *testing.T) {
 }
 
 func mustEvent(eventType, entityID string) Event {
-	return eventtest.RootIngress("", events.EventType(eventType), "", "", nil, 0, "", "", events.EventEnvelope{EntityID: entityID}, time.Time{})
+	return eventtest.RunCreatingRootIngress("", events.EventType(eventType), "", "", nil, 0, "", "", events.EventEnvelope{EntityID: entityID}, time.Time{})
 }

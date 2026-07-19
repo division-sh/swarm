@@ -489,7 +489,7 @@ func projectInboundPublication(target InboundTarget, admitted providertriggers.A
 		if output.Kind == providertriggers.OutputKindRaw {
 			envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{EntityID: request.EntityID, FlowInstance: target.FlowInstance})
 		}
-		event, err := events.NewRootIngressEvent(events.RootIngressEventInput{Facts: events.EventFacts{
+		event, err := events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: events.EventFacts{
 			ID: eventID, Type: output.Name, Producer: events.ProducerClaim{Type: events.EventProducerExternal, ID: "inbound-gateway"},
 			Payload: mustJSON(output.Payload), Envelope: envelope, RoutingSource: routingSource,
 			CreatedAt: now, ExecutionMode: executionmode.Live,

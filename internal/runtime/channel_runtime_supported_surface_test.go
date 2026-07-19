@@ -326,7 +326,7 @@ func configuredChannelExecutor(source semanticview.Source, binding packs.Outboun
 
 func configuredChannelCallContext(t *testing.T, ctx context.Context, selectedStore any, actor models.AgentConfig, runID, entityID, flowInstance, operationID string) context.Context {
 	t.Helper()
-	inbound := eventtest.RootIngress(
+	inbound := eventtest.RunCreatingRootIngress(
 		uuid.NewSHA1(uuid.NameSpaceURL, []byte(runID+"\x00"+operationID)).String(),
 		events.EventType("channel.requested"), actor.ID, operationID, json.RawMessage(`{}`), 0, runID, "",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), flowInstance), time.Now().UTC(),

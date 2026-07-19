@@ -49,7 +49,7 @@ func TestFormatEventForAgent_DoesNotNarrateIndependentToolSurface(t *testing.T) 
 		FlowID:        "task",
 		Tools:         []string{"schedule", "get_entity", "emit_example"},
 	}
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		"evt-1",
 		"item.created",
 		"runtime",
@@ -95,7 +95,7 @@ func TestFormatEventForAgent_DoesNotNarrateNativeBuiltinSurface(t *testing.T) {
 			Bash:   true,
 		},
 	}
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		"evt-1",
 		"item.created",
 		"runtime",
@@ -126,7 +126,7 @@ func TestFormatEventForAgent_DoesNotAdvertiseCLIOnlyControlTools(t *testing.T) {
 		Role:          "operator",
 		FlowID:        "task",
 	}
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		"evt-1",
 		"item.created",
 		"runtime",
@@ -482,7 +482,7 @@ func TestLLMAgent_OnEvent_UsesSinglePostStepExecutionPath(t *testing.T) {
 		nil,
 	)
 
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		"evt-1",
 		"analysis/requested",
 		"runtime",
@@ -507,7 +507,7 @@ type boardEmitExecutor struct{}
 
 func (boardEmitExecutor) Execute(ctx context.Context, name string, input any) (any, error) {
 	if rec, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && rec != nil {
-		rec.Append(eventtest.RootIngress("", events.EventType(strings.TrimPrefix(name, "emit_")), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+		rec.Append(eventtest.RunCreatingRootIngress("", events.EventType(strings.TrimPrefix(name, "emit_")), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	}
 	return map[string]any{"ok": true, "name": name, "input": input}, nil
 }
@@ -722,7 +722,7 @@ func TestLLMAgentOnEvent_FiltersRoleScopedToolsByTurnEntityEligibility(t *testin
 		t.Fatalf("factory: %v", err)
 	}
 	llmAgent := agent.(*LLMAgent)
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		"evt-root",
 		events.EventType("discovery/market_research.corpus_file_assigned"),
 		"",
@@ -984,7 +984,7 @@ func TestLLMAgent_StatelessTurnBudgetFailureResetsConversationAndRetries(t *test
 		nil,
 	)
 
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		"evt-1",
 		"validation/spec_review.requested",
 		"runtime",
@@ -1037,7 +1037,7 @@ func TestLLMAgent_OnEvent_SeedsRunIDIntoConversationContext(t *testing.T) {
 		nil,
 	)
 
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		"evt-1",
 		"scoring/scoring.requested",
 		"runtime",

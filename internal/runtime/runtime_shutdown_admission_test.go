@@ -165,7 +165,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress(eventtest.UUID("runtime-shutdown-inbound-1"),
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RunCreatingRootIngress(eventtest.UUID("runtime-shutdown-inbound-1"),
 		events.EventType("test.in"),
 		"tester", "", nil, 0, eventtest.UUID("runtime-shutdown-run-1"), "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -261,7 +261,7 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RootIngress(eventtest.UUID("runtime-shutdown-grace-inbound-1"),
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RunCreatingRootIngress(eventtest.UUID("runtime-shutdown-grace-inbound-1"),
 		events.EventType("test.in"),
 		"tester", "", nil, 0, eventtest.UUID("runtime-shutdown-grace-run-1"), "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)

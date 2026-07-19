@@ -200,7 +200,7 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 				t.Helper()
 				eventID := uuid.NewString()
 				payload := []byte(`{}`)
-				evt := eventtest.RootIngress(
+				evt := eventtest.RunCreatingRootIngress(
 					eventID, events.EventType(eventType), "operator", "", payload, 0,
 					runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), eventAt,
 				)
@@ -286,7 +286,7 @@ func TestWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores(t *test
 				}
 				eventID := uuid.NewString()
 				eventAt := createdAt.Add(eventOffset * time.Minute)
-				evt := eventtest.RootIngress(
+				evt := eventtest.RunCreatingRootIngress(
 					eventID, events.EventType(eventType), "operator", "", payload, 0,
 					runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 					eventAt,
@@ -399,7 +399,7 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 				t.Helper()
 				payload := []byte(fmt.Sprintf(`{"revision_id":%q}`, revisionID))
 				eventAt := createdAt.Add(time.Minute)
-				evt := eventtest.RootIngress(
+				evt := eventtest.RunCreatingRootIngress(
 					eventID, events.EventType(eventType), "operator", "",
 					payload, 0, runID, "",
 					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), eventAt,
@@ -1331,7 +1331,7 @@ func persistWorkflowTimerEvent(
 	if store.isSQLite() {
 		dialect = runtimeauthoractivity.DialectSQLite
 	}
-	event := eventtest.RootIngress(
+	event := eventtest.RunCreatingRootIngress(
 		eventID, events.EventType(eventType), "operator", "", payload, 0, runID, "",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), createdAt.UTC(),
 	)

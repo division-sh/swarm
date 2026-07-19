@@ -642,7 +642,7 @@ func newActivityBoringSourceEvent(entityID, runID, inputURL string) events.Event
 	if strings.TrimSpace(runID) == "" {
 		runID = testPipelineRunID
 	}
-	return eventtest.RootIngress(
+	return eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("source.requested"),
 		"source",

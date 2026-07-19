@@ -177,7 +177,7 @@ func TestBudgetTrackerActiveWorkThresholdPreservesInboundLineage(t *testing.T) {
 	}}})
 	tracker := NewBudgetTracker(spendStore, bus, &config.Config{Extensions: map[string]any{"budget": map[string]any{"system_monthly_cap": 1}}}, nil, nil, source)
 	runID, parentID := uuid.NewString(), uuid.NewString()
-	inbound := eventtest.InExecutionMode(eventtest.RootIngress(parentID, "work.received", "gateway", "task-1", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()), executionmode.Mock)
+	inbound := eventtest.RunCreatingRootIngressWithMode(parentID, "work.received", "gateway", "task-1", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC(), executionmode.Mock)
 	ctx := runtimecorrelation.WithInboundEvent(testAuthorActivityContext(context.Background()), inbound)
 
 	tracker.ProjectCommittedCompletionSpend(ctx, runtimeeffects.CompletionSpendProjection{AttemptID: "attempt-contextual"})

@@ -47,7 +47,7 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInput
 		FlowInstance: flowInstance,
 		EntityID:     entityID,
 	}
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType(finalflowinstanceauthoring.ProducerFlowID+"/"+finalflowinstanceauthoring.ProducerOutput),
 		finalflowinstanceauthoring.ProducerFlowID,

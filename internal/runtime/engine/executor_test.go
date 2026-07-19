@@ -253,7 +253,7 @@ func structuredRendererExecutionRequest(t *testing.T, moduleSpec *runtimecontrac
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 		NodeID:   identity.NodeID("render-node"),
 		FlowID:   identity.FlowID("render"),
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			events.EventType("render.requested"),
 			"",
@@ -596,7 +596,7 @@ func TestExecutorTimerReconciliationRequiresExactEventAuthority(t *testing.T) {
 	})}}
 	frame := executor.newExecutionFrame(stubTx{ctx: context.Background()}, ExecutionRequest{
 		EntityID: "entity-1",
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"event-1", "work.received", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{},
 		),
 		State: StateSnapshot{CurrentState: "waiting"},
@@ -615,7 +615,7 @@ func TestExecutorTimerReconciliationCarriesOnlyActualTransitionTarget(t *testing
 	createdAt := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
 	frame := executor.newExecutionFrame(stubTx{ctx: context.Background()}, ExecutionRequest{
 		EntityID: "entity-1",
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"event-1", "work.noted", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, createdAt,
 		),
 		State: StateSnapshot{CurrentState: "waiting"},
@@ -1026,7 +1026,7 @@ func TestExecutor_LoadsStateInsideEntityLock(t *testing.T) {
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 		NodeID:   identity.NodeID("node-1"),
 		FlowID:   identity.FlowID("flow-1"),
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			events.EventType("test.event"),
 			"",
@@ -1099,7 +1099,7 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 		NodeID:   identity.NodeID("scoring-node"),
 		FlowID:   identity.FlowID("scoring"),
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			events.EventType("scoring/score.dimension_complete"),
 			"",
@@ -1261,7 +1261,7 @@ func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t 
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "scoring-node",
-		Event: eventtest.RootIngress("evt-1",
+		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"score.dimension_complete", "", "", json.RawMessage(`{"vertical_id":"11111111-1111-1111-1111-111111111111","dimension":"market","tier":2,"score":87,"evidence":"strong","confidence":"high"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 
 		Handler: handler,
@@ -1471,7 +1471,7 @@ func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitField
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "scoring-node",
-		Event: eventtest.RootIngress("evt-1",
+		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"score.dimension_complete", "", "", json.RawMessage(`{"vertical_id":"11111111-1111-1111-1111-111111111111","dimension":"market","tier":2,"score":87,"evidence":"strong","confidence":"high","targets":["agent-a"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: handler,
 		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
@@ -1526,7 +1526,7 @@ func executeAccumulatorProjectionTestEvent(t *testing.T, exec *Executor, handler
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "scoring-node",
-		Event: eventtest.RootIngress("evt-1",
+		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"score.dimension_complete", "", "", json.RawMessage(`{"vertical_id":"11111111-1111-1111-1111-111111111111","dimension":"market","tier":2,"score":87,"evidence":"strong","confidence":"high"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: handler,
 		State:   state,
@@ -1584,7 +1584,7 @@ func TestExecutor_AccumulatorProjectionMaterializesForQualifiedRuntimeEvent(t *t
 		EntityID: "entity-1",
 		NodeID:   "scoring-node",
 		FlowID:   "scoring",
-		Event: eventtest.RootIngress("evt-1",
+		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"scoring/score.dimension_complete", "", "", json.RawMessage(`{"dimension":"market","score":87}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 
 		HandlerEventKey: "score.dimension_complete",
@@ -1639,7 +1639,7 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 		EntityID: "entity-1",
 		NodeID:   "lifecycle-orchestrator",
 		FlowID:   "operating",
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"evt-a",
 			"component-scaffold/a/component.scaffolded",
 			"",
@@ -1668,7 +1668,7 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 		EntityID: "entity-1",
 		NodeID:   "lifecycle-orchestrator",
 		FlowID:   "operating",
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"evt-b",
 			"component-scaffold/b/component.scaffolded",
 			"",
@@ -1738,7 +1738,7 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{Join: &spec}
 	first, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1", NodeID: "join-node", FlowID: "orders", HandlerEventKey: "item.completed", Handler: handler,
-		Event: eventtest.RootIngress("evt-b", "item.completed", "", "", json.RawMessage(`{"member_id":"b","result":{"score":2}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now),
+		Event: eventtest.RunCreatingRootIngress("evt-b", "item.completed", "", "", json.RawMessage(`{"member_id":"b","result":{"score":2}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now),
 		State: testStateSnapshot("awaiting", map[string]any{"expected": []any{"a", "b"}}, nil, buckets),
 	})
 	if err != nil {
@@ -1749,7 +1749,7 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 	}
 	second, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1", NodeID: "join-node", FlowID: "orders", HandlerEventKey: "item.completed", Handler: handler,
-		Event: eventtest.RootIngress("evt-a", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{"score":1}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now.Add(time.Second)),
+		Event: eventtest.RunCreatingRootIngress("evt-a", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{"score":1}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now.Add(time.Second)),
 		State: testStateSnapshot("awaiting", map[string]any{"expected": []any{"a", "b"}}, nil, first.StateMutation.StateCarrier.StateBuckets),
 	})
 	if err != nil {
@@ -1811,7 +1811,7 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "portfolio/portfolio", NodeID: "portfolio-collector", FlowID: "portfolio", HandlerEventKey: "operating.reported", Handler: rawHandler,
-		Event: eventtest.RootIngress("evt-operating-a", "operating.reported", "", "", json.RawMessage(`{"operating_id":"operating-a","period_id":"2026-Q3","revenue":42}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "portfolio/portfolio"), now),
+		Event: eventtest.RunCreatingRootIngress("evt-operating-a", "operating.reported", "", "", json.RawMessage(`{"operating_id":"operating-a","period_id":"2026-Q3","revenue":42}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "portfolio/portfolio"), now),
 		State: testStateSnapshot("awaiting", map[string]any{"expected_operating_ids": []any{"operating-a"}, "period_id": "2026-Q3"}, nil, buckets),
 	})
 	if err != nil {
@@ -1867,7 +1867,7 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 			}
 			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID: "entity-1", NodeID: "join-node", FlowID: "orders", HandlerEventKey: "item.completed", Handler: runtimecontracts.SystemNodeEventHandler{Join: &spec},
-				Event: eventtest.RootIngress("evt-a", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{"score":1}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now),
+				Event: eventtest.RunCreatingRootIngress("evt-a", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{"score":1}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now),
 				State: testStateSnapshot("awaiting", map[string]any{"expected": []any{"a"}}, nil, buckets),
 			})
 			if tc.wantErr {
@@ -1909,7 +1909,7 @@ func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) 
 		EntityID: "entity-1",
 		NodeID:   "lifecycle-orchestrator",
 		FlowID:   "operating",
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"evt-b",
 			"component-scaffold/b/component.scaffolded",
 			"",
@@ -1978,7 +1978,7 @@ func TestExecutor_PolicySheetLookupRowFeedsSelectionRow(t *testing.T) {
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 		NodeID:   identity.NodeID("repo-scaffold"),
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			events.EventType("repo.scaffold_requested"),
 			"",
@@ -2064,7 +2064,7 @@ func TestExecutor_PolicySheetComputeModuleRowFeedsSelectionRow(t *testing.T) {
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 		NodeID:   identity.NodeID("render-node"),
 		FlowID:   identity.FlowID("render"),
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			events.EventType("render.requested"),
 			"",
@@ -2464,7 +2464,7 @@ func TestExecutor_PolicySheetValidateRowFeedsSelectionRow(t *testing.T) {
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 		NodeID:   identity.NodeID("deploy-node"),
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			events.EventType("deploy.requested"),
 			"",
@@ -2588,7 +2588,7 @@ func TestExecutor_PolicySheetValidateNumericEqualityCanonicalizesRuntimeValues(t
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 		NodeID:   identity.NodeID("deploy-node"),
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			events.EventType("deploy.requested"),
 			"",
@@ -2658,7 +2658,7 @@ func TestExecutor_AccumulatorProjectionFailsClosedWhenDeclaredBindingDoesNotReso
 		EntityID: "entity-1",
 		NodeID:   "scoring-node",
 		FlowID:   "scoring",
-		Event: eventtest.RootIngress("evt-1",
+		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"scoring/score.unregistered_dimension_complete", "", "", json.RawMessage(`{"dimension":"market","score":87}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 
 		Handler: handler,
@@ -2791,7 +2791,7 @@ func TestExecutor_ActivityIntentPersistsBeforePostCommitDispatch(t *testing.T) {
 		NodeID:          identity.NormalizeNodeID("scanner"),
 		FlowID:          identity.NormalizeFlowID("research"),
 		HandlerEventKey: "source.requested",
-		Event:           eventtest.RootIngress("evt-1", "source.requested", "", "task-1", json.RawMessage(`{"url":"https://example.com"}`), 2, "run-1", "", events.EventEnvelope{}, time.Time{}),
+		Event:           eventtest.RunCreatingRootIngress("evt-1", "source.requested", "", "task-1", json.RawMessage(`{"url":"https://example.com"}`), 2, "run-1", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Activity: runtimecontracts.ActivitySpec{
 				Tool: "source_scrape",
@@ -2845,7 +2845,7 @@ func TestExecutor_ActivityDispatchDoesNotRunWhenIntentPersistenceFails(t *testin
 		NodeID:          identity.NormalizeNodeID("scanner"),
 		FlowID:          identity.NormalizeFlowID("research"),
 		HandlerEventKey: "source.requested",
-		Event:           eventtest.RootIngress("evt-1", "source.requested", "", "", json.RawMessage(`{"url":"https://example.com"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:           eventtest.RunCreatingRootIngress("evt-1", "source.requested", "", "", json.RawMessage(`{"url":"https://example.com"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Activity: runtimecontracts.ActivitySpec{
 				Tool: "source_scrape",
@@ -2885,7 +2885,7 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "done",
 			ClearGates: []string{"gate_a"},
@@ -2953,7 +2953,7 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"items":[{"score":60,"active":true},{"score":40,"active":true},{"score":60,"active":false}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"items":[{"score":60,"active":true},{"score":40,"active":true},{"score":60,"active":false}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Query: &runtimecontracts.QuerySpec{
 				Source:  "payload.items",
@@ -3026,7 +3026,7 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-2", "digest.requested", "", "", json.RawMessage(`{"items":[{"status":"queued"},{"status":"queued"},{"status":"done"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-2", "digest.requested", "", "", json.RawMessage(`{"items":[{"status":"queued"},{"status":"queued"},{"status":"done"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Query: &runtimecontracts.QuerySpec{
 				Source:  "payload.items",
@@ -3065,7 +3065,7 @@ func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-2", "digest.requested", "", "", json.RawMessage(`{"score":5,"items":[{"score":7},{"score":5}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-2", "digest.requested", "", "", json.RawMessage(`{"score":5,"items":[{"score":7},{"score":5}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Query: &runtimecontracts.QuerySpec{
 				Source:  "payload.items",
@@ -3104,7 +3104,7 @@ func TestExecutor_FilterRejectsUnqualifiedConditionField(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"score":5,"items":[{"score":7}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"score":5,"items":[{"score":7}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Filter: &runtimecontracts.FilterSpec{
 				ItemsFrom: "payload.items",
@@ -3145,7 +3145,7 @@ func TestExecutor_GuardRecursesAndUsesRegistryCheck(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
 				Checks: []runtimecontracts.GuardCheck{
@@ -3184,7 +3184,7 @@ func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "default",
 			Rules: []runtimecontracts.HandlerRuleEntry{
@@ -3237,7 +3237,7 @@ rules:
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "scan.requested", "", "", json.RawMessage(`{"mode":"deep"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "scan.requested", "", "", json.RawMessage(`{"mode":"deep"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler:  handler,
 		State:    testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
@@ -3270,7 +3270,7 @@ func TestExecutor_RulesUseHandlerAdvancesToDefaultWhenRuleOmitsTarget(t *testing
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "default",
 			Rules: []runtimecontracts.HandlerRuleEntry{{
@@ -3309,7 +3309,7 @@ func TestExecutor_HandlerSetsGateAppliesWithMatchedRule(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			SetsGate: &runtimecontracts.GateSpec{Name: "approved", Value: true},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
@@ -3355,7 +3355,7 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRules(t *testing.T) {
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Emit: runtimecontracts.EmitSpec{Event: "handler.emitted"},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
@@ -3393,7 +3393,7 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRulesWithoutRuleEmit(t 
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Emit: runtimecontracts.EmitSpec{Event: "handler.emitted"},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
@@ -3464,7 +3464,7 @@ func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing
 				NodeID:     "node-1",
 				FlowID:     "flow-1",
 				ChainDepth: 1,
-				Event: eventtest.RootIngress(
+				Event: eventtest.RunCreatingRootIngress(
 					"evt-1",
 					"account.scored",
 					"",
@@ -3559,7 +3559,7 @@ func TestExecutor_EmitFromLoweringQueuesCanonicalPayload(t *testing.T) {
 		EntityID:   "entity-1",
 		NodeID:     "bucket-node",
 		ChainDepth: 1,
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			"account.scored",
 			"",
@@ -3648,7 +3648,7 @@ func TestExecutor_OnSuccessEmitWithMatchedRuleQueuesRuleThenSuccess(t *testing.T
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{
 				Event: "handler.succeeded",
@@ -3750,7 +3750,7 @@ func TestExecutor_OnSuccessEmitFiresWhenRulesDoNotMatch(t *testing.T) {
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":3}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":3}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
@@ -3799,7 +3799,7 @@ func TestExecutor_OnSuccessEmitFailsClosedWhenRuleEventMatchesSuccessEvent(t *te
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "shared.event"}},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
@@ -3876,7 +3876,7 @@ func TestExecutor_OnSuccessSecondEmitFailureDoesNotCommitFirstEmitOrState(t *tes
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "done",
 			OnSuccess:  runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
@@ -3918,7 +3918,7 @@ func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -3972,7 +3972,7 @@ func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *te
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -4027,7 +4027,7 @@ func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelectio
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -4075,7 +4075,7 @@ func TestExecutor_ChainDepthOverflowInterceptsEmitsButSucceeds(t *testing.T) {
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "done",
 			Emit:       runtimecontracts.EmitSpec{Event: "task.followup"},
@@ -4121,7 +4121,7 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"items":["a","b"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"items":["a","b"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
@@ -4183,7 +4183,7 @@ func TestExecutor_FanOutBoundExceededFailsClosedBeforeEmit(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"items":["a","b"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"items":["a","b"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
@@ -4313,7 +4313,7 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 				EntityID:        "entity-1",
 				NodeID:          "node-1",
 				FlowID:          "flow-1",
-				Event:           eventtest.RootIngress("evt-1", tc.eventType, "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{}),
+				Event:           eventtest.RunCreatingRootIngress("evt-1", tc.eventType, "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{}),
 				HandlerEventKey: tc.handlerEventKey,
 				Handler:         tc.handler(newSpec(0)),
 				State:           state(),
@@ -4352,7 +4352,7 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 				EntityID:        "entity-1",
 				NodeID:          "node-1",
 				FlowID:          "flow-1",
-				Event:           eventtest.RootIngress("evt-bound", tc.eventType, "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{}),
+				Event:           eventtest.RunCreatingRootIngress("evt-bound", tc.eventType, "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{}),
 				HandlerEventKey: tc.handlerEventKey,
 				Handler:         tc.handler(newSpec(1)),
 				State:           state(),
@@ -4394,7 +4394,7 @@ func TestExecutor_FanOutRejectsInvalidSourceAndExplicitZeroBound(t *testing.T) {
 			}
 			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID: "entity-1", NodeID: "node-1", FlowID: "flow-1",
-				Event:   eventtest.RootIngress("evt-1", "batch.ready", "", "", json.RawMessage(`{"items":[{"id":"item-a"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+				Event:   eventtest.RunCreatingRootIngress("evt-1", "batch.ready", "", "", json.RawMessage(`{"items":[{"id":"item-a"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 				Handler: runtimecontracts.SystemNodeEventHandler{FanOut: &tc.spec},
 				State:   testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{}),
 			})
@@ -4444,7 +4444,7 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 		EntityID: "vertical-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event: eventtest.RootIngress("evt-1",
+		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"vertical.discovered", "", "", json.RawMessage(`{"mode":"corpus","discovery_context":{"source":"corpus"}}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 
 		Handler: runtimecontracts.SystemNodeEventHandler{
@@ -4538,7 +4538,7 @@ func TestExecutor_EmitIntentUsesTargetStateFlowIdentityBeforeInboundSource(t *te
 				EntityID: targetEntityID,
 				NodeID:   "validation-router",
 				FlowID:   "validation",
-				Event: eventtest.RootIngress(
+				Event: eventtest.RunCreatingRootIngress(
 					"evt-1",
 					"scoring/vertical.resumed",
 					"",
@@ -4616,7 +4616,7 @@ func TestExecutor_EmitIntentUsesAdmittedProducerRouteBeforeStateMetadata(t *test
 		NodeID:        "validation-router",
 		FlowID:        "validation",
 		ProducerRoute: admitted,
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			"validation.started",
 			"",
@@ -4666,7 +4666,7 @@ func TestExecutor_EmitIntentUsesExplicitProducerRouteWhenStateFlowPathNormalizes
 		ProducerRoute: events.RouteIdentity{
 			FlowID: "root", FlowInstance: "source/inst-1", EntityID: "entity-1",
 		},
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			"root.started",
 			"",
@@ -4759,7 +4759,7 @@ func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *test
 				EntityID: "component-entity",
 				NodeID:   "component-node",
 				FlowID:   "component-scaffold",
-				Event:    eventtest.RootIngress("evt-1", events.EventType(eventType), "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{}),
+				Event:    eventtest.RunCreatingRootIngress("evt-1", events.EventType(eventType), "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{}),
 				Handler:  tc.handler,
 				State: testStateSnapshot("ready", map[string]any{
 					"flow_path":            "component-scaffold/component-1",
@@ -4811,7 +4811,7 @@ func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
 		EntityID: "component-entity",
 		NodeID:   "component-node",
 		FlowID:   "component-scaffold",
-		Event:    eventtest.RootIngress("evt-1", "repo-scaffold/repo_scaffold.repo_scaffolded", "", "", json.RawMessage(`{"items":[{"id":"a"},{"id":"b"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "repo-scaffold/repo_scaffold.repo_scaffolded", "", "", json.RawMessage(`{"items":[{"id":"a"},{"id":"b"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
@@ -4862,7 +4862,7 @@ func TestExecutor_StaticProducerTargetRouteDoesNotOwnEventNamespace(t *testing.T
 		EntityID: "repo-entity",
 		NodeID:   "repo-node",
 		FlowID:   "repo-scaffold",
-		Event:    eventtest.RootIngress("evt-1", "repo.commit_ready", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "repo.commit_ready", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Emit: runtimecontracts.EmitSpec{
 				Event: "repo-scaffold/repo_scaffold.repo_scaffolded",
@@ -4928,7 +4928,7 @@ func TestExecutor_ChildPinOutputTargetsStoredParentRoute(t *testing.T) {
 		EntityID: "child-ent",
 		NodeID:   "child-node",
 		FlowID:   "child",
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			"child/requested",
 			"",
@@ -5006,7 +5006,7 @@ func TestExecutor_DataAccumulationTargetPathWritesNestedEntityLeaf(t *testing.T)
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"summary":"ready"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"summary":"ready"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -5052,7 +5052,7 @@ func TestExecutor_DataAccumulationAppliesTypedContainedOperations(t *testing.T) 
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			"job.received",
 			"",
@@ -5168,7 +5168,7 @@ func TestExecutor_SingletonCoordinatorAppliesContainedStateThroughLoadedContract
 		EntityID: "coordinator-1",
 		NodeID:   "coordinator-node",
 		FlowID:   "coordinator",
-		Event: eventtest.RootIngress(
+		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			"job.received",
 			"",
@@ -5245,7 +5245,7 @@ func TestExecutor_DataAccumulationContainedOperationRejectsMissingMapKey(t *test
 	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
-		Event:    eventtest.RootIngress("evt-1", "job.received", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "job.received", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -5291,7 +5291,7 @@ func TestExecutor_DataAccumulationRejectsContainedSetOrMergeIndex(t *testing.T) 
 			_, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID: "entity-1",
 				NodeID:   "node-1",
-				Event:    eventtest.RootIngress("evt-1", "job.received", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+				Event:    eventtest.RunCreatingRootIngress("evt-1", "job.received", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 				Handler: runtimecontracts.SystemNodeEventHandler{
 					DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 						Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -5334,7 +5334,7 @@ func TestExecutor_RejectsUndeclaredNestedEntityWriteBeforeExecution(t *testing.T
 	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Compute: &runtimecontracts.ComputeSpec{
 				Operation: runtimecontracts.ComputeOpCount,
@@ -5369,7 +5369,7 @@ func TestExecutor_ClearRemovesNestedEntityLeaf(t *testing.T) {
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Clear: &runtimecontracts.ClearSpec{Targets: []string{"entity.analysis.summary"}},
 		},
@@ -5420,7 +5420,7 @@ func TestExecutor_ClearSpecialTargetsBypassContractValidation(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "root",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Clear: &runtimecontracts.ClearSpec{Targets: []string{"pending_dedup", "accumulator_state"}},
 		},
@@ -5458,7 +5458,7 @@ func TestExecutor_EmitFieldsCELFailureReturnsError(t *testing.T) {
 		EntityID: "vertical-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event: eventtest.RootIngress("evt-1",
+		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"vertical.discovered", "", "", json.RawMessage(`{"mode":"corpus"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 
 		Handler: runtimecontracts.SystemNodeEventHandler{
@@ -5492,7 +5492,7 @@ func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
@@ -5534,7 +5534,7 @@ func TestExecutor_FanOutInternalCountBypassesEntityContractValidation(t *testing
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "root",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
@@ -5573,7 +5573,7 @@ func TestExecutor_FanOutUsesExplicitEmitEvent(t *testing.T) {
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      eventtest.RootIngress("evt-1", "batch.submitted", "", "", json.RawMessage(`{"items":[{"kind":"a"},{"kind":"b"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:      eventtest.RunCreatingRootIngress("evt-1", "batch.submitted", "", "", json.RawMessage(`{"items":[{"kind":"a"},{"kind":"b"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
@@ -5617,7 +5617,7 @@ func TestExecutor_GuardKillTransitionsToKilledStateWhenDeclared(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "check.requested", "", "", json.RawMessage(`{"score":50}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "check.requested", "", "", json.RawMessage(`{"score":50}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
 				Check:  "payload.score >= policy.threshold",
@@ -5658,7 +5658,7 @@ func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"items":[{"name":"a","category":"x"},{"name":"b","category":"y"},{"name":"c","category":"x"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"items":[{"name":"a","category":"x"},{"name":"b","category":"y"},{"name":"c","category":"x"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			GroupBy: &runtimecontracts.GroupBySpec{
 				ItemsFrom: "payload.items",
@@ -5702,7 +5702,7 @@ func TestExecutor_GroupByBareKeyUsesItemScopeWithoutFallbackAcrossRoots(t *testi
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"category":"payload","items":[{"name":"a","category":"x"},{"name":"b","category":"y"},{"name":"c","category":"x"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"category":"payload","items":[{"name":"a","category":"x"},{"name":"b","category":"y"},{"name":"c","category":"x"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			GroupBy: &runtimecontracts.GroupBySpec{
 				ItemsFrom: "payload.items",
@@ -5752,7 +5752,7 @@ func TestExecutor_ClearGatesWildcardUsesNodeGateSchema(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			ClearGates: []string{"*"},
 		},
@@ -5795,7 +5795,7 @@ func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			ClearGates: []string{"review"},
 			Guard: &runtimecontracts.GuardSpec{
@@ -5838,7 +5838,7 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Action: runtimecontracts.ActionSpec{ID: "notify"},
 		},
@@ -5893,7 +5893,7 @@ func TestExecutor_RuleActionRunsOnlyForSelectedRule(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "refund.requested", "", "", json.RawMessage(`{"amount":250}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "refund.requested", "", "", json.RawMessage(`{"amount":250}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Rules: []runtimecontracts.HandlerRuleEntry{
 				{
@@ -5946,7 +5946,7 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelActionWithRules(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "refund.requested", "", "", json.RawMessage(`{"amount":250}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "refund.requested", "", "", json.RawMessage(`{"amount":250}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Action: runtimecontracts.ActionSpec{ID: "handler_action"},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
@@ -6006,7 +6006,7 @@ func TestExecutor_RejectsUnsupportedRuleActionContextsBeforeExecution(t *testing
 				EntityID: "entity-1",
 				NodeID:   "node-1",
 				FlowID:   "flow-1",
-				Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+				Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 				Handler:  tc.handler,
 				State:    testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 			})
@@ -6115,7 +6115,7 @@ func TestExecutor_ActionRegistryEmitContractViolationRejectsHandler(t *testing.T
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Action: runtimecontracts.ActionSpec{ID: "notify"},
 		},
@@ -6166,7 +6166,7 @@ func TestExecutor_GuardOnFailEscalateCreatesEmitIntent(t *testing.T) {
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"ok":false}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"ok":false}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
 				Check:  "payload.ok == true",
@@ -6214,7 +6214,7 @@ func TestExecutor_GuardOnFailEscalateObjectFieldsShapeExplicitPayload(t *testing
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"ok":false,"score":42,"legacy":"should-not-pass"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"ok":false,"score":42,"legacy":"should-not-pass"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
 				Check: "payload.ok == true",

@@ -200,7 +200,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 			}
 			raw := eb.Subscribe("raw-source-listener", events.EventType("producer/account.ready"), events.EventType("account.ready"))
 			defer eb.Unsubscribe("raw-source-listener")
-			evt := eventtest.RootIngress(uuid.NewString(),
+			evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
 				events.EventType("producer/account.ready"),
 				"",
 				"",
@@ -240,14 +240,14 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 }
 
 func finalFlowInstanceAuthoringAccountReadyEvent(eventID, accountID string) events.Event {
-	return eventtest.RootIngress(
+	return eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("producer/account.ready"),
 		"",
 		"",
 		json.RawMessage(`{"account_id":"`+accountID+`","score":"91","decision":"approved"}`),
 		0,
-		"",
+		eventtest.UUID("run:"+eventID),
 		"",
 		events.EventEnvelope{},
 		time.Now().UTC(),

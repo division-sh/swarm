@@ -59,7 +59,7 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	childEventID := uuid.NewString()
 	grandchildEventID := uuid.NewString()
 	fixtureCtx := testAuthorActivityContext(context.Background())
-	storetest.CommitSemanticEvent(t, fixtureCtx, pg, eventtest.RootIngress(
+	storetest.CommitSemanticEvent(t, fixtureCtx, pg, eventtest.RunCreatingRootIngress(
 		rootEventID,
 		"root.started",
 		"",
@@ -208,7 +208,7 @@ func TestAssertEmittedEvents_AcceptsCrossFlowInheritDispatcherEmission(t *testin
 	h.bundle = bundle
 
 	insertCatalogAssertionEntityState(t, h, entityID, "dispatched")
-	storetest.CommitSemanticEvent(t, testAuthorActivityContext(context.Background()), h.pg, eventtest.RootIngress(
+	storetest.CommitSemanticEvent(t, testAuthorActivityContext(context.Background()), h.pg, eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		"score.requested",
 		"runtime",
@@ -270,7 +270,7 @@ func insertCatalogAssertionEntityState(t *testing.T, h *runtimeHarness, entityID
 
 func insertCatalogAssertionDeadLetterEvent(t *testing.T, h *runtimeHarness, entityID string) {
 	t.Helper()
-	storetest.CommitSemanticEvent(t, testAuthorActivityContext(context.Background()), h.pg, eventtest.RootIngress(
+	storetest.CommitSemanticEvent(t, testAuthorActivityContext(context.Background()), h.pg, eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		"platform.dead_letter",
 		"runtime",

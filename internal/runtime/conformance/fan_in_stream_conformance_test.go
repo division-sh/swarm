@@ -405,7 +405,7 @@ func fanInStreamEvent(eventType, id, flowInstance, reportID, periodID string, re
 		"operating_id": flowInstance,
 		"revenue":      revenue,
 	})
-	return eventtest.RootIngress(
+	return eventtest.RunCreatingRootIngress(
 		eventtest.UUID(id),
 		events.EventType(eventType),
 		"",

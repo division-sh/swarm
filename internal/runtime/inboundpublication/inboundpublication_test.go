@@ -46,8 +46,8 @@ func TestEventIntegrityFingerprintIgnoresJSONEncodingOrder(t *testing.T) {
 	eventID := uuid.NewString()
 	runID := uuid.NewString()
 	build := func(payload []byte) events.Event {
-		return eventtest.RootIngress(
-			eventID, "inbound.test", "gateway", "", payload, 0, runID, "",
+		return eventtest.ExistingRunRootIngress(
+			eventID, "inbound.test", "gateway", "", payload, 0, runID,
 			events.EventEnvelope{}, time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC),
 		)
 	}

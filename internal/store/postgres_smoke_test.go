@@ -109,14 +109,14 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	}
 
 	// Events + deliveries + receipts.
-	evt := eventtest.PersistedProjection(
+	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("review.requested"),
 		"dashboard",
 		"",
 		json.RawMessage(`{"message":"hi"}`),
 		0,
-		"",
+		eventtest.UUID("persisted-projection-run"),
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 		time.Now(),

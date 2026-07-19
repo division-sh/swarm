@@ -30,7 +30,7 @@ func toolEventTestContext(actor models.AgentConfig) context.Context {
 }
 
 func toolTestInboundEvent(eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, mode executionmode.Mode) events.Event {
-	return eventtest.RootIngressWithMode(
+	return eventtest.RunCreatingRootIngressWithMode(
 		"11111111-1111-4111-8111-111111111111",
 		eventType,
 		"test-gateway",

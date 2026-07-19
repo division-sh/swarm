@@ -42,7 +42,7 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 
 	evtID := uuid.NewString()
-	evt := eventtest.PersistedProjection(evtID,
+	evt := eventtest.RunCreatingRootIngress(evtID,
 
 		events.EventType("test.started"),
 		"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -714,7 +714,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.
 	publishCalls := 0
 	publish := func(ctx context.Context) (APIIdempotencyCompletion, error) {
 		publishCalls++
-		if err := bus.Publish(ctx, eventtest.RootIngress(
+		if err := bus.Publish(ctx, eventtest.RunCreatingRootIngress(
 			eventID,
 			events.EventType("item.received"),
 			"api.v1",
@@ -790,7 +790,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyFailedNestedPublishLeavesNoCompletionOr
 		Now:            time.Now().UTC(),
 	}
 	completion, replayed, err := store.WithAPIIdempotency(ctx, req, func(ctx context.Context) (APIIdempotencyCompletion, error) {
-		err := bus.Publish(ctx, eventtest.RootIngress(
+		err := bus.Publish(ctx, eventtest.RunCreatingRootIngress(
 			eventID,
 			events.EventType("item.failed"),
 			"api.v1",
@@ -911,7 +911,7 @@ func TestSQLiteRuntimeStoreRunEventTransactionEnsuresFreshRunRow(t *testing.T) {
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	if err := store.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return commitSemanticEventFixtureTx(txctx, store, tx, eventtest.PersistedProjection(
+		return commitSemanticEventFixtureTx(txctx, store, tx, eventtest.RunCreatingRootIngress(
 			eventID,
 			events.EventType("item.received"),
 			"api.v1",
@@ -952,7 +952,7 @@ func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishDoesNotReenterWrite(t 
 	bus.SetRuntimeIngressDispatchGate(controller)
 
 	eventID := uuid.NewString()
-	err = bus.Publish(ctx, eventtest.RootIngress(
+	err = bus.Publish(ctx, eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("item.received"),
 		"api.v1",
@@ -1049,7 +1049,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerSettlesDelivery(t *testing.T) {
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	eventID := uuid.NewString()
-	evt := eventtest.PersistedProjection(eventID,
+	evt := eventtest.RunCreatingRootIngress(eventID,
 
 		events.EventType("company.scanned"),
 		"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -1113,7 +1113,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerDeadLettersDelivery(t *testing.
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	eventID := uuid.NewString()
-	evt := eventtest.PersistedProjection(eventID,
+	evt := eventtest.RunCreatingRootIngress(eventID,
 		events.EventType("company.scanned"),
 		"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -1169,7 +1169,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithoutDeliveryAuthority(t
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	eventID := uuid.NewString()
-	evt := eventtest.PersistedProjection(eventID,
+	evt := eventtest.RunCreatingRootIngress(eventID,
 
 		events.EventType("company.scanned"),
 		"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -1220,7 +1220,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithTerminalDeliveryAuthor
 			runID := uuid.NewString()
 			ctx = runtimecorrelation.WithRunID(ctx, runID)
 			eventID := uuid.NewString()
-			evt := eventtest.PersistedProjection(eventID,
+			evt := eventtest.RunCreatingRootIngress(eventID,
 
 				events.EventType("company.scanned"),
 				"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -1278,7 +1278,7 @@ func TestSQLiteRuntimeStoreDeliveryReplayAndReceiptSemantics(t *testing.T) {
 	store.SetNowFnForTest(func() time.Time { return now })
 
 	eventID := uuid.NewString()
-	evt := eventtest.PersistedProjection(eventID,
+	evt := eventtest.RunCreatingRootIngress(eventID,
 
 		events.EventType("test.delivery_requested"),
 		"runtime", "", json.RawMessage(`{"delivery":true}`), 0, runID, "", events.EventEnvelope{}, now)
@@ -1405,7 +1405,7 @@ func TestSQLiteRuntimeStoreImmediateTerminalReceiptPreservesOriginalFailure(t *t
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	now := time.Now().UTC()
 	eventID := uuid.NewString()
-	evt := eventtest.PersistedProjection(eventID, events.EventType("test.terminal_delivery"), "runtime", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, now)
+	evt := eventtest.RunCreatingRootIngress(eventID, events.EventType("test.terminal_delivery"), "runtime", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, now)
 	if err := commitSemanticEventFixtureWithAgents(ctx, store, evt, []string{"agent-1"}); err != nil {
 		t.Fatalf("persist terminal delivery: %v", err)
 	}
@@ -1454,7 +1454,7 @@ func TestPendingSubscribedRecoveryUsesAdmittedSameScopeSubscriptionsSQLite(t *te
 		id        string
 		eventType events.EventType
 	}{{localID, "review/inst-1/task.ready"}, {foreignID, "foreign/task.ready"}} {
-		if err := commitSemanticEventFixture(ctx, store, eventtest.PersistedProjection(row.id, row.eventType, "runtime", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, now)); err != nil {
+		if err := commitSemanticEventFixture(ctx, store, eventtest.RunCreatingRootIngress(row.id, row.eventType, "runtime", "", json.RawMessage(`{}`), 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, now)); err != nil {
 			t.Fatalf("AppendEvent(%s): %v", row.eventType, err)
 		}
 		if err := store.InsertEventDeliveries(ctx, row.id, []string{"reviewer"}); err != nil {
@@ -1477,7 +1477,7 @@ func TestSQLiteRuntimeStoreDirectDeadLetterIsNotRetryExhaustion(t *testing.T) {
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	eventID := uuid.NewString()
-	evt := eventtest.PersistedProjection(eventID, events.EventType("test.direct_dead_letter"), "runtime", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+	evt := eventtest.RunCreatingRootIngress(eventID, events.EventType("test.direct_dead_letter"), "runtime", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 	if err := commitSemanticEventFixtureWithAgents(ctx, store, evt, []string{"agent-1"}); err != nil {
 		t.Fatalf("persist direct dead-letter delivery: %v", err)
 	}

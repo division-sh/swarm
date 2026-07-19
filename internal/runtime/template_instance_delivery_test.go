@@ -64,7 +64,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	eventID := "99999999-9999-4999-8999-999999999902"
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("operating/inst-1/opco.product_initialization_requested"),
 		"operating",
@@ -122,7 +122,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	}
 	ch := bus.SubscribeInternal("workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
 	eventID := "99999999-9999-4999-8999-999999999903"
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("operating/inst-1/opco.product_initialization_requested"),
 		"operating",
@@ -193,7 +193,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	})
 	bus.SetInterceptors(pc)
 
-	spinup := eventtest.RootIngress(
+	spinup := eventtest.RunCreatingRootIngress(
 		"99999999-9999-4999-8999-999999999910",
 		events.EventType("opco.spinup_requested"),
 		"test-producer",
@@ -286,7 +286,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	})
 	bus.SetInterceptors(pc)
 
-	spinup := eventtest.RootIngress(
+	spinup := eventtest.RunCreatingRootIngress(
 		"99999999-9999-4999-8999-999999999930",
 		events.EventType("opco.spinup_requested"),
 		"test-producer",
@@ -362,7 +362,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
 	})
-	evt := eventtest.RootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		"99999999-9999-4999-8999-999999999940",
 		events.EventType("producer/deploy.done"),
 		"producer",
@@ -441,7 +441,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		t.Fatal("workflow runtime did not subscribe")
 	}
 
-	mailbox := eventtest.RootIngress(
+	mailbox := eventtest.RunCreatingRootIngress(
 		"99999999-9999-4999-8999-999999999913",
 		events.EventType("approval.completed"),
 		"approval-source",
@@ -558,7 +558,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		t.Fatal("workflow runtime did not subscribe")
 	}
 
-	mailbox := eventtest.RootIngress(
+	mailbox := eventtest.RunCreatingRootIngress(
 		"99999999-9999-4999-8999-999999999912",
 		events.EventType("approval.completed"),
 		"approval-source",
@@ -1239,13 +1239,13 @@ func providerRollbackInboundBatch(t *testing.T, request runtimeinbound.Request) 
 	return runtimebus.InboundDeliveryBatch{
 		Provider: "telegram",
 		Events: []runtimebus.InboundDeliveryEvent{
-			{Event: eventtest.RootIngress(
+			{Event: eventtest.ExistingRunRootIngress(
 				rawID, "inbound.telegram", "inbound-gateway", "", []byte(`{"raw":true}`), 0,
-				request.ResolvedRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), now,
+				request.ResolvedRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), now,
 			), Kind: runtimeprovideroutput.KindRaw},
-			{Event: eventtest.RootIngress(
+			{Event: eventtest.ExistingRunRootIngress(
 				normalizedID, "inbound.telegram.text_message", "inbound-gateway", "", []byte(`{"chat_id":"42"}`), 0,
-				request.ResolvedRunID, "", events.EventEnvelope{}, now,
+				request.ResolvedRunID, events.EventEnvelope{}, now,
 			), Kind: runtimeprovideroutput.KindNormalized, Authorization: providerRollbackAuthorization()},
 		},
 	}

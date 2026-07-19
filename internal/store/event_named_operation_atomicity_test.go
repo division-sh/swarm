@@ -167,13 +167,13 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, store ev
 	sourceRunID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	if persistSource {
-		source := eventtest.RootIngress(sourceEventID, "atomic.source", "gateway", "source-task", []byte(`{"source":true}`), 0, sourceRunID, "", events.EventEnvelope{}, createdAt)
+		source := eventtest.RunCreatingRootIngress(sourceEventID, "atomic.source", "gateway", "source-task", []byte(`{"source":true}`), 0, sourceRunID, "", events.EventEnvelope{}, createdAt)
 		if err := commitSemanticEventFixture(ctx, store, source); err != nil {
 			t.Fatalf("commit source event: %v", err)
 		}
 	}
 	forkRunID := uuid.NewString()
-	forkTrigger := eventtest.RootIngress(uuid.NewString(), "atomic.fork_trigger", "gateway", "fork-task", []byte(`{"fork":true}`), 0, forkRunID, "", events.EventEnvelope{}, createdAt)
+	forkTrigger := eventtest.RunCreatingRootIngress(uuid.NewString(), "atomic.fork_trigger", "gateway", "fork-task", []byte(`{"fork":true}`), 0, forkRunID, "", events.EventEnvelope{}, createdAt)
 	if err := commitSemanticEventFixture(ctx, store, forkTrigger); err != nil {
 		t.Fatalf("commit fork run trigger: %v", err)
 	}

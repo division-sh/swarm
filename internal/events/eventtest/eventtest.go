@@ -23,18 +23,24 @@ func UUID(label string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm-eventtest:"+label)).String()
 }
 
-// RootIngress builds a test fixture for a root ingress event.
-func RootIngress(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
-	return RootIngressWithMode(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt, executionmode.Live)
+// RunCreatingRootIngress builds a root fixture authorized to create its run.
+func RunCreatingRootIngress(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
+	return RunCreatingRootIngressWithMode(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt, executionmode.Live)
 }
 
-// RootIngressWithMode builds a root-ingress fixture with an explicit causal
-// execution mode for exact persistence and duplicate tests.
-func RootIngressWithMode(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time, mode executionmode.Mode) events.Event {
+// RunCreatingRootIngressWithMode builds a run-creating root fixture with an
+// explicit execution mode for exact persistence and duplicate tests.
+func RunCreatingRootIngressWithMode(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time, mode executionmode.Mode) events.Event {
 	if strings.TrimSpace(parentEventID) != "" {
 		panic("root-ingress fixture cannot carry a causal parent")
 	}
-	return mustEvent(events.NewRootIngressEvent(events.RootIngressEventInput{Facts: fixtureFacts(id, eventType, events.EventProducerExternal, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, mode), RunID: runID}))
+	return mustEvent(events.NewRunCreatingRootIngressEvent(events.RunCreatingRootIngressEventInput{Facts: fixtureFacts(id, eventType, events.EventProducerExternal, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, mode), RunID: runID}))
+}
+
+// ExistingRunRootIngress builds a root fixture that requires its run to exist
+// and remain active.
+func ExistingRunRootIngress(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
+	return mustEvent(events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: fixtureFacts(id, eventType, events.EventProducerExternal, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live), RunID: runID}))
 }
 
 // OperatorInjected builds a root operator event with optional typed reference provenance.
@@ -100,9 +106,8 @@ func SelectedForkReplay(id string, eventType events.EventType, producer events.P
 }
 
 // PersistedProjection builds a persisted projection/readback fixture from
-// authoritative event facts. Runtime producer fixtures should use RootIngress,
-// ChildWithLineage, Replay, RuntimeControl, RuntimeDiagnostic, or
-// DiagnosticDirect instead.
+// authoritative event facts. Runtime producer fixtures should use the exact
+// class-specific construction helper instead.
 func PersistedProjection(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
 	producerType := events.EventProducerExternal
 	if strings.TrimSpace(parentEventID) != "" {
@@ -201,7 +206,7 @@ func rebuild(evt events.Event, taskID string, mode executionmode.Mode, envelope 
 	facts.RoutingSource = fixtureRoutingSource(envelope)
 	switch evt.AdmissionClass() {
 	case events.EventAdmissionRootIngress:
-		return mustEvent(events.NewRootIngressEvent(events.RootIngressEventInput{Facts: facts, RunID: evt.RunID()}))
+		panic("root-ingress fixture mutation requires an explicit run-creating or existing-run helper")
 	case events.EventAdmissionOperatorInjected:
 		var provenance *events.OperatorReferenceProvenance
 		if value, ok := evt.OperatorReference(); ok {
@@ -273,7 +278,7 @@ func persistedFixture(id string, eventType events.EventType, producer events.Pro
 	if producer.Type == events.EventProducerPlatform {
 		return mustEvent(runtimeControlFixture(facts, runID, ""))
 	}
-	return mustEvent(events.NewRootIngressEvent(events.RootIngressEventInput{Facts: facts, RunID: runID}))
+	return mustEvent(events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: facts, RunID: runID}))
 }
 
 func runtimeControlFixture(facts events.EventFacts, runID, parentEventID string) (events.Event, error) {

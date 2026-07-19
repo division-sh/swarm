@@ -96,7 +96,7 @@ func TestImportBoundaryConnectConsumesBindingsForInputAndRootOutputDelivery(t *t
 			envelope:  events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: eventtest.UUID("root-entity")}),
 		},
 	} {
-		evt := eventtest.RootIngress(tc.id, events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", tc.envelope, time.Now().UTC())
+		evt := eventtest.RunCreatingRootIngress(tc.id, events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", tc.envelope, time.Now().UTC())
 		plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 		if err != nil {
 			t.Fatalf("CheckPublishRecipientPlan(%s): %v", tc.eventType, err)

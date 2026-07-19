@@ -67,7 +67,7 @@ func TestSystemNodeRunner_MarkProcessedSettlesNodeDeliveryAndTriggersNormalRunCo
 		return nil
 	})
 
-	runner.ProcessEventForTest(ctx, eventtest.RootIngress(
+	runner.ProcessEventForTest(ctx, eventtest.RunCreatingRootIngress(
 		eventID,
 		"example.started",
 		"",
@@ -147,7 +147,7 @@ func TestSystemNodeRunner_TargetSetSameNodeSettlesEachTargetDelivery(t *testing.
 	})
 
 	eventForTarget := func(target events.RouteIdentity) events.Event {
-		return eventtest.RootIngress(eventID,
+		return eventtest.RunCreatingRootIngress(eventID,
 			"worker/work.assign", "", "", []byte(`{}`), 0, runID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC())
 	}
 
@@ -217,7 +217,7 @@ func TestSystemNodeRunner_TargetSetSameNodeFailureKeepsSiblingPending(t *testing
 	})
 
 	eventForTarget := func(target events.RouteIdentity) events.Event {
-		return eventtest.RootIngress(eventID,
+		return eventtest.RunCreatingRootIngress(eventID,
 			"worker/work.assign", "", "", []byte(`{}`), 0, runID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC())
 	}
 
@@ -254,7 +254,7 @@ func TestSystemNodeRunner_TargetSetSameNodeDeadLetterKeepsSiblingExecutable(t *t
 	failingRunner.SetRetryPolicyForTest(1, func(int) time.Duration { return 0 })
 
 	eventForTarget := func(target events.RouteIdentity) events.Event {
-		return eventtest.RootIngress(eventID,
+		return eventtest.RunCreatingRootIngress(eventID,
 			"worker/work.assign", "", "", []byte(`{}`), 0, runID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC())
 	}
 
@@ -387,7 +387,7 @@ func TestSystemNodeRunnerLifecycleProbeEmitsHandlerBoundaries(t *testing.T) {
 	})
 	runner.SetTestLifecycleProbe(probe)
 
-	runner.ProcessEventForTest(ctx, eventtest.RootIngress(
+	runner.ProcessEventForTest(ctx, eventtest.RunCreatingRootIngress(
 		eventID,
 		"example.started",
 		"",
@@ -483,7 +483,7 @@ func TestSystemNodeRunner_RetryableFailureWritesFailedBeforeRetry(t *testing.T) 
 		return 0
 	})
 
-	runner.ProcessEventForTest(ctx, eventtest.RootIngress(
+	runner.ProcessEventForTest(ctx, eventtest.RunCreatingRootIngress(
 		eventID,
 		"example.started",
 		"",
@@ -535,7 +535,7 @@ func TestSystemNodeRunner_RetryableFailureExhaustsConfiguredRetryLimit(t *testin
 	})
 	runner.SetRetryPolicyForTest(DefaultSystemNodeRetryLimit, func(int) time.Duration { return 0 })
 
-	runner.ProcessEventForTest(ctx, eventtest.RootIngress(
+	runner.ProcessEventForTest(ctx, eventtest.RunCreatingRootIngress(
 		eventID,
 		"example.started",
 		"",
@@ -778,7 +778,7 @@ func seedSQLiteSystemNodeCompletionEventWithoutDelivery(t *testing.T, db *sql.DB
 	`, runID, now); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
-	event := eventtest.RootIngress(eventID, "worker/work.assign", "test", "", []byte(`{}`), 0, runID, "",
+	event := eventtest.RunCreatingRootIngress(eventID, "worker/work.assign", "test", "", []byte(`{}`), 0, runID, "",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "example"), now)
 	seedPipelineEventRecordForDialect(t, ctx, db, runtimeauthoractivity.DialectSQLite, event)
 }
@@ -876,7 +876,7 @@ func seedSystemNodeCompletionEventWithoutDelivery(t *testing.T, db *sql.DB, runI
 	`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	event := eventtest.RootIngress(eventID, "example.started", "test", "", []byte(`{}`), 0, runID, "",
+	event := eventtest.RunCreatingRootIngress(eventID, "example.started", "test", "", []byte(`{}`), 0, runID, "",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "example"), time.Now().UTC())
 	seedPipelineEventRecord(t, ctx, db, event)
 	if _, err := db.ExecContext(ctx, `

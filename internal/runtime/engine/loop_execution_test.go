@@ -121,7 +121,7 @@ func loopTestRequest(state StateSnapshot, handler runtimecontracts.SystemNodeEve
 	return ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("00000000-0000-0000-0000-000000000001"),
 		NodeID:   "loop-node", FlowID: "validation", Handler: handler, State: state,
-		Event: eventtest.RootIngress(eventID, events.EventType("loop.event"), "", "", raw, 0,
+		Event: eventtest.RunCreatingRootIngress(eventID, events.EventType("loop.event"), "", "", raw, 0,
 			"00000000-0000-0000-0000-000000000010", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "00000000-0000-0000-0000-000000000001"),
 			time.Date(2026, time.July, 11, 12, 0, 0, 0, time.UTC)),
 	}
@@ -257,7 +257,7 @@ func TestLoopReturningCarrierAdmissionRejectsPriorAndAcceptsCurrentGeneration(t 
 func loopCarrierTestRequest(state StateSnapshot, handler runtimecontracts.SystemNodeEventHandler, eventType, eventID string, payload map[string]any) ExecutionRequest {
 	req := loopTestRequest(state, handler, eventID, payload)
 	raw, _ := json.Marshal(payload)
-	req.Event = eventtest.RootIngress(eventID, events.EventType(eventType), "", "", raw, 0,
+	req.Event = eventtest.RunCreatingRootIngress(eventID, events.EventType(eventType), "", "", raw, 0,
 		"00000000-0000-0000-0000-000000000010", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "00000000-0000-0000-0000-000000000001"),
 		time.Date(2026, time.July, 11, 12, 0, 0, 0, time.UTC))
 	return req

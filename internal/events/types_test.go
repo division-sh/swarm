@@ -51,7 +51,7 @@ func TestResolvedEnvelopeCannotRewriteRoutingSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	event, err := NewRootIngressEvent(RootIngressEventInput{Facts: EventFacts{
+	event, err := NewRunCreatingRootIngressEvent(RunCreatingRootIngressEventInput{Facts: EventFacts{
 		Type: "task.started", Producer: ProducerClaim{Type: EventProducerExternal, ID: "provider"}, Payload: []byte(`{}`),
 		Envelope: EventEnvelope{Source: source.Route()}, RoutingSource: source, ExecutionMode: executionmode.Live,
 	}})
@@ -75,7 +75,7 @@ func TestDeclaredIngressRoutingSourceRemainsOpaqueToEnvelopeRouting(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	event, err := NewRootIngressEvent(RootIngressEventInput{Facts: EventFacts{
+	event, err := NewRunCreatingRootIngressEvent(RunCreatingRootIngressEventInput{Facts: EventFacts{
 		Type: "inbound.telegram", Producer: ProducerClaim{Type: EventProducerExternal, ID: "inbound-gateway"},
 		Payload: []byte(`{}`), RoutingSource: source, ExecutionMode: executionmode.Live,
 	}})
@@ -124,7 +124,7 @@ func TestRuntimeRoutingSourceFromRouteRequiresExactClaim(t *testing.T) {
 }
 
 func TestEventDeliveryProjectionCannotPersist(t *testing.T) {
-	event, err := NewRootIngressEvent(RootIngressEventInput{Facts: EventFacts{
+	event, err := NewRunCreatingRootIngressEvent(RunCreatingRootIngressEventInput{Facts: EventFacts{
 		Type: "message.received", Producer: ProducerClaim{Type: EventProducerExternal, ID: "telegram"},
 		Payload: []byte(`{"text":"hello"}`), ExecutionMode: executionmode.Live,
 	}})

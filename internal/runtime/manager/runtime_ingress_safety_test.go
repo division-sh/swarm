@@ -26,8 +26,8 @@ func TestAuthBreakerConsumesRuntimeIngressSafetyPauseOwner(t *testing.T) {
 		},
 	})
 
-	am.maybeTripAuthCircuitBreaker(testAuthorActivityContext(context.Background()), "agent-1", eventtest.RootIngress("evt-1", events.EventType("work.requested"), "source", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{}), testAuthFailure())
-	am.maybeTripAuthCircuitBreaker(testAuthorActivityContext(context.Background()), "agent-1", eventtest.RootIngress("evt-2", events.EventType("work.requested"), "source", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{}), testAuthFailure())
+	am.maybeTripAuthCircuitBreaker(testAuthorActivityContext(context.Background()), "agent-1", eventtest.RunCreatingRootIngress("evt-1", events.EventType("work.requested"), "source", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{}), testAuthFailure())
+	am.maybeTripAuthCircuitBreaker(testAuthorActivityContext(context.Background()), "agent-1", eventtest.RunCreatingRootIngress("evt-2", events.EventType("work.requested"), "source", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{}), testAuthFailure())
 
 	if pauseCalls != 1 {
 		t.Fatalf("runtime ingress safety pause calls = %d, want 1", pauseCalls)
