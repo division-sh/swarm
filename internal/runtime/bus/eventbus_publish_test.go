@@ -396,9 +396,13 @@ func assertEventBusDiagnosticDirectRefusal(
 				name, publish := name, publish
 				t.Run(name, func(t *testing.T) {
 					eventID := uuid.NewString()
+					runID := ""
+					if eventType != events.EventTypePlatformRuntimeLog {
+						runID = uuid.NewString()
+					}
 					evt := eventtest.DiagnosticDirect(
 						eventID, eventType, "runtime", "", []byte(`{"evidence":"typed-owner-only"}`),
-						0, "", "", events.EventEnvelope{}, time.Now().UTC(),
+						0, runID, "", events.EventEnvelope{}, time.Now().UTC(),
 					)
 					err := publish(context.Background(), evt)
 					if err == nil || !strings.Contains(err.Error(), "closed event type") {

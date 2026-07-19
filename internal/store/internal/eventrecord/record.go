@@ -195,7 +195,7 @@ func (r Record) Validate() error {
 	if err != nil {
 		return fmt.Errorf("event record producer identity: %w", err)
 	}
-	if err := events.ValidateEventIdentityContract(r.Class, events.EventType(r.EventName), producer); err != nil {
+	if err := events.ValidateEventStructuralContract(r.Class, events.EventType(r.EventName), producer, r.RunID, r.Scope); err != nil {
 		return fmt.Errorf("event record identity contract: %w", err)
 	}
 	if _, err := r.decodeEnvelope(); err != nil {

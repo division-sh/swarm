@@ -74,3 +74,94 @@ func TestRecordValidateRejectsNoncanonicalTimestamp(t *testing.T) {
 		t.Fatalf("Validate error = %v", err)
 	}
 }
+
+func TestDiagnosticDirectSubtypeRecordValidationAndReadbackMatrix(t *testing.T) {
+	runID := uuid.NewString()
+	entityEnvelope := events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString())
+	valid := []struct {
+		name      string
+		eventType events.EventType
+		runID     string
+		envelope  events.EventEnvelope
+	}{
+		{"runtime_log_without_run", events.EventTypePlatformRuntimeLog, "", events.EventEnvelope{}},
+		{"runtime_log_with_run", events.EventTypePlatformRuntimeLog, runID, events.EventEnvelope{}},
+		{"inbound_recorded_global", events.EventTypePlatformInboundRecord, runID, events.EventEnvelope{}},
+		{"inbound_recorded_entity", events.EventTypePlatformInboundRecord, runID, entityEnvelope},
+		{"agent_directive_global", events.EventTypePlatformAgentDirective, runID, events.EventEnvelope{}},
+	}
+	for _, test := range valid {
+		t.Run("valid/"+test.name, func(t *testing.T) {
+			record := validDiagnosticDirectRecord(t, test.eventType, test.runID, test.envelope)
+			if err := record.Validate(); err != nil {
+				t.Fatalf("validate valid diagnostic record: %v", err)
+			}
+			decoded, err := record.Decode()
+			if err != nil {
+				t.Fatalf("decode valid diagnostic record: %v", err)
+			}
+			if decoded.Event().Type() != test.eventType || decoded.Event().RunID() != test.runID || decoded.Event().Scope() != test.envelope.Normalized().Scope {
+				t.Fatalf("decoded subtype facts = %s/%s/%s", decoded.Event().Type(), decoded.Event().RunID(), decoded.Event().Scope())
+			}
+		})
+	}
+
+	type hostileRecord struct {
+		name      string
+		eventType events.EventType
+		mutate    func(*Record)
+	}
+	hostile := make([]hostileRecord, 0, 16)
+	for _, eventType := range events.DiagnosticDirectEventTypes() {
+		for _, producerType := range []events.EventProducerType{events.EventProducerExternal, events.EventProducerAgent, events.EventProducerNode} {
+			typeCopy := producerType
+			hostile = append(hostile, hostileRecord{
+				name: string(eventType) + "_producer_" + string(typeCopy), eventType: eventType,
+				mutate: func(record *Record) { record.ProducedByType = typeCopy },
+			})
+		}
+	}
+	hostile = append(hostile,
+		hostileRecord{"runtime_log_wrong_platform_id", events.EventTypePlatformRuntimeLog, func(record *Record) { record.ProducedBy = "not-runtime" }},
+		hostileRecord{"runtime_log_entity_scope", events.EventTypePlatformRuntimeLog, func(record *Record) { record.Scope = events.EventScopeEntity }},
+		hostileRecord{"runtime_log_flow_scope", events.EventTypePlatformRuntimeLog, func(record *Record) { record.Scope = events.EventScopeFlow }},
+		hostileRecord{"inbound_recorded_missing_run", events.EventTypePlatformInboundRecord, func(record *Record) { record.RunID = "" }},
+		hostileRecord{"inbound_recorded_flow_scope", events.EventTypePlatformInboundRecord, func(record *Record) { record.Scope = events.EventScopeFlow }},
+		hostileRecord{"agent_directive_missing_run", events.EventTypePlatformAgentDirective, func(record *Record) { record.RunID = "" }},
+		hostileRecord{"agent_directive_entity_scope", events.EventTypePlatformAgentDirective, func(record *Record) { record.Scope = events.EventScopeEntity }},
+		hostileRecord{"agent_directive_flow_scope", events.EventTypePlatformAgentDirective, func(record *Record) { record.Scope = events.EventScopeFlow }},
+	)
+	for _, test := range hostile {
+		t.Run("hostile/"+test.name, func(t *testing.T) {
+			baseRunID := runID
+			if test.eventType == events.EventTypePlatformRuntimeLog {
+				baseRunID = ""
+			}
+			record := validDiagnosticDirectRecord(t, test.eventType, baseRunID, events.EventEnvelope{})
+			test.mutate(&record)
+			if err := record.Validate(); err == nil {
+				t.Fatal("record validation accepted invalid subtype tuple")
+			}
+			if _, err := record.Decode(); err == nil {
+				t.Fatal("canonical readback accepted invalid subtype tuple")
+			}
+		})
+	}
+}
+
+func validDiagnosticDirectRecord(t *testing.T, eventType events.EventType, runID string, envelope events.EventEnvelope) Record {
+	t.Helper()
+	event := eventtest.DiagnosticDirect(
+		uuid.NewString(), eventType, "runtime", "", []byte(`{}`), 0, runID, "", envelope,
+		time.Date(2026, 7, 19, 4, 0, 0, 0, time.UTC),
+	)
+	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := FromAdmitted(admitted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return record
+}
