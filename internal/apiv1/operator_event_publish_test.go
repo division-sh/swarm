@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -25,11 +26,107 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/eventfixture"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+type canonicalEventPublishProofStore interface {
+	runtimebus.EventStore
+	RunReadStore
+	ObservabilityReadStore
+	APIIdempotencyStore
+}
+
+func TestEventPublishCanonicalClassAndProvenanceReadbackParity(t *testing.T) {
+	type fixture struct {
+		store   canonicalEventPublishProofStore
+		db      *sql.DB
+		dialect runtimeauthoractivity.Dialect
+	}
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T, context.Context) fixture
+	}{
+		{
+			name: "sqlite",
+			open: func(t *testing.T, ctx context.Context) fixture {
+				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+				return fixture{store: sqliteStore, db: sqliteStore.DB, dialect: runtimeauthoractivity.DialectSQLite}
+			},
+		},
+		{
+			name: "postgres",
+			open: func(t *testing.T, _ context.Context) fixture {
+				_, db, _ := testutil.StartPostgres(t)
+				return fixture{store: storetest.AdmitPostgresRuntimeStore(t, db), db: db, dialect: runtimeauthoractivity.DialectPostgres}
+			},
+		},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			ctx := testAuthorActivityContext(context.Background())
+			f := backend.open(t, ctx)
+			source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+			bus, err := newScopedAPITestEventBus(t, f.store, runStartTestEventBusOptions(source))
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			handler := eventPublishTestHandlerWithStores(t, f.store, f.store, f.store, bus, source)
+
+			publish := func(label, body string) (string, string) {
+				t.Helper()
+				response := rpcCall(t, handler, body)
+				if response.Error != nil {
+					t.Fatalf("%s event.publish error = %#v", label, response.Error)
+				}
+				result := asMap(t, response.Result)
+				return stringValue(t, result["event_id"], label+" event_id"), stringValue(t, result["run_id"], label+" run_id")
+			}
+			rootID, runID := publish("new-run root", eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"root"}`, "", "canonical-root"))
+			operatorID, operatorRunID := publish("existing-run operator", eventPublishBody(runID, runStartTestFingerprint, "scan.requested", `{"topic":"operator"}`, "", "canonical-operator"))
+			if operatorRunID != runID {
+				t.Fatalf("existing-run operator run_id = %s, want %s", operatorRunID, runID)
+			}
+			referencedID, referencedRunID := publish("referenced operator", eventPublishBodyWithSource(runID, rootID, runStartTestFingerprint, "scan.requested", `{"topic":"referenced"}`, "", "canonical-referenced"))
+			if referencedRunID != runID {
+				t.Fatalf("referenced operator run_id = %s, want %s", referencedRunID, runID)
+			}
+
+			wantProducer, err := events.NewProducerIdentity(events.EventProducerExternal, "cli-publish:"+actorTokenID(testToken))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, expected := range []struct {
+				name         string
+				eventID      string
+				class        events.EventAdmissionClass
+				referenceID  string
+				hasReference bool
+			}{
+				{"new-run root", rootID, events.EventAdmissionRootIngress, "", false},
+				{"existing-run operator", operatorID, events.EventAdmissionOperatorInjected, "", false},
+				{"referenced operator", referencedID, events.EventAdmissionOperatorInjected, rootID, true},
+			} {
+				persisted, err := eventfixture.Load(ctx, f.db, f.dialect, expected.eventID)
+				if err != nil {
+					t.Fatalf("canonical readback %s: %v", expected.name, err)
+				}
+				if persisted.AdmissionClass() != expected.class || persisted.RunID() != runID || persisted.ParentEventID() != "" || !persisted.Producer().Equal(wantProducer) {
+					t.Fatalf("%s canonical identity = class:%s run:%s parent:%s producer:%v", expected.name, persisted.AdmissionClass(), persisted.RunID(), persisted.ParentEventID(), persisted.Producer())
+				}
+				reference, ok := persisted.OperatorReference()
+				if ok != expected.hasReference {
+					t.Fatalf("%s operator reference present = %v, want %v", expected.name, ok, expected.hasReference)
+				}
+				if ok && reference.ReferencedEventID() != expected.referenceID {
+					t.Fatalf("%s operator reference = %s, want %s", expected.name, reference.ReferencedEventID(), expected.referenceID)
+				}
+			}
+		})
+	}
+}
 
 func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)

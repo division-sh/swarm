@@ -105,3 +105,109 @@ func TestPersistentContractValidatesNestedDurableUUIDFacts(t *testing.T) {
 		t.Fatalf("selected source identity error = %v", err)
 	}
 }
+
+func TestDiagnosticDirectSubtypePolicyIsCompleteAtEveryRuntimeBoundary(t *testing.T) {
+	runID := uuid.NewString()
+	entityEnvelope := EnvelopeForEntityID(EventEnvelope{}, uuid.NewString())
+	flowEnvelope := EnvelopeForFlowInstance(EventEnvelope{}, "flow/instance")
+	globalEnvelope := EventEnvelope{}
+
+	valid := []struct {
+		name      string
+		eventType EventType
+		runID     string
+		envelope  EventEnvelope
+	}{
+		{"runtime_log_global_without_run", EventTypePlatformRuntimeLog, "", globalEnvelope},
+		{"runtime_log_global_with_run", EventTypePlatformRuntimeLog, runID, globalEnvelope},
+		{"inbound_recorded_global", EventTypePlatformInboundRecord, runID, globalEnvelope},
+		{"inbound_recorded_entity", EventTypePlatformInboundRecord, runID, entityEnvelope},
+		{"agent_directive_global", EventTypePlatformAgentDirective, runID, globalEnvelope},
+	}
+	for _, test := range valid {
+		t.Run("valid/"+test.name, func(t *testing.T) {
+			event, err := NewDiagnosticDirectEvent(diagnosticDirectContractInput(test.eventType, EventProducerPlatform, "runtime", test.runID, test.envelope))
+			if err != nil {
+				t.Fatalf("construct valid subtype: %v", err)
+			}
+			admitted, err := AdmitForPersistence(event, AdmissionOptions{RequirePersistentUUIDIdentity: true})
+			if err != nil {
+				t.Fatalf("admit valid subtype: %v", err)
+			}
+			if err := ValidateNamedEvent(admitted, EventAdmissionDiagnosticDirect, test.eventType); err != nil {
+				t.Fatalf("validate valid named subtype: %v", err)
+			}
+		})
+	}
+
+	type hostileTuple struct {
+		name         string
+		eventType    EventType
+		producerType EventProducerType
+		producerID   string
+		runID        string
+		envelope     EventEnvelope
+	}
+	hostile := make([]hostileTuple, 0, 16)
+	for _, eventType := range DiagnosticDirectEventTypes() {
+		for _, producerType := range []EventProducerType{EventProducerExternal, EventProducerAgent, EventProducerNode} {
+			hostile = append(hostile, hostileTuple{
+				name: string(eventType) + "_producer_" + string(producerType), eventType: eventType,
+				producerType: producerType, producerID: "hostile", runID: runID, envelope: globalEnvelope,
+			})
+		}
+	}
+	hostile = append(hostile,
+		hostileTuple{"runtime_log_wrong_platform_id", EventTypePlatformRuntimeLog, EventProducerPlatform, "not-runtime", runID, globalEnvelope},
+		hostileTuple{"runtime_log_entity_scope", EventTypePlatformRuntimeLog, EventProducerPlatform, "runtime", runID, entityEnvelope},
+		hostileTuple{"runtime_log_flow_scope", EventTypePlatformRuntimeLog, EventProducerPlatform, "runtime", runID, flowEnvelope},
+		hostileTuple{"inbound_recorded_missing_run", EventTypePlatformInboundRecord, EventProducerPlatform, "runtime", "", globalEnvelope},
+		hostileTuple{"inbound_recorded_flow_scope", EventTypePlatformInboundRecord, EventProducerPlatform, "runtime", runID, flowEnvelope},
+		hostileTuple{"agent_directive_missing_run", EventTypePlatformAgentDirective, EventProducerPlatform, "runtime", "", globalEnvelope},
+		hostileTuple{"agent_directive_entity_scope", EventTypePlatformAgentDirective, EventProducerPlatform, "runtime", runID, entityEnvelope},
+		hostileTuple{"agent_directive_flow_scope", EventTypePlatformAgentDirective, EventProducerPlatform, "runtime", runID, flowEnvelope},
+	)
+	for _, test := range hostile {
+		t.Run("hostile/"+test.name, func(t *testing.T) {
+			input := diagnosticDirectContractInput(test.eventType, test.producerType, test.producerID, test.runID, test.envelope)
+			if _, err := NewDiagnosticDirectEvent(input); err == nil {
+				t.Fatal("constructor accepted invalid subtype tuple")
+			}
+
+			baseRunID := runID
+			if test.eventType == EventTypePlatformRuntimeLog {
+				baseRunID = ""
+			}
+			base, err := NewDiagnosticDirectEvent(diagnosticDirectContractInput(test.eventType, EventProducerPlatform, "runtime", baseRunID, globalEnvelope))
+			if err != nil {
+				t.Fatalf("construct hostile base: %v", err)
+			}
+			producer, err := NewProducerIdentity(test.producerType, test.producerID)
+			if err != nil {
+				t.Fatalf("construct hostile producer: %v", err)
+			}
+			base.producer = producer
+			base.runID = test.runID
+			base.envelope = test.envelope.Normalized()
+			if err := ValidateEventContract(base); err == nil {
+				t.Fatal("canonical contract accepted invalid subtype tuple")
+			}
+			if _, err := AdmitForPersistence(base, AdmissionOptions{RequirePersistentUUIDIdentity: true}); err == nil {
+				t.Fatal("persistence admission accepted invalid subtype tuple")
+			}
+			if err := ValidateNamedEvent(newAdmittedEvent(base), EventAdmissionDiagnosticDirect, test.eventType); err == nil {
+				t.Fatal("named operation gate accepted invalid subtype tuple")
+			}
+		})
+	}
+}
+
+func diagnosticDirectContractInput(eventType EventType, producerType EventProducerType, producerID, runID string, envelope EventEnvelope) DiagnosticDirectEventInput {
+	return DiagnosticDirectEventInput{
+		Facts: EventFacts{
+			ID: uuid.NewString(), Type: eventType, Producer: ProducerClaim{Type: producerType, ID: producerID},
+			Payload: []byte(`{}`), Envelope: envelope, CreatedAt: time.Now().UTC().Truncate(time.Microsecond), ExecutionMode: executionmode.Live,
+		},
+		RunID: runID,
+	}
+}

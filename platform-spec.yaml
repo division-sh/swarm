@@ -1000,6 +1000,24 @@ contract_formats:
             All three event rows persist produced_by_type=platform. Runtime logs persist produced_by=runtime. Provider and
             directive identity remain explicit in subtype payload and operation state rather than reclassifying evidence as
             executable external or agent work.
+          structural_subtypes:
+            platform.runtime_log:
+              producer: produced_by_type MUST be platform and produced_by MUST be exactly runtime.
+              run: run_id is optional; when present it names the exact existing run observed by the log.
+              scope: scope MUST be global.
+            platform.inbound_recorded:
+              producer: produced_by_type MUST be platform; provider identity remains in the subtype payload and operation state.
+              run: run_id is required.
+              scope: scope MUST be entity or global and MUST NOT be flow.
+            platform.agent_directive:
+              producer: produced_by_type MUST be platform; agent and operator identity remain in the subtype payload and operation state.
+              run: run_id is required.
+              scope: scope MUST be global.
+          structural_owner: >
+            One exhaustive runtime event contract owns the three rows above at construction, persistence admission,
+            canonical durable record validation/readback, and named-operation admission. Fresh SQLite and PostgreSQL
+            schemas mirror every storage-enforceable producer, run, and scope fact. Payload and business-transaction
+            validation remain with each named subtype operation and are not duplicated in the structural owner.
           subtype_admission:
             platform.runtime_log: >
               RuntimeLogPersistence may append one event row globally without a run, or against an existing run in running,
@@ -11567,9 +11585,10 @@ platform_tables:
             CHECK (event_class NOT IN ('root_ingress', 'operator_injected', 'selected_fork_replay') OR run_id IS NOT NULL),
             CHECK ((event_class = 'operator_injected') OR operator_reference_event_id IS NULL),
             CHECK ((event_class IN ('root_ingress', 'operator_injected') AND produced_by_type = 'external') OR (event_class = 'child' AND produced_by_type IN ('node', 'agent', 'platform')) OR (event_class IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct') AND produced_by_type = 'platform') OR event_class IN ('replay', 'selected_fork_replay')),
-            CHECK ((event_name IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive') AND event_class = 'diagnostic_direct' AND produced_by_type = 'platform') OR (event_name NOT IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive') AND event_class <> 'diagnostic_direct')),
+            CHECK ((event_name IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive') AND event_class = 'diagnostic_direct') OR (event_name NOT IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive') AND event_class <> 'diagnostic_direct')),
             CHECK (event_name <> 'platform.runtime_log' OR produced_by = 'runtime'),
             CHECK (event_name NOT IN ('platform.inbound_recorded', 'platform.agent_directive') OR run_id IS NOT NULL),
+            CHECK ((event_name = 'platform.runtime_log' AND scope = 'global') OR (event_name = 'platform.inbound_recorded' AND scope IN ('entity', 'global')) OR (event_name = 'platform.agent_directive' AND scope = 'global') OR event_name NOT IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive')),
             CHECK ((routing_source_kind = '' AND source_route = '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL) OR (routing_source_kind = 'declared_ingress' AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NOT NULL) OR (routing_source_kind = 'runtime_instance' AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL)),
             INDEX idx_events_run (run_id, created_at) WHERE run_id IS NOT NULL,
             INDEX idx_events_entity (entity_id, created_at) WHERE entity_id IS NOT NULL,

@@ -13,7 +13,7 @@ func ValidateEventContract(event Event) error {
 	producer := event.Producer()
 	class := event.AdmissionClass()
 	eventType := event.Type()
-	if err := ValidateEventIdentityContract(class, eventType, producer); err != nil {
+	if err := ValidateEventStructuralContract(class, eventType, producer, event.RunID(), event.Scope()); err != nil {
 		return err
 	}
 
@@ -45,9 +45,47 @@ func ValidateEventContract(event Event) error {
 	return nil
 }
 
-// ValidateEventIdentityContract validates the durable discriminator, catalog,
-// and exact producer role without requiring a constructed Event carrier.
-func ValidateEventIdentityContract(class EventAdmissionClass, eventType EventType, producer ProducerIdentity) error {
+// ValidateEventStructuralContract is the canonical durable class, subtype,
+// producer, run, and scope policy. Constructors, admission, readback, and
+// named persistence operations all consume this owner.
+func ValidateEventStructuralContract(class EventAdmissionClass, eventType EventType, producer ProducerIdentity, runID string, scope EventScope) error {
+	if err := validateEventIdentityContract(class, eventType, producer); err != nil {
+		return err
+	}
+	if class != EventAdmissionDiagnosticDirect {
+		return nil
+	}
+
+	runID = strings.TrimSpace(runID)
+	switch eventType {
+	case EventTypePlatformRuntimeLog:
+		if producer.ID() != "runtime" {
+			return fmt.Errorf("%s requires exact platform producer runtime; got %q", eventType, producer.ID())
+		}
+		if scope != EventScopeGlobal {
+			return fmt.Errorf("%s requires global scope; got %q", eventType, scope)
+		}
+	case EventTypePlatformInboundRecord:
+		if runID == "" {
+			return fmt.Errorf("%s requires run_id", eventType)
+		}
+		if scope != EventScopeEntity && scope != EventScopeGlobal {
+			return fmt.Errorf("%s requires entity or global scope; got %q", eventType, scope)
+		}
+	case EventTypePlatformAgentDirective:
+		if runID == "" {
+			return fmt.Errorf("%s requires run_id", eventType)
+		}
+		if scope != EventScopeGlobal {
+			return fmt.Errorf("%s requires global scope; got %q", eventType, scope)
+		}
+	default:
+		return fmt.Errorf("diagnostic_direct event type %q is not in the closed catalog", eventType)
+	}
+	return nil
+}
+
+func validateEventIdentityContract(class EventAdmissionClass, eventType EventType, producer ProducerIdentity) error {
 	if err := producer.Validate(); err != nil {
 		return fmt.Errorf("event producer identity: %w", err)
 	}

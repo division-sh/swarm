@@ -697,10 +697,12 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 			t.Fatalf("diagnostic generic persistence error = %v, want named-operation refusal", err)
 		}
 
-		err = events.ValidateEventIdentityContract(
+		err = events.ValidateEventStructuralContract(
 			events.EventAdmissionRootIngress,
 			events.EventTypePlatformRuntimeLog,
 			eventtest.Producer(events.EventProducerExternal, "runtime"),
+			seed.RunID(),
+			seed.Scope(),
 		)
 		if err == nil {
 			t.Fatal("root-ingress constructor accepted a closed diagnostic event type")
@@ -775,10 +777,11 @@ func TestPostgresDiagnosticDirectEventsRequireClosedTypedOwners(t *testing.T) {
 
 func assertDiagnosticDirectEventsRequireClosedTypedOwners(t *testing.T, appendEvent func(context.Context, events.Event) error) {
 	t.Helper()
+	runID := uuid.NewString()
 	closed := []events.Event{
 		eventtest.DiagnosticDirect(uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", json.RawMessage(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-		eventtest.DiagnosticDirect(uuid.NewString(), events.EventTypePlatformInboundRecord, "runtime", "", json.RawMessage(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-		eventtest.DiagnosticDirect(uuid.NewString(), events.EventTypePlatformAgentDirective, "runtime", "", json.RawMessage(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		eventtest.DiagnosticDirect(uuid.NewString(), events.EventTypePlatformInboundRecord, "runtime", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()),
+		eventtest.DiagnosticDirect(uuid.NewString(), events.EventTypePlatformAgentDirective, "runtime", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()),
 	}
 	lineage, err := events.NewSelectedForkLineage(uuid.NewString(), uuid.NewString(), uuid.NewString(), "selection:generic-refusal", "", executionmode.Live)
 	if err != nil {
