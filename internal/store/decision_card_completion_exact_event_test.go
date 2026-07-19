@@ -113,6 +113,9 @@ func TestNormalRunCompletionRequiresExactDecisionOutcomeEventIDParity(t *testing
 				wrongEvent := eventtest.PersistedProjection(wrongEventID, events.EventType(eventName), "test", "", []byte(`{}`), 1,
 					runID, sourceEventID, events.EventEnvelope{}, now.Add(2*time.Hour+time.Minute))
 				if err := runDecisionCardTestPipelineMutation(t, ctx, cards, func(txctx context.Context, tx *sql.Tx) error {
+					if err := appendDecisionCardTestParent(t, txctx, cards, tx, runID, sourceEventID, now.Add(2*time.Hour)); err != nil {
+						return err
+					}
 					return appendDecisionCardTestEvent(t, txctx, cards, tx, wrongEvent)
 				}); err != nil {
 					t.Fatalf("append wrong-ID outcome event: %v", err)

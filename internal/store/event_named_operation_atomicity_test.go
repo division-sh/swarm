@@ -173,6 +173,10 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, store ev
 		}
 	}
 	forkRunID := uuid.NewString()
+	forkTrigger := eventtest.RootIngress(uuid.NewString(), "atomic.fork_trigger", "gateway", "fork-task", []byte(`{"fork":true}`), 0, forkRunID, "", events.EventEnvelope{}, createdAt)
+	if err := commitSemanticEventFixture(ctx, store, forkTrigger); err != nil {
+		t.Fatalf("commit fork run trigger: %v", err)
+	}
 	lineage, err := events.NewSelectedForkLineage(forkRunID, sourceRunID, sourceEventID, "selection:atomic", "fork-task", executionmode.Live)
 	if err != nil {
 		t.Fatal(err)

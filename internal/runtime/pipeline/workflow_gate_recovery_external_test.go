@@ -408,6 +408,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			decisionPayload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
 			decisionEvent := eventtest.RuntimeControl(decisionEventID, events.EventType("mailbox.card_decided"), "platform", "", decisionPayload, 0, runID, "",
 				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "root"), time.Now().UTC())
+			storetest.CommitSemanticEvent(t, ctx, selected.events, decisionEvent)
 			forward, emitted, err := newCoordinator(otherGateBundle).Intercept(ctx, decisionEvent)
 			if err == nil || !runtimepipeline.IsPipelineReceiptDeferred(err) {
 				t.Fatalf("route approval under changed bundle = forward:%v emitted:%d error:%v, want recoverable deferral", forward, len(emitted), err)
@@ -528,6 +529,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				payload, _ := json.Marshal(map[string]any{"card_id": pendingCard.CardID})
 				decision := eventtest.RuntimeControl(decisionID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
 					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "root"), time.Now().UTC())
+				storetest.CommitSemanticEvent(t, ctx, selected.events, decision)
 				consumed, _, routeErr = coordinator.Intercept(ctx, decision)
 				if routeErr != nil || consumed {
 					t.Fatalf("route %s = forward:%v error:%v", verdict, consumed, routeErr)
@@ -569,6 +571,10 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					t.Fatal(err)
 				}
 				sourceEventID := uuid.NewString()
+				sourceEvent := eventtest.RootIngress(sourceEventID, events.EventType("support.reply_drafted"), "support-agent", "task-1",
+					[]byte(`{"chat_id":"support-room","text":"Exact approved text"}`), 0, runID, "",
+					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now)
+				storetest.CommitSemanticEvent(t, ctx, selected.events, sourceEvent)
 				requestEventID := activityidentity.RequestEventID(activityidentity.Fact{
 					RunID: runID, SourceEventID: sourceEventID, EntityID: entityID, FlowID: "support", NodeID: "support",
 					HandlerEventKey: "support.reply_drafted", ActivityID: "send_support_reply", Tool: "provider_write", Attempt: 1,
@@ -638,6 +644,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				payload, _ := canonicaljson.Bytes(map[string]any{"card_id": card.CardID})
 				decisionEvent := eventtest.RuntimeControl(decisionEventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
 					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "root"), now.Add(time.Minute))
+				storetest.CommitSemanticEvent(t, ctx, selected.events, decisionEvent)
 				source := semanticview.Wrap(proposedEffectProofBundle("http://127.0.0.1:1"))
 				canonicalBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source},
 					"platform.activity_requested", "send_support_reply.revision_requested", "send_support_reply.rejected")

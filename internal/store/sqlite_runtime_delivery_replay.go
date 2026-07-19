@@ -602,30 +602,31 @@ func (s *SQLiteRuntimeStore) UpsertEventReceipt(ctx context.Context, eventID, ag
 		if !delivery.found {
 			return fmt.Errorf("upsert sqlite event receipt: delivery row required for event %s agent %s", eventID, agentID)
 		}
-		if activeRunQuiescenceDeliveryTerminal(delivery.status, delivery.reasonCode) {
-			return nil
-		}
-		if strings.TrimSpace(delivery.runID) != "" {
-			if err := storerunlifecycle.RequireActive(txctx, tx, delivery.runID, storerunlifecycle.DialectSQLite); err != nil {
+		if !activeRunQuiescenceDeliveryTerminal(delivery.status, delivery.reasonCode) {
+			if strings.TrimSpace(delivery.runID) != "" {
+				if err := storerunlifecycle.RequireActive(txctx, tx, delivery.runID, storerunlifecycle.DialectSQLite); err != nil {
+					return err
+				}
+			}
+			state, err := buildAgentReceiptWriteState(delivery.retryCount, status, failure)
+			if err != nil {
 				return err
 			}
+			now := s.now()
+			changed, err := s.updateAgentDeliveryRowTx(txctx, tx, eventID, agentID, state, now)
+			if err != nil {
+				return err
+			}
+			if changed {
+				if err := s.upsertAgentReceiptRowTx(txctx, tx, eventID, agentID, delivery, state, now); err != nil {
+					return err
+				}
+				if err := recordAgentDeliveryAuthorActivity(txctx, delivery, agentID, state, now); err != nil {
+					return err
+				}
+			}
 		}
-		state, err := buildAgentReceiptWriteState(delivery.retryCount, status, failure)
-		if err != nil {
-			return err
-		}
-		now := s.now()
-		changed, err := s.updateAgentDeliveryRowTx(txctx, tx, eventID, agentID, state, now)
-		if err != nil {
-			return err
-		}
-		if !changed {
-			return nil
-		}
-		if err := s.upsertAgentReceiptRowTx(txctx, tx, eventID, agentID, delivery, state, now); err != nil {
-			return err
-		}
-		return recordAgentDeliveryAuthorActivity(txctx, delivery, agentID, state, now)
+		return s.sqliteConvergeStandaloneRuntimePlatformRunByEventIDTx(txctx, tx, eventID)
 	})
 }
 

@@ -168,6 +168,17 @@ func validateDirectiveReservation(req runtimeagentcontrol.ReserveDirectiveOperat
 	if event.ID() != op.DirectiveEventID || event.RunID() != op.ResolvedRunID || event.Type() != events.EventTypePlatformAgentDirective || req.Event.Class() != events.EventAdmissionDiagnosticDirect {
 		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("directive operation event identity mismatch")
 	}
+	wantDisposition := events.AdmittedRunRequireActive
+	switch op.RunIDResolution {
+	case runtimeagentcontrol.RunResolutionNewRunAllocated:
+		wantDisposition = events.AdmittedRunCreateAuthorized
+	case runtimeagentcontrol.RunResolutionSpecified, runtimeagentcontrol.RunResolutionActiveSession:
+	default:
+		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("unsupported run_id_resolution %q", op.RunIDResolution)
+	}
+	if req.Event.RunDisposition() != wantDisposition {
+		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("directive operation run disposition %q does not match resolution %q", req.Event.RunDisposition(), op.RunIDResolution)
+	}
 	if op.State == "" {
 		op.State = runtimeagentcontrol.DirectiveOperationPrepared
 	}

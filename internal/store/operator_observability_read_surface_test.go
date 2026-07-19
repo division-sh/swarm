@@ -749,7 +749,7 @@ func seedOperatorObservabilityEvent(
 	if producerType == events.EventProducerPlatform {
 		event = eventtest.PersistedRuntimeControlForProducer(eventID, events.EventType(eventName), producer, "", payload, 0, runID, "", envelope, createdAt)
 	} else {
-		event = eventtest.PersistedChildForProducer(eventID, events.EventType(eventName), producer, "", payload, 0, runID, eventtest.UUID("operator-observability-parent:"+eventID), envelope, createdAt)
+		event = eventtest.RootIngress(eventID, events.EventType(eventName), producerID, "", payload, 0, runID, "", envelope, createdAt)
 	}
 	if err := commitSemanticEventFixture(ctx, pg, event); err != nil {
 		t.Fatalf("seed operator observability event %s: %v", eventName, err)

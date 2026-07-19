@@ -101,9 +101,17 @@ func TestAuthoredNodeEventProducerTypeParity(t *testing.T) {
 			eventID := uuid.NewString()
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			parentID := eventtest.UUID("authored-node-parent:" + eventID)
+			parent := eventtest.RootIngress(
+				parentID, events.EventType("test.node_parent"), "test-ingress", "", []byte(`{}`), 0,
+				runID, "", events.EventEnvelope{}, time.Date(2026, 7, 16, 2, 59, 59, 0, time.UTC),
+			)
+			if err := insertCanonicalEventRecordFixture(ctx, fixture.store, parent); err != nil {
+				t.Fatalf("seed authored node parent: %v", err)
+			}
 			event := eventtest.PersistedChildForProducer(
 				eventID, events.EventType("test.node_emitted"), eventtest.Producer(events.EventProducerNode, "declarative-node"), "", []byte(`{}`), 0,
-				runID, eventtest.UUID("authored-node-parent:"+eventID), events.EventEnvelope{}, time.Date(2026, 7, 16, 3, 0, 0, 0, time.UTC),
+				runID, parentID, events.EventEnvelope{}, time.Date(2026, 7, 16, 3, 0, 0, 0, time.UTC),
 			)
 
 			if err := commitSemanticEventFixtureWithAgents(ctx, fixture.store, event, nil); err != nil {

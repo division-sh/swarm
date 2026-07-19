@@ -84,23 +84,27 @@ func (s *SQLiteRuntimeStore) ConvergeStandaloneRuntimePlatformRun(ctx context.Co
 		return nil
 	}
 	return s.runAuthorActivityMutation(ctx, "sqlite standalone platform run convergence", func(txctx context.Context, tx *sql.Tx) error {
-		rec, found, err := sqliteLoadStandaloneRuntimePlatformRunRecord(txctx, tx, eventID)
-		if err != nil || !found || !isStandaloneRuntimePlatformRunRecord(rec) {
-			return err
-		}
-		switch strings.TrimSpace(rec.RunStatus) {
-		case "completed":
-			return nil
-		case "failed", "cancelled", "forked":
-			return fmt.Errorf("standalone runtime platform run %s already terminal with status %s", rec.RunID, strings.TrimSpace(rec.RunStatus))
-		}
-		active, err := sqliteHasActiveRunDeliveries(txctx, tx, rec.RunID)
-		if err != nil || active {
-			return err
-		}
-		_, err = s.sqliteMarkRunTerminalTx(txctx, tx, rec.RunID, "completed", nil, s.now())
-		return err
+		return s.sqliteConvergeStandaloneRuntimePlatformRunByEventIDTx(txctx, tx, eventID)
 	})
+}
+
+func (s *SQLiteRuntimeStore) sqliteConvergeStandaloneRuntimePlatformRunByEventIDTx(ctx context.Context, tx *sql.Tx, eventID string) error {
+	rec, found, err := sqliteLoadStandaloneRuntimePlatformRunRecord(ctx, tx, eventID)
+	if err != nil || !found || !isStandaloneRuntimePlatformRunRecord(rec) {
+		return err
+	}
+	switch strings.TrimSpace(rec.RunStatus) {
+	case "completed":
+		return nil
+	case "failed", "cancelled", "forked":
+		return fmt.Errorf("standalone runtime platform run %s already terminal with status %s", rec.RunID, strings.TrimSpace(rec.RunStatus))
+	}
+	active, err := sqliteHasActiveRunDeliveries(ctx, tx, rec.RunID)
+	if err != nil || active {
+		return err
+	}
+	_, err = s.sqliteMarkRunTerminalTx(ctx, tx, rec.RunID, "completed", nil, s.now())
+	return err
 }
 
 func (s *SQLiteRuntimeStore) ConvergeNormalRunCompletion(ctx context.Context, eventID string, workflowTerminalStates []string, flowTerminalStates map[string][]string) error {

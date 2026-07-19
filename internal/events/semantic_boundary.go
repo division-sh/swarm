@@ -10,14 +10,29 @@ import (
 // AdmittedEvent is the only event value accepted by persistence operations.
 // Its zero value is invalid and no field can be populated outside this package.
 type AdmittedEvent struct {
-	event Event
+	event          Event
+	runDisposition AdmittedRunDisposition
 }
 
 func (a AdmittedEvent) Event() Event               { return a.event.Clone() }
 func (a AdmittedEvent) ID() string                 { return a.event.ID() }
 func (a AdmittedEvent) Class() EventAdmissionClass { return a.event.AdmissionClass() }
+func (a AdmittedEvent) RunDisposition() AdmittedRunDisposition {
+	return a.runDisposition
+}
 
-func newAdmittedEvent(event Event) AdmittedEvent { return AdmittedEvent{event: event.Clone()} }
+type AdmittedRunDisposition string
+
+const (
+	AdmittedRunCreateAuthorized AdmittedRunDisposition = "create_authorized"
+	AdmittedRunRequireActive    AdmittedRunDisposition = "require_active"
+	AdmittedRunRequirePresent   AdmittedRunDisposition = "require_present"
+	AdmittedRunless             AdmittedRunDisposition = "runless"
+)
+
+func newAdmittedEvent(event Event, disposition AdmittedRunDisposition) AdmittedEvent {
+	return AdmittedEvent{event: event.Clone(), runDisposition: disposition}
+}
 
 type RestoredEventInput struct {
 	Class         EventAdmissionClass
@@ -70,7 +85,17 @@ func RestoreAdmittedEvent(input RestoredEventInput) (AdmittedEvent, error) {
 	if err := ValidatePersistentEvent(event); err != nil {
 		return AdmittedEvent{}, fmt.Errorf("durable event identity: %w", err)
 	}
-	return newAdmittedEvent(event), nil
+	return newAdmittedEvent(event, restoredRunDisposition(event)), nil
+}
+
+func restoredRunDisposition(event Event) AdmittedRunDisposition {
+	if strings.TrimSpace(event.RunID()) == "" {
+		return AdmittedRunless
+	}
+	if event.AdmissionClass() == EventAdmissionDiagnosticDirect && event.Type() == EventTypePlatformRuntimeLog {
+		return AdmittedRunRequirePresent
+	}
+	return AdmittedRunRequireActive
 }
 
 type RouteProbe struct {

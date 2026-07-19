@@ -195,14 +195,19 @@ func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, ope
 	if err != nil {
 		return none, err
 	}
-	return events.NewRunScopedDiagnosticDirectEvent(events.RunScopedRuntimeEventInput{
-		Facts: events.EventFacts{
-			ID: eventID, Type: events.EventType(DirectiveEventType),
-			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
-			Payload:  raw, ExecutionMode: executionmode.Live, CreatedAt: now,
-		},
-		RunID: target.RunID,
-	})
+	facts := events.EventFacts{
+		ID: eventID, Type: events.EventType(DirectiveEventType),
+		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
+		Payload:  raw, ExecutionMode: executionmode.Live, CreatedAt: now,
+	}
+	switch target.Mode {
+	case RunResolutionNewRunAllocated:
+		return events.NewRunCreatingDiagnosticDirectEvent(events.RunCreatingRuntimeEventInput{Facts: facts, RunID: target.RunID})
+	case RunResolutionSpecified, RunResolutionActiveSession:
+		return events.NewRunScopedDiagnosticDirectEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: target.RunID})
+	default:
+		return none, fmt.Errorf("unsupported run_id resolution %q", target.Mode)
+	}
 }
 
 func ValidateBoardDirective(d BoardDirective) error {

@@ -61,6 +61,13 @@ func DiagnosticDirect(id string, eventType events.EventType, sourceAgent, taskID
 	return mustEvent(diagnosticDirectFixture(facts, runID, parentEventID))
 }
 
+// RunCreatingDiagnosticDirect builds a test fixture for the closed direct
+// diagnostic subtype whose named operation creates newly allocated work.
+func RunCreatingDiagnosticDirect(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
+	facts := fixtureFacts(id, eventType, events.EventProducerPlatform, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live)
+	return mustEvent(events.NewRunCreatingDiagnosticDirectEvent(events.RunCreatingRuntimeEventInput{Facts: facts, RunID: runID}))
+}
+
 // Child builds a test fixture for a runtime child event derived from a parent.
 func Child(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, parent events.Event, envelope events.EventEnvelope, createdAt time.Time) events.Event {
 	return ChildWithLineage(id, eventType, sourceAgent, taskID, payload, chainDepth, events.LineageFromEvent(parent), envelope, createdAt)

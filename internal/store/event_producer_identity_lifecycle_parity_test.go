@@ -46,6 +46,7 @@ func TestEventProducerIdentityPersistenceToReadbackParity(t *testing.T) {
 			eventID := uuid.NewString()
 			agentID := "normalizer"
 			producer := eventtest.Producer(events.EventProducerNode, "declarative-node")
+			parentID := eventtest.UUID("producer-lifecycle-parent:" + eventID)
 			envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
 				FlowID:       "source-flow",
 				FlowInstance: "source-flow/one",
@@ -59,10 +60,13 @@ func TestEventProducerIdentityPersistenceToReadbackParity(t *testing.T) {
 				[]byte(`{"task_id":"payload-owned-task","text":"how are you"}`),
 				3,
 				runID,
-				eventtest.UUID("producer-lifecycle-parent:"+eventID),
+				parentID,
 				envelope,
 				createdAt,
 			)
+			if err := commitSemanticParentFixture(ctx, surface, runID, parentID, createdAt.Add(-time.Microsecond)); err != nil {
+				t.Fatalf("persist source parent: %v", err)
+			}
 			if err := commitSemanticEventFixtureWithAgents(ctx, surface, event, []string{agentID}); err != nil {
 				t.Fatalf("PersistEventWithDeliveries: %v", err)
 			}
@@ -326,18 +330,22 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 	sourceRunID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	producer := eventtest.Producer(events.EventProducerNode, "declarative-node")
+	parentID := eventtest.UUID("historical-replay-parent:" + sourceEventID)
 	sourceEnvelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "source-flow", FlowInstance: "source-flow/one", EntityID: uuid.NewString()})
 	sourceEvent := eventtest.InExecutionMode(eventtest.PersistedChildForProducer(
 		sourceEventID, events.EventType("test.node_emitted"), producer, "event-owned-task",
-		[]byte(`{"task_id":"payload-owned-task"}`), 2, sourceRunID, eventtest.UUID("historical-replay-parent:"+sourceEventID), sourceEnvelope, createdAt,
+		[]byte(`{"task_id":"payload-owned-task"}`), 2, sourceRunID, parentID, sourceEnvelope, createdAt,
 	), executionmode.Mock)
+	if err := commitSemanticParentFixture(ctx, surface, sourceRunID, parentID, createdAt.Add(-time.Microsecond)); err != nil {
+		t.Fatalf("persist source parent: %v", err)
+	}
 	if err := commitSemanticEventFixtureWithAgents(ctx, surface, sourceEvent, nil); err != nil {
 		t.Fatalf("persist source event: %v", err)
 	}
 	forkRunID := uuid.NewString()
-	forkOwner := eventtest.PersistedProjectionForProducer(
-		uuid.NewString(), events.EventType("test.node_emitted"), eventtest.Producer(events.EventProducerPlatform, "runtime"), "",
-		[]byte(`{}`), 0, forkRunID, "", events.EventEnvelope{}, createdAt.Add(time.Minute),
+	forkOwner := eventtest.RootIngress(
+		uuid.NewString(), events.EventType("test.fork_root"), "fixture", "", []byte(`{}`), 0,
+		forkRunID, "", events.EventEnvelope{}, createdAt.Add(time.Minute),
 	)
 	if err := commitSemanticEventFixtureWithAgents(ctx, surface, forkOwner, nil); err != nil {
 		t.Fatalf("persist fork run owner: %v", err)

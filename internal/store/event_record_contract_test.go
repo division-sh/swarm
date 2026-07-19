@@ -65,6 +65,13 @@ func TestEventRecordExactPersistenceParity(t *testing.T) {
 			assertExactEventRecord(t, ctx, fixture, diagnostic)
 
 			forkRunID := uuid.NewString()
+			forkRoot := eventtest.RootIngress(
+				uuid.NewString(), "contract.fork_root", "fixture", "", []byte(`{}`), 0,
+				forkRunID, "", events.EventEnvelope{}, now.Add(6*time.Microsecond),
+			)
+			if err := commitSemanticEventFixture(ctx, store, forkRoot); err != nil {
+				t.Fatalf("commit selected-fork run root: %v", err)
+			}
 			selectedLineage, err := events.NewSelectedForkLineage(forkRunID, runID, root.ID(), "selection:contract-proof", "fork-task", executionmode.Live)
 			if err != nil {
 				t.Fatal(err)

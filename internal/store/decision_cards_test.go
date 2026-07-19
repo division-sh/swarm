@@ -1081,6 +1081,18 @@ func appendDecisionCardTestEvent(t *testing.T, ctx context.Context, cards decisi
 	}
 }
 
+func appendDecisionCardTestParent(t *testing.T, ctx context.Context, cards decisioncard.Store, tx *sql.Tx, runID, parentEventID string, at time.Time) error {
+	t.Helper()
+	switch selected := cards.(type) {
+	case *PostgresStore:
+		return commitSemanticParentFixtureTx(ctx, selected, tx, runID, parentEventID, at)
+	case *SQLiteRuntimeStore:
+		return commitSemanticParentFixtureTx(ctx, selected, tx, runID, parentEventID, at)
+	default:
+		return fmt.Errorf("unexpected decision card store %T", cards)
+	}
+}
+
 func completeHumanTaskOutcomeInTestMutation(t *testing.T, ctx context.Context, cards decisioncard.Store, cardID, outcomeEventID string, at time.Time) decisioncard.HumanTaskContinuation {
 	t.Helper()
 	human := cards.(decisioncard.HumanTaskStore)
@@ -1109,6 +1121,9 @@ func completeHumanTaskOutcomeInTestMutation(t *testing.T, ctx context.Context, c
 	)
 	var completed decisioncard.HumanTaskContinuation
 	if err := runDecisionCardTestPipelineMutation(t, ctx, cards, func(txctx context.Context, tx *sql.Tx) error {
+		if err := appendDecisionCardTestParent(t, txctx, cards, tx, continuation.RunID, outcomeEventID, at.Add(-time.Microsecond)); err != nil {
+			return err
+		}
 		if err := appendDecisionCardTestEvent(t, txctx, cards, tx, evt); err != nil {
 			return err
 		}
@@ -1118,6 +1133,8 @@ func completeHumanTaskOutcomeInTestMutation(t *testing.T, ctx context.Context, c
 	}); err != nil {
 		t.Fatalf("complete human-task outcome in test mutation: %v", err)
 	}
+	requireDecisionCardPipelineReceipt(t, ctx, cards, "parent", outcomeEventID)
+	requireDecisionCardPipelineReceipt(t, ctx, cards, "outcome", evt.ID())
 	return completed
 }
 
@@ -1142,6 +1159,9 @@ func completeProposedEffectRouteInTestMutation(t *testing.T, ctx context.Context
 		continuation.RunID, parentID, events.EventEnvelope{}, at)
 	var completed decisioncard.ProposedEffectContinuation
 	if err := runDecisionCardTestPipelineMutation(t, ctx, cards, func(txctx context.Context, tx *sql.Tx) error {
+		if err := appendDecisionCardTestParent(t, txctx, cards, tx, continuation.RunID, parentID, at.Add(-time.Microsecond)); err != nil {
+			return err
+		}
 		if err := appendDecisionCardTestEvent(t, txctx, cards, tx, evt); err != nil {
 			return err
 		}
@@ -1151,7 +1171,23 @@ func completeProposedEffectRouteInTestMutation(t *testing.T, ctx context.Context
 	}); err != nil {
 		t.Fatalf("complete proposed-effect route in test mutation: %v", err)
 	}
+	requireDecisionCardPipelineReceipt(t, ctx, cards, "parent", parentID)
+	requireDecisionCardPipelineReceipt(t, ctx, cards, "outcome", evt.ID())
 	return completed
+}
+
+func requireDecisionCardPipelineReceipt(t *testing.T, ctx context.Context, cards decisioncard.Store, role, eventID string) {
+	t.Helper()
+	reader, ok := cards.(interface {
+		HasProcessedPipelineReceipt(context.Context, string) (bool, error)
+	})
+	if !ok {
+		t.Fatalf("decision card store %T has no pipeline receipt reader", cards)
+	}
+	processed, err := reader.HasProcessedPipelineReceipt(ctx, eventID)
+	if err != nil || !processed {
+		t.Fatalf("%s event %s pipeline receipt processed=%v err=%v", role, eventID, processed, err)
+	}
 }
 
 func appendDecisionCardChangeInStore(ctx context.Context, cards decisioncard.Store, runID, cardID, changeType string, payload semanticvalue.Value, now time.Time) (int64, error) {

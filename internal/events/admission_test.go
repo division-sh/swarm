@@ -129,6 +129,82 @@ func TestAdmissionAllocatesOnlyAuthorizedFacts(t *testing.T) {
 	}
 }
 
+func TestAdmissionCarriesExactRunDispositionAndReadbackNeverRegainsCreation(t *testing.T) {
+	runtimeFacts := func(eventType EventType) EventFacts {
+		facts := validFacts()
+		facts.Type = eventType
+		facts.Producer = ProducerClaim{Type: EventProducerPlatform, ID: "runtime"}
+		facts.TaskID = ""
+		return facts
+	}
+	childFacts := func() EventFacts {
+		facts := validFacts()
+		facts.Producer = ProducerClaim{Type: EventProducerAgent, ID: "worker"}
+		return facts
+	}
+	directiveFacts := func() EventFacts {
+		facts := diagnosticDirectFacts()
+		facts.Type = EventTypePlatformAgentDirective
+		return facts
+	}
+	tests := []struct {
+		name  string
+		build func() (Event, error)
+		want  AdmittedRunDisposition
+	}{
+		{name: "root create", build: func() (Event, error) {
+			return NewRootIngressEvent(RootIngressEventInput{Facts: validFacts(), RunID: testRunID})
+		}, want: AdmittedRunCreateAuthorized},
+		{name: "operator requires active", build: func() (Event, error) {
+			return NewOperatorInjectedEvent(OperatorInjectedEventInput{Facts: validFacts(), RunID: testRunID})
+		}, want: AdmittedRunRequireActive},
+		{name: "child requires active", build: func() (Event, error) {
+			return NewChildEvent(ChildEventInput{Facts: childFacts(), Lineage: validLineage()})
+		}, want: AdmittedRunRequireActive},
+		{name: "standalone runtime creates", build: func() (Event, error) {
+			return NewStandaloneRuntimeControlEvent(StandaloneRuntimeEventInput{Facts: runtimeFacts("platform.boot")})
+		}, want: AdmittedRunCreateAuthorized},
+		{name: "run scoped runtime requires active", build: func() (Event, error) {
+			return NewRunScopedRuntimeControlEvent(RunScopedRuntimeEventInput{Facts: runtimeFacts("platform.paused"), RunID: testRunID})
+		}, want: AdmittedRunRequireActive},
+		{name: "new-run directive creates", build: func() (Event, error) {
+			return NewRunCreatingDiagnosticDirectEvent(RunCreatingRuntimeEventInput{Facts: directiveFacts(), RunID: testRunID})
+		}, want: AdmittedRunCreateAuthorized},
+		{name: "global runtime log is runless", build: func() (Event, error) {
+			return NewStandaloneDiagnosticDirectEvent(StandaloneRuntimeEventInput{Facts: diagnosticDirectFacts()})
+		}, want: AdmittedRunless},
+		{name: "run runtime log requires present", build: func() (Event, error) {
+			return NewRunScopedDiagnosticDirectEvent(RunScopedRuntimeEventInput{Facts: diagnosticDirectFacts(), RunID: testRunID})
+		}, want: AdmittedRunRequirePresent},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			event, err := test.build()
+			if err != nil {
+				t.Fatalf("construct event: %v", err)
+			}
+			admitted, err := AdmitForPersistence(event, AdmissionOptions{RequirePersistentUUIDIdentity: true})
+			if err != nil {
+				t.Fatalf("admit event: %v", err)
+			}
+			if admitted.RunDisposition() != test.want {
+				t.Fatalf("run disposition = %q, want %q", admitted.RunDisposition(), test.want)
+			}
+			restored, err := RevalidatePersistedEvent(admitted.Event())
+			if err != nil {
+				t.Fatalf("revalidate event: %v", err)
+			}
+			wantRestored := test.want
+			if wantRestored == AdmittedRunCreateAuthorized {
+				wantRestored = AdmittedRunRequireActive
+			}
+			if restored.RunDisposition() != wantRestored {
+				t.Fatalf("restored run disposition = %q, want %q", restored.RunDisposition(), wantRestored)
+			}
+		})
+	}
+}
+
 func TestReplayClassesRequireExactTypedLineage(t *testing.T) {
 	if _, err := NewChildEvent(ChildEventInput{Facts: validFacts(), Lineage: EventLineage{ExecutionMode: executionmode.Live}}); err == nil {
 		t.Fatal("child construction accepted missing lineage")
@@ -224,6 +300,11 @@ func TestRuntimeConstructorsEncodeExplicitLineageIntent(t *testing.T) {
 		}, wantRun: testRunID, wantMode: executionmode.Live},
 		{name: "run-scoped direct", build: func() (Event, error) {
 			return NewRunScopedDiagnosticDirectEvent(RunScopedRuntimeEventInput{Facts: directFacts(), RunID: testRunID})
+		}, wantRun: testRunID, wantMode: executionmode.Live},
+		{name: "run-creating direct", build: func() (Event, error) {
+			facts := directFacts()
+			facts.Type = EventTypePlatformAgentDirective
+			return NewRunCreatingDiagnosticDirectEvent(RunCreatingRuntimeEventInput{Facts: facts, RunID: testRunID})
 		}, wantRun: testRunID, wantMode: executionmode.Live},
 		{name: "standalone control", build: func() (Event, error) {
 			return NewStandaloneRuntimeControlEvent(StandaloneRuntimeEventInput{Facts: runtimeFacts("platform.boot")})

@@ -647,10 +647,23 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, admitte
 		recordExec = conn
 	}
 	var ensureErr error
-	if evt.AdmissionClass() == events.EventAdmissionDiagnosticDirect && evt.Type() == events.EventTypePlatformRuntimeLog {
-		ensureErr = s.ensureRuntimeLogRunRow(ctx, tx, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName)
-	} else {
+	switch admitted.RunDisposition() {
+	case events.AdmittedRunCreateAuthorized:
 		ensureErr = s.ensureRunRow(ctx, tx, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName)
+	case events.AdmittedRunRequireActive:
+		ensureErr = storerunlifecycle.RequireActive(ctx, chooseExecQueryer(s.DB, tx), wantIdentity.RunID, storerunlifecycle.DialectPostgres)
+	case events.AdmittedRunRequirePresent:
+		if evt.AdmissionClass() != events.EventAdmissionDiagnosticDirect || evt.Type() != events.EventTypePlatformRuntimeLog || strings.TrimSpace(wantIdentity.RunID) == "" {
+			ensureErr = fmt.Errorf("event %s has invalid require-present run disposition", wantIdentity.EventID)
+		} else {
+			ensureErr = s.ensureRuntimeLogRunRow(ctx, tx, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName)
+		}
+	case events.AdmittedRunless:
+		if strings.TrimSpace(wantIdentity.RunID) != "" {
+			ensureErr = fmt.Errorf("event %s has runless disposition with run_id", wantIdentity.EventID)
+		}
+	default:
+		ensureErr = fmt.Errorf("event %s has invalid admitted run disposition %q", wantIdentity.EventID, admitted.RunDisposition())
 	}
 	if ensureErr != nil {
 		if errors.Is(ensureErr, storerunlifecycle.ErrRunNotActive) {
@@ -667,6 +680,9 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, admitte
 			}
 		}
 		return runtimebus.EventAppendOutcomeUnknown, ensureErr
+	}
+	if err := requireEventOwnedReferences(ctx, chooseExecQueryer(s.DB, tx), storerunlifecycle.DialectPostgres, wantIdentity); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	inserted, err := eventrecordpostgres.Insert(ctx, recordExec, wantIdentity)
 	if err != nil {
@@ -1355,8 +1371,10 @@ func isStandaloneRuntimePlatformRunRecord(rec standaloneRuntimePlatformRunRecord
 	if strings.TrimSpace(rec.RunID) == "" {
 		return false
 	}
-	producer, err := events.NewProducerIdentity(events.EventProducerType(rec.ProducedByType), rec.ProducedBy)
-	if err != nil || !events.IsStandaloneRuntimePlatformFacts(events.EventAdmissionClass(rec.EventClass), events.EventType(rec.EventType), producer) {
+	if rec.EventClass != string(events.EventAdmissionRuntimeControl) && rec.EventClass != string(events.EventAdmissionRuntimeDiagnostic) {
+		return false
+	}
+	if strings.TrimSpace(rec.ProducedByType) != string(events.EventProducerPlatform) || strings.TrimSpace(rec.ProducedBy) != "runtime" {
 		return false
 	}
 	if strings.TrimSpace(rec.SourceEventID) != "" {
