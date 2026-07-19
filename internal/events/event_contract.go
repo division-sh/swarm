@@ -257,23 +257,6 @@ func IsRuntimePlatformEvent(event Event) bool {
 	return event.AdmissionClass() == EventAdmissionRuntimeControl || event.AdmissionClass() == EventAdmissionRuntimeDiagnostic
 }
 
-func IsStandaloneRuntimePlatformFacts(class EventAdmissionClass, eventType EventType, producer ProducerIdentity) bool {
-	if !producer.Equal(mustProducerIdentity(EventProducerPlatform, "runtime")) {
-		return false
-	}
-	if class != EventAdmissionRuntimeControl && class != EventAdmissionRuntimeDiagnostic {
-		return false
-	}
-	switch eventType {
-	case "platform.boot", "platform.recovery_failed", "platform.event_quarantined", "platform.agent_panic",
-		"platform.agent_failed", "platform.auth_required", "platform.paused", "platform.resumed",
-		"platform.dead_letter_escalation", "platform.run_stalled", "platform.budget_threshold_crossed":
-		return true
-	default:
-		return false
-	}
-}
-
 func mustProducerIdentity(producerType EventProducerType, producerID string) ProducerIdentity {
 	producer, err := NewProducerIdentity(producerType, producerID)
 	if err != nil {

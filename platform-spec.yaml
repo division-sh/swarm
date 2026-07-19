@@ -847,8 +847,10 @@ contract_formats:
         explicitly admitted event_id and created_at defaults. It may allocate
         root-ingress run_id when the ingress class permits server allocation, and
         may allocate a fresh run only for an explicitly standalone runtime-control
-        or runtime-diagnostic constructor. Labels, payloads, context, and missing
-        facts never authorize run allocation. It MUST fail closed for missing
+        or runtime-diagnostic constructor or the exact typed run-creating
+        platform.agent_directive constructor consumed by its named operation.
+        Labels, payloads, context, run_id_resolution strings, and missing facts
+        never authorize run allocation. It MUST fail closed for missing
         child, replay, fork, or runtime-domain lineage
         facts that are required by the event class. EventBus, transactional
         outbox, direct store append/persist, runtime-log diagnostic-direct
@@ -862,6 +864,32 @@ contract_formats:
         event-owned fact, including the producer pair, task_id, payload,
         execution_mode, lineage, timestamp, and complete envelope; only an exact
         match is idempotent.
+
+        Admission MUST retain one opaque immutable run disposition with the admitted
+        event until persistence. `create_authorized` belongs only to freshly admitted
+        root ingress, explicitly standalone runtime-control/runtime-diagnostic events,
+        and the exact typed run-creating platform.agent_directive produced after
+        new-run target resolution; it permits creation of the event's exact run.
+        `require_active` belongs
+        to operator, child, replay, selected-fork, causal runtime, and run-scoped
+        runtime events; their run MUST already exist in running or paused status.
+        `require_present` belongs only to run-bearing diagnostic-direct
+        `platform.runtime_log` evidence; its run MUST exist but may be terminal.
+        `runless` belongs only to events with no run and MUST NOT read or mutate run
+        lifecycle state. Labels, payload, context, and non-empty run_id never derive
+        this disposition. Exact duplicate comparison precedes disposition enforcement,
+        so an exact retry remains idempotent after terminalization. Persisted readback
+        and revalidation can restore only `require_active`, `require_present`, or
+        `runless`; durable data can never regain run-creation authority.
+
+        Before inserting a new row, the selected-store transaction MUST prove that
+        every causal source_event_id exists in the event's exact run and that every
+        operator reference exists in the operator event's exact run. Missing or
+        cross-run references reject the whole named operation before event, run,
+        delivery, replay, receipt, idempotency, or lineage mutation. Selected-fork
+        cross-run parentage remains a different concept owned only by the typed
+        selected-fork sidecar and its named atomic operation; it MUST NOT be projected
+        into events.source_event_id.
 
         PostgreSQL and SQLite runtime readback share one canonical persisted-event
         decoder. Every readback family that can return an executable, recoverable,
@@ -881,8 +909,8 @@ contract_formats:
           rule: Constructor class and every class-conditioned causal, operator, or selected-fork lineage fact are complete before admission.
           negative_proof: TestEventConstructionClassInvariantMatrix
         runtime.event.runtime_lineage_intent_explicit_at_construction:
-          owner: internal/events causal, run-scoped, and standalone runtime/control/diagnostic constructors
-          rule: Every runtime/control/diagnostic producer explicitly chooses causal, run-scoped unparented, or standalone unparented intent. Causal construction requires one typed EventLineage carrying run, parent, task where applicable, and execution mode; EventBus validates and never infers or mutates those facts.
+          owner: internal/events causal, run-scoped, run-creating, and standalone runtime/control/diagnostic constructors
+          rule: Every runtime/control/diagnostic producer explicitly chooses causal, run-scoped unparented, standalone unparented, or the one closed run-creating platform.agent_directive intent. Causal construction requires one typed EventLineage carrying run, parent, task where applicable, and execution mode; EventBus validates and never infers or mutates those facts.
           negative_proof: TestProductionEventConstructionUsesPublicAPI
         runtime.event.routing_source_typed_at_construction:
           owner: internal/events RoutingSource
@@ -892,6 +920,10 @@ contract_formats:
           owner: internal/events AdmittedEvent and the closed named store operations
           rule: Durable event writers accept only opaque admitted values; raw Event, SQL, row, transaction, and generic mutation capabilities are unavailable to runtime and API consumers.
           negative_proof: TestEventAdmittedPersistenceBoundaryGuard
+        runtime.event.admitted_run_disposition:
+          owner: internal/events AdmittedEvent admission/revalidation and both selected-store private appenders
+          rule: Fresh admission carries exact create-authorized, require-active, require-present, or runless authority through persistence; readback never restores create authority and writers never infer it from labels, payload, context, or run presence.
+          negative_proof: TestAdmissionCarriesExactRunDispositionAndReadbackNeverRegainsCreation
         runtime.event.delivery_projection_nonpersistable:
           owner: internal/events DeliveryEvent
           rule: Receiver-local target, context, and payload projections are distinct nonpersistable values and never rewrite the journal event.
@@ -912,6 +944,14 @@ contract_formats:
           owner: internal/store closed event commit operations
           rule: Event rows and their declared initial delivery, replay, receipt, dead-letter, inbound, diagnostic, or selected-fork lineage facts commit atomically; exact duplicate stops the whole operation before side effects.
           negative_proof: TestEventNamedOperationAtomicityParity
+        store.event_record.same_run_references:
+          owner: internal/store private selected-store append adapters
+          rule: Causal source events and operator-reference events MUST already exist in the admitted event's exact run and are verified inside the same transaction before insertion; selected-fork cross-run lineage remains sidecar-owned.
+          negative_proof: TestEventOwnedReferencesRequireExistingSameRunEventParity
+        store.event_record.standalone_run_convergence:
+          owner: internal/store event append plus final-receipt convergence
+          rule: A standalone runtime run may converge only when its durable creation trigger matches the event identity and type and the immutable runtime class, platform/runtime producer, and no-parent facts; event labels never grant standalone authority.
+          negative_proof: TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity
         store.event_record.selected_backend_parity:
           owner: PostgreSQL and SQLite selected-store event adapters and operations
           rule: Both selected stores enforce the same construction, DDL, exact-write, duplicate, rollback, bounded-hydration, and canonical-readback contract.
@@ -919,11 +959,13 @@ contract_formats:
       terminal_run_admission:
         owner: internal/store/runlifecycle plus the selected-store event mutation boundary
         rule: >
-          A new event carrying an existing run_id may persist only while the locked run is running or paused.
-          Completed, cancelled, failed, and forked runs reject ordinary event persistence before any event, delivery,
-          receipt, replay-scope, outbox, state, or counter mutation. Event persistence never changes run lifecycle
-          status or clears terminal evidence, and a missing run may be created as running only through the canonical
-          run-creation owner.
+          The admitted run disposition is the only authority for run lifecycle behavior. create-authorized events
+          may create their exact missing run through the canonical run-creation owner. require-active events require
+          a locked running or paused row. require-present is limited to typed run-bearing platform.runtime_log
+          evidence and requires a row in any lifecycle status. runless events do not touch runs. Completed,
+          cancelled, failed, and forked runs reject ordinary new event persistence before any event, delivery,
+          receipt, replay-scope, outbox, state, or counter mutation. Event persistence never reopens a run or clears
+          terminal evidence.
         duplicate_order: >
           Admission validates event shape and lineage, then checks event_id before run status. An exact persisted
           duplicate is idempotent even after the run becomes terminal and creates no rows or lifecycle transition. A
@@ -944,12 +986,20 @@ contract_formats:
         terminal_evidence: >
           Executable terminal outcome events persist before the terminal transition in the same owner transaction.
           There is no generic post-terminal event bypass. Only typed platform.runtime_log evidence may persist after
-          terminalization through its closed subtype owner. platform.inbound_recorded and platform.agent_directive still
-          require running or paused subtype-owned runs. Event labels, produced_by_type, or payload values do not grant
+          terminalization through its closed subtype owner. platform.inbound_recorded and existing-run
+          platform.agent_directive events still require running or paused subtype-owned runs. The exact
+          new-run-allocated directive constructor is the only directive create trigger. Event labels,
+          produced_by_type, run_id_resolution payload values, or other payload values do not grant
           post-terminal authority, and diagnostic persistence never reopens the run.
         backend_atomicity:
           postgres: The event mutation transaction locks or creates the run before inserting a new event or recipient manifest.
           sqlite: The serialized runtime mutation transaction reads and validates run status before inserting a new event or recipient manifest.
+        standalone_convergence: >
+          Final-receipt convergence for a runtime-created standalone run consumes only durable creation evidence:
+          runs.trigger_event_id and runs.trigger_event_type MUST match the admitted event, the event class MUST be
+          runtime_control or runtime_diagnostic, the producer MUST be exactly platform/runtime, and source_event_id
+          MUST be absent. Labels are not standalone classifiers. A causal or run-scoped event with the same label
+          cannot create or converge a run.
       constructor_classes:
         root_ingress:
           rule: External/operator/root run ingress events carry their final
@@ -1020,7 +1070,7 @@ contract_formats:
               scope: scope MUST be entity or global and MUST NOT be flow.
             platform.agent_directive:
               producer: produced_by_type MUST be platform; agent and operator identity remain in the subtype payload and operation state.
-              run: run_id is required.
+              run: run_id is required. Specified and active-session resolutions use the run-scoped constructor and require an active run. New-run-allocated resolution uses the dedicated run-creating constructor and may create only that exact run in the named directive operation.
               scope: scope MUST be global.
           structural_owner: >
             One exhaustive runtime event contract owns the three rows above at construction, persistence admission,
@@ -1051,6 +1101,7 @@ contract_formats:
               selected_fork_record_projection: typed selected-fork object reconstructed from the event row plus its joined authoritative lineage fact.
             named_operation_cross_row:
               run: existence, lifecycle status, and lock ownership.
+              causal_parent: source event existence and exact same-run relationship.
               operator_provenance: referenced event existence and same-run relationship.
               selected_fork_lineage: source run, source event, selection authority, and exactly one lineage owner.
               subtype_business_state: subtype payload and operation-specific business preconditions.
@@ -1065,8 +1116,11 @@ contract_formats:
               The selected-store inbound publication ledger may append this evidence row only while its locked target run is
               running or paused and only in the atomic parent/ordered-child publication transaction.
             platform.agent_directive: >
-              The #1932 directive operation owner may append this evidence row only while its locked resolved run is running
-              or paused and only atomically with committed direct replay scope and the prepared directive operation.
+              The #1932 directive operation owner binds run_id_resolution to the admitted event's immutable run
+              disposition. Specified and inferred-active-session directives require a locked running or paused run.
+              A new-run-allocated directive carries create-authorized only through its dedicated typed constructor and
+              creates its exact run atomically with committed direct replay scope and the prepared directive operation.
+              Persisted readback restores require-active and can never recreate the run.
         route_probe:
           rule: Route-query and sentinel probes may use dedicated probe
             constructors only when the event is not a persisted runtime emit and
@@ -11222,6 +11276,13 @@ agent_directive_operation_model:
       replay scope. Failure leaves none of those facts. One keyed request identity is
       (method, actor_token_id, idempotency_key); a different request_hash fails before
       event persistence or execution.
+    run_authority: >
+      Run target resolution and event construction are one closed typed contract. specified and
+      inferred_from_active_session construct require-active directive evidence. new_run_allocated
+      constructs the dedicated create-authorized directive evidence. The named operation rejects
+      any mismatch between run_id_resolution and the admitted disposition before mutation; it never
+      infers authority from the payload or resolution string. Canonical readback strips create
+      authority and restores require-active.
     event_identity: The directive_event_id is allocated once by the operation owner and is stable for every retry.
   states:
     prepared: Reserved durably but not admitted to BoardStep.
@@ -13123,7 +13184,10 @@ run_model:
     source_event_id:
       description: 'The event that directly caused this event to be emitted. Forms a tree (not a DAG — each
         event has exactly one parent). The root event in a run has source_event_id = NULL. Walking
-        source_event_id from any event back to NULL reconstructs the full causal chain.'
+        source_event_id from any event back to NULL reconstructs the full causal chain. The selected-store append
+        transaction requires the referenced event to exist in the child event''s exact run before insertion; missing
+        and cross-run causal references fail atomically. Selected-fork cross-run lineage is intentionally not stored
+        here and remains owned by its typed sidecar relation and named commit operation.'
       present_on:
       - events.source_event_id
       usage:

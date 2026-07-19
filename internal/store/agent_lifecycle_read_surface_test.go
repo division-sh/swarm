@@ -184,9 +184,13 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalTerminalLife
 
 func seedAgentLifecycleEvent(t *testing.T, ctx context.Context, pg *PostgresStore, eventID, runID string, createdAt time.Time) {
 	t.Helper()
+	parentID := eventtest.UUID("agent-lifecycle-parent:" + eventID)
+	if err := commitSemanticParentFixture(ctx, pg, runID, parentID, createdAt.Add(-time.Microsecond)); err != nil {
+		t.Fatalf("seed lifecycle parent %s: %v", parentID, err)
+	}
 	event := eventtest.PersistedChildForProducer(
 		eventID, "task.completed", eventtest.Producer(events.EventProducerAgent, "runtime"), "",
-		json.RawMessage(`{}`), 0, runID, eventtest.UUID("agent-lifecycle-parent:"+eventID), events.EventEnvelope{}, createdAt,
+		json.RawMessage(`{}`), 0, runID, parentID, events.EventEnvelope{}, createdAt,
 	)
 	if err := commitSemanticEventFixture(ctx, pg, event); err != nil {
 		t.Fatalf("seed lifecycle event %s: %v", eventID, err)

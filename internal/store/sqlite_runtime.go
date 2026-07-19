@@ -152,13 +152,29 @@ func (s *SQLiteRuntimeStore) appendAdmittedEventTxOutcome(ctx context.Context, t
 		return runtimebus.EventAppendExactDuplicate, nil
 	}
 	var ensureErr error
-	if evt.AdmissionClass() == events.EventAdmissionDiagnosticDirect && evt.Type() == events.EventTypePlatformRuntimeLog {
-		ensureErr = sqliteRequireRunRowPresent(ctx, tx, wantIdentity.RunID)
-	} else {
+	switch admitted.RunDisposition() {
+	case events.AdmittedRunCreateAuthorized:
 		ensureErr = sqliteEnsureActiveRunRow(ctx, tx, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName, wantIdentity.CreatedAt)
+	case events.AdmittedRunRequireActive:
+		ensureErr = storerunlifecycle.RequireActive(ctx, tx, wantIdentity.RunID, storerunlifecycle.DialectSQLite)
+	case events.AdmittedRunRequirePresent:
+		if evt.AdmissionClass() != events.EventAdmissionDiagnosticDirect || evt.Type() != events.EventTypePlatformRuntimeLog || strings.TrimSpace(wantIdentity.RunID) == "" {
+			ensureErr = fmt.Errorf("event %s has invalid require-present run disposition", wantIdentity.EventID)
+		} else {
+			ensureErr = sqliteRequireRunRowPresent(ctx, tx, wantIdentity.RunID)
+		}
+	case events.AdmittedRunless:
+		if strings.TrimSpace(wantIdentity.RunID) != "" {
+			ensureErr = fmt.Errorf("event %s has runless disposition with run_id", wantIdentity.EventID)
+		}
+	default:
+		ensureErr = fmt.Errorf("event %s has invalid admitted run disposition %q", wantIdentity.EventID, admitted.RunDisposition())
 	}
 	if ensureErr != nil {
 		return runtimebus.EventAppendOutcomeUnknown, ensureErr
+	}
+	if err := requireEventOwnedReferences(ctx, tx, storerunlifecycle.DialectSQLite, wantIdentity); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	inserted, err := eventrecordsqlite.Insert(ctx, tx, wantIdentity)
 	if err != nil {

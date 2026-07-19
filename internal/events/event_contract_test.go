@@ -196,7 +196,7 @@ func TestDiagnosticDirectSubtypePolicyIsCompleteAtEveryRuntimeBoundary(t *testin
 			if _, err := AdmitForPersistence(base, AdmissionOptions{RequirePersistentUUIDIdentity: true}); err == nil {
 				t.Fatal("persistence admission accepted invalid subtype tuple")
 			}
-			if err := ValidateNamedEvent(newAdmittedEvent(base), EventAdmissionDiagnosticDirect, test.eventType); err == nil {
+			if err := ValidateNamedEvent(newAdmittedEvent(base, restoredRunDisposition(base)), EventAdmissionDiagnosticDirect, test.eventType); err == nil {
 				t.Fatal("named operation gate accepted invalid subtype tuple")
 			}
 		})

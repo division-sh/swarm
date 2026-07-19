@@ -33,6 +33,9 @@ func resolveEventPublicationBundleScope(
 	if err != nil {
 		return ctx, opts, params, err
 	}
+	if cfg.rootInputOnly {
+		params.NewRunCreated = !hasRunContext
+	}
 
 	resolvedHash := requestedHash
 	if hasRunContext {

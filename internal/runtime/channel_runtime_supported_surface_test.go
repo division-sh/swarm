@@ -141,7 +141,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			if _, prepared, err := binding.PrepareOperation("deliver", input); err != nil {
 				t.Fatalf("PrepareOperation: %v; public schema=%#v; prepared=%#v", err, publicTools["channel.ops.deliver"].InputSchema, prepared)
 			}
-			invalidCtx := configuredChannelCallContext(ctx, actor, runID, entityID, flowInstance, "invalid-connector-native-input")
+			invalidCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "invalid-connector-native-input")
 			if _, err := executor.Execute(invalidCtx, "channel.ops.deliver", map[string]any{
 				"presentation": map[string]any{"text": "Bypass"}, "actions": []any{}, "chat_id": "99",
 			}); err == nil {
@@ -150,7 +150,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			if calls.Load() != 0 {
 				t.Fatalf("provider called before provider-neutral admission: %d", calls.Load())
 			}
-			callCtx := configuredChannelCallContext(ctx, actor, runID, entityID, flowInstance, "call-1")
+			callCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "call-1")
 			result, err := executor.Execute(callCtx, "channel.ops.deliver", input)
 			if err != nil {
 				t.Fatalf("configured channel execute: %v", err)
@@ -189,7 +189,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			ackExecutor := &channelAckLossExecutor{delegate: coordinator}
 			ackExecutor.failNext.Store(true)
 			ackPath := configuredChannelExecutor(source, binding, credentialStore, ackExecutor)
-			ackCtx := configuredChannelCallContext(ctx, actor, runID, entityID, flowInstance, "call-ack-loss")
+			ackCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "call-ack-loss")
 			if _, err := ackPath.Execute(ackCtx, "channel.ops.deliver", input); err == nil {
 				t.Fatal("simulated post-commit acknowledgment loss was not surfaced")
 			}
@@ -205,7 +205,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			if err := credentialStore.Delete(ctx, "telegram_bot_token"); err != nil {
 				t.Fatalf("delete Telegram credential: %v", err)
 			}
-			missingCredentialCtx := configuredChannelCallContext(ctx, actor, runID, entityID, flowInstance, "missing-credential")
+			missingCredentialCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "missing-credential")
 			if _, err := executor.Execute(missingCredentialCtx, "channel.ops.deliver", input); err == nil {
 				t.Fatal("configured channel executed without its declared credential")
 			}
@@ -251,7 +251,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			})
 			coordinator = mismatchedCoordinator
 			mismatchedExecutor := configuredChannelExecutor(source, binding, credentialStore, mismatchedCoordinator)
-			mismatchedCtx := configuredChannelCallContext(ctx, actor, runID, entityID, flowInstance, "mismatched-plan-generation")
+			mismatchedCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "mismatched-plan-generation")
 			if _, err := mismatchedExecutor.Execute(mismatchedCtx, "channel.ops.deliver", input); err == nil {
 				t.Fatal("request executed through a private target carrying a different generation")
 			}
@@ -268,7 +268,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			})
 			coordinator = reloadedCoordinator
 			staleExecutor := configuredChannelExecutor(source, binding, credentialStore, reloadedCoordinator)
-			staleCtx := configuredChannelCallContext(ctx, actor, runID, entityID, flowInstance, "stale-plan-generation")
+			staleCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "stale-plan-generation")
 			if _, err := staleExecutor.Execute(staleCtx, "channel.ops.deliver", input); err == nil {
 				t.Fatal("persisted old-generation request executed through replacement plan")
 			}
@@ -324,12 +324,14 @@ func configuredChannelExecutor(source semanticview.Source, binding packs.Outboun
 	})
 }
 
-func configuredChannelCallContext(ctx context.Context, actor models.AgentConfig, runID, entityID, flowInstance, operationID string) context.Context {
+func configuredChannelCallContext(t *testing.T, ctx context.Context, selectedStore any, actor models.AgentConfig, runID, entityID, flowInstance, operationID string) context.Context {
+	t.Helper()
 	inbound := eventtest.RootIngress(
 		uuid.NewSHA1(uuid.NameSpaceURL, []byte(runID+"\x00"+operationID)).String(),
 		events.EventType("channel.requested"), actor.ID, operationID, json.RawMessage(`{}`), 0, runID, "",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), flowInstance), time.Now().UTC(),
 	)
+	storetest.CommitSemanticEvent(t, ctx, selectedStore, inbound)
 	ctx = runtimebus.WithInboundEvent(ctx, inbound)
 	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, operationID)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, runtimecorrelation.BundleSourceFact{

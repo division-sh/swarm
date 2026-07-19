@@ -532,6 +532,11 @@ type RunScopedRuntimeEventInput struct {
 	RunID string
 }
 
+type RunCreatingRuntimeEventInput struct {
+	Facts EventFacts
+	RunID string
+}
+
 type StandaloneRuntimeEventInput struct {
 	Facts EventFacts
 }
@@ -539,9 +544,10 @@ type StandaloneRuntimeEventInput struct {
 type runtimeLineageIntent string
 
 const (
-	runtimeLineageCausal     runtimeLineageIntent = "causal"
-	runtimeLineageRunScoped  runtimeLineageIntent = "run_scoped"
-	runtimeLineageStandalone runtimeLineageIntent = "standalone"
+	runtimeLineageCausal      runtimeLineageIntent = "causal"
+	runtimeLineageRunScoped   runtimeLineageIntent = "run_scoped"
+	runtimeLineageRunCreating runtimeLineageIntent = "run_creating"
+	runtimeLineageStandalone  runtimeLineageIntent = "standalone"
 )
 
 func NewRootIngressEvent(input RootIngressEventInput) (Event, error) {
@@ -629,6 +635,18 @@ func NewRunScopedDiagnosticDirectEvent(input RunScopedRuntimeEventInput) (Event,
 	return newRunScopedRuntimeEvent(EventAdmissionDiagnosticDirect, input)
 }
 
+// NewRunCreatingDiagnosticDirectEvent is reserved for a closed subtype whose
+// named operation is the authoritative trigger for newly allocated work.
+func NewRunCreatingDiagnosticDirectEvent(input RunCreatingRuntimeEventInput) (Event, error) {
+	if input.Facts.Type != EventTypePlatformAgentDirective {
+		return Event{}, fmt.Errorf("run-creating diagnostic-direct event type %q is not authorized", input.Facts.Type)
+	}
+	if err := validateDiagnosticDirectFacts(input.Facts); err != nil {
+		return Event{}, err
+	}
+	return newRunCreatingRuntimeEvent(EventAdmissionDiagnosticDirect, input)
+}
+
 func NewStandaloneDiagnosticDirectEvent(input StandaloneRuntimeEventInput) (Event, error) {
 	if err := validateDiagnosticDirectFacts(input.Facts); err != nil {
 		return Event{}, err
@@ -663,6 +681,19 @@ func newRunScopedRuntimeEvent(class EventAdmissionClass, input RunScopedRuntimeE
 		return Event{}, err
 	}
 	event.runtimeIntent = runtimeLineageRunScoped
+	return event, nil
+}
+
+func newRunCreatingRuntimeEvent(class EventAdmissionClass, input RunCreatingRuntimeEventInput) (Event, error) {
+	runID := strings.TrimSpace(input.RunID)
+	if runID == "" {
+		return Event{}, fmt.Errorf("%s run-creating event requires run_id", class)
+	}
+	event, err := newSemanticEvent(class, input.Facts, runID, "", nil, nil)
+	if err != nil {
+		return Event{}, err
+	}
+	event.runtimeIntent = runtimeLineageRunCreating
 	return event, nil
 }
 

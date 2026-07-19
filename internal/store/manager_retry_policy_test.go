@@ -15,7 +15,6 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -375,130 +374,6 @@ func TestUpsertEventReceipt_ConcurrentErrorRetriesAdvanceAtomically_V2(t *testin
 	}
 	if deliveryStatus != "dead_letter" || deliveryRetry != 2 || managerStatus != "dead_letter" || receiptRetry != 2 {
 		t.Fatalf("concurrent retry state mismatch: delivery=%q retry=%d manager=%q receipt_retry=%d", deliveryStatus, deliveryRetry, managerStatus, receiptRetry)
-	}
-}
-
-func TestUpsertEventReceipt_ConcurrentTerminalReceiptsConvergeStandaloneRuntimeRun_V2(t *testing.T) {
-	pg, cleanup := newTestPostgresStore(t)
-	defer cleanup()
-
-	ctx := testAuthorActivityContext()
-	entityID, agentA := seedEntityAndAgent(t, ctx, pg)
-	agentB := "agent-" + uuid.NewString()
-	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			ID:            agentB,
-			Type:          "test",
-			Role:          "test",
-			FlowID:        "worker",
-			Model:         "regular",
-			ExecutionMode: "live",
-			EntityID:      entityID,
-			Config:        []byte(`{"system_prompt":"x"}`),
-		},
-		Status:    "active",
-		HiredBy:   "test",
-		StartedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("seed second agent: %v", err)
-	}
-	payload, _ := json.Marshal(map[string]any{"k": "v"})
-	runID := uuid.NewString()
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
-		t.Fatalf("seed standalone runtime run: %v", err)
-	}
-	evt := eventtest.RuntimeControl(
-		uuid.NewString(),
-		events.EventType("platform.paused"),
-		"runtime",
-		"",
-		payload,
-		0,
-		runID,
-		"",
-		events.EventEnvelope{},
-		time.Now().Add(-1*time.Hour),
-	)
-	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, evt, []events.DeliveryRoute{
-		{SubscriberType: "agent", SubscriberID: agentA},
-		{SubscriberType: "agent", SubscriberID: agentB},
-	}, runtimereplayclaim.CommittedReplayScopeSubscribed)
-	if _, err := pg.DB.ExecContext(ctx, `
-		UPDATE runs
-		SET trigger_event_id = $2::uuid, trigger_event_type = $3
-		WHERE run_id = $1::uuid
-	`, runID, evt.ID(), evt.Type()); err != nil {
-		t.Fatalf("bind standalone runtime trigger: %v", err)
-	}
-
-	if _, err := pg.DB.ExecContext(ctx, `
-		CREATE OR REPLACE FUNCTION slow_receipt_delivery_sync()
-		RETURNS trigger
-		LANGUAGE plpgsql
-		AS $$
-		BEGIN
-			PERFORM pg_sleep(0.2);
-			RETURN NEW;
-		END;
-		$$;
-	`); err != nil {
-		t.Fatalf("create slow trigger function: %v", err)
-	}
-	if _, err := pg.DB.ExecContext(ctx, `
-		CREATE TRIGGER event_deliveries_slow_terminal_sync
-		BEFORE UPDATE ON event_deliveries
-		FOR EACH ROW
-		EXECUTE FUNCTION slow_receipt_delivery_sync()
-	`); err != nil {
-		t.Fatalf("create slow trigger: %v", err)
-	}
-
-	errCh := make(chan error, 2)
-	for _, agentID := range []string{agentA, agentB} {
-		agentID := agentID
-		go func() {
-			errCh <- pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusProcessed, nil)
-		}()
-	}
-	for i := 0; i < 2; i++ {
-		select {
-		case err := <-errCh:
-			if err != nil {
-				t.Fatalf("concurrent processed receipt #%d: %v", i+1, err)
-			}
-		case <-time.After(10 * time.Second):
-			t.Fatal("timed out waiting for concurrent processed receipts")
-		}
-	}
-
-	var (
-		runStatus      string
-		pendingCount   int
-		deliveredCount int
-	)
-	if err := pg.DB.QueryRowContext(ctx, `
-		SELECT COALESCE(r.status, '')
-		FROM events e
-		INNER JOIN runs r ON r.run_id = e.run_id
-		WHERE e.event_id = $1::uuid
-	`, evt.ID()).Scan(&runStatus); err != nil {
-		t.Fatalf("load run status: %v", err)
-	}
-	if err := pg.DB.QueryRowContext(ctx, `
-		SELECT
-			COUNT(*) FILTER (WHERE status IN ('pending', 'in_progress')),
-			COUNT(*) FILTER (WHERE status = 'delivered')
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-	`, evt.ID()).Scan(&pendingCount, &deliveredCount); err != nil {
-		t.Fatalf("load delivery counts: %v", err)
-	}
-	if runStatus != "completed" {
-		t.Fatalf("run status = %q, want completed", runStatus)
-	}
-	if pendingCount != 0 || deliveredCount != 2 {
-		t.Fatalf("delivery counts = pending:%d delivered:%d, want pending:0 delivered:2", pendingCount, deliveredCount)
 	}
 }
 

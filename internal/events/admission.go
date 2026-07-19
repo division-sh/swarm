@@ -33,7 +33,7 @@ func RevalidatePersistedEvent(event Event) (AdmittedEvent, error) {
 	if err := ValidatePersistentEvent(event); err != nil {
 		return AdmittedEvent{}, err
 	}
-	return newAdmittedEvent(event.Clone()), nil
+	return newAdmittedEvent(event.Clone(), restoredRunDisposition(event)), nil
 }
 
 func admitPersistableEvent(event Event, options AdmissionOptions) (AdmittedEvent, error) {
@@ -118,7 +118,48 @@ func admitPersistableEvent(event Event, options AdmissionOptions) (AdmittedEvent
 			return AdmittedEvent{}, err
 		}
 	}
-	return newAdmittedEvent(admitted), nil
+	disposition, err := freshRunDisposition(admitted)
+	if err != nil {
+		return AdmittedEvent{}, err
+	}
+	return newAdmittedEvent(admitted, disposition), nil
+}
+
+func freshRunDisposition(event Event) (AdmittedRunDisposition, error) {
+	switch event.AdmissionClass() {
+	case EventAdmissionRootIngress:
+		return AdmittedRunCreateAuthorized, nil
+	case EventAdmissionOperatorInjected, EventAdmissionChild, EventAdmissionReplay, EventAdmissionSelectedForkReplay:
+		return AdmittedRunRequireActive, nil
+	case EventAdmissionRuntimeControl, EventAdmissionRuntimeDiagnostic:
+		switch event.runtimeIntent {
+		case runtimeLineageStandalone:
+			return AdmittedRunCreateAuthorized, nil
+		case runtimeLineageCausal, runtimeLineageRunScoped:
+			return AdmittedRunRequireActive, nil
+		}
+	case EventAdmissionDiagnosticDirect:
+		if event.Type() == EventTypePlatformRuntimeLog {
+			if strings.TrimSpace(event.RunID()) == "" {
+				return AdmittedRunless, nil
+			}
+			return AdmittedRunRequirePresent, nil
+		}
+		switch event.runtimeIntent {
+		case runtimeLineageRunCreating:
+			if event.Type() != EventTypePlatformAgentDirective || strings.TrimSpace(event.RunID()) == "" {
+				return "", fmt.Errorf("diagnostic-direct event %q is not authorized to create a run", event.Type())
+			}
+			return AdmittedRunCreateAuthorized, nil
+		case runtimeLineageStandalone:
+			if strings.TrimSpace(event.RunID()) == "" {
+				return AdmittedRunless, nil
+			}
+		case runtimeLineageCausal, runtimeLineageRunScoped:
+			return AdmittedRunRequireActive, nil
+		}
+	}
+	return "", fmt.Errorf("event class %q has no admitted run disposition", event.AdmissionClass())
 }
 
 func validateRuntimeLineageIntent(event Event) error {
@@ -130,6 +171,10 @@ func validateRuntimeLineageIntent(event Event) error {
 	case runtimeLineageRunScoped:
 		if event.RunID() == "" || event.ParentEventID() != "" {
 			return fmt.Errorf("%s run-scoped event requires run_id without parent_event_id", event.AdmissionClass())
+		}
+	case runtimeLineageRunCreating:
+		if event.AdmissionClass() != EventAdmissionDiagnosticDirect || event.Type() != EventTypePlatformAgentDirective || event.RunID() == "" || event.ParentEventID() != "" {
+			return fmt.Errorf("%s run-creating event requires authorized subtype, run_id, and no parent_event_id", event.AdmissionClass())
 		}
 	case runtimeLineageStandalone:
 		if event.ParentEventID() != "" {

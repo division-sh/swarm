@@ -768,11 +768,6 @@ func TestRunServeRuntimeDiskLoadedRunForkSupportedSurfaceExecutesAndStampsEpheme
 	if err != nil {
 		t.Fatalf("BuildBundleCatalogProjection: %v", err)
 	}
-	bootIdentity, err := runtimecontracts.BootBundleIdentity(bundle)
-	if err != nil {
-		t.Fatalf("BootBundleIdentity: %v", err)
-	}
-
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath:         writeServeRuntimeTestConfig(t),
 		ContractsPath:      contractsPath,
@@ -830,8 +825,8 @@ func TestRunServeRuntimeDiskLoadedRunForkSupportedSurfaceExecutesAndStampsEpheme
 	`, result.ForkRunID).Scan(&forkBundleHash, &forkBundleSource, &forkBundleFingerprint); err != nil {
 		t.Fatalf("load fork run bundle identity: %v", err)
 	}
-	if forkBundleHash != projection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourceEphemeral || forkBundleFingerprint != bootIdentity.Fingerprint {
-		t.Fatalf("fork bundle identity = hash:%q source:%q fingerprint:%q, want disk-loaded %s/%s/%s", forkBundleHash, forkBundleSource, forkBundleFingerprint, projection.BundleHash, storerunlifecycle.BundleSourceEphemeral, bootIdentity.Fingerprint)
+	if forkBundleHash != projection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourceEphemeral || forkBundleFingerprint != "" {
+		t.Fatalf("fork bundle identity = hash:%q source:%q fingerprint:%q, want disk-loaded %s/%s without legacy fingerprint", forkBundleHash, forkBundleSource, forkBundleFingerprint, projection.BundleHash, storerunlifecycle.BundleSourceEphemeral)
 	}
 
 	if code := serve.stop(); code != 0 {

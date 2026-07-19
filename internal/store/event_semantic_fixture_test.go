@@ -47,6 +47,42 @@ func commitSemanticEventFixtureWithAgents(ctx context.Context, store any, event 
 	return err
 }
 
+func commitSemanticParentFixture(ctx context.Context, store any, runID, parentEventID string, createdAt time.Time) error {
+	parent := eventtest.RootIngress(
+		parentEventID, "test.fixture_parent", "fixture", "", []byte(`{}`), 0,
+		runID, "", events.EventEnvelope{}, createdAt,
+	)
+	if err := commitSemanticEventFixture(ctx, store, parent); err != nil {
+		return err
+	}
+	switch selected := store.(type) {
+	case *PostgresStore:
+		return selected.UpsertPipelineReceipt(ctx, parentEventID, "processed", nil)
+	case *SQLiteRuntimeStore:
+		return selected.UpsertPipelineReceipt(ctx, parentEventID, "processed", nil)
+	default:
+		return fmt.Errorf("semantic parent fixture store %T is unsupported", store)
+	}
+}
+
+func commitSemanticParentFixtureTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, runID, parentEventID string, createdAt time.Time) error {
+	parent := eventtest.RootIngress(
+		parentEventID, "test.fixture_parent", "fixture", "", []byte(`{}`), 0,
+		runID, "", events.EventEnvelope{}, createdAt,
+	)
+	if err := commitSemanticEventFixtureTx(ctx, store, tx, parent); err != nil {
+		return err
+	}
+	switch selected := store.(type) {
+	case *PostgresStore:
+		return selected.UpsertPipelineReceiptTx(ctx, tx, parentEventID, "processed", nil)
+	case *SQLiteRuntimeStore:
+		return selected.UpsertPipelineReceiptTx(ctx, tx, parentEventID, "processed", nil)
+	default:
+		return fmt.Errorf("semantic parent fixture store %T is unsupported", store)
+	}
+}
+
 func commitDiagnosticRuntimeLogFixture(ctx context.Context, store diagnosticRuntimeLogFixtureStore, event events.Event) error {
 	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
@@ -172,6 +208,16 @@ func commitSemanticEventFixtureOutcome(
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
+	return commitAdmittedSemanticEventFixtureOutcome(ctx, store, admitted, routes, scope)
+}
+
+func commitAdmittedSemanticEventFixtureOutcome(
+	ctx context.Context,
+	store any,
+	admitted events.AdmittedEvent,
+	routes []events.DeliveryRoute,
+	scope runtimereplayclaim.CommittedReplayScope,
+) (runtimebus.EventAppendOutcome, error) {
 	if admitted.Class() == events.EventAdmissionSelectedForkReplay {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("selected-fork replay events require their closed named persistence operation")
 	}

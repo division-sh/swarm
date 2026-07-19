@@ -29,6 +29,7 @@ var productionRouteProbeEventAllowlist = map[eventConstructorCallsite]int{
 
 var productionRuntimeConstructorAllowlist = map[runtimeConstructorCallsite]int{
 	{Path: "internal/apiv1/operator_decision_cards.go", Scope: "newMailboxRuntimeControlEvent", Constructor: "NewRunScopedRuntimeControlEvent"}:                                  1,
+	{Path: "internal/runtime/agentcontrol/control.go", Scope: "NewDirectiveEvent", Constructor: "NewRunCreatingDiagnosticDirectEvent"}:                                           1,
 	{Path: "internal/runtime/agentcontrol/control.go", Scope: "NewDirectiveEvent", Constructor: "NewRunScopedDiagnosticDirectEvent"}:                                             1,
 	{Path: "internal/runtime/budget.go", Scope: "BudgetTracker.evaluateScope", Constructor: "NewCausalRuntimeDiagnosticEvent"}:                                                   1,
 	{Path: "internal/runtime/budget.go", Scope: "BudgetTracker.evaluateScope", Constructor: "NewStandaloneRuntimeDiagnosticEvent"}:                                               1,
@@ -475,6 +476,7 @@ func runtimeConstructorCallName(call *ast.CallExpr, eventAliases map[string]stru
 		"NewRunScopedRuntimeDiagnosticEvent",
 		"NewStandaloneRuntimeDiagnosticEvent",
 		"NewCausalDiagnosticDirectEvent",
+		"NewRunCreatingDiagnosticDirectEvent",
 		"NewRunScopedDiagnosticDirectEvent",
 		"NewStandaloneDiagnosticDirectEvent":
 		return selector.Sel.Name, true
@@ -497,6 +499,7 @@ func testEventConstructorCallName(call *ast.CallExpr, eventAliases map[string]st
 		"NewRunScopedRuntimeDiagnosticEvent",
 		"NewStandaloneRuntimeDiagnosticEvent",
 		"NewCausalDiagnosticDirectEvent",
+		"NewRunCreatingDiagnosticDirectEvent",
 		"NewRunScopedDiagnosticDirectEvent",
 		"NewStandaloneDiagnosticDirectEvent",
 		"NewChildEvent",
@@ -618,7 +621,7 @@ func rhsProducesEventsEvent(expr ast.Expr, eventAliases map[string]struct{}) boo
 			return name == "EmptyEvent" || name == "NewRootIngressEvent" || name == "NewCausalRuntimeControlEvent" ||
 				name == "NewRunScopedRuntimeControlEvent" || name == "NewStandaloneRuntimeControlEvent" ||
 				name == "NewCausalRuntimeDiagnosticEvent" || name == "NewRunScopedRuntimeDiagnosticEvent" || name == "NewStandaloneRuntimeDiagnosticEvent" ||
-				name == "NewCausalDiagnosticDirectEvent" || name == "NewRunScopedDiagnosticDirectEvent" || name == "NewStandaloneDiagnosticDirectEvent" ||
+				name == "NewCausalDiagnosticDirectEvent" || name == "NewRunCreatingDiagnosticDirectEvent" || name == "NewRunScopedDiagnosticDirectEvent" || name == "NewStandaloneDiagnosticDirectEvent" ||
 				name == "NewChildEvent" || name == "NewChildEventWithLineage" ||
 				name == "NewReplayEvent" || name == "NewProjectionEvent" || name == "NewRouteProbeEvent"
 		}

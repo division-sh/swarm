@@ -2,7 +2,7 @@ package store
 
 import "testing"
 
-func TestStandaloneRuntimePlatformConvergenceRequiresExactClassAndProducerPair(t *testing.T) {
+func TestStandaloneRuntimePlatformConvergenceRequiresExactDurableCreationTrigger(t *testing.T) {
 	base := standaloneRuntimePlatformRunRecord{
 		RunID: "11111111-1111-4111-8111-111111111111", RunStatus: "running",
 		EventID: "22222222-2222-4222-8222-222222222222", EventClass: "runtime_control",
@@ -16,6 +16,13 @@ func TestStandaloneRuntimePlatformConvergenceRequiresExactClassAndProducerPair(t
 		func(record *standaloneRuntimePlatformRunRecord) { record.EventClass = "root_ingress" },
 		func(record *standaloneRuntimePlatformRunRecord) { record.ProducedByType = "external" },
 		func(record *standaloneRuntimePlatformRunRecord) { record.ProducedBy = "other" },
+		func(record *standaloneRuntimePlatformRunRecord) {
+			record.SourceEventID = "33333333-3333-4333-8333-333333333333"
+		},
+		func(record *standaloneRuntimePlatformRunRecord) {
+			record.TriggerEventID = "33333333-3333-4333-8333-333333333333"
+		},
+		func(record *standaloneRuntimePlatformRunRecord) { record.TriggerEventType = "platform.other" },
 	} {
 		hostile := base
 		mutate(&hostile)

@@ -21,6 +21,10 @@ func TestPostgresStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner(t *t
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
+	parentID := eventtest.UUID("mailbox-parent:" + eventID)
+	if err := commitSemanticParentFixture(ctx, store, runID, parentID, time.Now().UTC().Add(-time.Microsecond)); err != nil {
+		t.Fatalf("seed mailbox parent: %v", err)
+	}
 	if err := commitSemanticEventFixture(ctx, store, eventtest.PersistedChildForProducer(
 		eventID,
 		"mailbox.review_requested",
@@ -29,7 +33,7 @@ func TestPostgresStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner(t *t
 		json.RawMessage(`{"kind":"review"}`),
 		0,
 		runID,
-		eventtest.UUID("mailbox-parent:"+eventID),
+		parentID,
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "validation/case-1"),
 		time.Now().UTC(),
 	)); err != nil {
@@ -84,6 +88,10 @@ func TestSQLiteRuntimeStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
+	parentID := eventtest.UUID("mailbox-parent:" + eventID)
+	if err := commitSemanticParentFixture(ctx, store, runID, parentID, time.Now().UTC().Add(-time.Microsecond)); err != nil {
+		t.Fatalf("seed mailbox parent: %v", err)
+	}
 	if err := commitSemanticEventFixture(ctx, store, eventtest.PersistedChildForProducer(
 		eventID,
 		"mailbox.review_requested",
@@ -92,7 +100,7 @@ func TestSQLiteRuntimeStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner
 		json.RawMessage(`{"kind":"review"}`),
 		0,
 		runID,
-		eventtest.UUID("mailbox-parent:"+eventID),
+		parentID,
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "validation/case-1"),
 		time.Now().UTC(),
 	)); err != nil {

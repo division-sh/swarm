@@ -50,7 +50,11 @@ func seedPostgresStoreEvent(
 	if producerType == events.EventProducerPlatform {
 		event = eventtest.PersistedRuntimeControlForProducer(eventID, events.EventType(eventName), producer, "", json.RawMessage(`{}`), 0, runID, "", envelope, createdAt)
 	} else {
-		event = eventtest.PersistedChildForProducer(eventID, events.EventType(eventName), producer, "", json.RawMessage(`{}`), 0, runID, eventtest.UUID("postgres-store-parent:"+eventID), envelope, createdAt)
+		parentID := eventtest.UUID("postgres-store-parent:" + eventID)
+		if err := commitSemanticParentFixture(ctx, pg, runID, parentID, createdAt.Add(-time.Microsecond)); err != nil {
+			t.Fatalf("seed parent for event %s: %v", eventName, err)
+		}
+		event = eventtest.PersistedChildForProducer(eventID, events.EventType(eventName), producer, "", json.RawMessage(`{}`), 0, runID, parentID, envelope, createdAt)
 	}
 	if err := commitSemanticEventFixture(ctx, pg, event); err != nil {
 		t.Fatalf("seed event %s: %v", eventName, err)
@@ -278,8 +282,8 @@ func TestPostgresRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	`, runID).Scan(&eventCount, &entityCount); err != nil {
 		t.Fatalf("load synced counters: %v", err)
 	}
-	if eventCount != 2 || entityCount != 1 {
-		t.Fatalf("synced counters event_count=%d entity_count=%d, want 2/1 from events/entity_state", eventCount, entityCount)
+	if eventCount != 4 || entityCount != 1 {
+		t.Fatalf("synced counters event_count=%d entity_count=%d, want 4/1 from complete event graphs/entity_state", eventCount, entityCount)
 	}
 }
 
