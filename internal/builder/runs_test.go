@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
 )
@@ -99,33 +100,93 @@ func (c *counterPause) pause() error {
 	return nil
 }
 
+type builderCommitCaptureStore struct {
+	runtimebus.InMemoryEventStore
+	requests []runtimebus.CommitPublishRequest
+}
+
+func (s *builderCommitCaptureStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, request runtimebus.CommitPublishRequest) error {
+		s.requests = append(s.requests, request)
+		return nil
+	})
+}
+
 func TestRunHubStartRunPublishesTypedEntityEnvelope(t *testing.T) {
 	runID := eventtest.UUID("builder-run-hub-typed-envelope-run")
-	entityID := eventtest.UUID("builder-run-hub-typed-envelope-entity")
-	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	entityIDs := map[eventtypes.EventType]string{
+		"analysis.requested": eventtest.UUID("builder-run-hub-analysis-entity"),
+		"review.requested":   eventtest.UUID("builder-run-hub-review-entity"),
+	}
+	commitStore := &builderCommitCaptureStore{}
+	eb, err := runtimebus.NewEventBus(commitStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	rt := &runtimepkg.Runtime{Bus: eb}
 	hub := newRunHub(func() *runtimepkg.Runtime { return rt }, nil, nil, nil)
-	ch := eb.Subscribe("observer", "review.requested")
+	analysisEvents := eb.Subscribe("analysis-observer", "analysis.requested")
+	reviewEvents := eb.Subscribe("review-observer", "review.requested")
 
 	if err := hub.startRun(context.Background(), runID, map[string]any{
+		"analysis.requested": map[string]any{
+			"entity_id": entityIDs["analysis.requested"],
+			"topic":     "Feasibility",
+		},
 		"review.requested": map[string]any{
-			"entity_id": entityID,
+			"entity_id": entityIDs["review.requested"],
 			"name":      "Telemedicine",
 		},
 	}, nil); err != nil {
 		t.Fatalf("startRun: %v", err)
 	}
 
-	select {
-	case evt := <-ch:
-		if got := evt.EntityID(); got != entityID {
-			t.Fatalf("event entity_id = %q, want %q", got, entityID)
+	if got := len(commitStore.requests); got != 2 {
+		t.Fatalf("sealed commit requests = %d, want 2", got)
+	}
+	committedEventIDs := map[string]struct{}{}
+	committedRunIDs := map[string]struct{}{}
+	for _, request := range commitStore.requests {
+		admitted := request.Event
+		event := admitted.Event()
+		if admitted.RunDisposition() != eventtypes.AdmittedRunCreateAuthorized {
+			t.Fatalf("%s run disposition = %q, want create_authorized", event.Type(), admitted.RunDisposition())
 		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("expected run input event to be published")
+		if event.AdmissionClass() != eventtypes.EventAdmissionRootIngress {
+			t.Fatalf("%s class = %q, want root_ingress", event.Type(), event.AdmissionClass())
+		}
+		if event.RunID() != runID {
+			t.Fatalf("%s run_id = %q, want caller run %q", event.Type(), event.RunID(), runID)
+		}
+		wantEntityID, ok := entityIDs[event.Type()]
+		if !ok {
+			t.Fatalf("unexpected committed root type %q", event.Type())
+		}
+		if event.EntityID() != wantEntityID {
+			t.Fatalf("%s entity_id = %q, want %q", event.Type(), event.EntityID(), wantEntityID)
+		}
+		committedEventIDs[event.ID()] = struct{}{}
+		committedRunIDs[event.RunID()] = struct{}{}
+	}
+	if len(committedEventIDs) != 2 {
+		t.Fatalf("unique committed root event identities = %d, want 2", len(committedEventIDs))
+	}
+	if len(committedRunIDs) != 1 {
+		t.Fatalf("unique committed run identities = %d, want 1", len(committedRunIDs))
+	}
+
+	for eventType, channel := range map[eventtypes.EventType]<-chan eventtypes.Event{
+		"analysis.requested": analysisEvents,
+		"review.requested":   reviewEvents,
+	} {
+		select {
+		case event := <-channel:
+			if got := event.EntityID(); got != entityIDs[eventType] {
+				t.Fatalf("%s dispatched entity_id = %q, want %q", eventType, got, entityIDs[eventType])
+			}
+		case <-time.After(250 * time.Millisecond):
+			t.Fatalf("expected %s run input event to be published", eventType)
+		}
 	}
 }
 
