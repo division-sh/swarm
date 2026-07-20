@@ -28,7 +28,8 @@ type inboundPublicationProofStore interface {
 	runtimebus.EventStore
 }
 
-func commitInboundPublicationTestEvent(store runtimebus.EventStore, mutation runtimeinbound.Mutation, publication *runtimeinbound.EventFinalization) error {
+func commitInboundPublicationTestEvent(t *testing.T, store runtimebus.EventStore, mutation runtimeinbound.Mutation, publication *runtimeinbound.EventFinalization) error {
+	t.Helper()
 	if publication == nil {
 		return errors.New("inbound publication test event is required")
 	}
@@ -39,7 +40,7 @@ func commitInboundPublicationTestEvent(store runtimebus.EventStore, mutation run
 	if admitted.RunDisposition() != events.AdmittedRunRequireActive {
 		return fmt.Errorf("standing inbound root disposition = %q, want require_active", admitted.RunDisposition())
 	}
-	eventBus, err := runtimebus.NewEventBus(store)
+	eventBus, err := newStoreTestEventBus(t, store)
 	if err != nil {
 		return err
 	}
@@ -99,7 +100,7 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 		var evidence events.Event
 		publications, evidence = inboundPublicationProofEvents(t, request)
 		for index := range publications {
-			if err := commitInboundPublicationTestEvent(store, mutation, &publications[index]); err != nil {
+			if err := commitInboundPublicationTestEvent(t, store, mutation, &publications[index]); err != nil {
 				return err
 			}
 		}
@@ -137,7 +138,7 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	failedPublications, _ := inboundPublicationProofEvents(t, failedRequest)
 	injected := errors.New("injected publication failure")
 	if _, err := store.RunInboundPublicationMutation(ctx, failedRequest, func(mutation runtimeinbound.Mutation) error {
-		if err := commitInboundPublicationTestEvent(store, mutation, &failedPublications[0]); err != nil {
+		if err := commitInboundPublicationTestEvent(t, store, mutation, &failedPublications[0]); err != nil {
 			return err
 		}
 		return injected
@@ -241,7 +242,7 @@ func runInboundPublicationStandingGenerationRebindProof(t *testing.T, db *sql.DB
 			return err
 		}
 		for index := range publications {
-			if err := commitInboundPublicationTestEvent(store, mutation, &publications[index]); err != nil {
+			if err := commitInboundPublicationTestEvent(t, store, mutation, &publications[index]); err != nil {
 				return err
 			}
 		}
@@ -288,7 +289,7 @@ func runInboundPublicationOrdinalRollbackProof(t *testing.T, ctx context.Context
 				appendCount = len(publications)
 			}
 			for index := 0; index < appendCount; index++ {
-				if err := commitInboundPublicationTestEvent(store, mutation, &publications[index]); err != nil {
+				if err := commitInboundPublicationTestEvent(t, store, mutation, &publications[index]); err != nil {
 					return err
 				}
 			}
@@ -318,7 +319,7 @@ func runInboundPublicationOrdinalRollbackProof(t *testing.T, ctx context.Context
 	)
 	if _, err := store.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
 		for index := range publications {
-			if err := commitInboundPublicationTestEvent(store, mutation, &publications[index]); err != nil {
+			if err := commitInboundPublicationTestEvent(t, store, mutation, &publications[index]); err != nil {
 				return err
 			}
 		}
@@ -348,7 +349,7 @@ func runInboundPublicationConcurrentRetryProof(t *testing.T, ctx context.Context
 			record, err := store.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
 				callbackCalls.Add(1)
 				for index := range publications {
-					if err := commitInboundPublicationTestEvent(store, mutation, &publications[index]); err != nil {
+					if err := commitInboundPublicationTestEvent(t, store, mutation, &publications[index]); err != nil {
 						return err
 					}
 				}
@@ -387,7 +388,7 @@ func commitInboundPublicationProof(t *testing.T, ctx context.Context, store inbo
 	publications, evidence := inboundPublicationProofEventsCount(t, request, outputCount)
 	record, err := store.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
 		for index := range publications {
-			if err := commitInboundPublicationTestEvent(store, mutation, &publications[index]); err != nil {
+			if err := commitInboundPublicationTestEvent(t, store, mutation, &publications[index]); err != nil {
 				return err
 			}
 		}

@@ -13,6 +13,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -43,9 +44,10 @@ type AgentManager struct {
 	modelAliases                    llmselection.ModelAliases
 	requireModelResolution          bool
 	throttleSuppressPrefixes        []string
-	inFlightMu                      sync.Mutex
-	inFlight                        map[string]struct{}
+	activeEventMu                   sync.Mutex
+	activeEventKeys                 map[string]struct{}
 	workflowInstances               flowInstancePersistence
+	workOwner                       worklifetime.Occurrence
 	selectedContractRouteRecoveries map[string]SelectedContractRouteRecoveryTruth
 	directiveHeartbeat              directiveHeartbeatConfig
 	lifecycle                       *agentLifecycleCoordinator
@@ -53,7 +55,6 @@ type AgentManager struct {
 
 	runMu              sync.Mutex
 	authBreakerTripped bool
-	runWG              sync.WaitGroup
 
 	poisonMu            sync.Mutex
 	poisonPanicCounts   map[string]int
@@ -124,6 +125,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		semanticSource:                  opts.SemanticSource,
 		promptResolver:                  opts.PromptResolver,
 		workflowInstances:               opts.WorkflowInstances,
+		workOwner:                       opts.WorkOwner,
 		selectedContractRouteRecoveries: map[string]SelectedContractRouteRecoveryTruth{},
 		directiveHeartbeat:              defaultDirectiveHeartbeatConfig(),
 		runtimeMode:                     strings.TrimSpace(opts.RuntimeMode),
@@ -136,7 +138,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		llmBackend:                      normalizeManagerLLMBackend(opts.LLMBackend),
 		modelAliases:                    llmselection.EffectiveModelAliases(opts.ModelAliases),
 		requireModelResolution:          opts.RequireModelResolution,
-		inFlight:                        make(map[string]struct{}),
+		activeEventKeys:                 make(map[string]struct{}),
 		lifecycle:                       lifecycle,
 		baseContext:                     opts.BaseContext,
 		poisonPanicCounts:               make(map[string]int),
@@ -210,31 +212,11 @@ func (am *AgentManager) runtimePlatformControlEventContext(ctx context.Context) 
 	return ctx
 }
 
-func (am *AgentManager) InFlightCount() int {
-	if am == nil {
-		return 0
-	}
-	am.inFlightMu.Lock()
-	defer am.inFlightMu.Unlock()
-	return len(am.inFlight)
-}
-
 func (am *AgentManager) WaitForQuiescence(ctx context.Context) error {
-	if am == nil {
+	if am == nil || am.workOwner == nil {
 		return nil
 	}
-	ticker := time.NewTicker(5 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if am.InFlightCount() == 0 {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
-	}
+	return am.workOwner.Wait(ctx)
 }
 
 func (am *AgentManager) PublishEvent(ctx context.Context, evt events.Event) error {

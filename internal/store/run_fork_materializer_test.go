@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
@@ -1098,7 +1097,7 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err == nil || !strings.Contains(err.Error(), "run is not active") {
 		t.Fatalf("post-freeze source pipeline receipt error = %v, want inactive-run refusal", err)
 	}
-	eb, err := runtimebus.NewEventBus(pg)
+	eb, err := newStoreTestEventBus(t, pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1139,7 +1138,9 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 		t.Fatalf("SweepUndispatched replayed = %d, want 1", replayed)
 	}
 	select {
-	case evt := <-ch:
+	case delivery := <-ch:
+		evt := delivery.Event()
+		_ = delivery.Complete()
 		assertRunForkCompleteEventSnapshot(t, evt, forkEvent)
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for fork replay event delivery")

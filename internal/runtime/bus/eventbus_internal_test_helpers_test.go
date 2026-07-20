@@ -8,10 +8,12 @@ import (
 	"time"
 )
 
-func requireBusEvent(t testing.TB, ch <-chan events.Event, context string) events.Event {
+func requireBusEvent(t testing.TB, ch <-chan *LocalDelivery, context string) events.Event {
 	t.Helper()
 	select {
-	case evt := <-ch:
+	case delivery := <-ch:
+		evt := delivery.Event()
+		_ = delivery.Complete()
 		return evt
 	default:
 		t.Fatalf("%s: expected queued bus event", context)
@@ -19,11 +21,12 @@ func requireBusEvent(t testing.TB, ch <-chan events.Event, context string) event
 	}
 }
 
-func requireNoBusEvent(t testing.TB, ch <-chan events.Event, context string) {
+func requireNoBusEvent(t testing.TB, ch <-chan *LocalDelivery, context string) {
 	t.Helper()
 	select {
-	case evt := <-ch:
-		t.Fatalf("%s: unexpected bus event: %#v", context, evt)
+	case delivery := <-ch:
+		_ = delivery.Complete()
+		t.Fatalf("%s: unexpected bus event: %#v", context, delivery.Event())
 	default:
 	}
 }

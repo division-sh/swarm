@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -62,7 +61,7 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 		t.Fatalf("runtime logs = %#v, want runtime log %s", logs.Logs, runtimeLogID)
 	}
 
-	bus, err := runtimebus.NewEventBus(store)
+	bus, err := newStoreTestEventBus(t, store)
 	if err != nil {
 		t.Fatalf("NewEventBus(sqlite): %v", err)
 	}
@@ -124,7 +123,7 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 		t.Fatalf("runtime logs = %#v, want runtime log %s", logs.Logs, runtimeLogID)
 	}
 
-	bus, err := runtimebus.NewEventBus(pg)
+	bus, err := newStoreTestEventBus(t, pg)
 	if err != nil {
 		t.Fatalf("NewEventBus(postgres): %v", err)
 	}

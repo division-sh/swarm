@@ -23,8 +23,9 @@ import (
 
 const retryPolicyEntityStateRunID = "22222222-2222-2222-2222-222222222222"
 
-func commitSemanticEventFixture(ctx context.Context, pg *store.PostgresStore, event events.Event) error {
-	eventBus, err := runtimebus.NewEventBus(pg)
+func commitSemanticEventFixture(t *testing.T, ctx context.Context, pg *store.PostgresStore, event events.Event) error {
+	t.Helper()
+	eventBus, err := newStoreTestEventBus(t, pg)
 	if err != nil {
 		return err
 	}
@@ -1098,7 +1099,7 @@ func seedEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, entit
 		time.Now().Add(-1*time.Hour),
 	)
 
-	if err := commitSemanticEventFixture(ctx, pg, evt); err != nil {
+	if err := commitSemanticEventFixture(t, ctx, pg, evt); err != nil {
 		t.Fatalf("append event: %v", err)
 	}
 	return evt

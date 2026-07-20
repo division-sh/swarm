@@ -134,7 +134,7 @@ func seedFinalFlowInstanceAuthoringNodeDelivery(t *testing.T, db *sql.DB, ctx co
 func assertFinalFlowInstanceAuthoringDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, want string) {
 	t.Helper()
 	var got string
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
 		SELECT COALESCE(status, '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
@@ -151,7 +151,7 @@ func assertFinalFlowInstanceAuthoringDeliveryStatus(t *testing.T, db *sql.DB, ev
 func assertNoFinalFlowInstanceAuthoringContainedRouteRows(t *testing.T, db *sql.DB, flowInstance string) {
 	t.Helper()
 	var count int
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
 		SELECT COUNT(*)
 		FROM event_deliveries
 		WHERE delivery_target_route->>'flow_instance' = $1
@@ -199,7 +199,7 @@ func assertNoFinalFlowInstanceAuthoringContainedWorkflowInstance(t *testing.T, d
 func assertNoFinalFlowInstanceAuthoringRow(t *testing.T, db *sql.DB, query string, args ...any) {
 	t.Helper()
 	var count int
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), query, args...).Scan(&count); err != nil {
+	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), query, args...).Scan(&count); err != nil {
 		t.Fatalf("count final flow-instance authoring rows: %v", err)
 	}
 	if count != 0 {

@@ -693,7 +693,7 @@ func createReplyConformanceHumanTask(t *testing.T, ctx context.Context, cards re
 	return card
 }
 
-func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend durableReplyConformanceStore, source semanticview.Source) (*bus.EventBus, <-chan events.Event) {
+func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend durableReplyConformanceStore, source semanticview.Source) (*bus.EventBus, <-chan *bus.LocalDelivery) {
 	t.Helper()
 	cards, ok := backend.(replyHumanTaskConformanceStore)
 	if !ok {
@@ -746,13 +746,15 @@ func replyConformanceCardLifecycleEvent(t *testing.T, card decisioncard.Card, ev
 	)
 }
 
-func receiveReplyConformanceHumanTaskOutcome(t *testing.T, outcomes <-chan events.Event, eventType string) events.Event {
+func receiveReplyConformanceHumanTaskOutcome(t *testing.T, outcomes <-chan *bus.LocalDelivery, eventType string) events.Event {
 	t.Helper()
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
 	for {
 		select {
-		case evt := <-outcomes:
+		case delivery := <-outcomes:
+			evt := delivery.Event()
+			_ = delivery.Complete()
 			if string(evt.Type()) == eventType {
 				return evt
 			}

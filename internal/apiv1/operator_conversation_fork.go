@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
 )
@@ -254,18 +255,29 @@ func executeConversationForkChatWithHeartbeat(
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	heartbeatErr := make(chan error, 1)
+	owner, ok := worklifetime.ProcessFromContext(ctx)
+	if !ok {
+		cancel()
+		return store.ConversationForkChatExecution{}, errors.New("process work owner is required for conversation fork heartbeat")
+	}
+	lease, err := owner.Begin(executionCtx)
+	if err != nil {
+		cancel()
+		return store.ConversationForkChatExecution{}, fmt.Errorf("admit conversation fork heartbeat: %w", err)
+	}
 	go func() {
 		defer close(done)
+		defer func() { _ = lease.Done() }()
 		ticker := time.NewTicker(conversationForkChatHeartbeatInterval)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-stop:
 				return
-			case <-executionCtx.Done():
+			case <-lease.Context().Done():
 				return
 			case <-ticker.C:
-				if err := lifecycle.HeartbeatOperatorConversationForkChat(context.WithoutCancel(executionCtx), prepared, time.Now().UTC()); err != nil {
+				if err := lifecycle.HeartbeatOperatorConversationForkChat(context.WithoutCancel(lease.Context()), prepared, time.Now().UTC()); err != nil {
 					heartbeatErr <- err
 					cancel()
 					return

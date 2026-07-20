@@ -35,11 +35,11 @@ func testManagerSubscriptionAdmission(t *testing.T, cfg runtimeactors.AgentConfi
 func TestSpawnAgentRejectsForeignExactAndPatternBeforeRegistration(t *testing.T) {
 	for _, subscription := range []string{"foreign/task.ready", "foreign/**/task.ready"} {
 		t.Run(strings.ReplaceAll(subscription, "/", "_"), func(t *testing.T) {
-			eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+			eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 			if err != nil {
 				t.Fatal(err)
 			}
-			am := NewAgentManager(eb, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+			am := newTestAgentManager(t, eb, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 				return subscriptionAdmissionTestAgent{id: cfg.ID}, nil
 			})
 			err = am.SpawnAgent(runtimeactors.AgentConfig{
@@ -59,11 +59,11 @@ func TestSpawnAgentRejectsForeignExactAndPatternBeforeRegistration(t *testing.T)
 }
 
 func TestReconfigureAgentRejectsForeignSubscriptionWithoutReplacingCurrentAdmission(t *testing.T) {
-	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	am := NewAgentManager(eb, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am := newTestAgentManager(t, eb, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return subscriptionAdmissionTestAgent{id: cfg.ID}, nil
 	})
 	initial := runtimeactors.AgentConfig{

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 )
 
 type noopMonitorWriter struct{}
@@ -62,14 +63,17 @@ func TestSessionWatchdogMonitorWriter_PersistsHealthyLongRunningStateAfterOutput
 	sessionWatchdogPollInterval = 5 * time.Millisecond
 
 	store := &captureConversationStore{}
-	writer := newSessionWatchdogMonitorWriter(context.Background(), noopMonitorWriter{}, store, nil, MonitorTurnMeta{
+	writer, err := newSessionWatchdogMonitorWriter(llmTestWorkContext(t, context.Background()), noopMonitorWriter{}, store, nil, MonitorTurnMeta{
 		AgentID:                  "agent-1",
 		SessionID:                "sess-1",
 		Memory:                   testMemory(),
 		MemoryIdentity:           testMemoryIdentity("agent-1", "support/inst-1"),
 		WatchdogLongRunningAfter: 20 * time.Millisecond,
-		WatchdogNoOutputAfter:    60 * time.Millisecond,
+		WatchdogNoOutputAfter:    time.Hour,
 	})
+	if err != nil {
+		t.Fatalf("new session watchdog: %v", err)
+	}
 	defer func() {
 		_ = writer.Close()
 		sessionWatchdogPollInterval = prevPoll
@@ -96,13 +100,16 @@ func TestSessionWatchdogMonitorWriter_PersistsHealthyLongRunningStateAfterOutput
 
 func TestSessionWatchdogMonitorWriter_SkipsStatelessMemory(t *testing.T) {
 	base := &noopMonitorWriterPtr{}
-	writer := newSessionWatchdogMonitorWriter(context.Background(), base, &captureConversationStore{}, nil, MonitorTurnMeta{
+	writer, err := newSessionWatchdogMonitorWriter(context.Background(), base, &captureConversationStore{}, nil, MonitorTurnMeta{
 		AgentID:                  "agent-1",
 		SessionID:                "sess-1",
 		Memory:                   agentmemory.Authored(false),
 		WatchdogLongRunningAfter: 20 * time.Millisecond,
 		WatchdogNoOutputAfter:    20 * time.Millisecond,
 	})
+	if err != nil {
+		t.Fatalf("new stateless session watchdog: %v", err)
+	}
 	if writer != base {
 		t.Fatalf("expected stateless memory to return base writer, got %T", writer)
 	}
@@ -113,7 +120,7 @@ func TestSessionWatchdogMonitorWriter_PersistsNoOutputStateWithoutStdout(t *test
 	sessionWatchdogPollInterval = 5 * time.Millisecond
 
 	store := &captureConversationStore{}
-	writer := newSessionWatchdogMonitorWriter(context.Background(), noopMonitorWriter{}, store, nil, MonitorTurnMeta{
+	writer, err := newSessionWatchdogMonitorWriter(llmTestWorkContext(t, context.Background()), noopMonitorWriter{}, store, nil, MonitorTurnMeta{
 		AgentID:                  "agent-1",
 		SessionID:                "sess-1",
 		Memory:                   testMemory(),
@@ -121,6 +128,9 @@ func TestSessionWatchdogMonitorWriter_PersistsNoOutputStateWithoutStdout(t *test
 		WatchdogLongRunningAfter: 20 * time.Millisecond,
 		WatchdogNoOutputAfter:    20 * time.Millisecond,
 	})
+	if err != nil {
+		t.Fatalf("new session watchdog: %v", err)
+	}
 	defer func() {
 		_ = writer.Close()
 		sessionWatchdogPollInterval = prevPoll
@@ -150,7 +160,7 @@ func TestSessionWatchdogMonitorWriter_CloseCancelsBlockedWatchdogPersistence(t *
 	defer func() { sessionWatchdogPollInterval = prevPoll }()
 
 	store := &blockingWatchdogStore{started: make(chan struct{}, 1)}
-	writer := newSessionWatchdogMonitorWriter(context.Background(), noopMonitorWriter{}, store, nil, MonitorTurnMeta{
+	writer, err := newSessionWatchdogMonitorWriter(llmTestWorkContext(t, context.Background()), noopMonitorWriter{}, store, nil, MonitorTurnMeta{
 		AgentID:                  "agent-1",
 		SessionID:                "sess-1",
 		Memory:                   testMemory(),
@@ -158,6 +168,9 @@ func TestSessionWatchdogMonitorWriter_CloseCancelsBlockedWatchdogPersistence(t *
 		WatchdogLongRunningAfter: 20 * time.Millisecond,
 		WatchdogNoOutputAfter:    20 * time.Millisecond,
 	})
+	if err != nil {
+		t.Fatalf("new session watchdog: %v", err)
+	}
 
 	select {
 	case <-store.started:
@@ -175,5 +188,45 @@ func TestSessionWatchdogMonitorWriter_CloseCancelsBlockedWatchdogPersistence(t *
 	case <-done:
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("Close did not unblock after canceling watchdog persistence")
+	}
+}
+
+func TestSessionWatchdogJoinedOnGenerationRetire(t *testing.T) {
+	process := worklifetime.NewProcess()
+	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: "watchdog-runtime",
+		BundleHash:        "watchdog-bundle",
+	})
+	if err != nil {
+		t.Fatalf("new runtime occurrence: %v", err)
+	}
+	ctx := worklifetime.WithOccurrence(context.Background(), owner)
+	writer, err := newSessionWatchdogMonitorWriter(ctx, noopMonitorWriter{}, &captureConversationStore{}, nil, MonitorTurnMeta{
+		AgentID:                  "agent-1",
+		SessionID:                "sess-1",
+		Memory:                   testMemory(),
+		MemoryIdentity:           testMemoryIdentity("agent-1", "support/inst-1"),
+		WatchdogLongRunningAfter: time.Hour,
+		WatchdogNoOutputAfter:    2 * time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("new session watchdog: %v", err)
+	}
+	if got := owner.ActiveCount(); got != 1 {
+		t.Fatalf("active watchdog work = %d, want 1", got)
+	}
+	waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := owner.RetireAndWait(waitCtx); err != nil {
+		t.Fatalf("retire runtime occurrence: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close retired watchdog: %v", err)
+	}
+	if got := owner.ActiveCount(); got != 0 {
+		t.Fatalf("active watchdog work after retirement = %d, want 0", got)
+	}
+	if _, err := process.Join(waitCtx); err != nil {
+		t.Fatalf("join process: %v", err)
 	}
 }

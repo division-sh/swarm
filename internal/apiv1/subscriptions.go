@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
@@ -38,6 +40,7 @@ type SubscriptionRuntime struct {
 	pollInterval   time.Duration
 	healthInterval time.Duration
 	queueSize      int
+	workOwner      *worklifetime.Process
 }
 
 type subscriptionIDResult struct {
@@ -119,7 +122,7 @@ func (r *SubscriptionRuntime) prepare(session *webSocketSession, req Request) (s
 	}
 	switch req.Method {
 	case "health.subscribe":
-		return r.prepareHealthSubscription(session), nil
+		return r.prepareHealthSubscription(session)
 	case "event.subscribe":
 		return r.prepareEventSubscription(session, req)
 	case "run.subscribe_trace":
@@ -145,25 +148,34 @@ func (r *SubscriptionRuntime) prepareDecisionCardSubscription(session *webSocket
 		}
 		cursor = int64(value)
 	}
-	id, ctx, cancel := session.newSubscriptionContext("mailbox")
+	id, ctx, cancel, settle, err := r.newOwnedSubscriptionContext(session, "mailbox")
+	if err != nil {
+		return subscriptionPlan{}, err
+	}
 	return subscriptionPlan{
 		Result: subscriptionIDResult{SubscriptionID: id},
 		Start: func() {
-			go r.runDecisionCardSubscription(ctx, session, id, cursor)
+			go func() {
+				defer settle()
+				r.runDecisionCardSubscription(ctx, session, id, cursor)
+			}()
 		},
-		Cancel: cancel,
+		Cancel: func() { cancel(); settle() },
 	}, nil
 }
 
-func (r *SubscriptionRuntime) prepareHealthSubscription(session *webSocketSession) subscriptionPlan {
-	id, ctx, cancel := session.newSubscriptionContext("health")
+func (r *SubscriptionRuntime) prepareHealthSubscription(session *webSocketSession) (subscriptionPlan, error) {
+	id, ctx, cancel, settle, err := r.newOwnedSubscriptionContext(session, "health")
+	if err != nil {
+		return subscriptionPlan{}, err
+	}
 	return subscriptionPlan{
 		Result: subscriptionIDResult{SubscriptionID: id},
 		Start: func() {
-			go r.runHealthSubscription(ctx, session, id)
+			go func() { defer settle(); r.runHealthSubscription(ctx, session, id) }()
 		},
-		Cancel: cancel,
-	}
+		Cancel: func() { cancel(); settle() },
+	}, nil
 }
 
 func (r *SubscriptionRuntime) prepareEventSubscription(session *webSocketSession, req Request) (subscriptionPlan, error) {
@@ -182,13 +194,19 @@ func (r *SubscriptionRuntime) prepareEventSubscription(session *webSocketSession
 	if err != nil {
 		return subscriptionPlan{}, err
 	}
-	id, ctx, cancel := session.newSubscriptionContext("event")
+	id, ctx, cancel, settle, err := r.newOwnedSubscriptionContext(session, "event")
+	if err != nil {
+		return subscriptionPlan{}, err
+	}
 	return subscriptionPlan{
 		Result: subscriptionIDResult{SubscriptionID: id},
 		Start: func() {
-			go r.runEventSubscription(ctx, session, id, reads, filter, subscriptionBaseSince(replaySince, r.now()))
+			go func() {
+				defer settle()
+				r.runEventSubscription(ctx, session, id, reads, filter, subscriptionBaseSince(replaySince, r.now()))
+			}()
 		},
-		Cancel: cancel,
+		Cancel: func() { cancel(); settle() },
 	}, nil
 }
 
@@ -221,13 +239,19 @@ func (r *SubscriptionRuntime) prepareRunTraceSubscription(session *webSocketSess
 	} else if err != nil {
 		return subscriptionPlan{}, err
 	}
-	id, ctx, cancel := session.newSubscriptionContext("run-trace")
+	id, ctx, cancel, settle, err := r.newOwnedSubscriptionContext(session, "run-trace")
+	if err != nil {
+		return subscriptionPlan{}, err
+	}
 	return subscriptionPlan{
 		Result: subscriptionIDResult{SubscriptionID: id},
 		Start: func() {
-			go r.runTraceSubscription(ctx, session, id, reads, runID, baseSince, filter, includeInternal)
+			go func() {
+				defer settle()
+				r.runTraceSubscription(ctx, session, id, reads, runID, baseSince, filter, includeInternal)
+			}()
 		},
-		Cancel: cancel,
+		Cancel: func() { cancel(); settle() },
 	}, nil
 }
 
@@ -243,13 +267,16 @@ func (r *SubscriptionRuntime) prepareRuntimeLogSubscription(session *webSocketSe
 	opts.Since = subscriptionBaseSince(replaySince, r.now())
 	opts.Limit = subscriptionBatchLimit
 	opts.Order = "asc"
-	id, ctx, cancel := session.newSubscriptionContext("runtime-logs")
+	id, ctx, cancel, settle, err := r.newOwnedSubscriptionContext(session, "runtime-logs")
+	if err != nil {
+		return subscriptionPlan{}, err
+	}
 	return subscriptionPlan{
 		Result: subscriptionIDResult{SubscriptionID: id},
 		Start: func() {
-			go r.runRuntimeLogSubscription(ctx, session, id, reads, opts)
+			go func() { defer settle(); r.runRuntimeLogSubscription(ctx, session, id, reads, opts) }()
 		},
-		Cancel: cancel,
+		Cancel: func() { cancel(); settle() },
 	}, nil
 }
 
@@ -308,6 +335,21 @@ func (s *webSocketSession) newSubscriptionContext(prefix string) (string, contex
 	ctx, cancel := context.WithCancel(s.ctx)
 	s.registerSubscription(subscriptionID, cancel)
 	return subscriptionID, ctx, cancel
+}
+
+func (r *SubscriptionRuntime) newOwnedSubscriptionContext(session *webSocketSession, prefix string) (string, context.Context, context.CancelFunc, func(), error) {
+	if r == nil || r.workOwner == nil {
+		return "", nil, nil, nil, errors.New("process work owner is required for API subscription")
+	}
+	id, ctx, cancel := session.newSubscriptionContext(prefix)
+	lease, err := r.workOwner.Begin(ctx)
+	if err != nil {
+		cancel()
+		return "", nil, nil, nil, fmt.Errorf("admit API subscription: %w", err)
+	}
+	var once sync.Once
+	settle := func() { once.Do(func() { _ = lease.Done() }) }
+	return id, lease.Context(), cancel, settle, nil
 }
 
 func (r *SubscriptionRuntime) runHealthSubscription(ctx context.Context, session *webSocketSession, subscriptionID string) {

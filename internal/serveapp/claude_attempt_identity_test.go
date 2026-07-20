@@ -23,6 +23,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -418,10 +419,10 @@ func TestAgentManagerDirectDeadLetterPersistsCanonicalEnvelopeSelectedStores(t *
 	for _, backendName := range []string{"sqlite", "postgres"} {
 		t.Run(backendName, func(t *testing.T) {
 			backend := newClaudeAttemptProofBackend(t, backendName)
-			eventBus := newClaudeAttemptProofEventBus(t, backend)
+			eventBus, workOwner := newClaudeAttemptProofEventBus(t, backend)
 			manager := runtimemanager.NewAgentManagerWithOptions(eventBus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 				return claudeAttemptProofChainDepthAgent{id: cfg.ID}, nil
-			}, runtimemanager.AgentManagerOptions{BaseContext: claudeAttemptProofContext(), LifecycleStore: backend.store, Sessions: backend.sessions}, backend.store)
+			}, runtimemanager.AgentManagerOptions{BaseContext: claudeAttemptProofContext(), LifecycleStore: backend.store, Sessions: backend.sessions, WorkOwner: workOwner}, backend.store)
 			if err := manager.SpawnAgent(claudeAttemptProofAgentConfig()); err != nil {
 				t.Fatalf("spawn chain-depth proof agent: %v", err)
 			}
@@ -475,7 +476,7 @@ func newClaudeAttemptProofManager(t *testing.T, backend claudeAttemptProofBacken
 		surface = surfaces[0]
 	}
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "claude-attempt-proof-token")
-	eventBus := newClaudeAttemptProofEventBus(t, backend)
+	eventBus, workOwner := newClaudeAttemptProofEventBus(t, backend)
 	cfg := &config.Config{}
 	cfg.Workspace.DockerBin = dockerBin
 	cfg.LLM.ClaudeCLI.Command = "claude"
@@ -494,7 +495,7 @@ func newClaudeAttemptProofManager(t *testing.T, backend claudeAttemptProofBacken
 	)
 	manager := runtimemanager.NewAgentManagerWithOptions(eventBus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return &claudeAttemptProofAgent{runtime: runtime, config: cfg, calls: calls}, nil
-	}, runtimemanager.AgentManagerOptions{BaseContext: claudeAttemptProofContext(), LifecycleStore: backend.store, Sessions: backend.sessions}, backend.store)
+	}, runtimemanager.AgentManagerOptions{BaseContext: claudeAttemptProofContext(), LifecycleStore: backend.store, Sessions: backend.sessions, WorkOwner: workOwner}, backend.store)
 	return manager, eventBus
 }
 
@@ -522,8 +523,9 @@ func runClaudeAttemptProofManager(t testing.TB, manager *runtimemanager.AgentMan
 	}
 }
 
-func newClaudeAttemptProofEventBus(t *testing.T, backend claudeAttemptProofBackend) *runtimebus.EventBus {
+func newClaudeAttemptProofEventBus(t *testing.T, backend claudeAttemptProofBackend) (*runtimebus.EventBus, *worklifetime.RuntimeOccurrence) {
 	t.Helper()
+	workOwner := newSupervisorTestRuntimeOccurrence(t, claudeAttemptProofBundleHash)
 	lease, err := backend.store.RegisterAuthorActivityEventCatalog(
 		runtimeauthoractivity.BundleScope(claudeAttemptProofRuntimeID, claudeAttemptProofBundleHash),
 		[]runtimeauthoractivity.EventDescriptor{{EventType: string(claudeAttemptProofEventType), Disposition: runtimeauthoractivity.StoryDifferent}},
@@ -535,11 +537,12 @@ func newClaudeAttemptProofEventBus(t *testing.T, backend claudeAttemptProofBacke
 	eventBus, err := runtimebus.NewEventBusWithOptions(backend.store, runtimebus.EventBusOptions{
 		RuntimeInstanceID: claudeAttemptProofRuntimeID,
 		BundleSourceFact:  claudeAttemptProofBundleSourceFact,
+		WorkOwner:         workOwner,
 	})
 	if err != nil {
 		t.Fatalf("new Claude proof event bus: %v", err)
 	}
-	return eventBus
+	return eventBus, workOwner
 }
 
 func claudeAttemptProofAgentConfig(surfaces ...claudeAttemptProofSurface) runtimeactors.AgentConfig {

@@ -1947,7 +1947,7 @@ func (rejectingDeliveryRouteStore) ListEventDeliveryRecipients(context.Context, 
 	return nil, replayclaim.ErrAuthoritativeRecipientManifestUnavailable
 }
 
-func assertTargetRouteDeliveries(t *testing.T, ch <-chan events.Event, wantEntityIDs ...string) {
+func assertTargetRouteDeliveries(t *testing.T, ch <-chan *LocalDelivery, wantEntityIDs ...string) {
 	t.Helper()
 	seen := map[string]struct{}{}
 	for range wantEntityIDs {

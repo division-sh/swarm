@@ -29,12 +29,10 @@ func (a shutdownTestAgent) OnEvent(ctx context.Context, evt events.Event) ([]eve
 }
 
 func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	outputs := bus.Subscribe("observer", events.EventType("test.out"))
-
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	ctxErrCh := make(chan error, 1)
@@ -47,20 +45,14 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 			case started <- struct{}{}:
 			default:
 			}
-			select {
-			case <-release:
-			case <-ctx.Done():
-				ctxErrCh <- ctx.Err()
-				return nil, ctx.Err()
-			}
+			<-ctx.Done()
 			ctxErrCh <- ctx.Err()
-			return []events.Event{
-				eventtest.RunCreatingRootIngress(eventtest.UUID("evt-out-1"), events.EventType("test.out"), "agent-1", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-			}, nil
+			<-release
+			return nil, ctx.Err()
 		},
 	}
 
-	am := NewAgentManager(bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am := newTestAgentManager(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		if cfg.ID != agent.id {
 			t.Fatalf("unexpected agent id: %q", cfg.ID)
 		}
@@ -96,25 +88,21 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	close(release)
-
 	select {
 	case err := <-ctxErrCh:
-		if err != nil {
-			t.Fatalf("OnEvent context canceled during shutdown drain: %v", err)
+		if err == nil {
+			t.Fatal("OnEvent context was not canceled during generation retirement")
 		}
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for OnEvent completion")
+		t.Fatal("timed out waiting for generation cancellation")
 	}
 
 	select {
-	case evt := <-outputs:
-		if got := string(evt.Type()); got != "test.out" {
-			t.Fatalf("output event type = %q, want test.out", got)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for output publish during shutdown")
+	case err := <-shutdownErrCh:
+		t.Fatalf("Shutdown returned before canceled work completed: %v", err)
+	case <-time.After(50 * time.Millisecond):
 	}
+	close(release)
 
 	select {
 	case err := <-shutdownErrCh:
@@ -127,12 +115,13 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 }
 
 func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	started := make(chan struct{}, 1)
 	ctxErrCh := make(chan error, 1)
+	release := make(chan struct{})
 
 	agent := shutdownTestAgent{
 		id:            "agent-1",
@@ -144,11 +133,12 @@ func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t
 			}
 			<-ctx.Done()
 			ctxErrCh <- ctx.Err()
+			<-release
 			return nil, ctx.Err()
 		},
 	}
 
-	am := NewAgentManager(bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am := newTestAgentManager(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
 	})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
@@ -171,10 +161,8 @@ func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t
 	}
 
 	grace := 25 * time.Millisecond
-	err = am.ShutdownWithOptions(ShutdownOptions{Grace: grace})
-	if err == nil || !strings.Contains(err.Error(), "agent manager shutdown drain timed out after 25ms") {
-		t.Fatalf("ShutdownWithOptions err = %v, want configured grace timeout", err)
-	}
+	shutdownErrCh := make(chan error, 1)
+	go func() { shutdownErrCh <- am.ShutdownWithOptions(ShutdownOptions{Grace: grace}) }()
 
 	select {
 	case err := <-ctxErrCh:
@@ -184,14 +172,28 @@ func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for in-flight context cancellation")
 	}
+	select {
+	case err := <-shutdownErrCh:
+		t.Fatalf("ShutdownWithOptions abandoned accepted work after timeout: %v", err)
+	case <-time.After(2 * grace):
+	}
+	close(release)
+	select {
+	case err := <-shutdownErrCh:
+		if err == nil || !strings.Contains(err.Error(), "agent manager shutdown drain timed out after 25ms") {
+			t.Fatalf("ShutdownWithOptions err = %v, want configured grace timeout after join", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ShutdownWithOptions did not return after accepted work completed")
+	}
 }
 
 func TestShutdownWithOptions_RejectsNegativeGrace(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	am := NewAgentManager(bus, nil)
+	am := newTestAgentManager(t, bus, nil)
 
 	err = am.ShutdownWithOptions(ShutdownOptions{Grace: -time.Second})
 	if err == nil || !strings.Contains(err.Error(), "shutdown grace must be positive") {
@@ -200,7 +202,7 @@ func TestShutdownWithOptions_RejectsNegativeGrace(t *testing.T) {
 }
 
 func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -219,17 +221,15 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 				case firstStarted <- struct{}{}:
 				default:
 				}
-				select {
-				case <-releaseFirst:
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				}
+				<-ctx.Done()
+				<-releaseFirst
+				return nil, ctx.Err()
 			}
 			return nil, nil
 		},
 	}
 
-	am := NewAgentManager(bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am := newTestAgentManager(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
 	})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
@@ -239,12 +239,10 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 	}
 
 	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
-	for _, eventID := range []string{eventtest.UUID("evt-in-1"), eventtest.UUID("evt-in-2")} {
-		if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RunCreatingRootIngress(eventID,
-			events.EventType("test.in"),
-			"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
-			t.Fatalf("Publish(%s): %v", eventID, err)
-		}
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
+		events.EventType("test.in"),
+		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
+		t.Fatalf("Publish(first): %v", err)
 	}
 
 	select {
@@ -257,6 +255,18 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 	go func() {
 		shutdownErrCh <- am.Shutdown()
 	}()
+	deadline := time.Now().Add(time.Second)
+	for !am.isShuttingDown() {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for shutdown admission fence")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-2"),
+		events.EventType("test.in"),
+		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
+		t.Fatalf("Publish(after retirement): %v", err)
+	}
 
 	select {
 	case err := <-shutdownErrCh:
@@ -281,7 +291,7 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 }
 
 func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -297,16 +307,13 @@ func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing
 			case firstStarted <- struct{}{}:
 			default:
 			}
-			select {
-			case <-releaseFirst:
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-			return nil, nil
+			<-ctx.Done()
+			<-releaseFirst
+			return nil, ctx.Err()
 		},
 	}
 
-	am := NewAgentManager(bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am := newTestAgentManager(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
 	})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{

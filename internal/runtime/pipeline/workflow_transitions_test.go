@@ -29,7 +29,7 @@ func TestRecordPipelineTransitionPersistsCurrentReceipt(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"run_id", "family"}))
 	mock.ExpectCommit()
 
-	err = runtimepipeline.RecordPipelineTransition(testAuthorActivityContext(context.Background()), db, runtimepipeline.PipelineTransitionInput{
+	err = runtimepipeline.RecordPipelineTransition(testAuthorActivityContext(t, context.Background()), db, runtimepipeline.PipelineTransitionInput{
 		EventID:    eventID,
 		EventType:  "review.requested",
 		Handler:    "node-a",

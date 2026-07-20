@@ -48,6 +48,14 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 	if o.bus == nil || len(intents) == 0 {
 		return nil
 	}
+	lease, err := o.bus.beginRuntimeWork(ctx)
+	if err != nil {
+		return err
+	}
+	if lease != nil {
+		defer func() { _ = lease.Done() }()
+		ctx = bindWorkContext(ctx, lease, o.bus.workOwner)
+	}
 	transaction, ok := CommitPublishTransactionFromContext(ctx)
 	if !ok || transaction == nil {
 		return fmt.Errorf("engine outbox requires typed event commit transaction")
@@ -126,6 +134,14 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 	if d.bus == nil || len(intents) == 0 {
 		return nil
 	}
+	lease, err := d.bus.beginRuntimeWork(ctx)
+	if err != nil {
+		return err
+	}
+	if lease != nil {
+		defer func() { _ = lease.Done() }()
+		ctx = bindWorkContext(ctx, lease, d.bus.workOwner)
+	}
 	normalized := make([]runtimeengine.EmitIntent, 0, len(intents))
 	for i := range intents {
 		if strings.TrimSpace(string(intents[i].Event.Type())) == "" {
@@ -150,8 +166,10 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 		queuedIntents := clonePostCommitEmitIntents(intents)
 		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
 			postCommitActions := make([]func(), 0, 4)
+			rollbackActions := make([]func(), 0, 4)
 			dispatchCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)))
 			dispatchCtx = runtimepipeline.WithPipelinePostCommitActions(dispatchCtx, &postCommitActions)
+			dispatchCtx = runtimepipeline.WithPipelineRollbackActions(dispatchCtx, &rollbackActions)
 			if err := d.DispatchPostCommit(dispatchCtx, queuedIntents); err != nil {
 				d.bus.logRuntime(dispatchCtx, "error", "Post-commit outbox dispatch failed", "eventbus", "post_commit_outbox_dispatch_failed", "", "", "", "", "", nil, map[string]any{
 					"intents_count": len(queuedIntents),

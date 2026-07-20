@@ -36,7 +36,7 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 			t.Run(backend.name+"/"+mode, func(t *testing.T) {
 				fixture := backend.open(t)
 				ctx := testAuthorActivityContext()
-				eventBus, err := newRunConvergenceEventBus(fixture.store)
+				eventBus, err := newRunConvergenceEventBus(t, fixture.store)
 				if err != nil {
 					t.Fatalf("NewEventBus: %v", err)
 				}
@@ -48,7 +48,7 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 					test := test
 					t.Run(test.name, func(t *testing.T) {
 						event := test.make(uuid.NewString(), time.Date(2026, 7, 19, 20, index, 0, 0, time.UTC))
-						var delivery <-chan events.Event
+						var delivery <-chan *runtimebus.LocalDelivery
 						if routed {
 							delivery = eventBus.Subscribe(agentID, event.Type())
 							if delivery == nil {
@@ -61,7 +61,9 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 						}
 						if routed {
 							select {
-							case got := <-delivery:
+							case delivered := <-delivery:
+								got := delivered.Event()
+								_ = delivered.Complete()
 								if got.ID() != event.ID() {
 									t.Fatalf("delivered event = %s, want %s", got.ID(), event.ID())
 								}
@@ -193,7 +195,7 @@ func TestSameLabelCausalAndRunScopedEventsCannotConvergeExistingRunParity(t *tes
 					parentID = root.ID()
 				}
 				event := eventtest.RuntimeControl(uuid.NewString(), "platform.paused", "runtime", "", json.RawMessage(`{}`), 0, runID, parentID, events.EventEnvelope{}, at.Add(time.Second))
-				eventBus, err := newRunConvergenceEventBus(fixture.store)
+				eventBus, err := newRunConvergenceEventBus(t, fixture.store)
 				if err != nil {
 					t.Fatalf("NewEventBus: %v", err)
 				}
@@ -293,12 +295,13 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 	}
 }
 
-func newRunConvergenceEventBus(selected any) (*runtimebus.EventBus, error) {
+func newRunConvergenceEventBus(t *testing.T, selected any) (*runtimebus.EventBus, error) {
+	t.Helper()
 	switch store := selected.(type) {
 	case *PostgresStore:
-		return runtimebus.NewEventBus(store)
+		return newStoreTestEventBus(t, store)
 	case *SQLiteRuntimeStore:
-		return runtimebus.NewEventBus(store)
+		return newStoreTestEventBus(t, store)
 	default:
 		return nil, fmt.Errorf("unsupported run convergence store %T", selected)
 	}

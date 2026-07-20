@@ -2,9 +2,12 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 )
 
 const (
@@ -55,12 +58,12 @@ func conversationWatchdogThresholds(turnTimeout time.Duration) (time.Duration, t
 	return longRunningAfter, noOutputAfter
 }
 
-func newSessionWatchdogMonitorWriter(ctx context.Context, base MonitorTurnWriter, store ConversationPersistence, events EventPublisher, meta MonitorTurnMeta) MonitorTurnWriter {
+func newSessionWatchdogMonitorWriter(ctx context.Context, base MonitorTurnWriter, store ConversationPersistence, events EventPublisher, meta MonitorTurnMeta) (MonitorTurnWriter, error) {
 	if store == nil || strings.TrimSpace(meta.AgentID) == "" || strings.TrimSpace(meta.SessionID) == "" || !meta.Memory.Enabled {
-		return base
+		return base, nil
 	}
 	if err := meta.MemoryIdentity.Validate(); err != nil {
-		return base
+		return base, nil
 	}
 	longRunningAfter := meta.WatchdogLongRunningAfter
 	noOutputAfter := meta.WatchdogNoOutputAfter
@@ -68,9 +71,17 @@ func newSessionWatchdogMonitorWriter(ctx context.Context, base MonitorTurnWriter
 		longRunningAfter, noOutputAfter = conversationWatchdogThresholds(0)
 	}
 	if longRunningAfter <= 0 || noOutputAfter <= 0 {
-		return base
+		return base, nil
 	}
-	loopCtx, cancel := context.WithCancel(ctx)
+	owner, ok := worklifetime.OccurrenceFromContext(ctx)
+	if !ok {
+		return nil, errors.New("session watchdog requires a runtime work occurrence")
+	}
+	lease, err := owner.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	loopCtx, cancel := context.WithCancel(worklifetime.WithOccurrence(lease.Context(), owner))
 	nowFn := time.Now
 	w := &sessionWatchdogMonitorWriter{
 		base:    base,
@@ -83,8 +94,12 @@ func newSessionWatchdogMonitorWriter(ctx context.Context, base MonitorTurnWriter
 		nowFn:   nowFn,
 		startAt: nowFn(),
 	}
-	go w.loop(loopCtx, longRunningAfter, noOutputAfter)
-	return w
+	go func() {
+		defer close(w.done)
+		defer func() { _ = lease.Done() }()
+		w.loop(loopCtx, longRunningAfter, noOutputAfter)
+	}()
+	return w, nil
 }
 
 func (w *sessionWatchdogMonitorWriter) WriteStdout(line []byte) {
@@ -126,7 +141,6 @@ func (w *sessionWatchdogMonitorWriter) Close() error {
 }
 
 func (w *sessionWatchdogMonitorWriter) loop(ctx context.Context, longRunningAfter, noOutputAfter time.Duration) {
-	defer close(w.done)
 	ticker := time.NewTicker(sessionWatchdogPollInterval)
 	defer ticker.Stop()
 	for {

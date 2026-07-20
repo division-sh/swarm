@@ -30389,6 +30389,51 @@ api_specification:
       errors (array of error objects derived from components.errors with unique numeric OpenRPC codes and canonical data.code
       string discriminators).
 
+process_local_work_lifetime_authority:
+  implemented_by: '#2073'
+  owner: one serve-process root with fixed typed runtime, standing-service, route, and selected-fork occurrences
+  scope:
+    broadest_concept: ownership of every process-local asynchronous operation from admission through completion, cancellation, durable handoff, generation retirement, and final selected-store release
+    fixed_occurrences:
+      process: one opaque owner per selected-store serve process
+      runtime: exact runtime_instance_id plus bundle_hash
+      standing_service: exact service_id plus durable run_id/generation and a fresh opaque process occurrence
+      agent_route: exact runtime_epoch, agent_id, and lifecycle generation
+      selected_fork: exact selected execution_id, fork run_id, and generation
+    forbidden: [arbitrary_scope_hierarchy, free_string_identity, process_global_task_registry, nil_or_noop_async_owner, legacy_occurrence_adoption]
+  admission_and_settlement:
+    begin: Every enqueue, spawn, callback registration, channel send, or buffer escape acquires its opaque occurrence lease before the work becomes reachable. Admission after a fence or retirement fails closed.
+    context: The lease supplies the cancellation context and exact occurrence authority consumed by nested producers. Metadata snapshots and raw lookup APIs never expose an executable Runtime pointer.
+    done: Every accepted lease settles exactly once after execution, error, cancellation, or exact durable handoff. Duplicate settlement is invalid and cannot decrement another occurrence.
+    wait: Wait is event-driven and joins accepted work without counter polling, sleeps, or stable-tick heuristics.
+  queue_carriers:
+    event_bus: Every exact-agent and internal EventBus item is an opaque owned carrier from send through buffer, dequeue, execution, or handoff. A queued callback owns a lease at registration, including time between commit and callback start.
+    route_generation: A route delivery acquires both the exact route occurrence and its runtime/selected-fork occurrence. Route replacement retires and joins only the predecessor route. Late predecessor completion cannot mutate or unblock its successor.
+    reset: EventBus reset retires and joins retained carriers and claims before clearing owner maps or counters. Clearing memory never manufactures quiescence.
+  durable_handoff:
+    rule: Local ownership may end before execution only after the private selected-store adapter proves the exact event and exact delivery route obligation are committed.
+    boundary: This proof carries no eligibility, retry, claim, outcome, settlement, liveness, or replay semantics; those remain governed by their durable owners.
+    failure: Missing, forged, wrong-event, wrong-route, or unreadable proof fails closed and leaves local ownership unsettled.
+  replacement_and_standing:
+    fence: Admission fencing is reversible only while the occurrence is not retired and has drained. Retirement is irreversible.
+    runtime_replacement: Runtime selection and occurrence acquisition are atomic under the runtime-context selector lock. Every failure after predecessor retirement restores, if possible, through a fully started fresh runtime occurrence from immutable predecessor metadata; it never republishes the retired occurrence. Failed compensation remains unavailable.
+    standing_service: Suspend/reset closes domain admission and drains the current standing occurrence before durable commit. Pre-commit failure may reopen the unretired occurrence. Successful suspend retires it; resume/reset publishes a fresh process occurrence even when durable standing identity is unchanged.
+  shutdown_and_store_release:
+    ordering:
+      - Fence HTTP, API, MCP, runtime, standing-service, route, scheduler, timer-recovery, monitor, and selected-fork admission.
+      - Cancel and join every accepted process-local occurrence, preserving exact durable handoff requirements.
+      - Complete runtime-owned cleanup and release loaded bundle resources.
+      - Retire and join the process root, producing one opaque join receipt.
+      - Close an activated selected store only when presented with that exact process-root receipt.
+    timeout: The serve shutdown grace is one reporting and cancellation-escalation budget. Timeout is reported, but serve remains the reachable cleanup owner and does not return, detach a reaper, release project/test ownership, or close the store until accepted work settles and exact close completes.
+    store_states: An unactivated store may close through its distinct construction-failure owner. Once activated, no unconditional close, fallback close, inferred receipt, or compatibility cleanup path exists.
+  sibling_boundaries:
+    durable_delivery: '#2105'
+    replay_claims: '#2106'
+    unactivated_store_composition: '#2107'
+    durable_run_completion: '#2111'
+    durable_timer_state: '#2113'
+
 agent_lifecycle_authority:
   owner: typed AgentManager lifecycle coordinator plus the selected SQLite/Postgres store
   durable_cell:

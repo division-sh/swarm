@@ -11,6 +11,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -211,6 +212,7 @@ type AgentManagerOptions struct {
 	Budget                         BudgetGuard
 	ResetRuntimeOwnedState         func()
 	RuntimeShutdownAdmissionClosed func() bool
+	WorkOwner                      worklifetime.Occurrence
 	RuntimeIngressSafetyPause      func(context.Context, string, *runtimefailures.Envelope) error
 	NativeToolAdmissionValidator   func(context.Context, models.AgentConfig) error
 	ThrottleSuppressPrefixes       []string

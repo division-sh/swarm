@@ -17,7 +17,7 @@ func testAgentSubscriptionAdmission(t *testing.T, agentID string, eventTypes ...
 }
 
 func TestEventBusRawSubscribeRejectsQualifiedExactAuthority(t *testing.T) {
-	eb, err := NewEventBus(InMemoryEventStore{})
+	eb, err := newScopedTestEventBus(InMemoryEventStore{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestEventBusRawSubscribeRejectsQualifiedExactAuthority(t *testing.T) {
 }
 
 func TestEventBusRawSubscribeConsumesRootAdmissionForExactAndWildcard(t *testing.T) {
-	eb, err := NewEventBus(InMemoryEventStore{})
+	eb, err := newScopedTestEventBus(InMemoryEventStore{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestEventBusRawSubscribeConsumesRootAdmissionForExactAndWildcard(t *testing
 }
 
 func TestEventBusTypedAdmissionExecutesSameScopeExactAndWildcard(t *testing.T) {
-	eb, err := NewEventBus(InMemoryEventStore{})
+	eb, err := newScopedTestEventBus(InMemoryEventStore{})
 	if err != nil {
 		t.Fatal(err)
 	}

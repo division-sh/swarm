@@ -2,9 +2,12 @@ package sessions
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
+
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 )
 
 const (
@@ -27,22 +30,37 @@ func StartLeaseHeartbeatWithErrorHandler(ctx context.Context, sessions Registry,
 	}
 
 	interval := LeaseHeartbeatInterval(lease.ExpiresAt)
+	owner, ok := worklifetime.OccurrenceFromContext(ctx)
+	if !ok {
+		if onError != nil {
+			onError(fmt.Errorf("session lease heartbeat requires a runtime work occurrence"))
+		}
+		return func() {}
+	}
+	workLease, err := owner.Begin(ctx)
+	if err != nil {
+		if onError != nil {
+			onError(fmt.Errorf("admit session lease heartbeat: %w", err))
+		}
+		return func() {}
+	}
 	stopCh := make(chan struct{})
 	var once sync.Once
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer func() { _ = workLease.Done() }()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-workLease.Context().Done():
 				return
 			case <-stopCh:
 				return
 			case <-ticker.C:
-				refreshed, err := sessions.Acquire(ctx, identity, lockOwner)
+				refreshed, err := sessions.Acquire(workLease.Context(), identity, lockOwner)
 				if err != nil {
 					if onError != nil {
 						onError(err)

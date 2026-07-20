@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -203,6 +205,21 @@ func (c selectedContractForkLocalRuntimeContainer) Proof() SelectedContractForkL
 
 func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) ([]SelectedContractExecutionForkEvent, error) {
 	req := c.req
+	parent, ok := worklifetime.RuntimeOccurrenceFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("selected-contract fork requires an acquired runtime occurrence")
+	}
+	forkOwner, err := parent.NewSelectedFork(ctx, worklifetime.SelectedForkIdentity{
+		ExecutionID: c.proof.RuntimeExecutionID,
+		RunID:       req.ForkRunID,
+		Generation:  c.proof.RuntimeGeneration,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create selected-fork process occurrence: %w", err)
+	}
+	defer func() { _ = forkOwner.RetireAndWait(context.Background()) }()
+	ctx = worklifetime.WithOccurrence(ctx, forkOwner)
+	req.AgentRuntime.Options.AgentManagerOptions.WorkOwner = forkOwner
 	if err := req.Store.EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, req.SourceRunID, req.ForkEventID); err != nil {
 		return nil, err
 	}
@@ -217,6 +234,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(req.Store.DB)
 	var lifecycleManager *runtimemanager.AgentManager
 	bus, err := runtimebus.NewEventBusWithOptions(req.Store, runtimebus.EventBusOptions{
+		WorkOwner:                   forkOwner,
 		ContractBundle:              req.LoadedSource.Source,
 		Logger:                      selectedContractRuntimeContainerLogger(req.Store),
 		RecipientPlanAdmissionGuard: guard.AuthorizeEvent,
@@ -248,18 +266,25 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	defer cancelRuntime()
 	heartbeatErr := make(chan error, 1)
 	stopHeartbeat := make(chan struct{})
-	defer close(stopHeartbeat)
+	var stopHeartbeatOnce sync.Once
+	stopHeartbeatWork := func() { stopHeartbeatOnce.Do(func() { close(stopHeartbeat) }) }
+	defer stopHeartbeatWork()
+	heartbeatLease, err := forkOwner.Begin(runCtx)
+	if err != nil {
+		return nil, fmt.Errorf("admit selected-fork heartbeat: %w", err)
+	}
 	go func() {
+		defer func() { _ = heartbeatLease.Done() }()
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-stopHeartbeat:
 				return
-			case <-runCtx.Done():
+			case <-heartbeatLease.Context().Done():
 				return
 			case <-ticker.C:
-				if err := req.Store.HeartbeatRunForkSelectedContractRuntimeExecution(context.WithoutCancel(runCtx), c.authority, 2*time.Minute); err != nil {
+				if err := req.Store.HeartbeatRunForkSelectedContractRuntimeExecution(context.WithoutCancel(heartbeatLease.Context()), c.authority, 2*time.Minute); err != nil {
 					heartbeatErr <- err
 					cancelRuntime()
 					return
@@ -276,9 +301,12 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		return nil, fmt.Errorf("selected-contract fork-local lifecycle manager was not materialized")
 	}
 	lifecycleManager = agentRuntime.manager
+	agentRuntimeStopped := false
 	if agentRuntime != nil {
 		defer func() {
-			_ = agentRuntime.Shutdown()
+			if !agentRuntimeStopped {
+				_ = agentRuntime.Shutdown()
+			}
 		}()
 	}
 	out := make([]SelectedContractExecutionForkEvent, 0, len(sourceEvents))
@@ -321,7 +349,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 			return out, err
 		}
 		prepared = committedPrepared
-		if err := bus.DispatchPreparedPublish(eventCtx, prepared); err != nil {
+		if err := bus.DispatchPreparedPublishAndWait(eventCtx, prepared); err != nil {
 			return out, fmt.Errorf("%s dispatch committed selected-contract fork event %s as %s: %w",
 				store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
 				sourceEvent.SourceEventID,
@@ -336,6 +364,11 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		})
 	}
 	if agentRuntime != nil {
+		stopHeartbeatWork()
+		if err := agentRuntime.Shutdown(); err != nil {
+			return out, fmt.Errorf("%s stop selected-fork runtime before quiescence: %w", store.RunForkSelectedContractForkLocalRuntimeContainerOwner, err)
+		}
+		agentRuntimeStopped = true
 		timeout := req.AgentRuntime.Options.QuiescenceTimeout
 		if timeout <= 0 {
 			timeout = selectedContractAgentRuntimeDefaultQuiescenceTimeout

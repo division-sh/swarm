@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
@@ -30,9 +29,11 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -83,6 +84,7 @@ type RuntimeOptions struct {
 	BundleFingerprint                string
 	BundleSourceFact                 runtimecorrelation.BundleSourceFact
 	RuntimeInstanceID                string
+	ProcessWorkOwner                 *worklifetime.Process
 	WorkflowModule                   runtimepipeline.WorkflowModule
 	LLMRuntime                       llm.Runtime
 	Credentials                      runtimecredentials.Store
@@ -188,12 +190,12 @@ type Runtime struct {
 	pendingOwnershipOwned     bool
 	ownershipHandoffPending   bool
 	replacementQuiesced       bool
+	workOccurrence            *worklifetime.RuntimeOccurrence
 	ownerID                   string
 	bootID                    string
 	startupAdmission          managedexecution.Admission
 	pendingOwnershipHandoff   runtimestartupownership.Handoff
 	shutdownGate              shutdownAdmission
-	backgroundActive          atomic.Int64
 	payloadValidator          runtimebus.PayloadValidator
 	authorActivityDescriptors []runtimeauthoractivity.EventDescriptor
 	authorActivityScope       runtimeauthoractivity.Scope
@@ -251,7 +253,17 @@ func (rt *Runtime) shutdownAdmissionClosed() bool {
 func (rt *Runtime) CloseAdmission() {
 	if rt != nil {
 		rt.shutdownGate.Close()
+		if rt.workOccurrence != nil {
+			_ = rt.workOccurrence.Fence()
+		}
 	}
+}
+
+func (rt *Runtime) WorkOccurrence() *worklifetime.RuntimeOccurrence {
+	if rt == nil {
+		return nil
+	}
+	return rt.workOccurrence
 }
 
 // PrepareInitialStartupOwnership acquires the selected-store lease before
@@ -463,46 +475,16 @@ func (h *StartupOwnershipHandoff) Rollback() error {
 	return nil
 }
 
-const runtimeQuiescenceStableChecks = 3
-
 const bootstrapSelfCheckSubscriberID = "bootstrap-self-check"
 
 func (rt *Runtime) WaitForQuiescence(ctx context.Context) error {
 	if rt == nil {
 		return nil
 	}
-	ticker := time.NewTicker(5 * time.Millisecond)
-	defer ticker.Stop()
-	stable := 0
-	for {
-		if rt.Bus != nil {
-			if err := rt.Bus.WaitForQuiescence(ctx); err != nil {
-				return err
-			}
-		}
-		if rt.Manager != nil {
-			if err := rt.Manager.WaitForQuiescence(ctx); err != nil {
-				return err
-			}
-		}
-		pendingDeliveries := 0
-		if rt.Bus != nil {
-			pendingDeliveries = rt.Bus.PendingAgentDeliveries()
-		}
-		if pendingDeliveries == 0 {
-			stable++
-			if stable >= runtimeQuiescenceStableChecks {
-				return nil
-			}
-		} else {
-			stable = 0
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
+	if rt.workOccurrence == nil {
+		return nil
 	}
+	return rt.workOccurrence.Wait(ctx)
 }
 
 func runtimeThrottleSuppressPrefixes(source semanticview.Source) []string {
@@ -906,6 +888,22 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	stores := boot.Stores
 	opts := boot.Options
 	source := boot.Source
+	if opts.ProcessWorkOwner == nil {
+		return nil, fmt.Errorf("runtime process work owner is required")
+	}
+	workOccurrence, err := opts.ProcessWorkOwner.NewRuntime(ctx, worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: opts.RuntimeInstanceID,
+		BundleHash:        boot.BundleSourceFact.BundleHash,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create runtime work occurrence: %w", err)
+	}
+	workOccurrenceOwned := true
+	defer func() {
+		if workOccurrenceOwned {
+			_, _ = workOccurrence.RetireAndWait(context.Background())
+		}
+	}()
 	if stores.InboundStore != nil {
 		if err := stores.InboundStore.ValidateInboundPublicationIntegrity(ctx); err != nil {
 			return nil, fmt.Errorf("validate inbound publication integrity at startup: %w", err)
@@ -931,6 +929,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		PromptResolver:            boot.PromptResolver,
 		Credentials:               boot.Credentials,
 		ManagedCredentials:        boot.ManagedCredentials,
+		workOccurrence:            workOccurrence,
 	}
 
 	if stores.RuntimeLogStore != nil {
@@ -939,7 +938,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	payloadValidator := boot.payloadValidator(rt.Logger)
 	rt.payloadValidator = payloadValidator
 	var managerRef *runtimemanager.AgentManager
-	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, source, boot.TrimmedBundleFingerprint, boot.BundleSourceFact, opts.RuntimeInstanceID, func() []runtimebus.EventInterceptor {
+	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, source, boot.TrimmedBundleFingerprint, boot.BundleSourceFact, opts.RuntimeInstanceID, workOccurrence, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}
@@ -960,8 +959,8 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		rt.RunControl = runtimeruncontrol.NewController(runControlStore, rt.Bus, runtimeruncontrol.Options{})
 		rt.Bus.SetRunDispatchGate(rt.RunControl)
 	}
-	rt.Scheduler = runtimepipeline.NewScheduler(func(sc runtimepipeline.Schedule) {
-		callbackCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	rt.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(workOccurrence, func(taskCtx context.Context, sc runtimepipeline.Schedule) {
+		callbackCtx, cancel := context.WithTimeout(taskCtx, 10*time.Second)
 		defer cancel()
 		callbackCtx = events.WithDeliveryContext(callbackCtx, sc.Context)
 		if rt.Pipeline != nil && rt.Pipeline.IsWorkflowTimerSchedule(sc) {
@@ -1049,6 +1048,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			TestEntityStateHook:              opts.TestEntityStateHook,
 			TestWorkflowNodeHandlerStartHook: opts.TestWorkflowNodeHandlerStartHook,
 			TestLifecycleProbe:               opts.TestLifecycleProbe,
+			WorkOwner:                        workOccurrence,
 		})
 		if rt.Pipeline != nil {
 			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodesWithReceiptStore(rt.Bus, stores.SQLDB, pipelineStore)...)
@@ -1209,6 +1209,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			}
 		},
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
+		WorkOwner:                      workOccurrence,
 		RuntimeIngressSafetyPause: func(ctx context.Context, reason string, failure *runtimefailures.Envelope) error {
 			_, err := rt.RuntimeIngress.SafetyPause(ctx, runtimeingress.TransitionRequest{
 				Reason:       reason,
@@ -1244,6 +1245,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		}, rt.shutdownAdmissionClosed, rt.EmitRegistry, rt.MCPTurns))
 	}
 
+	workOccurrenceOwned = false
 	return rt, nil
 }
 
@@ -1307,6 +1309,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		return err
 	}
 	ctx = rt.authorActivityContext(ctx)
+	ctx = worklifetime.WithRuntimeOccurrence(ctx, rt.workOccurrence)
 	bootStartedAt := rt.Options.BootStartedAt
 	if bootStartedAt.IsZero() {
 		bootStartedAt = time.Now().UTC()
@@ -1430,10 +1433,13 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			rt.emitBootProgress(8, "pipeline_maintenance", "FAILED", err.Error())
 			return fmt.Errorf("repair contract entity types: %w", err)
 		}
-		rt.backgroundActive.Add(1)
+		lease, beginErr := rt.workOccurrence.Begin(startCtx)
+		if beginErr != nil {
+			return fmt.Errorf("admit pipeline maintenance: %w", beginErr)
+		}
 		go func() {
-			defer rt.backgroundActive.Add(-1)
-			rt.Pipeline.RunMaintenance(startCtx)
+			defer func() { _ = lease.Done() }()
+			rt.Pipeline.RunMaintenance(lease.Context())
 		}()
 		rt.emitBootProgress(8, "pipeline_maintenance", "started", "")
 	} else {
@@ -1500,7 +1506,9 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		if sweeperConfig == (runtimebus.OutboxSweeperConfig{}) {
 			sweeperConfig = runtimebus.DefaultOutboxSweeperConfig()
 		}
-		rt.Bus.StartOutboxSweeper(startCtx, sweeperConfig)
+		if err := rt.Bus.StartOutboxSweeper(startCtx, sweeperConfig); err != nil {
+			return fmt.Errorf("start outbox sweeper: %w", err)
+		}
 		rt.emitBootProgress(12, "outbox_sweeper", "started", "")
 	} else {
 		rt.emitBootProgress(12, "outbox_sweeper", "skipped", "event bus unavailable")
@@ -1617,7 +1625,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
 	if rt.Stores.SQLDB != nil && rt.Logger != nil {
 	}
-	var bootCheck <-chan events.Event
+	var bootCheck <-chan *worklifetime.EventDelivery
 	if rt.Options.SelfCheck && rt.Bus != nil {
 		bootCheck = rt.Bus.SubscribeInternal(bootstrapSelfCheckSubscriberID, events.EventType("platform.boot"))
 		defer rt.Bus.Unsubscribe(bootstrapSelfCheckSubscriberID)
@@ -1717,10 +1725,13 @@ func (rt *Runtime) startSystemNodesAndWaitForSubscriptions(ctx context.Context, 
 		nodes = append(nodes, node)
 	}
 	for _, node := range nodes {
-		rt.backgroundActive.Add(1)
+		lease, err := rt.workOccurrence.Begin(startCtx)
+		if err != nil {
+			return len(nodes), fmt.Errorf("admit system node %s: %w", runtimeBackgroundNodeName(node), err)
+		}
 		go func(node runtimepipeline.BackgroundNode) {
-			defer rt.backgroundActive.Add(-1)
-			node.Run(startCtx)
+			defer func() { _ = lease.Done() }()
+			node.Run(lease.Context())
 		}(node)
 	}
 	for subscribed := 0; subscribed < len(nodes); subscribed++ {
@@ -1774,6 +1785,9 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) 
 	}
 	rt.lifecycleMu.Unlock()
 	rt.shutdownGate.Close()
+	if rt.workOccurrence != nil {
+		_ = rt.workOccurrence.Fence()
+	}
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
 	defer cancelDrain()
 	var shutdownErr error
@@ -1786,9 +1800,7 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) 
 		if remaining <= 0 {
 			remaining = time.Nanosecond
 		}
-		if err := runRuntimeStopStep(drainCtx, func() error {
-			return rt.Manager.ShutdownWithOptions(runtimemanager.ShutdownOptions{Grace: remaining})
-		}); err != nil {
+		if err := rt.Manager.ShutdownWithOptions(runtimemanager.ShutdownOptions{Grace: remaining}); err != nil {
 			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("agent manager shutdown: %w", err))
 		}
 	}
@@ -1806,6 +1818,9 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) 
 	if cancelStart != nil {
 		cancelStart()
 	}
+	if err := rt.shutdownGate.Wait(context.Background()); err != nil {
+		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("runtime ingress admission join: %w", err))
+	}
 	if rt.Pipeline != nil {
 		if err := rt.Pipeline.StopWorkflowTimerLifecycle(drainCtx); err != nil {
 			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("workflow timer lifecycle shutdown: %w", err))
@@ -1815,23 +1830,39 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) 
 		rt.Scheduler.Stop()
 		if err := rt.Scheduler.Wait(drainCtx); err != nil {
 			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("scheduler shutdown: %w", err))
+			_ = rt.Scheduler.Wait(context.Background())
 		}
 	}
 	if rt.Bus != nil {
 		if err := rt.Bus.WaitForOutboxSweeper(drainCtx); err != nil {
 			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("outbox sweeper shutdown: %w", err))
+			_ = rt.Bus.WaitForOutboxSweeper(context.Background())
+		}
+		// Producers are stopped. Retire every retained route and internal
+		// subscriber queue before joining the runtime occurrence so buffered
+		// delivery carriers cannot strand generation ownership.
+		if err := rt.Bus.ResetInMemoryState(); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("event bus local delivery retirement: %w", err))
 		}
 	}
-	if err := waitRuntimeBackground(drainCtx, &rt.backgroundActive); err != nil {
-		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("runtime background shutdown: %w", err))
+	if rt.workOccurrence != nil {
+		rt.workOccurrence.Retire()
+		if _, err := rt.workOccurrence.RetireAndWait(drainCtx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("runtime work retirement: %w", err))
+			diaglog.ProcessLog(diaglog.LevelError, "runtime", "runtime work retirement exceeded shutdown budget",
+				"active_leases", rt.workOccurrence.ActiveCount(),
+				"error", err.Error(),
+			)
+			_, _ = rt.workOccurrence.RetireAndWait(context.Background())
+		}
 	}
 	if rt.Stores.ScheduleStore != nil {
-		if err := rt.Stores.ScheduleStore.ReleaseScheduleClaims(drainCtx); err != nil {
+		if err := rt.Stores.ScheduleStore.ReleaseScheduleClaims(context.Background()); err != nil {
 			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("release schedule claims: %w", err))
 		}
 	}
-	if releaseOwnership && shutdownErr == nil && lease != nil && !borrowedLease {
-		if err := lease.Release(drainCtx); err != nil {
+	if releaseOwnership && lease != nil && !borrowedLease {
+		if err := lease.Release(context.Background()); err != nil {
 			shutdownErr = errors.Join(shutdownErr, err)
 		} else {
 			rt.lifecycleMu.Lock()
@@ -1842,45 +1873,11 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) 
 			rt.lifecycleMu.Unlock()
 		}
 	}
-	if shutdownErr == nil {
-		rt.lifecycleMu.Lock()
-		rt.replacementQuiesced = true
-		rt.lifecycleMu.Unlock()
-		rt.releaseAuthorActivityCatalog()
-	}
+	rt.lifecycleMu.Lock()
+	rt.replacementQuiesced = true
+	rt.lifecycleMu.Unlock()
+	rt.releaseAuthorActivityCatalog()
 	return shutdownErr
-}
-
-func runRuntimeStopStep(ctx context.Context, fn func() error) error {
-	done := make(chan error, 1)
-	go func() { done <- fn() }()
-	select {
-	case err := <-done:
-		return err
-	case <-ctx.Done():
-		select {
-		case err := <-done:
-			return err
-		default:
-			return ctx.Err()
-		}
-	}
-}
-
-func waitRuntimeBackground(ctx context.Context, active *atomic.Int64) error {
-	if active == nil {
-		return nil
-	}
-	ticker := time.NewTicker(time.Millisecond)
-	defer ticker.Stop()
-	for active.Load() != 0 {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
-	}
-	return nil
 }
 
 func (rt *Runtime) cleanupStartFailure() {
@@ -1988,7 +1985,7 @@ func (rt *Runtime) publishBootCompleted(ctx context.Context, report bootComplete
 	return eventID, rt.Bus.Publish(ctx, evt)
 }
 
-func (rt *Runtime) verifyBootPublished(ch <-chan events.Event) error {
+func (rt *Runtime) verifyBootPublished(ch <-chan *worklifetime.EventDelivery) error {
 	if rt == nil || !rt.Options.SelfCheck {
 		return nil
 	}
@@ -1996,7 +1993,10 @@ func (rt *Runtime) verifyBootPublished(ch <-chan events.Event) error {
 		return fmt.Errorf("platform.boot subscription is not configured")
 	}
 	select {
-	case <-ch:
+	case delivery := <-ch:
+		if delivery != nil {
+			_ = delivery.Complete()
+		}
 	case <-time.After(1 * time.Second):
 		return fmt.Errorf("eventbus publish/subscribe timeout")
 	}

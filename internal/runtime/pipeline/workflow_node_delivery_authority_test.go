@@ -18,7 +18,7 @@ import (
 
 func TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContext(t, context.Background())
 	pc, bus := newDeliveryAuthorityCoordinator(t, db)
 	runCtx := testPipelineCoordinatorRunContext(t, pc)
 	evt := seedDeliveryAuthorityEvent(t, db, runCtx)
@@ -46,7 +46,7 @@ func TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority(
 
 func TestPipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutGenericAuthorityLog(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContext(t, context.Background())
 	pc, bus := newDeliveryAuthorityCoordinator(t, db)
 	runCtx := testPipelineCoordinatorRunContext(t, pc)
 	evt := seedDeliveryAuthorityEvent(t, db, runCtx)
@@ -109,7 +109,7 @@ func TestPipelineCoordinatorInterceptDeliveryRouteRejectsAmbiguousConnectedInput
 		Source:       events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()},
 		Target:       target,
 	}, time.Now().UTC())
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContext(t, context.Background())
 	seedPipelineEventRecord(t, ctx, db, evt)
 	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "receiver-node", Target: target}
 	seedDeliveryAuthorityNodeDeliveryForTarget(t, db, eventID, route.SubscriberID, target)
@@ -149,7 +149,7 @@ func TestPipelineCoordinatorInterceptDeliveryRouteRejectsAmbiguousConnectedInput
 
 func TestPipelineCoordinatorInterceptReplayScopeMarkerDoesNotAuthorizeConcreteNode(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContext(t, context.Background())
 	pc, bus := newDeliveryAuthorityCoordinator(t, db)
 	runCtx := testPipelineCoordinatorRunContext(t, pc)
 	evt := seedDeliveryAuthorityEvent(t, db, runCtx)
@@ -188,7 +188,7 @@ func TestPipelineCoordinatorInterceptTerminalNodeDeliveryDoesNotAuthorizeExecuti
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
-			ctx := testAuthorActivityContext(context.Background())
+			ctx := testAuthorActivityContext(t, context.Background())
 			pc, bus := newDeliveryAuthorityCoordinator(t, db)
 			runCtx := testPipelineCoordinatorRunContext(t, pc)
 			evt := seedDeliveryAuthorityEvent(t, db, runCtx)
@@ -219,7 +219,7 @@ func TestPipelineCoordinatorInterceptTerminalNodeDeliveryDoesNotAuthorizeExecuti
 
 func TestPipelineCoordinatorInterceptSettlesAuthorizedNodeDelivery(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContext(t, context.Background())
 	pc, _ := newDeliveryAuthorityCoordinator(t, db)
 	runCtx := testPipelineCoordinatorRunContext(t, pc)
 	evt := seedDeliveryAuthorityEvent(t, db, runCtx)
@@ -335,7 +335,7 @@ func seedDeliveryAuthorityNodeDeliveryForTarget(t *testing.T, db *sql.DB, eventI
 	if err != nil {
 		t.Fatalf("marshal delivery authority target: %v", err)
 	}
-	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `
+	if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `
 		INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, delivery_target_route, status, retry_count, created_at)
 		VALUES ($1::uuid, $2::uuid, 'node', $3, $4::jsonb, 'pending', 0, now())
 	`, testPipelineRunID, eventID, nodeID, string(raw)); err != nil {
@@ -345,7 +345,7 @@ func seedDeliveryAuthorityNodeDeliveryForTarget(t *testing.T, db *sql.DB, eventI
 
 func seedDeliveryAuthorityNodeDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, status string, retryCount int) {
 	t.Helper()
-	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `
+	if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `
 		INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, retry_count, created_at)
 		VALUES ($1::uuid, $2::uuid, 'node', $3, $4, $5, now())
 	`, testPipelineRunID, eventID, nodeID, status, retryCount); err != nil {
@@ -356,7 +356,7 @@ func seedDeliveryAuthorityNodeDeliveryStatus(t *testing.T, db *sql.DB, eventID, 
 func assertDeliveryAuthorityReceiptCount(t *testing.T, db *sql.DB, eventID, nodeID string, want int) {
 	t.Helper()
 	var got int
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
 		SELECT COUNT(*)
 		FROM event_receipts
 		WHERE event_id = $1::uuid
@@ -373,7 +373,7 @@ func assertDeliveryAuthorityReceiptCount(t *testing.T, db *sql.DB, eventID, node
 func assertDeliveryAuthorityDeliveryCount(t *testing.T, db *sql.DB, eventID, nodeID string, want int) {
 	t.Helper()
 	var got int
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
 		SELECT COUNT(*)
 		FROM event_deliveries
 		WHERE event_id = $1::uuid

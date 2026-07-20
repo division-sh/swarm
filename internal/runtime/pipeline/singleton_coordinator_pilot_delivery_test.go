@@ -192,7 +192,7 @@ func seedSingletonCoordinatorPilotNodeDelivery(t *testing.T, db *sql.DB, ctx con
 func assertSingletonCoordinatorPilotDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, want string) {
 	t.Helper()
 	var got string
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
 		SELECT COALESCE(status, '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
@@ -209,7 +209,7 @@ func assertSingletonCoordinatorPilotDeliveryStatus(t *testing.T, db *sql.DB, eve
 func assertNoSingletonCoordinatorPilotContainedRouteRows(t *testing.T, db *sql.DB, flowInstance string) {
 	t.Helper()
 	var count int
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
 		SELECT COUNT(*)
 		FROM event_deliveries
 		WHERE delivery_target_route->>'flow_instance' = $1
@@ -257,7 +257,7 @@ func assertNoSingletonCoordinatorPilotContainedWorkflowInstance(t *testing.T, db
 func assertNoSingletonCoordinatorPilotRow(t *testing.T, db *sql.DB, query string, args ...any) {
 	t.Helper()
 	var count int
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), query, args...).Scan(&count); err != nil {
+	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), query, args...).Scan(&count); err != nil {
 		t.Fatalf("count singleton coordinator pilot rows: %v", err)
 	}
 	if count != 0 {

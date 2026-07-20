@@ -975,6 +975,13 @@ func runtimeWriterRules() []runtimeWriterRule {
 			reason:         "runtimeeffects.Begin is the durable managed-attempt admission owner, not a raw SQLite transaction open",
 		},
 		{
+			name:           "typed process-local work admission",
+			path:           rx(`^internal/(apiv1/(handler|operator_conversation_fork|subscriptions)|builder/handler_ws|runtime/(bus/(eventbus_publish|sweeper)|context_manager|core/worklifetime/worklifetime|llm/(completion_authority|session_watchdog)|manager/runtime|pipeline/(scheduler|workflow_timer_owner)|runforkexecution/(agent_runtime_materialization|runtime_container)|runtime|sessions/heartbeat)|serveapp/(main|run_stalled_monitor|serve_author_activity))\.go$`),
+			kinds:          kinds(primitiveBegin),
+			classification: classDifferentConcept,
+			reason:         "worklifetime.Begin admits typed process-local work before escape; it does not open a SQL transaction",
+		},
+		{
 			name:           "sqlite schema bootstrap",
 			path:           rx(`^internal/store/(sqlite_schema|sqlite_schema_bootstrap|platformschema/platformschema)\.go$`),
 			kinds:          allPrimitiveKinds(),

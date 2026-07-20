@@ -15,6 +15,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -22,43 +23,78 @@ import (
 )
 
 func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredecessorRetirement(t *testing.T) {
-	eventBus, err := runtimebus.NewEventBus(nil)
+	processOwner := worklifetime.NewProcess()
+	runtimeOwner, err := processOwner.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: "selected-contract-test-runtime",
+		BundleHash:        "selected-contract-test-bundle",
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	eventBus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: runtimeOwner})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "fork-agent", Generation: 1}
 	newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "fork-agent", Generation: 2}
-	eventBus.ReplaceAgentRoute(oldToken, selectedContractAgentRouteAdmission(t, oldToken.AgentID, "item.received"))
+	oldRoute := eventBus.ReplaceAgentRoute(oldToken, selectedContractAgentRouteAdmission(t, oldToken.AgentID, "item.received"))
+	if oldRoute == nil {
+		t.Fatal("predecessor route was not installed")
+	}
 	oldEvent := eventtest.RuntimeControl(eventtest.UUID("old-work"), events.EventType("item.received"), "test", "", []byte(`{}`), 0, eventtest.UUID("run-1"), "", events.EventEnvelope{}, time.Now())
 	if err := eventBus.Publish(context.Background(), oldEvent); err != nil {
 		t.Fatalf("publish predecessor event: %v", err)
 	}
-	newRoute := eventBus.ReplaceAgentRoute(newToken, selectedContractAgentRouteAdmission(t, newToken.AgentID, "item.received"))
+	oldDelivery := <-oldRoute
+	replaced := make(chan (<-chan *runtimebus.LocalDelivery), 1)
+	go func() {
+		replaced <- eventBus.ReplaceAgentRoute(newToken, selectedContractAgentRouteAdmission(t, newToken.AgentID, "item.received"))
+	}()
+	select {
+	case <-replaced:
+		t.Fatal("replacement returned before predecessor delivery settled")
+	case <-time.After(25 * time.Millisecond):
+	}
+	if err := oldDelivery.Complete(); err != nil {
+		t.Fatalf("complete predecessor delivery: %v", err)
+	}
+	var newRoute <-chan *runtimebus.LocalDelivery
+	select {
+	case newRoute = <-replaced:
+	case <-time.After(time.Second):
+		t.Fatal("replacement did not complete after predecessor settlement")
+	}
 	newEvent := eventtest.RuntimeControl(eventtest.UUID("new-work"), events.EventType("item.received"), "test", "", []byte(`{}`), 0, eventtest.UUID("run-1"), "", events.EventEnvelope{}, time.Now())
 	if err := eventBus.Publish(context.Background(), newEvent); err != nil {
 		t.Fatalf("publish successor event: %v", err)
 	}
+	var newDelivery *runtimebus.LocalDelivery
 	select {
-	case <-newRoute:
+	case newDelivery = <-newRoute:
 	case <-time.After(time.Second):
 		t.Fatal("successor event was not dequeued")
 	}
 
-	runtime := &selectedContractAgentRuntime{manager: runtimemanager.NewAgentManager(nil, nil)}
+	runtime := &selectedContractAgentRuntime{manager: runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{WorkOwner: runtimeOwner})}
 	waitCtx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
 	if err := runtime.WaitForQuiescence(waitCtx, eventBus); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("WaitForQuiescence with current route work = %v, want deadline exceeded", err)
 	}
-	eventBus.CompleteAgentRouteDelivery(oldToken)
-	if got := eventBus.PendingAgentRouteDeliveries(); got != 1 {
-		t.Fatalf("late predecessor completion changed current pending count to %d", got)
+	if err := newDelivery.Complete(); err != nil {
+		t.Fatalf("complete successor delivery: %v", err)
 	}
-	eventBus.CompleteAgentRouteDelivery(newToken)
 	waitCtx, cancel = context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := runtime.WaitForQuiescence(waitCtx, eventBus); err != nil {
 		t.Fatalf("WaitForQuiescence after current route settlement: %v", err)
+	}
+	eventBus.RemoveAgentRoute(newToken)
+	if _, err := runtimeOwner.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire runtime owner: %v", err)
+	}
+	if _, err := processOwner.Join(context.Background()); err != nil {
+		t.Fatalf("join process owner: %v", err)
 	}
 }
 
@@ -122,7 +158,8 @@ func (selectedContractSelfReleaseAgent) OnEvent(context.Context, events.Event) (
 }
 
 func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
-	eventBus, err := runtimebus.NewEventBus(nil)
+	owner := testGatewayWorkOwner(t)
+	eventBus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: owner})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -132,7 +169,8 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 		AgentRuntime: selectedContractAgentRuntimePlan{
 			Proof: SelectedContractAgentRuntimeMaterialization{AgentRecipients: []string{"mock-agent"}},
 			Options: SelectedContractAgentRuntimeOptions{
-				Config: &config.Config{LLM: config.LLMConfig{Backend: "mock"}},
+				Config:              &config.Config{LLM: config.LLMConfig{Backend: "mock"}},
+				AgentManagerOptions: runtimemanager.AgentManagerOptions{WorkOwner: owner},
 			},
 		},
 	}, eventBus)
@@ -148,7 +186,8 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 }
 
 func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkScopeForSelfRelease(t *testing.T) {
-	eventBus, err := runtimebus.NewEventBus(nil)
+	owner := testGatewayWorkOwner(t)
+	eventBus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: owner})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -180,7 +219,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 				AgentFactory: func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 					return selectedContractSelfReleaseAgent{id: cfg.ID}, nil
 				},
-				AgentManagerOptions: runtimemanager.AgentManagerOptions{LifecycleStore: probe},
+				AgentManagerOptions: runtimemanager.AgentManagerOptions{LifecycleStore: probe, WorkOwner: owner},
 			},
 		},
 	}, eventBus)

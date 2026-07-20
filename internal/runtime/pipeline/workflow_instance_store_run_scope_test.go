@@ -14,7 +14,7 @@ func TestWorkflowInstanceStore_RequiresRunContext(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := NewWorkflowInstanceStore(db)
 
-	err := store.Upsert(testAuthorActivityContext(context.Background()), WorkflowInstance{
+	err := store.Upsert(testAuthorActivityContext(t, context.Background()), WorkflowInstance{
 		InstanceID:      uuid.NewString(),
 		StorageRef:      uuid.NewString(),
 		WorkflowName:    "run-scope",
@@ -33,12 +33,12 @@ func TestWorkflowInstanceStore_RunScopedCurrentStateRowsDoNotBleed(t *testing.T)
 	runB := uuid.NewString()
 	entityID := uuid.NewString()
 	for _, runID := range []string{runA, runB} {
-		if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 			t.Fatalf("seed run %s: %v", runID, err)
 		}
 	}
-	ctxA := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runA)
-	ctxB := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runB)
+	ctxA := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runA)
+	ctxB := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runB)
 	for _, tc := range []struct {
 		ctx   context.Context
 		state string

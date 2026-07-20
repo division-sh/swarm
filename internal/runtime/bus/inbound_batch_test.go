@@ -190,7 +190,7 @@ func TestPrepareInboundDeliveryBatchRejectsNonExclusiveOrMisorderedOutputsBefore
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &InMemoryEventStore{}
-			bus, err := NewEventBusWithOptions(store, EventBusOptions{
+			bus, err := newScopedTestEventBus(store, EventBusOptions{
 				ProviderOutputVerifier: inboundBatchAuthorizationVerifier{expected: expected},
 			})
 			if err != nil {
@@ -239,7 +239,7 @@ func TestPrepareInboundDeliveryBatchSharesTransactionRouteOverlayAcrossOrderedCh
 		PackID: "provider.telegram", PackVersion: "1.0.0",
 		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "generation-current",
 	}
-	bus, err := NewEventBusWithOptions(&InMemoryEventStore{}, EventBusOptions{
+	bus, err := newScopedTestEventBus(&InMemoryEventStore{}, EventBusOptions{
 		ProviderOutputVerifier: inboundBatchAuthorizationVerifier{expected: expected},
 	})
 	if err != nil {

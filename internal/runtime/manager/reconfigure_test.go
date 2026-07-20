@@ -38,7 +38,7 @@ func acquireReconfigureMemory(t *testing.T, registry *sessions.InMemoryRegistry,
 func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInvocation(t *testing.T) {
 	builds := 0
 	registry := sessions.NewInMemoryRegistry(0)
-	am := NewAgentManagerWithOptions(newProjectionTestBus(), func(cfg models.AgentConfig) (Agent, error) {
+	am := newTestAgentManagerWithOptions(t, newProjectionTestBus(), func(cfg models.AgentConfig) (Agent, error) {
 		builds++
 		return &reconfigureTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{Sessions: registry})
@@ -86,7 +86,7 @@ func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInv
 
 func TestReconfigureAgent_MemoryEnabledConfigChangeRotatesExactIdentity(t *testing.T) {
 	registry := sessions.NewInMemoryRegistry(0)
-	am := NewAgentManagerWithOptions(nil, func(cfg models.AgentConfig) (Agent, error) {
+	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{Sessions: registry})
 	cfg := models.AgentConfig{ExecutionMode: "live", ID: "memory-agent", Memory: agentmemory.Authored(true), FlowPath: "review/inst-1"}
@@ -109,7 +109,7 @@ func TestReconfigureAgent_MemoryEnabledConfigChangeRotatesExactIdentity(t *testi
 
 func TestReconfigureAgent_ExplicitFalseTerminatesReusableMemory(t *testing.T) {
 	registry := sessions.NewInMemoryRegistry(0)
-	am := NewAgentManagerWithOptions(nil, func(cfg models.AgentConfig) (Agent, error) {
+	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{Sessions: registry})
 	cfg := models.AgentConfig{ExecutionMode: "live", ID: "disable-memory-agent", Memory: agentmemory.Authored(true), FlowPath: "support/inst-1"}
@@ -136,7 +136,7 @@ func TestReconfigureAgent_ExplicitFalseTerminatesReusableMemory(t *testing.T) {
 
 func TestReconfigureAgent_ExplicitTrueStartsFreshAndOmissionRetains(t *testing.T) {
 	registry := sessions.NewInMemoryRegistry(0)
-	am := NewAgentManagerWithOptions(nil, func(cfg models.AgentConfig) (Agent, error) {
+	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{Sessions: registry})
 	cfg := models.AgentConfig{ExecutionMode: "live", ID: "enable-memory-agent", Memory: agentmemory.Authored(false), FlowPath: "support/inst-1"}

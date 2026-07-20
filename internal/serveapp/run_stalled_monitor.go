@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/bus"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/runstalled"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -26,10 +27,10 @@ type serveRunStalledReader struct {
 	store runStalledReadStore
 }
 
-func startServeRunStalledEscalation(ctx context.Context, stores storeBundle, contexts []serveRuntimeBundleContext, eventBus *bus.EventBus) {
+func startServeRunStalledEscalation(ctx context.Context, owner *worklifetime.Process, stores storeBundle, contexts []serveRuntimeBundleContext, eventBus *bus.EventBus) error {
 	reader, ok := newServeRunStalledReader(stores)
 	if !ok || eventBus == nil {
-		return
+		return nil
 	}
 	monitor := &runstalled.Monitor{
 		Reader:         reader,
@@ -39,7 +40,18 @@ func startServeRunStalledEscalation(ctx context.Context, stores storeBundle, con
 			log.Printf("run stalled escalation monitor: %v", err)
 		},
 	}
-	go monitor.Run(ctx)
+	if owner == nil {
+		return fmt.Errorf("run stalled monitor requires a process work owner")
+	}
+	lease, err := owner.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("admit run stalled monitor: %w", err)
+	}
+	go func() {
+		defer func() { _ = lease.Done() }()
+		monitor.Run(lease.Context())
+	}()
+	return nil
 }
 
 func newServeRunStalledReader(stores storeBundle) (*serveRunStalledReader, bool) {

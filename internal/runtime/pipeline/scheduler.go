@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/robfig/cron/v3"
 )
 
@@ -90,14 +90,17 @@ func (s Schedule) CanonicalWorkflowTimer() bool {
 
 type Scheduler struct {
 	mu      sync.Mutex
-	onFire  func(Schedule)
+	onFire  func(context.Context, Schedule)
 	tasks   map[string]*scheduledTask
+	retired []<-chan struct{}
 	stopped bool
-	active  atomic.Int64
+	owner   worklifetime.Occurrence
 }
 
 type scheduledTask struct {
-	stop chan struct{}
+	stop  chan struct{}
+	done  chan struct{}
+	lease *worklifetime.Lease
 }
 
 type cronSpec struct {
@@ -105,14 +108,15 @@ type cronSpec struct {
 	schedule cron.Schedule
 }
 
-func NewScheduler(callbacks ...func(Schedule)) *Scheduler {
-	var cb func(Schedule)
+func NewSchedulerWithWorkOwner(owner worklifetime.Occurrence, callbacks ...func(context.Context, Schedule)) *Scheduler {
+	var cb func(context.Context, Schedule)
 	if len(callbacks) > 0 {
 		cb = callbacks[0]
 	}
 	return &Scheduler{
 		onFire: cb,
 		tasks:  make(map[string]*scheduledTask),
+		owner:  owner,
 	}
 }
 
@@ -149,26 +153,37 @@ func (s *Scheduler) Register(sc Schedule) error {
 		s.mu.Unlock()
 		return errors.New("scheduler stopped")
 	}
+	if s.owner == nil {
+		s.mu.Unlock()
+		return errors.New("scheduler requires a runtime work occurrence")
+	}
+	lease, err := s.owner.Begin(context.Background())
+	if err != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("admit scheduled task: %w", err)
+	}
 	key := scheduleKey(sc)
 	if existing, ok := s.tasks[key]; ok {
 		close(existing.stop)
+		s.retired = append(s.retired, existing.done)
 		delete(s.tasks, key)
 	}
-	task := &scheduledTask{stop: make(chan struct{})}
+	task := &scheduledTask{stop: make(chan struct{}), done: make(chan struct{}), lease: lease}
 	s.tasks[key] = task
-	s.active.Add(1)
 	s.mu.Unlock()
 
 	switch sc.Mode {
 	case "once":
 		go func() {
-			defer s.active.Add(-1)
+			defer close(task.done)
+			defer func() { _ = task.lease.Done() }()
 			s.runOnce(task, key, sc)
 		}()
 		return nil
 	case "cron":
 		go func() {
-			defer s.active.Add(-1)
+			defer close(task.done)
+			defer func() { _ = task.lease.Done() }()
 			s.runCron(task, key, sc, spec)
 		}()
 		return nil
@@ -180,13 +195,18 @@ func (s *Scheduler) Wait(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
-	ticker := time.NewTicker(time.Millisecond)
-	defer ticker.Stop()
-	for s.active.Load() != 0 {
+	s.mu.Lock()
+	done := make([]<-chan struct{}, 0, len(s.retired)+len(s.tasks))
+	done = append(done, s.retired...)
+	for _, task := range s.tasks {
+		done = append(done, task.done)
+	}
+	s.mu.Unlock()
+	for _, taskDone := range done {
 		select {
+		case <-taskDone:
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-ticker.C:
 		}
 	}
 	return nil
@@ -203,6 +223,7 @@ func (s *Scheduler) Cancel(agentID string, eventType string) error {
 			continue
 		}
 		close(task.stop)
+		s.retired = append(s.retired, task.done)
 		delete(s.tasks, key)
 	}
 	return nil
@@ -220,6 +241,7 @@ func (s *Scheduler) CancelExact(sc Schedule) error {
 		return nil
 	}
 	close(task.stop)
+	s.retired = append(s.retired, task.done)
 	delete(s.tasks, key)
 	return nil
 }
@@ -233,6 +255,7 @@ func (s *Scheduler) Stop() {
 	s.stopped = true
 	for key, task := range s.tasks {
 		close(task.stop)
+		s.retired = append(s.retired, task.done)
 		delete(s.tasks, key)
 	}
 }
@@ -248,11 +271,13 @@ func (s *Scheduler) runOnce(task *scheduledTask, key string, sc Schedule) {
 	select {
 	case <-task.stop:
 		return
+	case <-task.lease.Context().Done():
+		return
 	case <-timer.C:
 		if scheduledTaskStopped(task) {
 			return
 		}
-		s.fire(sc)
+		s.fire(worklifetime.WithOccurrence(task.lease.Context(), s.owner), sc)
 		s.unregisterTask(key, task)
 	}
 }
@@ -265,11 +290,13 @@ func (s *Scheduler) runCron(task *scheduledTask, key string, sc Schedule, spec c
 			select {
 			case <-task.stop:
 				return
+			case <-task.lease.Context().Done():
+				return
 			case <-ticker.C:
 				if scheduledTaskStopped(task) {
 					return
 				}
-				s.fire(sc)
+				s.fire(worklifetime.WithOccurrence(task.lease.Context(), s.owner), sc)
 			}
 		}
 	}
@@ -284,11 +311,14 @@ func (s *Scheduler) runCron(task *scheduledTask, key string, sc Schedule, spec c
 		case <-task.stop:
 			timer.Stop()
 			return
+		case <-task.lease.Context().Done():
+			timer.Stop()
+			return
 		case <-timer.C:
 			if scheduledTaskStopped(task) {
 				return
 			}
-			s.fire(sc)
+			s.fire(worklifetime.WithOccurrence(task.lease.Context(), s.owner), sc)
 		}
 	}
 }
@@ -305,9 +335,9 @@ func scheduledTaskStopped(task *scheduledTask) bool {
 	}
 }
 
-func (s *Scheduler) fire(sc Schedule) {
+func (s *Scheduler) fire(ctx context.Context, sc Schedule) {
 	if s.onFire != nil {
-		s.onFire(sc)
+		s.onFire(ctx, sc)
 	}
 }
 
@@ -318,6 +348,7 @@ func (s *Scheduler) unregisterTask(key string, task *scheduledTask) {
 	if !ok || current != task {
 		return
 	}
+	s.retired = append(s.retired, task.done)
 	delete(s.tasks, key)
 }
 

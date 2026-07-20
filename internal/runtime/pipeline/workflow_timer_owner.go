@@ -87,8 +87,7 @@ type WorkflowTimerLifecycle struct {
 	recoveryCtx context.Context
 	cancel      context.CancelFunc
 	recoveryMu  sync.Mutex
-	recoveryWG  sync.WaitGroup
-	recovering  map[string]struct{}
+	recovering  map[string]chan struct{}
 	stopped     bool
 }
 
@@ -101,7 +100,7 @@ func newWorkflowTimerLifecycle(coordinator *PipelineCoordinator) *WorkflowTimerL
 		coordinator: coordinator,
 		recoveryCtx: recoveryCtx,
 		cancel:      cancel,
-		recovering:  make(map[string]struct{}),
+		recovering:  make(map[string]chan struct{}),
 	}
 }
 
@@ -707,8 +706,17 @@ func (l *WorkflowTimerLifecycle) startRecovery(key string, operation func(contex
 		l.recoveryMu.Unlock()
 		return true
 	}
-	l.recovering[key] = struct{}{}
-	l.recoveryWG.Add(1)
+	if l.coordinator == nil || l.coordinator.workOwner == nil {
+		l.recoveryMu.Unlock()
+		return false
+	}
+	lease, err := l.coordinator.workOwner.Begin(l.recoveryCtx)
+	if err != nil {
+		l.recoveryMu.Unlock()
+		return false
+	}
+	done := make(chan struct{})
+	l.recovering[key] = done
 	l.recoveryMu.Unlock()
 
 	go func() {
@@ -716,22 +724,23 @@ func (l *WorkflowTimerLifecycle) startRecovery(key string, operation func(contex
 			l.recoveryMu.Lock()
 			delete(l.recovering, key)
 			l.recoveryMu.Unlock()
-			l.recoveryWG.Done()
+			_ = lease.Done()
+			close(done)
 		}()
 		for attempt := 0; ; attempt++ {
 			timer := time.NewTimer(workflowTimerRecoveryDelay(attempt))
 			select {
-			case <-l.recoveryCtx.Done():
+			case <-lease.Context().Done():
 				timer.Stop()
 				return
 			case <-timer.C:
 			}
-			if err := operation(l.recoveryCtx); err != nil {
-				if l.recoveryCtx.Err() != nil {
+			if err := operation(lease.Context()); err != nil {
+				if lease.Context().Err() != nil {
 					return
 				}
 				if onFailure != nil {
-					onFailure(l.recoveryCtx, err)
+					onFailure(lease.Context(), err)
 				}
 				continue
 			}
@@ -762,18 +771,19 @@ func (l *WorkflowTimerLifecycle) stop(ctx context.Context) error {
 		l.stopped = true
 		l.cancel()
 	}
-	l.recoveryMu.Unlock()
-	done := make(chan struct{})
-	go func() {
-		l.recoveryWG.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	done := make([]<-chan struct{}, 0, len(l.recovering))
+	for _, recoveryDone := range l.recovering {
+		done = append(done, recoveryDone)
 	}
+	l.recoveryMu.Unlock()
+	for _, recoveryDone := range done {
+		select {
+		case <-recoveryDone:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 func (l *WorkflowTimerLifecycle) logFailure(ctx context.Context, action string, ref timeridentity.WorkflowTimerActivationRef, err error) {

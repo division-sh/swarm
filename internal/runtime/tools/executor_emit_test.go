@@ -16,6 +16,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -76,6 +77,34 @@ func newEmitRoutePlanStore() *emitRoutePlanStore {
 		receipts:    map[string]string{},
 		receiptErrs: map[string]*failures.Envelope{},
 	}
+}
+
+func newEmitRoutePlanEventBus(t *testing.T, store *emitRoutePlanStore, source semanticview.Source) *runtimebus.EventBus {
+	t.Helper()
+	process := worklifetime.NewProcess()
+	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: "emit-route-plan-test",
+		BundleHash:        "emit-route-plan-test-bundle",
+	})
+	if err != nil {
+		t.Fatalf("create emit route-plan runtime occurrence: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := owner.RetireAndWait(ctx); err != nil {
+			t.Errorf("retire emit route-plan runtime occurrence: %v", err)
+			return
+		}
+		if _, err := process.Join(ctx); err != nil {
+			t.Errorf("join emit route-plan process owner: %v", err)
+		}
+	})
+	bus, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source, WorkOwner: owner})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	return bus
 }
 
 func (s *emitRoutePlanStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
@@ -932,10 +961,7 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 		To:   "consumer.deploy_completed",
 	})
 	store := newEmitRoutePlanStore()
-	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
+	eb := newEmitRoutePlanEventBus(t, store, source)
 	emitRegistry := NewEmitRegistry(source, nil)
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
@@ -997,10 +1023,7 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflight(t *testing.T) {
 	source := emitRoutePlanRootReceiverSource()
 	store := newEmitRoutePlanStore()
-	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
+	eb := newEmitRoutePlanEventBus(t, store, source)
 	emitRegistry := NewEmitRegistry(source, nil)
 	parentRoute := events.RouteIdentity{EntityID: runtimeflowidentity.EntityID("root-entity")}
 	actor := models.AgentConfig{
@@ -1072,10 +1095,7 @@ func TestHandleEmitTool_RootReceiverConnectRejectsMissingOrIncompleteParentIdent
 		t.Run(tc.name, func(t *testing.T) {
 			source := emitRoutePlanRootReceiverSource()
 			store := newEmitRoutePlanStore()
-			eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
-			if err != nil {
-				t.Fatalf("NewEventBusWithOptions: %v", err)
-			}
+			eb := newEmitRoutePlanEventBus(t, store, source)
 			actor := models.AgentConfig{
 				ExecutionMode: "live",
 				ID:            "producer-agent",
@@ -1091,7 +1111,7 @@ func TestHandleEmitTool_RootReceiverConnectRejectsMissingOrIncompleteParentIdent
 				WorkflowInstances: emitWorkflowInstanceLoader{rows: tc.rows},
 			})
 
-			_, err = exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_deploy_done", map[string]any{})
+			_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_deploy_done", map[string]any{})
 			if err == nil || !strings.Contains(err.Error(), "parent_route_incomplete") {
 				t.Fatalf("handleEmitTool error = %v, want parent_route_incomplete", err)
 			}
@@ -1105,10 +1125,7 @@ func TestHandleEmitTool_RootReceiverConnectRejectsMissingOrIncompleteParentIdent
 func TestHandleEmitTool_FailsClosedForConnectedOutputWithoutCanonicalRouteAuthority(t *testing.T) {
 	source := emitRoutePlanSource(nil)
 	store := newEmitRoutePlanStore()
-	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
+	eb := newEmitRoutePlanEventBus(t, store, source)
 	raw := eb.SubscribeInternal("raw-listener", events.EventType("producer/deploy.done"), events.EventType("deploy.done"))
 	emitRegistry := NewEmitRegistry(source, nil)
 	actor := models.AgentConfig{
@@ -1133,7 +1150,7 @@ func TestHandleEmitTool_FailsClosedForConnectedOutputWithoutCanonicalRouteAuthor
 		"",
 		events.EventEnvelope{},
 		time.Now().UTC()))
-	_, err = exec.handleEmitTool(ctx, actor, "emit_deploy_done", map[string]any{})
+	_, err := exec.handleEmitTool(ctx, actor, "emit_deploy_done", map[string]any{})
 	if err == nil {
 		t.Fatal("handleEmitTool error = nil, want target_required_missing")
 	}

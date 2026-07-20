@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -20,8 +21,11 @@ import (
 )
 
 type systemNodeBus interface {
-	SubscribeInternal(subscriberID string, eventTypes ...events.EventType) <-chan events.Event
 	Publish(ctx context.Context, evt events.Event) error
+}
+
+type ownedInternalSubscriptionBus interface {
+	SubscribeInternal(subscriberID string, eventTypes ...events.EventType) <-chan *worklifetime.EventDelivery
 }
 
 type systemNodeRuntimeLogger interface {
@@ -87,13 +91,16 @@ func (n *systemNodeRunner) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case evt, ok := <-ch:
+		case delivery, ok := <-ch:
 			if !ok {
 				ch = n.subscribe()
 				n.notifySubscribed()
 				continue
 			}
-			n.ProcessEventForTest(ctx, evt)
+			func() {
+				defer func() { _ = delivery.Complete() }()
+				n.ProcessEventForTest(delivery.Context(), delivery.Event())
+			}()
 		}
 	}
 }
@@ -229,15 +236,19 @@ func (n *systemNodeRunner) SetTestLifecycleProbe(probe runtimelifecycleprobe.Obs
 	n.testLifecycleProbe = probe
 }
 
-func (n *systemNodeRunner) subscribe() <-chan events.Event {
+func (n *systemNodeRunner) subscribe() <-chan *worklifetime.EventDelivery {
 	if n == nil || n.bus == nil {
+		return nil
+	}
+	bus, ok := n.bus.(ownedInternalSubscriptionBus)
+	if !ok {
 		return nil
 	}
 	subscriptions := []events.EventType(nil)
 	if n.subscriptionsFn != nil {
 		subscriptions = n.subscriptionsFn()
 	}
-	return n.bus.SubscribeInternal(n.nodeID, subscriptions...)
+	return bus.SubscribeInternal(n.nodeID, subscriptions...)
 }
 
 func (n *systemNodeRunner) handle(ctx context.Context, evt events.Event) error {

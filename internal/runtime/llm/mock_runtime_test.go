@@ -53,7 +53,7 @@ def handle(input):
     return {"calls": [{"name": "echo", "arguments": {"text": "hello"}}], "usage": {"input_tokens": 7, "output_tokens": 3}}
 `)
 	harness := effecttest.New()
-	ctx := harness.CompletionContext("mock-turn")
+	ctx := llmTestWorkContext(t, harness.CompletionContext("mock-turn"))
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeMock)
 	actor := runtimeactors.AgentConfig{
 		ID: "effect-test-agent", ExecutionMode: runtimeeffects.ExecutionModeMock,

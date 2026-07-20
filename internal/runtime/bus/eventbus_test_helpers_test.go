@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -59,6 +60,17 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 	}
 	if strings.TrimSpace(opts.BundleSourceFact.BundleHash) == "" {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
+	}
+	if opts.WorkOwner == nil {
+		processOwner := worklifetime.NewProcess()
+		owner, err := processOwner.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+			RuntimeInstanceID: opts.RuntimeInstanceID,
+			BundleHash:        opts.BundleSourceFact.BundleHash,
+		})
+		if err != nil {
+			return nil, err
+		}
+		opts.WorkOwner = owner
 	}
 	if registrar, ok := store.(authorActivityTestCatalogRegistrar); ok {
 		descriptors := authorActivityTestEventDescriptors(opts.ContractBundle)
@@ -134,10 +146,12 @@ func authorActivityTestEventDescriptors(source semanticview.Source) []runtimeaut
 	return descriptors
 }
 
-func requireBusEvent(t testing.TB, ch <-chan events.Event, context string) events.Event {
+func requireBusEvent(t testing.TB, ch <-chan *runtimebus.LocalDelivery, context string) events.Event {
 	t.Helper()
 	select {
-	case evt := <-ch:
+	case delivery := <-ch:
+		evt := delivery.Event()
+		_ = delivery.Complete()
 		return evt
 	default:
 		t.Fatalf("%s: expected queued bus event", context)
@@ -145,16 +159,17 @@ func requireBusEvent(t testing.TB, ch <-chan events.Event, context string) event
 	}
 }
 
-func requireNoBusEvent(t testing.TB, ch <-chan events.Event, context string) {
+func requireNoBusEvent(t testing.TB, ch <-chan *runtimebus.LocalDelivery, context string) {
 	t.Helper()
 	select {
-	case evt := <-ch:
-		t.Fatalf("%s: unexpected bus event: %#v", context, evt)
+	case delivery := <-ch:
+		_ = delivery.Complete()
+		t.Fatalf("%s: unexpected bus event: %#v", context, delivery.Event())
 	default:
 	}
 }
 
-func requireBusEventTypes(t testing.TB, ch <-chan events.Event, context string, want ...events.EventType) {
+func requireBusEventTypes(t testing.TB, ch <-chan *runtimebus.LocalDelivery, context string, want ...events.EventType) {
 	t.Helper()
 	got := make(map[events.EventType]struct{}, len(want))
 	for len(got) < len(want) {

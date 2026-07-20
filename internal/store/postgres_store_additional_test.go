@@ -2165,13 +2165,13 @@ func TestSchedules_ClaimedOwnerIsOnlyRestoredTimerThatFires(t *testing.T) {
 	}
 
 	var fired1, fired2 atomic.Int32
-	scheduler1 := runtimepipeline.NewScheduler(func(sc runtimepipeline.Schedule) {
+	scheduler1 := runtimepipeline.NewSchedulerWithWorkOwner(storeTestWorkOwner(t), func(_ context.Context, sc runtimepipeline.Schedule) {
 		fired1.Add(1)
 		if err := pg1.CompleteScheduleFireExact(testAuthorActivityContext(), sc); err != nil {
 			t.Errorf("CompleteScheduleFireExact(pg1): %v", err)
 		}
 	})
-	scheduler2 := runtimepipeline.NewScheduler(func(sc runtimepipeline.Schedule) {
+	scheduler2 := runtimepipeline.NewSchedulerWithWorkOwner(storeTestWorkOwner(t), func(_ context.Context, sc runtimepipeline.Schedule) {
 		fired2.Add(1)
 		if err := pg2.CompleteScheduleFireExact(testAuthorActivityContext(), sc); err != nil {
 			t.Errorf("CompleteScheduleFireExact(pg2): %v", err)

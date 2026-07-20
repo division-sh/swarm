@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -39,8 +40,8 @@ type PayloadValidator func(ctx context.Context, eventType string, payload []byte
 
 type EventBus struct {
 	mu                          sync.RWMutex
-	channels                    map[events.EventType]map[string]chan events.Event
-	agentChans                  map[string]chan events.Event
+	channels                    map[events.EventType]map[string]chan *LocalDelivery
+	agentChans                  map[string]chan *LocalDelivery
 	agentRouteHandles           map[string]*agentRouteHandle
 	subscriptions               map[string][]events.EventType
 	subscriptionKinds           map[string]inMemorySubscriberKind
@@ -69,11 +70,11 @@ type EventBus struct {
 	testLifecycleProbe          runtimelifecycleprobe.Observer
 	providerOutputVerifier      ProviderOutputAuthorizationVerifier
 	outboxSweeperActive         bool
-	inFlightPublishes           atomic.Int64
-	inFlightEventIDs            map[string]int
-	agentRouteDeliveryMu        sync.Mutex
-	agentRouteDeliveries        map[runtimeeffects.LifecycleToken]int
+	outboxSweeperDone           chan struct{}
+	workOwner                   worklifetime.Occurrence
 }
+
+type LocalDelivery = worklifetime.EventDelivery
 
 type transactionRouteOverlayKey struct{}
 
@@ -161,6 +162,7 @@ type EventBusOptions struct {
 	RuntimeInstanceID           string
 	TestLifecycleProbe          runtimelifecycleprobe.Observer
 	ProviderOutputVerifier      ProviderOutputAuthorizationVerifier
+	WorkOwner                   worklifetime.Occurrence
 }
 
 const deliverySendTimeout = 250 * time.Millisecond
@@ -203,15 +205,14 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		routeTable = derived
 	}
 	eb := &EventBus{
-		channels:                    make(map[events.EventType]map[string]chan events.Event),
-		agentChans:                  make(map[string]chan events.Event),
+		channels:                    make(map[events.EventType]map[string]chan *LocalDelivery),
+		agentChans:                  make(map[string]chan *LocalDelivery),
 		agentRouteHandles:           make(map[string]*agentRouteHandle),
 		subscriptions:               make(map[string][]events.EventType),
 		subscriptionKinds:           make(map[string]inMemorySubscriberKind),
 		runtimeAgentDescriptors:     make(map[string]ActiveAgentDescriptor),
 		pendingInternalByID:         make(map[string][]events.DeliveryRoute),
 		pendingOutboxByID:           make(map[string][]pendingOutboxOperation),
-		agentRouteDeliveries:        make(map[runtimeeffects.LifecycleToken]int),
 		routeTable:                  routeTable,
 		store:                       store,
 		logger:                      opts.Logger,
@@ -230,7 +231,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		runtimeInstanceID:           strings.TrimSpace(opts.RuntimeInstanceID),
 		testLifecycleProbe:          opts.TestLifecycleProbe,
 		providerOutputVerifier:      opts.ProviderOutputVerifier,
-		inFlightEventIDs:            make(map[string]int),
+		workOwner:                   opts.WorkOwner,
 	}
 	eb.rebuildRoutePlanners()
 	return eb, nil
@@ -490,123 +491,68 @@ func (eb *EventBus) ResetInMemoryState() error {
 		return nil
 	}
 	eb.mu.Lock()
+	routeTable, err := eb.deriveBootRouteTableLocked()
+	if err != nil {
+		eb.mu.Unlock()
+		return err
+	}
 	pendingClaims := make([]*pipelinePublicationClaim, 0, len(eb.pendingOutboxByID))
 	for _, operations := range eb.pendingOutboxByID {
 		for _, operation := range operations {
 			pendingClaims = append(pendingClaims, operation.publicationClaim)
 		}
 	}
+	routes := make([]*agentRouteHandle, 0, len(eb.agentRouteHandles))
 	for _, route := range eb.agentRouteHandles {
 		route.deactivate()
+		routes = append(routes, route)
 	}
-	eb.channels = make(map[events.EventType]map[string]chan events.Event)
-	eb.agentChans = make(map[string]chan events.Event)
+	internalChannels := make([]chan *LocalDelivery, 0, len(eb.agentChans))
+	for subscriberID, ch := range eb.agentChans {
+		if eb.agentRouteHandles[subscriberID] == nil {
+			internalChannels = append(internalChannels, ch)
+		}
+	}
+	eb.mu.Unlock()
+
+	// Retained queues and claims are lifecycle evidence. Prove their durable
+	// handoff and settle their leases before erasing any in-memory owner map.
+	for _, route := range routes {
+		if retireErr := route.retireAndWait(context.Background(), eb.store); retireErr != nil {
+			return retireErr
+		}
+	}
+	for _, ch := range internalChannels {
+		if drainErr := drainBufferedLocalDeliveryChannel(context.Background(), eb.store, ch); drainErr != nil {
+			return drainErr
+		}
+	}
+	for _, claim := range pendingClaims {
+		claim.Release(context.Background())
+	}
+
+	eb.mu.Lock()
+	eb.channels = make(map[events.EventType]map[string]chan *LocalDelivery)
+	eb.agentChans = make(map[string]chan *LocalDelivery)
 	eb.agentRouteHandles = make(map[string]*agentRouteHandle)
 	eb.subscriptions = make(map[string][]events.EventType)
 	eb.subscriptionKinds = make(map[string]inMemorySubscriberKind)
 	eb.pendingInternalByID = make(map[string][]events.DeliveryRoute)
 	eb.pendingOutboxByID = make(map[string][]pendingOutboxOperation)
-	eb.inFlightEventIDs = make(map[string]int)
-	routeTable, err := eb.deriveBootRouteTableLocked()
-	if err != nil {
-		eb.mu.Unlock()
-		for _, claim := range pendingClaims {
-			claim.Release(context.Background())
-		}
-		return err
-	}
 	eb.routeTable = routeTable
 	eb.rebuildRoutePlanners()
-	eb.inFlightPublishes.Store(0)
-	eb.agentRouteDeliveryMu.Lock()
-	eb.agentRouteDeliveries = make(map[runtimeeffects.LifecycleToken]int)
-	eb.agentRouteDeliveryMu.Unlock()
 	eb.mu.Unlock()
-	for _, claim := range pendingClaims {
-		claim.Release(context.Background())
-	}
 	return nil
 }
 
-func (eb *EventBus) beginEventPublish(eventID string) {
-	if eb == nil {
-		return
-	}
-	eb.inFlightPublishes.Add(1)
-	eventID = strings.TrimSpace(eventID)
-	if eventID == "" {
-		return
-	}
-	eb.mu.Lock()
-	if eb.inFlightEventIDs == nil {
-		eb.inFlightEventIDs = make(map[string]int)
-	}
-	eb.inFlightEventIDs[eventID]++
-	eb.mu.Unlock()
-}
-
-func (eb *EventBus) endEventPublish(eventID string) {
-	if eb == nil {
-		return
-	}
-	eventID = strings.TrimSpace(eventID)
-	if eventID != "" {
-		eb.mu.Lock()
-		if count := eb.inFlightEventIDs[eventID]; count <= 1 {
-			delete(eb.inFlightEventIDs, eventID)
-		} else {
-			eb.inFlightEventIDs[eventID] = count - 1
-		}
-		eb.mu.Unlock()
-	}
-	eb.inFlightPublishes.Add(-1)
-}
-
-func (eb *EventBus) eventPublishInFlight(eventID string) bool {
-	if eb == nil {
-		return false
-	}
-	eventID = strings.TrimSpace(eventID)
-	if eventID == "" {
-		return false
-	}
-	eb.mu.RLock()
-	defer eb.mu.RUnlock()
-	return eb.inFlightEventIDs[eventID] > 0
-}
-
 func (eb *EventBus) WaitForQuiescence(ctx context.Context) error {
-	if eb == nil {
+	if eb == nil || eb.workOwner == nil {
 		return nil
 	}
-	ticker := time.NewTicker(5 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if eb.inFlightPublishes.Load() == 0 {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
-	}
+	return eb.workOwner.Wait(ctx)
 }
 
-func (eb *EventBus) PendingAgentDeliveries() int {
-	if eb == nil {
-		return 0
-	}
-	eb.mu.RLock()
-	defer eb.mu.RUnlock()
-	pending := 0
-	for _, ch := range eb.agentChans {
-		pending += len(ch)
-	}
-	return pending
-}
-
-func (eb *EventBus) Subscribe(agentID string, eventTypes ...events.EventType) <-chan events.Event {
+func (eb *EventBus) Subscribe(agentID string, eventTypes ...events.EventType) <-chan *LocalDelivery {
 	values := make([]string, 0, len(eventTypes))
 	for _, eventType := range eventTypes {
 		values = append(values, string(eventType))
@@ -620,7 +566,7 @@ func (eb *EventBus) Subscribe(agentID string, eventTypes ...events.EventType) <-
 	return eb.SubscribeAgent(admission)
 }
 
-func (eb *EventBus) SubscribeAgent(admission semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan events.Event {
+func (eb *EventBus) SubscribeAgent(admission semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan *LocalDelivery {
 	if eb == nil || !admission.ValidForAgent(admission.AgentID()) {
 		return nil
 	}
@@ -630,17 +576,30 @@ func (eb *EventBus) SubscribeAgent(admission semanticview.FlowOwnedAgentSubscrip
 // ReplaceAgentRoute installs one exact lifecycle-generation route. The old
 // channel is detached, not closed: publishers may retain a lock-free snapshot
 // of it and must be allowed to finish without a send-on-closed panic.
-func (eb *EventBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan events.Event {
-	if eb == nil || !token.Valid() || !admission.ValidForAgent(token.AgentID) {
+func (eb *EventBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan *LocalDelivery {
+	if eb == nil || eb.workOwner == nil || !token.Valid() || !admission.ValidForAgent(token.AgentID) {
 		return nil
 	}
 	eventTypes := admittedAgentEventTypes(admission)
 	agentID := strings.TrimSpace(token.AgentID)
-	ch := make(chan events.Event, 128)
-	route := newAgentRouteHandle(token, ch)
+	owner, err := eb.workOwner.NewRoute(context.Background(), worklifetime.RouteIdentity{
+		RuntimeEpoch: uint64(token.RuntimeEpoch), AgentID: agentID, Generation: token.Generation,
+	})
+	if err != nil {
+		return nil
+	}
+	ch := make(chan *LocalDelivery, 128)
+	route := newAgentRouteHandle(token, ch, owner)
 	eb.mu.Lock()
-	defer eb.mu.Unlock()
-	eb.detachSubscriberLocked(agentID)
+	old := eb.detachSubscriberLocked(agentID)
+	eb.mu.Unlock()
+	if old != nil {
+		if err := old.retireAndWait(context.Background(), eb.store); err != nil {
+			_ = route.retireAndWait(context.Background(), eb.store)
+			return nil
+		}
+	}
+	eb.mu.Lock()
 	eb.agentChans[agentID] = ch
 	eb.agentRouteHandles[agentID] = route
 	eb.subscriptionKinds[agentID] = inMemorySubscriberAgent
@@ -651,10 +610,11 @@ func (eb *EventBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToken, admis
 		}
 		eb.subscriptions[agentID] = AppendUniqueEventType(eb.subscriptions[agentID], eventType)
 		if eb.channels[eventType] == nil {
-			eb.channels[eventType] = make(map[string]chan events.Event)
+			eb.channels[eventType] = make(map[string]chan *LocalDelivery)
 		}
 		eb.channels[eventType][agentID] = ch
 	}
+	eb.mu.Unlock()
 	return ch
 }
 
@@ -675,19 +635,26 @@ func (eb *EventBus) RemoveAgentRoute(token runtimeeffects.LifecycleToken) {
 	}
 	agentID := strings.TrimSpace(token.AgentID)
 	eb.mu.Lock()
-	defer eb.mu.Unlock()
 	if current := eb.agentRouteHandles[agentID]; current == nil || current.token != token {
+		eb.mu.Unlock()
 		return
 	}
-	eb.detachSubscriberLocked(agentID)
+	route := eb.detachSubscriberLocked(agentID)
+	eb.mu.Unlock()
+	if route != nil {
+		_ = route.retireAndWait(context.Background(), eb.store)
+	}
 }
 
-func (eb *EventBus) SubscribeInternal(subscriberID string, eventTypes ...events.EventType) <-chan events.Event {
+func (eb *EventBus) SubscribeInternal(subscriberID string, eventTypes ...events.EventType) <-chan *LocalDelivery {
 	return eb.subscribe(subscriberID, inMemorySubscriberInternal, eventTypes...)
 }
 
-func (eb *EventBus) subscribe(subscriberID string, kind inMemorySubscriberKind, eventTypes ...events.EventType) <-chan events.Event {
-	ch := make(chan events.Event, 128)
+func (eb *EventBus) subscribe(subscriberID string, kind inMemorySubscriberKind, eventTypes ...events.EventType) <-chan *LocalDelivery {
+	if eb == nil || eb.workOwner == nil {
+		return nil
+	}
+	ch := make(chan *LocalDelivery, 128)
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
 
@@ -704,7 +671,7 @@ func (eb *EventBus) subscribe(subscriberID string, kind inMemorySubscriberKind, 
 	for _, et := range eventTypes {
 		eb.subscriptions[subscriberID] = AppendUniqueEventType(eb.subscriptions[subscriberID], et)
 		if eb.channels[et] == nil {
-			eb.channels[et] = make(map[string]chan events.Event)
+			eb.channels[et] = make(map[string]chan *LocalDelivery)
 		}
 		eb.channels[et][subscriberID] = ch
 	}
@@ -717,19 +684,23 @@ func (eb *EventBus) Unsubscribe(agentID string) {
 		return
 	}
 	eb.mu.Lock()
-	defer eb.mu.Unlock()
 	if _, exactRoute := eb.agentRouteHandles[agentID]; exactRoute {
+		eb.mu.Unlock()
 		return
 	}
-
+	ch := eb.agentChans[agentID]
 	eb.detachSubscriberLocked(agentID)
+	eb.mu.Unlock()
+	if err := drainBufferedLocalDeliveryChannel(context.Background(), eb.store, ch); err != nil {
+		diaglog.ProcessLog(diaglog.LevelError, "eventbus", "internal subscriber retirement failed closed", "subscriber_id", agentID, "error", err.Error())
+	}
 }
 
-func (eb *EventBus) detachSubscriberLocked(agentID string) {
+func (eb *EventBus) detachSubscriberLocked(agentID string) *agentRouteHandle {
+	var detached *agentRouteHandle
 	if route := eb.agentRouteHandles[agentID]; route != nil {
-		token := route.lifecycleToken()
 		route.deactivate()
-		eb.retireAgentRouteDeliveries(token)
+		detached = route
 	}
 	delete(eb.agentChans, agentID)
 	delete(eb.agentRouteHandles, agentID)
@@ -741,6 +712,7 @@ func (eb *EventBus) detachSubscriberLocked(agentID string) {
 			delete(eb.channels, et)
 		}
 	}
+	return detached
 }
 
 func (eb *EventBus) deriveBootRouteTableLocked() (*RouteTable, error) {

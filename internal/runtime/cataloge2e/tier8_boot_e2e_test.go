@@ -16,6 +16,7 @@ import (
 	runtime "github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -224,6 +225,14 @@ func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBund
 	if err != nil {
 		return nil, err
 	}
+	processOwner := worklifetime.NewProcess()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := processOwner.Join(ctx); err != nil {
+			t.Errorf("join tier-8 runtime process owner: %v", err)
+		}
+	})
 	return runtime.NewRuntime(testAuthorActivityContext(context.Background()), runtime.RuntimeDeps{Config: testRuntimeConfig(), Stores: runtime.Stores{}, Options: runtime.RuntimeOptions{
 		SelfCheck:           false,
 		WorkflowModule:      module,
@@ -231,6 +240,7 @@ func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBund
 		ProviderCredentials: tier8ProviderCredentialStore(t, "ANTHROPIC_API_KEY", "test-key"),
 		RuntimeInstanceID:   authorActivityTestRuntimeInstanceID,
 		BundleSourceFact:    authorActivityTestBundleSourceFact,
+		ProcessWorkOwner:    processOwner,
 	}})
 
 }

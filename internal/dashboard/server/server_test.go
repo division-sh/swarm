@@ -27,6 +27,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -1022,6 +1023,7 @@ func (s *stubProjectControl) CurrentProject() builderpkg.ProjectStatus {
 }
 
 func newBuilderHandlerForTest(
+	t *testing.T,
 	health HealthChecker,
 	entities EntityReader,
 	version string,
@@ -1029,10 +1031,11 @@ func newBuilderHandlerForTest(
 	rt *runtimepkg.Runtime,
 	projectCtl builderpkg.ProjectController,
 ) http.Handler {
-	var runtimeProvider builderpkg.RuntimeProvider
+	processOwner := worklifetime.NewProcess()
+	var runtimeAcquirer builderpkg.RuntimeAcquirer
 	var runDebug builderpkg.RunDebugReader
 	if rt != nil {
-		runtimeProvider = func() *runtimepkg.Runtime { return rt }
+		runtimeAcquirer = newDashboardBuilderRuntimeAcquirer(t, processOwner, rt)
 		if typed, ok := rt.Bus.Store().(*stubBuilderRunStore); ok {
 			runDebug = typed
 			if rt.RunControl == nil {
@@ -1041,16 +1044,76 @@ func newBuilderHandlerForTest(
 		}
 	}
 	return builderpkg.NewHandler(builderpkg.Options{
-		Health:         builderpkg.HealthChecker(health),
-		Entities:       entities,
-		Runtime:        runtimeCtl,
-		AuthToken:      testBuilderAuthToken,
-		Version:        version,
-		CurrentRuntime: runtimeProvider,
-		ProjectControl: projectCtl,
-		RunDebug:       runDebug,
+		Health:           builderpkg.HealthChecker(health),
+		Entities:         entities,
+		Runtime:          runtimeCtl,
+		AuthToken:        testBuilderAuthToken,
+		Version:          version,
+		RuntimeAcquirer:  runtimeAcquirer,
+		ProcessWorkOwner: processOwner,
+		ProjectControl:   projectCtl,
+		RunDebug:         runDebug,
 	})
 }
+
+type dashboardBuilderRuntimeAcquirer struct {
+	runtime *runtimepkg.Runtime
+	owner   *worklifetime.RuntimeOccurrence
+	process *worklifetime.Process
+}
+
+type dashboardBuilderRuntimeUse struct {
+	runtime *runtimepkg.Runtime
+	lease   *worklifetime.Lease
+	ctx     context.Context
+}
+
+func newDashboardBuilderRuntimeAcquirer(t *testing.T, process *worklifetime.Process, rt *runtimepkg.Runtime) builderpkg.RuntimeAcquirer {
+	t.Helper()
+	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: uuid.NewString(),
+		BundleHash:        "dashboard-builder-test-bundle",
+	})
+	if err != nil {
+		t.Fatalf("new dashboard builder runtime occurrence: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := owner.RetireAndWait(ctx); err != nil {
+			t.Errorf("retire dashboard builder runtime occurrence: %v", err)
+			return
+		}
+		if _, err := process.Join(ctx); err != nil {
+			t.Errorf("join dashboard builder process: %v", err)
+		}
+	})
+	return &dashboardBuilderRuntimeAcquirer{runtime: rt, owner: owner, process: process}
+}
+
+func (a *dashboardBuilderRuntimeAcquirer) AcquireCurrentRuntime(ctx context.Context) (builderpkg.RuntimeUse, error) {
+	return a.acquire(ctx)
+}
+
+func (a *dashboardBuilderRuntimeAcquirer) AcquireRunRuntime(ctx context.Context, _ string) (builderpkg.RuntimeUse, error) {
+	return a.acquire(ctx)
+}
+
+func (a *dashboardBuilderRuntimeAcquirer) acquire(ctx context.Context) (builderpkg.RuntimeUse, error) {
+	ctx = worklifetime.WithProcess(ctx, a.process)
+	ctx = worklifetime.WithOccurrence(ctx, a.owner)
+	lease, err := a.owner.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	workCtx := worklifetime.WithProcess(lease.Context(), a.process)
+	workCtx = worklifetime.WithOccurrence(workCtx, a.owner)
+	return &dashboardBuilderRuntimeUse{runtime: a.runtime, lease: lease, ctx: workCtx}, nil
+}
+
+func (u *dashboardBuilderRuntimeUse) Runtime() *runtimepkg.Runtime { return u.runtime }
+func (u *dashboardBuilderRuntimeUse) WorkContext() context.Context { return u.ctx }
+func (u *dashboardBuilderRuntimeUse) Done() error                  { return u.lease.Done() }
 
 func builderAuthRequest(method, path, body string) *http.Request {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -1759,7 +1822,7 @@ func TestHandler_BuilderRPC(t *testing.T) {
 		Entities:  instances,
 		AuthToken: testOperatorAuthToken,
 		Version:   "swarm-test",
-		Builder:   newBuilderHandlerForTest(health, instances, "swarm-test", nil, nil, projectCtl),
+		Builder:   newBuilderHandlerForTest(t, health, instances, "swarm-test", nil, nil, projectCtl),
 	})
 
 	rec := httptest.NewRecorder()
@@ -1917,7 +1980,7 @@ func TestHandler_BuilderWSHealthHeartbeat(t *testing.T) {
 	ts := httptest.NewServer(NewHandler(Options{
 		Health:  health,
 		Version: "swarm-test",
-		Builder: newBuilderHandlerForTest(health, nil, "swarm-test", nil, nil, nil),
+		Builder: newBuilderHandlerForTest(t, health, nil, "swarm-test", nil, nil, nil),
 	}))
 	defer ts.Close()
 
@@ -1958,7 +2021,7 @@ func TestHandler_BuilderWSHealthHeartbeat_APIAlias(t *testing.T) {
 	ts := httptest.NewServer(NewHandler(Options{
 		Health:  health,
 		Version: "swarm-test",
-		Builder: newBuilderHandlerForTest(health, nil, "swarm-test", nil, nil, nil),
+		Builder: newBuilderHandlerForTest(t, health, nil, "swarm-test", nil, nil, nil),
 	}))
 	defer ts.Close()
 
@@ -2040,7 +2103,7 @@ func TestHandler_RunStartStreamsRunEvents(t *testing.T) {
 		},
 		Version: "swarm-test",
 		Runtime: runtimeCtl,
-		Builder: newBuilderHandlerForTest(
+		Builder: newBuilderHandlerForTest(t,
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
@@ -2165,7 +2228,7 @@ func TestHandler_RunEventReplayUsesCanonicalPersistedRunDebugOwner(t *testing.T)
 		},
 		Version: "swarm-test",
 		Runtime: &stubRuntimeControl{},
-		Builder: newBuilderHandlerForTest(
+		Builder: newBuilderHandlerForTest(t,
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
@@ -2322,7 +2385,7 @@ func TestHandler_RunEventStreamPreservesCanonicalRuntimeLogWithoutEntityID(t *te
 		},
 		Version: "swarm-test",
 		Runtime: runtimeCtl,
-		Builder: newBuilderHandlerForTest(
+		Builder: newBuilderHandlerForTest(t,
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
@@ -2431,7 +2494,7 @@ func TestHandler_RunStopUsesRunControlOwnerAndStreamsStopped(t *testing.T) {
 		},
 		Version: "swarm-test",
 		Runtime: runtimeCtl,
-		Builder: newBuilderHandlerForTest(
+		Builder: newBuilderHandlerForTest(t,
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
@@ -2515,7 +2578,7 @@ func TestHandler_RunPauseAndContinueStreamStateChanges(t *testing.T) {
 		},
 		Version: "swarm-test",
 		Runtime: runtimeCtl,
-		Builder: newBuilderHandlerForTest(
+		Builder: newBuilderHandlerForTest(t,
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
@@ -2616,7 +2679,7 @@ func TestHandler_RunLifecycleOverAPIAliases(t *testing.T) {
 		},
 		Version: "swarm-test",
 		Runtime: runtimeCtl,
-		Builder: newBuilderHandlerForTest(
+		Builder: newBuilderHandlerForTest(t,
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
@@ -2726,7 +2789,7 @@ func TestHandler_RunBreakpointHitPausesRuntime(t *testing.T) {
 		},
 		Version: "swarm-test",
 		Runtime: runtimeCtl,
-		Builder: newBuilderHandlerForTest(
+		Builder: newBuilderHandlerForTest(t,
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
@@ -2824,7 +2887,7 @@ func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
 		},
 		Version: "swarm-test",
 		Runtime: runtimeCtl,
-		Builder: newBuilderHandlerForTest(
+		Builder: newBuilderHandlerForTest(t,
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
@@ -2939,7 +3002,7 @@ func TestHandler_RunStepPausesAfterNextRuntimeEvent(t *testing.T) {
 		},
 		Version: "swarm-test",
 		Runtime: runtimeCtl,
-		Builder: newBuilderHandlerForTest(
+		Builder: newBuilderHandlerForTest(t,
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
@@ -3050,7 +3113,7 @@ func TestHandler_RunRetryEmitsRetriedAndResumed(t *testing.T) {
 		},
 		Version: "swarm-test",
 		Runtime: runtimeCtl,
-		Builder: newBuilderHandlerForTest(
+		Builder: newBuilderHandlerForTest(t,
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
@@ -3144,7 +3207,7 @@ func TestHandler_RunSkipEmitsSkippedAndResumed(t *testing.T) {
 		},
 		Version: "swarm-test",
 		Runtime: runtimeCtl,
-		Builder: newBuilderHandlerForTest(
+		Builder: newBuilderHandlerForTest(t,
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},

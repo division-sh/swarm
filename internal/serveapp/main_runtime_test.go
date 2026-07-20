@@ -1067,7 +1067,7 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 }
 
 func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) {
-	endpoint, db, bundleHash, rt, pg := startServedJoinProofRuntime(t)
+	endpoint, db, bundleHash, _, pg := startServedJoinProofRuntime(t)
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name": "order.started", "bundle_hash": bundleHash,
 		"payload":         map[string]any{"expected": []any{"a", "b"}, "dispatch_id": "dispatch-1"},
@@ -1089,12 +1089,7 @@ func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) 
 	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, arrival.EventID, "node", "join-node", "delivered", 1)
 	waitServedEventPublishReceiptOutcomeCount(t, db, "postgres", arrival.EventID, "platform", "pipeline", "success", 1)
 	waitServedJoinSourceTimer(t, db, initial.RunID)
-	waitCtx, cancelWait := context.WithTimeout(context.Background(), servedProofPollDeadline)
-	defer cancelWait()
-	if err := rt.WaitForQuiescence(waitCtx); err != nil {
-		t.Fatalf("wait for join source quiescence before fork frontier: %v", err)
-	}
-	waitServedRunDeliveryQuiescence(t, db, initial.RunID)
+	waitServedRunDeliveryQuiescence(t, db, "postgres", initial.RunID)
 	forkEventID := seedServedJoinForkFrontier(t, db, initial.RunID, entityID, arrival.EventID)
 	if _, err := pg.PlanRunFork(context.Background(), store.RunForkPlanRequest{
 		SourceRunID: initial.RunID,
@@ -1174,18 +1169,27 @@ func waitServedJoinSourceTimer(t *testing.T, db *sql.DB, runID string) {
 	t.Fatalf("served join source timers for run %s = %d, want 1\n%s", runID, count, servedEventPublishDebugSummary(t, db, "postgres", runID))
 }
 
-func waitServedRunDeliveryQuiescence(t *testing.T, db *sql.DB, runID string) {
+func waitServedRunDeliveryQuiescence(t *testing.T, db *sql.DB, backend, runID string) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	stable := 0
 	for time.Now().Before(deadline) {
 		var active int
-		if err := db.QueryRowContext(context.Background(), `
+		query := `
 			SELECT COUNT(*)
 			FROM event_deliveries
-			WHERE run_id = $1::uuid
+			WHERE run_id = ?
 			  AND status IN ('pending', 'in_progress')
-		`, runID).Scan(&active); err != nil {
+		`
+		if backend == "postgres" {
+			query = `
+				SELECT COUNT(*)
+				FROM event_deliveries
+				WHERE run_id = $1::uuid
+				  AND status IN ('pending', 'in_progress')
+			`
+		}
+		if err := db.QueryRowContext(context.Background(), query, runID).Scan(&active); err != nil {
 			t.Fatalf("count active served run deliveries: %v", err)
 		}
 		if active == 0 {
@@ -1198,7 +1202,7 @@ func waitServedRunDeliveryQuiescence(t *testing.T, db *sql.DB, runID string) {
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("served run %s deliveries did not remain quiescent\n%s", runID, servedEventPublishDebugSummary(t, db, "postgres", runID))
+	t.Fatalf("served run %s deliveries did not remain quiescent\n%s", runID, servedEventPublishDebugSummary(t, db, backend, runID))
 }
 
 func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity(t *testing.T) {
@@ -2270,11 +2274,7 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 	if !initial.NewRunCreated || initial.RunID == "" {
 		t.Fatalf("%s conversation fork source run = %#v", rt.Backend, initial)
 	}
-	waitCtx, cancelWait := context.WithTimeout(context.Background(), servedProofPollDeadline)
-	defer cancelWait()
-	if err := rt.Runtime.WaitForQuiescence(waitCtx); err != nil {
-		t.Fatalf("wait for %s conversation fork source quiescence: %v", rt.Backend, err)
-	}
+	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, initial.RunID)
 	fixture := seedServedConversationForkSource(t, rt, initial.RunID)
 	keyPrefix := "issue-1997-" + rt.Backend + "-" + fixture.SessionID
 

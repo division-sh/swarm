@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -282,8 +283,8 @@ func TestOperatorRuntimeContextManagerRoutesAgentDirectiveByStoredBundle(t *test
 	fixture := newOperatorRuntimeContextFixture(t)
 	baseAgent := &directiveIntegrationAgent{id: "agent-1"}
 	selectedAgent := &directiveIntegrationAgent{id: "agent-1"}
-	baseManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busA, baseAgent, runtimeContextTestSourceFact(runStartTestBundleHash))
-	selectedManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busB, selectedAgent, runtimeContextTestSourceFact(runtimeContextTestBundleHashB))
+	baseManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busA, fixture.ownerA, baseAgent, runtimeContextTestSourceFact(runStartTestBundleHash))
+	selectedManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busB, fixture.ownerB, selectedAgent, runtimeContextTestSourceFact(runtimeContextTestBundleHashB))
 	manager := runtimeContextManagerWithRuntimes(t, fixture,
 		&swruntime.Runtime{Bus: fixture.busA, Manager: baseManager},
 		&swruntime.Runtime{Bus: fixture.busB, Manager: selectedManager},
@@ -438,11 +439,11 @@ func TestRunForkExecutorForBundleContextRebindsSelectedContractSelection(t *test
 		},
 	}
 
+	selectedRuntime := &swruntime.Runtime{}
 	rebound := runForkExecutorForBundleContext(executor, &swruntime.BundleContext{
 		Source:        targetSource,
 		ContractsRoot: "/tmp/target-contracts",
-		Runtime:       &swruntime.Runtime{},
-	})
+	}, selectedRuntime)
 
 	selected, ok := rebound.(SelectedContractRunForkExecutor)
 	if !ok {
@@ -553,6 +554,8 @@ type operatorRuntimeContextFixture struct {
 	sourceB semanticview.Source
 	busA    *runtimebus.EventBus
 	busB    *runtimebus.EventBus
+	ownerA  *worklifetime.RuntimeOccurrence
+	ownerB  *worklifetime.RuntimeOccurrence
 	manager *swruntime.RuntimeContextManager
 }
 
@@ -567,8 +570,8 @@ func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixtur
 
 	sourceA := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	sourceB := semanticview.Wrap(runStartTestBundle("triage.requested"))
-	busA := newRuntimeContextTestBus(t, pg, sourceA, runStartTestBundleHash)
-	busB := newRuntimeContextTestBus(t, pg, sourceB, runtimeContextTestBundleHashB)
+	busA, ownerA := newRuntimeContextTestBus(t, pg, sourceA, runStartTestBundleHash)
+	busB, ownerB := newRuntimeContextTestBus(t, pg, sourceB, runtimeContextTestBundleHashB)
 	manager, err := swruntime.NewRuntimeContextManager(pg,
 		swruntime.BundleContext{
 			BundleHash:       runStartTestBundleHash,
@@ -576,6 +579,7 @@ func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixtur
 			BundleIdentity:   runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
 			Source:           sourceA,
 			Runtime:          runtimeContextTestRuntime(&swruntime.Runtime{Bus: busA}, runStartTestBundleHash),
+			WorkOwner:        ownerA,
 		},
 		swruntime.BundleContext{
 			BundleHash:       runtimeContextTestBundleHashB,
@@ -583,6 +587,7 @@ func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixtur
 			BundleIdentity:   runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
 			Source:           sourceB,
 			Runtime:          runtimeContextTestRuntime(&swruntime.Runtime{Bus: busB}, runtimeContextTestBundleHashB),
+			WorkOwner:        ownerB,
 		},
 	)
 	if err != nil {
@@ -595,6 +600,8 @@ func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixtur
 		sourceB: sourceB,
 		busA:    busA,
 		busB:    busB,
+		ownerA:  ownerA,
+		ownerB:  ownerB,
 		manager: manager,
 	}
 }
@@ -648,6 +655,7 @@ func runtimeContextManagerWithRuntimes(t *testing.T, fixture operatorRuntimeCont
 			BundleIdentity:   runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
 			Source:           fixture.sourceA,
 			Runtime:          runtimeA,
+			WorkOwner:        fixture.ownerA,
 		},
 		swruntime.BundleContext{
 			BundleHash:       runtimeContextTestBundleHashB,
@@ -655,6 +663,7 @@ func runtimeContextManagerWithRuntimes(t *testing.T, fixture operatorRuntimeCont
 			BundleIdentity:   runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
 			Source:           fixture.sourceB,
 			Runtime:          runtimeB,
+			WorkOwner:        fixture.ownerB,
 		},
 	)
 	if err != nil {
@@ -663,11 +672,16 @@ func runtimeContextManagerWithRuntimes(t *testing.T, fixture operatorRuntimeCont
 	return manager
 }
 
-func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *runtimebus.EventBus, agent *directiveIntegrationAgent, fact runtimecorrelation.BundleSourceFact) *runtimemanager.AgentManager {
+func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *runtimebus.EventBus, workOwner *worklifetime.RuntimeOccurrence, agent *directiveIntegrationAgent, fact runtimecorrelation.BundleSourceFact) *runtimemanager.AgentManager {
 	t.Helper()
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
-	}, runtimemanager.AgentManagerOptions{BaseContext: testAuthorActivityContextForSource(context.Background(), fact)}, pg)
+	}, runtimemanager.AgentManagerOptions{BaseContext: testAuthorActivityContextForSource(context.Background(), fact), WorkOwner: workOwner}, pg)
+	t.Cleanup(func() {
+		if err := manager.Shutdown(); err != nil {
+			t.Errorf("shutdown runtime context agent manager: %v", err)
+		}
+	})
 	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular"}); err != nil {
 		t.Fatalf("SpawnAgent(%s): %v", agent.id, err)
 	}
@@ -743,16 +757,18 @@ func (s *recordingRuntimeContextRunControlStore) totalCalls() int {
 	return s.stopCalls + s.pauseCalls + s.continueCalls
 }
 
-func newRuntimeContextTestBus(t *testing.T, pg *store.PostgresStore, source semanticview.Source, bundleHash string) *runtimebus.EventBus {
+func newRuntimeContextTestBus(t *testing.T, pg *store.PostgresStore, source semanticview.Source, bundleHash string) (*runtimebus.EventBus, *worklifetime.RuntimeOccurrence) {
 	t.Helper()
+	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, bundleHash)
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle:   source,
 		BundleSourceFact: runtimeContextTestSourceFact(bundleHash),
+		WorkOwner:        workOwner,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	return bus
+	return bus, workOwner
 }
 
 func runtimeContextTestSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -20,7 +21,7 @@ func TestCompletionAttemptHeartbeatLossCancelsExecutionAndForcesUncertainty(t *t
 	injected := errors.New("injected completion heartbeat failure")
 	harness.HeartbeatErr = injected
 	harness.HeartbeatFailAfter = 1
-	ctx := harness.CompletionContext("heartbeat-loss")
+	ctx := llmTestWorkContext(t, harness.CompletionContext("heartbeat-loss"))
 	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("heartbeat"), nil)
 	if err != nil {
 		t.Fatalf("authorize completion: %v", err)
@@ -45,6 +46,72 @@ func TestCompletionAttemptHeartbeatLossCancelsExecutionAndForcesUncertainty(t *t
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Detail.Code != "completion_attempt_heartbeat_lost" {
 		t.Fatalf("heartbeat failure=%v, want completion_attempt_heartbeat_lost", err)
+	}
+}
+
+func TestCompletionHeartbeatRetirementHandoff(t *testing.T) {
+	harness := effecttest.New()
+	process := worklifetime.NewProcess()
+	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: "completion-runtime",
+		BundleHash:        "completion-bundle",
+	})
+	if err != nil {
+		t.Fatalf("new runtime occurrence: %v", err)
+	}
+	ctx := worklifetime.WithOccurrence(harness.CompletionContext("retirement"), owner)
+	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("heartbeat"), nil)
+	if err != nil {
+		t.Fatalf("authorize completion: %v", err)
+	}
+	_, heartbeat, err := startCompletionAttemptHeartbeatWithTiming(ctx, handle, time.Hour, time.Minute)
+	if err != nil {
+		t.Fatalf("start completion heartbeat: %v", err)
+	}
+	if got := owner.ActiveCount(); got != 1 {
+		t.Fatalf("active completion heartbeat work = %d, want 1", got)
+	}
+	waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := owner.RetireAndWait(waitCtx); err != nil {
+		t.Fatalf("retire runtime occurrence: %v", err)
+	}
+	if err := heartbeat.Stop(); err != nil {
+		t.Fatalf("stop retired completion heartbeat: %v", err)
+	}
+	if got := owner.ActiveCount(); got != 0 {
+		t.Fatalf("active completion heartbeat work after retirement = %d, want 0", got)
+	}
+	if _, err := process.Join(waitCtx); err != nil {
+		t.Fatalf("join process: %v", err)
+	}
+}
+
+func TestCompletionHeartbeatUsesProcessRootForOperatorWork(t *testing.T) {
+	harness := effecttest.New()
+	process := worklifetime.NewProcess()
+	ctx := worklifetime.WithProcess(harness.CompletionContext("operator-process"), process)
+	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("heartbeat"), nil)
+	if err != nil {
+		t.Fatalf("authorize completion: %v", err)
+	}
+	_, heartbeat, err := startCompletionAttemptHeartbeatWithTiming(ctx, handle, time.Hour, time.Minute)
+	if err != nil {
+		t.Fatalf("start completion heartbeat: %v", err)
+	}
+	if got := process.ActiveCount(); got != 1 {
+		t.Fatalf("active process-root heartbeat work = %d, want 1", got)
+	}
+	if err := heartbeat.Stop(); err != nil {
+		t.Fatalf("stop process-root heartbeat: %v", err)
+	}
+	if got := process.ActiveCount(); got != 0 {
+		t.Fatalf("active process-root heartbeat work after stop = %d, want 0", got)
+	}
+	joinCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := process.Join(joinCtx); err != nil {
+		t.Fatalf("join process: %v", err)
 	}
 }
 

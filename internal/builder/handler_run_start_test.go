@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -34,16 +33,11 @@ func (*runStartAppendStore) SupportsPersistedReplay() bool { return false }
 func TestHandlerRunStartRejectsUndeclaredInputBeforePublish(t *testing.T) {
 	source := semanticview.Wrap(runStartInputBundle("scan.corpus_file_requested"))
 	store := &runStartAppendStore{}
-	bus, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
+	_, acquirer := newTestOwnedEventBus(t, store, runtimebus.EventBusOptions{ContractBundle: source})
 	handler := NewHandler(Options{
-		AuthToken:      testBuilderAuthToken,
-		SemanticSource: source,
-		CurrentRuntime: func() *runtimepkg.Runtime {
-			return &runtimepkg.Runtime{Bus: bus}
-		},
+		AuthToken:       testBuilderAuthToken,
+		SemanticSource:  source,
+		RuntimeAcquirer: acquirer,
 	})
 
 	resp := callBuilderRPCRaw(t, handler, Request{
@@ -77,16 +71,11 @@ func TestHandlerRunStartRejectsDeclaredUnroutableInputBeforePublish(t *testing.T
 	bundle.Nodes["scan-orchestrator"] = bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"]
 	source := semanticview.Wrap(bundle)
 	store := &runStartAppendStore{}
-	bus, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
+	_, acquirer := newTestOwnedEventBus(t, store, runtimebus.EventBusOptions{ContractBundle: source})
 	handler := NewHandler(Options{
-		AuthToken:      testBuilderAuthToken,
-		SemanticSource: source,
-		CurrentRuntime: func() *runtimepkg.Runtime {
-			return &runtimepkg.Runtime{Bus: bus}
-		},
+		AuthToken:       testBuilderAuthToken,
+		SemanticSource:  source,
+		RuntimeAcquirer: acquirer,
 	})
 
 	resp := callBuilderRPCRaw(t, handler, Request{
@@ -146,16 +135,11 @@ func TestHandlerRunStartAcceptsDeclaredRoutableInput(t *testing.T) {
 	runID := eventtest.UUID("builder-run-start-accepts-routable-input")
 	source := semanticview.Wrap(runStartInputBundle(eventName))
 	store := &runStartAppendStore{}
-	bus, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
+	_, acquirer := newTestOwnedEventBus(t, store, runtimebus.EventBusOptions{ContractBundle: source})
 	handler := NewHandler(Options{
-		AuthToken:      testBuilderAuthToken,
-		SemanticSource: source,
-		CurrentRuntime: func() *runtimepkg.Runtime {
-			return &runtimepkg.Runtime{Bus: bus}
-		},
+		AuthToken:       testBuilderAuthToken,
+		SemanticSource:  source,
+		RuntimeAcquirer: acquirer,
 	})
 
 	resp := callBuilderRPCRaw(t, handler, Request{

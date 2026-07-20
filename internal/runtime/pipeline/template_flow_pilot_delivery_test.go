@@ -132,7 +132,7 @@ func seedTemplateFlowPilotPipelineNodeDelivery(t *testing.T, db *sql.DB, ctx con
 func assertTemplateFlowPilotPipelineDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, want string) {
 	t.Helper()
 	var got string
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
 		SELECT COALESCE(status, '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid

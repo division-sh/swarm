@@ -61,7 +61,7 @@ func (*recoveryBudgetGuardStub) IsThrottle(string) bool        { return false }
 func TestRecoverReturnsBudgetRecoveryProjectionFailure(t *testing.T) {
 	projectionErr := errors.New("budget projection unavailable")
 	budget := &recoveryBudgetGuardStub{err: projectionErr}
-	am := NewAgentManagerWithOptions(&recordingReceiptBus{}, nil, AgentManagerOptions{Budget: budget}, &receiptReaderStub{})
+	am := newTestAgentManagerWithOptions(t, &recordingReceiptBus{}, nil, AgentManagerOptions{Budget: budget}, &receiptReaderStub{})
 
 	err := am.Recover(testAuthorActivityContext(context.Background()))
 	if !errors.Is(err, projectionErr) {
@@ -174,7 +174,7 @@ func TestRecoverRejectsPersistedForeignExactAndPatternBeforeRouteOrPendingQuery(
 				Subscriptions: []string{subscription},
 			}}}}
 			bus := &recoveryTestBus{}
-			am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+			am := newTestAgentManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
 				return recoveryTestAgent{id: cfg.ID}, nil
 			}, store)
 			err := am.Recover(context.Background())
@@ -190,7 +190,7 @@ func TestRecoverRejectsPersistedForeignExactAndPatternBeforeRouteOrPendingQuery(
 
 func TestPendingSubscribedRecoveryUsesAdmittedSameScopeSubscriptions(t *testing.T) {
 	store := &recoveryTestStore{}
-	am := NewAgentManager(&recoveryTestBus{}, func(cfg models.AgentConfig) (Agent, error) {
+	am := newTestAgentManager(t, &recoveryTestBus{}, func(cfg models.AgentConfig) (Agent, error) {
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, store)
 	if err := am.SpawnAgent(models.AgentConfig{
@@ -289,7 +289,7 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 			},
 		},
 	}
-	am := NewAgentManagerWithOptions(bus, func(cfg models.AgentConfig) (Agent, error) {
+	am := newTestAgentManagerWithOptions(t, bus, func(cfg models.AgentConfig) (Agent, error) {
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{WorkflowInstances: workflowInstances}, store)
 
@@ -312,7 +312,7 @@ func TestDirectiveReconciliationPrecedesGenericPipelineRecovery(t *testing.T) {
 		recoveryTestBus:         &recoveryTestBus{},
 		DirectiveOperationStore: &directiveEventStore{},
 	}
-	am := NewAgentManager(bus, nil, &recoveryTestStore{})
+	am := newTestAgentManager(t, bus, nil, &recoveryTestStore{})
 
 	if err := am.ReconcileDirectiveOperations(testAuthorActivityContext(context.Background())); err != nil {
 		t.Fatalf("ReconcileDirectiveOperations: %v", err)
@@ -332,7 +332,7 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 			selectedContractRouteRecoveryRecord(t, forkRunID),
 		},
 	}
-	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+	am := newTestAgentManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, &recoveryTestStore{})
 
@@ -442,7 +442,7 @@ func TestRecoverRejectsSelectedContractRouteRecoveryFromCurrentRouteOwner(t *tes
 	bus := &recoveryTestBus{
 		selectedRouteRecoveries: []SelectedContractRouteRecoveryRecord{record},
 	}
-	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+	am := newTestAgentManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, &recoveryTestStore{})
 
@@ -476,7 +476,7 @@ func TestRecoverRejectsSelectedContractRouteRecoveryFingerprintMismatch(t *testi
 	bus := &recoveryTestBus{
 		selectedRouteRecoveries: []SelectedContractRouteRecoveryRecord{record},
 	}
-	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+	am := newTestAgentManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, &recoveryTestStore{})
 
@@ -595,7 +595,7 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 		}},
 	}
 	var hydrated models.AgentConfig
-	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+	am := newTestAgentManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
 		hydrated = cfg
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, store)
@@ -637,7 +637,7 @@ func TestRecover_UsesCanonicalPipelineReplayAftermathDiagnostics(t *testing.T) {
 			childID: {"agent-a"},
 		},
 	}
-	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+	am := newTestAgentManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, &recoveryTestStore{})
 
@@ -683,10 +683,10 @@ func TestRecoverWithStartupReplayDiagnostics_LogsCanonicalManagerReplayAftermath
 		},
 	}
 	bus := &recoveryTestBus{}
-	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+	am := newTestAgentManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
 		return startupReplayTestAgent{id: cfg.ID}, nil
 	}, store)
-	am.inFlight["agent-a|evt-inflight"] = struct{}{}
+	am.activeEventKeys["agent-a|evt-inflight"] = struct{}{}
 
 	summary, err := am.RecoverWithStartupReplayDiagnostics(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
 	if err != nil {
@@ -743,7 +743,7 @@ func TestReplayAgentBacklog_DoesNotEmitStartupAftermathOutsideStartupRecovery(t 
 		},
 	}
 	bus := &recoveryTestBus{}
-	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+	am := newTestAgentManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
 		return startupReplayTestAgent{id: cfg.ID}, nil
 	}, store)
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
@@ -779,7 +779,7 @@ func TestReplayBacklogReportsDirectReplayCount(t *testing.T) {
 			},
 		},
 	}
-	am := NewAgentManager(nil, func(cfg models.AgentConfig) (Agent, error) {
+	am := newTestAgentManager(t, nil, func(cfg models.AgentConfig) (Agent, error) {
 		return startupReplayTestAgent{id: cfg.ID}, nil
 	}, store)
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{

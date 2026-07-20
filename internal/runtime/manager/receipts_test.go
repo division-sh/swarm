@@ -69,7 +69,7 @@ func (projectedEmergencyBudgetGuard) IsEmergency(string) bool       { return tru
 func (projectedEmergencyBudgetGuard) IsThrottle(string) bool        { return true }
 
 func TestProjectedBudgetEmergencySuppressesDeliveryButNotThresholdEvent(t *testing.T) {
-	am := NewAgentManagerWithOptions(&recordingReceiptBus{}, nil, AgentManagerOptions{Budget: projectedEmergencyBudgetGuard{}})
+	am := newTestAgentManagerWithOptions(t, &recordingReceiptBus{}, nil, AgentManagerOptions{Budget: projectedEmergencyBudgetGuard{}})
 	registerReceiptTestAgent(t, am, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-a", EntityID: "entity-a"})
 	work := eventtest.RunCreatingRootIngress("evt-work", events.EventType("work.requested"), "source", "", nil, 0, "", "", events.EventEnvelope{}, time.Now())
 	if suppressed, reason := am.shouldSuppressForBudget("agent-a", work); !suppressed || reason != "suppressed by budget emergency guardrail" {
@@ -131,7 +131,7 @@ func TestWriteReceiptConvergesNormalRunCompletionAfterReceiptPersists(t *testing
 		},
 		found: true,
 	}
-	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{}, store)
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{}, store)
 
 	am.writeReceipt(testAuthorActivityContext(context.Background()), receiptTestEvent("event-1"), "agent-1", ReceiptStatusProcessed, nil)
 
@@ -154,7 +154,7 @@ func TestWriteReceiptConvergesNormalRunCompletionAfterReceiptRetryPersists(t *te
 		found:      true,
 		upsertErrs: []error{context.Canceled, nil},
 	}
-	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{}, store)
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{}, store)
 
 	am.writeReceipt(testAuthorActivityContext(context.Background()), receiptTestEvent("event-1"), "agent-1", ReceiptStatusProcessed, nil)
 
@@ -254,7 +254,7 @@ func (a partialOutputRetryAgent) OnEvent(_ context.Context, inbound events.Event
 func TestProcessEventDeterministicOutputIdentitySurvivesPartialSuccessRetry(t *testing.T) {
 	store := &partialOutputRetryStore{persisted: map[string]bool{}}
 	bus := &partialOutputRetryBus{store: store, failSecond: true}
-	manager := NewAgentManager(bus, nil, store)
+	manager := newTestAgentManager(t, bus, nil, store)
 	inbound := eventtest.RunCreatingRootIngress(uuid.NewString(), "input.received", "gateway", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 	agent := partialOutputRetryAgent{id: "agent-a"}
 
@@ -305,7 +305,7 @@ func registerReceiptTestAgent(t *testing.T, am *AgentManager, cfg runtimeactors.
 func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.T) {
 	bus := &recordingReceiptBus{}
 	pauseCalls := 0
-	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
 		RuntimeIngressSafetyPause: func(ctx context.Context, reason string, failure *runtimefailures.Envelope) error {
 			pauseCalls++
 			return bus.Publish(ctx, eventtest.RuntimeControl("", events.EventType("platform.paused"),
@@ -378,7 +378,7 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 
 func TestMaybeTripAuthCircuitBreaker_PreservesCanceledEventLineage(t *testing.T) {
 	bus := &recordingReceiptBus{}
-	am := NewAgentManager(bus, nil)
+	am := newTestAgentManager(t, bus, nil)
 
 	inbound := eventtest.RunCreatingRootIngress("evt-canceled",
 		events.EventType("work.requested"), "", "", nil, 0, "run-canceled", "", events.EventEnvelope{}, time.Time{})
@@ -433,7 +433,7 @@ func validateCurrentPlatformEventPayloadForManagerTest(t testing.TB, eventType s
 }
 
 func TestRecordDeadLetterEscalation_RequiresThreshold(t *testing.T) {
-	am := NewAgentManager(nil, nil)
+	am := newTestAgentManager(t, nil, nil)
 	now := time.Now().UTC()
 
 	for i := 0; i < deadLetterEscalationThreshold-1; i++ {
@@ -486,7 +486,7 @@ func TestMaybeEscalateDeadLetter_PublishesTypedFlowInstanceEnvelope(t *testing.T
 			Failure:    testFailure("handler_failed"),
 		},
 	}
-	am := NewAgentManager(bus, nil)
+	am := newTestAgentManager(t, bus, nil)
 	am.store = store
 	registerReceiptTestAgent(t, am, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
@@ -524,7 +524,7 @@ func TestMaybeEscalateDeadLetter_PublishesTypedFlowInstanceEnvelope(t *testing.T
 
 func TestHandleAgentLoopPanic_PublishesTypedFlowInstanceEnvelope(t *testing.T) {
 	bus := &recordingReceiptBus{}
-	am := NewAgentManager(bus, nil)
+	am := newTestAgentManager(t, bus, nil)
 	registerReceiptTestAgent(t, am, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-a",
@@ -578,7 +578,7 @@ func TestHandleAgentLoopPanic_PublishesTypedFlowInstanceEnvelope(t *testing.T) {
 }
 
 func TestRecordPoisonQuarantine_RequiresDistinctEntities(t *testing.T) {
-	am := NewAgentManager(nil, nil)
+	am := newTestAgentManager(t, nil, nil)
 
 	if count, emit := am.recordPoisonQuarantine("item.failed", "ent-1"); emit || count != 1 {
 		t.Fatalf("first poison count=%d emit=%v, want count=1 emit=false", count, emit)
@@ -599,7 +599,7 @@ func TestRecordPoisonQuarantine_RequiresDistinctEntities(t *testing.T) {
 
 func TestProcessEvent_PropagatesInboundParentWithoutTraceSeeding(t *testing.T) {
 	agent := &traceRecordingAgent{}
-	am := NewAgentManager(nil, nil)
+	am := newTestAgentManager(t, nil, nil)
 	evt := eventtest.RunCreatingRootIngress("evt-123",
 		events.EventType("discovery/market_research.scan_assigned"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 	evt = eventtest.ForDelivery(evt, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:agent-delivery"}})
@@ -639,7 +639,7 @@ func (s *deliveryLifecycleStoreStub) ActiveRunDeliveryQuiesced(context.Context, 
 func TestProcessEvent_LogsLaunchingDeliveryLifecycleTransition(t *testing.T) {
 	bus := &recordingReceiptBus{}
 	store := &deliveryLifecycleStoreStub{}
-	am := NewAgentManager(bus, nil, store)
+	am := newTestAgentManager(t, bus, nil, store)
 	evt := eventtest.RunCreatingRootIngress("evt-1", events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 	agent := traceRecordingAgent{parent: ""}
 
@@ -665,7 +665,7 @@ func TestProcessEvent_LogsLaunchingDeliveryLifecycleTransition(t *testing.T) {
 func TestProcessEvent_SkipsLateOutputAndReceiptAfterDestructiveResetQuiescence(t *testing.T) {
 	bus := &recordingReceiptBus{}
 	store := &deliveryLifecycleStoreStub{quiescedAfterChecks: 2}
-	am := NewAgentManager(bus, nil, store)
+	am := newTestAgentManager(t, bus, nil, store)
 	agent := &outputRecordingAgent{}
 
 	result := am.processEventDetailed(testAuthorActivityContext(context.Background()), agent, eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
@@ -719,7 +719,7 @@ func TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions(t *te
 			store := &deliveryLifecycleStoreStub{}
 			store.receipt = tc.receipt
 			store.found = true
-			am := NewAgentManager(bus, nil, store)
+			am := newTestAgentManager(t, bus, nil, store)
 
 			am.writeReceipt(testAuthorActivityContext(context.Background()), receiptTestEvent("evt-1"), "agent-a", ReceiptStatusError, testFailure("handler_failed"))
 
@@ -759,7 +759,7 @@ func TestWriteReceipt_RetryAfterContextCancellationStillLogsLifecycleTransition(
 	}
 	store.found = true
 	store.upsertErrs = []error{context.Canceled, nil}
-	am := NewAgentManager(bus, nil, store)
+	am := newTestAgentManager(t, bus, nil, store)
 
 	am.writeReceipt(testAuthorActivityContext(context.Background()), receiptTestEvent("evt-1"), "agent-a", ReceiptStatusError, testFailure("handler_failed"))
 

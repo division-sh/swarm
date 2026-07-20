@@ -28,6 +28,7 @@ import (
 	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -369,6 +370,7 @@ type serveRuntimeBundleContextRequest struct {
 	UseStartupRecovery     bool
 	RequireBundleScopeName bool
 	RuntimeInstanceID      string
+	ProcessWorkOwner       *worklifetime.Process
 }
 
 func (b serveRuntimeBundle) serveIdentityDetail() string {
@@ -682,6 +684,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			BundleFingerprint:                bootIdentity.Fingerprint,
 			BundleSourceFact:                 bundleSourceFact,
 			RuntimeInstanceID:                strings.TrimSpace(req.RuntimeInstanceID),
+			ProcessWorkOwner:                 req.ProcessWorkOwner,
 			Credentials:                      req.Credentials,
 			ManagedCredentials:               req.ManagedCredentials,
 			ProviderCredentials:              req.ProviderCredentials,
@@ -738,6 +741,12 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.RuntimeScope(runtimeInstanceID))
 	presenter := newServeLifecyclePresenter(opts)
 	defer presenter.finish()
+	shutdownGrace, err := runtimemanager.ResolveShutdownGrace(opts.ShutdownGrace)
+	if err != nil {
+		presenter.fail(1, "serve_admission", err)
+		return 2
+	}
+	opts.ShutdownGrace = shutdownGrace
 	if opts.NoFeed && !opts.Dev {
 		presenter.fail(1, "serve_admission", fmt.Errorf("--no-feed requires --dev"))
 		return 2
@@ -827,12 +836,9 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	}
 	presenter.recordStore(storeSelection)
 	storeFacade := stores.facade()
-	storeClosed := false
+	storeOwner := newSelectedStoreOwner(storeFacade)
 	defer func() {
-		if storeClosed {
-			return
-		}
-		if err := storeFacade.closeWithError(); err != nil {
+		if err := storeOwner.CloseUnactivated(); err != nil {
 			presenter.cleanupFailure("store shutdown", err)
 		}
 	}()
@@ -965,6 +971,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		return 3
 	}
 
+	processWorkOwner := worklifetime.NewProcess()
 	runtimeContexts := make([]serveRuntimeBundleContext, 0, len(loadedBundles))
 	workspaceLabels := serveLifecycleWorkspaceLabels(loadedBundles)
 	for i, loaded := range loadedBundles {
@@ -1008,6 +1015,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			UseStartupRecovery:     len(loadedBundles) == 1,
 			RequireBundleScopeName: len(loadedBundles) > 1,
 			RuntimeInstanceID:      runtimeInstanceID,
+			ProcessWorkOwner:       processWorkOwner,
 		})
 		if err != nil {
 			presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) bool {
@@ -1105,18 +1113,33 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	if len(pinnedBundleHashes) > 0 {
 		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins persisted bundle contexts for the process; dynamic project reload is not supported in this mode")
 	}
+	if err := storeOwner.Activate(processWorkOwner); err != nil {
+		presenter.fail(5, "runtime_context", err)
+		return 1
+	}
 	var apiServer, mcpServer *http.Server
 	var storyFollower *serveAuthorActivityFollower
 	defer func() {
+		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), opts.ShutdownGrace)
+		defer cancelShutdown()
+		deadline, _ := shutdownCtx.Deadline()
 		storyFollower.StopAndWait()
-		shutdownErr := shutdownHTTPServer("api", apiServer)
-		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer("mcp", mcpServer))
-		shutdownErr = errors.Join(shutdownErr, closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[1:], runtimeContextManager, opts))
-		shutdownErr = errors.Join(shutdownErr, closeServeRuntime(context.Background(), supervisor, opts, workspaces))
+		shutdownErr := shutdownHTTPServer(shutdownCtx, "api", apiServer)
+		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "mcp", mcpServer))
+		shutdownErr = errors.Join(shutdownErr, closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[1:], runtimeContextManager, opts, deadline))
+		shutdownErr = errors.Join(shutdownErr, closeServeRuntime(context.Background(), supervisor, opts, workspaces, deadline))
 		shutdownErr = errors.Join(shutdownErr, cleanupLoadedBundleSources())
 		bundleSourcesCleaned = true
-		shutdownErr = errors.Join(shutdownErr, storeFacade.closeWithError())
-		storeClosed = true
+		processWorkOwner.Retire()
+		receipt, joinErr := processWorkOwner.Join(shutdownCtx)
+		if joinErr != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("process work join timed out after %s: %w", opts.ShutdownGrace, joinErr))
+			receipt, joinErr = processWorkOwner.Join(context.Background())
+		}
+		shutdownErr = errors.Join(shutdownErr, joinErr)
+		if joinErr == nil {
+			shutdownErr = errors.Join(shutdownErr, storeOwner.CloseActivated(receipt))
+		}
 		presenter.shutdown(shutdownErr)
 	}()
 	apiStoreCaps, err := storeFacade.apiCapabilities(selectedAPICapabilityRequest{
@@ -1167,7 +1190,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		Idempotency:               stores.IdempotencyStore,
 		Events:                    rt.Bus,
 		RunControl:                rt.RunControl,
-		StandingServices:          &serveStandingServiceController{store: rt.Stores.PipelineStore, contexts: runtimeContexts, manager: runtimeContextManager},
+		StandingServices:          &serveStandingServiceController{store: rt.Stores.PipelineStore, manager: runtimeContextManager},
 		RuntimeIngress:            rt.RuntimeIngress,
 		RuntimeContexts:           apiStoreCaps.RuntimeContexts,
 		ResetCoordinator:          apiStoreCaps.ResetCoordinator,
@@ -1186,6 +1209,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	apiV1Handler, err := apiv1.NewHandler(apiv1.Options{
 		PlatformSpecPath: resolvedPlatformSpecPath,
 		AuthTokens:       apiAuth.Tokens,
+		ProcessWorkOwner: processWorkOwner,
 		Handlers:         apiv1.OperatorReadHandlers(apiReadOptions),
 		Subscriptions:    apiv1.OperatorSubscriptions(apiReadOptions),
 	})
@@ -1199,6 +1223,8 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	}
 	apiServer = newAPIServer(&ready, apiV1Handler, inboundHandler, ctx)
 	mcpServer = newMCPServer(rt.ToolGateway)
+	apiServer.Handler = processOwnedHTTPHandler(processWorkOwner, apiServer.Handler)
+	mcpServer.Handler = processOwnedHTTPHandler(processWorkOwner, mcpServer.Handler)
 	if err := projectContextRegistration.WriteFinal(runtimeInstanceID, apiListener.Addr(), apiAuth, resolvedPaths, storeSelection, mountSources); err != nil {
 		presenter.fail(20, "context_registry", err)
 		return 3
@@ -1208,8 +1234,25 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.runtimeFailure(subject, err)
 		cancelServe()
 	}
-	go serveHTTPServer("api", apiServer, apiListener, runtimeFailure)
-	go serveHTTPServer("mcp", mcpServer, mcpListener, runtimeFailure)
+	apiServerLease, err := processWorkOwner.Begin(ctx)
+	if err != nil {
+		presenter.fail(20, "http_listener_bind", fmt.Errorf("admit api server: %w", err))
+		return 1
+	}
+	mcpServerLease, err := processWorkOwner.Begin(ctx)
+	if err != nil {
+		_ = apiServerLease.Done()
+		presenter.fail(20, "http_listener_bind", fmt.Errorf("admit mcp server: %w", err))
+		return 1
+	}
+	go func() {
+		defer func() { _ = apiServerLease.Done() }()
+		serveHTTPServer("api", apiServer, apiListener, runtimeFailure)
+	}()
+	go func() {
+		defer func() { _ = mcpServerLease.Done() }()
+		serveHTTPServer("mcp", mcpServer, mcpListener, runtimeFailure)
+	}()
 	presenter.recordBootWarnings(bootReport)
 	if err := startServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager); err != nil {
 		presenter.fail(22, "ready", err)
@@ -1225,7 +1268,10 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	if opts.TestRuntimeContextsReadyHook != nil {
 		opts.TestRuntimeContextsReadyHook(runtimeContextManager)
 	}
-	startServeRunStalledEscalation(ctx, stores, runtimeContexts, rt.Bus)
+	if err := startServeRunStalledEscalation(ctx, processWorkOwner, stores, runtimeContexts, rt.Bus); err != nil {
+		presenter.fail(22, "ready", err)
+		return 1
+	}
 	presenter.boot(20, "http_listener_bind", "ok", fmt.Sprintf("api_listener=%s api_routes=%s mcp_listener=%s mcp_routes=%s", apiListener.Addr(), serveAPIRoutes, mcpListener.Addr(), serveMCPRoutes))
 	if err := waitForServeHealthEndpoints(ctx, apiListener.Addr()); err != nil {
 		presenter.fail(21, "health_endpoints_respond", err)
@@ -1281,7 +1327,11 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		if err := presenter.writeFeedReady(); err != nil {
 			presenter.storyWarning(err)
 		} else {
-			storyFollower = newServeAuthorActivityFollower(ctx, storyReader, presenter, runtimeInstanceID, runtimeContextManager, storyHead, runtimeauthoractivity.NewHumanRenderer(serveAuthorActivityRenderOptions(opts.Output, opts.NoColor)))
+			storyFollower, err = newServeAuthorActivityFollower(ctx, processWorkOwner, storyReader, presenter, runtimeInstanceID, runtimeContextManager, storyHead, runtimeauthoractivity.NewHumanRenderer(serveAuthorActivityRenderOptions(opts.Output, opts.NoColor)))
+			if err != nil {
+				presenter.fail(22, "ready", err)
+				return 1
+			}
 		}
 	}
 
@@ -1316,10 +1366,9 @@ func reconcileServeStandingServices(ctx context.Context, contexts []serveRuntime
 }
 
 type serveStandingServiceController struct {
-	store    *runtimepipeline.WorkflowInstanceStore
-	contexts []serveRuntimeBundleContext
-	manager  *runtime.RuntimeContextManager
-	mu       sync.Mutex
+	store   *runtimepipeline.WorkflowInstanceStore
+	manager *runtime.RuntimeContextManager
+	mu      sync.Mutex
 }
 
 func (c *serveStandingServiceController) SuspendStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
@@ -1328,13 +1377,25 @@ func (c *serveStandingServiceController) SuspendStandingService(ctx context.Cont
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	owner, err := c.closeAndDrain(ctx, operation.ServiceID)
+	use, _, err := c.manager.AcquireStandingService(ctx, operation.ServiceID)
+	if err != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, err
+	}
+	defer func() { _ = use.Done() }()
+	ctx = use.WorkContext()
+	owner := use.Runtime()
+	owner, err = c.closeAndDrain(ctx, operation.ServiceID, owner)
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
 	result, err := c.store.SuspendStandingService(ctx, operation)
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, errors.Join(err, c.restoreAdmission(owner, operation.ServiceID))
+	}
+	if c.manager != nil {
+		if err := c.manager.RetireStandingServiceOccurrence(ctx, operation.ServiceID); err != nil {
+			return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("retire suspended standing service occurrence: %w", err)
+		}
 	}
 	return result, nil
 }
@@ -1345,16 +1406,21 @@ func (c *serveStandingServiceController) ResumeStandingService(ctx context.Conte
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	use, _, err := c.manager.AcquireStandingService(ctx, operation.ServiceID)
+	if err != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, err
+	}
+	defer func() { _ = use.Done() }()
+	ctx = use.WorkContext()
+	owner := use.Runtime()
 	result, err := c.store.ResumeStandingService(ctx, operation)
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
-	if err := c.publishActiveService(ctx, result.ServiceID); err != nil {
+	if err := c.publishActiveService(ctx, result.ServiceID, owner); err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
-	if owner, err := c.runtimeForStandingService(result.ServiceID); err != nil {
-		return runtimepipeline.StandingServiceReconciliation{}, err
-	} else if owner.InboundGateway != nil {
+	if owner.InboundGateway != nil {
 		if err := owner.InboundGateway.ReopenStandingServiceAdmission(result.ServiceID); err != nil {
 			return runtimepipeline.StandingServiceReconciliation{}, c.failClosedAfterReopen(result.ServiceID, err)
 		}
@@ -1368,7 +1434,14 @@ func (c *serveStandingServiceController) ResetStandingService(ctx context.Contex
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	owner, err := c.closeAndDrain(ctx, operation.ServiceID)
+	use, _, err := c.manager.AcquireStandingService(ctx, operation.ServiceID)
+	if err != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, err
+	}
+	defer func() { _ = use.Done() }()
+	ctx = use.WorkContext()
+	owner := use.Runtime()
+	owner, err = c.closeAndDrain(ctx, operation.ServiceID, owner)
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
@@ -1376,8 +1449,13 @@ func (c *serveStandingServiceController) ResetStandingService(ctx context.Contex
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, errors.Join(err, c.restoreAdmission(owner, operation.ServiceID))
 	}
+	if c.manager != nil {
+		if err := c.manager.RetireStandingServiceOccurrence(ctx, operation.ServiceID); err != nil {
+			return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("retire reset standing service occurrence: %w", err)
+		}
+	}
 	if result.EffectiveState == "active" {
-		if err := c.publishActiveService(ctx, result.ServiceID); err != nil {
+		if err := c.publishActiveService(ctx, result.ServiceID, owner); err != nil {
 			return runtimepipeline.StandingServiceReconciliation{}, err
 		}
 		if owner.InboundGateway != nil {
@@ -1389,10 +1467,9 @@ func (c *serveStandingServiceController) ResetStandingService(ctx context.Contex
 	return result, nil
 }
 
-func (c *serveStandingServiceController) closeAndDrain(ctx context.Context, serviceID string) (*runtime.Runtime, error) {
-	owner, err := c.runtimeForStandingService(serviceID)
-	if err != nil {
-		return nil, err
+func (c *serveStandingServiceController) closeAndDrain(ctx context.Context, serviceID string, owner *runtime.Runtime) (*runtime.Runtime, error) {
+	if owner == nil {
+		return nil, fmt.Errorf("standing service %s runtime owner is unavailable", strings.TrimSpace(serviceID))
 	}
 	if owner.InboundGateway != nil {
 		if err := owner.InboundGateway.CloseStandingServiceAdmission(serviceID); err != nil {
@@ -1409,8 +1486,10 @@ func (c *serveStandingServiceController) closeAndDrain(ctx context.Context, serv
 			return nil, errors.Join(err, c.restoreAdmission(owner, serviceID))
 		}
 	}
-	if err := owner.WaitForQuiescence(ctx); err != nil {
-		return nil, errors.Join(err, c.restoreAdmission(owner, serviceID))
+	if c.manager != nil {
+		if err := c.manager.WaitStandingServiceOccurrence(ctx, serviceID); err != nil {
+			return nil, errors.Join(err, c.restoreAdmission(owner, serviceID))
+		}
 	}
 	return owner, nil
 }
@@ -1440,60 +1519,18 @@ func (c *serveStandingServiceController) failClosedAfterReopen(serviceID string,
 	return reopenErr
 }
 
-func (c *serveStandingServiceController) runtimeForStandingService(serviceID string) (*runtime.Runtime, error) {
-	serviceID = strings.TrimSpace(serviceID)
-	if serviceID == "" {
-		return nil, fmt.Errorf("standing service_id is required")
-	}
-	var owner *runtime.Runtime
-	for _, contextDef := range c.contexts {
-		if contextDef.runtime == nil {
-			continue
-		}
-		candidates, err := contextDef.runtime.PlanStandingServiceCandidates()
-		if err != nil {
-			return nil, err
-		}
-		for _, candidate := range candidates {
-			if candidate.ServiceID != serviceID {
-				continue
-			}
-			if owner != nil && owner != contextDef.runtime {
-				return nil, fmt.Errorf("standing service %s has more than one loaded runtime owner", serviceID)
-			}
-			owner = contextDef.runtime
-		}
-	}
+func (c *serveStandingServiceController) publishActiveService(ctx context.Context, serviceID string, owner *runtime.Runtime) error {
 	if owner == nil {
-		return nil, &runtimepipeline.StandingServiceError{ServiceID: serviceID, Err: runtimepipeline.ErrStandingServiceNotFound}
+		return fmt.Errorf("standing service %s runtime owner is unavailable", strings.TrimSpace(serviceID))
 	}
-	return owner, nil
-}
-
-func (c *serveStandingServiceController) publishActiveService(ctx context.Context, serviceID string) error {
-	for _, contextDef := range c.contexts {
-		if contextDef.runtime == nil {
-			continue
-		}
-		candidates, err := contextDef.runtime.PlanStandingServiceCandidates()
-		if err != nil {
-			return err
-		}
-		for _, candidate := range candidates {
-			if candidate.ServiceID != serviceID {
-				continue
-			}
-			targets, _, err := contextDef.runtime.EnsureStandingServiceTargets(ctx, serviceID)
-			if err != nil {
-				return err
-			}
-			if c.manager != nil {
-				return c.manager.PublishStandingServiceTargets(serviceID, targets)
-			}
-			return nil
-		}
+	targets, _, err := owner.EnsureStandingServiceTargets(ctx, serviceID)
+	if err != nil {
+		return err
 	}
-	return fmt.Errorf("standing service %s is not declared by a loaded runtime context", serviceID)
+	if c.manager == nil {
+		return errors.New("standing service runtime context manager is required")
+	}
+	return c.manager.PublishStandingServiceTargets(serviceID, targets)
 }
 
 func reportServeStandingReadiness(ctx context.Context, owner *runtimepipeline.WorkflowInstanceStore, out io.Writer) error {
@@ -1556,6 +1593,7 @@ func plannedServeRuntimeContexts(contexts []serveRuntimeBundleContext) ([]runtim
 			ContractsRoot:    contextDef.loaded.contractsRoot,
 			PlatformSpecPath: contextDef.loaded.platformSpecPath,
 			Runtime:          contextDef.runtime,
+			WorkOwner:        contextDef.runtime.WorkOccurrence(),
 			StandingTargets:  targets,
 		})
 	}
@@ -1686,13 +1724,13 @@ func serveLifecycleWorkspaceLabels(bundles []serveRuntimeBundle) []string {
 	return labels
 }
 
-func closeServeRuntime(ctx context.Context, supervisor *runtimeProjectSupervisor, opts cliapp.ServeOptions, workspaces cliapp.ServeWorkspaceLifecycle) error {
+func closeServeRuntime(ctx context.Context, supervisor *runtimeProjectSupervisor, opts cliapp.ServeOptions, workspaces cliapp.ServeWorkspaceLifecycle, deadlines ...time.Time) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	var shutdownErr error
 	if supervisor != nil {
-		shutdownOpts := runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
+		shutdownOpts := runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadlines...)}
 		_, shutdownErr = supervisor.CloseProjectWithShutdownOptions(ctx, shutdownOpts)
 	}
 	var cleanupErr error
@@ -1819,6 +1857,7 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 				ContractsRoot:    contextDef.loaded.contractsRoot,
 				PlatformSpecPath: contextDef.loaded.platformSpecPath,
 				Runtime:          contextDef.runtime,
+				WorkOwner:        contextDef.runtime.WorkOccurrence(),
 				StandingTargets:  targets,
 			}); err != nil {
 				rollback()
@@ -1835,18 +1874,18 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 	}
 	return nil
 }
-func closeAdditionalServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager, opts cliapp.ServeOptions) error {
+func closeAdditionalServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager, opts cliapp.ServeOptions, deadlines ...time.Time) error {
 	var shutdownErr error
 	for _, contextDef := range contexts {
 		if contextDef.runtime == nil {
 			continue
 		}
 		if manager != nil {
-			result := manager.DeactivateBundleHashWithOptions(contextDef.bundleSourceFact.BundleHash, runtime.RuntimeContextCauseUnloaded, runtime.ShutdownOptions{Grace: opts.ShutdownGrace})
+			result := manager.DeactivateBundleHashWithOptions(contextDef.bundleSourceFact.BundleHash, runtime.RuntimeContextCauseUnloaded, runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadlines...)})
 			shutdownErr = errors.Join(shutdownErr, result.ShutdownErr)
 			continue
 		}
-		if err := contextDef.runtime.ShutdownWithOptions(runtime.ShutdownOptions{Grace: opts.ShutdownGrace}); err != nil {
+		if err := contextDef.runtime.ShutdownWithOptions(runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadlines...)}); err != nil {
 			shutdownErr = errors.Join(shutdownErr, err)
 		}
 	}
@@ -2177,6 +2216,23 @@ type systemWorkspaceContainerLister interface {
 	SystemWorkspaceContainers() []string
 }
 
+func processOwnedHTTPHandler(owner *worklifetime.Process, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if owner == nil || next == nil {
+			http.Error(w, "runtime process unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		lease, err := owner.Begin(r.Context())
+		if err != nil {
+			http.Error(w, "runtime process is retiring", http.StatusServiceUnavailable)
+			return
+		}
+		defer func() { _ = lease.Done() }()
+		ctx := worklifetime.WithProcess(lease.Context(), owner)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 func systemWorkspaceContainers(lifecycle workspace.Lifecycle) []string {
 	lister, ok := lifecycle.(systemWorkspaceContainerLister)
 	if !ok || lister == nil {
@@ -2322,16 +2378,26 @@ func probeServeHealthEndpoint(ctx context.Context, client *http.Client, endpoint
 	return nil
 }
 
-func shutdownHTTPServer(name string, server *http.Server) error {
+func shutdownHTTPServer(ctx context.Context, name string, server *http.Server) error {
 	if server == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	if err := server.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("%s server shutdown: %w", name, err)
+		closeErr := server.Close()
+		return errors.Join(fmt.Errorf("%s server shutdown: %w", name, err), closeErr)
 	}
 	return nil
+}
+
+func remainingServeShutdownGrace(fallback time.Duration, deadlines ...time.Time) time.Duration {
+	if len(deadlines) == 0 || deadlines[0].IsZero() {
+		return fallback
+	}
+	remaining := time.Until(deadlines[0])
+	if remaining <= 0 {
+		return time.Nanosecond
+	}
+	return remaining
 }
 
 func addrString(addr net.Addr) string {

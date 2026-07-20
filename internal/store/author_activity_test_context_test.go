@@ -5,9 +5,13 @@ import (
 	"database/sql"
 	"reflect"
 	"sort"
+	"sync"
 	"testing"
+	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -15,6 +19,65 @@ import (
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
 const authorActivityTestBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+type storeTestWorkFixture struct {
+	process *worklifetime.Process
+	runtime *worklifetime.RuntimeOccurrence
+}
+
+var storeTestWorkFixtures sync.Map
+
+func storeTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
+	t.Helper()
+	if existing, ok := storeTestWorkFixtures.Load(t); ok {
+		return existing.(*storeTestWorkFixture).runtime
+	}
+	fixture := &storeTestWorkFixture{process: worklifetime.NewProcess()}
+	owner, err := fixture.process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+		BundleHash:        authorActivityTestBundleHash,
+	})
+	if err != nil {
+		t.Fatalf("create store test work owner: %v", err)
+	}
+	fixture.runtime = owner
+	actual, loaded := storeTestWorkFixtures.LoadOrStore(t, fixture)
+	if loaded {
+		_, _ = owner.RetireAndWait(context.Background())
+		return actual.(*storeTestWorkFixture).runtime
+	}
+	t.Cleanup(func() {
+		defer storeTestWorkFixtures.Delete(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := fixture.runtime.RetireAndWait(ctx); err != nil {
+			t.Errorf("retire store test work owner: %v", err)
+			return
+		}
+		fixture.process.Retire()
+		if _, err := fixture.process.Join(ctx); err != nil {
+			t.Errorf("join store test process owner: %v", err)
+		}
+	})
+	return owner
+}
+
+func storeTestWorkContext(t *testing.T, ctx context.Context) context.Context {
+	t.Helper()
+	return worklifetime.WithOccurrence(ctx, storeTestWorkOwner(t))
+}
+
+func newStoreTestEventBus(t *testing.T, store runtimebus.EventStore, options ...runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
+	t.Helper()
+	var opts runtimebus.EventBusOptions
+	if len(options) > 0 {
+		opts = options[0]
+	}
+	if opts.WorkOwner == nil {
+		opts.WorkOwner = storeTestWorkOwner(t)
+	}
+	return runtimebus.NewEventBusWithOptions(store, opts)
+}
 
 func testAuthorActivityContext() context.Context {
 	return testAuthorActivityContextForBundle(authorActivityTestBundleHash)

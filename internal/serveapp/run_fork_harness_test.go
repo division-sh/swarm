@@ -3,6 +3,7 @@ package serveapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -317,7 +319,19 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			}
 			return 1
 		}
-		result, err := runForkOwner.execute(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
+		bundleHash, err := runtimecontracts.BundleHash(bundle)
+		if err != nil {
+			writeForkContractLoadError(out, "fork failed: hash selected contracts", err)
+			return cliapp.CLIExitValidation
+		}
+		executionCtx, settleExecution, err := runForkSelectedExecutionContext(ctx, bundleHash)
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: create selected execution owner: %v\n", err)
+			}
+			return 1
+		}
+		result, executionErr := runForkOwner.execute(executionCtx, runtimerunforkexecution.SelectedContractExecutionRequest{
 			SourceRunID: strings.TrimSpace(*runID),
 			At:          strings.TrimSpace(*at),
 			SourceLoader: runtimerunforkexecution.ContractBundleSourceLoader{
@@ -339,6 +353,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 				ProviderCredentials: providerCredentialStore,
 			},
 		})
+		err = errors.Join(executionErr, settleExecution())
 		if err != nil {
 			if out != nil {
 				fmt.Fprintf(out, "fork failed: %v\n", err)
@@ -463,6 +478,28 @@ func runForkRuntimeOwnerContext(ctx context.Context) context.Context {
 	runtimeInstanceID := uuid.NewString()
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.RuntimeScope(runtimeInstanceID))
+}
+
+func runForkSelectedExecutionContext(ctx context.Context, bundleHash string) (context.Context, func() error, error) {
+	process := worklifetime.NewProcess()
+	runtimeInstanceID := uuid.NewString()
+	owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: runtimeInstanceID,
+		BundleHash:        bundleHash,
+	})
+	if err != nil {
+		return ctx, nil, err
+	}
+	ctx = worklifetime.WithRuntimeOccurrence(ctx, owner)
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, bundleHash))
+	settle := func() error {
+		_, retireErr := owner.RetireAndWait(context.Background())
+		process.Retire()
+		_, joinErr := process.Join(context.Background())
+		return errors.Join(retireErr, joinErr)
+	}
+	return ctx, settle, nil
 }
 
 func writeForkContractLoadError(out io.Writer, prefix string, err error) {

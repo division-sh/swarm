@@ -92,14 +92,14 @@ func TestOpenAIResponsesRuntimeConversationToolBudgetAndPersistence(t *testing.T
 		t.Fatalf("RequireProviderContract: %v", err)
 	}
 
-	ctx := runtimeactors.WithActor(harness.Context("openai-responses-tool-loop"), runtimeactors.AgentConfig{
+	ctx := llmTestWorkContext(t, runtimeactors.WithActor(harness.Context("openai-responses-tool-loop"), runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-1",
 		Model:         "cheap",
 		EntityID:      "entity-1",
 		FlowPath:      "support/inst-1",
 		Memory:        testMemory(),
-	})
+	}))
 	ctx = withTestMemory(ctx, "agent-1", "support/inst-1")
 	conv := NewConversation("agent-1", "task-1", "system prompt", []ToolDefinition{{
 		Name:        "lookup",

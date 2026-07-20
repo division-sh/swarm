@@ -15,6 +15,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store"
@@ -54,6 +55,22 @@ func registerRunStatusEventCatalog(t *testing.T, registrar runStatusEventCatalog
 		t.Fatalf("register run status event catalog: %v", err)
 	}
 	t.Cleanup(lease.Release)
+}
+
+func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore) (*runtimebus.EventBus, *worklifetime.RuntimeOccurrence) {
+	t.Helper()
+	workOwner := newSupervisorTestRuntimeOccurrence(t, runStatusTestBundleHash)
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		RuntimeInstanceID: runStatusTestRuntimeInstanceID,
+		BundleSourceFact: runtimecorrelation.BundleSourceFact{
+			BundleHash: runStatusTestBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral,
+		},
+		WorkOwner: workOwner,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	return bus, workOwner
 }
 
 func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, entityID string) string {
@@ -152,10 +169,7 @@ func waitRunStatusEventSettlement(t *testing.T, db *sql.DB, runID string, wantEv
 func TestRunState_UsesDurableCompletedRunState(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	eb, err := runtimebus.NewEventBus(pg)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
+	eb, _ := newRunStatusEventBus(t, pg)
 	registerRunStatusEventCatalog(t, pg)
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -189,10 +203,7 @@ func TestRunState_UsesDurableCompletedRunState(t *testing.T) {
 func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	eb, err := runtimebus.NewEventBus(pg)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
+	eb, workOwner := newRunStatusEventBus(t, pg)
 	registerRunStatusEventCatalog(t, pg)
 
 	agentStarted := make(chan struct{}, 1)
@@ -203,12 +214,12 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 		started:       agentStarted,
 		release:       releaseAgent,
 	}
-	am := runtimemanager.NewAgentManager(eb, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+	am := runtimemanager.NewAgentManagerWithOptions(eb, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		if cfg.ID != testAgent.id {
 			t.Fatalf("unexpected agent id: %q", cfg.ID)
 		}
 		return testAgent, nil
-	}, pg)
+	}, runtimemanager.AgentManagerOptions{WorkOwner: workOwner}, pg)
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            testAgent.id,
@@ -310,10 +321,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	eb, err := runtimebus.NewEventBus(pg)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
+	eb, workOwner := newRunStatusEventBus(t, pg)
 	registerRunStatusEventCatalog(t, pg)
 
 	agentStarted := make(chan struct{}, 1)
@@ -324,12 +332,12 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 		started:       agentStarted,
 		release:       releaseAgent,
 	}
-	am := runtimemanager.NewAgentManager(eb, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+	am := runtimemanager.NewAgentManagerWithOptions(eb, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		if cfg.ID != testAgent.id {
 			t.Fatalf("unexpected agent id: %q", cfg.ID)
 		}
 		return testAgent, nil
-	}, pg)
+	}, runtimemanager.AgentManagerOptions{WorkOwner: workOwner}, pg)
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            testAgent.id,
@@ -386,8 +394,8 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 	if activeDeliveries == 0 {
 		t.Fatal("expected same-run active delivery after builder timeout window")
 	}
-	if got := am.InFlightCount(); got == 0 {
-		t.Fatal("expected live in-flight manager work after builder timeout window")
+	if got := workOwner.ActiveCount(); got == 0 {
+		t.Fatal("expected runtime occurrence to retain active manager work after builder timeout window")
 	}
 	close(releaseAgent)
 	waitRunStatusEventSettlement(t, db, runID, 2)

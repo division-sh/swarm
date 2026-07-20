@@ -4,11 +4,14 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -19,6 +22,48 @@ var authorActivityTestBundleSourceFact = runtimecorrelation.BundleSourceFact{
 	BundleHash:        "bundle-v1:sha256:" + strings.Repeat("a", 64),
 	BundleSource:      "ephemeral",
 	BundleFingerprint: "sha256:" + strings.Repeat("a", 64),
+}
+
+var conformanceTestProcessOwners sync.Map
+
+func conformanceTestProcessOwner(t testing.TB) *worklifetime.Process {
+	t.Helper()
+	if existing, ok := conformanceTestProcessOwners.Load(t); ok {
+		return existing.(*worklifetime.Process)
+	}
+	process := worklifetime.NewProcess()
+	actual, loaded := conformanceTestProcessOwners.LoadOrStore(t, process)
+	if loaded {
+		return actual.(*worklifetime.Process)
+	}
+	t.Cleanup(func() {
+		defer conformanceTestProcessOwners.Delete(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := process.Join(ctx); err != nil {
+			t.Errorf("join conformance test process owner: %v", err)
+		}
+	})
+	return process
+}
+
+func conformanceTestRuntimeOccurrence(t testing.TB, bundleHash string) *worklifetime.RuntimeOccurrence {
+	t.Helper()
+	owner, err := conformanceTestProcessOwner(t).NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+		BundleHash:        strings.TrimSpace(bundleHash),
+	})
+	if err != nil {
+		t.Fatalf("create conformance test runtime occurrence: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := owner.RetireAndWait(ctx); err != nil {
+			t.Errorf("retire conformance test runtime occurrence: %v", err)
+		}
+	})
+	return owner
 }
 
 func testAuthorActivityContext(ctx context.Context) context.Context {
@@ -32,12 +77,16 @@ func testAuthorActivityRuntimeContext(ctx context.Context) context.Context {
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.RuntimeScope(authorActivityTestRuntimeInstanceID))
 }
 
-func testAuthorActivityRuntimeOptions(opts runtimepkg.RuntimeOptions) runtimepkg.RuntimeOptions {
+func testAuthorActivityRuntimeOptions(t testing.TB, opts runtimepkg.RuntimeOptions) runtimepkg.RuntimeOptions {
+	t.Helper()
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
 	if strings.TrimSpace(opts.BundleSourceFact.BundleHash) == "" {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
+	}
+	if opts.ProcessWorkOwner == nil {
+		opts.ProcessWorkOwner = conformanceTestProcessOwner(t)
 	}
 	return opts
 }
@@ -77,6 +126,9 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 	}
 	if strings.TrimSpace(opts.BundleSourceFact.BundleHash) == "" {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
+	}
+	if opts.WorkOwner == nil {
+		opts.WorkOwner = conformanceTestRuntimeOccurrence(t, opts.BundleSourceFact.BundleHash)
 	}
 	if registrar, ok := eventStore.(testAuthorActivityCatalogRegistrar); ok {
 		descriptors := testAuthorActivityEventDescriptors(t, opts)

@@ -74,12 +74,12 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 			}
 		}
 	}
-	if !am.markEventInFlight(agent.ID(), evt.ID()) {
+	if !am.claimActiveEvent(agent.ID(), evt.ID()) {
 		record.Outcome = startupManagerReplayOutcomeSkipped
 		record.ReasonCode = startupManagerReplayReasonDuplicateInFlight
 		return eventProcessResult{record: record}
 	}
-	defer am.unmarkEventInFlight(agent.ID(), evt.ID())
+	defer am.releaseActiveEvent(agent.ID(), evt.ID())
 	if skip, reason := am.shouldSkipEventDetailed(agent.ID(), evt.ID()); skip {
 		record.Outcome = startupManagerReplayOutcomeSkipped
 		record.ReasonCode = reason
@@ -277,32 +277,32 @@ func (am *AgentManager) shouldSuppressForBudget(agentID string, evt events.Event
 	return false, ""
 }
 
-func (am *AgentManager) markEventInFlight(agentID, eventID string) bool {
+func (am *AgentManager) claimActiveEvent(agentID, eventID string) bool {
 	agentID = strings.TrimSpace(agentID)
 	eventID = strings.TrimSpace(eventID)
 	if agentID == "" || eventID == "" {
 		return true
 	}
 	key := agentID + "|" + eventID
-	am.inFlightMu.Lock()
-	defer am.inFlightMu.Unlock()
-	if _, exists := am.inFlight[key]; exists {
+	am.activeEventMu.Lock()
+	defer am.activeEventMu.Unlock()
+	if _, exists := am.activeEventKeys[key]; exists {
 		return false
 	}
-	am.inFlight[key] = struct{}{}
+	am.activeEventKeys[key] = struct{}{}
 	return true
 }
 
-func (am *AgentManager) unmarkEventInFlight(agentID, eventID string) {
+func (am *AgentManager) releaseActiveEvent(agentID, eventID string) {
 	agentID = strings.TrimSpace(agentID)
 	eventID = strings.TrimSpace(eventID)
 	if agentID == "" || eventID == "" {
 		return
 	}
 	key := agentID + "|" + eventID
-	am.inFlightMu.Lock()
-	delete(am.inFlight, key)
-	am.inFlightMu.Unlock()
+	am.activeEventMu.Lock()
+	delete(am.activeEventKeys, key)
+	am.activeEventMu.Unlock()
 }
 
 func (am *AgentManager) shouldSkipEvent(agentID, eventID string) bool {

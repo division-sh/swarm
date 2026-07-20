@@ -76,10 +76,12 @@ func (startupReadinessWorkflowModule) ActionRegistry() runtimepipeline.ActionReg
 	return nil
 }
 
-func newStartupReadinessTestRuntime(nodes ...runtimepipeline.BackgroundNode) *Runtime {
+func newStartupReadinessTestRuntime(t testing.TB, nodes ...runtimepipeline.BackgroundNode) *Runtime {
+	t.Helper()
 	return &Runtime{
-		Config:      testOperationalRuntimeConfig(),
-		SystemNodes: nodes,
+		Config:         testOperationalRuntimeConfig(),
+		SystemNodes:    nodes,
+		workOccurrence: runtimeTestOccurrence(t, "bundle-v1:sha256:"+strings.Repeat("a", 64)),
 		Options: RuntimeOptions{
 			DisablePersistentStartupRecovery: true,
 			WorkflowModule:                   startupReadinessWorkflowModule{},
@@ -89,7 +91,7 @@ func newStartupReadinessTestRuntime(nodes ...runtimepipeline.BackgroundNode) *Ru
 
 func TestRuntimeStartWaitsForSystemNodeSubscriptionReadiness(t *testing.T) {
 	node := newDelayedSubscriptionBackgroundNode()
-	rt := newStartupReadinessTestRuntime(node)
+	rt := newStartupReadinessTestRuntime(t, node)
 	startErr := make(chan error, 1)
 	go func() {
 		startErr <- rt.Start(testAuthorActivityContext(context.Background()))
@@ -125,7 +127,7 @@ func TestRuntimeStartWaitsForSystemNodeSubscriptionReadiness(t *testing.T) {
 
 func TestRuntimeStartFailsClosedWhenSystemNodeSubscriptionReadinessIsCanceled(t *testing.T) {
 	node := newDelayedSubscriptionBackgroundNode()
-	rt := newStartupReadinessTestRuntime(node)
+	rt := newStartupReadinessTestRuntime(t, node)
 	ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
 	startErr := make(chan error, 1)
 	go func() {
@@ -161,7 +163,7 @@ func (n *nonReportingBackgroundNode) Run(context.Context) {
 
 func TestRuntimeStartRejectsSystemNodeWithoutSubscriptionReadiness(t *testing.T) {
 	node := &nonReportingBackgroundNode{}
-	rt := newStartupReadinessTestRuntime(node)
+	rt := newStartupReadinessTestRuntime(t, node)
 	err := rt.Start(testAuthorActivityContext(context.Background()))
 	if err == nil || !strings.Contains(err.Error(), "cannot report subscription readiness") {
 		t.Fatalf("Start error = %v, want subscription readiness reporting failure", err)

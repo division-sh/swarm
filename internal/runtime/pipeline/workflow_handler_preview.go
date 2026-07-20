@@ -61,10 +61,6 @@ func (m *previewWorkflowModule) ActionRegistry() ActionRegistry {
 
 type previewBus struct{}
 
-func (previewBus) SubscribeInternal(string, ...events.EventType) <-chan events.Event {
-	return make(chan events.Event)
-}
-
 func (previewBus) Publish(context.Context, events.Event) error { return nil }
 
 func (previewBus) PublishDirect(context.Context, events.Event, []string) error { return nil }

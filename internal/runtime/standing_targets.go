@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -423,6 +424,10 @@ func (rt *Runtime) EnsureStandingReplacementTargets(ctx context.Context, predece
 	if len(previous) == 0 && len(candidates) == 0 {
 		return nil, nil, nil
 	}
+	if rt.workOccurrence == nil {
+		return nil, nil, fmt.Errorf("replacement runtime work occurrence is required")
+	}
+	ctx = worklifetime.WithRuntimeOccurrence(ctx, rt.workOccurrence)
 	owner := rt.Stores.PipelineStore
 	if owner == nil {
 		return nil, nil, fmt.Errorf("standing replacement requires pipeline store")
@@ -449,7 +454,9 @@ func (rt *Runtime) EnsureStandingReplacementTargets(ctx context.Context, predece
 }
 
 func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) ([]StandingTarget, []StandingActivation, error) {
-	ctx = rt.authorActivityContext(ctx)
+	if rt == nil {
+		return nil, nil, fmt.Errorf("standing activation requires a runtime")
+	}
 	plans, err := rt.standingTargetPlans()
 	if err != nil {
 		return nil, nil, err
@@ -457,6 +464,11 @@ func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) 
 	if len(plans) == 0 {
 		return nil, nil, nil
 	}
+	if rt.workOccurrence == nil {
+		return nil, nil, fmt.Errorf("standing activation requires a runtime work occurrence")
+	}
+	ctx = rt.authorActivityContext(ctx)
+	ctx = worklifetime.WithRuntimeOccurrence(ctx, rt.workOccurrence)
 	if rt.Stores.PipelineStore == nil || rt.Manager == nil || rt.Pipeline == nil {
 		return nil, nil, fmt.Errorf("standing activation requires pipeline store, pipeline, and agent manager")
 	}

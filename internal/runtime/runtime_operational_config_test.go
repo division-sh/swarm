@@ -146,10 +146,11 @@ func TestNewRuntimeValidatesInboundPublicationIntegrityBeforeWiringGateway(t *te
 	}
 	sentinel := errors.New("inbound publication corruption")
 	corrupt := &recordingInboundStore{integrityErr: sentinel}
-	_, err = NewRuntime(context.Background(), RuntimeDeps{
+	_, err = newScopedTestRuntime(t, context.Background(), RuntimeDeps{
 		Config: testOperationalRuntimeConfig(), Stores: Stores{InboundStore: corrupt},
 		Options: RuntimeOptions{WorkflowModule: module, LLMRuntime: noopLLMRuntime{}, ProviderTriggerCatalog: catalog},
 	})
+
 	if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "validate inbound publication integrity at startup") {
 		t.Fatalf("NewRuntime corruption error = %v", err)
 	}
@@ -158,10 +159,11 @@ func TestNewRuntimeValidatesInboundPublicationIntegrityBeforeWiringGateway(t *te
 	}
 
 	healthy := &recordingInboundStore{}
-	rt, err := NewRuntime(context.Background(), RuntimeDeps{
+	rt, err := newScopedTestRuntime(t, context.Background(), RuntimeDeps{
 		Config: testOperationalRuntimeConfig(), Stores: Stores{InboundStore: healthy},
 		Options: RuntimeOptions{WorkflowModule: module, LLMRuntime: noopLLMRuntime{}, ProviderTriggerCatalog: catalog},
 	})
+
 	if err != nil {
 		t.Fatalf("NewRuntime healthy store: %v", err)
 	}
@@ -176,7 +178,7 @@ func TestNewRuntimeRejectsInvalidArtifactRootEnv(t *testing.T) {
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
 
-	_, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		SQLDB:         db,
 		PipelineStore: runtimepipeline.NewWorkflowInstanceStore(db),
 		EventStore:    &minimalRuntimeEventStore{},
@@ -201,7 +203,7 @@ func TestRuntimeStart_FailsWhenRecoveryDisabledAndActiveSchedulesExist(t *testin
 			TaskID:    "recover-me",
 		}},
 	}
-	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{ScheduleStore: store}, Options: RuntimeOptions{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{ScheduleStore: store}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
@@ -232,7 +234,7 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T
 			Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "persisted-agent"},
 		}},
 	}
-	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore:   eventStore,
 		ManagerStore: managerStore,
 	}, Options: RuntimeOptions{
@@ -257,7 +259,7 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T
 
 func TestRuntimeStart_AllowsRecoveryDisabledWhenNoRecoverableWorkExists(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
-	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		ScheduleStore: &recordingRuntimeScheduleStore{},
 		EventStore:    &recoveryGuardEventStore{},
 		ManagerStore:  &recoveryGuardManagerStore{},
@@ -280,7 +282,7 @@ func TestRuntimeStart_AllowsRecoveryDisabledWhenNoRecoverableWorkExists(t *testi
 
 func TestRuntimeStart_AllowsRecoveryDisabledWithNonReplayEventStore(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
-	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore:    &minimalRuntimeEventStore{},
 		ScheduleStore: &recordingRuntimeScheduleStore{},
 		ManagerStore:  &recoveryGuardManagerStore{},
@@ -324,7 +326,7 @@ func TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads(t 
 		},
 	}
 	eventStore := &recoveryGuardEventStore{}
-	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Stores: Stores{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Stores: Stores{
 		EventStore:    eventStore,
 		ManagerStore:  managerStore,
 		ScheduleStore: scheduleStore,
@@ -358,13 +360,14 @@ func TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads(t 
 func TestRuntimeStart_FailsClosedWhenRequiredDirectiveReconciliationFails(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	eventStore := &recoveryGuardEventStore{directiveReconcileErr: errors.New("injected directive reconciliation failure")}
-	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore: eventStore,
 	}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
 	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -382,13 +385,14 @@ func TestRuntimeStart_ReconcilesEverySelectedRuntimeContext(t *testing.T) {
 	stores := []*recoveryGuardEventStore{{}, {}}
 	runtimes := make([]*Runtime, 0, len(stores))
 	for _, eventStore := range stores {
-		rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+		rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 			EventStore: eventStore,
 		}, Options: RuntimeOptions{
 			SelfCheck:      false,
 			WorkflowModule: module,
 			LLMRuntime:     noopLLMRuntime{},
 		}})
+
 		if err != nil {
 			t.Fatalf("NewRuntime: %v", err)
 		}
@@ -411,7 +415,7 @@ func TestRuntimeStart_ReconcilesEverySelectedRuntimeContext(t *testing.T) {
 
 func TestNewRuntime_FailsClosedOnMalformedExtensionConfig(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
-	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{RecoveryOnStartup: false},
 		LLM:     config.LLMConfig{Backend: "anthropic"},
 		Extensions: map[string]any{

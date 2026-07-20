@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 )
 
@@ -14,11 +15,11 @@ type recordingInternalSubscriptionBus struct {
 	eventTypes []events.EventType
 }
 
-func (b *recordingInternalSubscriptionBus) SubscribeInternal(subscriber string, eventTypes ...events.EventType) <-chan events.Event {
+func (b *recordingInternalSubscriptionBus) SubscribeInternal(subscriber string, eventTypes ...events.EventType) <-chan *worklifetime.EventDelivery {
 	b.mode = "internal"
 	b.subscriber = subscriber
 	b.eventTypes = append([]events.EventType(nil), eventTypes...)
-	return make(chan events.Event, 1)
+	return make(chan *worklifetime.EventDelivery, 1)
 }
 
 func (*recordingInternalSubscriptionBus) Publish(context.Context, events.Event) error { return nil }

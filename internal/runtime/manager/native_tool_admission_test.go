@@ -12,7 +12,7 @@ import (
 func TestAgentManagerSpawnAgentConsumesNativeToolAdmissionValidator(t *testing.T) {
 	t.Parallel()
 
-	am := NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{
+	am := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{
 		NativeToolAdmissionValidator: func(context.Context, models.AgentConfig) error {
 			return errors.New("native tool denied")
 		},
@@ -35,7 +35,7 @@ func TestAgentManagerSpawnAgentConsumesNativeToolAdmissionValidator(t *testing.T
 func TestAgentManagerReconfigureConsumesNativeToolAdmissionValidator(t *testing.T) {
 	t.Parallel()
 
-	am := NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{
+	am := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{
 		NativeToolAdmissionValidator: func(_ context.Context, cfg models.AgentConfig) error {
 			if cfg.NativeTools.Any() {
 				return errors.New("native tool denied")

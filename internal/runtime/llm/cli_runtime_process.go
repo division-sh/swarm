@@ -244,7 +244,14 @@ func (r *ClaudeCLIRuntime) openMonitorTurn(ctx context.Context, meta MonitorTurn
 			return nil, err
 		}
 	}
-	return newSessionWatchdogMonitorWriter(ctx, base, r.conversations, r.events, meta), nil
+	writer, err := newSessionWatchdogMonitorWriter(ctx, base, r.conversations, r.events, meta)
+	if err != nil {
+		if base != nil {
+			err = errors.Join(err, base.Close())
+		}
+		return nil, err
+	}
+	return writer, nil
 }
 
 func readStreamLines(rc io.ReadCloser, monitor MonitorTurnWriter, stderr bool) [][]byte {

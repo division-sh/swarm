@@ -64,6 +64,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 			module := newRuntimeTestWorkflowModule(t, source)
 			resultHandlerStarted := make(chan string, 4)
 			pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+				WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
 				Module:        module,
 				WorkflowStore: workflowStore,
 				ArtifactRoot:  t.TempDir(),
@@ -124,7 +125,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 			`, []any{resultEventType, tc.requestEventID})
 			assertArtifactActionResultEventContext(t, ctx, db, resultEventID, tc.resultKind, "repo-scaffold/inst-1")
 			assertArtifactActionResultNodeRoute(t, ctx, db, resultEventID, "repo-scaffold/inst-1")
-			waitArtifactActionResultHandlerStarted(t, resultHandlerStarted, resultEventID)
+			waitArtifactActionResultHandlerStarted(t, ctx, db, resultHandlerStarted, resultEventID)
 			waitArtifactActionResultDBCount(t, ctx, db, `
 				SELECT COUNT(*)
 				FROM event_deliveries
@@ -222,6 +223,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			module := newRuntimeTestWorkflowModule(t, source)
 			resultHandlerStarted := make(chan string, 4)
 			pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+				WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
 				Module:        module,
 				WorkflowStore: workflowStore,
 				ArtifactRoot:  t.TempDir(),
@@ -280,7 +282,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			`, []any{resultEventType, tc.requestEventID})
 			assertArtifactActionResultEventContext(t, ctx, db, resultEventID, tc.resultKind, tc.wantFlowPath)
 			assertArtifactActionResultNodeRoute(t, ctx, db, resultEventID, tc.wantFlowPath)
-			waitArtifactActionResultHandlerStarted(t, resultHandlerStarted, resultEventID)
+			waitArtifactActionResultHandlerStarted(t, ctx, db, resultHandlerStarted, resultEventID)
 			waitArtifactActionResultDBCount(t, ctx, db, `
 				SELECT COUNT(*)
 				FROM event_deliveries
@@ -411,7 +413,7 @@ func assertArtifactActionResultNodeRoute(t *testing.T, ctx context.Context, db *
 	}
 }
 
-func waitArtifactActionResultHandlerStarted(t *testing.T, started <-chan string, eventID string) {
+func waitArtifactActionResultHandlerStarted(t *testing.T, ctx context.Context, db *sql.DB, started <-chan string, eventID string) {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
 	for {
@@ -421,7 +423,20 @@ func waitArtifactActionResultHandlerStarted(t *testing.T, started <-chan string,
 				return
 			}
 		case <-deadline:
-			t.Fatalf("callback handler did not start for result event %s", eventID)
+			var deliveries, receipts string
+			if err := db.QueryRowContext(ctx, `
+				SELECT COALESCE(jsonb_agg(to_jsonb(d))::text, '[]')
+				FROM event_deliveries d WHERE event_id = $1::uuid
+			`, eventID).Scan(&deliveries); err != nil {
+				t.Fatalf("query callback delivery diagnostics: %v", err)
+			}
+			if err := db.QueryRowContext(ctx, `
+				SELECT COALESCE(jsonb_agg(to_jsonb(r))::text, '[]')
+				FROM event_receipts r WHERE event_id = $1::uuid
+			`, eventID).Scan(&receipts); err != nil {
+				t.Fatalf("query callback receipt diagnostics: %v", err)
+			}
+			t.Fatalf("callback handler did not start for result event %s; deliveries=%s receipts=%s", eventID, deliveries, receipts)
 		}
 	}
 }

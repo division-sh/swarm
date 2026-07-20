@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -120,10 +121,14 @@ func TestServeAuthorActivityFollowerRetriesUnchangedCursorAndExactScope(t *testi
 	presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Output: out, ErrorOutput: &errOut, Dev: true})
 	ctx, cancel := context.WithCancel(context.Background())
 	scope := &mutableServeAuthorActivityScope{hashes: []string{"bundle-a", "bundle-b"}}
-	follower := newServeAuthorActivityFollower(
-		ctx, reader, presenter, "runtime-a", scope, 10,
+	processOwner := worklifetime.NewProcess()
+	follower, err := newServeAuthorActivityFollower(
+		ctx, processOwner, reader, presenter, "runtime-a", scope, 10,
 		runtimeauthoractivity.NewHumanRenderer(runtimeauthoractivity.RenderOptions{Mode: runtimeauthoractivity.RenderPlain, Width: 120}),
 	)
+	if err != nil {
+		t.Fatalf("newServeAuthorActivityFollower: %v", err)
+	}
 	waitForServeStory(t, func() bool { return strings.Contains(out.String(), "telegram-sender ✓ sent") })
 	waitForServeStory(t, func() bool { return len(reader.snapshotCalls()) >= 5 })
 	cancel()
@@ -177,10 +182,14 @@ func TestServeAuthorActivityFollowerRetriesWriteAndFlushesBeforeReturn(t *testin
 	var errOut bytes.Buffer
 	presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Output: out, ErrorOutput: &errOut, Dev: true})
 	scope := &mutableServeAuthorActivityScope{hashes: []string{"bundle-a"}}
-	follower := newServeAuthorActivityFollower(
-		context.Background(), reader, presenter, "runtime-a", scope, 20,
+	processOwner := worklifetime.NewProcess()
+	follower, err := newServeAuthorActivityFollower(
+		context.Background(), processOwner, reader, presenter, "runtime-a", scope, 20,
 		runtimeauthoractivity.NewHumanRenderer(runtimeauthoractivity.RenderOptions{Mode: runtimeauthoractivity.RenderPlain, Width: 120}),
 	)
+	if err != nil {
+		t.Fatalf("newServeAuthorActivityFollower: %v", err)
+	}
 	waitForServeStory(t, func() bool { return strings.Contains(out.String(), "(2nd time)") })
 	follower.StopAndWait()
 
@@ -219,10 +228,14 @@ func TestServeAuthorActivityFollowerRefreshesExactScopeAfterRuntimeReload(t *tes
 	out := &synchronizedBuffer{}
 	var errOut bytes.Buffer
 	presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Output: out, ErrorOutput: &errOut, Dev: true})
-	follower := newServeAuthorActivityFollower(
-		context.Background(), reader, presenter, "runtime-a", scope, 30,
+	processOwner := worklifetime.NewProcess()
+	follower, err := newServeAuthorActivityFollower(
+		context.Background(), processOwner, reader, presenter, "runtime-a", scope, 30,
 		runtimeauthoractivity.NewHumanRenderer(runtimeauthoractivity.RenderOptions{Mode: runtimeauthoractivity.RenderPlain, Width: 120}),
 	)
+	if err != nil {
+		t.Fatalf("newServeAuthorActivityFollower: %v", err)
+	}
 	waitForServeStory(t, func() bool { return strings.Contains(out.String(), "how are you") })
 	scope.replace("bundle-replacement")
 	waitForServeStory(t, func() bool { return strings.Contains(out.String(), "replacement activity") })

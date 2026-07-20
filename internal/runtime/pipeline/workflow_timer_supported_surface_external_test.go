@@ -38,7 +38,7 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(false))
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
@@ -53,7 +53,7 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 
 			fireErrors := make(chan error, 4)
 			var coordinator *runtimepipeline.PipelineCoordinator
-			scheduler := runtimepipeline.NewScheduler(func(schedule runtimepipeline.Schedule) {
+			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t), func(_ context.Context, schedule runtimepipeline.Schedule) {
 				if coordinator == nil {
 					fireErrors <- fmt.Errorf("workflow timer coordinator is unavailable")
 					return
@@ -119,7 +119,7 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(false))
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
@@ -152,7 +152,7 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 
 			fireErrors := make(chan error, 4)
 			var restored *runtimepipeline.PipelineCoordinator
-			scheduler := runtimepipeline.NewScheduler(func(schedule runtimepipeline.Schedule) {
+			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t), func(_ context.Context, schedule runtimepipeline.Schedule) {
 				_, err := restored.FireWorkflowTimer(ctx, schedule)
 				if err != nil {
 					fireErrors <- err
@@ -205,7 +205,7 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 				t.Fatalf("release one-shot claims for second restart: %v", err)
 			}
 
-			terminalScheduler := runtimepipeline.NewScheduler(func(schedule runtimepipeline.Schedule) {
+			terminalScheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t), func(_ context.Context, schedule runtimepipeline.Schedule) {
 				fireErrors <- fmt.Errorf("terminal timer was restored: %s", schedule.TaskID)
 			})
 			t.Cleanup(terminalScheduler.Stop)
@@ -241,7 +241,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
+			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			bundle := workflowTimerServedLifecycleBundle(true)
 			bundle.Semantics.Timers[0].AdvancesTo = ""
 			cancelHandler := runtimecontracts.SystemNodeEventHandler{AdvancesTo: "done"}
@@ -304,7 +304,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			var coordinator *runtimepipeline.PipelineCoordinator
 			fireErrors := make(chan error, 8)
 			newScheduler := func() *runtimepipeline.Scheduler {
-				return runtimepipeline.NewScheduler(func(schedule runtimepipeline.Schedule) {
+				return runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t), func(_ context.Context, schedule runtimepipeline.Schedule) {
 					if coordinator == nil {
 						fireErrors <- fmt.Errorf("workflow timer coordinator is unavailable")
 						return
@@ -407,7 +407,7 @@ func TestRecurringWorkflowTimerRegistersNextOccurrenceWhenPostgresReleaseInitial
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	insertGateRecoveryRun(t, selected, runID)
-	ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
+	ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 	bundle := workflowTimerServedLifecycleBundle(true)
 	bundle.Semantics.Timers[0].AdvancesTo = ""
 	source := semanticview.Wrap(bundle)
@@ -429,7 +429,7 @@ func TestRecurringWorkflowTimerRegistersNextOccurrenceWhenPostgresReleaseInitial
 
 	fireErrors := make(chan error, 8)
 	var coordinator *runtimepipeline.PipelineCoordinator
-	scheduler := runtimepipeline.NewScheduler(func(schedule runtimepipeline.Schedule) {
+	scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t), func(_ context.Context, schedule runtimepipeline.Schedule) {
 		if coordinator == nil {
 			fireErrors <- fmt.Errorf("workflow timer coordinator is unavailable")
 			return
@@ -440,7 +440,7 @@ func TestRecurringWorkflowTimerRegistersNextOccurrenceWhenPostgresReleaseInitial
 	})
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
 		Module: gateRecoveryModule{source: source}, WorkflowStore: selected.workflowStore,
-		TimerScheduler: scheduler, TimerScheduleStore: scheduleStore,
+		TimerScheduler: scheduler, TimerScheduleStore: scheduleStore, WorkOwner: pipelineExternalTestWorkOwner(t),
 	})
 	bus.SetInterceptors(coordinator)
 	t.Cleanup(func() {
@@ -526,7 +526,7 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 			bundle := workflowTimerServedLifecycleBundle(false)
 			bundle.Semantics.Timers[0].Delay = "200ms"
 			source := semanticview.Wrap(bundle)
@@ -556,7 +556,7 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			results := make(chan fireResult, 2)
 			attemptedSchedules := make(chan runtimepipeline.Schedule, 2)
 			var coordinator *runtimepipeline.PipelineCoordinator
-			scheduler := runtimepipeline.NewScheduler(func(schedule runtimepipeline.Schedule) {
+			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t), func(_ context.Context, schedule runtimepipeline.Schedule) {
 				attemptedSchedules <- schedule
 				outcome, err := coordinator.FireWorkflowTimer(ctx, schedule)
 				results <- fireResult{outcome: outcome, err: err}
@@ -650,7 +650,7 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(false))
 			failingStore, failures := failNextWorkflowTimerPipelineReceipt(t, selected.events)
 			bus, err := newScopedTestEventBus(t, failingStore, runtimebus.EventBusOptions{
@@ -666,7 +666,7 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 
 			fireErrors := make(chan error, 4)
 			var coordinator *runtimepipeline.PipelineCoordinator
-			scheduler := runtimepipeline.NewScheduler(func(schedule runtimepipeline.Schedule) {
+			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t), func(_ context.Context, schedule runtimepipeline.Schedule) {
 				_, err := coordinator.FireWorkflowTimer(ctx, schedule)
 				if err != nil {
 					fireErrors <- err

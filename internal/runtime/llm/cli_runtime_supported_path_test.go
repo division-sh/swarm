@@ -165,7 +165,7 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 	conv.SetToolExecutor(exec)
 
 	recorder := runtimebus.NewEmittedEventsRecorder()
-	ctx := runtimebus.WithEmittedEventsRecorder(
+	ctx := llmTestWorkContext(t, runtimebus.WithEmittedEventsRecorder(
 		withTestMemory(runtimeactors.WithActor(effects.CompletionContext("claude-supported-read-file"), runtimeactors.AgentConfig{
 			ID:       "market-research-agent",
 			FlowPath: "market/inst-1",
@@ -175,7 +175,7 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 			},
 		}), "market-research-agent", "market/inst-1"),
 		recorder,
-	)
+	))
 
 	resp, err := conv.Step(ctx, "scan the file")
 	if err != nil {

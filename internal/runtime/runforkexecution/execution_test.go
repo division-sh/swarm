@@ -98,7 +98,7 @@ func selectedForkExecutionTestContext(t testing.TB, ctx context.Context, authori
 func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -345,7 +345,7 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.TemplateCreateMintedKey)
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := canonicalrouting.ExampleRoot(t, canonicalrouting.TemplateCreateMintedKey)
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
@@ -376,8 +376,10 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 		t.Fatalf("seed source run: %v", err)
 	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workOwner := testGatewayWorkOwner(t)
 	var manager *runtimemanager.AgentManager
 	sourceBus, err := bus.NewEventBusWithOptions(pg, bus.EventBusOptions{
+		WorkOwner:      workOwner,
 		ContractBundle: loaded.Source,
 		InterceptorProvider: func() []bus.EventInterceptor {
 			return nil
@@ -395,9 +397,12 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 	manager = runtimemanager.NewAgentManagerWithOptions(sourceBus, nil, runtimemanager.AgentManagerOptions{
 		SemanticSource:    loaded.Source,
 		WorkflowInstances: workflowStore,
+		WorkOwner:         workOwner,
 	}, pg)
 	t.Cleanup(func() { _ = manager.Shutdown() })
-	sourcePipeline := newSelectedContractPipeline(sourceBus, pg, loaded, SelectedContractAgentRuntimeOptions{}, workflowStore, manager.ActivateFlowInstance)
+	sourcePipeline := newSelectedContractPipeline(sourceBus, pg, loaded, SelectedContractAgentRuntimeOptions{
+		AgentManagerOptions: runtimemanager.AgentManagerOptions{WorkOwner: workOwner},
+	}, workflowStore, manager.ActivateFlowInstance)
 
 	sourceEventID := uuid.NewString()
 	payload := json.RawMessage(`{"candidate":"candidate-1"}`)
@@ -574,7 +579,7 @@ func requireSyntheticProjectionRoute(t *testing.T, pg *store.PostgresStore, even
 func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIdentity(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -656,7 +661,7 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronology(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
@@ -722,7 +727,7 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 func TestExecuteSelectedContractRunForkFailsClosedBeforeMaterializationForAgentRecipientWithoutHandlerMaterializer(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
 	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -772,7 +777,7 @@ func TestExecuteSelectedContractRunForkFailsClosedBeforeMaterializationForAgentR
 func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRuntime(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
 	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -968,7 +973,7 @@ func TestExecuteSelectedContractRunForkAPIProvidersPersistExactManagedCapability
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
-			ctx := runForkTestContext()
+			ctx := runForkTestContext(t)
 			repoRoot := runForkExecutionRepoRoot(t)
 			contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
 			loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
@@ -1147,7 +1152,7 @@ func TestExecuteSelectedContractRunForkClaudeOAuthPersistsStartupAndTurnCapabili
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-host-token")
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
@@ -1357,7 +1362,7 @@ func assertSelectedForkClaudeCapabilityEvidence(t testing.TB, ctx context.Contex
 
 func TestSelectedContractForkManagedPreflightExecutesEligibleMCPToolCall(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	container := buildSelectedForkProofContainer(t, ctx, db)
 
 	manager := runtimemanager.NewAgentManager(nil, nil)
@@ -1539,7 +1544,7 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 
 func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostileAdmission(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	container := buildSelectedForkProofContainer(t, ctx, db)
 	proof := container.Proof()
 	var requests atomic.Int32
@@ -1687,7 +1692,7 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 
 func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCleanup(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
@@ -1778,7 +1783,7 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 
 func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	now := time.Now().UTC()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
@@ -2004,7 +2009,7 @@ func TestStartSelectedContractAgentRuntimeGatewayReturnsGeneratedBinding(t *test
 
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{})
 	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
-	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, nil, turns, nil)
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, nil, turns, testGatewayWorkOwner(t), nil)
 	if err != nil {
 		t.Fatalf("startSelectedContractAgentRuntimeGateway: %v", err)
 	}
@@ -2055,7 +2060,7 @@ func TestStartSelectedContractAgentRuntimeGatewayRejectsRetiredTokenEnv(t *testi
 
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{})
 	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
-	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, nil, turns, nil)
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, nil, turns, testGatewayWorkOwner(t), nil)
 	if err == nil || !strings.Contains(err.Error(), "SWARM_TOOL_GATEWAY_TOKEN is retired") || !strings.Contains(err.Error(), "ToolGatewayBinding") {
 		t.Fatalf("startSelectedContractAgentRuntimeGateway error = %v, want retired token env rejection", err)
 	}
@@ -2083,7 +2088,8 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", staleHostURL)
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", staleContainerURL)
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
-	eventBus, err := bus.NewEventBus(nil)
+	owner := testGatewayWorkOwner(t)
+	eventBus, err := bus.NewEventBusWithOptions(nil, bus.EventBusOptions{WorkOwner: owner})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -2115,8 +2121,9 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 				},
 			}},
 			Options: SelectedContractAgentRuntimeOptions{
-				Config:     &config.Config{},
-				LLMRuntime: selectedContractCleanupRuntime{},
+				Config:              &config.Config{},
+				LLMRuntime:          selectedContractCleanupRuntime{},
+				AgentManagerOptions: runtimemanager.AgentManagerOptions{WorkOwner: owner},
 			},
 		},
 	}, eventBus)
@@ -2144,7 +2151,7 @@ func (selectedContractCleanupRuntime) ContinueSession(context.Context, *runtimel
 func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -2236,7 +2243,7 @@ func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(
 func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSelectedRecipients(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -2358,7 +2365,7 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMarker(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -2418,7 +2425,7 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -2529,7 +2536,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEmission(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -2669,7 +2676,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBranchDivergence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -2802,7 +2809,7 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -2879,7 +2886,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeMarkerWriteSkew(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -2944,7 +2951,7 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeMarkerWriteSke
 func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterialization(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -2994,7 +3001,7 @@ func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterializ
 func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -3056,7 +3063,7 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(
 func TestExecuteSelectedContractRunForkBranchesWhenSourceAdvancedAfterForkPoint(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -3757,7 +3764,7 @@ func materializeSelectedExecutionForkForTest(
 
 func seedSelectedExecutionSourceRun(t *testing.T, db *sql.DB, sourceRunID, entityID, sourceEventID, eventName string, at time.Time) {
 	t.Helper()
-	ctx := runForkTestContext()
+	ctx := runForkTestContext(t)
 	payload, _ := json.Marshal(map[string]any{"entity_id": entityID})
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)

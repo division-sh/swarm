@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -103,6 +104,53 @@ func TestDeliveryRouteSyntheticProjectionRoundTripsOnBothBackends(t *testing.T) 
 			}
 			if len(got) != 1 || got[0] != want.Normalized() {
 				t.Fatalf("delivery routes = %#v, want %#v", got, want.Normalized())
+			}
+		})
+	}
+}
+
+func TestLocalDeliveryHandoffProofIsExactOnBothBackends(t *testing.T) {
+	type localDeliveryHandoffStore interface {
+		replyContextStoreTestSurface
+		ProveLocalDeliveryHandoff(context.Context, string, events.DeliveryRoute) error
+	}
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error)
+	}{
+		{name: "postgres", setup: setupPostgresReplyContextStoreTest},
+		{name: "sqlite", setup: setupSQLiteReplyContextStoreTest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base, seed := tc.setup(t)
+			store, ok := base.(localDeliveryHandoffStore)
+			if !ok {
+				t.Fatalf("%s store lacks exact local-delivery handoff proof", tc.name)
+			}
+			ctx := testAuthorActivityContext()
+			runID := uuid.NewString()
+			eventID := uuid.NewString()
+			if err := seed(ctx, runID, eventID); err != nil {
+				t.Fatalf("seed event: %v", err)
+			}
+			route := events.DeliveryRoute{
+				SubscriberType: "node",
+				SubscriberID:   "workflow-runtime",
+				Target:         events.RouteIdentity{FlowID: "flow-1", FlowInstance: "flow-1/instance-1", EntityID: uuid.NewString()},
+			}
+			if err := store.InsertEventDeliveryRoutes(ctx, eventID, []events.DeliveryRoute{route}); err != nil {
+				t.Fatalf("insert exact delivery route: %v", err)
+			}
+			if err := store.ProveLocalDeliveryHandoff(ctx, eventID, route); err != nil {
+				t.Fatalf("prove exact delivery route: %v", err)
+			}
+			wrongRoute := route
+			wrongRoute.SubscriberID = "other-runtime"
+			if err := store.ProveLocalDeliveryHandoff(ctx, eventID, wrongRoute); !errors.Is(err, errLocalDeliveryHandoffNotCommitted) {
+				t.Fatalf("wrong-route proof = %v, want errLocalDeliveryHandoffNotCommitted", err)
+			}
+			if err := store.ProveLocalDeliveryHandoff(ctx, uuid.NewString(), route); !errors.Is(err, errLocalDeliveryHandoffNotCommitted) {
+				t.Fatalf("wrong-event proof = %v, want errLocalDeliveryHandoffNotCommitted", err)
 			}
 		})
 	}

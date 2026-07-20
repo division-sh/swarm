@@ -1019,7 +1019,7 @@ func seedSelectEntityBudgetWithMetadataAndState(t *testing.T, store *WorkflowIns
 func assertSelectEntityReceiptRow(t *testing.T, db *sql.DB, eventID, nodeID string) {
 	t.Helper()
 	var count int
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
 		SELECT COUNT(*)
 		FROM event_receipts
 		WHERE event_id = $1::uuid
@@ -1037,7 +1037,7 @@ func assertSelectEntityReceiptRow(t *testing.T, db *sql.DB, eventID, nodeID stri
 func assertEntityStateField(t *testing.T, db *sql.DB, entityID, field string, want any) {
 	t.Helper()
 	var gotRaw []byte
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
 		SELECT fields -> $3
 		FROM entity_state
 		WHERE run_id = $1::uuid AND entity_id = $2::uuid
@@ -1056,7 +1056,7 @@ func assertEntityStateField(t *testing.T, db *sql.DB, entityID, field string, wa
 func assertFlowInstanceControlConfig(t *testing.T, db *sql.DB, storageRef, field string, want any) {
 	t.Helper()
 	var gotRaw []byte
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
 		SELECT config -> $2
 		FROM flow_instances
 		WHERE instance_id = $1
@@ -1075,7 +1075,7 @@ func assertFlowInstanceControlConfig(t *testing.T, db *sql.DB, storageRef, field
 func assertEntityStateRowCount(t *testing.T, db *sql.DB, want int) {
 	t.Helper()
 	var got int
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `SELECT COUNT(*) FROM entity_state`).Scan(&got); err != nil {
+	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `SELECT COUNT(*) FROM entity_state`).Scan(&got); err != nil {
 		t.Fatalf("count entity_state: %v", err)
 	}
 	if got != want {
@@ -1091,7 +1091,7 @@ func assertEntityStateEntityType(t *testing.T, db *sql.DB, entityID, want string
 func assertEntityStateEntityTypeForRun(t *testing.T, db *sql.DB, runID, entityID, want string) {
 	t.Helper()
 	var got string
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
 		SELECT COALESCE(entity_type, '')
 		FROM entity_state
 		WHERE run_id = $1::uuid AND entity_id = $2::uuid

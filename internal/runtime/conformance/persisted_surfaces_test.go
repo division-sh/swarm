@@ -27,6 +27,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimediaglog "github.com/division-sh/swarm/internal/runtime/diaglog"
@@ -311,9 +312,11 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	if err != nil {
 		t.Fatalf("Build LLM runtime: %v", err)
 	}
+	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash)
 
 	newTurnContext := func(evt events.Event) context.Context {
 		base := runtimeeffects.WithLifecycleToken(testAuthorActivityContext(context.Background()), lifecycleToken)
+		base = worklifetime.WithOccurrence(base, workOwner)
 		base = managedConformanceExecutionContext(t, base, "reused-live-session")
 		base = agentmemory.WithExecution(base, agentmemory.Authored(true), agentmemory.Identity{RunID: runID, AgentID: "agent-1", FlowInstance: "support/inst-1"})
 		base = runtimecorrelation.WithRunID(base, runID)
@@ -493,9 +496,11 @@ printf '{"result":"ok"}'
 	if err != nil {
 		t.Fatalf("Build LLM runtime: %v", err)
 	}
+	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash)
 
 	newTurnContext := func(evt events.Event) context.Context {
 		base := runtimeeffects.WithLifecycleToken(testAuthorActivityContext(context.Background()), lifecycleToken)
+		base = worklifetime.WithOccurrence(base, workOwner)
 		base = managedConformanceExecutionContext(t, base, "cli-session-failure")
 		base = agentmemory.WithExecution(base, agentmemory.Authored(true), agentmemory.Identity{RunID: runID, AgentID: "agent-1", FlowInstance: "support/inst-1"})
 		base = runtimecorrelation.WithRunID(base, runID)
@@ -1057,17 +1062,18 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 		RuntimeLogStore: pg,
 		ManagerStore:    pg,
 		ScheduleStore:   pg,
-	}, Options: runtimepkg.RuntimeOptions{
+	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
 		SelfCheck:         false,
 		WorkflowModule:    loadConformanceRuntimeWorkflowModule(t),
 		LLMRuntime:        conformanceNoopLLMRuntime{},
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
-	}})
+	})})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
+	t.Cleanup(func() { _ = rt.Shutdown() })
 
 	startErr := rt.Start(ctx)
 	if startErr == nil || !strings.Contains(startErr.Error(), "runtime.recovery_on_startup=false") {
@@ -1144,13 +1150,13 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 		EventStore:      eventStore,
 		RuntimeLogStore: pg,
 		ManagerStore:    &conformanceManagerReplayStore{},
-	}, Options: runtimepkg.RuntimeOptions{
+	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
 		SelfCheck:         false,
 		WorkflowModule:    module,
 		LLMRuntime:        conformanceNoopLLMRuntime{},
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
-	}})
+	})})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -1253,13 +1259,13 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 		RuntimeLogStore: pg,
 		ManagerStore:    pg,
 		ScheduleStore:   scheduleStore,
-	}, Options: runtimepkg.RuntimeOptions{
+	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
 		SelfCheck:         false,
 		WorkflowModule:    loadConformanceRuntimeWorkflowModule(t),
 		LLMRuntime:        conformanceNoopLLMRuntime{},
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
-	}})
+	})})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -1367,8 +1373,10 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	seedConformanceAgent(t, ctx, pg, "agent-1")
 
 	logger := runtimepkg.NewRuntimeLogger(pg)
+	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash)
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
-		Logger: conformanceRuntimeLoggerHook{logger: logger},
+		Logger:    conformanceRuntimeLoggerHook{logger: logger},
+		WorkOwner: workOwner,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -1388,6 +1396,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	am := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		BaseContext: testAuthorActivityRuntimeContext(context.Background()),
 		Sessions:    registry,
+		WorkOwner:   workOwner,
 	})
 	if err := am.ResetRuntimeStateWithSource("admin_cli"); err != nil {
 		t.Fatalf("ResetRuntimeStateWithSource: %v", err)
@@ -1529,20 +1538,20 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		EventStore:      conformanceTimerRecoveryEventStore{store: pg},
 		RuntimeLogStore: pg,
 		ManagerStore:    managerStore,
-	}, Options: runtimepkg.RuntimeOptions{
+	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
 		SelfCheck:         false,
 		WorkflowModule:    module,
 		LLMRuntime:        conformanceNoopLLMRuntime{},
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
-	}})
+	})})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	rt.Manager = runtimemanager.NewAgentManager(rt.Bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return conformanceManagerReplayAgent{id: cfg.ID}, nil
-	}, managerStore)
+	}, runtimemanager.AgentManagerOptions{WorkOwner: rt.WorkOccurrence()}, managerStore)
 
 	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -1638,7 +1647,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	replayRecipient := "agent-replay"
-	_ = bus.Subscribe(replayRecipient)
+	replayDeliveries := bus.Subscribe(replayRecipient)
 
 	replayRunID := uuid.NewString()
 	replayParentID := uuid.NewString()
@@ -1683,6 +1692,17 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	rm := runtimepipeline.NewRecoveryManagerWith(pg, bus)
 	if err := rm.Recover(ctx); err != nil {
 		t.Fatalf("Recover: %v", err)
+	}
+	select {
+	case delivery := <-replayDeliveries:
+		if delivery.ID() != replayChildID {
+			t.Fatalf("replayed local delivery id = %q, want %q", delivery.ID(), replayChildID)
+		}
+		if err := delivery.Complete(); err != nil {
+			t.Fatalf("complete replayed local delivery ownership: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("replayed local delivery was not dispatched")
 	}
 
 	reader := dashboardserver.NewSQLObservabilityReader(db, pg)

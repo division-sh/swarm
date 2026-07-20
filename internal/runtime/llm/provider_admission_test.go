@@ -313,12 +313,12 @@ func TestOpenAICompatibleProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 	firstErr := make(chan error, 1)
 	go func() {
-		_, _, _, err := runtime.sendAdmittedRequest(harness.CompletionContext("openai-compatible-admission-first"), profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"hello"}]}`))
+		_, _, _, err := runtime.sendAdmittedRequest(llmTestWorkContext(t, harness.CompletionContext("openai-compatible-admission-first")), profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"hello"}]}`))
 		firstErr <- err
 	}()
 	<-entered
 
-	_, _, _, err := runtime.sendAdmittedRequest(harness.CompletionContext("openai-compatible-admission-second"), profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"second"}]}`))
+	_, _, _, err := runtime.sendAdmittedRequest(llmTestWorkContext(t, harness.CompletionContext("openai-compatible-admission-second")), profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"second"}]}`))
 	requireProviderAdmissionRateLimited(t, err)
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("requests = %d, want second request rejected before HTTP dispatch", got)
@@ -361,12 +361,12 @@ func TestOpenAIResponsesProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T)
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 	firstErr := make(chan error, 1)
 	go func() {
-		_, _, _, err := runtime.sendAdmittedRequest(harness.CompletionContext("openai-responses-admission-first"), profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"hello"}]}`))
+		_, _, _, err := runtime.sendAdmittedRequest(llmTestWorkContext(t, harness.CompletionContext("openai-responses-admission-first")), profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"hello"}]}`))
 		firstErr <- err
 	}()
 	<-entered
 
-	_, _, _, err := runtime.sendAdmittedRequest(harness.CompletionContext("openai-responses-admission-second"), profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"second"}]}`))
+	_, _, _, err := runtime.sendAdmittedRequest(llmTestWorkContext(t, harness.CompletionContext("openai-responses-admission-second")), profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"second"}]}`))
 	requireProviderAdmissionRateLimited(t, err)
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("requests = %d, want second request rejected before HTTP dispatch", got)

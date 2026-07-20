@@ -5,10 +5,13 @@ import (
 	"database/sql"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -23,7 +26,49 @@ var authorActivityTestBundleSourceFact = runtimecorrelation.BundleSourceFact{
 	BundleFingerprint: "sha256:" + strings.Repeat("a", 64),
 }
 
-func testAuthorActivityContext(ctx context.Context) context.Context {
+type pipelineExternalTestWorkFixture struct {
+	process *worklifetime.Process
+	runtime *worklifetime.RuntimeOccurrence
+}
+
+var pipelineExternalTestWorkFixtures sync.Map
+
+func pipelineExternalTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
+	t.Helper()
+	if existing, ok := pipelineExternalTestWorkFixtures.Load(t); ok {
+		return existing.(*pipelineExternalTestWorkFixture).runtime
+	}
+	fixture := &pipelineExternalTestWorkFixture{process: worklifetime.NewProcess()}
+	owner, err := fixture.process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+		BundleHash:        authorActivityTestBundleSourceFact.BundleHash,
+	})
+	if err != nil {
+		t.Fatalf("create pipeline test work owner: %v", err)
+	}
+	fixture.runtime = owner
+	actual, loaded := pipelineExternalTestWorkFixtures.LoadOrStore(t, fixture)
+	if loaded {
+		return actual.(*pipelineExternalTestWorkFixture).runtime
+	}
+	t.Cleanup(func() {
+		defer pipelineExternalTestWorkFixtures.Delete(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := fixture.runtime.RetireAndWait(ctx); err != nil {
+			t.Errorf("retire pipeline test work owner: %v", err)
+			return
+		}
+		if _, err := fixture.process.Join(ctx); err != nil {
+			t.Errorf("join pipeline test process owner: %v", err)
+		}
+	})
+	return owner
+}
+
+func testAuthorActivityContext(t *testing.T, ctx context.Context) context.Context {
+	t.Helper()
+	ctx = worklifetime.WithOccurrence(ctx, pipelineExternalTestWorkOwner(t))
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
 		authorActivityTestBundleSourceFact.BundleHash,
@@ -57,6 +102,9 @@ func registerDifferentTestAuthorActivityEvents(t *testing.T, eventStore any, eve
 
 func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts runtimebus.EventBusOptions, differentEvents ...string) (*runtimebus.EventBus, error) {
 	t.Helper()
+	if opts.WorkOwner == nil {
+		opts.WorkOwner = pipelineExternalTestWorkOwner(t)
+	}
 	if registrar, ok := eventStore.(testAuthorActivityCatalogRegistrar); ok {
 		descriptors := testAuthorActivityEventDescriptors(t, opts)
 		for _, eventType := range differentEvents {

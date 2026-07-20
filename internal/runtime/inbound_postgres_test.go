@@ -133,7 +133,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows after resume = %d, want 1", got)
 	}
-	waitForInboundBusQuiescence(t, bus)
+	unsubscribeAndWaitForInboundBusQuiescence(t, bus, agentID)
 }
 
 func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
@@ -236,7 +236,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows after resume = %d, want 1", got)
 	}
-	waitForInboundBusQuiescence(t, bus)
+	unsubscribeAndWaitForInboundBusQuiescence(t, bus, agentID)
 }
 
 func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
@@ -341,7 +341,7 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows after resume = %d, want 1", got)
 	}
-	waitForInboundBusQuiescence(t, bus)
+	unsubscribeAndWaitForInboundBusQuiescence(t, bus, agentID)
 }
 
 func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testing.T) {
@@ -397,11 +397,11 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 		if got.ID() != eventID || got.Type() != events.EventType(providerEventName) {
 			t.Fatalf("delivered event = %s/%s, want %s/%s", got.ID(), got.Type(), eventID, providerEventName)
 		}
-	default:
-		// The Stripe manifest uses durable_before_dispatch; this proof is about
-		// durable persisted evidence, not immediate post-ack handler scheduling.
+		_ = got.Complete()
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stripe SQLite post-commit dispatch did not arrive")
 	}
-	waitForInboundBusQuiescence(t, bus)
+	unsubscribeAndWaitForInboundBusQuiescence(t, bus, agentID)
 }
 
 func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
@@ -464,11 +464,11 @@ func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *test
 		if got.ID() != eventID || got.Type() != events.EventType(providerEventName) {
 			t.Fatalf("delivered event = %s/%s, want %s/%s", got.ID(), got.Type(), eventID, providerEventName)
 		}
-	default:
-		// Twilio uses durable_before_dispatch; this proof is about persisted
-		// evidence and supported store admission, not handler completion.
+		_ = got.Complete()
+	case <-time.After(5 * time.Second):
+		t.Fatal("Twilio PostgreSQL post-commit dispatch did not arrive")
 	}
-	waitForInboundBusQuiescence(t, bus)
+	unsubscribeAndWaitForInboundBusQuiescence(t, bus, agentID)
 }
 
 func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testing.T) {
@@ -528,11 +528,11 @@ func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testin
 		if got.ID() != eventID || got.Type() != events.EventType(providerEventName) {
 			t.Fatalf("delivered event = %s/%s, want %s/%s", got.ID(), got.Type(), eventID, providerEventName)
 		}
-	default:
-		// Twilio uses durable_before_dispatch; this proof is about persisted
-		// evidence and supported store admission, not handler completion.
+		_ = got.Complete()
+	case <-time.After(5 * time.Second):
+		t.Fatal("Twilio SQLite post-commit dispatch did not arrive")
 	}
-	waitForInboundBusQuiescence(t, bus)
+	unsubscribeAndWaitForInboundBusQuiescence(t, bus, agentID)
 }
 
 func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
@@ -591,11 +591,11 @@ func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *tes
 		if got.ID() != eventID || got.Type() != events.EventType(providerEventName) {
 			t.Fatalf("delivered event = %s/%s, want %s/%s", got.ID(), got.Type(), eventID, providerEventName)
 		}
-	default:
-		// Shopify uses durable_before_dispatch; this proof is about persisted
-		// evidence and supported store admission, not handler completion.
+		_ = got.Complete()
+	case <-time.After(5 * time.Second):
+		t.Fatal("Shopify PostgreSQL post-commit dispatch did not arrive")
 	}
-	waitForInboundBusQuiescence(t, bus)
+	unsubscribeAndWaitForInboundBusQuiescence(t, bus, agentID)
 }
 
 func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testing.T) {
@@ -651,11 +651,11 @@ func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testi
 		if got.ID() != eventID || got.Type() != events.EventType(providerEventName) {
 			t.Fatalf("delivered event = %s/%s, want %s/%s", got.ID(), got.Type(), eventID, providerEventName)
 		}
-	default:
-		// Shopify uses durable_before_dispatch; this proof is about persisted
-		// evidence and supported store admission, not handler completion.
+		_ = got.Complete()
+	case <-time.After(5 * time.Second):
+		t.Fatal("Shopify SQLite post-commit dispatch did not arrive")
 	}
-	waitForInboundBusQuiescence(t, bus)
+	unsubscribeAndWaitForInboundBusQuiescence(t, bus, agentID)
 }
 
 func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
@@ -715,8 +715,8 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 	if err != nil || !found {
 		t.Fatalf("LoadInboundPublicationByIdentity = found:%v err:%v", found, err)
 	}
-	waitForInboundBusQuiescence(t, bus)
 	requireInboundPostCommitSnapshot(t, requireInboundBusEvent(t, ch, "Telegram PostgreSQL post-commit dispatch"), inboundPublicationEvent(t, record, eventID))
+	waitForInboundBusQuiescence(t, bus)
 
 	eventtestsql.CorruptEventStore(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.duplicate_integrity",
@@ -785,8 +785,8 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 	if err != nil || !found {
 		t.Fatalf("LoadInboundPublicationByIdentity = found:%v err:%v", found, err)
 	}
-	waitForInboundBusQuiescence(t, bus)
 	requireInboundPostCommitSnapshot(t, requireInboundBusEvent(t, ch, "Telegram SQLite post-commit dispatch"), inboundPublicationEvent(t, record, eventID))
+	waitForInboundBusQuiescence(t, bus)
 
 	eventtestsql.CorruptEventStore(t, ctx, sqliteStore.DB, runtimeauthoractivity.DialectSQLite, eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.duplicate_integrity",
@@ -973,11 +973,11 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 				if got.ID() != eventID || got.Type() != events.EventType(tc.providerEventName) {
 					t.Fatalf("delivered event = %s/%s, want %s/%s", got.ID(), got.Type(), eventID, tc.providerEventName)
 				}
-			default:
-				// Typeform and Intercom use durable_before_dispatch; this proof is
-				// about persisted evidence and supported store admission.
+				_ = got.Complete()
+			case <-time.After(5 * time.Second):
+				t.Fatalf("%s PostgreSQL post-commit dispatch did not arrive", tc.provider)
 			}
-			waitForInboundBusQuiescence(t, bus)
+			unsubscribeAndWaitForInboundBusQuiescence(t, bus, tc.agentID)
 		})
 	}
 }
@@ -1065,11 +1065,11 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 				if got.ID() != eventID || got.Type() != events.EventType(tc.providerEventName) {
 					t.Fatalf("delivered event = %s/%s, want %s/%s", got.ID(), got.Type(), eventID, tc.providerEventName)
 				}
-			default:
-				// Typeform and Intercom use durable_before_dispatch; this proof is
-				// about persisted evidence and supported store admission.
+				_ = got.Complete()
+			case <-time.After(5 * time.Second):
+				t.Fatalf("%s SQLite post-commit dispatch did not arrive", tc.provider)
 			}
-			waitForInboundBusQuiescence(t, bus)
+			unsubscribeAndWaitForInboundBusQuiescence(t, bus, tc.agentID)
 		})
 	}
 }
@@ -1414,24 +1414,33 @@ func countPostgresAgentReceiptsForEvent(t *testing.T, ctx context.Context, db *s
 	return count
 }
 
-func requireInboundBusEvent(t testing.TB, ch <-chan events.Event, context string) events.Event {
+func requireInboundBusEvent(t testing.TB, ch <-chan *runtimebus.LocalDelivery, context string) events.Event {
 	t.Helper()
 	select {
-	case evt := <-ch:
+	case delivery := <-ch:
+		evt := delivery.Event()
+		_ = delivery.Complete()
 		return evt
-	default:
+	case <-time.After(5 * time.Second):
 		t.Fatalf("%s: expected queued bus event", context)
 		return events.Event{}
 	}
 }
 
-func requireNoInboundBusEvent(t testing.TB, ch <-chan events.Event, context string) {
+func requireNoInboundBusEvent(t testing.TB, ch <-chan *runtimebus.LocalDelivery, context string) {
 	t.Helper()
 	select {
-	case evt := <-ch:
-		t.Fatalf("%s: unexpected bus event: %#v", context, evt)
+	case delivery := <-ch:
+		_ = delivery.Complete()
+		t.Fatalf("%s: unexpected bus event: %#v", context, delivery.Event())
 	default:
 	}
+}
+
+func unsubscribeAndWaitForInboundBusQuiescence(t testing.TB, bus *runtimebus.EventBus, agentID string) {
+	t.Helper()
+	bus.Unsubscribe(agentID)
+	waitForInboundBusQuiescence(t, bus)
 }
 
 func waitForInboundBusQuiescence(t testing.TB, bus *runtimebus.EventBus) {

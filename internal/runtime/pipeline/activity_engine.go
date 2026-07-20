@@ -776,10 +776,6 @@ func (pc *PipelineCoordinator) ExecuteDurableActivity(ctx context.Context, inten
 	}
 	publishCtx := events.WithDeliveryContext(ctx, request.Context)
 	publishErr := pc.bus.Publish(publishCtx, request.Event)
-	var dispatchErr error
-	if publishErr == nil {
-		_, dispatchErr = pc.handleActivityRequestEvent(publishCtx, request.Event)
-	}
 	waitCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
 	defer cancel()
 	ticker := time.NewTicker(5 * time.Millisecond)
@@ -801,9 +797,6 @@ func (pc *PipelineCoordinator) ExecuteDurableActivity(ctx context.Context, inten
 		}
 		if publishErr != nil {
 			return ActivityAttemptRecord{}, publishErr
-		}
-		if dispatchErr != nil {
-			return ActivityAttemptRecord{}, dispatchErr
 		}
 		select {
 		case <-waitCtx.Done():
