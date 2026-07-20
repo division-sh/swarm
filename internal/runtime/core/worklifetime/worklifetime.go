@@ -63,6 +63,10 @@ func (g *gate) begin(parent context.Context) (*Lease, error) {
 		parent = context.Background()
 	}
 	g.mu.Lock()
+	if g.ctx.Err() != nil {
+		g.mu.Unlock()
+		return nil, ErrRetired
+	}
 	switch g.state {
 	case gateFenced:
 		g.mu.Unlock()
@@ -140,6 +144,9 @@ func (g *gate) admits() error {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.ctx.Err() != nil {
+		return ErrRetired
+	}
 	switch g.state {
 	case gateFenced:
 		return ErrAdmissionFenced
@@ -238,6 +245,13 @@ type ownedOccurrence struct {
 
 func newOwnedOccurrence(parent context.Context, parentLease *Lease) *ownedOccurrence {
 	return &ownedOccurrence{id: uuid.NewString(), gate: newGate(parent), parentLease: parentLease}
+}
+
+func (o *ownedOccurrence) newChild(parentLease *Lease) *ownedOccurrence {
+	if o == nil || o.gate == nil {
+		return nil
+	}
+	return newOwnedOccurrence(o.gate.ctx, parentLease)
 }
 
 func (o *ownedOccurrence) begin(ctx context.Context) (*Lease, error) {
@@ -441,7 +455,7 @@ func (p *Process) NewRuntime(ctx context.Context, identity RuntimeIdentity) (*Ru
 		return nil, fmt.Errorf("admit runtime occurrence: %w", err)
 	}
 	return &RuntimeOccurrence{
-		occurrence: newOwnedOccurrence(parentLease.Context(), parentLease),
+		occurrence: p.occurrence.newChild(parentLease),
 		identity: RuntimeIdentity{
 			RuntimeInstanceID: strings.TrimSpace(identity.RuntimeInstanceID),
 			BundleHash:        strings.TrimSpace(identity.BundleHash),
@@ -538,7 +552,7 @@ func (r *RuntimeOccurrence) NewStanding(ctx context.Context, identity StandingId
 	}
 	identity.ServiceID = strings.TrimSpace(identity.ServiceID)
 	identity.RunID = strings.TrimSpace(identity.RunID)
-	return &StandingOccurrence{occurrence: newOwnedOccurrence(parentLease.Context(), parentLease), identity: identity}, nil
+	return &StandingOccurrence{occurrence: r.occurrence.newChild(parentLease), identity: identity}, nil
 }
 
 func (s *StandingOccurrence) Begin(ctx context.Context) (*Lease, error) {
@@ -619,7 +633,7 @@ func (r *RuntimeOccurrence) NewRoute(ctx context.Context, identity RouteIdentity
 		return nil, fmt.Errorf("admit route occurrence: %w", err)
 	}
 	identity.AgentID = strings.TrimSpace(identity.AgentID)
-	return &RouteOccurrence{occurrence: newOwnedOccurrence(ctx, nil), identity: identity, owner: r}, nil
+	return &RouteOccurrence{occurrence: r.occurrence.newChild(nil), identity: identity, owner: r}, nil
 }
 
 func (r *RouteOccurrence) Begin(ctx context.Context) (*Lease, error) {
@@ -684,7 +698,7 @@ func (r *RuntimeOccurrence) NewSelectedFork(ctx context.Context, identity Select
 	}
 	identity.ExecutionID = strings.TrimSpace(identity.ExecutionID)
 	identity.RunID = strings.TrimSpace(identity.RunID)
-	return &SelectedForkOccurrence{occurrence: newOwnedOccurrence(parentLease.Context(), parentLease), identity: identity}, nil
+	return &SelectedForkOccurrence{occurrence: r.occurrence.newChild(parentLease), identity: identity}, nil
 }
 
 func (p *Process) NewSelectedFork(ctx context.Context, identity SelectedForkIdentity) (*SelectedForkOccurrence, error) {
@@ -700,7 +714,7 @@ func (p *Process) NewSelectedFork(ctx context.Context, identity SelectedForkIden
 	}
 	identity.ExecutionID = strings.TrimSpace(identity.ExecutionID)
 	identity.RunID = strings.TrimSpace(identity.RunID)
-	return &SelectedForkOccurrence{occurrence: newOwnedOccurrence(parentLease.Context(), parentLease), identity: identity}, nil
+	return &SelectedForkOccurrence{occurrence: p.occurrence.newChild(parentLease), identity: identity}, nil
 }
 
 func (s *SelectedForkOccurrence) Begin(ctx context.Context) (*Lease, error) {
@@ -743,5 +757,5 @@ func (s *SelectedForkOccurrence) NewRoute(ctx context.Context, identity RouteIde
 		return nil, fmt.Errorf("admit selected-fork route occurrence: %w", err)
 	}
 	identity.AgentID = strings.TrimSpace(identity.AgentID)
-	return &RouteOccurrence{occurrence: newOwnedOccurrence(parentLease.Context(), parentLease), identity: identity, owner: s}, nil
+	return &RouteOccurrence{occurrence: s.occurrence.newChild(parentLease), identity: identity, owner: s}, nil
 }

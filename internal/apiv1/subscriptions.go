@@ -64,6 +64,63 @@ type subscriptionPlan struct {
 	Cancel context.CancelFunc
 }
 
+type ownedSubscriptionState uint8
+
+const (
+	ownedSubscriptionPrepared ownedSubscriptionState = iota
+	ownedSubscriptionStarted
+	ownedSubscriptionCancelled
+)
+
+type ownedSubscriptionWork struct {
+	mu     sync.Mutex
+	state  ownedSubscriptionState
+	ctx    context.Context
+	cancel context.CancelFunc
+	lease  *worklifetime.Lease
+	settle sync.Once
+}
+
+func (w *ownedSubscriptionWork) Start(run func(context.Context)) {
+	if w == nil || run == nil {
+		return
+	}
+	w.mu.Lock()
+	if w.state != ownedSubscriptionPrepared {
+		w.mu.Unlock()
+		return
+	}
+	w.state = ownedSubscriptionStarted
+	w.mu.Unlock()
+	go func() {
+		defer w.settleLease()
+		run(w.ctx)
+	}()
+}
+
+func (w *ownedSubscriptionWork) Cancel() {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	settlePrepared := w.state == ownedSubscriptionPrepared
+	if settlePrepared {
+		w.state = ownedSubscriptionCancelled
+	}
+	w.mu.Unlock()
+	w.cancel()
+	if settlePrepared {
+		w.settleLease()
+	}
+}
+
+func (w *ownedSubscriptionWork) settleLease() {
+	if w == nil {
+		return
+	}
+	w.settle.Do(func() { _ = w.lease.Done() })
+}
+
 type runtimeLogSubscriptionState struct {
 	since *time.Time
 	seen  map[string]string
@@ -148,33 +205,28 @@ func (r *SubscriptionRuntime) prepareDecisionCardSubscription(session *webSocket
 		}
 		cursor = int64(value)
 	}
-	id, ctx, cancel, settle, err := r.newOwnedSubscriptionContext(session, "mailbox")
+	id, work, err := r.newOwnedSubscriptionWork(session, "mailbox")
 	if err != nil {
 		return subscriptionPlan{}, err
 	}
 	return subscriptionPlan{
 		Result: subscriptionIDResult{SubscriptionID: id},
 		Start: func() {
-			go func() {
-				defer settle()
-				r.runDecisionCardSubscription(ctx, session, id, cursor)
-			}()
+			work.Start(func(ctx context.Context) { r.runDecisionCardSubscription(ctx, session, id, cursor) })
 		},
-		Cancel: func() { cancel(); settle() },
+		Cancel: work.Cancel,
 	}, nil
 }
 
 func (r *SubscriptionRuntime) prepareHealthSubscription(session *webSocketSession) (subscriptionPlan, error) {
-	id, ctx, cancel, settle, err := r.newOwnedSubscriptionContext(session, "health")
+	id, work, err := r.newOwnedSubscriptionWork(session, "health")
 	if err != nil {
 		return subscriptionPlan{}, err
 	}
 	return subscriptionPlan{
 		Result: subscriptionIDResult{SubscriptionID: id},
-		Start: func() {
-			go func() { defer settle(); r.runHealthSubscription(ctx, session, id) }()
-		},
-		Cancel: func() { cancel(); settle() },
+		Start:  func() { work.Start(func(ctx context.Context) { r.runHealthSubscription(ctx, session, id) }) },
+		Cancel: work.Cancel,
 	}, nil
 }
 
@@ -194,19 +246,18 @@ func (r *SubscriptionRuntime) prepareEventSubscription(session *webSocketSession
 	if err != nil {
 		return subscriptionPlan{}, err
 	}
-	id, ctx, cancel, settle, err := r.newOwnedSubscriptionContext(session, "event")
+	id, work, err := r.newOwnedSubscriptionWork(session, "event")
 	if err != nil {
 		return subscriptionPlan{}, err
 	}
 	return subscriptionPlan{
 		Result: subscriptionIDResult{SubscriptionID: id},
 		Start: func() {
-			go func() {
-				defer settle()
+			work.Start(func(ctx context.Context) {
 				r.runEventSubscription(ctx, session, id, reads, filter, subscriptionBaseSince(replaySince, r.now()))
-			}()
+			})
 		},
-		Cancel: func() { cancel(); settle() },
+		Cancel: work.Cancel,
 	}, nil
 }
 
@@ -239,19 +290,18 @@ func (r *SubscriptionRuntime) prepareRunTraceSubscription(session *webSocketSess
 	} else if err != nil {
 		return subscriptionPlan{}, err
 	}
-	id, ctx, cancel, settle, err := r.newOwnedSubscriptionContext(session, "run-trace")
+	id, work, err := r.newOwnedSubscriptionWork(session, "run-trace")
 	if err != nil {
 		return subscriptionPlan{}, err
 	}
 	return subscriptionPlan{
 		Result: subscriptionIDResult{SubscriptionID: id},
 		Start: func() {
-			go func() {
-				defer settle()
+			work.Start(func(ctx context.Context) {
 				r.runTraceSubscription(ctx, session, id, reads, runID, baseSince, filter, includeInternal)
-			}()
+			})
 		},
-		Cancel: func() { cancel(); settle() },
+		Cancel: work.Cancel,
 	}, nil
 }
 
@@ -267,16 +317,16 @@ func (r *SubscriptionRuntime) prepareRuntimeLogSubscription(session *webSocketSe
 	opts.Since = subscriptionBaseSince(replaySince, r.now())
 	opts.Limit = subscriptionBatchLimit
 	opts.Order = "asc"
-	id, ctx, cancel, settle, err := r.newOwnedSubscriptionContext(session, "runtime-logs")
+	id, work, err := r.newOwnedSubscriptionWork(session, "runtime-logs")
 	if err != nil {
 		return subscriptionPlan{}, err
 	}
 	return subscriptionPlan{
 		Result: subscriptionIDResult{SubscriptionID: id},
 		Start: func() {
-			go func() { defer settle(); r.runRuntimeLogSubscription(ctx, session, id, reads, opts) }()
+			work.Start(func(ctx context.Context) { r.runRuntimeLogSubscription(ctx, session, id, reads, opts) })
 		},
-		Cancel: func() { cancel(); settle() },
+		Cancel: work.Cancel,
 	}, nil
 }
 
@@ -330,26 +380,20 @@ func runtimeLogSubscriptionOptionsFromParams(params map[string]any) (store.Opera
 	return out, replaySince, nil
 }
 
-func (s *webSocketSession) newSubscriptionContext(prefix string) (string, context.Context, context.CancelFunc) {
-	subscriptionID := strings.Trim(strings.TrimSpace(prefix)+"-"+uuid.NewString(), "-")
-	ctx, cancel := context.WithCancel(s.ctx)
-	s.registerSubscription(subscriptionID, cancel)
-	return subscriptionID, ctx, cancel
-}
-
-func (r *SubscriptionRuntime) newOwnedSubscriptionContext(session *webSocketSession, prefix string) (string, context.Context, context.CancelFunc, func(), error) {
+func (r *SubscriptionRuntime) newOwnedSubscriptionWork(session *webSocketSession, prefix string) (string, *ownedSubscriptionWork, error) {
 	if r == nil || r.workOwner == nil {
-		return "", nil, nil, nil, errors.New("process work owner is required for API subscription")
+		return "", nil, errors.New("process work owner is required for API subscription")
 	}
-	id, ctx, cancel := session.newSubscriptionContext(prefix)
+	id := strings.Trim(strings.TrimSpace(prefix)+"-"+uuid.NewString(), "-")
+	ctx, cancel := context.WithCancel(session.ctx)
 	lease, err := r.workOwner.Begin(ctx)
 	if err != nil {
 		cancel()
-		return "", nil, nil, nil, fmt.Errorf("admit API subscription: %w", err)
+		return "", nil, fmt.Errorf("admit API subscription: %w", err)
 	}
-	var once sync.Once
-	settle := func() { once.Do(func() { _ = lease.Done() }) }
-	return id, lease.Context(), cancel, settle, nil
+	work := &ownedSubscriptionWork{ctx: lease.Context(), cancel: cancel, lease: lease}
+	session.registerSubscription(id, work.Cancel)
+	return id, work, nil
 }
 
 func (r *SubscriptionRuntime) runHealthSubscription(ctx context.Context, session *webSocketSession, subscriptionID string) {

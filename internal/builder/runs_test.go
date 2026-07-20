@@ -2,7 +2,6 @@ package builder
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -25,7 +24,6 @@ type snapshotRunStore struct {
 	events        []store.OperatorEventFull
 	runtimeLogs   []store.OperatorRuntimeLogEntry
 	appendErr     error
-	terminalErr   error
 	terminalCalls int
 }
 
@@ -38,9 +36,6 @@ func (s *snapshotRunStore) CommitPublish(ctx context.Context, plan runtimebus.Co
 
 func (s *snapshotRunStore) MarkRunTerminal(_ context.Context, runID, status string, failure *runtimefailures.Envelope, endedAt time.Time) (runtimebus.RunLifecycleSnapshot, error) {
 	s.terminalCalls++
-	if s.terminalErr != nil {
-		return runtimebus.RunLifecycleSnapshot{}, s.terminalErr
-	}
 	s.snapshot.RunID = runID
 	s.snapshot.Status = status
 	s.snapshot.Failure = runtimefailures.CloneEnvelope(failure)
@@ -213,23 +208,40 @@ func TestRunHubStartRunPublishFailureUsesCanonicalEnvelopeOnly(t *testing.T) {
 
 func TestBuilderRunCompletionUsesAcquiredGeneration(t *testing.T) {
 	store := &snapshotRunStore{snapshot: runtimebus.RunLifecycleSnapshot{
-		RunID: "run-owned", Status: "running", StartedAt: time.Now().UTC(),
+		RunID: "run-owned", Status: "completed", StartedAt: time.Now().UTC(),
 	}}
-	_, acquirer := newTestOwnedEventBus(t, store, runtimebus.EventBusOptions{})
-	hub := newRunHub(acquirer, nil, nil, store)
-	if err := hub.startRun(context.Background(), "run-owned", nil, nil); err != nil {
-		t.Fatalf("startRun: %v", err)
+	rt, acquirer := newTestOwnedEventBus(t, store, runtimebus.EventBusOptions{})
+	unrelated, err := acquirer.owner.Begin(context.Background())
+	if err != nil {
+		t.Fatalf("begin persistent runtime work: %v", err)
+	}
+	use, err := acquirer.acquire(context.Background())
+	if err != nil {
+		t.Fatalf("acquire completion generation: %v", err)
+	}
+	hub := &runHub{runDebug: store, sessions: map[string]*runSession{"run-owned": {
+		runID: "run-owned", runtime: rt, subs: map[string]func(RunEventEnvelope){},
+		debug: runDebugStreamState{eventIDs: map[string]struct{}{}, runtimeLogIDs: map[string]struct{}{}},
+	}}}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() { _ = use.Done() }()
+		hub.awaitCompletion(use.WorkContext(), "run-owned", rt)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("canonical completion waited on its own or unrelated runtime work")
+	}
+	if !hub.isTerminal("run-owned") {
+		t.Fatal("canonical terminal lifecycle was not observed")
 	}
 	if got := acquirer.owner.ActiveCount(); got != 1 {
-		t.Fatalf("active builder completion work = %d, want 1", got)
+		t.Fatalf("active runtime work after completion = %d, want only persistent lease", got)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if _, err := acquirer.owner.RetireAndWait(ctx); err != nil {
-		t.Fatalf("retire acquired builder generation: %v", err)
-	}
-	if got := acquirer.owner.ActiveCount(); got != 0 {
-		t.Fatalf("active builder completion work after retirement = %d, want 0", got)
+	if err := unrelated.Done(); err != nil {
+		t.Fatalf("settle persistent runtime work: %v", err)
 	}
 }
 
@@ -273,38 +285,6 @@ func TestRunHubAwaitCompletion_MarksSessionTerminalWhenCanonicalObservationIsUna
 	}
 	if _, ok := payload["persistence_error"]; ok {
 		t.Fatalf("last payload = %#v, persistence_error must be retired", payload)
-	}
-}
-
-func TestRunHubAwaitCompletionFailedTerminalPersistenceOmitsOriginalFailure(t *testing.T) {
-	store := &snapshotRunStore{terminalErr: errors.New("raw persistence secret")}
-	eb, err := runtimebus.NewEventBus(store)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	rt := &runtimepkg.Runtime{Bus: eb}
-	hub := &runHub{sessions: map[string]*runSession{"run-123": {
-		runID:             "run-123",
-		runtime:           rt,
-		waitForQuiescence: func(context.Context) error { return errors.New("raw execution secret") },
-		subs:              map[string]func(RunEventEnvelope){},
-	}}}
-
-	hub.awaitCompletion(context.Background(), "run-123", rt)
-	session := hub.session("run-123")
-	if session == nil || len(session.controlEvents) != 1 {
-		t.Fatalf("control events = %#v", session)
-	}
-	payload, _ := session.controlEvents[0]["payload"].(map[string]any)
-	failureValue, _ := payload["failure"].(map[string]any)
-	detail, _ := failureValue["detail"].(map[string]any)
-	attributes, _ := detail["attributes"].(map[string]any)
-	if failureValue["class"] != string(runtimefailures.ClassOutcomeUncertain) || detail["code"] != "run_terminal_persistence_unconfirmed" || attributes["attempted_status"] != "failed" {
-		t.Fatalf("terminal persistence failure = %#v", failureValue)
-	}
-	raw, _ := json.Marshal(payload)
-	if strings.Contains(string(raw), "raw execution secret") || strings.Contains(string(raw), "raw persistence secret") {
-		t.Fatalf("raw cause leaked: %s", raw)
 	}
 }
 
@@ -376,10 +356,9 @@ func TestRunHubAwaitCompletion_WaitingCanonicalRunDoesNotWriteCompleted(t *testi
 	}
 	rt := &runtimepkg.Runtime{Bus: eb}
 	hub := &runHub{sessions: map[string]*runSession{"run-123": {
-		runID:             "run-123",
-		runtime:           rt,
-		waitForQuiescence: func(context.Context) error { return nil },
-		subs:              map[string]func(RunEventEnvelope){},
+		runID:   "run-123",
+		runtime: rt,
+		subs:    map[string]func(RunEventEnvelope){},
 	}}}
 	previousInterval := runCompletionObservationInterval
 	runCompletionObservationInterval = 5 * time.Millisecond

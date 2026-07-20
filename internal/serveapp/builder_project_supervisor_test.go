@@ -1617,6 +1617,7 @@ func newSupervisorForLoadProjectFailureTest(
 	source := semanticview.Wrap(bundle)
 	module := stubWorkflowModule{source: source}
 	supervisor := newRuntimeProjectSupervisor("", "", nil, storeBundle{}, new(atomic.Bool), cliapp.WorkspaceMountSources{}, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil, nil, nil, "", nil, nil, nil)
+	supervisor.processWorkOwner = worklifetime.NewProcess()
 	catalog := testProviderTriggerCatalog(t)
 	supervisor.providerTriggers = catalog
 	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) { return catalog, nil }
@@ -1638,6 +1639,38 @@ func newSupervisorForLoadProjectFailureTest(
 		supervisor.createRuntime = createRuntime
 	}
 	return supervisor
+}
+
+func TestRuntimeProjectSupervisorCarriesProcessOwnerIntoDynamicRuntime(t *testing.T) {
+	projectRoot := writeProjectRoot(t)
+	processOwner := worklifetime.NewProcess()
+	var captured runtimepkg.RuntimeDeps
+	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
+		captured = deps
+		return &runtimepkg.Runtime{Options: deps.Options}, nil
+	})
+	supervisor.processWorkOwner = processOwner
+	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
+	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
+
+	if _, err := supervisor.OpenProject(context.Background(), projectRoot); err != nil {
+		t.Fatalf("OpenProject: %v", err)
+	}
+	if captured.Options.ProcessWorkOwner != processOwner {
+		t.Fatalf("dynamic runtime process owner = %p, want served owner %p", captured.Options.ProcessWorkOwner, processOwner)
+	}
+}
+
+func TestRuntimeProjectSupervisorDerivesProcessOwnerFromInitialRuntime(t *testing.T) {
+	processOwner := worklifetime.NewProcess()
+	initial := &runtimepkg.Runtime{Options: runtimepkg.RuntimeOptions{ProcessWorkOwner: processOwner}}
+	supervisor := newRuntimeProjectSupervisor(
+		"", "", nil, storeBundle{}, new(atomic.Bool), cliapp.WorkspaceMountSources{},
+		cliapp.WorkspaceBackendSelection{}, nil, nil, nil, "", nil, nil, initial,
+	)
+	if supervisor.processWorkOwner != processOwner {
+		t.Fatalf("supervisor process owner = %p, want initial runtime owner %p", supervisor.processWorkOwner, processOwner)
+	}
 }
 
 func TestRuntimeProjectSupervisorLoadProjectUsesResolvedWorkspaceMountSources(t *testing.T) {

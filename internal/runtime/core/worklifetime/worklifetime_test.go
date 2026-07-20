@@ -101,6 +101,97 @@ func TestChildOccurrenceTransitivelyBlocksProcessJoin(t *testing.T) {
 	}
 }
 
+func TestChildOccurrencesIgnoreConstructionCancellationAndFollowOwnerRetirement(t *testing.T) {
+	process := NewProcess()
+	constructionCtx, cancelConstruction := context.WithCancel(context.Background())
+	runtime, err := process.NewRuntime(constructionCtx, RuntimeIdentity{RuntimeInstanceID: "runtime-1", BundleHash: "bundle-1"})
+	if err != nil {
+		t.Fatalf("new runtime occurrence: %v", err)
+	}
+	standing, err := runtime.NewStanding(constructionCtx, StandingIdentity{ServiceID: "service-1", RunID: "run-1", Generation: 1})
+	if err != nil {
+		t.Fatalf("new standing occurrence: %v", err)
+	}
+	runtimeRoute, err := runtime.NewRoute(constructionCtx, RouteIdentity{RuntimeEpoch: 1, AgentID: "runtime-agent", Generation: 1})
+	if err != nil {
+		t.Fatalf("new runtime route: %v", err)
+	}
+	runtimeFork, err := runtime.NewSelectedFork(constructionCtx, SelectedForkIdentity{ExecutionID: "runtime-fork", RunID: "run-2", Generation: 1})
+	if err != nil {
+		t.Fatalf("new runtime selected fork: %v", err)
+	}
+	processFork, err := process.NewSelectedFork(constructionCtx, SelectedForkIdentity{ExecutionID: "process-fork", RunID: "run-3", Generation: 1})
+	if err != nil {
+		t.Fatalf("new process selected fork: %v", err)
+	}
+	forkRoute, err := runtimeFork.NewRoute(constructionCtx, RouteIdentity{RuntimeEpoch: 1, AgentID: "fork-agent", Generation: 1})
+	if err != nil {
+		t.Fatalf("new selected-fork route: %v", err)
+	}
+
+	cancelConstruction()
+	starters := []struct {
+		name  string
+		begin func(context.Context) (*Lease, error)
+	}{
+		{name: "runtime", begin: runtime.Begin},
+		{name: "standing", begin: standing.Begin},
+		{name: "runtime route", begin: runtimeRoute.Begin},
+		{name: "runtime selected fork", begin: runtimeFork.Begin},
+		{name: "process selected fork", begin: processFork.Begin},
+		{name: "selected-fork route", begin: forkRoute.Begin},
+	}
+	leases := make([]*Lease, 0, len(starters))
+	for _, starter := range starters {
+		lease, beginErr := starter.begin(context.Background())
+		if beginErr != nil {
+			t.Fatalf("begin %s after construction cancellation: %v", starter.name, beginErr)
+		}
+		select {
+		case <-lease.Context().Done():
+			t.Fatalf("%s inherited cancelled construction context", starter.name)
+		default:
+		}
+		leases = append(leases, lease)
+	}
+
+	process.Retire()
+	for i, lease := range leases {
+		select {
+		case <-lease.Context().Done():
+		case <-time.After(time.Second):
+			t.Fatalf("%s was not cancelled by owner retirement", starters[i].name)
+		}
+		if err := lease.Done(); err != nil {
+			t.Fatalf("settle %s: %v", starters[i].name, err)
+		}
+	}
+	if _, err := runtime.Begin(context.Background()); !errors.Is(err, ErrRetired) {
+		t.Fatalf("runtime admission after process retirement = %v, want ErrRetired", err)
+	}
+	retirements := []struct {
+		name   string
+		retire func(context.Context) error
+	}{
+		{name: "runtime route", retire: runtimeRoute.RetireAndWait},
+		{name: "selected-fork route", retire: forkRoute.RetireAndWait},
+		{name: "standing", retire: standing.RetireAndWait},
+		{name: "runtime fork", retire: runtimeFork.RetireAndWait},
+		{name: "process fork", retire: processFork.RetireAndWait},
+	}
+	for _, retirement := range retirements {
+		if err := retirement.retire(context.Background()); err != nil {
+			t.Fatalf("retire %s: %v", retirement.name, err)
+		}
+	}
+	if _, err := runtime.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire runtime: %v", err)
+	}
+	if _, err := process.Join(context.Background()); err != nil {
+		t.Fatalf("join process: %v", err)
+	}
+}
+
 func TestBeginRetireRaceRejectsLateAdmissionAndJoinsAcceptedWork(t *testing.T) {
 	process := NewProcess()
 	runtime, err := process.NewRuntime(context.Background(), RuntimeIdentity{RuntimeInstanceID: "runtime-1", BundleHash: "bundle-1"})
