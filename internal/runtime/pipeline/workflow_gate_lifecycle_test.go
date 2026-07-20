@@ -656,7 +656,7 @@ func ensurePipelineTestRun(t *testing.T, store *WorkflowInstanceStore, runID str
 	if store.isSQLite() {
 		query = `INSERT OR IGNORE INTO runs (run_id, status) VALUES (?, 'running')`
 	}
-	if _, err := store.db.ExecContext(testAuthorActivityContext(context.Background()), query, runID); err != nil {
+	if _, err := store.db.ExecContext(testAuthorActivityContext(t, context.Background()), query, runID); err != nil {
 		t.Fatal(err)
 	}
 }

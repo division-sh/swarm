@@ -115,11 +115,12 @@ func (*runtimeShutdownInboundStore) ValidateInboundPublicationIntegrity(context.
 }
 
 func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := newRuntimeTestEventBus(t, nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	started := make(chan struct{}, 1)
+	canceled := make(chan struct{}, 1)
 	release := make(chan struct{})
 
 	agent := runtimeShutdownTestAgent{
@@ -130,16 +131,15 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 			case started <- struct{}{}:
 			default:
 			}
-			select {
-			case <-release:
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-			return nil, nil
+			<-ctx.Done()
+			canceled <- struct{}{}
+			<-release
+			return nil, ctx.Err()
 		},
 	}
 
-	rt := &Runtime{}
+	workOwner := runtimeTestEventBusRuntimeOccurrence(t, bus)
+	rt := &Runtime{Bus: bus, workOccurrence: workOwner}
 	managerStore := &runtimeShutdownManagerStore{}
 	am := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		if cfg.ID != agent.id {
@@ -148,6 +148,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
+		WorkOwner:                      workOwner,
 	}, managerStore)
 	rt.Manager = am
 
@@ -183,9 +184,14 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	}()
 
 	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("accepted work was not canceled during retirement")
+	}
+	select {
 	case err := <-shutdownErrCh:
-		t.Fatalf("Shutdown returned before in-flight work drained: %v", err)
-	case <-time.After(50 * time.Millisecond):
+		t.Fatalf("Shutdown returned before canceled work settled: %v", err)
+	default:
 	}
 
 	if !rt.shutdownAdmissionClosed() {
@@ -224,11 +230,13 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 }
 
 func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := newRuntimeTestEventBus(t, nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	started := make(chan struct{}, 1)
+	canceled := make(chan struct{}, 1)
+	release := make(chan struct{})
 
 	agent := runtimeShutdownTestAgent{
 		id:            "agent-1",
@@ -239,15 +247,19 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 			default:
 			}
 			<-ctx.Done()
+			canceled <- struct{}{}
+			<-release
 			return nil, ctx.Err()
 		},
 	}
 
-	rt := &Runtime{}
+	workOwner := runtimeTestEventBusRuntimeOccurrence(t, bus)
+	rt := &Runtime{Bus: bus, workOccurrence: workOwner}
 	am := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
+		WorkOwner:                      workOwner,
 	})
 	rt.Manager = am
 
@@ -274,14 +286,25 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 	}
 
 	grace := 25 * time.Millisecond
-	startedAt := time.Now()
-	err = rt.ShutdownWithOptions(ShutdownOptions{Grace: grace})
-	elapsed := time.Since(startedAt)
+	shutdownErrCh := make(chan error, 1)
+	go func() {
+		shutdownErrCh <- rt.ShutdownWithOptions(ShutdownOptions{Grace: grace})
+	}()
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("manager work was not canceled at shutdown")
+	}
+	<-time.After(2 * grace)
+	select {
+	case err := <-shutdownErrCh:
+		t.Fatalf("ShutdownWithOptions abandoned canceled work: %v", err)
+	default:
+	}
+	close(release)
+	err = <-shutdownErrCh
 	if err == nil || !strings.Contains(err.Error(), "agent manager shutdown:") {
 		t.Fatalf("ShutdownWithOptions err = %v, want configured grace manager timeout", err)
-	}
-	if elapsed > 150*time.Millisecond {
-		t.Fatalf("ShutdownWithOptions elapsed = %s, want configured %s bound", elapsed, grace)
 	}
 	if !rt.shutdownAdmissionClosed() {
 		t.Fatal("runtime shutdown admission was not closed")
@@ -293,18 +316,20 @@ func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testi
 	publicationStore := &cancellationBlockingInboundStore{
 		entered: make(chan struct{}, 1),
 	}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	hash := "bundle-v1:sha256:" + strings.Repeat("7", 64)
+	workOwner := runtimeTestOccurrence(t, hash)
+	bus, err := newRuntimeTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{WorkOwner: workOwner})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	rt := &Runtime{Bus: bus}
+	rt := &Runtime{Bus: bus, workOccurrence: workOwner}
 	gateway := newTestInboundGateway(t, bus, nil, rt.shutdownAdmissionClosed, publicationStore)
 	gateway.SetAdmissionGuard(rt.shutdownGate.BeginContext)
 	rt.InboundGateway = gateway.InboundGateway
-	hash := "bundle-v1:sha256:" + strings.Repeat("7", 64)
 	contextDef := testBundleContext(t, hash, "inbound.telegram")
 	contextDef.Runtime = rt
-	manager, err := NewRuntimeContextManager(nil, contextDef)
+	contextDef.WorkOwner = rt.WorkOccurrence()
+	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}

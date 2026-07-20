@@ -14,7 +14,7 @@ import (
 func TestPreviewContractHandlerExecution_DeniesImportBoundaryWildcardRawFallback(t *testing.T) {
 	bundle := loadPipelineImportBoundaryWildcardBundle(t, canonicalrouting.ImportBoundaryWildcardDenied)
 	_, err := PreviewContractHandlerExecution(
-		testAuthorActivityContext(context.Background()),
+		testAuthorActivityContext(t, context.Background()),
 		bundle,
 		"worker-listener",
 		eventtest.RunCreatingRootIngress("", "producer/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
@@ -32,7 +32,7 @@ func TestPreviewContractHandlerExecution_DeniesImportBoundaryWildcardRawFallback
 func TestPreviewContractHandlerExecution_AllowsGrantedImportBoundaryWildcard(t *testing.T) {
 	bundle := loadPipelineImportBoundaryWildcardBundle(t, canonicalrouting.ImportBoundaryWildcardObserveGranted)
 	preview, err := PreviewContractHandlerExecution(
-		testAuthorActivityContext(context.Background()),
+		testAuthorActivityContext(t, context.Background()),
 		bundle,
 		"worker-listener",
 		eventtest.RunCreatingRootIngress("", "producer/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),

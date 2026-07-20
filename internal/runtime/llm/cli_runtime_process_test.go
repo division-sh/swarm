@@ -26,7 +26,7 @@ type workspaceResolverStub struct {
 func beginClaudeTestCompletion(t *testing.T, parent context.Context, request string) (*effecttest.Harness, context.Context, *runtimeeffects.Handle) {
 	t.Helper()
 	harness := effecttest.New()
-	ctx := harness.CompletionContext(t.Name())
+	ctx := llmTestWorkContext(t, harness.CompletionContext(t.Name()))
 	if actor, ok := runtimeactors.ActorFromContext(parent); ok {
 		ctx = runtimeactors.WithActor(ctx, actor)
 	}

@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"testing"
@@ -8,6 +9,20 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 )
+
+func TestValidateRuntimeContextSetWithAdmissionDoesNotActivateStandingOccurrences(t *testing.T) {
+	catalog := runtimeAdmissionTestCatalog(t, "a")
+	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	owner := contextDef.Runtime.WorkOccurrence()
+	before := owner.ActiveCount()
+
+	if err := ValidateRuntimeContextSetWithAdmission(runtimeAdmissionTestState(t, catalog), contextDef); err != nil {
+		t.Fatalf("ValidateRuntimeContextSetWithAdmission: %v", err)
+	}
+	if got := owner.ActiveCount(); got != before {
+		t.Fatalf("validation activated %d runtime lease(s), want unchanged count %d", got, before)
+	}
+}
 
 func TestRuntimeContextManagerPublishesOneAdmissionGenerationAcrossAllContexts(t *testing.T) {
 	oldCatalog := runtimeAdmissionTestCatalog(t, "a")
@@ -17,7 +32,7 @@ func TestRuntimeContextManagerPublishesOneAdmissionGenerationAcrossAllContexts(t
 
 	primary := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", oldCatalog)
 	survivor := runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", oldCatalog)
-	manager, err := NewRuntimeContextManagerWithAdmission(nil, oldState, primary, survivor)
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, oldState, primary, survivor)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManagerWithAdmission: %v", err)
 	}
@@ -78,7 +93,7 @@ func TestRuntimeContextManagerPublishesOneAdmissionGenerationAcrossAllContexts(t
 		}
 	}()
 
-	if _, err := manager.BeginBundleHashReplacement(runtimeContextTestHashA, candidate); err != nil {
+	if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, candidate); err != nil {
 		t.Fatalf("BeginBundleHashReplacement: %v", err)
 	}
 	if err := manager.PublishBundleHashReplacementWithAdmission(runtimeContextTestHashA, candidate, survivingTargets, newState); err != nil {
@@ -118,7 +133,7 @@ func TestRuntimeContextManagerRejectsIncompleteAdmissionGenerationWithoutMutatio
 	newCatalog := runtimeAdmissionTestCatalog(t, "b")
 	primary := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", oldCatalog)
 	survivor := runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", oldCatalog)
-	manager, err := NewRuntimeContextManagerWithAdmission(nil, runtimeAdmissionTestState(t, oldCatalog), primary, survivor)
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, oldCatalog), primary, survivor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +159,7 @@ func TestRuntimeContextManagerAdmissionGenerationDoesNotDependOnPrimaryPackUse(t
 	newCatalog := runtimeAdmissionTestCatalog(t, "b")
 	primary := testBundleContext(t, runtimeContextTestHashA, "primary.event")
 	survivor := runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", oldCatalog)
-	manager, err := NewRuntimeContextManagerWithAdmission(nil, runtimeAdmissionTestState(t, oldCatalog), primary, survivor)
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, oldCatalog), primary, survivor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +170,7 @@ func TestRuntimeContextManagerAdmissionGenerationDoesNotDependOnPrimaryPackUse(t
 	if err := manager.ValidateProcessAdmissionReplacement(runtimeContextTestHashA, candidatePrimary, updates, state); err != nil {
 		t.Fatalf("primary-without-pack validation: %v", err)
 	}
-	if _, err := manager.BeginBundleHashReplacement(runtimeContextTestHashA, candidatePrimary); err != nil {
+	if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, candidatePrimary); err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.PublishBundleHashReplacementWithAdmission(runtimeContextTestHashA, candidatePrimary, updates, state); err != nil {
@@ -185,11 +200,11 @@ func TestRuntimeContextManagerRejectsCandidatePackRemovalAcrossContexts(t *testi
 		t.Fatal(err)
 	}
 	survivor.StandingTargets = []StandingTarget{{
-		BundleHash: runtimeContextTestHashB, FlowID: "coordinator", Alias: "chat", Provider: "telegram",
-		RunID: "run-chat", FlowInstance: "coordinator/chat", EntityID: "entity-chat",
+		BundleHash: runtimeContextTestHashB, ServiceID: "service-chat", FlowID: "coordinator", Alias: "chat", Provider: "telegram",
+		RunID: "run-chat", Generation: 1, FlowInstance: "coordinator/chat", EntityID: "entity-chat",
 		SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 	}}
-	manager, err := NewRuntimeContextManagerWithAdmission(nil, runtimeAdmissionTestState(t, oldCatalog), primary, survivor)
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, oldCatalog), primary, survivor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +228,7 @@ func TestRuntimeContextManagerRejectsTwoContextIngressCollisionWithoutMutation(t
 	newCatalog := runtimeAdmissionTestCatalog(t, "b")
 	primary := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", oldCatalog)
 	survivor := runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", oldCatalog)
-	manager, err := NewRuntimeContextManagerWithAdmission(nil, runtimeAdmissionTestState(t, oldCatalog), primary, survivor)
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, oldCatalog), primary, survivor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +256,7 @@ func TestRuntimeContextManagerSignedToUnsignedTransitionRequiresAcknowledgedReco
 	unsigned := runtimeAdmissionUnsignedTestCatalog(t, "b")
 	primary := testBundleContext(t, runtimeContextTestHashA, "primary.event")
 	survivor := runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", signed)
-	manager, err := NewRuntimeContextManagerWithAdmission(nil, runtimeAdmissionTestState(t, signed), primary, survivor)
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, signed), primary, survivor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +284,7 @@ func TestRuntimeContextManagerSignedToUnsignedTransitionRequiresAcknowledgedReco
 	if err := manager.ValidateProcessAdmissionReplacement(runtimeContextTestHashA, candidatePrimary, updates, state); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := manager.BeginBundleHashReplacement(runtimeContextTestHashA, candidatePrimary); err != nil {
+	if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, candidatePrimary); err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.PublishBundleHashReplacementWithAdmission(runtimeContextTestHashA, candidatePrimary, updates, state); err != nil {
@@ -289,12 +304,12 @@ func TestRuntimeContextManagerSignedToUnsignedTransitionRequiresAcknowledgedReco
 func TestRuntimeContextManagerRejectsAdmissionTargetsOnLegacyPublishAndRestoresPredecessor(t *testing.T) {
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	predecessor := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
-	manager, err := NewRuntimeContextManagerWithAdmission(nil, runtimeAdmissionTestState(t, catalog), predecessor)
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), predecessor)
 	if err != nil {
 		t.Fatal(err)
 	}
 	restored := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
-	if _, err := manager.BeginBundleHashReplacement(runtimeContextTestHashA, restored); err != nil {
+	if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, restored); err != nil {
 		t.Fatal(err)
 	}
 	err = manager.PublishBundleHashReplacement(runtimeContextTestHashA, restored)
@@ -379,8 +394,9 @@ func runtimeAdmissionTestContext(t *testing.T, hash, alias string, catalog *prov
 		t.Fatal(err)
 	}
 	contextDef.StandingTargets = []StandingTarget{{
-		BundleHash: hash, FlowID: "acme-flow", Alias: alias, Provider: "acme", RunID: "run-" + alias,
-		FlowInstance: "acme-flow/" + alias, EntityID: "entity-" + alias, SigningSecret: "webhook_signing.acme", AdmissionPlan: plan,
+		BundleHash: hash, ServiceID: "service-" + alias, FlowID: "acme-flow", Alias: alias, Provider: "acme", RunID: "run-" + alias,
+		Generation: 1, FlowInstance: "acme-flow/" + alias, EntityID: "entity-" + alias,
+		SigningSecret: "webhook_signing.acme", AdmissionPlan: plan,
 	}}
 	return contextDef
 }

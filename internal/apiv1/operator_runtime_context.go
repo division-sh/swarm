@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 
 	swruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -26,38 +27,84 @@ func multiRuntimeContextMode(opts OperatorReadOptions) bool {
 	return manager != nil && manager.MultiContext()
 }
 
-func operatorOptionsForBundleContext(opts OperatorReadOptions, contextDef *swruntime.BundleContext) OperatorReadOptions {
-	if contextDef == nil || contextDef.Runtime == nil {
+type runtimeUseCollectionKey struct{}
+
+type runtimeUseCollection struct {
+	mu   sync.Mutex
+	uses []*swruntime.RuntimeContextUse
+}
+
+func beginRuntimeUseCollection(ctx context.Context) (context.Context, *runtimeUseCollection) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	uses := &runtimeUseCollection{}
+	return context.WithValue(ctx, runtimeUseCollectionKey{}, uses), uses
+}
+
+func (c *runtimeUseCollection) add(use *swruntime.RuntimeContextUse) error {
+	if c == nil || use == nil {
+		return errors.New("runtime use collection is required")
+	}
+	c.mu.Lock()
+	c.uses = append(c.uses, use)
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *runtimeUseCollection) done() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	uses := append([]*swruntime.RuntimeContextUse(nil), c.uses...)
+	c.uses = nil
+	c.mu.Unlock()
+	for i := len(uses) - 1; i >= 0; i-- {
+		_ = uses[i].Done()
+	}
+}
+
+func registerRuntimeUse(ctx context.Context, use *swruntime.RuntimeContextUse) error {
+	collection, ok := ctx.Value(runtimeUseCollectionKey{}).(*runtimeUseCollection)
+	if !ok || collection == nil {
+		return errors.New("runtime execution requires request-scoped use ownership")
+	}
+	return collection.add(use)
+}
+
+func operatorOptionsForBundleContext(opts OperatorReadOptions, contextDef *swruntime.BundleContext, selectedRuntime *swruntime.Runtime) OperatorReadOptions {
+	if contextDef == nil || selectedRuntime == nil {
 		return opts
 	}
 	selected := opts
 	selected.Source = contextDef.Source
 	selected.Bundle = contextDef.BundleIdentity
-	selected.Events = contextDef.Runtime.Bus
-	selected.RuntimeIngress = contextDef.Runtime.RuntimeIngress
-	selected.RunControl = contextDef.Runtime.RunControl
-	if contextDef.Runtime.Manager != nil {
-		selected.AgentControl = contextDef.Runtime.Manager
+	selected.Events = selectedRuntime.Bus
+	selected.RuntimeIngress = selectedRuntime.RuntimeIngress
+	selected.RunControl = selectedRuntime.RunControl
+	if selectedRuntime.Manager != nil {
+		selected.AgentControl = selectedRuntime.Manager
 	}
-	selected.RunFork = runForkExecutorForBundleContext(selected.RunFork, contextDef)
+	selected.RunFork = runForkExecutorForBundleContext(selected.RunFork, contextDef, selectedRuntime)
 	return selected
 }
 
-func runForkExecutorForBundleContext(executor RunForkExecutor, contextDef *swruntime.BundleContext) RunForkExecutor {
-	if contextDef == nil || contextDef.Runtime == nil || executor == nil {
+func runForkExecutorForBundleContext(executor RunForkExecutor, contextDef *swruntime.BundleContext, selectedRuntime *swruntime.Runtime) RunForkExecutor {
+	if contextDef == nil || selectedRuntime == nil || executor == nil {
 		return executor
 	}
 	apply := func(selected SelectedContractRunForkExecutor) SelectedContractRunForkExecutor {
-		selected.AgentRuntime.Config = contextDef.Runtime.Config
-		selected.AgentRuntime.EntityStore = contextDef.Runtime.Stores.ToolEntityStore
-		selected.AgentRuntime.HumanTaskStore = contextDef.Runtime.Stores.HumanTaskStore
-		selected.AgentRuntime.SessionRegistry = contextDef.Runtime.Stores.SessionRegistry
-		selected.AgentRuntime.ConversationStore = contextDef.Runtime.Stores.ConversationStore
-		selected.AgentRuntime.ScheduleStore = contextDef.Runtime.Stores.ScheduleStore
-		selected.AgentRuntime.MailboxStore = contextDef.Runtime.Stores.MailboxStore
-		selected.AgentRuntime.Workspace = contextDef.Runtime.Workspace
-		selected.AgentRuntime.Credentials = contextDef.Runtime.Credentials
-		selected.AgentRuntime.LLMRuntime = contextDef.Runtime.LLM
+		selected.AgentRuntime.Config = selectedRuntime.Config
+		selected.AgentRuntime.EntityStore = selectedRuntime.Stores.ToolEntityStore
+		selected.AgentRuntime.HumanTaskStore = selectedRuntime.Stores.HumanTaskStore
+		selected.AgentRuntime.SessionRegistry = selectedRuntime.Stores.SessionRegistry
+		selected.AgentRuntime.ConversationStore = selectedRuntime.Stores.ConversationStore
+		selected.AgentRuntime.ScheduleStore = selectedRuntime.Stores.ScheduleStore
+		selected.AgentRuntime.MailboxStore = selectedRuntime.Stores.MailboxStore
+		selected.AgentRuntime.Workspace = selectedRuntime.Workspace
+		selected.AgentRuntime.Credentials = selectedRuntime.Credentials
+		selected.AgentRuntime.LLMRuntime = selectedRuntime.LLM
 		selected.ContractSelection = runtimerunforkadmission.SelectedContractSelection(contextDef.Source, contextDef.ContractsRoot)
 		return selected
 	}
@@ -88,7 +135,13 @@ func runtimeBundleContextByHash(ctx context.Context, opts OperatorReadOptions, b
 			"reason": "bundle_hash is required to select a runtime context",
 		})
 	}
-	lookup := manager.LookupBundleHashStatus(bundleHash)
+	use, lookup, acquireErr := manager.AcquireBundleHash(ctx, bundleHash)
+	transferred := false
+	defer func() {
+		if use != nil && !transferred {
+			_ = use.Done()
+		}
+	}()
 	if !lookup.Loaded() {
 		return ctx, opts, nil, NewApplicationError(BundleUnavailableCode, false, map[string]any{
 			"bundle_hash": bundleHash,
@@ -96,15 +149,24 @@ func runtimeBundleContextByHash(ctx context.Context, opts OperatorReadOptions, b
 			"cause":       runtimeContextLookupCause(lookup),
 		})
 	}
-	contextDef := lookup.Context
-	selected := operatorOptionsForBundleContext(opts, contextDef)
+	if acquireErr != nil {
+		return ctx, opts, nil, acquireErr
+	}
+	if err := registerRuntimeUse(ctx, use); err != nil {
+		return ctx, opts, nil, err
+	}
+	transferred = true
+	ctx = use.WorkContext()
+	contextDef := &use.Context
+	selectedRuntime := use.Runtime()
+	selected := operatorOptionsForBundleContext(opts, contextDef, selectedRuntime)
 	fact := contextDef.BundleSourceFact.Normalized()
 	if fact.BundleHash == "" {
 		fact.BundleHash = bundleHash
 	}
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
-	if contextDef.Runtime != nil {
-		runtimeInstanceID := contextDef.Runtime.Options.RuntimeInstanceID
+	if selectedRuntime != nil {
+		runtimeInstanceID := selectedRuntime.Options.RuntimeInstanceID
 		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
 		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash))
 	}
@@ -116,7 +178,13 @@ func runtimeBundleContextByRun(ctx context.Context, opts OperatorReadOptions, ru
 	if manager == nil {
 		return ctx, opts, runbundle.Availability{}, nil
 	}
-	lookup, availability, err := manager.LookupRunStatus(ctx, strings.TrimSpace(runID))
+	use, lookup, availability, err := manager.AcquireRun(ctx, strings.TrimSpace(runID))
+	transferred := false
+	defer func() {
+		if use != nil && !transferred {
+			_ = use.Done()
+		}
+	}()
 	if errors.Is(err, store.ErrRunNotFound) {
 		return ctx, opts, runbundle.Availability{}, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": strings.TrimSpace(runID)})
 	}
@@ -135,15 +203,21 @@ func runtimeBundleContextByRun(ctx context.Context, opts OperatorReadOptions, ru
 		details["cause"] = runtimeContextLookupCause(lookup)
 		return ctx, opts, availability, NewApplicationError(BundleUnavailableCode, false, details)
 	}
-	contextDef := lookup.Context
-	selected := operatorOptionsForBundleContext(opts, contextDef)
+	if err := registerRuntimeUse(ctx, use); err != nil {
+		return ctx, opts, availability, err
+	}
+	transferred = true
+	ctx = use.WorkContext()
+	contextDef := &use.Context
+	selectedRuntime := use.Runtime()
+	selected := operatorOptionsForBundleContext(opts, contextDef, selectedRuntime)
 	fact := contextDef.BundleSourceFact.Normalized()
 	if fact.BundleHash == "" {
 		fact.BundleHash = availability.BundleHash
 	}
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
-	if contextDef.Runtime != nil {
-		runtimeInstanceID := contextDef.Runtime.Options.RuntimeInstanceID
+	if selectedRuntime != nil {
+		runtimeInstanceID := selectedRuntime.Options.RuntimeInstanceID
 		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
 		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash))
 	}

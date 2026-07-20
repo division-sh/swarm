@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -123,7 +122,7 @@ func TestBudgetTracker_RecordSpendNormalizesThroughBudgetSpendOwner(t *testing.T
 func TestBudgetTrackerProjectsCommittedCompletionIntoThresholdEventAndEmergencyState(t *testing.T) {
 	store := &budgetSpendStoreCapture{sum: 0.95}
 	eventStore := &bootSelfCheckDescriptorStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -168,7 +167,7 @@ func TestBudgetTrackerProjectsCommittedCompletionIntoThresholdEventAndEmergencyS
 func TestBudgetTrackerActiveWorkThresholdPreservesInboundLineage(t *testing.T) {
 	spendStore := &budgetSpendStoreCapture{sum: 0.95}
 	eventStore := &bootSelfCheckDescriptorStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -202,7 +201,7 @@ func TestBudgetTrackerProjectsRecoveryScopesBeforeAllRunTargetsWithoutRunContext
 		},
 	}
 	eventStore := &bootSelfCheckDescriptorStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -252,13 +251,14 @@ func TestBudgetTrackerProjectsRecoveryScopesBeforeAllRunTargetsWithoutRunContext
 func TestNewRuntimeConstructsBudgetTrackerFromBackendNeutralStore(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	store := &budgetSpendStoreCapture{}
-	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore:       &minimalRuntimeEventStore{},
 		BudgetSpendStore: store,
 	}, Options: RuntimeOptions{
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
 	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}

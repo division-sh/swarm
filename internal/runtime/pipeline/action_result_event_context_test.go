@@ -121,7 +121,7 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 
 			pc := &PipelineCoordinator{}
 			var intents []runtimeengine.EmitIntent
-			ctx := runtimeengine.WithActionEmitIntentCollector(testAuthorActivityContext(context.Background()), &intents)
+			ctx := runtimeengine.WithActionEmitIntentCollector(testAuthorActivityContext(t, context.Background()), &intents)
 			queued, err := pc.queueArtifactRepoResultEvent(ctx, execCtx, tc.eventType, map[string]any{"ok": true})
 			if err != nil {
 				t.Fatalf("queueArtifactRepoResultEvent: %v", err)

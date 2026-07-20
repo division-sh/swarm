@@ -404,7 +404,7 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 		}},
 	}
 
-	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
@@ -462,7 +462,7 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 		}},
 	}
 
-	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
@@ -539,7 +539,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 		}},
 	}
 
-	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
@@ -628,7 +628,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 		},
 	}
 
-	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
@@ -751,7 +751,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 		},
 	}
 
-	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
@@ -771,6 +771,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 	}, runtimemanager.AgentManagerOptions{
 		SemanticSource:                 module.SemanticSource(),
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
+		WorkOwner:                      rt.WorkOccurrence(),
 	}, managerStore)
 
 	if err := rt.Start(ctx); err != nil {
@@ -852,7 +853,7 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 		claimErr: errors.New("claim failed"),
 	}
 
-	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
@@ -902,7 +903,7 @@ func TestRuntimeStart_RecoveryInspectionFailureDoesNotBlockRecoveryEnabledStartu
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
 
-	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
@@ -978,7 +979,7 @@ func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndD
 		loadErr:           errors.New("load agents failed"),
 	}
 
-	rt, err := newScopedTestRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogPersistenceStub{db: db},

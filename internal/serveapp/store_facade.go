@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"sync"
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -21,6 +23,80 @@ import (
 
 type selectedRuntimeStoreFacade struct {
 	stores storeBundle
+}
+
+type selectedStoreOwnershipState uint8
+
+const (
+	selectedStoreUnactivated selectedStoreOwnershipState = iota
+	selectedStoreActivated
+	selectedStoreClosed
+)
+
+type selectedStoreOwner struct {
+	mu      sync.Mutex
+	facade  selectedRuntimeStoreFacade
+	state   selectedStoreOwnershipState
+	process *worklifetime.Process
+}
+
+func newSelectedStoreOwner(facade selectedRuntimeStoreFacade) *selectedStoreOwner {
+	return &selectedStoreOwner{facade: facade, state: selectedStoreUnactivated}
+}
+
+func (o *selectedStoreOwner) Activate(process *worklifetime.Process) error {
+	if o == nil || process == nil {
+		return fmt.Errorf("selected store activation requires a process work owner")
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.state != selectedStoreUnactivated {
+		return fmt.Errorf("selected store activation requires unactivated construction state")
+	}
+	o.process = process
+	o.state = selectedStoreActivated
+	return nil
+}
+
+func (o *selectedStoreOwner) CloseUnactivated() error {
+	if o == nil {
+		return nil
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.state == selectedStoreClosed {
+		return nil
+	}
+	if o.state != selectedStoreUnactivated {
+		return fmt.Errorf("activated selected store requires a process join receipt")
+	}
+	if err := o.facade.closeWithError(); err != nil {
+		return err
+	}
+	o.state = selectedStoreClosed
+	return nil
+}
+
+func (o *selectedStoreOwner) CloseActivated(receipt *worklifetime.ProcessJoinReceipt) error {
+	if o == nil {
+		return nil
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.state == selectedStoreClosed {
+		return nil
+	}
+	if o.state != selectedStoreActivated || o.process == nil {
+		return fmt.Errorf("selected store is not activated")
+	}
+	if err := o.process.ValidateJoinReceipt(receipt); err != nil {
+		return err
+	}
+	if err := o.facade.closeWithError(); err != nil {
+		return err
+	}
+	o.state = selectedStoreClosed
+	return nil
 }
 
 type selectedBundleRuntimeCatalogStore interface {

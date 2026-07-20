@@ -164,8 +164,10 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		coordinator *runtimepipeline.PipelineCoordinator
 		manager     *runtimemanager.AgentManager
 	)
+	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash)
 	eventBus, err := newScopedTestEventBus(t, backend, runtimebus.EventBusOptions{
 		ContractBundle: source,
+		WorkOwner:      workOwner,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if coordinator == nil {
 				return nil
@@ -189,6 +191,7 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 	}
 	manager = runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{
 		WorkflowInstances: workflowStore,
+		WorkOwner:         workOwner,
 	})
 	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
 	if err != nil {

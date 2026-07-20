@@ -450,7 +450,10 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	}
 	if record.AcknowledgementMode == runtimeinbound.AcknowledgementDurableBeforeDispatch {
 		for _, item := range prepared {
-			g.bus.DispatchPreparedPublishAsync(pubCtx, item)
+			if err := g.bus.DispatchPreparedPublishAsync(pubCtx, item); err != nil {
+				http.Error(w, "publish inbound failed", http.StatusServiceUnavailable)
+				return
+			}
 		}
 	} else {
 		for _, item := range prepared {

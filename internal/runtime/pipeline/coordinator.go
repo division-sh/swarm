@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
@@ -59,6 +60,7 @@ type PipelineCoordinator struct {
 	testWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
 	testLifecycleProbe               runtimelifecycleprobe.Observer
 	testEngineEmitNow                func() time.Time
+	workOwner                        worklifetime.Occurrence
 }
 
 type WorkflowNodeHandlerStartHook func(context.Context, string, events.Event) error
@@ -84,6 +86,7 @@ type PipelineCoordinatorOptions struct {
 	TestWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
 	TestLifecycleProbe               runtimelifecycleprobe.Observer
 	TestEngineEmitNow                func() time.Time
+	WorkOwner                        worklifetime.Occurrence
 }
 
 // ChannelActivityTarget is a private compiled connector target. Generation is
@@ -152,6 +155,7 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		testWorkflowNodeHandlerStartHook: opts.TestWorkflowNodeHandlerStartHook,
 		testLifecycleProbe:               opts.TestLifecycleProbe,
 		testEngineEmitNow:                opts.TestEngineEmitNow,
+		workOwner:                        opts.WorkOwner,
 		entityLocks:                      make(map[string]*sync.Mutex),
 	}
 	coordinator.workflowTimers = newWorkflowTimerLifecycle(coordinator)
@@ -208,14 +212,16 @@ func (pc *PipelineCoordinator) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case evt, ok := <-ch:
+		case delivery, ok := <-ch:
 			if !ok {
 				ch = pc.subscribe()
 				pc.notifyTestSubscribed()
 				continue
 			}
-			if _, err := pc.handleEventResult(ctx, evt); err != nil && pc.bus != nil {
-				pc.bus.LogRuntime(ctx, RuntimeLogEntry{
+			evt := delivery.Event()
+			deliveryCtx := delivery.Context()
+			if _, err := pc.handleEventResult(deliveryCtx, evt); err != nil && pc.bus != nil {
+				pc.bus.LogRuntime(deliveryCtx, RuntimeLogEntry{
 					Level:     "error",
 					Message:   "Workflow handler execution failed",
 					Component: runtimeWorkflowID,
@@ -226,6 +232,7 @@ func (pc *PipelineCoordinator) Run(ctx context.Context) {
 					Failure:   pipelineRuntimeFailure(err, runtimeWorkflowID, "handle_event"),
 				})
 			}
+			_ = delivery.Complete()
 		}
 	}
 }
@@ -361,9 +368,13 @@ func (pc *PipelineCoordinator) interceptPolicy(ctx context.Context, eventType st
 	return pc.workflowNodeInterceptPolicy(ctx, eventType, evt)
 }
 
-func (pc *PipelineCoordinator) subscribe() <-chan events.Event {
+func (pc *PipelineCoordinator) subscribe() <-chan *worklifetime.EventDelivery {
+	bus, ok := pc.bus.(ownedInternalSubscriptionBus)
+	if !ok {
+		return nil
+	}
 	subscriptions := workflowRuntimeSubscriptions(pc.WorkflowNodes())
-	return pc.bus.SubscribeInternal(runtimeWorkflowID, subscriptions...)
+	return bus.SubscribeInternal(runtimeWorkflowID, subscriptions...)
 }
 
 func (pc *PipelineCoordinator) handleEvent(ctx context.Context, evt events.Event) bool {

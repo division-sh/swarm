@@ -417,7 +417,11 @@ func (s *PostgresStore) ClaimPipelinePublication(ctx context.Context, eventID st
 	}
 	// Publication ownership serializes same-ID attempts. Canonical append must
 	// classify exact/conflicting duplicates before applying run-status admission.
-	return acquireAdvisoryLockLease(ctx, s.DB, replayClaimLockKey(eventID))
+	// A publication claim survives its creating transaction and may dispatch
+	// asynchronously, so it must never share a transaction/parent claim session.
+	claimCtx := runtimepipeline.WithoutPipelineSQLTxContext(ctx)
+	claimCtx = runtimepipeline.WithoutPipelineSQLConnContext(claimCtx)
+	return acquireAdvisoryLockLease(claimCtx, s.DB, replayClaimLockKey(eventID))
 }
 
 func (s *PostgresStore) ClaimPipelineSettlement(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {

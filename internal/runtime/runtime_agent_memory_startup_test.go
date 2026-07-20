@@ -24,7 +24,7 @@ func TestRuntimeStart_SoleParentFlowPackageAgentsCarryCanonicalMemoryIdentity(t 
 
 func assertRuntimeStartCarriesMemoryIdentity(t *testing.T, source semanticview.Source) {
 	t.Helper()
-	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{}, Stores: Stores{}, Options: RuntimeOptions{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{}, Stores: Stores{}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		LLMRuntime:     noopLLMRuntime{},
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: source},

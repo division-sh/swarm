@@ -295,7 +295,6 @@ func TestAnthropicAPIRuntime_StartSessionPreservesBusinessPrompt(t *testing.T) {
 			},
 		},
 	)
-
 	s, err := runtime.StartSession(ctx, "agent-3", "base prompt", []ToolDefinition{
 		{Name: "emit_market_research_scan_complete"},
 		{Name: "query_entities"},
@@ -508,7 +507,7 @@ func TestAnthropicAPIRuntime_PersistConversationFailureLogsRuntime(t *testing.T)
 	})
 
 	if len(publisher.runtimeLogs) != 1 {
-		t.Fatalf("runtime log count = %d, want 1", len(publisher.runtimeLogs))
+		t.Fatalf("runtime logs = %#v, want one mark failure", publisher.runtimeLogs)
 	}
 	if publisher.runtimeLogs[0].Action != "persist_api_conversation_failed" {
 		t.Fatalf("action = %q", publisher.runtimeLogs[0].Action)
@@ -636,6 +635,7 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 			FlowPath:      "support/inst-1",
 		},
 	)
+	ctx = llmTestWorkContext(t, ctx)
 
 	s, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
@@ -680,6 +680,7 @@ func TestAnthropicAPIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(
 			FlowPath:      "support/inst-1",
 		},
 	)
+	ctx = llmTestWorkContext(t, ctx)
 
 	s, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
@@ -693,7 +694,7 @@ func TestAnthropicAPIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(
 		t.Fatalf("ContinueSession err = %v, want mark failure", err)
 	}
 	if len(publisher.runtimeLogs) != 1 {
-		t.Fatalf("runtime log count = %d, want 1", len(publisher.runtimeLogs))
+		t.Fatalf("runtime logs = %#v, want one mark failure", publisher.runtimeLogs)
 	}
 	if publisher.runtimeLogs[0].Action != "mark_delivery_in_progress_failed" {
 		t.Fatalf("runtime log action = %q, want mark_delivery_in_progress_failed", publisher.runtimeLogs[0].Action)
@@ -715,6 +716,7 @@ func TestClaudeCLIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(t *
 			FlowPath:      "support/inst-1",
 		},
 	)
+	ctx = llmTestWorkContext(t, ctx)
 
 	s, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {

@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -28,7 +29,7 @@ func TestSchedulerKeysSchedulesByRunID(t *testing.T) {
 		t.Fatalf("schedule keys matched across run_id: %q", scheduleKey(scA))
 	}
 
-	s := NewScheduler()
+	s := NewSchedulerWithWorkOwner(pipelineTestWorkOwner(t))
 	if err := s.Register(scA); err != nil {
 		t.Fatalf("Register(run A): %v", err)
 	}
@@ -52,7 +53,7 @@ func TestSchedulerKeysSchedulesByRunID(t *testing.T) {
 
 func TestSchedulerOneShotPreservesReplyContextToFire(t *testing.T) {
 	fired := make(chan Schedule, 1)
-	scheduler := NewScheduler(func(schedule Schedule) {
+	scheduler := NewSchedulerWithWorkOwner(pipelineTestWorkOwner(t), func(_ context.Context, schedule Schedule) {
 		fired <- schedule
 	})
 	t.Cleanup(scheduler.Stop)

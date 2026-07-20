@@ -15,6 +15,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -52,7 +53,8 @@ type agentExecutionProjection struct {
 	cancelGeneration context.CancelFunc
 	loopCancel       context.CancelFunc
 	loopDone         chan struct{}
-	route            <-chan events.Event
+	loopSettled      chan struct{}
+	route            <-chan *worklifetime.EventDelivery
 	routeToken       runtimeeffects.LifecycleToken
 	fenced           bool
 	leases           int
@@ -60,12 +62,8 @@ type agentExecutionProjection struct {
 }
 
 type agentRouteBus interface {
-	ReplaceAgentRoute(runtimeeffects.LifecycleToken, semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan events.Event
+	ReplaceAgentRoute(runtimeeffects.LifecycleToken, semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan *worklifetime.EventDelivery
 	RemoveAgentRoute(runtimeeffects.LifecycleToken)
-}
-
-type agentRouteDeliveryCompleter interface {
-	CompleteAgentRouteDelivery(runtimeeffects.LifecycleToken)
 }
 
 type agentExecutionSnapshot struct {
@@ -339,6 +337,7 @@ func (c *agentLifecycleCoordinator) cancelShutdownWork() (context.Context, []<-c
 		c.cancelRun = nil
 	}
 	done := make([]<-chan struct{}, 0, len(c.cells))
+	routeTokens := make([]runtimeeffects.LifecycleToken, 0, len(c.cells))
 	for _, cell := range c.cells {
 		execution := cell.execution
 		if execution == nil {
@@ -349,10 +348,13 @@ func (c *agentLifecycleCoordinator) cancelShutdownWork() (context.Context, []<-c
 			execution.cancelGeneration()
 		}
 		if c.routes != nil && execution.routeToken.Valid() {
-			c.routes.RemoveAgentRoute(execution.routeToken)
+			routeTokens = append(routeTokens, execution.routeToken)
 		}
 		if execution.loopDone != nil {
 			done = append(done, execution.loopDone)
+		}
+		if execution.loopSettled != nil {
+			done = append(done, execution.loopSettled)
 		}
 		if execution.leases > 0 && execution.leaseDrained != nil {
 			done = append(done, execution.leaseDrained)
@@ -360,6 +362,9 @@ func (c *agentLifecycleCoordinator) cancelShutdownWork() (context.Context, []<-c
 	}
 	ctx := c.runCtx
 	c.mu.Unlock()
+	for _, token := range routeTokens {
+		c.routes.RemoveAgentRoute(token)
+	}
 	return ctx, done
 }
 
@@ -691,7 +696,9 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(ctx context.Context, agent
 		loopCtx = runtimeeffects.WithController(loopCtx, runtimeeffects.NewController(store))
 	}
 	done := make(chan struct{})
+	settled := make(chan struct{})
 	nextExecution.loopCancel, nextExecution.loopDone = cancelGeneration, done
+	nextExecution.loopSettled = settled
 	return loopCtx, token, done, nil
 }
 

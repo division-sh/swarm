@@ -87,12 +87,13 @@ func (*recordingSchedulePersistence) CompleteScheduleFireExact(context.Context, 
 	return nil
 }
 
-func newTimerLifecycleCoordinator(bus Bus, db *sql.DB, module WorkflowModule, store SchedulePersistence) *PipelineCoordinator {
+func newTimerLifecycleCoordinator(t *testing.T, bus Bus, db *sql.DB, module WorkflowModule, store SchedulePersistence) *PipelineCoordinator {
+	t.Helper()
 	opts := PipelineCoordinatorOptions{
 		Module: module,
 	}
 	if store != nil {
-		opts.TimerScheduler = NewScheduler()
+		opts.TimerScheduler = NewSchedulerWithWorkOwner(pipelineTestWorkOwner(t))
 		opts.TimerScheduleStore = store
 	}
 	return NewPipelineCoordinatorWithOptions(bus, db, opts)
@@ -566,7 +567,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRo
 	}); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}
-	if consume, handled, err := pc.workflowNodeInterceptPolicy(testAuthorActivityContext(context.Background()), "child/grandchild/micro.done", eventtest.RunCreatingRootIngress(
+	if consume, handled, err := pc.workflowNodeInterceptPolicy(testAuthorActivityContext(t, context.Background()), "child/grandchild/micro.done", eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("child/grandchild/micro.done"),
 		"",
@@ -656,7 +657,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDo
 	}); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}
-	tx, err := db.BeginTx(testAuthorActivityContext(context.Background()), nil)
+	tx, err := db.BeginTx(testAuthorActivityContext(t, context.Background()), nil)
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}

@@ -33,7 +33,7 @@ func TestRuntimeStart_PipelineMaintenanceFailureUsesCanonicalBootStepIdentity(t 
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	store := &bootSelfCheckDescriptorStore{}
 	progress := []BootProgressEvent{}
-	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore: store,
 	}, Options: RuntimeOptions{
 		WorkflowModule: module,
@@ -42,10 +42,13 @@ func TestRuntimeStart_PipelineMaintenanceFailureUsesCanonicalBootStepIdentity(t 
 			progress = append(progress, evt)
 		},
 	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, db, runtimepipeline.PipelineCoordinatorOptions{Module: module})
+	rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module: module, WorkOwner: rt.WorkOccurrence(),
+	})
 	if err := rt.Start(testAuthorActivityContext(context.Background())); err == nil {
 		t.Fatal("Start error = nil, want pipeline maintenance failure")
 	}
@@ -105,7 +108,7 @@ func TestRuntimeStart_SelfCheckUsesInternalSubscriberVisibility(t *testing.T) {
 	store := &bootSelfCheckDescriptorStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "agent-a"}},
 	}
-	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore: store,
 	}, Options: RuntimeOptions{
 		SelfCheck:      true,
@@ -138,7 +141,7 @@ func TestRuntimeStart_PlatformBootPayloadCarriesBootDecisionSummary(t *testing.T
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	store := &bootSelfCheckDescriptorStore{}
 	progress := []BootProgressEvent{}
-	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore: store,
 	}, Options: RuntimeOptions{
 		SelfCheck:         true,

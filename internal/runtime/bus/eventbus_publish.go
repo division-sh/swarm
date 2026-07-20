@@ -11,9 +11,11 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -162,6 +164,14 @@ func (eb *EventBus) logDispatchQueued(ctx context.Context, reason string, evt ev
 }
 
 func (eb *EventBus) Publish(ctx context.Context, evt events.Event) error {
+	lease, err := eb.beginRuntimeWork(ctx)
+	if err != nil {
+		return err
+	}
+	if lease != nil {
+		defer func() { _ = lease.Done() }()
+		ctx = bindWorkContext(ctx, lease, eb.workOwner)
+	}
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
@@ -171,9 +181,40 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) error {
 	if err != nil {
 		return err
 	}
-	eb.beginEventPublish(prepared.Event.ID())
-	defer eb.endEventPublish(prepared.Event.ID())
-	return eb.DispatchPreparedPublish(ctx, prepared)
+	return eb.dispatchPreparedPublish(ctx, prepared)
+}
+
+// PublishAndWait persists and dispatches one event, then joins the exact tree
+// of process-local deliveries accepted from that dispatch. Durable retry work
+// remains owned by the store and is not reinterpreted as live local work.
+func (eb *EventBus) PublishAndWait(ctx context.Context, evt events.Event) error {
+	lease, err := eb.beginRuntimeWork(ctx)
+	if err != nil {
+		return err
+	}
+	if lease != nil {
+		defer func() { _ = lease.Done() }()
+		ctx = bindWorkContext(ctx, lease, eb.workOwner)
+	}
+	ctx = WithCurrentRuntimeEpoch(ctx)
+	if err := ensurePublishEpoch(ctx); err != nil {
+		return err
+	}
+	ctx = eb.withBundleFingerprint(ctx)
+	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt})
+	if err != nil {
+		return err
+	}
+	group := newLocalDeliveryCompletionGroup()
+	waitCtx := ctx
+	ctx = withLocalDeliveryCompletionGroup(ctx, group)
+	if prepared.dispatchContext != nil {
+		prepared.dispatchContext = withLocalDeliveryCompletionGroup(prepared.dispatchContext, group)
+	}
+	return eb.dispatchPreparedPublishWithCompletion(ctx, prepared, func() error {
+		group.releaseDispatch()
+		return group.wait(waitCtx)
+	})
 }
 
 // PublishAcknowledged persists the event, recipient manifest, and replay scope
@@ -181,6 +222,14 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) error {
 // Public API surfaces use this when success means durable acceptance rather than
 // downstream handler completion.
 func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) error {
+	lease, err := eb.beginRuntimeWork(ctx)
+	if err != nil {
+		return err
+	}
+	if lease != nil {
+		defer func() { _ = lease.Done() }()
+		ctx = bindWorkContext(ctx, lease, eb.workOwner)
+	}
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
@@ -193,8 +242,7 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 	if prepared.exactDuplicate {
 		return eb.DispatchPreparedPublish(ctx, prepared)
 	}
-	eb.DispatchPreparedPublishAsync(ctx, prepared)
-	return nil
+	return eb.DispatchPreparedPublishAsync(ctx, prepared)
 }
 
 type eventBusCommitPublishPlan struct {
@@ -408,6 +456,14 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 // active typed mutation. Dispatch is deliberately separate and may happen only
 // after the selected-store transaction commits.
 func (eb *EventBus) PreparePublishInMutation(ctx context.Context, evt events.Event) (PreparedPublish, error) {
+	lease, err := eb.beginRuntimeWork(ctx)
+	if err != nil {
+		return PreparedPublish{}, err
+	}
+	if lease != nil {
+		defer func() { _ = lease.Done() }()
+		ctx = bindWorkContext(ctx, lease, eb.workOwner)
+	}
 	return eb.preparePublishInMutation(ctx, evt, runtimereplayclaim.CommittedReplayScopeSubscribed, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
 		return eb.planSubscribedRoutePlan(ctx, evt, true)
 	})
@@ -534,6 +590,9 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 // PublishInMutation preserves the general producer surface by preparing inside
 // the active mutation and queueing dispatch after commit.
 func (eb *EventBus) PublishInMutation(ctx context.Context, evt events.Event) error {
+	if eb != nil && eb.workOwner != nil {
+		ctx = worklifetime.WithOccurrence(ctx, eb.workOwner)
+	}
 	prepared, err := eb.PreparePublishInMutation(ctx, evt)
 	if err != nil {
 		return err
@@ -545,6 +604,14 @@ func (eb *EventBus) PublishInMutation(ctx context.Context, evt events.Event) err
 // It persists the exact direct-recipient manifest in the caller's active typed
 // mutation so payload fields can never become delivery authority.
 func (eb *EventBus) PublishDirectInMutation(ctx context.Context, evt events.Event, recipients []string) error {
+	lease, err := eb.beginRuntimeWork(ctx)
+	if err != nil {
+		return err
+	}
+	if lease != nil {
+		defer func() { _ = lease.Done() }()
+		ctx = bindWorkContext(ctx, lease, eb.workOwner)
+	}
 	requested := uniqueStrings(recipients)
 	if len(requested) == 0 {
 		return errors.New("direct event publication requires at least one recipient")
@@ -573,7 +640,9 @@ func (eb *EventBus) queuePreparedPublishInMutation(ctx context.Context, prepared
 	txctx := ctx
 	if !runtimepipeline.QueuePipelinePostCommitAction(txctx, func() {
 		dispatchCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(txctx)))
-		_ = eb.DispatchPreparedPublish(dispatchCtx, prepared)
+		if err := eb.DispatchPreparedPublish(dispatchCtx, prepared); err != nil {
+			eb.reportLocalDispatchFailure("post_commit_dispatch_failed", prepared.Event, err)
+		}
 	}) {
 		return errors.New("event mutation post-commit actions are required")
 	}
@@ -583,6 +652,46 @@ func (eb *EventBus) queuePreparedPublishInMutation(ctx context.Context, prepared
 // DispatchPreparedPublish consumes only the plan finalized by
 // PreparePublishInMutation. It never invokes route planning again.
 func (eb *EventBus) DispatchPreparedPublish(ctx context.Context, prepared PreparedPublish) error {
+	lease, err := eb.beginRuntimeWork(ctx)
+	if err != nil {
+		return err
+	}
+	if lease != nil {
+		defer func() { _ = lease.Done() }()
+		ctx = bindWorkContext(ctx, lease, eb.workOwner)
+	}
+	return eb.dispatchPreparedPublish(ctx, prepared)
+}
+
+// DispatchPreparedPublishAndWait dispatches one committed publish and joins
+// the complete local-delivery tree produced by its handlers. It is intended
+// for bounded runtimes that must finish their accepted story before retiring.
+func (eb *EventBus) DispatchPreparedPublishAndWait(ctx context.Context, prepared PreparedPublish) error {
+	lease, err := eb.beginRuntimeWork(ctx)
+	if err != nil {
+		return err
+	}
+	if lease != nil {
+		defer func() { _ = lease.Done() }()
+		ctx = bindWorkContext(ctx, lease, eb.workOwner)
+	}
+	group := newLocalDeliveryCompletionGroup()
+	waitCtx := ctx
+	ctx = withLocalDeliveryCompletionGroup(ctx, group)
+	if prepared.dispatchContext != nil {
+		prepared.dispatchContext = withLocalDeliveryCompletionGroup(prepared.dispatchContext, group)
+	}
+	return eb.dispatchPreparedPublishWithCompletion(ctx, prepared, func() error {
+		group.releaseDispatch()
+		return group.wait(waitCtx)
+	})
+}
+
+func (eb *EventBus) dispatchPreparedPublish(ctx context.Context, prepared PreparedPublish) error {
+	return eb.dispatchPreparedPublishWithCompletion(ctx, prepared, nil)
+}
+
+func (eb *EventBus) dispatchPreparedPublishWithCompletion(ctx context.Context, prepared PreparedPublish, completion func() error) error {
 	if strings.TrimSpace(prepared.Event.ID()) == "" {
 		return errors.New("prepared event is required")
 	}
@@ -591,6 +700,14 @@ func (eb *EventBus) DispatchPreparedPublish(ctx context.Context, prepared Prepar
 	}
 	ctx = prepared.publicationClaim.BindContext(ctx)
 	defer prepared.publicationClaim.Release(ctx)
+	dispatchErr := eb.dispatchPreparedPublishBody(ctx, prepared)
+	if completion == nil {
+		return dispatchErr
+	}
+	return errors.Join(dispatchErr, completion())
+}
+
+func (eb *EventBus) dispatchPreparedPublishBody(ctx context.Context, prepared PreparedPublish) error {
 	if prepared.exactDuplicate {
 		return nil
 	}
@@ -608,29 +725,60 @@ func (eb *EventBus) DispatchPreparedPublish(ctx context.Context, prepared Prepar
 	return eb.completeCommittedPublishDispatch(ctx, prepared.Event, prepared.plan)
 }
 
-func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared PreparedPublish) {
+func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared PreparedPublish) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if eb == nil || eb.workOwner == nil {
+		return errors.New("asynchronous event dispatch requires a runtime work occurrence")
+	}
+	lease, err := eb.workOwner.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("admit asynchronous event dispatch: %w", err)
+	}
 	dispatchCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)))
-	eb.beginEventPublish(prepared.Event.ID())
 	go func() {
-		defer eb.endEventPublish(prepared.Event.ID())
-		_ = eb.DispatchPreparedPublish(dispatchCtx, prepared)
+		defer func() { _ = lease.Done() }()
+		if err := eb.dispatchPreparedPublish(bindWorkContext(dispatchCtx, lease, eb.workOwner), prepared); err != nil {
+			eb.reportLocalDispatchFailure("async_dispatch_failed", prepared.Event, err)
+		}
 	}()
+	return nil
 }
 
-func (eb *EventBus) dispatchCommittedPublishAsync(ctx context.Context, evt events.Event, inboundPlan RoutePlan, publicationClaim *pipelinePublicationClaim) {
+func (eb *EventBus) dispatchCommittedPublishAsync(ctx context.Context, evt events.Event, inboundPlan RoutePlan, publicationClaim *pipelinePublicationClaim) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if eb == nil || eb.workOwner == nil {
+		return errors.New("asynchronous committed dispatch requires a runtime work occurrence")
+	}
+	lease, err := eb.workOwner.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("admit asynchronous committed dispatch: %w", err)
+	}
 	dispatchCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)))
-	eb.beginEventPublish(evt.ID())
 	go func() {
-		defer eb.endEventPublish(evt.ID())
+		defer func() { _ = lease.Done() }()
+		dispatchCtx = bindWorkContext(dispatchCtx, lease, eb.workOwner)
 		defer publicationClaim.Release(dispatchCtx)
-		_ = eb.completeCommittedPublishDispatch(dispatchCtx, evt, inboundPlan)
+		if err := eb.completeCommittedPublishDispatch(dispatchCtx, evt, inboundPlan); err != nil {
+			eb.reportLocalDispatchFailure("async_committed_dispatch_failed", evt, err)
+		}
 	}()
+	return nil
+}
+
+func (eb *EventBus) reportLocalDispatchFailure(action string, evt events.Event, err error) {
+	if err == nil {
+		return
+	}
+	diaglog.ProcessLog(diaglog.LevelError, "eventbus", "local committed event dispatch failed",
+		"action", strings.TrimSpace(action),
+		"event_id", strings.TrimSpace(evt.ID()),
+		"event_type", strings.TrimSpace(string(evt.Type())),
+		"error", err.Error(),
+	)
 }
 
 func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt events.Event, inboundPlan RoutePlan) error {
@@ -1255,6 +1403,14 @@ func (eb *EventBus) planDirectRoutePlan(ctx context.Context, evt events.Event, r
 // recipient set. The recipient manifest still routes through the canonical
 // delivery policy so explicit delivery cannot bypass scoped-recipient rules.
 func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipients []string) error {
+	lease, err := eb.beginRuntimeWork(ctx)
+	if err != nil {
+		return err
+	}
+	if lease != nil {
+		defer func() { _ = lease.Done() }()
+		ctx = bindWorkContext(ctx, lease, eb.workOwner)
+	}
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
@@ -1264,9 +1420,39 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	if err != nil {
 		return err
 	}
-	eb.beginEventPublish(prepared.Event.ID())
-	defer eb.endEventPublish(prepared.Event.ID())
-	return eb.DispatchPreparedPublish(ctx, prepared)
+	return eb.dispatchPreparedPublish(ctx, prepared)
+}
+
+func (eb *EventBus) beginRuntimeWork(ctx context.Context) (*worklifetime.Lease, error) {
+	if eb == nil {
+		return nil, errors.New("event bus is required")
+	}
+	if eb.workOwner == nil {
+		return nil, errors.New("event bus requires a process work occurrence")
+	}
+	lease, err := eb.workOwner.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("admit event bus work: %w", err)
+	}
+	return lease, nil
+}
+
+func bindWorkContext(ctx context.Context, lease *worklifetime.Lease, owner worklifetime.Occurrence) context.Context {
+	if lease == nil {
+		return ctx
+	}
+	workCtx := lease.Context()
+	workCtx = worklifetime.WithOccurrence(workCtx, owner)
+	if scope, ok := runtimeauthoractivity.ScopeFromContext(ctx); ok {
+		workCtx = runtimeauthoractivity.WithScope(workCtx, scope)
+	}
+	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
+		workCtx = runtimecorrelation.WithBundleSourceFact(workCtx, fact)
+	}
+	if runtimeID, ok := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); ok {
+		workCtx = runtimecorrelation.WithRuntimeInstanceID(workCtx, runtimeID)
+	}
+	return workCtx
 }
 
 // CheckDirectRecipients applies the same direct-recipient policy used by

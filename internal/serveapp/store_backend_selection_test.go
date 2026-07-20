@@ -16,11 +16,13 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t *testing.T) {
@@ -469,11 +471,21 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwne
 	if _, err := initializeStateStores(ctx, stores, bundle); err != nil {
 		t.Fatalf("initializeStateStores(sqlite): %v", err)
 	}
+	bundleHash, err := runtimecontracts.BundleHash(bundle)
+	if err != nil {
+		t.Fatalf("BundleHash: %v", err)
+	}
+	processWorkOwner := newSupervisorTestProcessOwner(t)
 	rt, err := runtime.NewRuntime(ctx, runtime.RuntimeDeps{
 		Config: &config.Config{},
 		Stores: runtimeStores,
 		Options: runtime.RuntimeOptions{
-			SelfCheck:              true,
+			SelfCheck:         true,
+			ProcessWorkOwner:  processWorkOwner,
+			RuntimeInstanceID: "11111111-1111-4111-8111-111111111111",
+			BundleSourceFact: runtimecorrelation.BundleSourceFact{
+				BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral,
+			},
 			WorkflowModule:         stubWorkflowModule{source: semanticview.Wrap(bundle)},
 			LLMRuntime:             storeBackendSelectionNoopLLMRuntime{},
 			ProviderTriggerCatalog: testProviderTriggerCatalog(t),
@@ -482,6 +494,11 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwne
 	if err != nil {
 		t.Fatalf("NewRuntime(sqlite): %v", err)
 	}
+	t.Cleanup(func() {
+		if err := rt.ShutdownWithOptions(runtime.DefaultShutdownOptions()); err != nil {
+			t.Errorf("shutdown sqlite runtime: %v", err)
+		}
+	})
 	if rt.Pipeline == nil {
 		t.Fatal("NewRuntime(sqlite) Pipeline = nil, want runtime construction to consume SQLite pipeline store")
 	}

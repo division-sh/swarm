@@ -320,9 +320,11 @@ func TestEngineDispatcherQueuesWhenPipelineSQLTxActive(t *testing.T) {
 		),
 	}
 	postCommitActions := make([]func(), 0, 1)
+	rollbackActions := make([]func(), 0, 1)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
 	txctx = runtimebus.WithCommitPublishTransaction(txctx, store)
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommitActions)
+	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
 
 	if err := eb.EngineOutbox().WriteOutbox(txctx, []runtimeengine.EmitIntent{intent}); err != nil {
 		_ = tx.Rollback()
@@ -332,9 +334,9 @@ func TestEngineDispatcherQueuesWhenPipelineSQLTxActive(t *testing.T) {
 		_ = tx.Rollback()
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
-	if len(postCommitActions) != 1 {
+	if len(postCommitActions) == 0 {
 		_ = tx.Rollback()
-		t.Fatalf("post-commit actions = %d, want 1", len(postCommitActions))
+		t.Fatal("post-commit dispatch was not queued")
 	}
 	requireNoBusEvent(t, ch, "post-commit delivery before flush")
 
@@ -385,8 +387,10 @@ func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t 
 		Recipients: recipients,
 	}}
 	postCommitActions := make([]func(), 0, 1)
+	rollbackActions := make([]func(), 0, 1)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommitActions)
+	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
 
 	if err := eb.EngineDispatcher().DispatchPostCommit(txctx, intents); err != nil {
 		_ = tx.Rollback()
@@ -560,7 +564,7 @@ func TestEngineOutboxExactDuplicateDispatchIsOperationNoOp(t *testing.T) {
 			{AgentID: "late-reviewer", EntityID: eventtest.UUID("ent-1")},
 		},
 	}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -641,7 +645,7 @@ func TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack(t *testin
 			store := &outboxClaimStore{directRecipientTransactionalStore: directRecipientTransactionalStore{
 				descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "reviewer", EntityID: eventtest.UUID("ent-claim")}},
 			}}
-			eb, err := runtimebus.NewEventBus(store)
+			eb, err := newScopedTestEventBus(store)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -673,7 +677,9 @@ func TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack(t *testin
 				t.Fatalf("Begin: %v", err)
 			}
 			rollbackActions := []func(){}
+			postCommitActions := []func(){}
 			ctx := runtimepipeline.WithPipelineRollbackActions(runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx), &rollbackActions)
+			ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
 			ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
 			if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
 				t.Fatalf("WriteOutbox: %v", err)
@@ -683,6 +689,7 @@ func TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack(t *testin
 				if err := tx.Commit(); err != nil {
 					t.Fatalf("Commit: %v", err)
 				}
+				runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 				if lease, claimed, err := store.ClaimPipelineReplay(context.Background(), intent.Event.ID()); err != nil || claimed || lease != nil {
 					t.Fatalf("replay claim before designated dispatch = claimed:%v lease:%T err:%v", claimed, lease, err)
 				}
@@ -719,7 +726,7 @@ func TestEngineOutboxPreservesAppendOutcomeForEveryIntentInBatch(t *testing.T) {
 	}
 	defer db.Close()
 	store := &directRecipientTransactionalStore{descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "reviewer", EntityID: eventtest.UUID("ent-1")}}}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -765,7 +772,7 @@ func TestEngineOutboxPreexistingExactDuplicateBatchDispatchesZero(t *testing.T) 
 	}
 	defer db.Close()
 	store := &directRecipientTransactionalStore{descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "reviewer", EntityID: eventtest.UUID("ent-1")}}}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -814,7 +821,7 @@ func TestEngineOutboxConflictingSameIDBatchRollsBackOrderedOutcomes(t *testing.T
 	}
 	defer db.Close()
 	store := &directRecipientTransactionalStore{descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "reviewer", EntityID: eventtest.UUID("ent-1")}}}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -833,7 +840,9 @@ func TestEngineOutboxConflictingSameIDBatchRollsBackOrderedOutcomes(t *testing.T
 		t.Fatal(err)
 	}
 	rollbackActions := []func(){}
+	postCommitActions := []func(){}
 	ctx := runtimepipeline.WithPipelineRollbackActions(runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx), &rollbackActions)
+	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
 	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
 	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent, conflict}); err == nil || !strings.Contains(err.Error(), "conflicting event identity") {
 		t.Fatalf("WriteOutbox conflict error = %v", err)
@@ -885,7 +894,7 @@ func TestEngineOutboxDistinctIntentBatchDispatchesEachOnce(t *testing.T) {
 	}
 	defer db.Close()
 	store := &directRecipientTransactionalStore{descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "reviewer", EntityID: eventtest.UUID("ent-1")}}}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1457,9 +1466,9 @@ func TestPublishDirectInMutationRejectsFilteredExplicitRecipient(t *testing.T) {
 		_ = tx.Rollback()
 		t.Fatalf("PublishDirectInMutation error = %v", err)
 	}
-	if len(postCommit) != 0 {
+	if len(postCommit) != 1 {
 		_ = tx.Rollback()
-		t.Fatalf("post-commit actions = %d, want none", len(postCommit))
+		t.Fatalf("post-commit actions = %d, want only the rollback-lease settlement counterpart", len(postCommit))
 	}
 	if err := tx.Rollback(); err != nil {
 		t.Fatalf("Rollback: %v", err)

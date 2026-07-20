@@ -196,7 +196,7 @@ func TestGenericRecurringScheduleFiresRestoresAndCancelsOnBothStores(t *testing.
 			}
 
 			firstResults := make(chan error, 8)
-			firstScheduler := runtimepipeline.NewScheduler(func(fired runtimepipeline.Schedule) {
+			firstScheduler := runtimepipeline.NewSchedulerWithWorkOwner(storeTestWorkOwner(t), func(_ context.Context, fired runtimepipeline.Schedule) {
 				firstResults <- store.CompleteScheduleFireExact(ctx, fired)
 			})
 			claimed, err := runtimepipeline.ClaimAndRegisterSchedule(ctx, store, firstScheduler, schedule)
@@ -225,7 +225,7 @@ func TestGenericRecurringScheduleFiresRestoresAndCancelsOnBothStores(t *testing.
 			var releaseOnce sync.Once
 			release := func() { releaseOnce.Do(func() { close(releaseCallback) }) }
 			t.Cleanup(release)
-			secondScheduler := runtimepipeline.NewScheduler(func(fired runtimepipeline.Schedule) {
+			secondScheduler := runtimepipeline.NewSchedulerWithWorkOwner(storeTestWorkOwner(t), func(_ context.Context, fired runtimepipeline.Schedule) {
 				secondResults <- store.CompleteScheduleFireExact(ctx, fired)
 				<-releaseCallback
 			})

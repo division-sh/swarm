@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -98,7 +99,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				t.Fatalf("WithRuntimeTools: %v", err)
 			}
 			var coordinator *runtimepipeline.PipelineCoordinator
-			bus, err := runtimebus.NewEventBusWithOptions(eventStore, runtimebus.EventBusOptions{
+			bus, err := newRuntimeTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{
 				ContractBundle: source,
 				BundleSourceFact: runtimecorrelation.BundleSourceFact{
 					BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral,
@@ -123,12 +124,13 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				t.Fatalf("RuntimeActivityTarget: %v", err)
 			}
 			coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+				WorkOwner:            runtimeTestEventBusWorkOwner(t, bus),
 				Module:               telegramConnectorSupportedSurfaceModule{source: source},
 				WorkflowStore:        workflowStore,
 				Credentials:          credentialStore,
 				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{privateToolID: {Tool: privateTool, PlanGeneration: planGeneration}},
 			})
-			startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db, workflowStore)
+			stopActivityNode := startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db, workflowStore)
 			executor := configuredChannelExecutor(source, binding, credentialStore, coordinator)
 			actor := models.AgentConfig{
 				ExecutionMode: "live", ID: "channel-sender", Role: "worker", FlowID: "global",
@@ -242,6 +244,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				t.Fatal("replacement plan reused the prior private target generation")
 			}
 			mismatchedCoordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+				WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
 				Module:        telegramConnectorSupportedSurfaceModule{source: source},
 				WorkflowStore: workflowStore,
 				Credentials:   credentialStore,
@@ -249,7 +252,9 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 					privateToolID: {Tool: replacementTool, PlanGeneration: replacementGeneration},
 				},
 			})
+			stopActivityNode()
 			coordinator = mismatchedCoordinator
+			stopActivityNode = startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db, workflowStore)
 			mismatchedExecutor := configuredChannelExecutor(source, binding, credentialStore, mismatchedCoordinator)
 			mismatchedCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "mismatched-plan-generation")
 			if _, err := mismatchedExecutor.Execute(mismatchedCtx, "channel.ops.deliver", input); err == nil {
@@ -259,6 +264,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				t.Fatalf("mismatched plan generation reached provider: calls=%d", calls.Load())
 			}
 			reloadedCoordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+				WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
 				Module:        telegramConnectorSupportedSurfaceModule{source: source},
 				WorkflowStore: workflowStore,
 				Credentials:   credentialStore,
@@ -266,7 +272,9 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 					replacementToolID: {Tool: replacementTool, PlanGeneration: replacementGeneration},
 				},
 			})
+			stopActivityNode()
 			coordinator = reloadedCoordinator
+			stopActivityNode = startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db, workflowStore)
 			staleExecutor := configuredChannelExecutor(source, binding, credentialStore, reloadedCoordinator)
 			staleCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "stale-plan-generation")
 			if _, err := staleExecutor.Execute(staleCtx, "channel.ops.deliver", input); err == nil {
@@ -279,7 +287,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 	}
 }
 
-func startConfiguredChannelActivityNode(t *testing.T, ctx context.Context, coordinator *runtimepipeline.PipelineCoordinator, bus *runtimebus.EventBus, db *sql.DB, store *runtimepipeline.WorkflowInstanceStore) {
+func startConfiguredChannelActivityNode(t *testing.T, ctx context.Context, coordinator *runtimepipeline.PipelineCoordinator, bus *runtimebus.EventBus, db *sql.DB, store *runtimepipeline.WorkflowInstanceStore) func() {
 	t.Helper()
 	nodes := coordinator.BackgroundNodesWithReceiptStore(bus, db, store)
 	if len(nodes) != 1 {
@@ -287,14 +295,17 @@ func startConfiguredChannelActivityNode(t *testing.T, ctx context.Context, coord
 	}
 	ready := make(chan struct{}, len(nodes))
 	runCtx, cancel := context.WithCancel(ctx)
-	t.Cleanup(cancel)
+	done := make(chan struct{}, len(nodes))
 	for _, node := range nodes {
 		if observable, ok := node.(runtimepipeline.SubscriptionReadyBackgroundNode); ok {
 			observable.AddSubscriptionReadyHook(func() { ready <- struct{}{} })
 		} else {
 			t.Fatal("configured channel activity dispatcher does not expose subscription readiness")
 		}
-		go node.Run(runCtx)
+		go func(node runtimepipeline.BackgroundNode) {
+			defer func() { done <- struct{}{} }()
+			node.Run(runCtx)
+		}(node)
 	}
 	for range nodes {
 		select {
@@ -303,6 +314,21 @@ func startConfiguredChannelActivityNode(t *testing.T, ctx context.Context, coord
 			t.Fatal("configured channel activity dispatcher did not subscribe")
 		}
 	}
+	var stopOnce sync.Once
+	stop := func() {
+		stopOnce.Do(func() {
+			cancel()
+			for range nodes {
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					t.Fatal("configured channel activity dispatcher did not stop")
+				}
+			}
+		})
+	}
+	t.Cleanup(stop)
+	return stop
 }
 
 type channelAckLossExecutor struct {

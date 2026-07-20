@@ -4,10 +4,13 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -19,6 +22,8 @@ var authorActivityTestBundleSourceFact = runtimecorrelation.BundleSourceFact{
 	BundleSource:      "ephemeral",
 	BundleFingerprint: "sha256:" + strings.Repeat("a", 64),
 }
+
+var externalRuntimeTestEventBusOwners sync.Map
 
 type testAuthorActivityCatalogRegistrar interface {
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
@@ -59,7 +64,59 @@ func newScopedTestEventBus(t *testing.T, store runtimebus.EventStore, opts runti
 		}
 		t.Cleanup(lease.Release)
 	}
-	return runtimebus.NewEventBusWithOptions(store, opts)
+	return newRuntimeTestEventBusWithOptions(t, store, opts)
+}
+
+func newRuntimeTestEventBus(t testing.TB, store runtimebus.EventStore) (*runtimebus.EventBus, error) {
+	t.Helper()
+	return newRuntimeTestEventBusWithOptions(t, store, runtimebus.EventBusOptions{})
+}
+
+func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore, opts runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
+	t.Helper()
+	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
+		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
+	}
+	if strings.TrimSpace(opts.BundleSourceFact.BundleHash) == "" {
+		opts.BundleSourceFact = authorActivityTestBundleSourceFact
+	}
+	if opts.WorkOwner == nil {
+		process := worklifetime.NewProcess()
+		owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+			RuntimeInstanceID: opts.RuntimeInstanceID,
+			BundleHash:        opts.BundleSourceFact.BundleHash,
+		})
+		if err != nil {
+			return nil, err
+		}
+		opts.WorkOwner = owner
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := owner.RetireAndWait(ctx); err != nil {
+				t.Errorf("retire external runtime test occurrence: %v", err)
+			}
+			if _, err := process.Join(ctx); err != nil {
+				t.Errorf("join external runtime test process: %v", err)
+			}
+		})
+	}
+	bus, err := runtimebus.NewEventBusWithOptions(store, opts)
+	if err != nil {
+		return nil, err
+	}
+	externalRuntimeTestEventBusOwners.Store(bus, opts.WorkOwner)
+	t.Cleanup(func() { externalRuntimeTestEventBusOwners.Delete(bus) })
+	return bus, nil
+}
+
+func runtimeTestEventBusWorkOwner(t testing.TB, bus *runtimebus.EventBus) worklifetime.Occurrence {
+	t.Helper()
+	owner, ok := externalRuntimeTestEventBusOwners.Load(bus)
+	if !ok {
+		t.Fatal("external runtime test event bus has no registered work owner")
+	}
+	return owner.(worklifetime.Occurrence)
 }
 
 func testAuthorActivityEventDescriptors(t *testing.T, opts runtimebus.EventBusOptions) []runtimeauthoractivity.EventDescriptor {

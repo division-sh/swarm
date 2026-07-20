@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -26,9 +27,9 @@ func DefaultOutboxSweeperConfig() OutboxSweeperConfig {
 	}
 }
 
-func (eb *EventBus) StartOutboxSweeper(ctx context.Context, cfg OutboxSweeperConfig) {
+func (eb *EventBus) StartOutboxSweeper(ctx context.Context, cfg OutboxSweeperConfig) error {
 	if eb == nil {
-		return
+		return nil
 	}
 	if cfg.Interval <= 0 || cfg.Lookback <= 0 || cfg.Limit <= 0 {
 		defaults := DefaultOutboxSweeperConfig()
@@ -45,12 +46,25 @@ func (eb *EventBus) StartOutboxSweeper(ctx context.Context, cfg OutboxSweeperCon
 	eb.mu.Lock()
 	if eb.outboxSweeperActive {
 		eb.mu.Unlock()
-		return
+		return nil
+	}
+	if eb.workOwner == nil {
+		eb.mu.Unlock()
+		return errors.New("outbox sweeper requires a runtime work occurrence")
+	}
+	lease, err := eb.workOwner.Begin(ctx)
+	if err != nil {
+		eb.mu.Unlock()
+		return fmt.Errorf("admit outbox sweeper: %w", err)
 	}
 	eb.outboxSweeperActive = true
+	done := make(chan struct{})
+	eb.outboxSweeperDone = done
 	eb.mu.Unlock()
 
 	go func() {
+		defer close(done)
+		defer func() { _ = lease.Done() }()
 		ticker := time.NewTicker(cfg.Interval)
 		defer ticker.Stop()
 		defer func() {
@@ -58,40 +72,39 @@ func (eb *EventBus) StartOutboxSweeper(ctx context.Context, cfg OutboxSweeperCon
 			eb.outboxSweeperActive = false
 			eb.mu.Unlock()
 		}()
+		workCtx := lease.Context()
 		for {
-			if _, err := eb.SweepUndispatched(ctx, cfg.Lookback, cfg.Limit); err != nil {
-				eb.logRuntime(ctx, "warn", "Outbox sweep failed", "eventbus", "outbox_sweep_failed", "", "", "", "", "", nil, map[string]any{
+			if _, err := eb.SweepUndispatched(workCtx, cfg.Lookback, cfg.Limit); err != nil {
+				eb.logRuntime(workCtx, "warn", "Outbox sweep failed", "eventbus", "outbox_sweep_failed", "", "", "", "", "", nil, map[string]any{
 					"lookback_seconds": int(cfg.Lookback / time.Second),
 					"limit":            cfg.Limit,
 				}, eventBusDependencyFailure(err, "outbox_sweep_failed", "sweep_outbox"), 0)
 			}
 			select {
-			case <-ctx.Done():
+			case <-workCtx.Done():
 				return
 			case <-ticker.C:
 			}
 		}
 	}()
+	return nil
 }
 
 func (eb *EventBus) WaitForOutboxSweeper(ctx context.Context) error {
 	if eb == nil {
 		return nil
 	}
-	ticker := time.NewTicker(time.Millisecond)
-	defer ticker.Stop()
-	for {
-		eb.mu.RLock()
-		active := eb.outboxSweeperActive
-		eb.mu.RUnlock()
-		if !active {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
+	eb.mu.RLock()
+	done := eb.outboxSweeperDone
+	eb.mu.RUnlock()
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -146,9 +159,6 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	redelivered := decisionRoutes
 	for _, record := range events {
 		evt := record.Event
-		if eb.eventPublishInFlight(evt.ID()) {
-			continue
-		}
 		lease, claimed, err := replayStore.ClaimPipelineReplay(ctx, evt.ID())
 		if err != nil {
 			return redelivered, err
@@ -224,9 +234,6 @@ func (eb *EventBus) sweepDecisionRouteObligations(ctx context.Context, limit int
 	}
 	for _, record := range records {
 		evt := record.Event
-		if eb.eventPublishInFlight(evt.ID()) {
-			continue
-		}
 		lease, claimed, err := settlementOwner.ClaimPipelineSettlement(ctx, evt.ID())
 		if err != nil {
 			return recovered, err

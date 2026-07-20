@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestPostgresPublicationClaimRetainsBorrowedConnectionAfterOriginalOwnerReturns(t *testing.T) {
+func TestPostgresPublicationClaimUsesIndependentConnectionAcrossAsyncBoundary(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	store := admitTestPostgresStore(t, db)
@@ -38,7 +38,9 @@ func TestPostgresPublicationClaimRetainsBorrowedConnectionAfterOriginalOwnerRetu
 			childEventID := uuid.NewString()
 			var child runtimeownership.Lease
 			var childCtx context.Context
+			var transactionConn *sql.Conn
 			if err := store.runEventTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+				transactionConn, _ = runtimepipeline.PipelineSQLConnFromContext(txctx)
 				lease, claimed, err := store.ClaimPipelinePublication(txctx, childEventID)
 				if err != nil {
 					return err
@@ -60,11 +62,17 @@ func TestPostgresPublicationClaimRetainsBorrowedConnectionAfterOriginalOwnerRetu
 
 			conn, ok := runtimepipeline.PipelineSQLConnFromContext(childCtx)
 			if !ok || conn == nil {
-				t.Fatal("child publication claim did not bind its retained connection")
+				t.Fatal("child publication claim did not bind its independent connection")
+			}
+			if transactionConn == nil {
+				t.Fatal("transaction did not expose its connection")
+			}
+			if conn == transactionConn {
+				t.Fatal("async publication claim reused its creating transaction connection")
 			}
 			var one int
 			if err := conn.QueryRowContext(childCtx, `SELECT 1`).Scan(&one); err != nil || one != 1 {
-				t.Fatalf("retained child connection query = %d, %v", one, err)
+				t.Fatalf("independent child connection query = %d, %v", one, err)
 			}
 			if err := child.Release(testAuthorActivityContext()); err != nil {
 				t.Fatalf("release child publication claim: %v", err)

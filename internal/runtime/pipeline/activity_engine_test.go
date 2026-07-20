@@ -48,7 +48,7 @@ func TestPipelineActivityIntentWriterPersistsDurableActivityRequestEvent(t *test
 	intent.PlanGeneration = "sha256:" + strings.Repeat("a", 64)
 
 	writer := pipelineActivityIntentWriter{coordinator: pc}
-	if err := writer.WriteActivityIntents(testAuthorActivityContext(context.Background()), []runtimeengine.ActivityIntent{intent}); err != nil {
+	if err := writer.WriteActivityIntents(testAuthorActivityContext(t, context.Background()), []runtimeengine.ActivityIntent{intent}); err != nil {
 		t.Fatalf("WriteActivityIntents: %v", err)
 	}
 	if got := bus.outboxCount(); got != 1 {
@@ -145,7 +145,9 @@ func TestPipelineActivityIntentWriterDefersRuntimeLogUntilPostCommit(t *testing.
 	})
 	writer := pipelineActivityIntentWriter{coordinator: pc}
 	postCommit := []func(){}
-	ctx := WithPipelinePostCommitActions(testAuthorActivityContext(context.Background()), &postCommit)
+	rollbackActions := []func(){}
+	ctx := WithPipelinePostCommitActions(testAuthorActivityContext(t, context.Background()), &postCommit)
+	ctx = WithPipelineRollbackActions(ctx, &rollbackActions)
 	ctx = WithPipelineSQLTxContext(ctx, &sql.Tx{})
 
 	if err := writer.WriteActivityIntents(ctx, []runtimeengine.ActivityIntent{testActivityIntent("https://example.com/source")}); err != nil {
@@ -232,7 +234,7 @@ func TestActivityHTTPResponseSuccessPolicyParityCases(t *testing.T) {
 			defer server.Close()
 
 			policy := tc.policy
-			_, err := executePreparedActivityHTTPTool(testAuthorActivityContext(context.Background()), preparedActivityHTTPTool{
+			_, err := executePreparedActivityHTTPTool(testAuthorActivityContext(t, context.Background()), preparedActivityHTTPTool{
 				toolName: "policy_probe",
 				method:   http.MethodPost,
 				url:      server.URL,
@@ -273,7 +275,7 @@ func TestActivityCredentialRedactionGuarantee(t *testing.T) {
 	defer server.Close()
 
 	policy := runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.state", Equals: "accepted"}
-	_, err := executePreparedActivityHTTPTool(testAuthorActivityContext(context.Background()), preparedActivityHTTPTool{
+	_, err := executePreparedActivityHTTPTool(testAuthorActivityContext(t, context.Background()), preparedActivityHTTPTool{
 		toolName: "redaction_guarantee_probe",
 		method:   http.MethodPost,
 		url:      server.URL,
@@ -361,7 +363,7 @@ func TestCompiledResultProjectionHasNoConversionSeam(t *testing.T) {
 func TestChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStores(t *testing.T) {
 	for _, tc := range activityBoringStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
+			ctx := testAuthorActivityContext(t, context.Background())
 			runID := uuid.NewString()
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -414,7 +416,7 @@ func TestChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStores(t 
 func TestChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossSelectedStores(t *testing.T) {
 	for _, tc := range activityBoringStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
+			ctx := testAuthorActivityContext(t, context.Background())
 			runID := uuid.NewString()
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -498,7 +500,7 @@ func TestPipelineActivityDispatcherDispatchesDurableActivityRequestEvent(t *test
 
 	dispatcher := pipelineActivityDispatcher{coordinator: pc}
 	intent := testActivityIntent("https://example.com/source")
-	if err := dispatcher.DispatchActivities(testAuthorActivityContext(context.Background()), []runtimeengine.ActivityIntent{intent}); err != nil {
+	if err := dispatcher.DispatchActivities(testAuthorActivityContext(t, context.Background()), []runtimeengine.ActivityIntent{intent}); err != nil {
 		t.Fatalf("DispatchActivities: %v", err)
 	}
 	if got := bus.publishedCount(); got != 1 {
@@ -553,7 +555,7 @@ func TestPipelineActivityRequestEventExecutesHTTPToolAndPublishesGeneratedSucces
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
 	}
-	handled, err := pc.handleEventResult(testAuthorActivityContext(context.Background()), eventtest.ForDelivery(request.Event, intent.Context))
+	handled, err := pc.handleEventResult(testAuthorActivityContext(t, context.Background()), eventtest.ForDelivery(request.Event, intent.Context))
 	if err != nil {
 		t.Fatalf("handleEventResult: %v", err)
 	}
@@ -631,7 +633,7 @@ func TestPipelineActivityRequestRetriesReadOnlyHTTPTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
 	}
-	handled, err := pc.handleEventResult(testAuthorActivityContext(context.Background()), request.Event)
+	handled, err := pc.handleEventResult(testAuthorActivityContext(t, context.Background()), request.Event)
 	if err != nil {
 		t.Fatalf("handleEventResult: %v", err)
 	}
@@ -686,7 +688,7 @@ func TestPipelineActivityRequestFailsClosedForWriteEffectClass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
 	}
-	handled, err := pc.handleEventResult(testAuthorActivityContext(context.Background()), request.Event)
+	handled, err := pc.handleEventResult(testAuthorActivityContext(t, context.Background()), request.Event)
 	if err != nil {
 		t.Fatalf("handleEventResult: %v", err)
 	}
@@ -715,7 +717,7 @@ func TestPipelineActivityRequestFailsClosedForWriteEffectClass(t *testing.T) {
 }
 
 func TestPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCredentials(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContext(t, context.Background())
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -804,7 +806,7 @@ func TestPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCrede
 }
 
 func TestPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedResponseAndJournal(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContext(t, context.Background())
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	var calls atomic.Int32
@@ -1028,7 +1030,7 @@ func TestPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTT
 }
 
 func TestGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplay(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContext(t, context.Background())
 	artifacts, err := providerconnectors.GenerateCatalog(os.DirFS("../../providerconnectors"))
 	if err != nil {
 		t.Fatalf("GenerateCatalog: %v", err)
@@ -1110,7 +1112,7 @@ func TestGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplay(t *test
 }
 
 func TestPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContext(t, context.Background())
 	for _, tc := range []struct {
 		name  string
 		setup func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool)
@@ -1256,7 +1258,7 @@ func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, ctx conte
 }
 
 func TestPipelineActivityRequestNonIdempotentFailureDoesNotRetry(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContext(t, context.Background())
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1309,7 +1311,7 @@ func TestPipelineActivityRequestNonIdempotentFailureDoesNotRetry(t *testing.T) {
 }
 
 func TestPipelineActivityRequestNonIdempotentTransportErrorMarksUncertain(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContext(t, context.Background())
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1375,7 +1377,7 @@ func TestPipelineActivityRequestNonIdempotentTransportErrorMarksUncertain(t *tes
 }
 
 func TestPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutTerminalizing(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContext(t, context.Background())
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1433,7 +1435,7 @@ func TestPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutTer
 
 func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *testing.T) {
 	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
 		t.Fatal(err)
@@ -1513,7 +1515,7 @@ func (r *activityCommitAckLossRunner) RunRuntimeMutationContext(ctx context.Cont
 }
 
 func TestPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResult(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContext(t, context.Background())
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1602,7 +1604,7 @@ func TestPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResu
 }
 
 func TestPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatch(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContext(t, context.Background())
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1663,7 +1665,7 @@ func TestPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatch(t
 }
 
 func TestPipelineActivityRequestTelegramConnectorMissingTokenFailsAfterClaimBeforeDispatch(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := testAuthorActivityContext(t, context.Background())
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1786,7 +1788,7 @@ func testActivityCredentialStore(t *testing.T, key, value string) runtimecredent
 		t.Fatalf("NewFileStore: %v", err)
 	}
 	if strings.TrimSpace(key) != "" {
-		if err := store.Set(testAuthorActivityContext(context.Background()), key, value); err != nil {
+		if err := store.Set(testAuthorActivityContext(t, context.Background()), key, value); err != nil {
 			t.Fatalf("Set credential: %v", err)
 		}
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -195,6 +196,7 @@ type deliveryLifecycleSnapshot struct {
 type deliveryLifecycleFixture struct {
 	pg           *store.PostgresStore
 	bus          *runtimebus.EventBus
+	workOwner    *worklifetime.RuntimeOccurrence
 	agentID      string
 	subscription events.EventType
 }
@@ -207,7 +209,8 @@ func newDeliveryLifecycleFixture(t *testing.T, ctx context.Context) *deliveryLif
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	requireCanonicalDeliveryLifecycleSurface(t, ctx, pg)
 
-	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, "review.requested")
+	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash)
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{WorkOwner: workOwner}, "review.requested")
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -234,6 +237,7 @@ func newDeliveryLifecycleFixture(t *testing.T, ctx context.Context) *deliveryLif
 	return &deliveryLifecycleFixture{
 		pg:           pg,
 		bus:          bus,
+		workOwner:    workOwner,
 		agentID:      agentID,
 		subscription: events.EventType("review.*"),
 	}
@@ -272,6 +276,9 @@ func (fx *deliveryLifecycleFixture) publishDirectEvent(t *testing.T, ctx context
 	case delivered := <-ch:
 		if delivered.ID() != eventID {
 			t.Fatalf("delivered event id = %q, want %q", delivered.ID(), eventID)
+		}
+		if err := delivered.Complete(); err != nil {
+			t.Fatalf("complete local delivery ownership: %v", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expected direct publish to fan out to live subscriber")
@@ -387,7 +394,7 @@ func (fx *deliveryLifecycleFixture) recoverSeenEventIDs(t *testing.T, ctx contex
 		mu   sync.Mutex
 		seen []string
 	)
-	am := runtimemanager.NewAgentManager(fx.bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+	am := runtimemanager.NewAgentManagerWithOptions(fx.bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		subscriptions := make([]events.EventType, 0, len(cfg.Subscriptions))
 		for _, raw := range cfg.Subscriptions {
 			raw = strings.TrimSpace(raw)
@@ -404,7 +411,7 @@ func (fx *deliveryLifecycleFixture) recoverSeenEventIDs(t *testing.T, ctx contex
 				mu.Unlock()
 			},
 		}, nil
-	}, fx.pg)
+	}, runtimemanager.AgentManagerOptions{WorkOwner: fx.workOwner}, fx.pg)
 	if err := am.Recover(ctx); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}

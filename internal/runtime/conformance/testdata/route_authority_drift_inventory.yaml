@@ -126,10 +126,9 @@ search_dimensions:
     canonical_layer: invalid_old_authority
     classified_paths_required: true
   - id: pipeline_internal_carrier_registration
-    pattern: 'type Bus interface \{\n[[:space:]]*SubscribeInternal|type systemNodeBus interface|pc\.bus\.SubscribeInternal|n\.bus\.SubscribeInternal|Test(PipelineCoordinator|SystemNodeRunner|ActivityDispatcher)Subscribe_UsesInternalSubscribers'
-    minimum_matching_files: 5
+    pattern: 'type ownedInternalSubscriptionBus interface|bus\.SubscribeInternal\(runtimeWorkflowID|bus\.SubscribeInternal\(activityDispatcherSubscriberID|bus\.SubscribeInternal\(n\.nodeID|Test(PipelineCoordinator|SystemNodeRunner|ActivityDispatcher)Subscribe_UsesInternalSubscribers'
+    minimum_matching_files: 4
     required_paths:
-      - internal/runtime/pipeline/runtime_support.go
       - internal/runtime/pipeline/coordinator.go
       - internal/runtime/pipeline/node_system_runner.go
       - internal/runtime/pipeline/activity_background.go

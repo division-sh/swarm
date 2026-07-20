@@ -14,6 +14,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -53,13 +54,32 @@ func startCompletionAttemptHeartbeatWithTiming(ctx context.Context, handle *runt
 	if interval <= 0 || lease <= 0 {
 		return ctx, nil, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_heartbeat_timing_invalid", "llm-completion-authority", "heartbeat_attempt", nil)
 	}
-	if err := handle.Heartbeat(ctx, lease); err != nil {
+	owner, occurrenceOwned := worklifetime.OccurrenceFromContext(ctx)
+	var workLease *worklifetime.Lease
+	var err error
+	if occurrenceOwned {
+		workLease, err = owner.Begin(ctx)
+	} else if process, processOwned := worklifetime.ProcessFromContext(ctx); processOwned {
+		workLease, err = process.Begin(ctx)
+	} else {
+		return ctx, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_heartbeat_work_owner_missing", "llm-completion-authority", "heartbeat_attempt", nil)
+	}
+	if err != nil {
+		return ctx, nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_heartbeat_admission_failed", "llm-completion-authority", "heartbeat_attempt", nil, err)
+	}
+	heartbeatParent := workLease.Context()
+	if occurrenceOwned {
+		heartbeatParent = worklifetime.WithOccurrence(heartbeatParent, owner)
+	}
+	if err := handle.Heartbeat(heartbeatParent, lease); err != nil {
+		_ = workLease.Done()
 		return ctx, nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_attempt_heartbeat_failed", "llm-completion-authority", "heartbeat_attempt", map[string]any{"stage": "prelaunch"}, err)
 	}
-	heartbeatCtx, cancel := context.WithCancelCause(ctx)
+	heartbeatCtx, cancel := context.WithCancelCause(heartbeatParent)
 	heartbeat := &completionAttemptHeartbeat{cancel: cancel, done: make(chan struct{})}
 	go func() {
 		defer close(heartbeat.done)
+		defer func() { _ = workLease.Done() }()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {

@@ -110,7 +110,7 @@ func (s *routePersistenceTestStore) UpsertFlowInstanceRoute(_ context.Context, r
 
 func TestEventBusRestorePersistedFlowInstanceRouteDoesNotRewritePersistence(t *testing.T) {
 	store := &routePersistenceTestStore{}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

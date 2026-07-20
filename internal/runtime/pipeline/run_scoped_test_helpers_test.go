@@ -52,7 +52,7 @@ func testPipelineRunContext(t *testing.T, db *sql.DB) context.Context {
 	if db == nil {
 		t.Fatal("test pipeline run context requires db")
 	}
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), testPipelineRunID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), testPipelineRunID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status)
 		VALUES ($1::uuid, 'running')
@@ -63,8 +63,9 @@ func testPipelineRunContext(t *testing.T, db *sql.DB) context.Context {
 	return ctx
 }
 
-func testPipelineRunContextNoSeed() context.Context {
-	return runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), testPipelineRunID)
+func testPipelineRunContextNoSeed(t *testing.T) context.Context {
+	t.Helper()
+	return runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), testPipelineRunID)
 }
 
 func testWorkflowStoreRunContext(t *testing.T, store *WorkflowInstanceStore) context.Context {
@@ -73,7 +74,7 @@ func testWorkflowStoreRunContext(t *testing.T, store *WorkflowInstanceStore) con
 		t.Fatal("test workflow store run context requires store")
 	}
 	if store.db == nil {
-		return testPipelineRunContextNoSeed()
+		return testPipelineRunContextNoSeed(t)
 	}
 	return testPipelineRunContext(t, store.db)
 }
@@ -89,7 +90,7 @@ func testPipelineCoordinatorRunContext(t *testing.T, pc *PipelineCoordinator) co
 	if pc.workflowStore != nil {
 		return testWorkflowStoreRunContext(t, pc.workflowStore)
 	}
-	return testPipelineRunContextNoSeed()
+	return testPipelineRunContextNoSeed(t)
 }
 
 func testWorkflowStateTransitionContext(ctx context.Context, entityID, eventType string) context.Context {
@@ -131,7 +132,7 @@ func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Even
 	if _, err := uuid.Parse(runID); err != nil {
 		t.Fatalf("seed pipeline node delivery authority run id = %q: %v", runID, err)
 	}
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status)
 		VALUES ($1::uuid, 'running')

@@ -18,7 +18,7 @@ func TestWorkflowNodeDeliveryRouteInstallsReplyContext(t *testing.T) {
 			Reply: &events.ReplyContextRef{ID: "reply-v1:node-delivery"},
 		},
 	}
-	ctx := withWorkflowNodeDeliveryRoute(testAuthorActivityContext(context.Background()), route)
+	ctx := withWorkflowNodeDeliveryRoute(testAuthorActivityContext(t, context.Background()), route)
 	if got := events.DeliveryContextFromContext(ctx).ReplyContextID(); got != route.Context.ReplyContextID() {
 		t.Fatalf("node delivery reply context = %q, want %q", got, route.Context.ReplyContextID())
 	}

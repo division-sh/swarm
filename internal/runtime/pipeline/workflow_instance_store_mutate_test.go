@@ -216,7 +216,7 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `
+	if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `
 		INSERT INTO timers (
 			timer_name, entity_id, flow_instance, fire_event, fire_payload,
 			fire_at, recurring, recurrence_cron, recurrence_interval,
@@ -245,7 +245,7 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 		t.Fatal("expected workflow instance to persist")
 	}
 	var schedulerRows int
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
 		SELECT COUNT(*)
 		FROM timers
 		WHERE entity_id = $1::uuid

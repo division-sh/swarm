@@ -264,7 +264,7 @@ func (*capturingInboundEventStore) ListEventDeliveryRecipients(context.Context, 
 
 func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -538,7 +538,7 @@ func (*rollbackTrackingInboundStore) ValidateInboundPublicationIntegrity(context
 }
 
 func TestInboundGateway_Returns503WithoutCompensatingMarkerPathWhenBatchFails(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(failingInboundEventStore{})
+	bus, err := newRuntimeTestEventBus(t, failingInboundEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -558,7 +558,7 @@ func TestInboundGateway_Returns503WithoutCompensatingMarkerPathWhenBatchFails(t 
 }
 
 func TestInboundGateway_Returns503WhenRuntimeShutdownAdmissionClosed(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := newRuntimeTestEventBus(t, nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -581,7 +581,7 @@ func TestInboundGateway_Returns503WhenRuntimeShutdownAdmissionClosed(t *testing.
 }
 
 func TestInboundGateway_UnknownTargetFailsBeforeProviderAdmission(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := newRuntimeTestEventBus(t, nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -604,7 +604,7 @@ func TestInboundGateway_UnknownTargetFailsBeforeProviderAdmission(t *testing.T) 
 
 func TestInboundGateway_PausedRuntimeUsesIngressOwnerAndAcceptsQueueableWebhook(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -635,7 +635,7 @@ func TestInboundGateway_PausedRuntimeUsesIngressOwnerAndAcceptsQueueableWebhook(
 
 func TestInboundGateway_GitHubPausedRuntimeUsesIngressOwnerAndAcceptsQueueableWebhook(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -676,7 +676,7 @@ func TestInboundGateway_GitHubPausedRuntimeUsesIngressOwnerAndAcceptsQueueableWe
 
 func TestInboundGateway_GitHubAdapterOwnsSignatureDeliveryIDAndEventMapping(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -724,7 +724,7 @@ func TestInboundGateway_GitHubAdapterOwnsSignatureDeliveryIDAndEventMapping(t *t
 
 func TestInboundGateway_GitHubAdapterRejectsInvalidSignatureBeforeMarkerAndPublish(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -759,7 +759,7 @@ func TestInboundGateway_GitHubAdapterRejectsInvalidSignatureBeforeMarkerAndPubli
 
 func TestInboundGateway_GitHubAdapterDuplicateDeliveryDoesNotPublishAgain(t *testing.T) {
 	eventStore := &capturingInboundEventStore{duplicate: true}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -794,7 +794,7 @@ func TestInboundGateway_GitHubAdapterDuplicateDeliveryDoesNotPublishAgain(t *tes
 
 func TestInboundGatewayExactRetryBypassesCurrentProjectionAndConflictsOnChangedRedactedSemantics(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -847,7 +847,7 @@ func TestInboundGatewayExactRetryBypassesCurrentProjectionAndConflictsOnChangedR
 
 func TestInboundGatewayConcurrentLoserReturnsCommittedBatchDespiteCurrentProjectionFailure(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -961,7 +961,7 @@ func normalizedRetryRequest(body string) *http.Request {
 
 func TestInboundGateway_SlackURLVerificationReturnsChallengeWithoutMarkerOrPublish(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -995,7 +995,7 @@ func TestInboundGateway_SlackURLVerificationReturnsChallengeWithoutMarkerOrPubli
 
 func TestInboundGateway_SlackURLVerificationRequiresChallengeBeforeMarkerAndPublish(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1023,7 +1023,7 @@ func TestInboundGateway_SlackURLVerificationRequiresChallengeBeforeMarkerAndPubl
 
 func TestInboundGateway_SlackRejectsMissingSecretBeforeMarkerAndPublish(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1074,7 +1074,7 @@ func TestInboundGateway_SlackRejectsMissingOrInvalidSignatureBeforeMarkerAndPubl
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}
-			bus, err := runtimebus.NewEventBus(eventStore)
+			bus, err := newRuntimeTestEventBus(t, eventStore)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -1109,7 +1109,7 @@ func TestInboundGateway_SlackRejectsMissingOrInvalidSignatureBeforeMarkerAndPubl
 
 func TestInboundGateway_SlackRejectsStaleTimestampBeforeMarkerAndPublish(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1141,7 +1141,7 @@ func TestInboundGateway_SlackRejectsStaleTimestampBeforeMarkerAndPublish(t *test
 
 func TestInboundGateway_SlackEventCallbackOwnsEventIDAndInnerEventMapping(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1202,7 +1202,7 @@ func TestInboundGateway_SlackEventCallbackAcknowledgesBeforePostCommitDispatchCo
 		})
 	}
 	t.Cleanup(releaseDispatch)
-	bus, err := runtimebus.NewEventBusWithOptions(eventStore, runtimebus.EventBusOptions{
+	bus, err := newRuntimeTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{
 		Interceptors: []runtimebus.EventInterceptor{
 			blockingInboundInterceptor{started: started, release: release},
 		},
@@ -1255,7 +1255,7 @@ func TestInboundGateway_SlackEventCallbackAcknowledgesBeforePostCommitDispatchCo
 
 func TestInboundGateway_SlackEventCallbackRequiresEventIDBeforeMarkerAndPublish(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1283,7 +1283,7 @@ func TestInboundGateway_SlackEventCallbackRequiresEventIDBeforeMarkerAndPublish(
 
 func TestInboundGateway_SlackDuplicateEventDoesNotPublishAgain(t *testing.T) {
 	eventStore := &capturingInboundEventStore{duplicate: true}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1320,7 +1320,7 @@ func TestInboundGateway_StripeManifestOwnsSignatureReplayIDTypeAndAck(t *testing
 		})
 	}
 	t.Cleanup(releaseDispatch)
-	bus, err := runtimebus.NewEventBusWithOptions(eventStore, runtimebus.EventBusOptions{
+	bus, err := newRuntimeTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{
 		Interceptors: []runtimebus.EventInterceptor{
 			blockingInboundInterceptor{started: started, release: release},
 		},
@@ -1487,7 +1487,7 @@ func TestInboundGateway_StripeRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}
-			bus, err := runtimebus.NewEventBus(eventStore)
+			bus, err := newRuntimeTestEventBus(t, eventStore)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -1521,7 +1521,7 @@ func TestInboundGateway_StripeRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 
 func TestInboundGateway_StripeDuplicateEventDoesNotPublishAgain(t *testing.T) {
 	eventStore := &capturingInboundEventStore{duplicate: true}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1555,7 +1555,7 @@ func TestInboundGateway_StripeDuplicateEventDoesNotPublishAgain(t *testing.T) {
 
 func TestInboundGateway_TwilioManifestOwnsURLFormSignatureAndLiteralEvent(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1678,7 +1678,7 @@ func TestInboundGateway_TwilioRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}
-			bus, err := runtimebus.NewEventBus(eventStore)
+			bus, err := newRuntimeTestEventBus(t, eventStore)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -1711,7 +1711,7 @@ func TestInboundGateway_TwilioRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 
 func TestInboundGateway_TwilioDuplicateDeliveryDoesNotPublishAgain(t *testing.T) {
 	eventStore := &capturingInboundEventStore{duplicate: true}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1744,7 +1744,7 @@ func TestInboundGateway_TwilioDuplicateDeliveryDoesNotPublishAgain(t *testing.T)
 
 func TestInboundGateway_ShopifyManifestOwnsRawBodySignatureDeliveryIDAndTopic(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1853,7 +1853,7 @@ func TestInboundGateway_ShopifyRejectsInvalidInputsBeforeMarkerAndPublish(t *tes
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}
-			bus, err := runtimebus.NewEventBus(eventStore)
+			bus, err := newRuntimeTestEventBus(t, eventStore)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -1888,7 +1888,7 @@ func TestInboundGateway_ShopifyRejectsInvalidInputsBeforeMarkerAndPublish(t *tes
 
 func TestInboundGateway_ShopifyDuplicateDeliveryDoesNotPublishAgain(t *testing.T) {
 	eventStore := &capturingInboundEventStore{duplicate: true}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1960,7 +1960,7 @@ func TestInboundGateway_TypeformAndIntercomManifestsOwnRawBodySignatureDeliveryI
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}
-			bus, err := runtimebus.NewEventBus(eventStore)
+			bus, err := newRuntimeTestEventBus(t, eventStore)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -2140,7 +2140,7 @@ func TestInboundGateway_TypeformAndIntercomRejectInvalidInputsBeforeMarkerAndPub
 		for _, tc := range providerCase.cases {
 			t.Run(providerCase.provider+"/"+tc.name, func(t *testing.T) {
 				eventStore := &capturingInboundEventStore{}
-				bus, err := runtimebus.NewEventBus(eventStore)
+				bus, err := newRuntimeTestEventBus(t, eventStore)
 				if err != nil {
 					t.Fatalf("NewEventBus: %v", err)
 				}
@@ -2198,7 +2198,7 @@ func TestInboundGateway_TypeformAndIntercomDuplicateDeliveryDoesNotPublishAgain(
 	} {
 		t.Run(tc.provider, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{duplicate: true}
-			bus, err := runtimebus.NewEventBus(eventStore)
+			bus, err := newRuntimeTestEventBus(t, eventStore)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -2240,7 +2240,7 @@ func TestInboundGateway_TelegramManifestOwnsTokenDeliveryIDLiteralEventAndAck(t 
 		})
 	}
 	t.Cleanup(releaseDispatch)
-	bus, err := runtimebus.NewEventBusWithOptions(eventStore, runtimebus.EventBusOptions{
+	bus, err := newRuntimeTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{
 		Interceptors: []runtimebus.EventInterceptor{
 			blockingInboundInterceptor{started: started, release: release},
 		},
@@ -2420,7 +2420,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}
-			bus, err := runtimebus.NewEventBus(eventStore)
+			bus, err := newRuntimeTestEventBus(t, eventStore)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -2463,7 +2463,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 
 func TestInboundGateway_TelegramDuplicateDeliveryDoesNotPublishAgain(t *testing.T) {
 	eventStore := &capturingInboundEventStore{duplicate: true}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -2516,7 +2516,7 @@ func TestInboundGateway_NoPlanDoesNotInterpretTypeformOrIntercomSignatures(t *te
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}
-			bus, err := runtimebus.NewEventBus(eventStore)
+			bus, err := newRuntimeTestEventBus(t, eventStore)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -2550,7 +2550,7 @@ func TestInboundGateway_NoPlanDoesNotInterpretTypeformOrIntercomSignatures(t *te
 
 func TestInboundGateway_NoPlanDoesNotInterpretTelegramSecretToken(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -2583,7 +2583,7 @@ func TestInboundGateway_NoPlanDoesNotInterpretTelegramSecretToken(t *testing.T) 
 
 func TestInboundGateway_NoPlanDoesNotInterpretShopifySignature(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -2616,7 +2616,7 @@ func TestInboundGateway_NoPlanDoesNotInterpretShopifySignature(t *testing.T) {
 
 func TestInboundGateway_NoPlanDoesNotInterpretStripeSignature(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -2679,7 +2679,7 @@ func TestInboundGateway_ExecutesOnlyCompiledRawAdmissionPolicy(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}
-			bus, err := runtimebus.NewEventBus(eventStore)
+			bus, err := newRuntimeTestEventBus(t, eventStore)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2736,7 +2736,7 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 	mac := hmac.New(sha256.New, []byte("partner-secret"))
 	signature := hex.EncodeToString(mac.Sum(nil))
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2795,7 +2795,7 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 
 func TestInboundGateway_RejectsOversizedBodyBeforeMarkerAndPublish(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

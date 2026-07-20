@@ -410,7 +410,7 @@ func TestSQLiteRuntimeStoreUpsertAgentConsumesActivePipelineTransaction(t *testi
 
 func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *testing.T) {
 	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
+	ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContext()), runID)
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
 		t.Fatalf("seed activation run: %v", err)
@@ -421,6 +421,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 		WorkflowInstances: workflowStore,
 		LLMBackend:        "anthropic",
 		LifecycleStore:    sqliteStore,
+		WorkOwner:         storeTestWorkOwner(t),
 	}, sqliteStore)
 	bundle := sqliteFlowActivationBundle()
 
@@ -454,7 +455,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 
 func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T) {
 	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
+	ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContext()), runID)
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
 		t.Fatalf("seed fan-out run: %v", err)
@@ -465,6 +466,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 		WorkflowInstances: workflowStore,
 		LLMBackend:        "anthropic",
 		LifecycleStore:    sqliteStore,
+		WorkOwner:         storeTestWorkOwner(t),
 	}, sqliteStore)
 	bundle := sqliteFlowActivationBundle()
 
@@ -696,7 +698,7 @@ func assertSQLiteRouteMaterializationVars(t *testing.T, bus *sqliteFlowActivatio
 func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	bus, err := runtimebus.NewEventBus(store)
+	bus, err := newStoreTestEventBus(t, store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -775,7 +777,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyFailedNestedPublishLeavesNoCompletionOr
 		}
 		return nil
 	})
-	bus, err := runtimebus.NewEventBus(store)
+	bus, err := newStoreTestEventBus(t, store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -941,7 +943,7 @@ func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishDoesNotReenterWrite(t 
 	`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	bus, err := runtimebus.NewEventBus(store)
+	bus, err := newStoreTestEventBus(t, store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
@@ -51,7 +52,7 @@ type runtimeProjectSupervisor struct {
 	initStateStores     func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error)
 	newWorkspaces       func(storeBundle, string, semanticview.Source, cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error)
 	createRuntime       func(context.Context, runtime.RuntimeDeps) (*runtime.Runtime, error)
-	cloneRuntime        func(context.Context, *runtime.Runtime) (*runtime.Runtime, error)
+	cloneRuntime        func(context.Context, *runtime.Runtime) (*runtime.Runtime, *worklifetime.RuntimeOccurrence, error)
 	replacementShutdown runtime.ShutdownOptions
 	runtimeLifetime     context.Context
 	runtimeInstanceID   string
@@ -166,11 +167,15 @@ func newRuntimeProjectSupervisor(
 		createRuntime: func(ctx context.Context, deps runtime.RuntimeDeps) (*runtime.Runtime, error) {
 			return runtime.NewRuntime(ctx, deps)
 		},
-		cloneRuntime: func(ctx context.Context, predecessor *runtime.Runtime) (*runtime.Runtime, error) {
+		cloneRuntime: func(ctx context.Context, predecessor *runtime.Runtime) (*runtime.Runtime, *worklifetime.RuntimeOccurrence, error) {
 			if predecessor == nil {
-				return nil, fmt.Errorf("predecessor runtime is required")
+				return nil, nil, fmt.Errorf("predecessor runtime is required")
 			}
-			return runtime.NewRuntime(ctx, runtime.RuntimeDeps{Config: predecessor.Config, Stores: predecessor.Stores, Options: predecessor.Options})
+			restored, err := runtime.NewRuntime(ctx, runtime.RuntimeDeps{Config: predecessor.Config, Stores: predecessor.Stores, Options: predecessor.Options})
+			if err != nil {
+				return nil, nil, err
+			}
+			return restored, restored.WorkOccurrence(), nil
 		},
 		currentRoot:   strings.TrimSpace(initialRoot),
 		currentSource: initialSource,
@@ -190,10 +195,21 @@ func (s *runtimeProjectSupervisor) CurrentSource() semanticview.Source {
 	return s.currentSource
 }
 
-func (s *runtimeProjectSupervisor) CurrentRuntime() *runtime.Runtime {
+func (s *runtimeProjectSupervisor) acquireCurrentRuntime(ctx context.Context) (*runtime.RuntimeContextUse, error) {
+	if s == nil || s.runtimeContexts == nil {
+		return nil, fmt.Errorf("runtime context manager unavailable")
+	}
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.currentRT
+	bundleHash := strings.TrimSpace(s.currentBundleSourceFact.BundleHash)
+	s.mu.RUnlock()
+	use, lookup, err := s.runtimeContexts.AcquireBundleHash(ctx, bundleHash)
+	if err != nil {
+		return nil, err
+	}
+	if use == nil || !lookup.Loaded() {
+		return nil, fmt.Errorf("current runtime context unavailable: %s", lookup.Cause)
+	}
+	return use, nil
 }
 
 func (s *runtimeProjectSupervisor) CurrentProject() builderpkg.ProjectStatus {
@@ -355,7 +371,7 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		return builderpkg.ProjectStatus{}, err
 	}
 	admissionCandidate.catalog = candidateCatalog
-	status, err := s.replaceCurrentRuntimeWithSourceAndAdmission(ctx, resolvedRoot, source, bundle, bundleSourceFact, bundleIdentity, newRT, &admissionCandidate)
+	status, err := s.replaceCurrentRuntimeWithSourceAndAdmission(ctx, resolvedRoot, source, bundle, bundleSourceFact, bundleIdentity, newRT, newRT.WorkOccurrence(), &admissionCandidate)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
@@ -424,7 +440,7 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntime(
 		fact = newRT.Options.BundleSourceFact.Normalized()
 		identity.BundleHash = fact.BundleHash
 	}
-	return s.replaceCurrentRuntimeWithSource(ctx, resolvedRoot, source, bundle, fact, identity, newRT)
+	return s.replaceCurrentRuntimeWithSource(ctx, resolvedRoot, source, bundle, fact, identity, newRT, newRT.WorkOccurrence())
 }
 
 func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSource(
@@ -435,8 +451,9 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSource(
 	fact runtimecorrelation.BundleSourceFact,
 	identity runtimecontracts.BundleIdentity,
 	newRT *runtime.Runtime,
+	workOwner *worklifetime.RuntimeOccurrence,
 ) (builderpkg.ProjectStatus, error) {
-	return s.replaceCurrentRuntimeWithSourceAndAdmission(ctx, resolvedRoot, source, bundle, fact, identity, newRT, nil)
+	return s.replaceCurrentRuntimeWithSourceAndAdmission(ctx, resolvedRoot, source, bundle, fact, identity, newRT, workOwner, nil)
 }
 
 func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
@@ -447,6 +464,7 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 	fact runtimecorrelation.BundleSourceFact,
 	identity runtimecontracts.BundleIdentity,
 	newRT *runtime.Runtime,
+	workOwner *worklifetime.RuntimeOccurrence,
 	admissionCandidate *processAdmissionCandidate,
 ) (builderpkg.ProjectStatus, error) {
 	s.mu.RLock()
@@ -461,7 +479,7 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		}
 		contextDef := runtime.BundleContext{
 			BundleHash: newHash, BundleSourceFact: fact, BundleIdentity: identity, Source: source,
-			ContractsRoot: resolvedRoot, PlatformSpecPath: s.platformSpecPath, Runtime: newRT, StandingTargets: plannedTargets,
+			ContractsRoot: resolvedRoot, PlatformSpecPath: s.platformSpecPath, Runtime: newRT, WorkOwner: workOwner, StandingTargets: plannedTargets,
 		}
 		if err := manager.ValidateReplacement(oldHash, contextDef); err != nil {
 			return builderpkg.ProjectStatus{}, err
@@ -480,7 +498,7 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		oldRT := s.currentRT
 		s.mu.RUnlock()
 		s.setReady(false)
-		if _, err := manager.BeginBundleHashReplacement(oldHash, contextDef); err != nil {
+		if _, err := manager.BeginBundleHashReplacement(ctx, oldHash, contextDef); err != nil {
 			s.setReady(true)
 			return s.CurrentProject(), fmt.Errorf("withdraw predecessor runtime context for replacement: %w", err)
 		}
@@ -655,13 +673,20 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Contex
 	s.mu.RUnlock()
 	clone := s.cloneRuntime
 	if clone == nil {
-		clone = func(ctx context.Context, predecessor *runtime.Runtime) (*runtime.Runtime, error) {
-			return runtime.NewRuntime(ctx, runtime.RuntimeDeps{Config: predecessor.Config, Stores: predecessor.Stores, Options: predecessor.Options})
+		clone = func(ctx context.Context, predecessor *runtime.Runtime) (*runtime.Runtime, *worklifetime.RuntimeOccurrence, error) {
+			restored, err := runtime.NewRuntime(ctx, runtime.RuntimeDeps{Config: predecessor.Config, Stores: predecessor.Stores, Options: predecessor.Options})
+			if err != nil {
+				return nil, nil, err
+			}
+			return restored, restored.WorkOccurrence(), nil
 		}
 	}
-	restored, err := clone(ctx, predecessor)
+	restored, restoredWorkOwner, err := clone(ctx, predecessor)
 	if err != nil {
 		return fmt.Errorf("restore predecessor runtime construction: %w", err)
+	}
+	if restoredWorkOwner == nil {
+		return fmt.Errorf("restore predecessor runtime construction: runtime occurrence is required")
 	}
 	handoff, err := restored.PrepareStartupOwnershipHandoff(predecessor)
 	if err != nil {
@@ -687,6 +712,7 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Contex
 		return fmt.Errorf("commit predecessor ownership restoration: %w", err)
 	}
 	predecessorContext.Runtime = restored
+	predecessorContext.WorkOwner = restoredWorkOwner
 	predecessorContext.StandingTargets = targets
 	if err := manager.PublishRestoredBundleHashReplacement(predecessorContext.BundleHash, predecessorContext); err != nil {
 		quiesceErr := s.quiesceCurrentRuntimeWithOptions(context.Background(), restored, s.replacementShutdown)
@@ -755,7 +781,7 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 		http.Error(w, "expected /webhooks/{alias}/{provider}", http.StatusBadRequest)
 		return
 	}
-	lookup := h.contexts.LookupIngress(alias, providertriggers.NormalizeProviderName(provider))
+	use, lookup, acquireErr := h.contexts.AcquireIngress(r.Context(), alias, providertriggers.NormalizeProviderName(provider))
 	if !lookup.Found {
 		if lookup.AliasFound {
 			http.Error(w, fmt.Sprintf("ingress target %q does not declare provider %q; add that provider binding to the standing singleton flow", alias, provider), http.StatusNotFound)
@@ -764,18 +790,24 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 		http.Error(w, fmt.Sprintf("no ingress target %q is declared; add ingress to a standing singleton flow", alias), http.StatusNotFound)
 		return
 	}
-	if !lookup.Loaded() || lookup.Context.Runtime == nil || lookup.Context.Runtime.InboundGateway == nil {
+	if acquireErr != nil {
+		http.Error(w, fmt.Sprintf("ingress target %q provider %q cannot admit work: %v", alias, provider, acquireErr), http.StatusServiceUnavailable)
+		return
+	}
+	if !lookup.Loaded() || use == nil || use.Runtime() == nil || use.Runtime().InboundGateway == nil {
 		http.Error(w, fmt.Sprintf("ingress target %q provider %q is unavailable: %s", alias, provider, lookup.Cause), http.StatusServiceUnavailable)
 		return
 	}
+	defer func() { _ = use.Done() }()
 	target := lookup.Target
-	lookup.Context.Runtime.InboundGateway.HandleResolvedWebhook(w, r, runtime.InboundTarget{
+	selectedRuntime := use.Runtime()
+	selectedRuntime.InboundGateway.HandleResolvedWebhook(w, r.WithContext(use.WorkContext()), runtime.InboundTarget{
 		BundleHash: target.BundleHash, ServiceID: target.ServiceID, PackageKey: target.PackageKey,
 		FlowID: target.FlowID, RunID: target.RunID, Generation: target.Generation,
 		PublicationSequence: target.PublicationSequence, InstanceID: target.InstanceID,
 		FlowInstance: target.FlowInstance, EntityID: target.EntityID, EntitySlug: target.Alias,
 		Alias: target.Alias, Provider: target.Provider, SigningSecret: target.SigningSecret, AdmissionPlan: target.AdmissionPlan,
-	}, lookup.Context.Source)
+	}, use.Context.Source)
 }
 
 func parseProcessWebhookPath(path string) (string, string, bool) {
@@ -789,11 +821,16 @@ func parseProcessWebhookPath(path string) (string, string, bool) {
 }
 
 func (c dashboardDynamicRuntimeControl) PauseIngress() error {
-	rt := c.supervisor.CurrentRuntime()
+	use, err := c.supervisor.acquireCurrentRuntime(context.Background())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = use.Done() }()
+	rt := use.Runtime()
 	if rt == nil || rt.RuntimeIngress == nil {
 		return fmt.Errorf("runtime ingress controller unavailable")
 	}
-	_, err := rt.RuntimeIngress.Pause(context.Background(), runtimeingress.TransitionRequest{
+	_, err = rt.RuntimeIngress.Pause(use.WorkContext(), runtimeingress.TransitionRequest{
 		Reason:       "dashboard_action",
 		ControlledBy: "dashboard",
 	})
@@ -801,11 +838,16 @@ func (c dashboardDynamicRuntimeControl) PauseIngress() error {
 }
 
 func (c dashboardDynamicRuntimeControl) ResumeIngress() error {
-	rt := c.supervisor.CurrentRuntime()
+	use, err := c.supervisor.acquireCurrentRuntime(context.Background())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = use.Done() }()
+	rt := use.Runtime()
 	if rt == nil || rt.RuntimeIngress == nil {
 		return fmt.Errorf("runtime ingress controller unavailable")
 	}
-	_, err := rt.RuntimeIngress.Resume(context.Background(), runtimeingress.TransitionRequest{
+	_, err = rt.RuntimeIngress.Resume(use.WorkContext(), runtimeingress.TransitionRequest{
 		Reason:       "dashboard_action",
 		ControlledBy: "dashboard",
 	})
@@ -817,28 +859,43 @@ type dashboardDynamicAgentControl struct {
 }
 
 func (c dashboardDynamicAgentControl) Restart(ctx context.Context, req runtimeagentcontrol.RestartRequest) (runtimeagentcontrol.RestartResult, error) {
-	rt := c.supervisor.CurrentRuntime()
+	use, err := c.supervisor.acquireCurrentRuntime(ctx)
+	if err != nil {
+		return runtimeagentcontrol.RestartResult{}, err
+	}
+	defer func() { _ = use.Done() }()
+	rt := use.Runtime()
 	if rt == nil || rt.Manager == nil {
 		return runtimeagentcontrol.RestartResult{}, fmt.Errorf("runtime manager unavailable")
 	}
-	return rt.Manager.Restart(ctx, req)
+	return rt.Manager.Restart(use.WorkContext(), req)
 }
 
 func (c dashboardDynamicAgentControl) ReplayBacklog(ctx context.Context, req runtimeagentcontrol.ReplayBacklogRequest) (runtimeagentcontrol.ReplayBacklogResult, error) {
-	rt := c.supervisor.CurrentRuntime()
+	use, err := c.supervisor.acquireCurrentRuntime(ctx)
+	if err != nil {
+		return runtimeagentcontrol.ReplayBacklogResult{}, err
+	}
+	defer func() { _ = use.Done() }()
+	rt := use.Runtime()
 	if rt == nil || rt.Manager == nil {
 		return runtimeagentcontrol.ReplayBacklogResult{}, fmt.Errorf("runtime manager unavailable")
 	}
-	return rt.Manager.ReplayBacklog(ctx, req)
+	return rt.Manager.ReplayBacklog(use.WorkContext(), req)
 }
 
 func (c dashboardDynamicAgentControl) SendDirective(ctx context.Context, req runtimeagentcontrol.SendDirectiveRequest) (runtimeagentcontrol.SendDirectiveResult, error) {
-	rt := c.supervisor.CurrentRuntime()
+	use, err := c.supervisor.acquireCurrentRuntime(ctx)
+	if err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
+	defer func() { _ = use.Done() }()
+	rt := use.Runtime()
 	if rt == nil || rt.Manager == nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, fmt.Errorf("runtime manager unavailable")
 	}
 	if req.Source == "" {
 		req.Source = runtimeagentcontrol.DirectiveSourceBuilderRuntime
 	}
-	return rt.Manager.SendDirective(ctx, req)
+	return rt.Manager.SendDirective(use.WorkContext(), req)
 }

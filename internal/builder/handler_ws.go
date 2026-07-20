@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/gorilla/websocket"
 )
 
@@ -27,7 +28,7 @@ func (h *handler) handleWS(w http.ResponseWriter, r *http.Request) {
 		conn:       conn,
 		subscribed: map[string]context.CancelFunc{},
 	}
-	client.run(r.Context())
+	client.run(worklifetime.WithProcess(r.Context(), h.processWorkOwner))
 }
 
 func (c *wsClient) run(ctx context.Context) {
@@ -58,29 +59,64 @@ func (c *wsClient) handleSubscribe(ctx context.Context, channel string) {
 	if channel == "" {
 		return
 	}
-	c.mu.Lock()
-	if _, exists := c.subscribed[channel]; exists {
-		c.mu.Unlock()
-		return
-	}
-	subCtx, cancel := context.WithCancel(ctx)
-	c.subscribed[channel] = cancel
-	c.mu.Unlock()
 	switch channel {
 	case "engine:health":
-		go c.runEngineHealth(subCtx, channel)
+		owner, ok := worklifetime.ProcessFromContext(ctx)
+		if !ok {
+			return
+		}
+		lease, err := owner.Begin(ctx)
+		if err != nil {
+			return
+		}
+		parent := lease.Context()
+		var use RuntimeUse
+		if c.handler.runtimeAcquirer != nil {
+			use, err = c.handler.runtimeAcquirer.AcquireCurrentRuntime(parent)
+			if err != nil {
+				_ = lease.Done()
+				return
+			}
+			parent = use.WorkContext()
+		}
+		subCtx, cancel := context.WithCancel(parent)
+		c.mu.Lock()
+		if _, exists := c.subscribed[channel]; exists {
+			c.mu.Unlock()
+			cancel()
+			if use != nil {
+				_ = use.Done()
+			}
+			_ = lease.Done()
+			return
+		}
+		c.subscribed[channel] = cancel
+		c.mu.Unlock()
+		go func() {
+			defer func() {
+				if use != nil {
+					_ = use.Done()
+				}
+				_ = lease.Done()
+			}()
+			c.runEngineHealth(subCtx, channel)
+		}()
 	default:
 		if strings.HasPrefix(channel, "run:events:") && c.handler.runHub != nil {
 			runID := strings.TrimSpace(strings.TrimPrefix(channel, "run:events:"))
-			cancel = c.handler.runHub.subscribe(runID, func(data RunEventEnvelope) {
+			cancel := c.handler.runHub.subscribe(runID, func(data RunEventEnvelope) {
 				_ = c.writeEvent(channel, data)
 			})
 			c.mu.Lock()
+			if _, exists := c.subscribed[channel]; exists {
+				c.mu.Unlock()
+				cancel()
+				return
+			}
 			c.subscribed[channel] = cancel
 			c.mu.Unlock()
 			return
 		}
-		c.handleUnsubscribe(channel)
 	}
 }
 

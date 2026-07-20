@@ -10,7 +10,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/runbundle"
 )
@@ -29,6 +31,7 @@ type BundleContext struct {
 	ContractsRoot     string
 	PlatformSpecPath  string
 	Runtime           *Runtime
+	WorkOwner         *worklifetime.RuntimeOccurrence
 	WorkspaceScopeKey string
 	StandingTargets   []StandingTarget
 }
@@ -67,10 +70,60 @@ func (c BundleContext) normalized() BundleContext {
 
 type runtimeContextEntry struct {
 	context          *BundleContext
+	runtime          *Runtime
+	workOwner        *worklifetime.RuntimeOccurrence
+	standing         map[string]*worklifetime.StandingOccurrence
 	state            RuntimeContextState
 	cause            string
 	shutdownMu       sync.Mutex
 	shutdownComplete bool
+}
+
+// RuntimeContextUse is the only execution-bearing result produced by the
+// runtime selector. Metadata lookups never expose a raw Runtime pointer.
+type RuntimeContextUse struct {
+	Context BundleContext
+	runtime *Runtime
+	lease   *worklifetime.Lease
+	leases  []*worklifetime.Lease
+	once    sync.Once
+}
+
+func (u *RuntimeContextUse) Runtime() *Runtime {
+	if u == nil {
+		return nil
+	}
+	return u.runtime
+}
+
+func (u *RuntimeContextUse) WorkContext() context.Context {
+	if u == nil {
+		return context.Background()
+	}
+	if len(u.leases) > 0 {
+		return u.leases[len(u.leases)-1].Context()
+	}
+	if u.lease == nil {
+		return context.Background()
+	}
+	return u.lease.Context()
+}
+
+func (u *RuntimeContextUse) Done() error {
+	if u == nil {
+		return nil
+	}
+	var err error
+	u.once.Do(func() {
+		leases := u.leases
+		if len(leases) == 0 && u.lease != nil {
+			leases = []*worklifetime.Lease{u.lease}
+		}
+		for i := len(leases) - 1; i >= 0; i-- {
+			err = errors.Join(err, leases[i].Done())
+		}
+	})
+	return err
 }
 
 type runtimeContextAgentSlugCollision struct {
@@ -136,42 +189,73 @@ func NewRuntimeContextManagerWithAdmission(availability RunBundleAvailabilityRea
 	return newRuntimeContextManager(availability, state, contexts...)
 }
 
-func newRuntimeContextManager(availability RunBundleAvailabilityReader, state ProcessAdmissionState, contexts ...BundleContext) (*RuntimeContextManager, error) {
+func newRuntimeContextManagerState(availability RunBundleAvailabilityReader, state ProcessAdmissionState) (*RuntimeContextManager, error) {
 	installed, err := packs.NormalizeSubjects(state.InstalledSubjects)
 	if err != nil {
 		return nil, fmt.Errorf("normalize installed provider trigger subjects: %w", err)
 	}
-	manager := &RuntimeContextManager{
+	return &RuntimeContextManager{
 		availability:               availability,
 		contexts:                   map[string]*runtimeContextEntry{},
 		admissionGeneration:        strings.TrimSpace(state.GenerationID),
 		installedTriggerSubjects:   installed,
 		suppressedStandingServices: map[string]struct{}{},
+	}, nil
+}
+
+func newRuntimeContextManager(availability RunBundleAvailabilityReader, state ProcessAdmissionState, contexts ...BundleContext) (*RuntimeContextManager, error) {
+	manager, err := newRuntimeContextManagerState(availability, state)
+	if err != nil {
+		return nil, err
 	}
 	for _, contextDef := range contexts {
 		if err := manager.Register(contextDef); err != nil {
-			return nil, err
+			return nil, errors.Join(err, manager.quiesceConstructionFailure())
 		}
 	}
 	if err := manager.refreshCapabilitySubjectsLocked(); err != nil {
-		return nil, err
+		return nil, errors.Join(err, manager.quiesceConstructionFailure())
 	}
 	return manager, nil
+}
+
+func (m *RuntimeContextManager) quiesceConstructionFailure() error {
+	if m == nil {
+		return nil
+	}
+	var cleanupErr error
+	for _, result := range m.DeactivateAll(RuntimeContextCauseUnavailable) {
+		if result.ShutdownErr != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("shutdown partially registered runtime context %s: %w", result.BundleHash, result.ShutdownErr))
+		}
+	}
+	return cleanupErr
 }
 
 // ValidateRuntimeContextSet applies the manager's process-global collision
 // rules without publishing any context as loaded.
 func ValidateRuntimeContextSet(contexts ...BundleContext) error {
-	_, err := NewRuntimeContextManager(nil, contexts...)
-	return err
+	return ValidateRuntimeContextSetWithAdmission(ProcessAdmissionState{}, contexts...)
 }
 
 func ValidateRuntimeContextSetWithAdmission(state ProcessAdmissionState, contexts ...BundleContext) error {
-	_, err := NewRuntimeContextManagerWithAdmission(nil, state, contexts...)
-	return err
+	manager, err := newRuntimeContextManagerState(nil, state)
+	if err != nil {
+		return err
+	}
+	for _, contextDef := range contexts {
+		if err := manager.register(contextDef, false); err != nil {
+			return err
+		}
+	}
+	return manager.refreshCapabilitySubjectsLocked()
 }
 
 func (m *RuntimeContextManager) Register(contextDef BundleContext) error {
+	return m.register(contextDef, true)
+}
+
+func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccurrences bool) error {
 	if m == nil {
 		return fmt.Errorf("runtime context manager is required")
 	}
@@ -203,9 +287,23 @@ func (m *RuntimeContextManager) Register(contextDef BundleContext) error {
 		return fmt.Errorf("duplicate standing ingress alias %q across loaded BundleContexts: existing %s; incoming %s; rename one package flow ingress alias", alias, runtimeContextBundleLabel(existing), runtimeContextBundleLabel(incoming))
 	}
 	copied := contextDef
+	runtimeOwner := copied.Runtime
+	workOwner := copied.WorkOwner
+	copied.Runtime = nil
+	copied.WorkOwner = nil
+	var standing map[string]*worklifetime.StandingOccurrence
+	if activateOccurrences {
+		standing, err = m.newStandingOccurrencesLocked(workOwner, copied.StandingTargets)
+		if err != nil {
+			return err
+		}
+	}
 	m.contexts[contextDef.BundleHash] = &runtimeContextEntry{
-		context: &copied,
-		state:   RuntimeContextStateLoaded,
+		context:   &copied,
+		runtime:   runtimeOwner,
+		workOwner: workOwner,
+		standing:  standing,
+		state:     RuntimeContextStateLoaded,
 	}
 	m.order = append(m.order, contextDef.BundleHash)
 	sort.Strings(m.order)
@@ -217,9 +315,47 @@ func (m *RuntimeContextManager) Register(contextDef BundleContext) error {
 				break
 			}
 		}
-		return err
+		var retireErr error
+		for serviceID, occurrence := range standing {
+			if occurrence != nil {
+				if occurrenceErr := occurrence.RetireAndWait(context.Background()); occurrenceErr != nil {
+					retireErr = errors.Join(retireErr, fmt.Errorf("retire standing occurrence %s after registration failure: %w", serviceID, occurrenceErr))
+				}
+			}
+		}
+		return errors.Join(err, retireErr)
 	}
 	return nil
+}
+
+func (m *RuntimeContextManager) newStandingOccurrencesLocked(workOwner *worklifetime.RuntimeOccurrence, targets []StandingTarget) (map[string]*worklifetime.StandingOccurrence, error) {
+	out := map[string]*worklifetime.StandingOccurrence{}
+	if workOwner == nil {
+		return nil, errors.New("runtime occurrence is required")
+	}
+	for _, raw := range targets {
+		target := raw.normalized()
+		if m.standingServiceSuppressedLocked(target.ServiceID) {
+			continue
+		}
+		if _, exists := out[target.ServiceID]; exists {
+			continue
+		}
+		if target.Generation <= 0 {
+			return nil, fmt.Errorf("standing service %s has invalid durable generation %d", target.ServiceID, target.Generation)
+		}
+		occurrence, err := workOwner.NewStanding(context.Background(), worklifetime.StandingIdentity{
+			ServiceID: target.ServiceID, RunID: target.RunID, Generation: uint64(target.Generation),
+		})
+		if err != nil {
+			for _, created := range out {
+				_ = created.RetireAndWait(context.Background())
+			}
+			return nil, fmt.Errorf("create standing process occurrence: %w", err)
+		}
+		out[target.ServiceID] = occurrence
+	}
+	return out, nil
 }
 
 func validateRuntimeContextDefinition(contextDef BundleContext) (BundleContext, error) {
@@ -239,6 +375,15 @@ func validateRuntimeContextDefinition(contextDef BundleContext) (BundleContext, 
 	if contextDef.Runtime.Bus == nil {
 		return BundleContext{}, fmt.Errorf("runtime context %s event bus is required", contextDef.BundleHash)
 	}
+	if contextDef.WorkOwner == nil {
+		return BundleContext{}, fmt.Errorf("runtime context %s work owner is required", contextDef.BundleHash)
+	}
+	if ownerHash := strings.TrimSpace(contextDef.WorkOwner.Identity().BundleHash); ownerHash != contextDef.BundleHash {
+		return BundleContext{}, fmt.Errorf("runtime context %s work owner belongs to bundle %s", contextDef.BundleHash, ownerHash)
+	}
+	if runtimeOwner := contextDef.Runtime.WorkOccurrence(); runtimeOwner != nil && runtimeOwner != contextDef.WorkOwner {
+		return BundleContext{}, fmt.Errorf("runtime context %s work owner does not belong to runtime", contextDef.BundleHash)
+	}
 	if err := validateRuntimeContextStandingTargets(contextDef); err != nil {
 		return BundleContext{}, err
 	}
@@ -256,7 +401,7 @@ func validateRuntimeContextStandingTargets(contextDef BundleContext) error {
 		if target.BundleHash != contextDef.BundleHash {
 			return fmt.Errorf("runtime context %s standing target %q/%q bundle_hash %q does not match context", contextDef.BundleHash, target.Alias, target.Provider, target.BundleHash)
 		}
-		if target.Alias == "" || target.Provider == "" || target.RunID == "" || target.FlowID == "" || target.FlowInstance == "" || target.EntityID == "" || !target.AdmissionPlan.Valid() {
+		if target.Alias == "" || target.Provider == "" || target.RunID == "" || target.Generation <= 0 || target.FlowID == "" || target.FlowInstance == "" || target.EntityID == "" || !target.AdmissionPlan.Valid() {
 			return fmt.Errorf("runtime context %s standing target requires alias, provider, run_id, flow_id, flow_instance, entity_id, and compiled admission plan", contextDef.BundleHash)
 		}
 		if target.AdmissionPlan.RequiresSecret() != (target.SigningSecret != "") {
@@ -474,6 +619,95 @@ func (m *RuntimeContextManager) LoadedContexts() []BundleContext {
 	return out
 }
 
+func (m *RuntimeContextManager) acquireEntryLocked(ctx context.Context, entry *runtimeContextEntry) (*RuntimeContextUse, error) {
+	if !runtimeContextEntryLoaded(entry) || entry.runtime == nil || entry.workOwner == nil {
+		return nil, fmt.Errorf("runtime context is unavailable")
+	}
+	owner := entry.workOwner
+	ctx = worklifetime.WithOccurrence(ctx, owner)
+	lease, err := owner.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("admit runtime context use: %w", err)
+	}
+	return &RuntimeContextUse{Context: *entry.context, runtime: entry.runtime, lease: lease}, nil
+}
+
+func (m *RuntimeContextManager) AcquireBundleHash(ctx context.Context, bundleHash string) (*RuntimeContextUse, RuntimeContextLookup, error) {
+	if m == nil {
+		return nil, RuntimeContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}, nil
+	}
+	bundleHash = strings.TrimSpace(bundleHash)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entry := m.contexts[bundleHash]
+	lookup := runtimeContextLookupForEntry(entry)
+	if !lookup.Loaded() {
+		return nil, lookup, nil
+	}
+	use, err := m.acquireEntryLocked(ctx, entry)
+	return use, lookup, err
+}
+
+// AcquireStandingService selects the one loaded runtime that declares the
+// service without acquiring its potentially fenced standing occurrence.
+// Lifecycle operations use this to create or retire that child occurrence.
+func (m *RuntimeContextManager) AcquireStandingService(ctx context.Context, serviceID string) (*RuntimeContextUse, StandingTarget, error) {
+	if m == nil {
+		return nil, StandingTarget{}, errors.New("runtime context manager is required")
+	}
+	serviceID = strings.TrimSpace(serviceID)
+	if serviceID == "" {
+		return nil, StandingTarget{}, errors.New("standing service_id is required")
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var selected *runtimeContextEntry
+	var selectedTarget StandingTarget
+	for _, bundleHash := range m.order {
+		entry := m.contexts[bundleHash]
+		if entry == nil || entry.context == nil {
+			continue
+		}
+		for _, target := range entry.context.StandingTargets {
+			target = target.normalized()
+			if target.ServiceID != serviceID {
+				continue
+			}
+			if selected != nil && selected != entry {
+				return nil, StandingTarget{}, fmt.Errorf("standing service %s has more than one runtime owner", serviceID)
+			}
+			selected, selectedTarget = entry, target
+		}
+	}
+	if selected == nil {
+		return nil, StandingTarget{}, &runtimepipeline.StandingServiceError{ServiceID: serviceID, Err: runtimepipeline.ErrStandingServiceNotFound}
+	}
+	if !runtimeContextEntryLoaded(selected) {
+		return nil, selectedTarget, fmt.Errorf("standing service %s runtime context is unavailable", serviceID)
+	}
+	use, err := m.acquireEntryLocked(ctx, selected)
+	return use, selectedTarget, err
+}
+
+func runtimeContextLookupForEntry(entry *runtimeContextEntry) RuntimeContextLookup {
+	if entry == nil {
+		return RuntimeContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}
+	}
+	state := entry.state
+	if state == "" {
+		state = RuntimeContextStateLoaded
+	}
+	cause := strings.TrimSpace(entry.cause)
+	if cause == "" && state != RuntimeContextStateLoaded {
+		cause = RuntimeContextCauseUnavailable
+	}
+	lookup := RuntimeContextLookup{State: state, Cause: cause, Found: true}
+	if state == RuntimeContextStateLoaded {
+		lookup.Context = entry.context
+	}
+	return lookup
+}
+
 func (m *RuntimeContextManager) Primary() (*BundleContext, bool) {
 	if m == nil {
 		return nil, false
@@ -512,23 +746,7 @@ func (m *RuntimeContextManager) LookupBundleHashStatus(bundleHash string) Runtim
 	if entry == nil {
 		return RuntimeContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}
 	}
-	state := entry.state
-	if state == "" {
-		state = RuntimeContextStateLoaded
-	}
-	cause := strings.TrimSpace(entry.cause)
-	if cause == "" && state != RuntimeContextStateLoaded {
-		cause = RuntimeContextCauseUnavailable
-	}
-	lookup := RuntimeContextLookup{
-		State: state,
-		Cause: cause,
-		Found: true,
-	}
-	if state == RuntimeContextStateLoaded {
-		lookup.Context = entry.context
-	}
-	return lookup
+	return runtimeContextLookupForEntry(entry)
 }
 
 func (m *RuntimeContextManager) LookupIngress(alias, provider string) RuntimeIngressContextLookup {
@@ -601,6 +819,21 @@ func (m *RuntimeContextManager) SuppressStandingServiceTargets(serviceID string)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var fenced []*worklifetime.StandingOccurrence
+	for _, entry := range m.contexts {
+		if entry == nil || entry.standing == nil {
+			continue
+		}
+		if occurrence := entry.standing[serviceID]; occurrence != nil {
+			if err := occurrence.Fence(); err != nil {
+				for _, prior := range fenced {
+					_ = prior.Reopen()
+				}
+				return fmt.Errorf("fence standing service %s occurrence: %w", serviceID, err)
+			}
+			fenced = append(fenced, occurrence)
+		}
+	}
 	if m.suppressedStandingServices == nil {
 		m.suppressedStandingServices = map[string]struct{}{}
 	}
@@ -609,6 +842,9 @@ func (m *RuntimeContextManager) SuppressStandingServiceTargets(serviceID string)
 	if err := m.refreshCapabilitySubjectsLocked(); err != nil {
 		if !alreadySuppressed {
 			delete(m.suppressedStandingServices, serviceID)
+		}
+		for _, occurrence := range fenced {
+			_ = occurrence.Reopen()
 		}
 		return err
 	}
@@ -634,6 +870,61 @@ func (m *RuntimeContextManager) RestoreStandingServiceTargets(serviceID string) 
 	if err := m.refreshCapabilitySubjectsLocked(); err != nil {
 		m.suppressedStandingServices[serviceID] = struct{}{}
 		return err
+	}
+	for _, entry := range m.contexts {
+		if entry != nil && entry.standing != nil && entry.standing[serviceID] != nil {
+			if err := entry.standing[serviceID].Reopen(); err != nil {
+				m.suppressedStandingServices[serviceID] = struct{}{}
+				_ = m.refreshCapabilitySubjectsLocked()
+				return fmt.Errorf("reopen standing service %s occurrence: %w", serviceID, err)
+			}
+		}
+	}
+	return nil
+}
+
+func (m *RuntimeContextManager) WaitStandingServiceOccurrence(ctx context.Context, serviceID string) error {
+	if m == nil {
+		return nil
+	}
+	serviceID = strings.TrimSpace(serviceID)
+	m.mu.RLock()
+	var occurrences []*worklifetime.StandingOccurrence
+	for _, entry := range m.contexts {
+		if entry != nil && entry.standing != nil && entry.standing[serviceID] != nil {
+			occurrences = append(occurrences, entry.standing[serviceID])
+		}
+	}
+	m.mu.RUnlock()
+	if len(occurrences) == 0 {
+		return fmt.Errorf("standing service %s has no process occurrence", serviceID)
+	}
+	for _, occurrence := range occurrences {
+		if err := occurrence.Wait(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *RuntimeContextManager) RetireStandingServiceOccurrence(ctx context.Context, serviceID string) error {
+	if m == nil {
+		return nil
+	}
+	serviceID = strings.TrimSpace(serviceID)
+	m.mu.Lock()
+	var occurrences []*worklifetime.StandingOccurrence
+	for _, entry := range m.contexts {
+		if entry != nil && entry.standing != nil && entry.standing[serviceID] != nil {
+			occurrences = append(occurrences, entry.standing[serviceID])
+			delete(entry.standing, serviceID)
+		}
+	}
+	m.mu.Unlock()
+	for _, occurrence := range occurrences {
+		if err := occurrence.RetireAndWait(ctx); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -696,6 +987,30 @@ func (m *RuntimeContextManager) PublishStandingServiceTargets(serviceID string, 
 	if replaced == 0 && len(targets) > 0 {
 		return fmt.Errorf("standing service %s has no loaded target owner", serviceID)
 	}
+	var newOccurrence *worklifetime.StandingOccurrence
+	var occurrenceEntry *runtimeContextEntry
+	for bundleHash, contextDef := range planned {
+		entry := m.contexts[bundleHash]
+		if entry == nil || entry.workOwner == nil || len(contextDef.StandingTargets) == 0 {
+			continue
+		}
+		if entry.standing != nil && entry.standing[serviceID] != nil {
+			return fmt.Errorf("standing service %s still owns an unretired process occurrence", serviceID)
+		}
+		for _, target := range contextDef.StandingTargets {
+			if target.ServiceID != serviceID {
+				continue
+			}
+			created, err := entry.workOwner.NewStanding(context.Background(), worklifetime.StandingIdentity{
+				ServiceID: serviceID, RunID: target.RunID, Generation: uint64(target.Generation),
+			})
+			if err != nil {
+				return fmt.Errorf("publish fresh standing process occurrence: %w", err)
+			}
+			newOccurrence, occurrenceEntry = created, entry
+			break
+		}
+	}
 	oldContexts := map[string]*BundleContext{}
 	for bundleHash, contextDef := range planned {
 		oldContexts[bundleHash] = m.contexts[bundleHash].context
@@ -710,7 +1025,16 @@ func (m *RuntimeContextManager) PublishStandingServiceTargets(serviceID string, 
 		if wasSuppressed {
 			m.suppressedStandingServices[serviceID] = struct{}{}
 		}
+		if newOccurrence != nil {
+			_ = newOccurrence.RetireAndWait(context.Background())
+		}
 		return err
+	}
+	if newOccurrence != nil {
+		if occurrenceEntry.standing == nil {
+			occurrenceEntry.standing = map[string]*worklifetime.StandingOccurrence{}
+		}
+		occurrenceEntry.standing[serviceID] = newOccurrence
 	}
 	return nil
 }
@@ -736,7 +1060,7 @@ func (m *RuntimeContextManager) ValidateReplacement(existingHash string, context
 // after validating the candidate. The caller must publish either a started
 // candidate or a freshly restored predecessor before the context is loaded
 // again.
-func (m *RuntimeContextManager) BeginBundleHashReplacement(existingHash string, contextDef BundleContext) (BundleContext, error) {
+func (m *RuntimeContextManager) BeginBundleHashReplacement(ctx context.Context, existingHash string, contextDef BundleContext) (BundleContext, error) {
 	if m == nil {
 		return BundleContext{}, fmt.Errorf("runtime context manager is required")
 	}
@@ -746,17 +1070,57 @@ func (m *RuntimeContextManager) BeginBundleHashReplacement(existingHash string, 
 	}
 	existingHash = strings.TrimSpace(existingHash)
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if err := m.validateReplacementLocked(existingHash, contextDef); err != nil {
+		m.mu.Unlock()
 		return BundleContext{}, err
 	}
 	entry := m.contexts[existingHash]
 	predecessor := *entry.context
-	if predecessor.Runtime != nil {
-		predecessor.Runtime.CloseAdmission()
+	var standing []*worklifetime.StandingOccurrence
+	for _, occurrence := range entry.standing {
+		if err := occurrence.Fence(); err != nil {
+			for _, prior := range standing {
+				_ = prior.Reopen()
+			}
+			m.mu.Unlock()
+			return BundleContext{}, fmt.Errorf("fence predecessor standing occurrence: %w", err)
+		}
+		standing = append(standing, occurrence)
+	}
+	if entry.workOwner != nil {
+		if err := entry.workOwner.Fence(); err != nil {
+			for _, prior := range standing {
+				_ = prior.Reopen()
+			}
+			m.mu.Unlock()
+			return BundleContext{}, fmt.Errorf("fence predecessor runtime occurrence: %w", err)
+		}
 	}
 	entry.state = RuntimeContextStateUnloaded
 	entry.cause = RuntimeContextCauseReplacing
+	m.mu.Unlock()
+	for _, occurrence := range standing {
+		if err := occurrence.Wait(ctx); err != nil {
+			for _, prior := range standing {
+				_ = prior.Reopen()
+			}
+			if entry.workOwner != nil {
+				_ = entry.workOwner.Reopen()
+			}
+			m.mu.Lock()
+			entry.state, entry.cause = RuntimeContextStateLoaded, ""
+			m.mu.Unlock()
+			return BundleContext{}, fmt.Errorf("drain predecessor standing occurrence: %w", err)
+		}
+	}
+	for _, occurrence := range standing {
+		if err := occurrence.RetireAndWait(ctx); err != nil {
+			return BundleContext{}, fmt.Errorf("retire predecessor standing occurrence: %w", err)
+		}
+	}
+	m.mu.Lock()
+	entry.standing = nil
+	m.mu.Unlock()
 	return predecessor, nil
 }
 
@@ -843,7 +1207,18 @@ func (m *RuntimeContextManager) publishBundleHashReplacementLocked(existingHash 
 		sort.Strings(m.order)
 	}
 	copied := contextDef
+	runtimeOwner := copied.Runtime
+	workOwner := copied.WorkOwner
+	copied.Runtime = nil
+	copied.WorkOwner = nil
+	standing, err := m.newStandingOccurrencesLocked(workOwner, copied.StandingTargets)
+	if err != nil {
+		return err
+	}
 	entry.context = &copied
+	entry.runtime = runtimeOwner
+	entry.workOwner = workOwner
+	entry.standing = standing
 	entry.state = RuntimeContextStateLoaded
 	entry.cause = ""
 	return nil
@@ -1060,44 +1435,10 @@ func validateContextSetCollisions(contexts []BundleContext) error {
 }
 
 func (m *RuntimeContextManager) ReplaceBundleHash(existingHash string, contextDef BundleContext) error {
-	if m == nil {
-		return fmt.Errorf("runtime context manager is required")
-	}
-	contextDef, err := validateRuntimeContextDefinition(contextDef)
-	if err != nil {
+	if _, err := m.BeginBundleHashReplacement(context.Background(), existingHash, contextDef); err != nil {
 		return err
 	}
-	existingHash = strings.TrimSpace(existingHash)
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if err := m.validateReplacementLocked(existingHash, contextDef); err != nil {
-		return err
-	}
-	entry := m.contexts[existingHash]
-	if m.admissionGeneration != "" && (len(entry.context.StandingTargets) > 0 || len(contextDef.StandingTargets) > 0) {
-		return fmt.Errorf("runtime context %s carries compiled admission targets; replace through the process admission replacement transaction", existingHash)
-	}
-	if entry.context != nil && entry.context.Runtime != nil {
-		entry.context.Runtime.CloseAdmission()
-	}
-	if existingHash != contextDef.BundleHash {
-		delete(m.contexts, existingHash)
-		for i, bundleHash := range m.order {
-			if bundleHash == existingHash {
-				m.order = append(m.order[:i], m.order[i+1:]...)
-				break
-			}
-		}
-		entry = &runtimeContextEntry{}
-		m.contexts[contextDef.BundleHash] = entry
-		m.order = append(m.order, contextDef.BundleHash)
-		sort.Strings(m.order)
-	}
-	copied := contextDef
-	entry.context = &copied
-	entry.state = RuntimeContextStateLoaded
-	entry.cause = ""
-	return nil
+	return m.PublishBundleHashReplacement(existingHash, contextDef)
 }
 
 func (m *RuntimeContextManager) validateReplacementLocked(existingHash string, contextDef BundleContext) error {
@@ -1189,6 +1530,87 @@ func (m *RuntimeContextManager) LookupRunStatus(ctx context.Context, runID strin
 	return m.LookupBundleHashStatus(availability.BundleHash), availability, nil
 }
 
+func (m *RuntimeContextManager) AcquireRun(ctx context.Context, runID string) (*RuntimeContextUse, RuntimeContextLookup, runbundle.Availability, error) {
+	if m == nil {
+		lookup := RuntimeContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}
+		return nil, lookup, runbundle.Availability{}, nil
+	}
+	if m.availability == nil {
+		return nil, RuntimeContextLookup{}, runbundle.Availability{}, fmt.Errorf("run bundle availability reader is required")
+	}
+	availability, err := m.availability.LoadRunBundleAvailability(ctx, strings.TrimSpace(runID))
+	if err != nil {
+		return nil, RuntimeContextLookup{}, runbundle.Availability{}, err
+	}
+	if strings.TrimSpace(availability.BundleHash) == "" {
+		lookup := RuntimeContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}
+		return nil, lookup, availability, nil
+	}
+	use, lookup, err := m.AcquireBundleHash(ctx, availability.BundleHash)
+	return use, lookup, availability, err
+}
+
+func (m *RuntimeContextManager) AcquireIngress(ctx context.Context, alias, provider string) (*RuntimeContextUse, RuntimeIngressContextLookup, error) {
+	if m == nil {
+		return nil, RuntimeIngressContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}, nil
+	}
+	alias = strings.Trim(strings.TrimSpace(alias), "/")
+	provider = strings.TrimSpace(provider)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	aliasFound := false
+	for _, bundleHash := range m.order {
+		entry := m.contexts[bundleHash]
+		if entry == nil || entry.context == nil {
+			continue
+		}
+		for _, raw := range entry.context.StandingTargets {
+			target := raw.normalized()
+			if target.Alias != alias {
+				continue
+			}
+			aliasFound = true
+			if target.Provider != provider {
+				continue
+			}
+			lookup := RuntimeIngressContextLookup{Target: target, Found: true, AliasFound: true, State: entry.state, Cause: entry.cause}
+			if lookup.State == "" {
+				lookup.State = RuntimeContextStateLoaded
+			}
+			if m.standingServiceSuppressedLocked(target.ServiceID) {
+				lookup.State = RuntimeContextStateUnloaded
+				lookup.Cause = RuntimeContextCauseStandingSuppressed
+				return nil, lookup, nil
+			}
+			if lookup.State != RuntimeContextStateLoaded {
+				if strings.TrimSpace(lookup.Cause) == "" {
+					lookup.Cause = RuntimeContextCauseUnavailable
+				}
+				return nil, lookup, nil
+			}
+			lookup.Context = entry.context
+			use, err := m.acquireEntryLocked(ctx, entry)
+			if err != nil {
+				return nil, lookup, err
+			}
+			standing := entry.standing[target.ServiceID]
+			if standing == nil {
+				_ = use.Done()
+				return nil, lookup, fmt.Errorf("standing service %s has no process occurrence", target.ServiceID)
+			}
+			standingLease, err := standing.Begin(use.WorkContext())
+			if err != nil {
+				_ = use.Done()
+				return nil, lookup, fmt.Errorf("admit standing process occurrence: %w", err)
+			}
+			use.leases = []*worklifetime.Lease{use.lease, standingLease}
+			use.lease = nil
+			return use, lookup, nil
+		}
+	}
+	return nil, RuntimeIngressContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded, AliasFound: aliasFound}, nil
+}
+
 func (m *RuntimeContextManager) DeactivateBundleHash(bundleHash, cause string) RuntimeContextDeactivationResult {
 	return m.DeactivateBundleHashWithOptions(bundleHash, cause, DefaultShutdownOptions())
 }
@@ -1205,6 +1627,7 @@ func (m *RuntimeContextManager) DeactivateBundleHashWithOptions(bundleHash, caus
 	var (
 		entry             *runtimeContextEntry
 		runtimeToShutdown *Runtime
+		standingToRetire  []*worklifetime.StandingOccurrence
 	)
 	m.mu.Lock()
 	entry = m.contexts[result.BundleHash]
@@ -1227,16 +1650,26 @@ func (m *RuntimeContextManager) DeactivateBundleHashWithOptions(bundleHash, caus
 		entry.cause = result.Cause
 		result.Changed = true
 		if entry.context != nil {
-			runtimeToShutdown = entry.context.Runtime
+			runtimeToShutdown = entry.runtime
+			for _, occurrence := range entry.standing {
+				occurrence.Retire()
+				standingToRetire = append(standingToRetire, occurrence)
+			}
+			entry.standing = nil
 			if runtimeToShutdown != nil {
 				runtimeToShutdown.CloseAdmission()
 			}
 		}
 	}
 	if runtimeToShutdown == nil && entry.context != nil {
-		runtimeToShutdown = entry.context.Runtime
+		runtimeToShutdown = entry.runtime
 	}
 	m.mu.Unlock()
+	for _, occurrence := range standingToRetire {
+		if err := occurrence.RetireAndWait(context.Background()); err != nil {
+			result.ShutdownErr = errors.Join(result.ShutdownErr, fmt.Errorf("retire standing process occurrence: %w", err))
+		}
+	}
 	if runtimeToShutdown == nil {
 		return result
 	}
@@ -1245,7 +1678,7 @@ func (m *RuntimeContextManager) DeactivateBundleHashWithOptions(bundleHash, caus
 	if entry.shutdownComplete {
 		return result
 	}
-	result.ShutdownErr = runtimeToShutdown.ShutdownWithOptions(opts)
+	result.ShutdownErr = errors.Join(result.ShutdownErr, runtimeToShutdown.ShutdownWithOptions(opts))
 	if result.ShutdownErr == nil {
 		entry.shutdownComplete = true
 	}

@@ -14,7 +14,7 @@ import (
 
 func TestEventBusRejectsMalformedFailureBeforeRuntimeLog(t *testing.T) {
 	logger := NewRuntimeLogger(nil)
-	eventBus, err := newRuntimeEventBus(nil, logger, nil, "", runtimecorrelation.BundleSourceFact{}, "", nil, nil, nil, nil, nil)
+	eventBus, err := newRuntimeEventBus(nil, logger, nil, "", runtimecorrelation.BundleSourceFact{}, "", nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newRuntimeEventBus: %v", err)
 	}

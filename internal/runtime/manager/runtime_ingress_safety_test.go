@@ -12,13 +12,13 @@ import (
 )
 
 func TestAuthBreakerConsumesRuntimeIngressSafetyPauseOwner(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	pauseCalls := 0
 	var pauseReason string
-	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
 		RuntimeIngressSafetyPause: func(_ context.Context, reason string, _ *runtimefailures.Envelope) error {
 			pauseCalls++
 			pauseReason = reason

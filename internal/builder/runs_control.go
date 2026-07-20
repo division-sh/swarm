@@ -20,12 +20,12 @@ import (
 var runCompletionTimeout = 30 * time.Second
 var runCompletionObservationInterval = 50 * time.Millisecond
 
-func newRunHub(runtimeProvider func() *runtimepkg.Runtime, pauseRuntime func() error, resumeRuntime func() error, runDebug RunDebugReader) *runHub {
-	if runtimeProvider == nil {
+func newRunHub(runtimeAcquirer RuntimeAcquirer, pauseRuntime func() error, resumeRuntime func() error, runDebug RunDebugReader) *runHub {
+	if runtimeAcquirer == nil {
 		return nil
 	}
 	return &runHub{
-		runtimeProvider: runtimeProvider,
+		runtimeAcquirer: runtimeAcquirer,
 		pauseRuntime:    pauseRuntime,
 		resumeRuntime:   resumeRuntime,
 		runDebug:        runDebug,
@@ -37,7 +37,17 @@ func (h *runHub) startRun(ctx context.Context, runID string, inputs map[string]a
 	if h == nil {
 		return fmt.Errorf("runtime bus is not configured")
 	}
-	rt := h.currentRuntime()
+	use, err := h.runtimeAcquirer.AcquireCurrentRuntime(context.WithoutCancel(ctx))
+	if err != nil {
+		return err
+	}
+	releaseUse := true
+	defer func() {
+		if releaseUse {
+			_ = use.Done()
+		}
+	}()
+	rt := use.Runtime()
 	if rt == nil || rt.Bus == nil {
 		return fmt.Errorf("runtime bus is not configured")
 	}
@@ -99,7 +109,7 @@ func (h *runHub) startRun(ctx context.Context, runID string, inputs map[string]a
 			h.deleteRun(runID)
 			return err
 		}
-		if err := rt.Bus.Publish(ctx, evt); err != nil {
+		if err := rt.Bus.Publish(use.WorkContext(), evt); err != nil {
 			failure := runtimefailures.Normalize(err, "builder.run_hub", "publish_run_input")
 			h.emitControl(runID, map[string]any{
 				"id":        uuid.NewString(),
@@ -111,8 +121,12 @@ func (h *runHub) startRun(ctx context.Context, runID string, inputs map[string]a
 			return err
 		}
 	}
-	h.syncCanonical(context.Background(), runID)
-	go h.awaitCompletion(runID)
+	h.syncCanonical(use.WorkContext(), runID)
+	releaseUse = false
+	go func() {
+		defer func() { _ = use.Done() }()
+		h.awaitCompletion(use.WorkContext(), runID, rt)
+	}()
 	return nil
 }
 
@@ -124,10 +138,11 @@ func (h *runHub) stopRun(ctx context.Context, runID string) error {
 	if runID == "" {
 		return fmt.Errorf("run_id is required")
 	}
-	ctrl, err := h.runControl(runID)
+	ctrl, use, err := h.runControl(ctx, runID)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = use.Done() }()
 	if _, err := ctrl.Stop(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "builder_rpc", ControlledBy: "builder.rpc"}); err != nil {
 		return err
 	}
@@ -149,10 +164,11 @@ func (h *runHub) pauseRun(ctx context.Context, runID string) error {
 	if runID == "" {
 		return fmt.Errorf("run_id is required")
 	}
-	ctrl, err := h.runControl(runID)
+	ctrl, use, err := h.runControl(ctx, runID)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = use.Done() }()
 	if _, err := ctrl.Pause(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "builder_rpc", ControlledBy: "builder.rpc"}); err != nil {
 		return err
 	}
@@ -174,10 +190,11 @@ func (h *runHub) continueRun(ctx context.Context, runID string) error {
 	if runID == "" {
 		return fmt.Errorf("run_id is required")
 	}
-	ctrl, err := h.runControl(runID)
+	ctrl, use, err := h.runControl(ctx, runID)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = use.Done() }()
 	if _, err := ctrl.Continue(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "builder_rpc", ControlledBy: "builder.rpc"}); err != nil {
 		return err
 	}
@@ -354,25 +371,30 @@ func (h *runHub) emitControl(runID string, event RunEventEnvelope) {
 	}
 }
 
-func (h *runHub) awaitCompletion(runID string) {
+func (h *runHub) awaitCompletion(ctx context.Context, runID string, rt *runtimepkg.Runtime) {
 	for {
 		session := h.session(runID)
-		if session == nil || session.runtime == nil || session.runtime.Bus == nil {
+		if session == nil || rt == nil || rt.Bus == nil {
+			return
+		}
+		if ctx.Err() != nil {
 			return
 		}
 		if h.isTerminal(runID) {
 			return
 		}
 		if h.isPaused(runID) {
-			time.Sleep(50 * time.Millisecond)
+			if !waitBuilderObservation(ctx, 50*time.Millisecond) {
+				return
+			}
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), runCompletionTimeout)
-		waitForQuiescence := session.runtime.WaitForQuiescence
+		waitCtx, cancel := context.WithTimeout(ctx, runCompletionTimeout)
+		waitForQuiescence := rt.WaitForQuiescence
 		if session.waitForQuiescence != nil {
 			waitForQuiescence = session.waitForQuiescence
 		}
-		err := waitForQuiescence(ctx)
+		err := waitForQuiescence(waitCtx)
 		cancel()
 		if err != nil {
 			if h.isTerminal(runID) {
@@ -385,7 +407,7 @@ func (h *runHub) awaitCompletion(runID string) {
 				continue
 			}
 			failure := runtimefailures.Normalize(err, "builder.run_hub", "wait_for_quiescence")
-			if _, persistErr := h.persistTerminalState(runID, "failed", &failure, time.Now().UTC()); persistErr != nil {
+			if _, persistErr := h.persistTerminalState(ctx, rt, runID, "failed", &failure, time.Now().UTC()); persistErr != nil {
 				h.markTerminal(runID)
 				persistenceFailure := runTerminalPersistenceFailure("failed")
 				h.emitControl(runID, map[string]any{
@@ -400,10 +422,10 @@ func (h *runHub) awaitCompletion(runID string) {
 				return
 			}
 			h.markTerminal(runID)
-			h.syncCanonical(context.Background(), runID)
+			h.syncCanonical(ctx, runID)
 			return
 		}
-		snapshot, err := h.loadCanonicalRunLifecycle(runID)
+		snapshot, err := h.loadCanonicalRunLifecycle(ctx, rt, runID)
 		if err != nil {
 			h.markTerminal(runID)
 			observationFailure := runCompletionObservationFailure()
@@ -421,11 +443,13 @@ func (h *runHub) awaitCompletion(runID string) {
 		switch strings.TrimSpace(strings.ToLower(snapshot.Status)) {
 		case "completed", "failed", "cancelled", "forked":
 			h.markTerminal(runID)
-			h.syncCanonical(context.Background(), runID)
+			h.syncCanonical(ctx, runID)
 			return
 		case "running", "paused":
-			h.syncCanonical(context.Background(), runID)
-			time.Sleep(runCompletionObservationInterval)
+			h.syncCanonical(ctx, runID)
+			if !waitBuilderObservation(ctx, runCompletionObservationInterval) {
+				return
+			}
 			continue
 		default:
 			h.markTerminal(runID)
@@ -441,6 +465,17 @@ func (h *runHub) awaitCompletion(runID string) {
 			})
 			return
 		}
+	}
+}
+
+func waitBuilderObservation(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 
@@ -483,41 +518,43 @@ func (h *runHub) isPaused(runID string) bool {
 	return session != nil && session.paused
 }
 
-func (h *runHub) runControl(runID string) (*runtimeruncontrol.Controller, error) {
+func (h *runHub) runControl(ctx context.Context, runID string) (*runtimeruncontrol.Controller, RuntimeUse, error) {
 	runID = strings.TrimSpace(runID)
-	if runID != "" {
-		if session := h.session(runID); session != nil && session.runtime != nil && session.runtime.RunControl != nil {
-			return session.runtime.RunControl, nil
-		}
+	if h == nil || h.runtimeAcquirer == nil {
+		return nil, nil, fmt.Errorf("runtime acquirer is not configured")
 	}
-	if rt := h.currentRuntime(); rt != nil && rt.RunControl != nil {
-		return rt.RunControl, nil
+	use, err := h.runtimeAcquirer.AcquireRunRuntime(ctx, runID)
+	if err != nil {
+		return nil, nil, err
 	}
-	return nil, fmt.Errorf("run control owner is not configured")
+	rt := use.Runtime()
+	if rt == nil || rt.RunControl == nil {
+		_ = use.Done()
+		return nil, nil, fmt.Errorf("run control owner is not configured")
+	}
+	return rt.RunControl, use, nil
 }
 
-func (h *runHub) persistTerminalState(runID, status string, failure *runtimefailures.Envelope, endedAt time.Time) (runtimebus.RunLifecycleSnapshot, error) {
-	session := h.session(runID)
-	if session == nil || session.runtime == nil || session.runtime.Bus == nil {
+func (h *runHub) persistTerminalState(ctx context.Context, rt *runtimepkg.Runtime, runID, status string, failure *runtimefailures.Envelope, endedAt time.Time) (runtimebus.RunLifecycleSnapshot, error) {
+	if rt == nil || rt.Bus == nil {
 		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run terminal persistence is not configured")
 	}
-	writer, ok := session.runtime.Bus.Store().(runtimebus.RunLifecyclePersistence)
+	writer, ok := rt.Bus.Store().(runtimebus.RunLifecyclePersistence)
 	if !ok || writer == nil {
 		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run terminal persistence is not supported")
 	}
-	return writer.MarkRunTerminal(context.Background(), runID, status, failure, endedAt)
+	return writer.MarkRunTerminal(ctx, runID, status, failure, endedAt)
 }
 
-func (h *runHub) loadCanonicalRunLifecycle(runID string) (runtimebus.RunLifecycleSnapshot, error) {
-	session := h.session(runID)
-	if session == nil || session.runtime == nil || session.runtime.Bus == nil {
+func (h *runHub) loadCanonicalRunLifecycle(ctx context.Context, rt *runtimepkg.Runtime, runID string) (runtimebus.RunLifecycleSnapshot, error) {
+	if rt == nil || rt.Bus == nil {
 		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run lifecycle observation is not configured")
 	}
-	reader, ok := session.runtime.Bus.Store().(runtimebus.RunLifecycleReadPersistence)
+	reader, ok := rt.Bus.Store().(runtimebus.RunLifecycleReadPersistence)
 	if !ok || reader == nil {
 		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run lifecycle observation is not supported")
 	}
-	return reader.LoadRunLifecycleSnapshot(context.Background(), runID)
+	return reader.LoadRunLifecycleSnapshot(ctx, runID)
 }
 
 func runTerminalPersistenceFailure(attemptedStatus string) runtimefailures.Envelope {
@@ -579,13 +616,6 @@ func (h *runHub) isTerminal(runID string) bool {
 	defer h.mu.RUnlock()
 	session := h.sessions[strings.TrimSpace(runID)]
 	return session != nil && session.terminal
-}
-
-func (h *runHub) currentRuntime() *runtimepkg.Runtime {
-	if h == nil || h.runtimeProvider == nil {
-		return nil
-	}
-	return h.runtimeProvider()
 }
 
 func (h *runHub) session(runID string) *runSession {

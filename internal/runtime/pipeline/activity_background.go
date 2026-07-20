@@ -31,7 +31,11 @@ func (n *activityBackgroundNode) Run(ctx context.Context) {
 	if n == nil || n.coordinator == nil || n.bus == nil {
 		return
 	}
-	ch := n.bus.SubscribeInternal(activityDispatcherSubscriberID, activityRequestEventType)
+	bus, ok := n.bus.(ownedInternalSubscriptionBus)
+	if !ok {
+		return
+	}
+	ch := bus.SubscribeInternal(activityDispatcherSubscriberID, activityRequestEventType)
 	n.mu.Lock()
 	hooks := append([]func(){}, n.readyHooks...)
 	n.mu.Unlock()
@@ -42,11 +46,12 @@ func (n *activityBackgroundNode) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case evt, ok := <-ch:
+		case delivery, ok := <-ch:
 			if !ok {
 				return
 			}
-			_, _ = n.coordinator.handleActivityRequestEvent(ctx, evt)
+			_, _ = n.coordinator.handleActivityRequestEvent(delivery.Context(), delivery.Event())
+			_ = delivery.Complete()
 		}
 	}
 }

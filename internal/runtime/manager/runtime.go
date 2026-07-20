@@ -18,7 +18,9 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -148,31 +150,26 @@ func (am *AgentManager) shutdownWithOptions(opts ShutdownOptions, continueReset 
 	defer cancelDrain()
 
 	if am.lifecycle.phaseSnapshot() == runtimeLifecycleShuttingDown {
-		return am.waitForRunShutdown(grace)
+		return nil
 	}
 	am.lifecycle.beginShutdownAdmission()
 
 	var shutdownErr error
-	if err := am.WaitForQuiescence(drainCtx); err != nil {
+	_, loopDone := am.lifecycle.cancelShutdownWork()
+	if drainCtx.Err() != nil {
 		shutdownErr = fmt.Errorf("agent manager shutdown drain timed out after %s", grace)
 	}
-
-	_, loopDone := am.lifecycle.cancelShutdownWork()
 	for _, done := range loopDone {
 		select {
 		case <-done:
 		case <-drainCtx.Done():
 			if shutdownErr == nil {
-				shutdownErr = fmt.Errorf("agent manager shutdown loop wait timed out after %s", grace)
+				shutdownErr = fmt.Errorf("agent manager shutdown drain timed out after %s", grace)
 			}
+			<-done
 		}
 	}
 
-	if err := am.waitForRunShutdown(grace); err != nil {
-		if shutdownErr == nil {
-			shutdownErr = err
-		}
-	}
 	if continueReset {
 		am.lifecycle.beginReset()
 	} else {
@@ -217,20 +214,6 @@ func (am *AgentManager) shutdownAdmissionClosedLocked() bool {
 		return am.runtimeShutdownAdmissionClosed()
 	}
 	return false
-}
-
-func (am *AgentManager) waitForRunShutdown(grace time.Duration) error {
-	done := make(chan struct{})
-	go func() {
-		am.runWG.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		return nil
-	case <-time.After(grace):
-		return fmt.Errorf("agent manager shutdown timed out after %s", grace)
-	}
 }
 
 func (am *AgentManager) GetAgentConfig(agentID string) (runtimeactors.AgentConfig, bool) {
@@ -583,9 +566,16 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 	directiveCtx := runtimecorrelation.WithRunID(lease.Context, strings.TrimSpace(directiveEvent.RunID()))
 	directiveCtx = runtimebus.WithInboundEvent(directiveCtx, directiveEvent)
 	heartbeatConfig := am.directiveHeartbeat.normalized()
-	heartbeatCtx, stopHeartbeat := context.WithCancel(context.Background())
+	heartbeatLease, err := am.beginWork(ctx, "directive heartbeat")
+	if err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
+	heartbeatCtx, stopHeartbeat := context.WithCancel(heartbeatLease.Context())
 	heartbeatDone := make(chan struct{})
-	go runDirectiveExecutionHeartbeat(heartbeatCtx, heartbeatDone, store, admitted.OperationID, ownerID, heartbeatConfig)
+	go func() {
+		defer func() { _ = heartbeatLease.Done() }()
+		runDirectiveExecutionHeartbeat(heartbeatCtx, heartbeatDone, store, admitted.OperationID, ownerID, heartbeatConfig)
+	}()
 	response, executionErr := chatAgent.BoardStep(directiveCtx, runtimeagentcontrol.BoardDirective{
 		Directive:       admitted.Directive,
 		Event:           directiveEvent,
@@ -736,6 +726,9 @@ func (am *AgentManager) Run(ctx context.Context) error {
 	if am.shutdownAdmissionClosedLocked() {
 		return errRuntimeShuttingDown
 	}
+	if am.workOwner == nil {
+		return errors.New("agent manager requires a runtime work occurrence")
+	}
 	runCtx, started := am.lifecycle.beginRun(ctx, AgentRunModeStandard)
 	if !started {
 		return fmt.Errorf("agent manager is already running")
@@ -748,14 +741,22 @@ func (am *AgentManager) Run(ctx context.Context) error {
 		_, _ = am.replaceExecution(runCtx, agentID, "start", "", nil)
 	}
 
-	am.runWG.Add(1)
+	retryLease, err := am.beginWork(runCtx, "manager retry loop")
+	if err != nil {
+		return err
+	}
 	go func() {
-		defer am.runWG.Done()
-		am.retryLoop(runCtx)
+		defer func() { _ = retryLease.Done() }()
+		am.retryLoop(retryLease.Context())
 	}()
 
+	watchLease, err := am.beginWork(runCtx, "manager shutdown watcher")
+	if err != nil {
+		return err
+	}
 	go func() {
-		<-runCtx.Done()
+		defer func() { _ = watchLease.Done() }()
+		<-watchLease.Context().Done()
 		initiated := am.lifecycle.beginShutdownAdmission()
 		if initiated {
 			_, done := am.lifecycle.cancelShutdownWork()
@@ -779,6 +780,9 @@ func (am *AgentManager) RunAuthoritativeDeliveryOnly(ctx context.Context) error 
 	if am.shutdownAdmissionClosedLocked() {
 		return errRuntimeShuttingDown
 	}
+	if am.workOwner == nil {
+		return errors.New("agent manager requires a runtime work occurrence")
+	}
 	runCtx, started := am.lifecycle.beginRun(ctx, AgentRunModeAuthoritativeDeliveryOnly)
 	if !started {
 		return fmt.Errorf("agent manager is already running")
@@ -791,8 +795,13 @@ func (am *AgentManager) RunAuthoritativeDeliveryOnly(ctx context.Context) error 
 		_, _ = am.replaceExecution(runCtx, agentID, "start", "", nil)
 	}
 
+	watchLease, err := am.beginWork(runCtx, "authoritative manager shutdown watcher")
+	if err != nil {
+		return err
+	}
 	go func() {
-		<-runCtx.Done()
+		defer func() { _ = watchLease.Done() }()
+		<-watchLease.Context().Done()
 		initiated := am.lifecycle.beginShutdownAdmission()
 		if initiated {
 			_, done := am.lifecycle.cancelShutdownWork()
@@ -1202,7 +1211,7 @@ func (am *AgentManager) replayAgentBacklogDetailed(ctx context.Context, agentID 
 		if am.isAuthBreakerTripped() {
 			return summary, nil
 		}
-		eventCtx := lease.Context
+		eventCtx := worklifetime.WithOccurrence(lease.Context, am.workOwner)
 		result := am.processEventDetailed(eventCtx, agent, evt)
 		summary.observe(result.record)
 		if startupManagerReplayDiagnosticsEnabled(ctx) {
@@ -1394,9 +1403,9 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 			entities[entityID] = struct{}{}
 		}
 	}
-	am.mu.Lock()
-	am.inFlight = make(map[string]struct{})
-	am.mu.Unlock()
+	am.activeEventMu.Lock()
+	am.activeEventKeys = make(map[string]struct{})
+	am.activeEventMu.Unlock()
 	am.poisonMu.Lock()
 	am.poisonPanicCounts = make(map[string]int)
 	am.poisonMu.Unlock()
@@ -1551,7 +1560,7 @@ func (am *AgentManager) replaceExecution(parent context.Context, agentID, trigge
 	runMode := cell.runMode
 	am.lifecycle.mu.Unlock()
 
-	var ch <-chan events.Event
+	var ch <-chan *worklifetime.EventDelivery
 	if loopCtx != nil {
 		if routeBus == nil {
 			return replaceExecutionResult{}, errors.New("event bus does not support generation-owned agent routes")
@@ -1573,20 +1582,27 @@ func (am *AgentManager) replaceExecution(parent context.Context, agentID, trigge
 	}
 
 	if loopCtx != nil {
-		am.launchExecutionLoop(parent, successor, loopCtx, done)
+		if err := am.launchExecutionLoop(parent, successor, loopCtx, done); err != nil {
+			return replaceExecutionResult{}, err
+		}
 	}
 	return replaceExecutionResult{config: candidate.Config, transitioned: true}, nil
 }
 
-func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *agentExecutionProjection, loopCtx context.Context, done chan struct{}) {
+func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *agentExecutionProjection, loopCtx context.Context, done chan struct{}) error {
 	agent := execution.agent
 	ch := execution.route
 	token := execution.token
 	_ = am.projectLifecycleDiagnostics(context.WithoutCancel(parent))
-	am.runWG.Add(1)
+	workLease, err := am.beginWork(loopCtx, "agent execution loop")
+	if err != nil {
+		return err
+	}
 	go func() {
-		defer am.runWG.Done()
 		defer func() {
+			if execution.loopSettled != nil {
+				defer close(execution.loopSettled)
+			}
 			if releaseErr := am.lifecycle.releaseLoop(token, done); releaseErr != nil && am.bus != nil {
 				failure := runtimefailures.FromError(releaseErr, "agent-manager", "release_agent_loop")
 				_ = am.bus.LogRuntime(context.Background(), runtimepipeline.RuntimeLogEntry{
@@ -1595,6 +1611,12 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 				})
 			}
 			_ = am.projectLifecycleDiagnostics(context.Background())
+			if settleErr := workLease.Done(); settleErr != nil {
+				diaglog.ProcessLog(diaglog.LevelError, "agent-manager", "agent execution loop work settlement failed",
+					"agent_id", agent.ID(),
+					"error", settleErr.Error(),
+				)
+			}
 		}()
 		consecutivePanics := 0
 		for {
@@ -1613,20 +1635,37 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 				}()
 				for {
 					select {
-					case <-loopCtx.Done():
+					case <-workLease.Context().Done():
 						return
-					case evt, ok := <-ch:
+					case delivery, ok := <-ch:
 						if !ok {
 							return
 						}
+						evt := delivery.Event()
 						stop := func() bool {
-							if completer, ok := am.bus.(agentRouteDeliveryCompleter); ok {
-								defer completer.CompleteAgentRouteDelivery(token)
-							}
+							defer func() { _ = delivery.Complete() }()
 							if am.shutdownAdmissionClosed() {
 								return true
 							}
-							evtCtx := runtimecorrelation.WithInboundEvent(loopCtx, evt)
+							// The carrier owns this item's queue-to-completion lifetime. The
+							// receiver generation still owns execution authority and must
+							// retain its lifecycle token and effect controller.
+							deliveryOwner, ok := worklifetime.OccurrenceFromContext(delivery.Context())
+							if !ok {
+								if am.bus != nil {
+									am.bus.LogRuntime(loopCtx, runtimepipeline.RuntimeLogEntry{
+										Level:     "error",
+										Component: "agent-manager",
+										Action:    "delivery_work_owner_missing",
+										EventID:   strings.TrimSpace(evt.ID()),
+										EventType: strings.TrimSpace(string(evt.Type())),
+										AgentID:   agent.ID(),
+									})
+								}
+								return true
+							}
+							evtCtx := worklifetime.WithOccurrence(loopCtx, deliveryOwner)
+							evtCtx = runtimecorrelation.WithInboundEvent(evtCtx, evt)
 							evtCtx = runtimecorrelation.WithRunID(evtCtx, strings.TrimSpace(evt.RunID()))
 							err, evtPanicked, evtPanicText, evtStackTrace := am.safeProcessEvent(evtCtx, agent, evt)
 							if evtPanicked {
@@ -1701,6 +1740,18 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 			}
 		}
 	}()
+	return nil
+}
+
+func (am *AgentManager) beginWork(ctx context.Context, kind string) (*worklifetime.Lease, error) {
+	if am == nil || am.workOwner == nil {
+		return nil, fmt.Errorf("%s requires a runtime work occurrence", strings.TrimSpace(kind))
+	}
+	lease, err := am.workOwner.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("admit %s: %w", strings.TrimSpace(kind), err)
+	}
+	return lease, nil
 }
 
 func panicBackoff(consecutivePanics int) time.Duration {

@@ -20,6 +20,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -194,6 +195,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			BaseContext:       context.WithoutCancel(ctx),
 			SemanticSource:    req.LoadedSource.Source,
 			WorkflowInstances: runtimepipeline.NewWorkflowInstanceStore(req.Store.DB),
+			WorkOwner:         req.AgentRuntime.Options.AgentManagerOptions.WorkOwner,
 		}, req.Store)
 		return &selectedContractAgentRuntime{manager: manager}, admission, nil
 	}
@@ -353,7 +355,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 			return managerRef
 		},
 	}, options.ScheduleStore)
-	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, emitRegistry, mcpTurns, func(agentID string) (runtimeactors.AgentConfig, bool) {
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, emitRegistry, mcpTurns, managerOptions.WorkOwner, func(agentID string) (runtimeactors.AgentConfig, bool) {
 		if managerRef == nil {
 			return runtimeactors.AgentConfig{}, false
 		}
@@ -409,7 +411,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	}, nil
 }
 
-func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, emitRegistry *runtimetools.EmitRegistry, mcpTurns *runtimemcp.TurnContextRegistry, resolveActorConfig func(string) (runtimeactors.AgentConfig, bool)) (toolgateway.Binding, func(), error) {
+func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, emitRegistry *runtimetools.EmitRegistry, mcpTurns *runtimemcp.TurnContextRegistry, owner worklifetime.Occurrence, resolveActorConfig func(string) (runtimeactors.AgentConfig, bool)) (toolgateway.Binding, func(), error) {
 	if exec == nil {
 		return toolgateway.Binding{}, nil, nil
 	}
@@ -445,15 +447,28 @@ func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, emitR
 
 	gateway := runtimemcp.NewGateway(exec, binding.AuthToken(), swaruntime.RuntimeMCPGatewayHooks(nil, nil, resolveActorConfig, nil, emitRegistry, mcpTurns))
 	server := &http.Server{Handler: gateway.Handler()}
+	if owner == nil {
+		_ = ln.Close()
+		return toolgateway.Binding{}, nil, fmt.Errorf("selected-fork gateway requires work occurrence")
+	}
+	lease, err := owner.Begin(context.Background())
+	if err != nil {
+		_ = ln.Close()
+		return toolgateway.Binding{}, nil, fmt.Errorf("admit selected-fork gateway: %w", err)
+	}
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
+		defer func() { _ = lease.Done() }()
 		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
 			_ = server.Close()
 		}
 	}()
 	return binding, func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = server.Shutdown(ctx)
-		cancel()
+		if err := server.Shutdown(context.Background()); err != nil {
+			_ = server.Close()
+		}
+		<-done
 	}, nil
 }
 
@@ -488,34 +503,11 @@ func (r *selectedContractAgentRuntime) WaitForQuiescence(ctx context.Context, bu
 	if r == nil || r.manager == nil {
 		return nil
 	}
-	ticker := time.NewTicker(5 * time.Millisecond)
-	defer ticker.Stop()
-	stable := 0
-	for {
-		if bus != nil {
-			if err := bus.WaitForQuiescence(ctx); err != nil {
-				return err
-			}
-		}
-		if err := r.manager.WaitForQuiescence(ctx); err != nil {
-			return err
-		}
-		pending := 0
-		if bus != nil {
-			pending = bus.PendingAgentDeliveries() + bus.PendingAgentRouteDeliveries()
-		}
-		if pending == 0 {
-			stable++
-			if stable >= 3 {
-				return nil
-			}
-		} else {
-			stable = 0
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
+	if err := r.manager.WaitForQuiescence(ctx); err != nil {
+		return err
 	}
+	if bus != nil {
+		return bus.WaitForQuiescence(ctx)
+	}
+	return nil
 }

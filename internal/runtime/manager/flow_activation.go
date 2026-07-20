@@ -15,6 +15,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -57,6 +58,12 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if am == nil {
 		return fmt.Errorf("agent manager is required")
 	}
+	lease, err := am.beginWork(ctx, "flow instance activation")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lease.Done() }()
+	ctx = worklifetime.WithOccurrence(lease.Context(), am.workOwner)
 	if req.Context.Empty() {
 		req.Context = events.DeliveryContextFromContext(ctx)
 	}
@@ -562,6 +569,12 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 	if am == nil {
 		return fmt.Errorf("agent manager is required")
 	}
+	lease, err := am.beginWork(ctx, "flow instance deactivation")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lease.Done() }()
+	ctx = worklifetime.WithOccurrence(lease.Context(), am.workOwner)
 	if am.workflowInstances == nil {
 		return fmt.Errorf("workflow instance store is required")
 	}

@@ -79,7 +79,7 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 		t.Run(tt.name, func(t *testing.T) {
 			store := &receiptReaderStub{}
 			bus := &recordingReceiptBus{}
-			am := NewAgentManager(bus, nil, store)
+			am := newTestAgentManager(t, bus, nil, store)
 			err := tt.newFailure()
 			expected := runtimeengine.NormalizeFailure(err, "agent-manager", "process_event.on_event").Failure
 			evt := eventtest.RunCreatingRootIngress("evt-"+tt.name, events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
@@ -108,7 +108,7 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 
 func TestProcessEventOutcomeUncertainTerminalReceiptSuppressesReplay(t *testing.T) {
 	store := &receiptReaderStub{}
-	am := NewAgentManager(&recordingReceiptBus{}, nil, store)
+	am := newTestAgentManager(t, &recordingReceiptBus{}, nil, store)
 	err := runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "claude_cli_attempt_outcome_unconfirmed", "claude-cli-adapter", "wait", nil)
 	agent := &countingFailureAgent{failureReturningAgent: failureReturningAgent{id: "agent-a", err: err}}
 	evt := eventtest.RunCreatingRootIngress("evt-uncertain", events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
@@ -126,7 +126,7 @@ func TestProcessEventOutcomeUncertainTerminalReceiptSuppressesReplay(t *testing.
 
 func TestQuarantineCarriesTriggeringPanicFailureWithoutReclassification(t *testing.T) {
 	bus := &recordingReceiptBus{}
-	am := NewAgentManager(bus, nil)
+	am := newTestAgentManager(t, bus, nil)
 	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassInternalFailure, "agent_event_panic", "agent-manager", "process_event", map[string]any{"agent_id": "agent-a"}), "agent-manager", "process_event")
 	for i := 0; i < poisonEventEntityThreshold; i++ {
 		evt := eventtest.RunCreatingRootIngress("evt-quarantine", events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{EntityID: "entity-" + string(rune('a'+i))}, time.Time{})

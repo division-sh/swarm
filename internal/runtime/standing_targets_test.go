@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -182,11 +183,12 @@ func TestValidateWorkflowContractSurfaceWarnsForUnacknowledgedUnsignedRawAdmissi
 
 func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-	bus, err := runtimebus.NewEventBus(nil)
+	hash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
+	workOwner := runtimeTestOccurrence(t, hash)
+	bus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{WorkOwner: workOwner})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	hash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
 	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
 	if err != nil {
 		t.Fatal(err)
@@ -195,13 +197,14 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager, err := NewRuntimeContextManagerWithAdmission(nil, ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed}, BundleContext{
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed}, BundleContext{
 		BundleHash: hash,
 		Source:     source,
-		Runtime:    &Runtime{Bus: bus},
+		Runtime:    &Runtime{Bus: bus, workOccurrence: workOwner},
+		WorkOwner:  workOwner,
 		StandingTargets: []StandingTarget{{
-			BundleHash: hash, FlowID: "coordinator", Alias: "chat", Provider: "telegram",
-			RunID: "run", FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram",
+			BundleHash: hash, ServiceID: "service-chat", FlowID: "coordinator", Alias: "chat", Provider: "telegram",
+			RunID: "run", Generation: 1, FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram",
 			AdmissionPlan: plan,
 		}},
 	})
@@ -218,11 +221,12 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 
 func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneration(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-	bus, err := runtimebus.NewEventBus(nil)
+	hash := "bundle-v1:sha256:" + strings.Repeat("b", 64)
+	workOwner := runtimeTestOccurrence(t, hash)
+	bus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{WorkOwner: workOwner})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	hash := "bundle-v1:sha256:" + strings.Repeat("b", 64)
 	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
 	if err != nil {
 		t.Fatal(err)
@@ -236,8 +240,8 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 		RunID: "run-1", Generation: 1, PublicationSequence: 1, InstanceID: "instance-1",
 		FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 	}
-	manager, err := NewRuntimeContextManagerWithAdmission(nil, ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed}, BundleContext{
-		BundleHash: hash, Source: source, Runtime: &Runtime{Bus: bus}, StandingTargets: []StandingTarget{target},
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed}, BundleContext{
+		BundleHash: hash, Source: source, Runtime: &Runtime{Bus: bus, workOccurrence: workOwner}, WorkOwner: workOwner, StandingTargets: []StandingTarget{target},
 	})
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
@@ -257,6 +261,9 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 	if err := manager.SuppressStandingServiceTargets(target.ServiceID); err != nil {
 		t.Fatalf("second SuppressStandingServiceTargets: %v", err)
 	}
+	if err := manager.RetireStandingServiceOccurrence(context.Background(), target.ServiceID); err != nil {
+		t.Fatalf("RetireStandingServiceOccurrence: %v", err)
+	}
 	published := target
 	published.RunID = "run-2"
 	published.Generation = 2
@@ -270,10 +277,51 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 	}
 }
 
+func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupTarget(t *testing.T) {
+	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
+	hash := "bundle-v1:sha256:" + strings.Repeat("c", 64)
+	workOwner := runtimeTestOccurrence(t, hash)
+	bus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{WorkOwner: workOwner})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed, err := catalog.InstalledCapabilitySubjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := StandingTarget{
+		BundleHash: hash, ServiceID: "service-suspended", FlowID: "coordinator", Alias: "chat", Provider: "telegram",
+		RunID: "run-1", Generation: 1, PublicationSequence: 1, InstanceID: "instance-1",
+		FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
+	}
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed})
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	if err := manager.SuppressStandingServiceTargets(target.ServiceID); err != nil {
+		t.Fatalf("SuppressStandingServiceTargets: %v", err)
+	}
+	if err := manager.Register(BundleContext{
+		BundleHash: hash, Source: source, Runtime: &Runtime{Bus: bus, workOccurrence: workOwner}, WorkOwner: workOwner, StandingTargets: []StandingTarget{target},
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := manager.PublishStandingServiceTargets(target.ServiceID, []StandingTarget{target}); err != nil {
+		t.Fatalf("PublishStandingServiceTargets after suspended startup: %v", err)
+	}
+	if lookup := manager.LookupIngress("chat", "telegram"); !lookup.Loaded() || lookup.Target.ServiceID != target.ServiceID {
+		t.Fatalf("resumed lookup = %#v, want fresh loaded process occurrence", lookup)
+	}
+}
+
 func TestInboundGatewayConsumesCompiledTelegramRouteWithoutReinterpretingStandingPins(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "lead.observed")
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -304,7 +352,7 @@ func TestInboundGatewayConsumesCompiledTelegramRouteWithoutReinterpretingStandin
 func TestInboundGatewayConsumesCompiledGitHubRouteWithoutReinterpretingDynamicPins(t *testing.T) {
 	source, catalog := standingProviderDeclarationSource(t, "github", "inbound.github.issues")
 	eventStore := &capturingInboundEventStore{}
-	bus, err := runtimebus.NewEventBus(eventStore)
+	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

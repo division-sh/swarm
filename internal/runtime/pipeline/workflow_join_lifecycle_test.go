@@ -49,7 +49,7 @@ func TestArmWorkflowJoinPersistsActivationAndScheduleAtomically(t *testing.T) {
 			entityID := FlowInstanceEntityID("orders/order-1")
 			runID := uuid.NewString()
 			ensurePipelineTestRun(t, store, runID)
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 			if err := store.Upsert(ctx, WorkflowInstance{
 				InstanceID: "order-1", StorageRef: "orders/order-1", WorkflowName: "orders", WorkflowVersion: "1.0.0",
 				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": tc.members},
@@ -106,10 +106,10 @@ func TestArmWorkflowJoinPostgresParity(t *testing.T) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 				t.Fatal(err)
 			}
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 			store := NewWorkflowInstanceStore(db)
 			schedules := &recordingSchedulePersistence{}
 			pc := &PipelineCoordinator{module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowJoinLifecycleBundle())}, workflowStore: store, timerScheduleStore: schedules}
@@ -219,7 +219,7 @@ func TestWorkflowJoinArmRejectsCatalogInvalidNamedResultExpression(t *testing.T)
 	entityID := FlowInstanceEntityID("orders/order-typed")
 	runID := uuid.NewString()
 	ensurePipelineTestRun(t, store, runID)
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 	if err := store.Upsert(ctx, WorkflowInstance{
 		InstanceID: "order-typed", StorageRef: "orders/order-typed", WorkflowName: "orders", WorkflowVersion: "1.0.0",
 		CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{}},
@@ -315,10 +315,10 @@ func workflowJoinStoreCases() []workflowJoinStoreCase {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 				t.Fatal(err)
 			}
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 			return NewWorkflowInstanceStore(db), runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 		}},
 	}
@@ -330,7 +330,7 @@ func newSQLiteWorkflowJoinStore(t *testing.T) (*WorkflowInstanceStore, context.C
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	runID := uuid.NewString()
 	ensurePipelineTestRun(t, store, runID)
-	return store, runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+	return store, runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 }
 
 func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.T) {
@@ -345,10 +345,10 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 				t.Fatal(err)
 			}
-			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 		}},
 	}
 	for _, tc := range tests {
@@ -442,10 +442,10 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 				t.Fatal(err)
 			}
-			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 		}},
 	}
 	for _, tc := range tests {
@@ -526,10 +526,10 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 				t.Fatal(err)
 			}
-			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 		}},
 	}
 	for _, tc := range tests {
@@ -617,10 +617,10 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 				t.Fatal(err)
 			}
-			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 		}},
 	}
 	for _, tc := range tests {
@@ -704,10 +704,10 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 				t.Fatal(err)
 			}
-			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 		}},
 	}
 	for _, tc := range tests {

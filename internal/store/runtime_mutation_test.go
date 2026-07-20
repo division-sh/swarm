@@ -18,7 +18,7 @@ import (
 
 func TestSQLiteRuntimeStore_RunRuntimeMutationRetriesBusyAndFlushesPostCommitOnce(t *testing.T) {
 	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, time.Millisecond)
-	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(storeTestWorkContext(t, testAuthorActivityContext()), 2*time.Second)
 	defer cancel()
 
 	lockTx, err := lockStore.DB.BeginTx(ctx, nil)
@@ -189,7 +189,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationDoesNotRetryActiveTransaction(t *t
 
 func TestSQLiteRuntimeStore_RunRuntimeMutationPostCommitCanReenterRuntimeMutation(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(storeTestWorkContext(t, testAuthorActivityContext()), 2*time.Second)
 	defer cancel()
 
 	innerDone := make(chan error, 1)

@@ -566,7 +566,7 @@ func TestWorkflowTimerLifecycleRecurringAdvancesPersistedCoordinateOnBothStores(
 				t.Fatalf("recurring event ids = (%q, %q), want distinct deterministic (%q, %q)", bus.publishedEvent(0).ID(), bus.publishedEvent(1).ID(), firstID, secondID)
 			}
 
-			restartedScheduler := NewScheduler()
+			restartedScheduler := NewSchedulerWithWorkOwner(pipelineTestWorkOwner(t))
 			t.Cleanup(restartedScheduler.Stop)
 			restarted := NewPipelineCoordinatorWithOptions(bus, store.db, PipelineCoordinatorOptions{
 				Module:         &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowTimerOwnerBundle(true))},
@@ -676,7 +676,7 @@ func TestWorkflowTimerLifecycleRollbackAndCancellationOnBothStores(t *testing.T)
 				t.Fatalf("cancelled activation status = %q, want cancelled", persisted.Status)
 			}
 
-			restartedScheduler := NewScheduler()
+			restartedScheduler := NewSchedulerWithWorkOwner(pipelineTestWorkOwner(t))
 			t.Cleanup(restartedScheduler.Stop)
 			restarted := NewPipelineCoordinatorWithOptions(bus, store.db, PipelineCoordinatorOptions{
 				Module:         &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowTimerOwnerBundle(false))},
@@ -877,7 +877,7 @@ func TestWorkflowTimerLifecycleActivationRollbackDoesNotRegisterOnBothStores(t *
 			}); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
-			scheduler := NewScheduler()
+			scheduler := NewSchedulerWithWorkOwner(pipelineTestWorkOwner(t))
 			t.Cleanup(scheduler.Stop)
 			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
 				Module:         &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowTimerOwnerBundle(false))},
@@ -917,7 +917,7 @@ func TestWorkflowTimerLifecycleTargetedRegistrationRecoveryOnBothStores(t *testi
 				claimFailures: 2,
 				claimErr:      errors.New("transient claim failure"),
 			}
-			scheduler := NewScheduler()
+			scheduler := NewSchedulerWithWorkOwner(pipelineTestWorkOwner(t))
 			t.Cleanup(scheduler.Stop)
 			_, activation := seedWorkflowTimerOwnerRegisteredActivation(t, store, ctx, claims, scheduler)
 			if claims.claimCalls != 3 {
@@ -938,7 +938,7 @@ func TestWorkflowTimerLifecycleTargetedRegistrationRecoveryOnBothStores(t *testi
 		t.Run(tc.name+"/persistent_retry", func(t *testing.T) {
 			store, ctx := tc.open(t)
 			claims := &workflowTimerRetrySchedulePersistence{failuresRemaining: 5}
-			scheduler := NewScheduler()
+			scheduler := NewSchedulerWithWorkOwner(pipelineTestWorkOwner(t))
 			t.Cleanup(scheduler.Stop)
 			pc, activation := seedWorkflowTimerOwnerRegisteredActivation(t, store, ctx, claims, scheduler)
 			waitForWorkflowTimerCondition(t, 5*time.Second, func() bool {
@@ -963,7 +963,7 @@ func TestWorkflowTimerLifecycleTargetedRegistrationRecoveryOnBothStores(t *testi
 		t.Run(tc.name+"/shutdown_stops_retry", func(t *testing.T) {
 			store, ctx := tc.open(t)
 			claims := &workflowTimerRetrySchedulePersistence{alwaysFail: true}
-			scheduler := NewScheduler()
+			scheduler := NewSchedulerWithWorkOwner(pipelineTestWorkOwner(t))
 			t.Cleanup(scheduler.Stop)
 			pc, _ := seedWorkflowTimerOwnerRegisteredActivation(t, store, ctx, claims, scheduler)
 			waitForWorkflowTimerCondition(t, 5*time.Second, func() bool {
@@ -1063,8 +1063,8 @@ func TestWorkflowTimerLifecycleSchedulerRetryPreservesOccurrenceOnBothStores(t *
 				err     error
 			}
 			results := make(chan fireResult, 2)
-			scheduler := NewScheduler(func(schedule Schedule) {
-				outcome, err := pc.FireWorkflowTimer(ctx, schedule)
+			scheduler := NewSchedulerWithWorkOwner(pipelineTestWorkOwner(t), func(taskCtx context.Context, schedule Schedule) {
+				outcome, err := pc.FireWorkflowTimer(taskCtx, schedule)
 				results <- fireResult{outcome: outcome, err: err}
 			})
 			t.Cleanup(scheduler.Stop)
@@ -1140,7 +1140,9 @@ func TestWorkflowTimerLifecyclePostgresReleasesClaimOnlyAfterOuterCommit(t *test
 			}
 		})
 		actions := make([]func(), 0, 1)
+		rollbackActions := make([]func(), 0, 1)
 		txctx := withPipelinePostCommitActions(WithPipelineSQLTxContext(ctx, tx), &actions)
+		txctx = withPipelineRollbackActions(txctx, &rollbackActions)
 		txctx, err = runtimeauthoractivity.Begin(txctx, tx, runtimeauthoractivity.DialectPostgres)
 		if err != nil {
 			t.Fatalf("begin author activity: %v", err)
@@ -1285,6 +1287,7 @@ func seedWorkflowTimerOwnerRegisteredActivation(
 		WorkflowStore:      store,
 		TimerScheduler:     scheduler,
 		TimerScheduleStore: claims,
+		WorkOwner:          pipelineTestWorkOwner(t),
 	})
 	if err := store.RunPipelineMutation(ctx, func(txctx context.Context) error {
 		return pc.workflowTimers.Reconcile(txctx, entityID, "", "waiting", workflowTimerCause{

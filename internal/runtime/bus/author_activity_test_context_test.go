@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -60,6 +61,17 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 	}
 	if strings.TrimSpace(opts.BundleSourceFact.BundleHash) == "" {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
+	}
+	if opts.WorkOwner == nil {
+		processOwner := worklifetime.NewProcess()
+		owner, err := processOwner.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+			RuntimeInstanceID: opts.RuntimeInstanceID,
+			BundleHash:        opts.BundleSourceFact.BundleHash,
+		})
+		if err != nil {
+			return nil, err
+		}
+		opts.WorkOwner = owner
 	}
 	if registrar, ok := store.(authorActivityTestCatalogRegistrar); ok {
 		descriptors := authorActivityTestEventDescriptors(opts.ContractBundle)

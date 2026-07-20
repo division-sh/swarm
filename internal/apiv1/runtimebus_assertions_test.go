@@ -5,19 +5,30 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 )
 
 const apiv1RuntimeBusAssertionTimeout = time.Second
 const apiv1RuntimeBusAbsenceTimeout = 150 * time.Millisecond
 
-func requireAPIV1RuntimeBusEvent(t *testing.T, ch <-chan events.Event, description string) events.Event {
+func requireAPIV1RuntimeBusEvent(t *testing.T, ch <-chan *runtimebus.LocalDelivery, description string) events.Event {
 	t.Helper()
-	return requireAPIV1RuntimeBusValue[events.Event](t, ch, description)
+	delivery := requireAPIV1RuntimeBusValue[*runtimebus.LocalDelivery](t, ch, description)
+	evt := delivery.Event()
+	_ = delivery.Complete()
+	return evt
 }
 
-func requireNoAPIV1RuntimeBusEvent(t *testing.T, ch <-chan events.Event, description string) {
+func requireNoAPIV1RuntimeBusEvent(t *testing.T, ch <-chan *runtimebus.LocalDelivery, description string) {
 	t.Helper()
-	requireNoAPIV1RuntimeBusValue[events.Event](t, ch, description)
+	timer := time.NewTimer(apiv1RuntimeBusAbsenceTimeout)
+	defer timer.Stop()
+	select {
+	case delivery := <-ch:
+		_ = delivery.Complete()
+		t.Fatalf("%s delivered unexpected runtimebus value: %#v", description, delivery.Event())
+	case <-timer.C:
+	}
 }
 
 func requireAPIV1RuntimeBusSignal(t *testing.T, ch <-chan string, description string) string {

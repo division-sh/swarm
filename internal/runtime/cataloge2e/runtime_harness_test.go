@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtime "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -178,6 +179,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 
 	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), catalogRuntimeRunID))
 	t.Cleanup(cancel)
+	processOwner := worklifetime.NewProcess()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
 		VALUES ($1::uuid, 'running', $2, $3, $4)
@@ -206,6 +208,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 		LLMRuntime:        llmRuntime,
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
+		ProcessWorkOwner:  processOwner,
 	}})
 
 	if err != nil {
@@ -220,7 +223,16 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 		}
 	}
 	startedAt := catalogHarnessStartBoundary(t, db)
-	t.Cleanup(func() { _ = rt.Shutdown() })
+	t.Cleanup(func() {
+		if err := rt.Shutdown(); err != nil {
+			t.Errorf("shutdown catalog runtime: %v", err)
+		}
+		joinCtx, cancelJoin := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelJoin()
+		if _, err := processOwner.Join(joinCtx); err != nil {
+			t.Errorf("join catalog runtime process owner: %v", err)
+		}
+	})
 
 	return &runtimeHarness{
 		t:              t,
@@ -374,9 +386,6 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 			h.t.Fatalf("concurrent publish failed: %v", err)
 		}
 	}
-	if err := h.rt.WaitForQuiescence(ctx); err != nil {
-		h.t.Fatalf("WaitForQuiescence(concurrent): %v", err)
-	}
 	for _, item := range items {
 		h.refreshPublishedEventEntityID(item.evt.ID())
 	}
@@ -428,9 +437,6 @@ func (h *runtimeHarness) publishRuntimeEventResult(eventType, sourceAgent string
 	if err := h.publishBusEvent(ctx, evt); err != nil {
 		return err
 	}
-	if err := h.rt.WaitForQuiescence(ctx); err != nil {
-		return err
-	}
 	h.refreshPublishedEventEntityID(evt.ID())
 	return nil
 }
@@ -473,7 +479,7 @@ func (h *runtimeHarness) publishBusEvent(ctx context.Context, evt events.Event) 
 			case <-time.After(150 * time.Millisecond):
 			}
 		}
-		if err := h.rt.Bus.Publish(ctx, evt); err != nil {
+		if err := h.rt.Bus.PublishAndWait(ctx, evt); err != nil {
 			lastErr = err
 			if isTransientCatalogPublishError(err) {
 				continue
@@ -541,9 +547,6 @@ func (h *runtimeHarness) waitForExpectedEmittedEvents(expected catalogExpectedDo
 		stateReady := flowPrefix != "" || strings.TrimSpace(expected.Expected.EntityState) == "" ||
 			h.hasExpectedRootEntityState(ctx, entityID, expected.Expected.EntityState)
 		if eventsReady && stateReady {
-			if err := h.rt.WaitForQuiescence(ctx); err != nil {
-				h.t.Fatalf("WaitForQuiescence(after emitted events): %v", err)
-			}
 			return
 		}
 		select {

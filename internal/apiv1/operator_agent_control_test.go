@@ -271,14 +271,20 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	bus, err := newScopedAPITestEventBus(t, pg)
+	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash)
+	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{WorkOwner: workOwner})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	agent := &directiveIntegrationAgent{id: "agent-1"}
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
-	}, runtimemanager.AgentManagerOptions{BaseContext: testAuthorActivityContext(context.Background())}, pg)
+	}, runtimemanager.AgentManagerOptions{BaseContext: testAuthorActivityContext(context.Background()), WorkOwner: workOwner}, pg)
+	t.Cleanup(func() {
+		if err := manager.Shutdown(); err != nil {
+			t.Errorf("shutdown directive integration manager: %v", err)
+		}
+	})
 	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular"}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
@@ -325,9 +331,11 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeBundleSource(t *testing.T
 	bootFact := runtimecorrelation.BundleSourceFact{
 		BundleHash: "bundle-v1:" + bootFingerprint, BundleSource: storerunlifecycle.BundleSourceEphemeral, BundleFingerprint: bootFingerprint,
 	}
+	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, bootFact.BundleHash)
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 		BundleFingerprint: bootFingerprint,
 		BundleSourceFact:  bootFact,
+		WorkOwner:         workOwner,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -335,7 +343,12 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeBundleSource(t *testing.T
 	agent := &directiveIntegrationAgent{id: "agent-1"}
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
-	}, runtimemanager.AgentManagerOptions{BaseContext: testAuthorActivityContextForSource(context.Background(), bootFact)}, pg)
+	}, runtimemanager.AgentManagerOptions{BaseContext: testAuthorActivityContextForSource(context.Background(), bootFact), WorkOwner: workOwner}, pg)
+	t.Cleanup(func() {
+		if err := manager.Shutdown(); err != nil {
+			t.Errorf("shutdown canonical source manager: %v", err)
+		}
+	})
 	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular"}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}

@@ -72,12 +72,11 @@ func TestHandler_RuntimeControllerHasNoResetCallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
+	rt := &runtimepkg.Runtime{Bus: eb}
 	h := NewHandler(Options{
-		AuthToken: testBuilderAuthToken,
-		Runtime:   stubBuilderRuntimeControl{},
-		CurrentRuntime: func() *runtimepkg.Runtime {
-			return &runtimepkg.Runtime{Bus: eb}
-		},
+		AuthToken:       testBuilderAuthToken,
+		Runtime:         stubBuilderRuntimeControl{},
+		RuntimeAcquirer: newTestRuntimeAcquirer(t, rt),
 	})
 	typed, ok := h.(*handler)
 	if !ok || typed.runHub == nil {

@@ -431,6 +431,7 @@ func startTelegramConnectorSupportedSurfaceCoordinator(
 		actions: runtimepipeline.NewContractActionRegistry(source),
 	}
 	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
 		Module:        module,
 		WorkflowStore: workflowStore,
 		Credentials:   credentialStore,

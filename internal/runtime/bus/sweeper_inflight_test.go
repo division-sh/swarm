@@ -34,7 +34,7 @@ func (s *inFlightSweepStore) ClaimPipelineReplay(context.Context, string) (runti
 	return nil, false, nil
 }
 
-func TestSweepUndispatchedSkipsForegroundInFlightEvent(t *testing.T) {
+func TestSweepUndispatchedUsesDurableClaimToArbitrateConcurrentDispatch(t *testing.T) {
 	evt := eventtest.ExistingRunRootIngress(
 		"evt-in-flight",
 		events.EventType("custom.in_flight"),
@@ -51,9 +51,6 @@ func TestSweepUndispatchedSkipsForegroundInFlightEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	eb.beginEventPublish(evt.ID())
-	defer eb.endEventPublish(evt.ID())
-
 	got, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
 	if err != nil {
 		t.Fatalf("SweepUndispatched: %v", err)
@@ -61,7 +58,7 @@ func TestSweepUndispatchedSkipsForegroundInFlightEvent(t *testing.T) {
 	if got != 0 {
 		t.Fatalf("SweepUndispatched recovered = %d, want 0 for foreground in-flight event", got)
 	}
-	if claims := store.claims.Load(); claims != 0 {
-		t.Fatalf("pipeline replay claims = %d, want 0 for foreground in-flight event", claims)
+	if claims := store.claims.Load(); claims != 1 {
+		t.Fatalf("pipeline replay claims = %d, want 1 durable arbitration attempt", claims)
 	}
 }

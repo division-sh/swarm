@@ -9,9 +9,11 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -37,7 +39,6 @@ func pipelineDependencyFailure(err error, detailCode, component, operation strin
 }
 
 type Bus interface {
-	SubscribeInternal(subscriberID string, eventTypes ...events.EventType) <-chan events.Event
 	Publish(ctx context.Context, evt events.Event) error
 	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
 	ResolveSubscribedRecipients(eventType string) []string
@@ -448,10 +449,22 @@ func queuePipelinePostCommitAction(ctx context.Context, fn func()) bool {
 		return false
 	}
 	actions, ok := ctx.Value(pipelinePostCommitActionsKey{}).(*[]func())
-	if !ok || actions == nil {
+	rollback, rollbackOK := ctx.Value(pipelineRollbackActionsKey{}).(*[]func())
+	owner, ownerOK := worklifetime.OccurrenceFromContext(ctx)
+	if !ok || actions == nil || !rollbackOK || rollback == nil || !ownerOK {
 		return false
 	}
-	*actions = append(*actions, fn)
+	lease, err := owner.Begin(ctx)
+	if err != nil {
+		return false
+	}
+	var once sync.Once
+	settle := func() { once.Do(func() { _ = lease.Done() }) }
+	*actions = append(*actions, func() {
+		defer settle()
+		fn()
+	})
+	*rollback = append(*rollback, settle)
 	return true
 }
 
@@ -487,10 +500,22 @@ func queuePipelineRollbackAction(ctx context.Context, fn func()) bool {
 		return false
 	}
 	actions, ok := ctx.Value(pipelineRollbackActionsKey{}).(*[]func())
-	if !ok || actions == nil {
+	postCommit, postCommitOK := ctx.Value(pipelinePostCommitActionsKey{}).(*[]func())
+	owner, ownerOK := worklifetime.OccurrenceFromContext(ctx)
+	if !ok || actions == nil || !postCommitOK || postCommit == nil || !ownerOK {
 		return false
 	}
-	*actions = append(*actions, fn)
+	lease, err := owner.Begin(ctx)
+	if err != nil {
+		return false
+	}
+	var once sync.Once
+	settle := func() { once.Do(func() { _ = lease.Done() }) }
+	*actions = append(*actions, func() {
+		defer settle()
+		fn()
+	})
+	*postCommit = append(*postCommit, settle)
 	return true
 }
 
@@ -526,10 +551,18 @@ func queuePipelineAfterPublishAction(ctx context.Context, fn func()) bool {
 		return false
 	}
 	actions, ok := ctx.Value(pipelineAfterPublishActionsKey{}).(*[]func())
-	if !ok || actions == nil {
+	owner, ownerOK := worklifetime.OccurrenceFromContext(ctx)
+	if !ok || actions == nil || !ownerOK {
 		return false
 	}
-	*actions = append(*actions, fn)
+	lease, err := owner.Begin(ctx)
+	if err != nil {
+		return false
+	}
+	*actions = append(*actions, func() {
+		defer func() { _ = lease.Done() }()
+		fn()
+	})
 	return true
 }
 

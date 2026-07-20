@@ -460,9 +460,11 @@ func assertBundleUnavailableNewWork(t *testing.T, resp rpcResponse, method strin
 func newBundleDeleteRuntimeContextManager(t *testing.T) *swruntime.RuntimeContextManager {
 	t.Helper()
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, runStartTestBundleHash)
 	bus, err := newScopedAPITestEventBus(t, nil, runtimebus.EventBusOptions{
 		ContractBundle:   source,
 		BundleSourceFact: runtimeContextTestSourceFact(runStartTestBundleHash),
+		WorkOwner:        workOwner,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -473,6 +475,7 @@ func newBundleDeleteRuntimeContextManager(t *testing.T) *swruntime.RuntimeContex
 		BundleIdentity:   runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
 		Source:           source,
 		Runtime:          &swruntime.Runtime{Bus: bus},
+		WorkOwner:        workOwner,
 	})
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)

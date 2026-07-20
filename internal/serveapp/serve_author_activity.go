@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"golang.org/x/term"
 )
 
@@ -35,20 +36,29 @@ type serveAuthorActivityFollower struct {
 
 func newServeAuthorActivityFollower(
 	parent context.Context,
+	owner *worklifetime.Process,
 	reader serveAuthorActivityReader,
 	presenter *serveLifecyclePresenter,
 	runtimeInstanceID string,
 	scope serveAuthorActivityScope,
 	cursor int64,
 	renderer runtimeauthoractivity.HumanRenderer,
-) *serveAuthorActivityFollower {
-	ctx, cancel := context.WithCancel(parent)
+) (*serveAuthorActivityFollower, error) {
+	if owner == nil {
+		return nil, fmt.Errorf("author activity follower requires a process work owner")
+	}
+	lease, err := owner.Begin(parent)
+	if err != nil {
+		return nil, fmt.Errorf("admit author activity follower: %w", err)
+	}
+	ctx, cancel := context.WithCancel(lease.Context())
 	follower := &serveAuthorActivityFollower{cancel: cancel, done: make(chan struct{})}
 	go func() {
 		defer close(follower.done)
+		defer func() { _ = lease.Done() }()
 		runServeAuthorActivityFollower(ctx, reader, presenter, runtimeInstanceID, scope, cursor, renderer)
 	}()
-	return follower
+	return follower, nil
 }
 
 func (f *serveAuthorActivityFollower) StopAndWait() {

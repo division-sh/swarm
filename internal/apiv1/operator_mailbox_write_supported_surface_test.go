@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
@@ -190,10 +191,12 @@ func newMailboxWriteSupportedSurfaceHandler(
 ) (*Handler, *runtimebus.EventBus) {
 	t.Helper()
 	var coordinator *runtimepipeline.PipelineCoordinator
+	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, fact.BundleHash)
 	bus, err := newScopedAPITestEventBus(t, persistence.(runtimebus.EventStore), runtimebus.EventBusOptions{
 		ContractBundle:     source,
 		BundleFingerprint:  fact.BundleFingerprint,
 		BundleSourceFact:   fact,
+		WorkOwner:          workOwner,
 		TestLifecycleProbe: probe,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if coordinator == nil {
@@ -218,7 +221,38 @@ func newMailboxWriteSupportedSurfaceHandler(
 		TestLifecycleProbe:  probe,
 	})
 	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: "workflow-runtime"})
-	bus.Subscribe("workflow-runtime", events.EventType("thing.created"))
+	workflowDeliveries := bus.Subscribe("workflow-runtime", events.EventType("thing.created"))
+	workerOwner := worklifetime.NewProcess()
+	workerLease, err := workerOwner.Begin(context.Background())
+	if err != nil {
+		t.Fatalf("admit workflow runtime test carrier: %v", err)
+	}
+	stopWorker := make(chan struct{})
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		defer workerLease.Done()
+		for {
+			select {
+			case <-stopWorker:
+				return
+			case delivery := <-workflowDeliveries:
+				if delivery != nil {
+					_ = delivery.Complete()
+				}
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		close(stopWorker)
+		<-workerDone
+		workerOwner.Retire()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := workerOwner.Join(ctx); err != nil {
+			t.Errorf("join workflow runtime test carrier: %v", err)
+		}
+	})
 	mailbox, ok := persistence.(MailboxAPIStore)
 	if !ok {
 		t.Fatal("persistence store does not implement MailboxAPIStore")

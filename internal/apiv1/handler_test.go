@@ -19,6 +19,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/gorilla/websocket"
@@ -1343,6 +1344,18 @@ var _ BundleCatalogRegisterStore = (*fakeBundleCatalogReadStore)(nil)
 func testHandler(t *testing.T, opts Options) *Handler {
 	t.Helper()
 	opts.Registry = testRegistry(t)
+	if opts.ProcessWorkOwner == nil {
+		opts.ProcessWorkOwner = worklifetime.NewProcess()
+		process := opts.ProcessWorkOwner
+		t.Cleanup(func() {
+			process.Retire()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := process.Join(ctx); err != nil {
+				t.Errorf("join API test process work: %v", err)
+			}
+		})
+	}
 	handler, err := NewHandler(opts)
 	if err != nil {
 		t.Fatalf("NewHandler() error = %v", err)

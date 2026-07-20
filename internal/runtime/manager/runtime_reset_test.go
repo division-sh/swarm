@@ -79,7 +79,7 @@ func TestResetRuntimeState_OnlyResetsOwnedTurnContextRegistry(t *testing.T) {
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
 
-	am := NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{
+	am := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{
 		ResetRuntimeOwnedState: registryA.Reset,
 	})
 	if err := am.ResetRuntimeState(); err != nil {
@@ -112,7 +112,7 @@ func TestResetRuntimeState_LogsCanonicalOrphanedSessionAftermath(t *testing.T) {
 		}},
 	}}
 
-	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
 		Sessions: registry,
 	})
 	if err := am.ResetRuntimeStateWithSource("admin_cli"); err != nil {
@@ -157,7 +157,7 @@ func TestResetRuntimeState_LogsCanonicalOrphanedSessionAftermath(t *testing.T) {
 func TestResetRuntimeStateWithSource_PublishesPlatformResetOnlyForExplicitAdminSources(t *testing.T) {
 	t.Run("admin_cli", func(t *testing.T) {
 		bus := &resetTestBus{}
-		am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{})
+		am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{})
 
 		if err := am.ResetRuntimeStateWithSource("admin_cli"); err != nil {
 			t.Fatalf("ResetRuntimeStateWithSource(admin_cli): %v", err)
@@ -172,7 +172,7 @@ func TestResetRuntimeStateWithSource_PublishesPlatformResetOnlyForExplicitAdminS
 
 	t.Run("builder api retired", func(t *testing.T) {
 		bus := &resetTestBus{}
-		am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{})
+		am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{})
 
 		if err := am.ResetRuntimeStateWithSource("builder_api"); err != nil {
 			t.Fatalf("ResetRuntimeStateWithSource(builder_api): %v", err)
@@ -184,7 +184,7 @@ func TestResetRuntimeStateWithSource_PublishesPlatformResetOnlyForExplicitAdminS
 
 	t.Run("startup recovery fallback", func(t *testing.T) {
 		bus := &resetTestBus{}
-		am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{})
+		am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{})
 
 		if err := am.ResetRuntimeStateWithSource("startup_recovery_failed"); err != nil {
 			t.Fatalf("ResetRuntimeStateWithSource(startup_recovery_failed): %v", err)
@@ -207,7 +207,7 @@ func TestResetRuntimeStateFailureAlwaysLeavesResetPhase(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			am := NewAgentManagerWithOptions(tt.bus, nil, AgentManagerOptions{})
+			am := newTestAgentManagerWithOptions(t, tt.bus, nil, AgentManagerOptions{})
 			rec := lifecycleTestPersistedAgent()
 			if err := am.lifecycle.register(testAuthorActivityContext(context.Background()), rec, false); err != nil {
 				t.Fatalf("register lifecycle cell: %v", err)

@@ -16,6 +16,10 @@ import (
 	"github.com/google/uuid"
 )
 
+func releaseCoordinatorLoop(coordinator *agentLifecycleCoordinator, token runtimeeffects.LifecycleToken, done chan struct{}) error {
+	return coordinator.releaseLoop(token, done)
+}
+
 type lifecyclePersistenceProbe struct {
 	mu         sync.Mutex
 	cell       lifecycleProbeCell
@@ -112,7 +116,7 @@ func TestLifecycleCoordinatorReplayDoesNotReplaceSuccessfulGeneration(t *testing
 	default:
 	}
 	coordinator.cancelShutdownWork()
-	if err := coordinator.releaseLoop(token, done); err != nil {
+	if err := releaseCoordinatorLoop(coordinator, token, done); err != nil {
 		t.Fatalf("release loop: %v", err)
 	}
 }
@@ -257,7 +261,7 @@ func TestLifecycleCoordinatorPersistenceFailureLeavesPriorGenerationOwned(t *tes
 		t.Fatalf("current token = %+v ok=%v, want %+v", current, ok, token)
 	}
 	coordinator.cancelShutdownWork()
-	if err := coordinator.releaseLoop(token, done); err != nil {
+	if err := releaseCoordinatorLoop(coordinator, token, done); err != nil {
 		t.Fatalf("release loop: %v", err)
 	}
 }
@@ -302,7 +306,7 @@ func TestLifecycleCoordinatorRecoveredGenerationZeroAdvancesFromDurableValue(t *
 	}
 	coordinator.cancelShutdownWork()
 	<-loopCtx.Done()
-	if err := coordinator.releaseLoop(token, done); err != nil {
+	if err := releaseCoordinatorLoop(coordinator, token, done); err != nil {
 		t.Fatalf("release recovered loop: %v", err)
 	}
 }
@@ -333,7 +337,7 @@ func TestLifecycleCoordinatorInMemoryEffectContextCarriesCurrentToken(t *testing
 	lease.Release()
 	coordinator.cancelShutdownWork()
 	<-loopCtx.Done()
-	if err := coordinator.releaseLoop(token, done); err != nil {
+	if err := releaseCoordinatorLoop(coordinator, token, done); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 }
@@ -365,7 +369,7 @@ func TestLifecycleCoordinatorTeardownPersistenceFailureLeavesLoopOwned(t *testin
 		t.Fatalf("current token = %+v ok=%v, want %+v", current, ok, token)
 	}
 	coordinator.cancelShutdownWork()
-	if err := coordinator.releaseLoop(token, done); err != nil {
+	if err := releaseCoordinatorLoop(coordinator, token, done); err != nil {
 		t.Fatalf("release loop: %v", err)
 	}
 }
@@ -384,7 +388,7 @@ func TestLifecycleCoordinatorRestartVersusTeardownNeverResurrectsLoop(t *testing
 	}
 	go func() {
 		<-initialCtx.Done()
-		_ = coordinator.releaseLoop(initialToken, initialDone)
+		_ = releaseCoordinatorLoop(coordinator, initialToken, initialDone)
 	}()
 
 	start := make(chan struct{})
@@ -397,7 +401,7 @@ func TestLifecycleCoordinatorRestartVersusTeardownNeverResurrectsLoop(t *testing
 		if restartErr == nil && loopCtx != nil {
 			go func() {
 				<-loopCtx.Done()
-				_ = coordinator.releaseLoop(token, done)
+				_ = releaseCoordinatorLoop(coordinator, token, done)
 			}()
 		}
 	}()
@@ -444,7 +448,7 @@ func TestLifecycleCoordinatorSelfReleasePersistenceFailureFailsClosed(t *testing
 	probe.mu.Lock()
 	probe.failNext = fmt.Errorf("injected self-release persistence failure")
 	probe.mu.Unlock()
-	if err := coordinator.releaseLoop(token, done); err == nil {
+	if err := releaseCoordinatorLoop(coordinator, token, done); err == nil {
 		t.Fatal("self-release succeeded despite persistence failure")
 	}
 	if _, ok := coordinator.token(rec.Config.ID); ok {
@@ -469,7 +473,7 @@ func TestLifecycleCoordinatorConcurrentReplacementsCommitAdjacentGenerations(t *
 	}
 	go func() {
 		<-initialCtx.Done()
-		_ = coordinator.releaseLoop(initialToken, initialDone)
+		_ = releaseCoordinatorLoop(coordinator, initialToken, initialDone)
 	}()
 
 	const replacements = 8
@@ -488,7 +492,7 @@ func TestLifecycleCoordinatorConcurrentReplacementsCommitAdjacentGenerations(t *
 			generations <- token.Generation
 			go func() {
 				<-loopCtx.Done()
-				_ = coordinator.releaseLoop(token, done)
+				_ = releaseCoordinatorLoop(coordinator, token, done)
 			}()
 		}()
 	}

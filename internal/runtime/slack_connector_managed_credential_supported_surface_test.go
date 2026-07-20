@@ -487,6 +487,7 @@ func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackMana
 		actions: runtimepipeline.NewContractActionRegistry(source),
 	}
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, backend.db, runtimepipeline.PipelineCoordinatorOptions{
+		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
 		Module:             module,
 		WorkflowStore:      backend.workflowStore,
 		ManagedCredentials: managedStore,

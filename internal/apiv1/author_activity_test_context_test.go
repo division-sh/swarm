@@ -6,10 +6,12 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -70,6 +72,9 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 	if strings.TrimSpace(opts.BundleSourceFact.BundleHash) == "" {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
 	}
+	if opts.WorkOwner == nil {
+		opts.WorkOwner = newAPITestRuntimeWorkOccurrence(t, opts.RuntimeInstanceID, opts.BundleSourceFact.BundleHash)
+	}
 	if registrar, ok := eventStore.(authorActivityTestCatalogRegistrar); ok {
 		descriptors, err := authorActivityTestDescriptors(opts.ContractBundle)
 		if err != nil {
@@ -83,7 +88,40 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 		}
 		t.Cleanup(lease.Release)
 	}
-	return runtimebus.NewEventBusWithOptions(eventStore, opts)
+	bus, err := runtimebus.NewEventBusWithOptions(eventStore, opts)
+	if err != nil {
+		return nil, err
+	}
+	t.Cleanup(func() {
+		if err := bus.ResetInMemoryState(); err != nil {
+			t.Errorf("retire API test EventBus queues: %v", err)
+		}
+	})
+	return bus, nil
+}
+
+func newAPITestRuntimeWorkOccurrence(t *testing.T, runtimeInstanceID, bundleHash string) *worklifetime.RuntimeOccurrence {
+	t.Helper()
+	process := worklifetime.NewProcess()
+	occurrence, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: strings.TrimSpace(runtimeInstanceID),
+		BundleHash:        strings.TrimSpace(bundleHash),
+	})
+	if err != nil {
+		t.Fatalf("create API test runtime work occurrence: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := occurrence.RetireAndWait(ctx); err != nil {
+			t.Errorf("retire API test runtime work: %v", err)
+		}
+		process.Retire()
+		if _, err := process.Join(ctx); err != nil {
+			t.Errorf("join API test process work: %v", err)
+		}
+	})
+	return occurrence
 }
 
 func registerScopedAPITestCatalog(t *testing.T, target authorActivityTestCatalogRegistrar, source semanticview.Source) {

@@ -232,11 +232,12 @@ func requireRouteGenerationResult(t *testing.T, ch <-chan error, label string) e
 	}
 }
 
-func assertNoRouteGenerationEvent(t *testing.T, ch <-chan events.Event, label string) {
+func assertNoRouteGenerationEvent(t *testing.T, ch <-chan *LocalDelivery, label string) {
 	t.Helper()
 	select {
-	case evt := <-ch:
-		t.Fatalf("%s received event %q", label, evt.ID())
+	case delivery := <-ch:
+		_ = delivery.Complete()
+		t.Fatalf("%s received event %q", label, delivery.ID())
 	default:
 	}
 }

@@ -18,6 +18,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apispec"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
@@ -61,11 +62,12 @@ func (r AuthTokenResolution) UsesDefaultLoopbackToken() bool {
 }
 
 type Handler struct {
-	registry *Registry
-	tokens   map[string]struct{}
-	handlers map[string]MethodHandler
-	upgrader websocket.Upgrader
-	subs     *SubscriptionRuntime
+	registry  *Registry
+	tokens    map[string]struct{}
+	handlers  map[string]MethodHandler
+	upgrader  websocket.Upgrader
+	subs      *SubscriptionRuntime
+	workOwner *worklifetime.Process
 }
 
 type MethodHandler func(context.Context, Request) (any, error)
@@ -76,6 +78,7 @@ type Options struct {
 	AuthTokens       []string
 	Handlers         map[string]MethodHandler
 	Subscriptions    *SubscriptionRuntime
+	ProcessWorkOwner *worklifetime.Process
 }
 
 type Request struct {
@@ -153,13 +156,18 @@ func NewHandler(opts Options) (*Handler, error) {
 		}
 		handlers[clean] = handler
 	}
-	return &Handler{
-		registry: registry,
-		tokens:   tokenSet(opts.AuthTokens),
-		handlers: handlers,
-		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
-		subs:     opts.Subscriptions.withDefaults(),
-	}, nil
+	handler := &Handler{
+		registry:  registry,
+		tokens:    tokenSet(opts.AuthTokens),
+		handlers:  handlers,
+		upgrader:  websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
+		subs:      opts.Subscriptions.withDefaults(),
+		workOwner: opts.ProcessWorkOwner,
+	}
+	if handler.subs != nil {
+		handler.subs.workOwner = opts.ProcessWorkOwner
+	}
+	return handler, nil
 }
 
 func DefaultLoopbackAPITokenAllowedHost(host string) bool {
@@ -218,6 +226,7 @@ func (h *Handler) handleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) dispatch(ctx context.Context, raw []byte, transport, fallbackCorrelationID, actorTokenID string) rpcResponse {
+	ctx = worklifetime.WithProcess(ctx, h.workOwner)
 	req, failure := h.prepareRequest(raw, transport, fallbackCorrelationID, actorTokenID)
 	if failure != nil {
 		return *failure
@@ -269,6 +278,8 @@ func runtimeMethodTransport(methodName string, method apispec.Method) string {
 }
 
 func (h *Handler) dispatchPrepared(ctx context.Context, req Request) rpcResponse {
+	ctx, uses := beginRuntimeUseCollection(ctx)
+	defer uses.done()
 	handler := h.handlers[req.Method]
 	if handler == nil {
 		return rpcResponse{
@@ -407,10 +418,28 @@ func newWebSocketSession(handler *Handler, conn *websocket.Conn, parent context.
 }
 
 func (s *webSocketSession) run() {
+	if s == nil || s.handler == nil || s.handler.workOwner == nil {
+		s.close()
+		return
+	}
+	sessionLease, err := s.handler.workOwner.Begin(s.ctx)
+	if err != nil {
+		s.close()
+		return
+	}
+	defer func() { _ = sessionLease.Done() }()
+	stopRetirementClose := context.AfterFunc(sessionLease.Context(), s.close)
+	defer stopRetirementClose()
+	writeLease, err := s.handler.workOwner.Begin(sessionLease.Context())
+	if err != nil {
+		s.close()
+		return
+	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer func() { _ = writeLease.Done() }()
 		s.writeLoop()
 	}()
 	defer func() {

@@ -48,7 +48,8 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 	}
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module: module,
+		WorkOwner: runtimeTestEventBusWorkOwner(t, bus),
+		Module:    module,
 	})
 	subscribed := make(chan struct{}, 1)
 	pc.SetTestSubscribeHook(func() { subscribed <- struct{}{} })
@@ -143,6 +144,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	}
 	select {
 	case got := <-ch:
+		defer func() { _ = got.Complete() }()
 		if got.FlowInstance() != "operating/inst-1" || got.EntityID() != "11111111-1111-4111-8111-111111111111" {
 			t.Fatalf("delivered route identity flow=%q entity=%q, want operating/inst-1 product entity", got.FlowInstance(), got.EntityID())
 		}
@@ -176,6 +178,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
 	})
@@ -183,7 +186,8 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	var activationErr error
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module: module,
+		WorkOwner: runtimeTestEventBusWorkOwner(t, bus),
+		Module:    module,
 		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 			activationCalls++
 			activationErr = manager.ActivateFlowInstance(ctx, req)
@@ -275,11 +279,13 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
 	})
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		Module:            module,
 		InstanceActivator: manager.ActivateFlowInstance,
 		WorkflowStore:     workflowStore,
@@ -359,6 +365,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	manager = runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
 	})
@@ -421,11 +428,13 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
 	})
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		Module:            module,
 		InstanceActivator: manager.ActivateFlowInstance,
 		WorkflowStore:     workflowStore,
@@ -538,11 +547,13 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
 	})
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		Module:            module,
 		InstanceActivator: manager.ActivateFlowInstance,
 		WorkflowStore:     workflowStore,
@@ -925,6 +936,7 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 					t.Fatalf("NewEventBusWithOptions: %v", err)
 				}
 				manager = runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+					WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 					WorkflowInstances: workflowStore,
 				})
 

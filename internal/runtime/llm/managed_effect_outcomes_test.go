@@ -73,7 +73,7 @@ func TestManagedProviderEffectOutcomes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			harness := effecttest.New()
 			client := &http.Client{Transport: effectRoundTripper{t: t, harness: harness, adapter: tt.adapter}}
-			ctx := harness.CompletionContext("provider-" + tt.name)
+			ctx := llmTestWorkContext(t, harness.CompletionContext("provider-"+tt.name))
 			dispatch, err := tt.send(ctx, client)
 			if err == nil {
 				t.Fatal("provider transport failure returned nil")
@@ -101,7 +101,7 @@ func TestManagedProviderEffectOutcomes(t *testing.T) {
 
 func TestManagedClaudeCLIEffectOutcomes(t *testing.T) {
 	harness := effecttest.New()
-	ctx := harness.CompletionContext("claude-cli-start")
+	ctx := llmTestWorkContext(t, harness.CompletionContext("claude-cli-start"))
 	attempt, err := runtimeeffects.BeginCompletion(ctx, "claude_cli", []byte("request"), nil)
 	if err != nil {
 		t.Fatalf("authorize claude attempt: %v", err)
@@ -143,7 +143,7 @@ func TestManagedClaudeCLIEffectOutcomes(t *testing.T) {
 
 func TestManagedClaudeCLIStreamingSetupFailureSettlesPrelaunch(t *testing.T) {
 	harness := effecttest.New()
-	ctx := harness.CompletionContext("claude-cli-monitor-prelaunch")
+	ctx := llmTestWorkContext(t, harness.CompletionContext("claude-cli-monitor-prelaunch"))
 	attempt, err := runtimeeffects.BeginCompletion(ctx, "claude_cli", []byte("request"), nil)
 	if err != nil {
 		t.Fatalf("authorize claude attempt: %v", err)

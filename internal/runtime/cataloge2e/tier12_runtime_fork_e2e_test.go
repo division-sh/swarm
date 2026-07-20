@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -71,7 +72,8 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 
 	cfg := testRuntimeConfig()
 	cfg.LLM.Backend = "anthropic"
-	result, err := runtimerunforkexecution.ExecuteSelectedContractRunFork(h.ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
+	executionCtx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
+	result, err := runtimerunforkexecution.ExecuteSelectedContractRunFork(executionCtx, runtimerunforkexecution.SelectedContractExecutionRequest{
 		SourceRunID:         sourceRunID,
 		At:                  forkAt,
 		ConfirmSourceFreeze: true,

@@ -105,20 +105,26 @@ func TestSelectedContractWorkflowTimerForkRestoresAndExecutesThroughHandler(t *t
 			source := semanticview.Wrap(selectedContractWorkflowTimerBundle(test.recurring))
 			lease := registerSelectedContractWorkflowTimerEvent(t, pg, ctx)
 			t.Cleanup(lease.Release)
-			bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+			bus, err := newStoreTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			forkCtx := runtimecorrelation.WithRunID(ctx, materialized.ForkRunID)
+			forkScope, ok := runtimeauthoractivity.ScopeFromContext(forkCtx)
+			if !ok {
+				t.Fatal("fork timer proof requires author activity scope")
+			}
 			workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 			fireErrors := make(chan error, 4)
 			var coordinator *runtimepipeline.PipelineCoordinator
-			scheduler := runtimepipeline.NewScheduler(func(schedule runtimepipeline.Schedule) {
+			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(storeTestWorkOwner(t), func(taskCtx context.Context, schedule runtimepipeline.Schedule) {
 				if coordinator == nil {
 					fireErrors <- fmt.Errorf("workflow timer coordinator is unavailable")
 					return
 				}
-				if _, err := coordinator.FireWorkflowTimer(forkCtx, schedule); err != nil {
+				fireCtx := runtimeauthoractivity.WithScope(taskCtx, forkScope)
+				fireCtx = runtimecorrelation.WithRunID(fireCtx, materialized.ForkRunID)
+				if _, err := coordinator.FireWorkflowTimer(fireCtx, schedule); err != nil {
 					fireErrors <- err
 				}
 			})

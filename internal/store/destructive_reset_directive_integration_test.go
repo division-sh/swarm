@@ -10,7 +10,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -47,13 +46,13 @@ func (a *destructiveResetBlockingDirectiveAgent) BoardStep(context.Context, runt
 func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	ctx := testAuthorActivityContext()
+	ctx := storeTestWorkContext(t, testAuthorActivityContext())
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, "INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')", runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	bus, err := runtimebus.NewEventBus(pg)
+	bus, err := newStoreTestEventBus(t, pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -62,9 +61,9 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 		started: make(chan struct{}, 1),
 		release: make(chan struct{}),
 	}
-	manager := runtimemanager.NewAgentManager(bus, func(runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
-	}, pg)
+	}, runtimemanager.AgentManagerOptions{WorkOwner: storeTestWorkOwner(t)}, pg)
 	if err := manager.RegisterEphemeralAgentForExecution(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Role: "test"},
 	}); err != nil {

@@ -56,7 +56,7 @@ func TestCompleteEventSnapshotDispatchesThroughRecoveryOwnersOnSQLiteAndPostgres
 				if _, err := fixture.invoke(surface); err != nil {
 					t.Fatalf("%s dispatch: %v", surface, err)
 				}
-				assertCompleteEventDelivery(t, ch, fixture.event)
+				assertCompleteLocalDelivery(t, ch, fixture.event)
 			})
 		}
 	}
@@ -341,6 +341,18 @@ func assertCompleteEventDelivery(t *testing.T, delivered <-chan events.Event, wa
 	t.Helper()
 	select {
 	case got := <-delivered:
+		assertCompleteEventSnapshot(t, got, want)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for complete event dispatch")
+	}
+}
+
+func assertCompleteLocalDelivery(t *testing.T, delivered <-chan *runtimebus.LocalDelivery, want events.Event) {
+	t.Helper()
+	select {
+	case delivery := <-delivered:
+		got := delivery.Event()
+		_ = delivery.Complete()
 		assertCompleteEventSnapshot(t, got, want)
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for complete event dispatch")

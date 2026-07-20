@@ -126,7 +126,7 @@ func TestCommittedPublishDispatchDropsTransactionConnectionCapability(t *testing
 	}
 	defer conn.Close()
 	observer := &dispatchContextObserver{t: t}
-	bus, err := runtimebus.NewEventBusWithOptions(&retainedConnectionCommitStore{conn: conn}, runtimebus.EventBusOptions{TestLifecycleProbe: observer})
+	bus, err := newScopedTestEventBus(&retainedConnectionCommitStore{conn: conn}, runtimebus.EventBusOptions{TestLifecycleProbe: observer})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -633,11 +633,12 @@ func (i providerReachabilityInterceptor) Intercept(_ context.Context, _ events.E
 	return true, nil, nil
 }
 
-func assertSelectedForkDispatchNotReached(t *testing.T, deliveries <-chan events.Event, providerReached <-chan struct{}) {
+func assertSelectedForkDispatchNotReached(t *testing.T, deliveries <-chan *runtimebus.LocalDelivery, providerReached <-chan struct{}) {
 	t.Helper()
 	select {
-	case event := <-deliveries:
-		t.Fatalf("selected-fork delivery ran before commit: %s", event.ID())
+	case delivery := <-deliveries:
+		_ = delivery.Complete()
+		t.Fatalf("selected-fork delivery ran before commit: %s", delivery.ID())
 	default:
 	}
 	select {
@@ -1990,7 +1991,9 @@ func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *
 	defer deliveryTimer.Stop()
 	var got events.Event
 	select {
-	case got = <-ch:
+	case delivery := <-ch:
+		got = delivery.Event()
+		_ = delivery.Complete()
 	case <-deliveryTimer.C:
 		t.Fatal("acknowledged publish delivery: timed out waiting for queued bus event")
 	}

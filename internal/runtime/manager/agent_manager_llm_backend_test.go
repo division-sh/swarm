@@ -17,7 +17,7 @@ import (
 )
 
 func TestAgentManagerDefaultsLLMBackendFromCanonicalProfile(t *testing.T) {
-	am := NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{LLMBackend: "openai_compatible"})
+	am := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{LLMBackend: "openai_compatible"})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: models.AgentConfig{
 			ExecutionMode: "live",
@@ -51,7 +51,7 @@ func TestResolveAgentModelLiveBackendsDropInactiveMockArtifact(t *testing.T) {
 		{backend: llmselection.BackendOpenAIResponses, provider: llmselection.ProviderOpenAI, transport: llmselection.TransportAPI},
 	} {
 		t.Run(tc.backend, func(t *testing.T) {
-			am := NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{LLMBackend: tc.backend})
+			am := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{LLMBackend: tc.backend})
 			cfg := models.AgentConfig{ID: "agent-" + tc.backend, Model: "regular", LLMBackend: tc.backend, Mock: artifact}
 			if err := am.resolveAgentModel(&cfg); err != nil {
 				t.Fatalf("resolveAgentModel: %v", err)
@@ -70,7 +70,7 @@ func TestResolveAgentModelLiveBackendsDropInactiveMockArtifact(t *testing.T) {
 }
 
 func TestResolveAgentModelMockRetainsAndRequiresCapturedArtifact(t *testing.T) {
-	am := NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{LLMBackend: llmselection.BackendMock})
+	am := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{LLMBackend: llmselection.BackendMock})
 	artifact := capturedMockAlternative()
 	cfg := models.AgentConfig{ID: "mock-agent", Model: "regular", LLMBackend: llmselection.BackendMock, Mock: artifact}
 	if err := am.resolveAgentModel(&cfg); err != nil {
@@ -109,7 +109,7 @@ func TestAuthoredMockAlternativeStaticAndInstantiatedAgentsSpawnPersistRecoverLi
 
 	store := &liveMockAlternativePersistence{}
 	spawned := map[string]models.AgentConfig{}
-	am := NewAgentManagerWithOptions(&recoveryTestBus{}, func(cfg models.AgentConfig) (Agent, error) {
+	am := newTestAgentManagerWithOptions(t, &recoveryTestBus{}, func(cfg models.AgentConfig) (Agent, error) {
 		spawned[cfg.ID] = cfg
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{LLMBackend: llmselection.BackendAnthropic}, store)
@@ -129,7 +129,7 @@ func TestAuthoredMockAlternativeStaticAndInstantiatedAgentsSpawnPersistRecoverLi
 	assertLiveMockAlternativeProjection(t, "persisted", persisted, staticCfg.ID, instantiatedCfg.ID)
 
 	recovered := map[string]models.AgentConfig{}
-	recoveryManager := NewAgentManagerWithOptions(&recoveryTestBus{}, func(cfg models.AgentConfig) (Agent, error) {
+	recoveryManager := newTestAgentManagerWithOptions(t, &recoveryTestBus{}, func(cfg models.AgentConfig) (Agent, error) {
 		recovered[cfg.ID] = cfg
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{LLMBackend: llmselection.BackendAnthropic}, store)

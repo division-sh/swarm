@@ -441,10 +441,7 @@ func startLocalRunServe(ctx context.Context, repo string, opts runCommandOptions
 	}()
 	stop := func() {
 		cancel()
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-		}
+		<-done
 		if releaseProjectClaim != nil {
 			releaseProjectClaim()
 			releaseProjectClaim = nil

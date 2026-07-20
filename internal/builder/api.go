@@ -8,6 +8,7 @@ import (
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -27,7 +28,16 @@ type RuntimeController interface {
 
 type SourceProvider func() semanticview.Source
 
-type RuntimeProvider func() *runtimepkg.Runtime
+type RuntimeUse interface {
+	Runtime() *runtimepkg.Runtime
+	WorkContext() context.Context
+	Done() error
+}
+
+type RuntimeAcquirer interface {
+	AcquireCurrentRuntime(context.Context) (RuntimeUse, error)
+	AcquireRunRuntime(context.Context, string) (RuntimeUse, error)
+}
 
 type RunDebugReader interface {
 	ListOperatorEvents(ctx context.Context, opts store.OperatorEventListOptions) (store.OperatorEventListResult, error)
@@ -50,18 +60,18 @@ type ProjectController interface {
 }
 
 type Options struct {
-	Health         HealthChecker
-	Entities       EntityReader
-	Runtime        RuntimeController
-	Credentials    runtimecredentials.Store
-	AuthToken      string
-	Version        string
-	SemanticSource semanticview.Source
-	RuntimeRef     *runtimepkg.Runtime
-	CurrentSource  SourceProvider
-	CurrentRuntime RuntimeProvider
-	ProjectControl ProjectController
-	RunDebug       RunDebugReader
+	Health           HealthChecker
+	Entities         EntityReader
+	Runtime          RuntimeController
+	Credentials      runtimecredentials.Store
+	AuthToken        string
+	Version          string
+	SemanticSource   semanticview.Source
+	CurrentSource    SourceProvider
+	RuntimeAcquirer  RuntimeAcquirer
+	ProjectControl   ProjectController
+	RunDebug         RunDebugReader
+	ProcessWorkOwner *worklifetime.Process
 }
 
 type Request struct {
@@ -154,23 +164,21 @@ type EngineHealth struct {
 
 func NewHandler(opts Options) http.Handler {
 	h := &handler{
-		health:         opts.Health,
-		entities:       opts.Entities,
-		runtime:        opts.Runtime,
-		credentials:    opts.Credentials,
-		authToken:      strings.TrimSpace(opts.AuthToken),
-		version:        strings.TrimSpace(opts.Version),
-		semanticSource: opts.SemanticSource,
-		currentSource:  opts.CurrentSource,
-		currentRuntime: opts.CurrentRuntime,
-		projectControl: opts.ProjectControl,
+		health:           opts.Health,
+		entities:         opts.Entities,
+		runtime:          opts.Runtime,
+		credentials:      opts.Credentials,
+		authToken:        strings.TrimSpace(opts.AuthToken),
+		version:          strings.TrimSpace(opts.Version),
+		semanticSource:   opts.SemanticSource,
+		currentSource:    opts.CurrentSource,
+		runtimeAcquirer:  opts.RuntimeAcquirer,
+		processWorkOwner: opts.ProcessWorkOwner,
+		projectControl:   opts.ProjectControl,
 	}
-	if h.currentRuntime == nil && opts.RuntimeRef != nil {
-		h.currentRuntime = func() *runtimepkg.Runtime { return opts.RuntimeRef }
-	}
-	if h.currentRuntime != nil {
+	if h.runtimeAcquirer != nil {
 		h.runHub = newRunHub(
-			h.currentRuntime,
+			h.runtimeAcquirer,
 			func() error {
 				if h.runtime == nil {
 					return errUnavailable("runtime controller is not configured")

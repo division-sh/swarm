@@ -119,12 +119,9 @@ func TestRunHubStartRunPublishesTypedEntityEnvelope(t *testing.T) {
 		"review.requested":   eventtest.UUID("builder-run-hub-review-entity"),
 	}
 	commitStore := &builderCommitCaptureStore{}
-	eb, err := runtimebus.NewEventBus(commitStore)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	rt := &runtimepkg.Runtime{Bus: eb}
-	hub := newRunHub(func() *runtimepkg.Runtime { return rt }, nil, nil, nil)
+	rt, acquirer := newTestOwnedEventBus(t, commitStore, runtimebus.EventBusOptions{})
+	eb := rt.Bus
+	hub := newRunHub(acquirer, nil, nil, nil)
 	analysisEvents := eb.Subscribe("analysis-observer", "analysis.requested")
 	reviewEvents := eb.Subscribe("review-observer", "review.requested")
 
@@ -175,12 +172,14 @@ func TestRunHubStartRunPublishesTypedEntityEnvelope(t *testing.T) {
 		t.Fatalf("unique committed run identities = %d, want 1", len(committedRunIDs))
 	}
 
-	for eventType, channel := range map[eventtypes.EventType]<-chan eventtypes.Event{
+	for eventType, channel := range map[eventtypes.EventType]<-chan *runtimebus.LocalDelivery{
 		"analysis.requested": analysisEvents,
 		"review.requested":   reviewEvents,
 	} {
 		select {
-		case event := <-channel:
+		case delivery := <-channel:
+			event := delivery.Event()
+			_ = delivery.Complete()
 			if got := event.EntityID(); got != entityIDs[eventType] {
 				t.Fatalf("%s dispatched entity_id = %q, want %q", eventType, got, entityIDs[eventType])
 			}
@@ -192,13 +191,9 @@ func TestRunHubStartRunPublishesTypedEntityEnvelope(t *testing.T) {
 
 func TestRunHubStartRunPublishFailureUsesCanonicalEnvelopeOnly(t *testing.T) {
 	store := &snapshotRunStore{appendErr: errors.New("raw publish secret")}
-	eb, err := runtimebus.NewEventBus(store)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	rt := &runtimepkg.Runtime{Bus: eb}
+	_, acquirer := newTestOwnedEventBus(t, store, runtimebus.EventBusOptions{})
 	var observed RunEventEnvelope
-	hub := newRunHub(func() *runtimepkg.Runtime { return rt }, nil, nil, nil)
+	hub := newRunHub(acquirer, nil, nil, nil)
 	hub.sessions["run-123"] = &runSession{subs: map[string]func(RunEventEnvelope){"test": func(event RunEventEnvelope) { observed = cloneRunEvent(event) }}}
 
 	if err := hub.startRun(context.Background(), "run-123", map[string]any{"review.requested": map[string]any{"entity_id": "ent-1"}}, nil); err == nil {
@@ -213,6 +208,28 @@ func TestRunHubStartRunPublishFailureUsesCanonicalEnvelopeOnly(t *testing.T) {
 		if _, exists := payload[retired]; exists {
 			t.Fatalf("publish failure payload retained %s: %#v", retired, payload)
 		}
+	}
+}
+
+func TestBuilderRunCompletionUsesAcquiredGeneration(t *testing.T) {
+	store := &snapshotRunStore{snapshot: runtimebus.RunLifecycleSnapshot{
+		RunID: "run-owned", Status: "running", StartedAt: time.Now().UTC(),
+	}}
+	_, acquirer := newTestOwnedEventBus(t, store, runtimebus.EventBusOptions{})
+	hub := newRunHub(acquirer, nil, nil, store)
+	if err := hub.startRun(context.Background(), "run-owned", nil, nil); err != nil {
+		t.Fatalf("startRun: %v", err)
+	}
+	if got := acquirer.owner.ActiveCount(); got != 1 {
+		t.Fatalf("active builder completion work = %d, want 1", got)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := acquirer.owner.RetireAndWait(ctx); err != nil {
+		t.Fatalf("retire acquired builder generation: %v", err)
+	}
+	if got := acquirer.owner.ActiveCount(); got != 0 {
+		t.Fatalf("active builder completion work after retirement = %d, want 0", got)
 	}
 }
 
@@ -233,7 +250,7 @@ func TestRunHubAwaitCompletion_MarksSessionTerminalWhenCanonicalObservationIsUna
 		},
 	}
 
-	hub.awaitCompletion("run-123")
+	hub.awaitCompletion(context.Background(), "run-123", rt)
 
 	if !hub.isTerminal("run-123") {
 		t.Fatal("expected run session to be marked terminal when canonical completion observation is unavailable")
@@ -273,7 +290,7 @@ func TestRunHubAwaitCompletionFailedTerminalPersistenceOmitsOriginalFailure(t *t
 		subs:              map[string]func(RunEventEnvelope){},
 	}}}
 
-	hub.awaitCompletion("run-123")
+	hub.awaitCompletion(context.Background(), "run-123", rt)
 	session := hub.session("run-123")
 	if session == nil || len(session.controlEvents) != 1 {
 		t.Fatalf("control events = %#v", session)
@@ -329,7 +346,7 @@ func TestRunHubAwaitCompletion_EmitsAuthoritativeRunSummary(t *testing.T) {
 		},
 	}
 
-	hub.awaitCompletion("run-123")
+	hub.awaitCompletion(context.Background(), "run-123", rt)
 
 	if len(observed) == 0 {
 		t.Fatal("expected terminal event to be emitted")
@@ -370,7 +387,7 @@ func TestRunHubAwaitCompletion_WaitingCanonicalRunDoesNotWriteCompleted(t *testi
 
 	done := make(chan struct{})
 	go func() {
-		hub.awaitCompletion("run-123")
+		hub.awaitCompletion(context.Background(), "run-123", rt)
 		close(done)
 	}()
 	time.Sleep(25 * time.Millisecond)

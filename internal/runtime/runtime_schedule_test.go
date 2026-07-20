@@ -490,7 +490,7 @@ func TestNewRuntime_SchedulerMarksSchedulesFiredThroughCanonicalTerminalHelper(t
 		t.Fatalf("load bundle: %v", err)
 	}
 	store := &recordingRuntimeScheduleStore{fired: make(chan runtimepipeline.Schedule, 1)}
-	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
 		LLM:     config.LLMConfig{Backend: "anthropic"},
 	}, Stores: Stores{ScheduleStore: store}, Options: RuntimeOptions{
@@ -565,7 +565,7 @@ func TestRuntime_StartRestoresExactSchedulesDistinctByFlowInstance(t *testing.T)
 		},
 		fired: make(chan runtimepipeline.Schedule, 2),
 	}
-	rt, err := newScopedTestRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
 		LLM:     config.LLMConfig{Backend: "anthropic"},
 	}, Stores: Stores{ScheduleStore: store}, Options: RuntimeOptions{

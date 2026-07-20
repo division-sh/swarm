@@ -84,7 +84,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 				}
 			}
 
-			bus, err := runtimebus.NewEventBus(selected)
+			bus, err := newRuntimeTestEventBus(t, selected)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -108,6 +108,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 				LifecycleStore: selected,
 				SemanticSource: source,
 				Budget:         tracker,
+				WorkOwner:      runtimeTestEventBusWorkOwner(t, bus),
 			}, selected)
 
 			admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "budget-recovery-test", 1, "", "budget-recovery-actors", "budget-recovery-bundle", nil)

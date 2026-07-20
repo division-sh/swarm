@@ -224,7 +224,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 						}
 						routeTable.rebuildLocked()
 					}
-					eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source, RouteTable: routeTable})
+					eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, RouteTable: routeTable})
 					if err != nil {
 						t.Fatalf("NewEventBusWithOptions: %v", err)
 					}
@@ -301,7 +301,7 @@ func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplica
 
 	source := connectReceiverPinCollisionSource("static", false, "node", true)
 	store := newTargetRouteMemoryStore()
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplica
 	} {
 		t.Run("public "+tc.name, func(t *testing.T) {
 			store := newTargetRouteMemoryStore()
-			eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: connectReceiverPinLegalSource(tc.shape)})
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: connectReceiverPinLegalSource(tc.shape)})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -379,7 +379,7 @@ func TestEventBusPublish_ConnectRoutePlanAddressCollisionRejectsRuntimeResolvedN
 			if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "one")}); err != nil {
 				t.Fatalf("AddFlowInstanceRoute: %v", err)
 			}
-			var agentEvents <-chan events.Event
+			var agentEvents <-chan *LocalDelivery
 			if tc.subscriberType == "agent" {
 				if tc.distinctEvents {
 					agentEvents = eb.SubscribeAgent(testAgentSubscriptionAdmission(t, "receiver-one", "work.accepted", "work.audited"))
@@ -816,7 +816,7 @@ func TestEventBusConnectRouteDeliversToLiveAgentCarrier(t *testing.T) {
 		To:   "consumer.deploy_completed",
 	}}))
 	store := newTargetRouteMemoryStore()
-	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -2308,7 +2308,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleAdmissionPreservesDuplicateEdg
 			if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != tc.wantRoutes {
 				t.Fatalf("preflight = failure:%q routes:%#v, want %d legal routes", preflight.TargetFailure, preflight.DeliveryRoutes, tc.wantRoutes)
 			}
-			var agentEvents <-chan events.Event
+			var agentEvents <-chan *LocalDelivery
 			if tc.wantAgent {
 				var agentID string
 				for _, route := range preflight.DeliveryRoutes {
@@ -2623,7 +2623,9 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 		t.Fatalf("replayed delivery target = flow_instance:%q entity:%q, want persisted consumer/one ent-1", got.FlowInstance(), got.EntityID())
 	}
 	select {
-	case evt := <-consumerTwo:
+	case delivery := <-consumerTwo:
+		_ = delivery.Complete()
+		evt := delivery.Event()
 		t.Fatalf("descriptor drift recipient received replay: flow_instance:%q entity:%q", evt.FlowInstance(), evt.EntityID())
 	default:
 	}
@@ -3825,11 +3827,12 @@ func connectRoutePlanOutputEvents(pins []runtimecontracts.FlowOutputEventPin) []
 	return out
 }
 
-func requireNoConnectRoutePlanBusEvent(t testing.TB, ch <-chan events.Event, context string) {
+func requireNoConnectRoutePlanBusEvent(t testing.TB, ch <-chan *LocalDelivery, context string) {
 	t.Helper()
 	select {
-	case evt := <-ch:
-		t.Fatalf("%s: unexpected lower-precedence bus event: %#v", context, evt)
+	case delivery := <-ch:
+		_ = delivery.Complete()
+		t.Fatalf("%s: unexpected lower-precedence bus event: %#v", context, delivery.Event())
 	default:
 	}
 }

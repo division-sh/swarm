@@ -44,14 +44,14 @@ func (s *shutdownAdmissionManagerStore) ListPendingSubscribedEvents(context.Cont
 }
 
 func TestRun_UsesRuntimeShutdownAdmissionOwner(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	var closed atomic.Bool
 	closed.Store(true)
 
-	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
 		RuntimeShutdownAdmissionClosed: closed.Load,
 	})
 
@@ -63,7 +63,7 @@ func TestRun_UsesRuntimeShutdownAdmissionOwner(t *testing.T) {
 }
 
 func TestReplayAgentBacklog_UsesRuntimeShutdownAdmissionOwnerBeforeStoreAccess(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestReplayAgentBacklog_UsesRuntimeShutdownAdmissionOwnerBeforeStoreAccess(t
 	closed.Store(true)
 	store := &shutdownAdmissionManagerStore{}
 
-	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
 		RuntimeShutdownAdmissionClosed: closed.Load,
 	}, store)
 
@@ -84,12 +84,12 @@ func TestReplayAgentBacklog_UsesRuntimeShutdownAdmissionOwnerBeforeStoreAccess(t
 }
 
 func TestRestartAgent_DeniesWhenRuntimeShutdownAdmissionClosed(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	agent := shutdownTestAgent{id: "agent-1"}
-	am := NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am := newTestAgentManagerWithOptions(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
 	}, AgentManagerOptions{
 		RuntimeShutdownAdmissionClosed: func() bool { return true },
@@ -104,7 +104,7 @@ func TestRestartAgent_DeniesWhenRuntimeShutdownAdmissionClosed(t *testing.T) {
 }
 
 func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -120,16 +120,13 @@ func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown
 			case started <- struct{}{}:
 			default:
 			}
-			select {
-			case <-release:
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-			return nil, nil
+			<-ctx.Done()
+			<-release
+			return nil, ctx.Err()
 		},
 	}
 
-	am := NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am := newTestAgentManagerWithOptions(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
 	}, AgentManagerOptions{
 		RuntimeShutdownAdmissionClosed: func() bool { return false },
@@ -184,7 +181,7 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 	runtimebus.ResumeRuntimeIngress()
 	defer runtimebus.ResumeRuntimeIngress()
 
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -200,16 +197,13 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 			case started <- struct{}{}:
 			default:
 			}
-			select {
-			case <-release:
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-			return nil, nil
+			<-ctx.Done()
+			<-release
+			return nil, ctx.Err()
 		},
 	}
 
-	am := NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am := newTestAgentManagerWithOptions(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
 	}, AgentManagerOptions{
 		RuntimeShutdownAdmissionClosed: func() bool { return false },

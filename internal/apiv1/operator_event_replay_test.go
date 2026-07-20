@@ -1084,7 +1084,7 @@ func agentReplayBody(eventID, agentID, idempotencyKey string) string {
 	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-replay","method":"agent.replay","params":{"event_id":%q,"agent_id":%q,"idempotency_key":%q}}`, eventID, agentID, idempotencyKey)
 }
 
-func assertReplayEventDelivered(t *testing.T, ch <-chan events.Event, replayEventID, originalEventID string) {
+func assertReplayEventDelivered(t *testing.T, ch <-chan *runtimebus.LocalDelivery, replayEventID, originalEventID string) {
 	t.Helper()
 	got := requireAPIV1RuntimeBusEvent(t, ch, "replay event "+replayEventID)
 	if got.ID() != replayEventID || got.ParentEventID() != originalEventID {
@@ -1092,7 +1092,7 @@ func assertReplayEventDelivered(t *testing.T, ch <-chan events.Event, replayEven
 	}
 }
 
-func assertNoReplayEvent(t *testing.T, ch <-chan events.Event) {
+func assertNoReplayEvent(t *testing.T, ch <-chan *runtimebus.LocalDelivery) {
 	t.Helper()
 	requireNoAPIV1RuntimeBusEvent(t, ch, "replay assertion")
 }
@@ -1108,7 +1108,7 @@ func fillAgentChannel(t *testing.T, ctx context.Context, bus *runtimebus.EventBu
 	}
 }
 
-func drainAgentChannel(t *testing.T, ch <-chan events.Event, count int) {
+func drainAgentChannel(t *testing.T, ch <-chan *runtimebus.LocalDelivery, count int) {
 	t.Helper()
 	for i := 0; i < count; i++ {
 		requireAPIV1RuntimeBusEvent(t, ch, fmt.Sprintf("agent channel drain item %d", i))
