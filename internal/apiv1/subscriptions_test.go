@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/gorilla/websocket"
 )
@@ -78,6 +79,69 @@ func TestHandlerWebSocketHealthSubscribeAndUnsubscribe(t *testing.T) {
 	unsubscribe := readWSResponse(t, conn)
 	if unsubscribe.Error != nil || asMap(t, unsubscribe.Result)["ok"] != true {
 		t.Fatalf("rpc.unsubscribe response = %#v", unsubscribe)
+	}
+}
+
+func TestOwnedSubscriptionCancellationWaitsForStartedStoreRead(t *testing.T) {
+	process := worklifetime.NewProcess()
+	runtime := &SubscriptionRuntime{workOwner: process}
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	defer cancelSession()
+	session := &webSocketSession{ctx: sessionCtx, subs: map[string]context.CancelFunc{}}
+	_, work, err := runtime.newOwnedSubscriptionWork(session, "event")
+	if err != nil {
+		t.Fatalf("prepare owned subscription: %v", err)
+	}
+	readStarted := make(chan struct{})
+	releaseRead := make(chan struct{})
+	work.Start(func(context.Context) {
+		close(readStarted)
+		<-releaseRead
+	})
+	select {
+	case <-readStarted:
+	case <-time.After(time.Second):
+		t.Fatal("subscription store read did not start")
+	}
+	work.Cancel()
+	if got := process.ActiveCount(); got != 1 {
+		t.Fatalf("active subscription work after cancellation = %d, want started read retained", got)
+	}
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	if _, err := process.Join(waitCtx); !errors.Is(err, context.DeadlineExceeded) {
+		cancelWait()
+		t.Fatalf("process join while store read is active = %v, want deadline", err)
+	}
+	cancelWait()
+	close(releaseRead)
+	joinCtx, cancelJoin := context.WithTimeout(context.Background(), time.Second)
+	defer cancelJoin()
+	if _, err := process.Join(joinCtx); err != nil {
+		t.Fatalf("process join after subscription store read exited: %v", err)
+	}
+}
+
+func TestOwnedSubscriptionCancelBeforeStartSettlesAndPreventsLaunch(t *testing.T) {
+	process := worklifetime.NewProcess()
+	runtime := &SubscriptionRuntime{workOwner: process}
+	session := &webSocketSession{ctx: context.Background(), subs: map[string]context.CancelFunc{}}
+	_, work, err := runtime.newOwnedSubscriptionWork(session, "health")
+	if err != nil {
+		t.Fatalf("prepare owned subscription: %v", err)
+	}
+	started := make(chan struct{})
+	work.Cancel()
+	work.Start(func(context.Context) { close(started) })
+	select {
+	case <-started:
+		t.Fatal("cancelled prepared subscription started")
+	default:
+	}
+	if got := process.ActiveCount(); got != 0 {
+		t.Fatalf("active prepared subscription work after cancellation = %d, want zero", got)
+	}
+	if _, err := process.Join(context.Background()); err != nil {
+		t.Fatalf("join process after prepared cancellation: %v", err)
 	}
 }
 

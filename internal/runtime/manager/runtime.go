@@ -1664,7 +1664,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								}
 								return true
 							}
-							evtCtx := worklifetime.WithOccurrence(loopCtx, deliveryOwner)
+							evtCtx := agentDeliveryExecutionContext(delivery.Context(), loopCtx, token, deliveryOwner)
 							evtCtx = runtimecorrelation.WithInboundEvent(evtCtx, evt)
 							evtCtx = runtimecorrelation.WithRunID(evtCtx, strings.TrimSpace(evt.RunID()))
 							err, evtPanicked, evtPanicText, evtStackTrace := am.safeProcessEvent(evtCtx, agent, evt)
@@ -1741,6 +1741,18 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 		}
 	}()
 	return nil
+}
+
+func agentDeliveryExecutionContext(deliveryCtx, loopCtx context.Context, token runtimeeffects.LifecycleToken, deliveryOwner worklifetime.Occurrence) context.Context {
+	ctx := worklifetime.WithOccurrence(deliveryCtx, deliveryOwner)
+	ctx = runtimeeffects.WithLifecycleToken(ctx, token)
+	if controller, found := runtimeeffects.ControllerFromContext(loopCtx); found {
+		ctx = runtimeeffects.WithController(ctx, controller)
+	}
+	if admission, found := managedexecution.FromContext(loopCtx); found {
+		ctx = managedexecution.WithAdmission(ctx, admission)
+	}
+	return ctx
 }
 
 func (am *AgentManager) beginWork(ctx context.Context, kind string) (*worklifetime.Lease, error) {

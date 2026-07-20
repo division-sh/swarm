@@ -40,6 +40,7 @@ type runtimeProjectSupervisor struct {
 	credentials         runtimecredentials.Store
 	providerCredentials runtimecredentials.Store
 	providerTriggers    *providertriggers.CatalogSnapshot
+	processWorkOwner    *worklifetime.Process
 	loadProviderCatalog func() (*providertriggers.CatalogSnapshot, error)
 	loadChannelPacks    func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error)
 	channelPlans        []packs.SatisfactionPlan
@@ -122,6 +123,12 @@ func newRuntimeProjectSupervisor(
 		credentials:         credentials,
 		providerCredentials: providerCredentials,
 		providerTriggers:    providerTriggers,
+		processWorkOwner: func() *worklifetime.Process {
+			if initialRT == nil {
+				return nil
+			}
+			return initialRT.Options.ProcessWorkOwner
+		}(),
 		runtimeInstanceID: func() string {
 			if initialRT == nil {
 				return ""
@@ -349,11 +356,15 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		}
 	}
 
+	if s.processWorkOwner == nil {
+		return builderpkg.ProjectStatus{}, errors.New("served process work owner is required for project runtime replacement")
+	}
 	newRT, err := s.createRuntime(ctx, runtime.RuntimeDeps{
 		Config: s.cfg,
 		Stores: s.stores.runtimeStores(),
 		Options: runtime.RuntimeOptions{
 			SelfCheck:               false,
+			ProcessWorkOwner:        s.processWorkOwner,
 			WorkflowModule:          module,
 			WorkspaceLifecycle:      workspaces,
 			BundleFingerprint:       bundleIdentity.Fingerprint,

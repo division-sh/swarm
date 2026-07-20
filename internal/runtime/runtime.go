@@ -477,16 +477,6 @@ func (h *StartupOwnershipHandoff) Rollback() error {
 
 const bootstrapSelfCheckSubscriberID = "bootstrap-self-check"
 
-func (rt *Runtime) WaitForQuiescence(ctx context.Context) error {
-	if rt == nil {
-		return nil
-	}
-	if rt.workOccurrence == nil {
-		return nil
-	}
-	return rt.workOccurrence.Wait(ctx)
-}
-
 func runtimeThrottleSuppressPrefixes(source semanticview.Source) []string {
 	if source == nil {
 		return nil
