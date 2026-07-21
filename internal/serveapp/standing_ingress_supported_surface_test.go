@@ -22,8 +22,10 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -192,14 +194,20 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	default:
 		t.Fatalf("unknown standing served parity backend %q", backend)
 	}
+	contextsReady := make(chan *runtimepkg.RuntimeContextManager, 2)
+	opts.TestRuntimeContextsReadyHook = func(manager *runtimepkg.RuntimeContextManager) {
+		contextsReady <- manager
+	}
 
 	first := startServeRuntimeTestProcess(t, opts)
 	first.waitForReadyLine()
+	firstManager := waitForServedStandingContextManager(t, contextsReady, backend)
 	if db == nil {
 		t.Fatal("standing served parity SQLDB is required")
 	}
 	firstEndpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString()) + "/v1/rpc"
 	serviceID, firstRunID, firstGeneration := loadServedStandingOwner(t, db, string(backend))
+	firstSchedules := registerServedStandingScheduleProjections(t, firstManager, firstRunID)
 	suspendKey := "standing-suspend-" + string(backend)
 	suspended := invokeServedStandingOperation(t, firstEndpoint, "standing.suspend", serviceID, suspendKey)
 	if suspended.EffectiveState != "suspended" || suspended.Transition != "suspended" || suspended.RunID != firstRunID {
@@ -209,6 +217,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	if replayedSuspend != suspended {
 		t.Fatalf("%s suspend replay = %#v, want %#v", backend, replayedSuspend, suspended)
 	}
+	assertServedStandingSchedulesRetired(t, firstSchedules, backend, "suspend")
 	requireStandingTelegramUnavailable(t, strings.TrimSuffix(firstEndpoint, "/v1/rpc"), 9001)
 	assertServedStandingState(t, db, string(backend), serviceID, firstRunID, firstGeneration, "suspended", "paused")
 	if code := first.stop(); code != 0 {
@@ -217,6 +226,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 
 	second := startServeRuntimeTestProcess(t, opts)
 	second.waitForReadyLine()
+	secondManager := waitForServedStandingContextManager(t, contextsReady, backend)
 	secondOutput := second.outputString()
 	if !strings.Contains(secondOutput, "suspended") || !strings.Contains(secondOutput, "swarm standing resume "+serviceID) {
 		t.Fatalf("%s restart readiness omitted suspended standing story:\n%s", backend, secondOutput)
@@ -231,6 +241,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	}
 	requireStandingLifecycleTelegramCall(t, telegramCalls, backend, "resume")
 	assertServedStandingState(t, db, string(backend), serviceID, firstRunID, firstGeneration, "active", "running")
+	resumedSchedules := registerServedStandingScheduleProjections(t, secondManager, firstRunID)
 
 	resetKey := "standing-reset-" + string(backend)
 	reset := invokeServedStandingOperation(t, secondEndpoint, "standing.reset", serviceID, resetKey)
@@ -245,11 +256,87 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	if replayedReset != reset {
 		t.Fatalf("%s reset replay = %#v, want %#v", backend, replayedReset, reset)
 	}
+	assertServedStandingSchedulesRetired(t, resumedSchedules, backend, "reset")
+	freshUse, freshLookup, err := secondManager.AcquireIngress(context.Background(), "chat", "telegram")
+	if err != nil {
+		t.Fatalf("%s acquire reset successor ingress: %v", backend, err)
+	}
+	if freshUse == nil || !freshLookup.Found {
+		t.Fatalf("%s reset successor ingress is unavailable: %#v", backend, freshLookup)
+	}
+	freshOwner, ok := worklifetime.OccurrenceFromContext(freshUse.WorkContext())
+	if !ok || freshOwner == nil || freshOwner == resumedSchedules.occurrence {
+		_ = freshUse.Done()
+		t.Fatalf("%s reset did not publish a fresh standing process occurrence", backend)
+	}
+	if err := freshUse.Done(); err != nil {
+		t.Fatalf("%s settle reset successor ingress: %v", backend, err)
+	}
 	assertServedStandingState(t, db, string(backend), serviceID, reset.RunID, reset.Generation, "active", "running")
 	requireServedParitySettlementPostconditions(t, secondEndpoint, db, string(backend), firstRunID, servedparity.MustScenario(servedparity.ScenarioStandingServiceResetLifecycle))
 	requireServedParitySettlementPostconditions(t, secondEndpoint, db, string(backend), reset.RunID, servedparity.MustScenario(servedparity.ScenarioStandingServiceResetLifecycle))
 	if code := second.stop(); code != 0 {
 		t.Fatalf("%s second standing serve exit = %d", backend, code)
+	}
+}
+
+type servedStandingScheduleProbe struct {
+	scheduler  *runtimepipeline.Scheduler
+	occurrence worklifetime.Occurrence
+}
+
+func waitForServedStandingContextManager(t testing.TB, ready <-chan *runtimepkg.RuntimeContextManager, backend servedparity.Backend) *runtimepkg.RuntimeContextManager {
+	t.Helper()
+	select {
+	case manager := <-ready:
+		if manager == nil {
+			t.Fatalf("%s served standing context manager is nil", backend)
+		}
+		return manager
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s timed out waiting for served standing context manager", backend)
+		return nil
+	}
+}
+
+func registerServedStandingScheduleProjections(t testing.TB, manager *runtimepkg.RuntimeContextManager, runID string) servedStandingScheduleProbe {
+	t.Helper()
+	use, lookup, err := manager.AcquireIngress(context.Background(), "chat", "telegram")
+	if err != nil {
+		t.Fatalf("acquire standing ingress for schedule proof: %v", err)
+	}
+	if use == nil || !lookup.Found || use.Runtime() == nil || use.Runtime().Scheduler == nil {
+		t.Fatalf("standing ingress schedule owner is unavailable: %#v", lookup)
+	}
+	occurrence, ok := worklifetime.OccurrenceFromContext(use.WorkContext())
+	if !ok || occurrence == nil {
+		_ = use.Done()
+		t.Fatal("standing ingress work context has no exact occurrence")
+	}
+	for _, schedule := range []runtimepipeline.Schedule{
+		{RunID: runID, AgentID: "standing-proof", EventType: "standing.proof.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: uuid.NewString()},
+		{RunID: runID, AgentID: "standing-proof", EventType: "standing.proof.cron", Mode: "cron", Cron: "@every 1h", TaskID: uuid.NewString()},
+	} {
+		if err := use.Runtime().Scheduler.Register(use.WorkContext(), schedule); err != nil {
+			_ = use.Done()
+			t.Fatalf("register served standing %s schedule: %v", schedule.Mode, err)
+		}
+	}
+	probe := servedStandingScheduleProbe{scheduler: use.Runtime().Scheduler, occurrence: occurrence}
+	if err := use.Done(); err != nil {
+		t.Fatalf("settle standing ingress schedule registration: %v", err)
+	}
+	return probe
+}
+
+func assertServedStandingSchedulesRetired(t testing.TB, probe servedStandingScheduleProbe, backend servedparity.Backend, operation string) {
+	t.Helper()
+	remaining, err := probe.scheduler.ParkOccurrence(context.Background(), probe.occurrence)
+	if err != nil {
+		t.Fatalf("%s inspect %s standing schedules: %v", backend, operation, err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("%s %s left predecessor schedules reachable: %#v", backend, operation, remaining)
 	}
 }
 

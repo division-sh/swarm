@@ -73,6 +73,7 @@ type runtimeContextEntry struct {
 	runtime          *Runtime
 	workOwner        *worklifetime.RuntimeOccurrence
 	standing         map[string]*worklifetime.StandingOccurrence
+	parkedStanding   map[string][]runtimepipeline.Schedule
 	state            RuntimeContextState
 	cause            string
 	shutdownMu       sync.Mutex
@@ -87,6 +88,7 @@ type replacementPublication struct {
 	runtime             *Runtime
 	workOwner           *worklifetime.RuntimeOccurrence
 	standing            map[string]*worklifetime.StandingOccurrence
+	parkedStanding      map[string][]runtimepipeline.Schedule
 	survivingContexts   map[string]*BundleContext
 	admissionGeneration string
 	installedSubjects   []packs.Subject
@@ -97,11 +99,71 @@ type replacementPublication struct {
 // replacement publication. Preparation owns the candidate standing
 // occurrences; Publish is the only operation that makes them selectable.
 type PreparedRuntimeContextReplacement struct {
-	mu          sync.Mutex
-	manager     *RuntimeContextManager
-	publication *replacementPublication
-	published   bool
-	discarded   bool
+	mu                sync.Mutex
+	manager           *RuntimeContextManager
+	publication       *replacementPublication
+	published         bool
+	discarded         bool
+	schedulesRestored bool
+}
+
+// PreparedStandingServicePublication owns one fresh, unselectable standing
+// occurrence while canonical activation and timer producers build its local
+// projections. Publish installs the exact occurrence and targets atomically.
+type PreparedStandingServicePublication struct {
+	mu         sync.Mutex
+	manager    *RuntimeContextManager
+	serviceID  string
+	entry      *runtimeContextEntry
+	identity   worklifetime.StandingIdentity
+	occurrence *worklifetime.StandingOccurrence
+	published  bool
+	discarded  bool
+}
+
+func (p *PreparedStandingServicePublication) WorkContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if p == nil || p.occurrence == nil {
+		return ctx
+	}
+	return worklifetime.WithOccurrence(ctx, p.occurrence)
+}
+
+func (p *PreparedStandingServicePublication) Publish(targets []StandingTarget) error {
+	if p == nil {
+		return errors.New("prepared standing service publication is required")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.published {
+		return nil
+	}
+	if p.discarded || p.manager == nil || p.occurrence == nil {
+		return errors.New("prepared standing service publication is no longer active")
+	}
+	if err := p.manager.publishStandingServiceTargets(p.serviceID, targets, p); err != nil {
+		return err
+	}
+	p.published = true
+	return nil
+}
+
+func (p *PreparedStandingServicePublication) Discard() error {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.published {
+		return errors.New("published standing service occurrence cannot be discarded")
+	}
+	if p.discarded {
+		return nil
+	}
+	p.discarded = true
+	return p.occurrence.RetireAndWait(context.Background())
 }
 
 func (p *PreparedRuntimeContextReplacement) Publish() error {
@@ -116,6 +178,12 @@ func (p *PreparedRuntimeContextReplacement) Publish() error {
 	if p.discarded || p.manager == nil || p.publication == nil {
 		return errors.New("prepared runtime context replacement is no longer active")
 	}
+	if !p.schedulesRestored {
+		if err := restoreReplacementStandingSchedules(p.publication); err != nil {
+			return err
+		}
+		p.schedulesRestored = true
+	}
 	m := p.manager
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -125,6 +193,25 @@ func (p *PreparedRuntimeContextReplacement) Publish() error {
 	}
 	m.applyReplacementPublicationLocked(p.publication)
 	p.published = true
+	return nil
+}
+
+func restoreReplacementStandingSchedules(publication *replacementPublication) error {
+	if publication == nil || len(publication.parkedStanding) == 0 {
+		return nil
+	}
+	if publication.runtime == nil || publication.runtime.Scheduler == nil {
+		return errors.New("replacement standing schedules require a candidate scheduler")
+	}
+	for serviceID, schedules := range publication.parkedStanding {
+		owner := publication.standing[serviceID]
+		if owner == nil {
+			continue
+		}
+		if err := publication.runtime.Scheduler.RestoreOccurrence(context.Background(), owner, schedules); err != nil {
+			return fmt.Errorf("restore replacement standing schedules for %s: %w", serviceID, err)
+		}
+	}
 	return nil
 }
 
@@ -880,6 +967,170 @@ func (m *RuntimeContextManager) standingServiceSuppressedLocked(serviceID string
 	return suppressed
 }
 
+type standingOccurrenceTransition struct {
+	entry      *runtimeContextEntry
+	occurrence *worklifetime.StandingOccurrence
+	scheduler  *runtimepipeline.Scheduler
+	schedules  []runtimepipeline.Schedule
+}
+
+// StandingServiceTransition is the sole process-local owner for a standing
+// suspend/reset transition. It parks exact-owner timer projections before
+// active descendants drain, then either restores the same unretired occurrence
+// or retires it after the durable transition commits.
+type StandingServiceTransition struct {
+	mu          sync.Mutex
+	manager     *RuntimeContextManager
+	serviceID   string
+	occurrences []standingOccurrenceTransition
+	settled     bool
+}
+
+func (m *RuntimeContextManager) BeginStandingServiceTransition(ctx context.Context, serviceID string) (*StandingServiceTransition, error) {
+	if m == nil {
+		return nil, errors.New("runtime context manager is required")
+	}
+	serviceID = strings.TrimSpace(serviceID)
+	if serviceID == "" {
+		return nil, errors.New("standing service_id is required")
+	}
+	transition := &StandingServiceTransition{manager: m, serviceID: serviceID}
+	m.mu.Lock()
+	for _, entry := range m.contexts {
+		if entry == nil || entry.standing == nil || entry.standing[serviceID] == nil {
+			continue
+		}
+		occurrence := entry.standing[serviceID]
+		if err := occurrence.Fence(); err != nil {
+			for _, prior := range transition.occurrences {
+				_ = prior.occurrence.Reopen()
+			}
+			m.mu.Unlock()
+			return nil, fmt.Errorf("fence standing service %s occurrence: %w", serviceID, err)
+		}
+		var scheduler *runtimepipeline.Scheduler
+		if entry.runtime != nil {
+			scheduler = entry.runtime.Scheduler
+		}
+		transition.occurrences = append(transition.occurrences, standingOccurrenceTransition{
+			entry: entry, occurrence: occurrence, scheduler: scheduler,
+		})
+	}
+	if len(transition.occurrences) == 0 {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("standing service %s has no process occurrence", serviceID)
+	}
+	if m.suppressedStandingServices == nil {
+		m.suppressedStandingServices = map[string]struct{}{}
+	}
+	_, alreadySuppressed := m.suppressedStandingServices[serviceID]
+	m.suppressedStandingServices[serviceID] = struct{}{}
+	if err := m.refreshCapabilitySubjectsLocked(); err != nil {
+		if !alreadySuppressed {
+			delete(m.suppressedStandingServices, serviceID)
+		}
+		for _, prior := range transition.occurrences {
+			_ = prior.occurrence.Reopen()
+		}
+		m.mu.Unlock()
+		return nil, err
+	}
+	m.mu.Unlock()
+
+	for i := range transition.occurrences {
+		item := &transition.occurrences[i]
+		if item.scheduler == nil {
+			continue
+		}
+		schedules, err := item.scheduler.ParkOccurrence(ctx, item.occurrence)
+		item.schedules = schedules
+		if err != nil {
+			return nil, errors.Join(err, transition.Restore(context.Background()))
+		}
+	}
+	return transition, nil
+}
+
+func (t *StandingServiceTransition) Wait(ctx context.Context) error {
+	if t == nil {
+		return errors.New("standing service transition is required")
+	}
+	for _, item := range t.occurrences {
+		if err := item.occurrence.Wait(ctx); err != nil {
+			return fmt.Errorf("drain standing service %s occurrence: %w", t.serviceID, err)
+		}
+	}
+	return nil
+}
+
+func (t *StandingServiceTransition) Restore(ctx context.Context) error {
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.settled {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for _, item := range t.occurrences {
+		if err := item.occurrence.Reopen(); err != nil {
+			return fmt.Errorf("reopen standing service %s occurrence: %w", t.serviceID, err)
+		}
+	}
+	for _, item := range t.occurrences {
+		if item.scheduler == nil || len(item.schedules) == 0 {
+			continue
+		}
+		if err := item.scheduler.RestoreOccurrence(ctx, item.occurrence, item.schedules); err != nil {
+			for _, fenced := range t.occurrences {
+				_ = fenced.occurrence.Fence()
+			}
+			return fmt.Errorf("restore standing service %s schedules: %w", t.serviceID, err)
+		}
+	}
+	t.manager.mu.Lock()
+	delete(t.manager.suppressedStandingServices, t.serviceID)
+	if err := t.manager.refreshCapabilitySubjectsLocked(); err != nil {
+		t.manager.suppressedStandingServices[t.serviceID] = struct{}{}
+		t.manager.mu.Unlock()
+		for _, fenced := range t.occurrences {
+			_ = fenced.occurrence.Fence()
+		}
+		return err
+	}
+	t.manager.mu.Unlock()
+	t.settled = true
+	return nil
+}
+
+func (t *StandingServiceTransition) Retire(ctx context.Context) error {
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.settled {
+		return nil
+	}
+	t.manager.mu.Lock()
+	for _, item := range t.occurrences {
+		if item.entry != nil && item.entry.standing != nil && item.entry.standing[t.serviceID] == item.occurrence {
+			delete(item.entry.standing, t.serviceID)
+		}
+	}
+	t.manager.mu.Unlock()
+	for _, item := range t.occurrences {
+		if err := item.occurrence.RetireAndWait(ctx); err != nil {
+			return fmt.Errorf("retire standing service %s occurrence: %w", t.serviceID, err)
+		}
+	}
+	t.settled = true
+	return nil
+}
+
 // SuppressStandingServiceTargets withdraws process ingress before a lifecycle
 // transition drains admitted work. Declaration targets remain in the context
 // so alias collision authority and rollback/resume publication are preserved.
@@ -1005,7 +1256,56 @@ func (m *RuntimeContextManager) RetireStandingServiceOccurrence(ctx context.Cont
 
 // PublishStandingServiceTargets replaces stale run/generation/publication
 // facts from committed reconciliation and makes that service visible.
+func (m *RuntimeContextManager) PrepareStandingServicePublication(serviceID, runID string, generation int64) (*PreparedStandingServicePublication, error) {
+	if m == nil {
+		return nil, errors.New("runtime context manager is required")
+	}
+	serviceID = strings.TrimSpace(serviceID)
+	runID = strings.TrimSpace(runID)
+	if serviceID == "" || runID == "" || generation <= 0 {
+		return nil, errors.New("prepared standing publication requires service_id, run_id, and positive generation")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, suppressed := m.suppressedStandingServices[serviceID]; !suppressed {
+		return nil, fmt.Errorf("standing service %s must remain suppressed during successor preparation", serviceID)
+	}
+	var selected *runtimeContextEntry
+	for _, entry := range m.contexts {
+		if entry == nil || entry.context == nil {
+			continue
+		}
+		for _, target := range entry.context.StandingTargets {
+			if target.normalized().ServiceID != serviceID {
+				continue
+			}
+			if selected != nil && selected != entry {
+				return nil, fmt.Errorf("standing service %s has more than one runtime owner", serviceID)
+			}
+			selected = entry
+		}
+	}
+	if selected == nil || !runtimeContextEntryLoaded(selected) || selected.workOwner == nil {
+		return nil, fmt.Errorf("standing service %s has no loaded runtime owner", serviceID)
+	}
+	if selected.standing != nil && selected.standing[serviceID] != nil {
+		return nil, fmt.Errorf("standing service %s predecessor process occurrence is still live", serviceID)
+	}
+	identity := worklifetime.StandingIdentity{ServiceID: serviceID, RunID: runID, Generation: uint64(generation)}
+	occurrence, err := selected.workOwner.NewStanding(context.Background(), identity)
+	if err != nil {
+		return nil, fmt.Errorf("prepare standing service %s successor occurrence: %w", serviceID, err)
+	}
+	return &PreparedStandingServicePublication{
+		manager: m, serviceID: serviceID, entry: selected, identity: identity, occurrence: occurrence,
+	}, nil
+}
+
 func (m *RuntimeContextManager) PublishStandingServiceTargets(serviceID string, targets []StandingTarget) error {
+	return m.publishStandingServiceTargets(serviceID, targets, nil)
+}
+
+func (m *RuntimeContextManager) publishStandingServiceTargets(serviceID string, targets []StandingTarget, prepared *PreparedStandingServicePublication) error {
 	if m == nil {
 		return nil
 	}
@@ -1075,13 +1375,22 @@ func (m *RuntimeContextManager) PublishStandingServiceTargets(serviceID string, 
 			if target.ServiceID != serviceID {
 				continue
 			}
-			created, err := entry.workOwner.NewStanding(context.Background(), worklifetime.StandingIdentity{
-				ServiceID: serviceID, RunID: target.RunID, Generation: uint64(target.Generation),
-			})
-			if err != nil {
-				return fmt.Errorf("publish fresh standing process occurrence: %w", err)
+			if prepared != nil {
+				if prepared.manager != m || prepared.entry != entry || prepared.serviceID != serviceID ||
+					prepared.identity.RunID != target.RunID || prepared.identity.Generation != uint64(target.Generation) {
+					return fmt.Errorf("prepared standing service %s occurrence does not match committed target identity", serviceID)
+				}
+				newOccurrence = prepared.occurrence
+			} else {
+				created, err := entry.workOwner.NewStanding(context.Background(), worklifetime.StandingIdentity{
+					ServiceID: serviceID, RunID: target.RunID, Generation: uint64(target.Generation),
+				})
+				if err != nil {
+					return fmt.Errorf("publish fresh standing process occurrence: %w", err)
+				}
+				newOccurrence = created
 			}
-			newOccurrence, occurrenceEntry = created, entry
+			occurrenceEntry = entry
 			break
 		}
 	}
@@ -1150,21 +1459,28 @@ func (m *RuntimeContextManager) BeginBundleHashReplacement(ctx context.Context, 
 	}
 	entry := m.contexts[existingHash]
 	predecessor := *entry.context
-	var standing []*worklifetime.StandingOccurrence
+	standing := make([]standingOccurrenceTransition, 0, len(entry.standing))
 	for _, occurrence := range entry.standing {
 		if err := occurrence.Fence(); err != nil {
 			for _, prior := range standing {
-				_ = prior.Reopen()
+				_ = prior.occurrence.Reopen()
 			}
 			m.mu.Unlock()
 			return BundleContext{}, fmt.Errorf("fence predecessor standing occurrence: %w", err)
 		}
-		standing = append(standing, occurrence)
+		var scheduler *runtimepipeline.Scheduler
+		if entry.runtime != nil {
+			scheduler = entry.runtime.Scheduler
+		}
+		standing = append(standing, standingOccurrenceTransition{
+			entry: entry, occurrence: occurrence, scheduler: scheduler,
+			schedules: nil,
+		})
 	}
 	if entry.workOwner != nil {
 		if err := entry.workOwner.Fence(); err != nil {
 			for _, prior := range standing {
-				_ = prior.Reopen()
+				_ = prior.occurrence.Reopen()
 			}
 			m.mu.Unlock()
 			return BundleContext{}, fmt.Errorf("fence predecessor runtime occurrence: %w", err)
@@ -1173,18 +1489,41 @@ func (m *RuntimeContextManager) BeginBundleHashReplacement(ctx context.Context, 
 	entry.state = RuntimeContextStateUnloaded
 	entry.cause = RuntimeContextCauseReplacing
 	m.mu.Unlock()
-	for _, occurrence := range standing {
-		if err := occurrence.Wait(ctx); err != nil {
+	retainParked := func(parked map[string][]runtimepipeline.Schedule) {
+		m.mu.Lock()
+		entry.parkedStanding = parked
+		m.mu.Unlock()
+	}
+	parked := make(map[string][]runtimepipeline.Schedule)
+	for i := range standing {
+		item := &standing[i]
+		if item.scheduler == nil {
+			continue
+		}
+		schedules, err := item.scheduler.ParkOccurrence(ctx, item.occurrence)
+		item.schedules = schedules
+		if len(schedules) > 0 {
+			parked[item.occurrence.Identity().ServiceID] = schedules
+		}
+		if err != nil {
+			retainParked(parked)
+			return BundleContext{}, fmt.Errorf("park predecessor standing schedules: %w", err)
+		}
+	}
+	for _, item := range standing {
+		if err := item.occurrence.Wait(ctx); err != nil {
+			retainParked(parked)
 			return BundleContext{}, fmt.Errorf("drain predecessor standing occurrence: %w", err)
 		}
 	}
-	for _, occurrence := range standing {
-		if err := occurrence.RetireAndWait(ctx); err != nil {
+	for _, item := range standing {
+		if err := item.occurrence.RetireAndWait(ctx); err != nil {
 			return BundleContext{}, fmt.Errorf("retire predecessor standing occurrence: %w", err)
 		}
 	}
 	m.mu.Lock()
 	entry.standing = nil
+	entry.parkedStanding = parked
 	m.mu.Unlock()
 	return predecessor, nil
 }
@@ -1293,13 +1632,14 @@ func (m *RuntimeContextManager) prepareReplacementPublicationLocked(existingHash
 		return nil, err
 	}
 	return &replacementPublication{
-		existingHash: existingHash,
-		bundleHash:   contextDef.BundleHash,
-		entry:        entry,
-		context:      copied,
-		runtime:      runtimeOwner,
-		workOwner:    workOwner,
-		standing:     standing,
+		existingHash:   existingHash,
+		bundleHash:     contextDef.BundleHash,
+		entry:          entry,
+		context:        copied,
+		runtime:        runtimeOwner,
+		workOwner:      workOwner,
+		standing:       standing,
+		parkedStanding: cloneParkedStandingSchedules(entry.parkedStanding),
 	}, nil
 }
 
@@ -1328,6 +1668,7 @@ func (m *RuntimeContextManager) applyReplacementPublicationLocked(publication *r
 	entry.runtime = publication.runtime
 	entry.workOwner = publication.workOwner
 	entry.standing = publication.standing
+	entry.parkedStanding = nil
 	entry.state = RuntimeContextStateLoaded
 	entry.cause = ""
 	if publication.admissionGeneration != "" {
@@ -1335,6 +1676,22 @@ func (m *RuntimeContextManager) applyReplacementPublicationLocked(publication *r
 		m.installedTriggerSubjects = publication.installedSubjects
 		m.capabilitySubjects = publication.capabilitySubjects
 	}
+}
+
+func cloneParkedStandingSchedules(in map[string][]runtimepipeline.Schedule) map[string][]runtimepipeline.Schedule {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string][]runtimepipeline.Schedule, len(in))
+	for serviceID, schedules := range in {
+		cloned := make([]runtimepipeline.Schedule, 0, len(schedules))
+		for _, schedule := range schedules {
+			schedule.Payload = append([]byte(nil), schedule.Payload...)
+			cloned = append(cloned, schedule)
+		}
+		out[serviceID] = cloned
+	}
+	return out
 }
 
 func validateRestoredAdmissionAuthority(predecessor, restored BundleContext) error {

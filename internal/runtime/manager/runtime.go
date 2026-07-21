@@ -142,7 +142,15 @@ func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
 	if err != nil {
 		return err
 	}
-	return waitForRuntimeLifecycleTransition(am.lifecycle.requestShutdownTransition(), grace, "shutdown drain")
+	transition := am.lifecycle.requestShutdownTransition()
+	executor, claimed, err := am.lifecycle.claimUnwatchedTransition(transition, runtimeLifecycleTransitionShutdown)
+	if err != nil {
+		return err
+	}
+	if claimed {
+		go am.completeClaimedShutdownTransition(transition, executor)
+	}
+	return waitForRuntimeLifecycleTransition(transition, grace, "shutdown drain")
 }
 
 func waitForRuntimeLifecycleTransition(transition *runtimeLifecycleTransition, grace time.Duration, operation string) error {
@@ -719,7 +727,10 @@ func (am *AgentManager) Run(ctx context.Context) error {
 	if am.workOwner == nil {
 		return errors.New("agent manager requires a runtime work occurrence")
 	}
-	runCtx, started := am.lifecycle.beginRun(ctx, AgentRunModeStandard)
+	runCtx, started, err := am.lifecycle.beginRun(ctx, AgentRunModeStandard, am.workOwner)
+	if err != nil {
+		return fmt.Errorf("admit manager run occurrence: %w", err)
+	}
 	if !started {
 		return fmt.Errorf("agent manager is already running")
 	}
@@ -727,15 +738,18 @@ func (am *AgentManager) Run(ctx context.Context) error {
 	am.authBreakerTripped = false
 	am.runMu.Unlock()
 	if err := am.startShutdownWatcher(runCtx, "manager shutdown watcher"); err != nil {
-		am.lifecycle.abortRunStart()
-		return err
+		return errors.Join(err, am.lifecycle.abortRunStart(err))
 	}
 
 	for _, agentID := range am.lifecycle.executionIDs() {
-		_, _ = am.replaceExecution(runCtx, agentID, "start", "", nil)
+		if _, err := am.replaceExecution(runCtx, agentID, "start", "", nil); err != nil {
+			transition := am.lifecycle.requestShutdownTransition()
+			grace, _ := ResolveShutdownGrace(DefaultShutdownOptions().Grace)
+			return errors.Join(err, waitForRuntimeLifecycleTransition(transition, grace, "failed agent start shutdown drain"))
+		}
 	}
 
-	retryLease, err := am.beginWork(runCtx, "manager retry loop")
+	retryLease, err := am.beginStandingWork(runCtx, "manager retry loop")
 	if err != nil {
 		transition := am.lifecycle.requestShutdownTransition()
 		grace, _ := ResolveShutdownGrace(DefaultShutdownOptions().Grace)
@@ -772,7 +786,10 @@ func (am *AgentManager) RunAuthoritativeDeliveryOnly(ctx context.Context) error 
 	if am.workOwner == nil {
 		return errors.New("agent manager requires a runtime work occurrence")
 	}
-	runCtx, started := am.lifecycle.beginRun(ctx, AgentRunModeAuthoritativeDeliveryOnly)
+	runCtx, started, err := am.lifecycle.beginRun(ctx, AgentRunModeAuthoritativeDeliveryOnly, am.workOwner)
+	if err != nil {
+		return fmt.Errorf("admit authoritative manager run occurrence: %w", err)
+	}
 	if !started {
 		return fmt.Errorf("agent manager is already running")
 	}
@@ -780,36 +797,44 @@ func (am *AgentManager) RunAuthoritativeDeliveryOnly(ctx context.Context) error 
 	am.authBreakerTripped = false
 	am.runMu.Unlock()
 	if err := am.startShutdownWatcher(runCtx, "authoritative manager shutdown watcher"); err != nil {
-		am.lifecycle.abortRunStart()
-		return err
+		return errors.Join(err, am.lifecycle.abortRunStart(err))
 	}
 
 	for _, agentID := range am.lifecycle.executionIDs() {
-		_, _ = am.replaceExecution(runCtx, agentID, "start", "", nil)
+		if _, err := am.replaceExecution(runCtx, agentID, "start", "", nil); err != nil {
+			transition := am.lifecycle.requestShutdownTransition()
+			grace, _ := ResolveShutdownGrace(DefaultShutdownOptions().Grace)
+			return errors.Join(err, waitForRuntimeLifecycleTransition(transition, grace, "failed authoritative agent start shutdown drain"))
+		}
 	}
 	return nil
 }
 
 func (am *AgentManager) startShutdownWatcher(runCtx context.Context, kind string) error {
-	watchLease, err := am.beginWork(runCtx, kind)
+	watchLease, err := am.lifecycle.takeShutdownWatcherExecutor()
 	if err != nil {
-		return err
+		return fmt.Errorf("admit %s: %w", strings.TrimSpace(kind), err)
 	}
 	go func() {
-		<-watchLease.Context().Done()
+		<-runCtx.Done()
 		transition := am.lifecycle.requestShutdownTransition()
 		if !am.lifecycle.claimTransition(transition, runtimeLifecycleTransitionShutdown) {
 			_ = watchLease.Done()
 			return
 		}
-		_, done := am.lifecycle.cancelShutdownWork()
-		for _, wait := range done {
-			<-wait
-		}
-		settleErr := watchLease.Done()
-		am.lifecycle.completeShutdownTransition(transition, settleErr)
+		am.completeClaimedShutdownTransition(transition, watchLease)
 	}()
 	return nil
+}
+
+func (am *AgentManager) completeClaimedShutdownTransition(transition *runtimeLifecycleTransition, executor *worklifetime.Lease) {
+	_, done := am.lifecycle.cancelShutdownWork()
+	for _, wait := range done {
+		<-wait
+	}
+	runSettleErr := am.lifecycle.retireRunOwner(context.Background())
+	settleErr := executor.Done()
+	am.lifecycle.completeShutdownTransition(transition, errors.Join(runSettleErr, settleErr))
 }
 
 func (am *AgentManager) Recover(ctx context.Context) error {
@@ -1332,6 +1357,13 @@ func platformResetSourceAuthorized(source string) bool {
 
 func (am *AgentManager) resetRuntimeState(source string) error {
 	shutdown, reset := am.lifecycle.requestResetTransition()
+	executor, claimed, err := am.lifecycle.claimUnwatchedTransition(shutdown, runtimeLifecycleTransitionShutdown)
+	if err != nil {
+		return err
+	}
+	if claimed {
+		go am.completeClaimedShutdownTransition(shutdown, executor)
+	}
 	if shutdown != nil {
 		grace, _ := ResolveShutdownGrace(DefaultShutdownOptions().Grace)
 		if err := waitForRuntimeLifecycleTransition(shutdown, grace, "reset shutdown drain"); err != nil {
@@ -1470,6 +1502,8 @@ type replaceExecutionResult struct {
 }
 
 func (am *AgentManager) replaceExecution(parent context.Context, agentID, trigger, operationID string, patch *runtimeactors.AgentConfig) (replaceExecutionResult, error) {
+	am.lifecycle.executionPublishMu.Lock()
+	defer am.lifecycle.executionPublishMu.Unlock()
 	cell, err := am.lifecycle.lockAgentOperation(agentID)
 	if err != nil {
 		return replaceExecutionResult{}, err
@@ -1539,75 +1573,121 @@ func (am *AgentManager) replaceExecution(parent context.Context, agentID, trigge
 		subordinate = reconfigureSessionMutationPlan(current.Config, updated)
 	}
 
-	_, _, runtimeRunning := am.lifecycle.runSnapshot()
+	runCtx, runMode, runtimeRunning := am.lifecycle.runSnapshot()
 	routeBus := am.lifecycle.routes
 	if runtimeRunning {
 		if routeBus == nil {
 			return replaceExecutionResult{}, errors.New("event bus does not support generation-owned agent routes")
 		}
 	}
-	loopCtx, token, done, err := am.lifecycle.replaceLoopLocked(parent, strings.TrimSpace(agentID), trigger, operationID, rec, subordinate, cell)
+	var loopWorkLease *worklifetime.Lease
+	var preparedRoute runtimebus.AgentRoutePreparation
+	var proposedToken runtimeeffects.LifecycleToken
+	if runtimeRunning {
+		loopWorkLease, err = am.beginStandingWork(runCtx, "agent execution loop")
+		if err != nil {
+			return replaceExecutionResult{}, err
+		}
+		proposedToken, err = am.lifecycle.prepareLoopTokenLocked(agentID, cell)
+		if err != nil {
+			_ = loopWorkLease.Done()
+			return replaceExecutionResult{}, err
+		}
+		routeAdmission := candidateAdmission
+		if runMode == AgentRunModeAuthoritativeDeliveryOnly {
+			routeAdmission = routeAdmission.CarrierOnly()
+		}
+		preparedRoute = routeBus.PrepareAgentRoute(proposedToken, routeAdmission)
+		if preparedRoute == nil {
+			_ = loopWorkLease.Done()
+			return replaceExecutionResult{}, errors.New("failed to prepare generation-owned agent route")
+		}
+	}
+	cleanupPrepared := func() error {
+		var cleanupErr error
+		if preparedRoute != nil {
+			cleanupErr = errors.Join(cleanupErr, preparedRoute.Discard())
+			preparedRoute = nil
+		}
+		if loopWorkLease != nil {
+			cleanupErr = errors.Join(cleanupErr, loopWorkLease.Done())
+			loopWorkLease = nil
+		}
+		return cleanupErr
+	}
+	loopCtx, token, done, err := am.lifecycle.replaceLoopLocked(parent, strings.TrimSpace(agentID), trigger, operationID, rec, subordinate, cell, proposedToken)
 	if err != nil {
-		return replaceExecutionResult{}, err
+		return replaceExecutionResult{}, errors.Join(err, cleanupPrepared())
 	}
 	if token == current.Token && loopCtx == nil && done == nil {
-		return replaceExecutionResult{config: current.Config}, nil
+		return replaceExecutionResult{config: current.Config}, cleanupPrepared()
+	}
+	if loopCtx != nil && token != proposedToken {
+		transitionErr := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "prepared_execution_token_mismatch", "agent-lifecycle", trigger, map[string]any{"agent_id": strings.TrimSpace(agentID)})
+		abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, strings.TrimSpace(agentID), token, done, cell)
+		return replaceExecutionResult{}, errors.Join(transitionErr, abortErr, cleanupPrepared())
 	}
 
 	am.lifecycle.mu.Lock()
 	successor := cell.execution
 	if successor == nil || successor.token != token {
 		am.lifecycle.mu.Unlock()
-		return replaceExecutionResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": strings.TrimSpace(agentID)})
+		transitionErr := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": strings.TrimSpace(agentID)})
+		abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, strings.TrimSpace(agentID), token, done, cell)
+		return replaceExecutionResult{}, errors.Join(transitionErr, abortErr, cleanupPrepared())
 	}
 	successor.agent = candidate.Agent
 	successor.config = candidate.Config
 	successor.subscriptions = append([]events.EventType(nil), candidate.Subscriptions...)
 	successor.admission = candidateAdmission
 	successor.startedAt = candidate.StartedAt
-	runMode := cell.runMode
 	am.lifecycle.mu.Unlock()
 
-	var ch <-chan *worklifetime.EventDelivery
 	if loopCtx != nil {
-		if routeBus == nil {
-			return replaceExecutionResult{}, errors.New("event bus does not support generation-owned agent routes")
+		if loopWorkLease == nil || preparedRoute == nil {
+			transitionErr := errors.New("running agent transition has no pre-admitted work and route authority")
+			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, strings.TrimSpace(agentID), token, done, cell)
+			return replaceExecutionResult{}, errors.Join(transitionErr, abortErr, cleanupPrepared())
 		}
-		routeAdmission := candidateAdmission
-		if runMode == AgentRunModeAuthoritativeDeliveryOnly {
-			routeAdmission = routeAdmission.CarrierOnly()
+		if loopWorkLease.Context().Err() != nil {
+			transitionErr := fmt.Errorf("agent execution owner retired before publication: %w", loopWorkLease.Context().Err())
+			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, strings.TrimSpace(agentID), token, done, cell)
+			return replaceExecutionResult{}, errors.Join(transitionErr, abortErr, cleanupPrepared())
 		}
-		ch = routeBus.ReplaceAgentRoute(token, routeAdmission)
-		if ch == nil {
-			return replaceExecutionResult{}, errors.New("failed to install generation-owned agent route")
+		if err := preparedRoute.Publish(); err != nil {
+			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, strings.TrimSpace(agentID), token, done, cell)
+			return replaceExecutionResult{}, errors.Join(fmt.Errorf("publish generation-owned agent route: %w", err), abortErr, cleanupPrepared())
 		}
+		if loopWorkLease.Context().Err() != nil {
+			transitionErr := fmt.Errorf("agent execution owner retired during route publication: %w", loopWorkLease.Context().Err())
+			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, strings.TrimSpace(agentID), token, done, cell)
+			return replaceExecutionResult{}, errors.Join(transitionErr, abortErr, cleanupPrepared())
+		}
+		ch := preparedRoute.Deliveries()
 		am.lifecycle.mu.Lock()
 		if cell.execution == successor && successor.token == token {
 			successor.route = ch
 			successor.routeToken = token
 		}
 		am.lifecycle.mu.Unlock()
-	}
-
-	if loopCtx != nil {
-		if err := am.launchExecutionLoop(parent, successor, loopCtx, done); err != nil {
-			return replaceExecutionResult{}, err
-		}
+		preparedRoute = nil
+		am.launchExecutionLoop(parent, successor, loopCtx, done, loopWorkLease)
+		loopWorkLease = nil
 	}
 	return replaceExecutionResult{config: candidate.Config, transitioned: true}, nil
 }
 
-func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *agentExecutionProjection, loopCtx context.Context, done chan struct{}) error {
+func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *agentExecutionProjection, loopCtx context.Context, done chan struct{}, workLease *worklifetime.Lease) {
 	agent := execution.agent
 	ch := execution.route
 	token := execution.token
 	_ = am.projectLifecycleDiagnostics(context.WithoutCancel(parent))
-	workLease, err := am.beginWork(loopCtx, "agent execution loop")
-	if err != nil {
-		return err
-	}
 	go func() {
+		executionCtx, cancelExecution := context.WithCancel(workLease.Context())
+		stopGenerationCancel := context.AfterFunc(loopCtx, cancelExecution)
 		defer func() {
+			stopGenerationCancel()
+			cancelExecution()
 			if execution.loopSettled != nil {
 				defer close(execution.loopSettled)
 			}
@@ -1643,7 +1723,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 				}()
 				for {
 					select {
-					case <-workLease.Context().Done():
+					case <-executionCtx.Done():
 						return
 					case delivery, ok := <-ch:
 						if !ok {
@@ -1655,10 +1735,15 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 							if am.shutdownAdmissionClosed() {
 								return true
 							}
+							eventWork, err := am.beginWork(delivery.Context(), "agent event processing")
+							if err != nil {
+								return true
+							}
+							defer func() { _ = eventWork.Done() }()
 							// The carrier owns this item's queue-to-completion lifetime. The
 							// receiver generation still owns execution authority and must
 							// retain its lifecycle token and effect controller.
-							deliveryOwner, ok := worklifetime.OccurrenceFromContext(delivery.Context())
+							deliveryOwner, ok := worklifetime.OccurrenceFromContext(eventWork.Context())
 							if !ok {
 								if am.bus != nil {
 									am.bus.LogRuntime(loopCtx, runtimepipeline.RuntimeLogEntry{
@@ -1672,7 +1757,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								}
 								return true
 							}
-							evtCtx := agentDeliveryExecutionContext(delivery.Context(), loopCtx, token, deliveryOwner)
+							evtCtx := agentDeliveryExecutionContext(eventWork.Context(), loopCtx, token, deliveryOwner)
 							evtCtx = runtimecorrelation.WithInboundEvent(evtCtx, evt)
 							evtCtx = runtimecorrelation.WithRunID(evtCtx, strings.TrimSpace(evt.RunID()))
 							err, evtPanicked, evtPanicText, evtStackTrace := am.safeProcessEvent(evtCtx, agent, evt)
@@ -1742,13 +1827,12 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 			}
 			wait := panicBackoff(consecutivePanics)
 			select {
-			case <-loopCtx.Done():
+			case <-executionCtx.Done():
 				return
 			case <-time.After(wait):
 			}
 		}
 	}()
-	return nil
 }
 
 func agentDeliveryExecutionContext(deliveryCtx, loopCtx context.Context, token runtimeeffects.LifecycleToken, deliveryOwner worklifetime.Occurrence) context.Context {
@@ -1767,11 +1851,24 @@ func (am *AgentManager) beginWork(ctx context.Context, kind string) (*worklifeti
 	if am == nil || am.workOwner == nil {
 		return nil, fmt.Errorf("%s requires a runtime work occurrence", strings.TrimSpace(kind))
 	}
-	owner := am.workOwner
+	var companion worklifetime.Occurrence
 	if contextualOwner, ok := worklifetime.OccurrenceFromContext(ctx); ok {
-		owner = contextualOwner
+		if contextualOwner != am.workOwner {
+			companion = contextualOwner
+		}
 	}
-	lease, err := owner.Begin(ctx)
+	lease, err := am.lifecycle.beginWork(ctx, companion)
+	if err != nil {
+		return nil, fmt.Errorf("admit %s: %w", strings.TrimSpace(kind), err)
+	}
+	return lease, nil
+}
+
+func (am *AgentManager) beginStandingWork(ctx context.Context, kind string) (*worklifetime.Lease, error) {
+	if am == nil || am.workOwner == nil {
+		return nil, fmt.Errorf("%s requires a runtime work occurrence", strings.TrimSpace(kind))
+	}
+	lease, err := am.lifecycle.beginStandingWork(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("admit %s: %w", strings.TrimSpace(kind), err)
 	}

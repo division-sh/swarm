@@ -1549,6 +1549,9 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
+	if err := rt.Manager.Shutdown(); err != nil {
+		t.Fatalf("retire constructed manager before test replacement: %v", err)
+	}
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return conformanceManagerReplayAgent{id: cfg.ID}, nil
 	}, runtimemanager.AgentManagerOptions{WorkOwner: rt.WorkOccurrence()}, managerStore)

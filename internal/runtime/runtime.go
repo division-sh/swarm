@@ -888,9 +888,13 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create runtime work occurrence: %w", err)
 	}
+	var managerRef *runtimemanager.AgentManager
 	workOccurrenceOwned := true
 	defer func() {
 		if workOccurrenceOwned {
+			if managerRef != nil {
+				_ = managerRef.ShutdownWithOptions(runtimemanager.DefaultShutdownOptions())
+			}
 			_, _ = workOccurrence.RetireAndWait(context.Background())
 		}
 	}()
@@ -927,7 +931,6 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	}
 	payloadValidator := boot.payloadValidator(rt.Logger)
 	rt.payloadValidator = payloadValidator
-	var managerRef *runtimemanager.AgentManager
 	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, source, boot.TrimmedBundleFingerprint, boot.BundleSourceFact, opts.RuntimeInstanceID, workOccurrence, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil

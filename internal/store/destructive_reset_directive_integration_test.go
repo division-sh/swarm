@@ -61,9 +61,9 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 		started: make(chan struct{}, 1),
 		release: make(chan struct{}),
 	}
-	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, func(runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
-	}, runtimemanager.AgentManagerOptions{WorkOwner: storeTestWorkOwner(t)}, pg)
+	}, runtimemanager.AgentManagerOptions{WorkOwner: storeTestWorkOwner(t)}, pg))
 	if err := manager.RegisterEphemeralAgentForExecution(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Role: "test"},
 	}); err != nil {

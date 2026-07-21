@@ -12,6 +12,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -117,6 +118,16 @@ func runtimeTestEventBusWorkOwner(t testing.TB, bus *runtimebus.EventBus) workli
 		t.Fatal("external runtime test event bus has no registered work owner")
 	}
 	return owner.(worklifetime.Occurrence)
+}
+
+func ownRuntimeTestAgentManager(t testing.TB, manager *runtimemanager.AgentManager) *runtimemanager.AgentManager {
+	t.Helper()
+	t.Cleanup(func() {
+		if err := manager.Shutdown(); err != nil {
+			t.Errorf("shutdown external runtime test manager: %v", err)
+		}
+	})
+	return manager
 }
 
 func testAuthorActivityEventDescriptors(t *testing.T, opts runtimebus.EventBusOptions) []runtimeauthoractivity.EventDescriptor {

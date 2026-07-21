@@ -118,13 +118,18 @@ func TestAgentManagerWorkUsesContextualStandingOccurrence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new standing occurrence: %v", err)
 	}
-	am := &AgentManager{workOwner: runtimeOwner}
+	am := NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{WorkOwner: runtimeOwner})
+	if _, started, err := am.lifecycle.beginRun(context.Background(), AgentRunModeStandard, runtimeOwner); err != nil || !started {
+		t.Fatalf("begin manager run: started=%v err=%v", started, err)
+	}
 	lease, err := am.beginWork(worklifetime.WithOccurrence(context.Background(), standing), "standing manager work")
 	if err != nil {
 		t.Fatalf("begin standing manager work: %v", err)
 	}
-	if owner, ok := worklifetime.OccurrenceFromContext(lease.Context()); !ok || owner != standing {
-		t.Fatalf("manager work owner = %v, %v; want standing occurrence", owner, ok)
+	if owner, ok := worklifetime.OccurrenceFromContext(lease.Context()); !ok {
+		t.Fatal("manager work context has no composed occurrence owner")
+	} else if _, ok := owner.(*worklifetime.ManagerWorkOccurrence); !ok {
+		t.Fatalf("manager work owner = %T, want ManagerWorkOccurrence", owner)
 	}
 
 	standing.Retire()
@@ -140,6 +145,9 @@ func TestAgentManagerWorkUsesContextualStandingOccurrence(t *testing.T) {
 	}
 	if err := lease.Done(); err != nil {
 		t.Fatalf("settle standing manager work: %v", err)
+	}
+	if err := am.lifecycle.abortRunStart(context.Canceled); err != nil {
+		t.Fatalf("retire manager run: %v", err)
 	}
 	if err := standing.RetireAndWait(context.Background()); err != nil {
 		t.Fatalf("retire standing occurrence: %v", err)

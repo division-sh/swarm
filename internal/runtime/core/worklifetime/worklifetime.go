@@ -27,12 +27,14 @@ const (
 // gate is the only process-local work counter. It is deliberately private:
 // callers operate through one of the fixed occurrence types below.
 type gate struct {
-	mu      sync.Mutex
-	state   gateState
-	active  uint64
-	drained chan struct{}
-	ctx     context.Context
-	cancel  context.CancelCauseFunc
+	mu               sync.Mutex
+	state            gateState
+	active           uint64
+	activeTransient  uint64
+	drained          chan struct{}
+	transientDrained chan struct{}
+	ctx              context.Context
+	cancel           context.CancelCauseFunc
 }
 
 func newGate(parent context.Context) *gate {
@@ -42,20 +44,31 @@ func newGate(parent context.Context) *gate {
 	ctx, cancel := context.WithCancelCause(parent)
 	drained := make(chan struct{})
 	close(drained)
-	return &gate{ctx: ctx, cancel: cancel, drained: drained}
+	transientDrained := make(chan struct{})
+	close(transientDrained)
+	return &gate{ctx: ctx, cancel: cancel, drained: drained, transientDrained: transientDrained}
 }
 
 type Lease struct {
-	mu      sync.Mutex
-	gate    *gate
-	ctx     context.Context
-	cancel  context.CancelCauseFunc
-	stop    func() bool
-	parent  *Lease
-	settled bool
+	mu        sync.Mutex
+	gate      *gate
+	ctx       context.Context
+	cancel    context.CancelCauseFunc
+	stop      func() bool
+	parent    *Lease
+	transient bool
+	settled   bool
 }
 
 func (g *gate) begin(parent context.Context) (*Lease, error) {
+	return g.beginClass(parent, true)
+}
+
+func (g *gate) beginStanding(parent context.Context) (*Lease, error) {
+	return g.beginClass(parent, false)
+}
+
+func (g *gate) beginClass(parent context.Context, transient bool) (*Lease, error) {
 	if g == nil {
 		return nil, errors.New("work occurrence is required")
 	}
@@ -79,10 +92,16 @@ func (g *gate) begin(parent context.Context) (*Lease, error) {
 		g.drained = make(chan struct{})
 	}
 	g.active++
+	if transient {
+		if g.activeTransient == 0 {
+			g.transientDrained = make(chan struct{})
+		}
+		g.activeTransient++
+	}
 	g.mu.Unlock()
 
 	ctx, cancel := context.WithCancelCause(parent)
-	lease := &Lease{gate: g, ctx: ctx, cancel: cancel}
+	lease := &Lease{gate: g, ctx: ctx, cancel: cancel, transient: transient}
 	lease.stop = context.AfterFunc(g.ctx, func() {
 		cancel(ErrRetired)
 	})
@@ -128,6 +147,16 @@ func (l *Lease) Done() error {
 			g.active--
 			if g.active == 0 {
 				close(g.drained)
+			}
+			if l.transient {
+				if g.activeTransient == 0 {
+					settleErr = errors.Join(settleErr, errors.New("transient work occurrence accounting underflow"))
+				} else {
+					g.activeTransient--
+					if g.activeTransient == 0 {
+						close(g.transientDrained)
+					}
+				}
 			}
 		}
 		g.mu.Unlock()
@@ -179,8 +208,8 @@ func (g *gate) reopen() error {
 	if g.state == gateRetired {
 		return ErrRetired
 	}
-	if g.active != 0 {
-		return fmt.Errorf("work occurrence still owns %d active lease(s)", g.active)
+	if g.activeTransient != 0 {
+		return fmt.Errorf("work occurrence still owns %d active finite lease(s)", g.activeTransient)
 	}
 	g.state = gateOpen
 	return nil
@@ -202,6 +231,14 @@ func (g *gate) retire() {
 }
 
 func (g *gate) wait(ctx context.Context) error {
+	return g.waitClass(ctx, false)
+}
+
+func (g *gate) waitTransient(ctx context.Context) error {
+	return g.waitClass(ctx, true)
+}
+
+func (g *gate) waitClass(ctx context.Context, transientOnly bool) error {
 	if g == nil {
 		return nil
 	}
@@ -209,21 +246,39 @@ func (g *gate) wait(ctx context.Context) error {
 		ctx = context.Background()
 	}
 	g.mu.Lock()
-	if g.active == 0 {
+	active := g.active
+	drained := g.drained
+	if transientOnly {
+		active = g.activeTransient
+		drained = g.transientDrained
+	}
+	if active == 0 {
 		g.mu.Unlock()
 		return nil
 	}
-	drained := g.drained
 	g.mu.Unlock()
 	select {
 	case <-drained:
 		return nil
 	case <-ctx.Done():
-		if active := g.activeCount(); active != 0 {
+		active := g.activeCount()
+		if transientOnly {
+			active = g.activeTransientCount()
+		}
+		if active != 0 {
 			return fmt.Errorf("wait for %d active work lease(s): %w", active, ctx.Err())
 		}
 		return nil
 	}
+}
+
+func (g *gate) activeTransientCount() uint64 {
+	if g == nil {
+		return 0
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.activeTransient
 }
 
 func (g *gate) activeCount() uint64 {
@@ -410,6 +465,207 @@ type RuntimeOccurrence struct {
 	identity   RuntimeIdentity
 }
 
+type ManagerRunIdentity struct {
+	Generation uint64
+}
+
+func (i ManagerRunIdentity) validate() error {
+	if i.Generation == 0 {
+		return errors.New("manager run occurrence requires generation")
+	}
+	return nil
+}
+
+// ManagerRunOccurrence owns every process-local operation admitted by one
+// AgentManager run. It remains distinct from the ambient runtime or standing
+// occurrence so shutdown can fence and join all Manager work through one
+// retained transition without losing the ambient owner's accounting.
+type ManagerRunOccurrence struct {
+	occurrence *ownedOccurrence
+	identity   ManagerRunIdentity
+}
+
+// ManagerWorkOccurrence is the fixed projection carried by one Manager work
+// context. Descendants admitted from that context retain both the Manager
+// generation and its exact ambient runtime child, when one exists.
+type ManagerWorkOccurrence struct {
+	manager   *ManagerRunOccurrence
+	companion Occurrence
+}
+
+func NewManagerRunOccurrence(ctx context.Context, parent Occurrence, identity ManagerRunIdentity) (*ManagerRunOccurrence, error) {
+	if parent == nil {
+		return nil, errors.New("manager run occurrence requires a parent work occurrence")
+	}
+	if err := identity.validate(); err != nil {
+		return nil, err
+	}
+	parentLease, err := parent.BeginStanding(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("admit manager run occurrence: %w", err)
+	}
+	return &ManagerRunOccurrence{
+		occurrence: newOwnedOccurrence(parentLease.Context(), parentLease),
+		identity:   identity,
+	}, nil
+}
+
+// Begin admits Manager work and optionally composes the ambient standing or
+// selected-fork owner into the same exactly-once settlement.
+func (m *ManagerRunOccurrence) Begin(ctx context.Context, companion Occurrence) (*Lease, error) {
+	return m.beginClass(ctx, companion, false)
+}
+
+// BeginStanding admits generation-long process-local work. Standing work is
+// joined by retirement but does not prevent callers from observing that all
+// finite operations admitted by the generation have completed.
+func (m *ManagerRunOccurrence) BeginStanding(ctx context.Context) (*Lease, error) {
+	return m.beginClass(ctx, nil, true)
+}
+
+func (m *ManagerRunOccurrence) beginClass(ctx context.Context, companion Occurrence, standing bool) (*Lease, error) {
+	if m == nil {
+		return nil, errors.New("manager run occurrence is required")
+	}
+	projection := &ManagerWorkOccurrence{manager: m, companion: companion}
+	if companion == nil {
+		var lease *Lease
+		var err error
+		if standing {
+			lease, err = m.occurrence.gate.beginStanding(ctx)
+		} else {
+			lease, err = m.occurrence.begin(ctx)
+		}
+		if err != nil {
+			return nil, err
+		}
+		lease.ctx = WithOccurrence(lease.Context(), projection)
+		return lease, nil
+	}
+	var companionLease *Lease
+	var err error
+	if standing {
+		companionLease, err = companion.BeginStanding(ctx)
+	} else {
+		companionLease, err = companion.Begin(ctx)
+	}
+	if err != nil {
+		return nil, err
+	}
+	var lease *Lease
+	if standing {
+		lease, err = m.occurrence.gate.beginStanding(companionLease.Context())
+	} else {
+		lease, err = m.occurrence.begin(companionLease.Context())
+	}
+	if err != nil {
+		_ = companionLease.Done()
+		return nil, err
+	}
+	lease.parent = companionLease
+	lease.ctx = WithOccurrence(lease.Context(), projection)
+	return lease, nil
+}
+
+func (m *ManagerWorkOccurrence) Begin(ctx context.Context) (*Lease, error) {
+	if m == nil || m.manager == nil {
+		return nil, errors.New("manager work occurrence is required")
+	}
+	return m.manager.Begin(ctx, m.companion)
+}
+
+func (m *ManagerWorkOccurrence) BeginStanding(ctx context.Context) (*Lease, error) {
+	if m == nil || m.manager == nil {
+		return nil, errors.New("manager work occurrence is required")
+	}
+	return m.manager.beginClass(ctx, m.companion, true)
+}
+
+func (m *ManagerWorkOccurrence) Wait(ctx context.Context) error {
+	if m == nil || m.manager == nil {
+		return nil
+	}
+	if err := m.manager.occurrence.wait(ctx); err != nil {
+		return err
+	}
+	if m.companion != nil {
+		return m.companion.Wait(ctx)
+	}
+	return nil
+}
+
+func (m *ManagerWorkOccurrence) WaitForQuiescence(ctx context.Context) error {
+	if m == nil || m.manager == nil {
+		return nil
+	}
+	if err := m.manager.WaitForQuiescence(ctx); err != nil {
+		return err
+	}
+	if m.companion != nil {
+		return m.companion.WaitForQuiescence(ctx)
+	}
+	return nil
+}
+
+func (m *ManagerWorkOccurrence) NewRoute(ctx context.Context, identity RouteIdentity) (*RouteOccurrence, error) {
+	if m == nil || m.manager == nil {
+		return nil, errors.New("manager work occurrence is required")
+	}
+	if err := identity.validate(); err != nil {
+		return nil, err
+	}
+	probe, err := m.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("admit manager route occurrence: %w", err)
+	}
+	if err := probe.Done(); err != nil {
+		return nil, err
+	}
+	identity.AgentID = strings.TrimSpace(identity.AgentID)
+	return &RouteOccurrence{occurrence: m.manager.occurrence.newChild(nil), identity: identity, owner: m}, nil
+}
+
+func (m *ManagerRunOccurrence) Fence() error {
+	if m == nil {
+		return errors.New("manager run occurrence is required")
+	}
+	return m.occurrence.fence()
+}
+
+func (m *ManagerRunOccurrence) Retire() {
+	if m != nil {
+		m.occurrence.retire()
+	}
+}
+
+func (m *ManagerRunOccurrence) Wait(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	return m.occurrence.wait(ctx)
+}
+
+func (m *ManagerRunOccurrence) WaitForQuiescence(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	return m.occurrence.gate.waitTransient(ctx)
+}
+
+func (m *ManagerRunOccurrence) RetireAndWait(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	return m.occurrence.finish(ctx)
+}
+
+func (m *ManagerRunOccurrence) Identity() ManagerRunIdentity {
+	if m == nil {
+		return ManagerRunIdentity{}
+	}
+	return m.identity
+}
+
 type occurrenceContextKey struct{}
 
 func WithOccurrence(ctx context.Context, occurrence Occurrence) context.Context {
@@ -470,6 +726,13 @@ func (r *RuntimeOccurrence) Begin(ctx context.Context) (*Lease, error) {
 	return r.occurrence.begin(WithOccurrence(ctx, r))
 }
 
+func (r *RuntimeOccurrence) BeginStanding(ctx context.Context) (*Lease, error) {
+	if r == nil {
+		return nil, errors.New("runtime occurrence is required")
+	}
+	return r.occurrence.gate.beginStanding(WithOccurrence(ctx, r))
+}
+
 func (r *RuntimeOccurrence) Fence() error {
 	if r == nil {
 		return errors.New("runtime occurrence is required")
@@ -495,6 +758,13 @@ func (r *RuntimeOccurrence) Wait(ctx context.Context) error {
 		return nil
 	}
 	return r.occurrence.wait(ctx)
+}
+
+func (r *RuntimeOccurrence) WaitForQuiescence(ctx context.Context) error {
+	if r == nil {
+		return nil
+	}
+	return r.occurrence.gate.waitTransient(ctx)
 }
 
 func (r *RuntimeOccurrence) RetireAndWait(ctx context.Context) (*RuntimeRetirementReceipt, error) {
@@ -546,7 +816,7 @@ func (r *RuntimeOccurrence) NewStanding(ctx context.Context, identity StandingId
 	if err := identity.validate(); err != nil {
 		return nil, err
 	}
-	parentLease, err := r.Begin(ctx)
+	parentLease, err := r.BeginStanding(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("admit standing occurrence: %w", err)
 	}
@@ -560,6 +830,13 @@ func (s *StandingOccurrence) Begin(ctx context.Context) (*Lease, error) {
 		return nil, errors.New("standing occurrence is required")
 	}
 	return s.occurrence.begin(WithOccurrence(ctx, s))
+}
+
+func (s *StandingOccurrence) BeginStanding(ctx context.Context) (*Lease, error) {
+	if s == nil {
+		return nil, errors.New("standing occurrence is required")
+	}
+	return s.occurrence.gate.beginStanding(WithOccurrence(ctx, s))
 }
 
 func (s *StandingOccurrence) Fence() error {
@@ -581,6 +858,13 @@ func (s *StandingOccurrence) Wait(ctx context.Context) error {
 		return nil
 	}
 	return s.occurrence.wait(ctx)
+}
+
+func (s *StandingOccurrence) WaitForQuiescence(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	return s.occurrence.gate.waitTransient(ctx)
 }
 
 func (s *StandingOccurrence) Retire() {
@@ -706,7 +990,7 @@ func (r *RuntimeOccurrence) NewSelectedFork(ctx context.Context, identity Select
 	if err := identity.validate(); err != nil {
 		return nil, err
 	}
-	parentLease, err := r.Begin(ctx)
+	parentLease, err := r.BeginStanding(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("admit selected-fork occurrence: %w", err)
 	}
@@ -738,6 +1022,13 @@ func (s *SelectedForkOccurrence) Begin(ctx context.Context) (*Lease, error) {
 	return s.occurrence.begin(WithOccurrence(ctx, s))
 }
 
+func (s *SelectedForkOccurrence) BeginStanding(ctx context.Context) (*Lease, error) {
+	if s == nil {
+		return nil, errors.New("selected-fork occurrence is required")
+	}
+	return s.occurrence.gate.beginStanding(WithOccurrence(ctx, s))
+}
+
 func (s *SelectedForkOccurrence) RetireAndWait(ctx context.Context) error {
 	if s == nil {
 		return nil
@@ -759,6 +1050,13 @@ func (s *SelectedForkOccurrence) Wait(ctx context.Context) error {
 	return s.occurrence.wait(ctx)
 }
 
+func (s *SelectedForkOccurrence) WaitForQuiescence(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	return s.occurrence.gate.waitTransient(ctx)
+}
+
 func (s *SelectedForkOccurrence) NewRoute(ctx context.Context, identity RouteIdentity) (*RouteOccurrence, error) {
 	if s == nil {
 		return nil, errors.New("selected-fork occurrence is required")
@@ -766,7 +1064,7 @@ func (s *SelectedForkOccurrence) NewRoute(ctx context.Context, identity RouteIde
 	if err := identity.validate(); err != nil {
 		return nil, err
 	}
-	parentLease, err := s.Begin(ctx)
+	parentLease, err := s.BeginStanding(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("admit selected-fork route occurrence: %w", err)
 	}

@@ -5,9 +5,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 func TestValidateRuntimeContextSetWithAdmissionDoesNotActivateStandingOccurrences(t *testing.T) {
@@ -186,6 +189,176 @@ func TestRuntimeContextManagerAdmissionReplacementPublishesExactExecutableCandid
 				}
 			}
 		})
+	}
+}
+
+func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *testing.T) {
+	for _, changedHash := range []bool{false, true} {
+		name := "same_hash"
+		if changedHash {
+			name = "changed_hash"
+		}
+		t.Run(name, func(t *testing.T) {
+			catalog := runtimeAdmissionTestCatalog(t, "a")
+			predecessor := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+			predecessor.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(predecessor.WorkOwner)
+			manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), predecessor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			serviceID := predecessor.StandingTargets[0].ServiceID
+			standing := manager.contexts[runtimeContextTestHashA].standing[serviceID]
+			ownerCtx := worklifetime.WithOccurrence(context.Background(), standing)
+			for _, schedule := range []runtimepipeline.Schedule{
+				{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "future-once"},
+				{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "recurring-cron"},
+			} {
+				if err := predecessor.Runtime.Scheduler.Register(ownerCtx, schedule); err != nil {
+					t.Fatalf("register %s schedule: %v", schedule.Mode, err)
+				}
+			}
+
+			candidateHash := runtimeContextTestHashA
+			if changedHash {
+				candidateHash = "bundle-v1:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+			}
+			candidate := runtimeAdmissionTestContext(t, candidateHash, "primary", catalog)
+			candidate.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(candidate.WorkOwner)
+			if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, candidate); err != nil {
+				t.Fatalf("begin replacement with parked schedules: %v", err)
+			}
+			prepared, err := manager.PrepareBundleHashReplacementPublicationWithAdmission(
+				runtimeContextTestHashA, candidate, nil, runtimeAdmissionTestState(t, catalog),
+			)
+			if err != nil {
+				t.Fatalf("prepare replacement publication: %v", err)
+			}
+			if err := prepared.Publish(); err != nil {
+				t.Fatalf("publish replacement: %v", err)
+			}
+			freshStanding := manager.contexts[candidateHash].standing[serviceID]
+			parked, err := candidate.Runtime.Scheduler.ParkOccurrence(context.Background(), freshStanding)
+			if err != nil {
+				t.Fatalf("inspect rehydrated schedules: %v", err)
+			}
+			if len(parked) != 2 {
+				t.Fatalf("rehydrated schedules = %#v, want future one-shot and recurring cron", parked)
+			}
+			modes := map[string]bool{}
+			for _, schedule := range parked {
+				modes[schedule.Mode] = true
+			}
+			if !modes["once"] || !modes["cron"] {
+				t.Fatalf("rehydrated schedule modes = %#v, want once and cron", modes)
+			}
+		})
+	}
+}
+
+func TestStandingServiceTransitionRollbackRestoresExactOwnerSchedulesBeforeAdmission(t *testing.T) {
+	catalog := runtimeAdmissionTestCatalog(t, "a")
+	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	contextDef.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(contextDef.WorkOwner)
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), contextDef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serviceID := contextDef.StandingTargets[0].ServiceID
+	standing := manager.contexts[runtimeContextTestHashA].standing[serviceID]
+	ownerCtx := worklifetime.WithOccurrence(context.Background(), standing)
+	for _, schedule := range []runtimepipeline.Schedule{
+		{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "future-once"},
+		{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "recurring-cron"},
+	} {
+		if err := contextDef.Runtime.Scheduler.Register(ownerCtx, schedule); err != nil {
+			t.Fatalf("register %s schedule: %v", schedule.Mode, err)
+		}
+	}
+
+	transition, err := manager.BeginStandingServiceTransition(context.Background(), serviceID)
+	if err != nil {
+		t.Fatalf("begin standing transition: %v", err)
+	}
+	if err := transition.Wait(context.Background()); err != nil {
+		t.Fatalf("drain standing transition: %v", err)
+	}
+	if err := transition.Restore(context.Background()); err != nil {
+		t.Fatalf("restore standing transition: %v", err)
+	}
+	lease, err := standing.Begin(context.Background())
+	if err != nil {
+		t.Fatalf("standing admission after rollback: %v", err)
+	}
+	lease.Done()
+	parked, err := contextDef.Runtime.Scheduler.ParkOccurrence(context.Background(), standing)
+	if err != nil {
+		t.Fatalf("inspect restored schedules: %v", err)
+	}
+	if len(parked) != 2 {
+		t.Fatalf("restored schedules = %#v, want future one-shot and recurring cron", parked)
+	}
+	modes := map[string]bool{}
+	for _, schedule := range parked {
+		modes[schedule.Mode] = true
+	}
+	if !modes["once"] || !modes["cron"] {
+		t.Fatalf("restored schedule modes = %#v, want once and cron", modes)
+	}
+}
+
+func TestPreparedStandingSuccessorOwnsSchedulesBeforePublication(t *testing.T) {
+	catalog := runtimeAdmissionTestCatalog(t, "a")
+	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	contextDef.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(contextDef.WorkOwner)
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), contextDef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serviceID := contextDef.StandingTargets[0].ServiceID
+	predecessor := manager.contexts[runtimeContextTestHashA].standing[serviceID]
+	transition, err := manager.BeginStandingServiceTransition(context.Background(), serviceID)
+	if err != nil {
+		t.Fatalf("begin standing reset transition: %v", err)
+	}
+	if err := transition.Wait(context.Background()); err != nil {
+		t.Fatalf("drain standing reset transition: %v", err)
+	}
+	if err := transition.Retire(context.Background()); err != nil {
+		t.Fatalf("retire standing reset predecessor: %v", err)
+	}
+
+	const successorRunID = "run-successor"
+	successorGeneration := contextDef.StandingTargets[0].Generation + 1
+	prepared, err := manager.PrepareStandingServicePublication(serviceID, successorRunID, successorGeneration)
+	if err != nil {
+		t.Fatalf("prepare standing successor: %v", err)
+	}
+	for _, schedule := range []runtimepipeline.Schedule{
+		{RunID: successorRunID, AgentID: "timer-agent", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "future-once"},
+		{RunID: successorRunID, AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "recurring-cron"},
+	} {
+		if err := contextDef.Runtime.Scheduler.Register(prepared.WorkContext(context.Background()), schedule); err != nil {
+			t.Fatalf("register prepared %s schedule: %v", schedule.Mode, err)
+		}
+	}
+	successorTargets := append([]StandingTarget(nil), contextDef.StandingTargets...)
+	for i := range successorTargets {
+		successorTargets[i].RunID = successorRunID
+		successorTargets[i].Generation = successorGeneration
+	}
+	if err := prepared.Publish(successorTargets); err != nil {
+		t.Fatalf("publish standing successor: %v", err)
+	}
+	successor := manager.contexts[runtimeContextTestHashA].standing[serviceID]
+	if successor == nil || successor == predecessor {
+		t.Fatal("prepared standing publication did not install a fresh occurrence")
+	}
+	parked, err := contextDef.Runtime.Scheduler.ParkOccurrence(context.Background(), successor)
+	if err != nil {
+		t.Fatalf("inspect prepared successor schedules: %v", err)
+	}
+	if len(parked) != 2 {
+		t.Fatalf("prepared successor schedules = %#v, want future one-shot and recurring cron", parked)
 	}
 }
 

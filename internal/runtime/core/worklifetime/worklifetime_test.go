@@ -33,6 +33,9 @@ func TestRuntimeOccurrenceFenceRetireAndProcessJoin(t *testing.T) {
 	if err := runtime.Wait(waitCtx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("wait with active lease = %v, want deadline", err)
 	}
+	if err := runtime.Reopen(); err == nil {
+		t.Fatal("reopen with active finite work succeeded")
+	}
 	if err := lease.Done(); err != nil {
 		t.Fatalf("settle lease: %v", err)
 	}
@@ -78,6 +81,65 @@ func TestLeaseSettlesExactlyOnce(t *testing.T) {
 	}
 	if err := lease.Done(); !errors.Is(err, ErrAlreadySettled) {
 		t.Fatalf("second Done = %v, want ErrAlreadySettled", err)
+	}
+}
+
+func TestManagerRunQuiescenceExcludesStandingWorkButRetirementJoinsIt(t *testing.T) {
+	process := NewProcess()
+	runtimeOwner, err := process.NewRuntime(context.Background(), RuntimeIdentity{RuntimeInstanceID: "runtime-1", BundleHash: "bundle-1"})
+	if err != nil {
+		t.Fatalf("new runtime occurrence: %v", err)
+	}
+	manager, err := NewManagerRunOccurrence(context.Background(), runtimeOwner, ManagerRunIdentity{Generation: 1})
+	if err != nil {
+		t.Fatalf("new manager run occurrence: %v", err)
+	}
+	standing, err := manager.BeginStanding(context.Background())
+	if err != nil {
+		t.Fatalf("begin standing work: %v", err)
+	}
+	transient, err := manager.Begin(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("begin transient work: %v", err)
+	}
+	if err := runtimeOwner.Fence(); err != nil {
+		t.Fatalf("fence runtime with standing manager generation: %v", err)
+	}
+	if err := runtimeOwner.Reopen(); err != nil {
+		t.Fatalf("reopen runtime with only standing child ownership: %v", err)
+	}
+
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancelWait()
+	if err := manager.WaitForQuiescence(waitCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("quiescence with transient work = %v, want deadline", err)
+	}
+	if err := transient.Done(); err != nil {
+		t.Fatalf("settle transient work: %v", err)
+	}
+	if err := manager.WaitForQuiescence(context.Background()); err != nil {
+		t.Fatalf("quiescence with only standing work: %v", err)
+	}
+
+	retired := make(chan error, 1)
+	go func() { retired <- manager.RetireAndWait(context.Background()) }()
+	select {
+	case err := <-retired:
+		t.Fatalf("retirement completed before standing work settled: %v", err)
+	case <-time.After(10 * time.Millisecond):
+	}
+	if err := standing.Done(); err != nil {
+		t.Fatalf("settle standing work: %v", err)
+	}
+	if err := <-retired; err != nil {
+		t.Fatalf("retire manager run occurrence: %v", err)
+	}
+	if _, err := runtimeOwner.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire runtime occurrence: %v", err)
+	}
+	process.Retire()
+	if _, err := process.Join(context.Background()); err != nil {
+		t.Fatalf("join process: %v", err)
 	}
 }
 

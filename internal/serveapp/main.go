@@ -1384,18 +1384,16 @@ func (c *serveStandingServiceController) SuspendStandingService(ctx context.Cont
 	defer func() { _ = use.Done() }()
 	ctx = use.WorkContext()
 	owner := use.Runtime()
-	owner, err = c.closeAndDrain(ctx, operation.ServiceID, owner)
+	owner, transition, err := c.closeAndDrain(ctx, operation.ServiceID, owner)
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
 	result, err := c.store.SuspendStandingService(ctx, operation)
 	if err != nil {
-		return runtimepipeline.StandingServiceReconciliation{}, errors.Join(err, c.restoreAdmission(owner, operation.ServiceID))
+		return runtimepipeline.StandingServiceReconciliation{}, errors.Join(err, c.restoreAdmission(owner, operation.ServiceID, transition))
 	}
-	if c.manager != nil {
-		if err := c.manager.RetireStandingServiceOccurrence(ctx, operation.ServiceID); err != nil {
-			return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("retire suspended standing service occurrence: %w", err)
-		}
+	if err := transition.Retire(ctx); err != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("retire suspended standing service occurrence: %w", err)
 	}
 	return result, nil
 }
@@ -1417,7 +1415,7 @@ func (c *serveStandingServiceController) ResumeStandingService(ctx context.Conte
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
-	if err := c.publishActiveService(ctx, result.ServiceID, owner); err != nil {
+	if err := c.publishActiveService(ctx, result, owner); err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
 	if owner.InboundGateway != nil {
@@ -1441,21 +1439,19 @@ func (c *serveStandingServiceController) ResetStandingService(ctx context.Contex
 	defer func() { _ = use.Done() }()
 	ctx = use.WorkContext()
 	owner := use.Runtime()
-	owner, err = c.closeAndDrain(ctx, operation.ServiceID, owner)
+	owner, transition, err := c.closeAndDrain(ctx, operation.ServiceID, owner)
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
 	result, err := c.store.ResetStandingService(ctx, operation)
 	if err != nil {
-		return runtimepipeline.StandingServiceReconciliation{}, errors.Join(err, c.restoreAdmission(owner, operation.ServiceID))
+		return runtimepipeline.StandingServiceReconciliation{}, errors.Join(err, c.restoreAdmission(owner, operation.ServiceID, transition))
 	}
-	if c.manager != nil {
-		if err := c.manager.RetireStandingServiceOccurrence(ctx, operation.ServiceID); err != nil {
-			return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("retire reset standing service occurrence: %w", err)
-		}
+	if err := transition.Retire(ctx); err != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("retire reset standing service occurrence: %w", err)
 	}
 	if result.EffectiveState == "active" {
-		if err := c.publishActiveService(ctx, result.ServiceID, owner); err != nil {
+		if err := c.publishActiveService(ctx, result, owner); err != nil {
 			return runtimepipeline.StandingServiceReconciliation{}, err
 		}
 		if owner.InboundGateway != nil {
@@ -1467,36 +1463,36 @@ func (c *serveStandingServiceController) ResetStandingService(ctx context.Contex
 	return result, nil
 }
 
-func (c *serveStandingServiceController) closeAndDrain(ctx context.Context, serviceID string, owner *runtime.Runtime) (*runtime.Runtime, error) {
+func (c *serveStandingServiceController) closeAndDrain(ctx context.Context, serviceID string, owner *runtime.Runtime) (*runtime.Runtime, *runtime.StandingServiceTransition, error) {
 	if owner == nil {
-		return nil, fmt.Errorf("standing service %s runtime owner is unavailable", strings.TrimSpace(serviceID))
+		return nil, nil, fmt.Errorf("standing service %s runtime owner is unavailable", strings.TrimSpace(serviceID))
 	}
 	if owner.InboundGateway != nil {
 		if err := owner.InboundGateway.CloseStandingServiceAdmission(serviceID); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	if c.manager != nil {
-		if err := c.manager.SuppressStandingServiceTargets(serviceID); err != nil {
-			return nil, errors.Join(err, c.restoreAdmission(owner, serviceID))
-		}
+	if c.manager == nil {
+		return nil, nil, errors.Join(errors.New("standing service runtime context manager is required"), c.restoreAdmission(owner, serviceID, nil))
+	}
+	transition, err := c.manager.BeginStandingServiceTransition(ctx, serviceID)
+	if err != nil {
+		return nil, nil, errors.Join(err, c.restoreAdmission(owner, serviceID, nil))
 	}
 	if owner.InboundGateway != nil {
 		if err := owner.InboundGateway.WaitForStandingServiceAdmission(ctx, serviceID); err != nil {
-			return nil, errors.Join(err, c.restoreAdmission(owner, serviceID))
+			return nil, nil, errors.Join(err, c.restoreAdmission(owner, serviceID, transition))
 		}
 	}
-	if c.manager != nil {
-		if err := c.manager.WaitStandingServiceOccurrence(ctx, serviceID); err != nil {
-			return nil, errors.Join(err, c.restoreAdmission(owner, serviceID))
-		}
+	if err := transition.Wait(ctx); err != nil {
+		return nil, nil, errors.Join(err, c.restoreAdmission(owner, serviceID, transition))
 	}
-	return owner, nil
+	return owner, transition, nil
 }
 
-func (c *serveStandingServiceController) restoreAdmission(owner *runtime.Runtime, serviceID string) error {
-	if c.manager != nil {
-		if err := c.manager.RestoreStandingServiceTargets(serviceID); err != nil {
+func (c *serveStandingServiceController) restoreAdmission(owner *runtime.Runtime, serviceID string, transition *runtime.StandingServiceTransition) error {
+	if transition != nil {
+		if err := transition.Restore(context.Background()); err != nil {
 			return fmt.Errorf("restore standing service %s process targets: %w", serviceID, err)
 		}
 	}
@@ -1519,18 +1515,26 @@ func (c *serveStandingServiceController) failClosedAfterReopen(serviceID string,
 	return reopenErr
 }
 
-func (c *serveStandingServiceController) publishActiveService(ctx context.Context, serviceID string, owner *runtime.Runtime) error {
+func (c *serveStandingServiceController) publishActiveService(ctx context.Context, result runtimepipeline.StandingServiceReconciliation, owner *runtime.Runtime) error {
+	serviceID := strings.TrimSpace(result.ServiceID)
 	if owner == nil {
-		return fmt.Errorf("standing service %s runtime owner is unavailable", strings.TrimSpace(serviceID))
-	}
-	targets, _, err := owner.EnsureStandingServiceTargets(ctx, serviceID)
-	if err != nil {
-		return err
+		return fmt.Errorf("standing service %s runtime owner is unavailable", serviceID)
 	}
 	if c.manager == nil {
 		return errors.New("standing service runtime context manager is required")
 	}
-	return c.manager.PublishStandingServiceTargets(serviceID, targets)
+	prepared, err := c.manager.PrepareStandingServicePublication(serviceID, result.RunID, result.Generation)
+	if err != nil {
+		return err
+	}
+	targets, _, err := owner.EnsureStandingServiceTargets(prepared.WorkContext(ctx), serviceID)
+	if err != nil {
+		return errors.Join(err, prepared.Discard())
+	}
+	if err := prepared.Publish(targets); err != nil {
+		return errors.Join(err, prepared.Discard())
+	}
+	return nil
 }
 
 func reportServeStandingReadiness(ctx context.Context, owner *runtimepipeline.WorkflowInstanceStore, out io.Writer) error {

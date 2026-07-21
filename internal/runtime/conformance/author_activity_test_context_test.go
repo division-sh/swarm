@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -64,6 +65,16 @@ func conformanceTestRuntimeOccurrence(t testing.TB, bundleHash string) *worklife
 		}
 	})
 	return owner
+}
+
+func ownConformanceTestAgentManager(t testing.TB, manager *runtimemanager.AgentManager) *runtimemanager.AgentManager {
+	t.Helper()
+	t.Cleanup(func() {
+		if err := manager.Shutdown(); err != nil {
+			t.Errorf("shutdown conformance test manager: %v", err)
+		}
+	})
+	return manager
 }
 
 func testAuthorActivityContext(ctx context.Context) context.Context {

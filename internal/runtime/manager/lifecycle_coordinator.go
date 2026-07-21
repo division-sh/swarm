@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -40,10 +41,11 @@ const (
 )
 
 type runtimeLifecycleTransition struct {
-	kind    runtimeLifecycleTransitionKind
-	done    chan struct{}
-	claimed bool
-	result  error
+	kind     runtimeLifecycleTransitionKind
+	done     chan struct{}
+	claimed  bool
+	complete bool
+	result   error
 }
 
 func newRuntimeLifecycleTransition(kind runtimeLifecycleTransitionKind) *runtimeLifecycleTransition {
@@ -80,7 +82,7 @@ type agentExecutionProjection struct {
 }
 
 type agentRouteBus interface {
-	ReplaceAgentRoute(runtimeeffects.LifecycleToken, semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan *worklifetime.EventDelivery
+	PrepareAgentRoute(runtimeeffects.LifecycleToken, semanticview.FlowOwnedAgentSubscriptionAdmission) runtimebus.AgentRoutePreparation
 	RemoveAgentRoute(runtimeeffects.LifecycleToken)
 }
 
@@ -109,19 +111,28 @@ func (l *agentExecutionLease) Release() {
 }
 
 type agentLifecycleCoordinator struct {
-	mu           sync.Mutex
-	store        AgentLifecyclePersistence
-	sessions     runtimesessions.LifecycleProjection
-	phase        runtimeLifecyclePhase
-	runMode      AgentRunMode
-	runCtx       context.Context
-	baseContext  context.Context
-	cancelRun    context.CancelFunc
-	transition   *runtimeLifecycleTransition
-	pendingReset *runtimeLifecycleTransition
-	retryDone    <-chan struct{}
-	cells        map[string]*agentLifecycleCell
-	routes       agentRouteBus
+	mu                 sync.Mutex
+	workMu             sync.Mutex
+	executionPublishMu sync.Mutex
+	store              AgentLifecyclePersistence
+	sessions           runtimesessions.LifecycleProjection
+	phase              runtimeLifecyclePhase
+	runMode            AgentRunMode
+	runCtx             context.Context
+	baseContext        context.Context
+	cancelRun          context.CancelFunc
+	runParentContext   context.Context
+	runParent          worklifetime.Occurrence
+	runOwner           *worklifetime.ManagerRunOccurrence
+	transitionExecutor *worklifetime.Lease
+	runGeneration      uint64
+	workRetiring       bool
+	watcherExpected    bool
+	transition         *runtimeLifecycleTransition
+	pendingReset       *runtimeLifecycleTransition
+	retryDone          <-chan struct{}
+	cells              map[string]*agentLifecycleCell
+	routes             agentRouteBus
 }
 
 func (c *agentLifecycleCoordinator) context() context.Context {
@@ -148,6 +159,66 @@ func (c *agentLifecycleCoordinator) bindRoutes(bus Bus) {
 	}
 	routes, _ := bus.(agentRouteBus)
 	c.routes = routes
+}
+
+func (c *agentLifecycleCoordinator) prepareRunOwner(parent context.Context, owner worklifetime.Occurrence) error {
+	if c == nil {
+		return errors.New("agent lifecycle coordinator is required")
+	}
+	c.workMu.Lock()
+	defer c.workMu.Unlock()
+	if c.runParent != nil {
+		return nil
+	}
+	if owner == nil {
+		return errors.New("manager run occurrence requires a runtime work occurrence")
+	}
+	c.runParentContext = parent
+	c.runParent = owner
+	return nil
+}
+
+func (c *agentLifecycleCoordinator) ensureRunAuthoritiesLocked(parent context.Context, owner worklifetime.Occurrence) error {
+	if c.workRetiring {
+		return errRuntimeShuttingDown
+	}
+	if c.runOwner != nil {
+		return nil
+	}
+	if owner == nil {
+		owner = c.runParent
+	}
+	if parent == nil {
+		parent = c.runParentContext
+	}
+	runGeneration := c.runGeneration + 1
+	runOwner, transitionExecutor, err := prepareManagerRunAuthorities(parent, owner, runGeneration)
+	if err != nil {
+		return err
+	}
+	c.runOwner = runOwner
+	c.transitionExecutor = transitionExecutor
+	c.runGeneration = runGeneration
+	return nil
+}
+
+func prepareManagerRunAuthorities(parent context.Context, owner worklifetime.Occurrence, generation uint64) (*worklifetime.ManagerRunOccurrence, *worklifetime.Lease, error) {
+	if owner == nil {
+		return nil, nil, errors.New("manager run occurrence requires a runtime work occurrence")
+	}
+	if parent == nil {
+		parent = context.Background()
+	}
+	root := runtimebus.WithRuntimeEpoch(context.WithoutCancel(parent), runtimebus.CurrentRuntimeEpoch())
+	transitionExecutor, err := owner.BeginStanding(root)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reserve manager transition executor: %w", err)
+	}
+	runOwner, err := worklifetime.NewManagerRunOccurrence(root, owner, worklifetime.ManagerRunIdentity{Generation: generation})
+	if err != nil {
+		return nil, nil, errors.Join(err, transitionExecutor.Done())
+	}
+	return runOwner, transitionExecutor, nil
 }
 
 func lifecycleConfigRevision(rec PersistedAgent) (string, error) {
@@ -316,20 +387,30 @@ func (c *agentLifecycleCoordinator) unregisterLocal(agentID string) {
 	c.mu.Unlock()
 }
 
-func (c *agentLifecycleCoordinator) beginRun(parent context.Context, mode AgentRunMode) (context.Context, bool) {
+func (c *agentLifecycleCoordinator) beginRun(parent context.Context, mode AgentRunMode, owner worklifetime.Occurrence) (context.Context, bool, error) {
+	c.executionPublishMu.Lock()
+	defer c.executionPublishMu.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.phase != runtimeLifecycleStopped {
-		return c.runCtx, false
+		return c.runCtx, false, nil
 	}
+	c.workMu.Lock()
+	if err := c.ensureRunAuthoritiesLocked(parent, owner); err != nil {
+		c.workMu.Unlock()
+		return nil, false, err
+	}
+	c.workMu.Unlock()
 	root := runtimebus.WithRuntimeEpoch(parent, runtimebus.CurrentRuntimeEpoch())
-	c.runCtx, c.cancelRun = context.WithCancel(root)
+	runCtx, cancelRun := context.WithCancel(root)
+	c.runCtx, c.cancelRun = runCtx, cancelRun
 	c.phase = runtimeLifecycleRunning
 	c.runMode = mode
 	c.transition = nil
 	c.pendingReset = nil
 	c.retryDone = nil
-	return c.runCtx, true
+	c.watcherExpected = true
+	return c.runCtx, true, nil
 }
 
 func (c *agentLifecycleCoordinator) runSnapshot() (context.Context, AgentRunMode, bool) {
@@ -344,19 +425,159 @@ func (c *agentLifecycleCoordinator) phaseSnapshot() runtimeLifecyclePhase {
 	return c.phase
 }
 
-func (c *agentLifecycleCoordinator) abortRunStart() {
+func (c *agentLifecycleCoordinator) abortRunStart(startErr error) error {
 	c.mu.Lock()
 	if c.cancelRun != nil {
 		c.cancelRun()
+	}
+	c.workMu.Lock()
+	runOwner := c.runOwner
+	transitionExecutor := c.transitionExecutor
+	c.runOwner = nil
+	c.transitionExecutor = nil
+	c.workRetiring = true
+	c.workMu.Unlock()
+	transitions := []*runtimeLifecycleTransition{c.transition, c.pendingReset}
+	for _, transition := range transitions {
+		if transition == nil || transition.complete {
+			continue
+		}
+		transition.claimed = true
 	}
 	c.phase = runtimeLifecycleStopped
 	c.runMode = AgentRunModeStopped
 	c.runCtx = nil
 	c.cancelRun = nil
+	c.watcherExpected = false
 	c.transition = nil
 	c.pendingReset = nil
 	c.retryDone = nil
 	c.mu.Unlock()
+	var settleErr error
+	if transitionExecutor != nil {
+		settleErr = transitionExecutor.Done()
+	}
+	if runOwner != nil {
+		if err := runOwner.RetireAndWait(context.Background()); err != nil {
+			settleErr = errors.Join(settleErr, fmt.Errorf("retire aborted manager run occurrence: %w", err))
+		}
+	}
+	transitionResult := errors.Join(startErr, settleErr)
+	for _, transition := range transitions {
+		if transition == nil || transition.complete {
+			continue
+		}
+		transition.result = transitionResult
+		transition.complete = true
+		close(transition.done)
+	}
+	c.workMu.Lock()
+	c.workRetiring = false
+	c.workMu.Unlock()
+	return settleErr
+}
+
+func (c *agentLifecycleCoordinator) takeShutdownWatcherExecutor() (*worklifetime.Lease, error) {
+	if c == nil {
+		return nil, errors.New("agent lifecycle coordinator is required")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.watcherExpected || c.phase != runtimeLifecycleRunning {
+		return nil, errors.New("manager shutdown watcher is not expected")
+	}
+	c.workMu.Lock()
+	defer c.workMu.Unlock()
+	if c.transitionExecutor == nil {
+		return nil, errors.New("manager shutdown watcher has no reserved transition executor")
+	}
+	executor := c.transitionExecutor
+	c.transitionExecutor = nil
+	return executor, nil
+}
+
+func (c *agentLifecycleCoordinator) claimUnwatchedTransition(transition *runtimeLifecycleTransition, kind runtimeLifecycleTransitionKind) (*worklifetime.Lease, bool, error) {
+	if c == nil || transition == nil {
+		return nil, false, nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.watcherExpected {
+		return nil, false, nil
+	}
+	if c.transition != transition || transition.kind != kind || transition.claimed || transition.complete {
+		return nil, false, nil
+	}
+	c.workMu.Lock()
+	defer c.workMu.Unlock()
+	if c.transitionExecutor == nil {
+		return nil, false, errors.New("manager transition has no reserved executor")
+	}
+	transition.claimed = true
+	executor := c.transitionExecutor
+	c.transitionExecutor = nil
+	return executor, true, nil
+}
+
+func (c *agentLifecycleCoordinator) beginWork(ctx context.Context, companion worklifetime.Occurrence) (*worklifetime.Lease, error) {
+	if c == nil {
+		return nil, errors.New("agent lifecycle coordinator is required")
+	}
+	c.workMu.Lock()
+	defer c.workMu.Unlock()
+	if err := c.ensureRunAuthoritiesLocked(nil, nil); err != nil {
+		return nil, err
+	}
+	return c.runOwner.Begin(ctx, companion)
+}
+
+func (c *agentLifecycleCoordinator) beginStandingWork(ctx context.Context) (*worklifetime.Lease, error) {
+	if c == nil {
+		return nil, errors.New("agent lifecycle coordinator is required")
+	}
+	c.workMu.Lock()
+	defer c.workMu.Unlock()
+	if err := c.ensureRunAuthoritiesLocked(nil, nil); err != nil {
+		return nil, err
+	}
+	return c.runOwner.BeginStanding(ctx)
+}
+
+func (c *agentLifecycleCoordinator) retireRunOwner(ctx context.Context) error {
+	if c == nil {
+		return nil
+	}
+	c.workMu.Lock()
+	owner := c.runOwner
+	c.workMu.Unlock()
+	if owner == nil {
+		return nil
+	}
+	return owner.RetireAndWait(ctx)
+}
+
+func (c *agentLifecycleCoordinator) waitForWork(ctx context.Context) error {
+	if c == nil {
+		return nil
+	}
+	c.workMu.Lock()
+	owner := c.runOwner
+	c.workMu.Unlock()
+	if owner == nil {
+		return nil
+	}
+	return owner.WaitForQuiescence(ctx)
+}
+
+func (c *agentLifecycleCoordinator) retireWorkAdmission() bool {
+	c.workMu.Lock()
+	defer c.workMu.Unlock()
+	if c.runOwner == nil {
+		return false
+	}
+	c.workRetiring = true
+	c.runOwner.Retire()
+	return true
 }
 
 func (c *agentLifecycleCoordinator) requestShutdownTransition() *runtimeLifecycleTransition {
@@ -368,6 +589,7 @@ func (c *agentLifecycleCoordinator) requestShutdownTransition() *runtimeLifecycl
 	var transition *runtimeLifecycleTransition
 	switch c.phase {
 	case runtimeLifecycleRunning:
+		c.retireWorkAdmission()
 		transition = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown)
 		c.transition = transition
 		c.phase = runtimeLifecycleShuttingDown
@@ -375,7 +597,12 @@ func (c *agentLifecycleCoordinator) requestShutdownTransition() *runtimeLifecycl
 	case runtimeLifecycleShuttingDown, runtimeLifecycleResetting:
 		transition = c.transition
 	case runtimeLifecycleStopped:
-		transition = nil
+		if c.retireWorkAdmission() {
+			transition = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown)
+			c.transition = transition
+			c.phase = runtimeLifecycleShuttingDown
+			cancel = c.cancelRun
+		}
 	}
 	c.mu.Unlock()
 	if cancel != nil {
@@ -394,6 +621,7 @@ func (c *agentLifecycleCoordinator) requestResetTransition() (*runtimeLifecycleT
 	var reset *runtimeLifecycleTransition
 	switch c.phase {
 	case runtimeLifecycleRunning:
+		c.retireWorkAdmission()
 		shutdown = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown)
 		reset = newRuntimeLifecycleTransition(runtimeLifecycleTransitionReset)
 		c.transition = shutdown
@@ -409,9 +637,18 @@ func (c *agentLifecycleCoordinator) requestResetTransition() (*runtimeLifecycleT
 	case runtimeLifecycleResetting:
 		reset = c.transition
 	case runtimeLifecycleStopped:
-		reset = newRuntimeLifecycleTransition(runtimeLifecycleTransitionReset)
-		c.transition = reset
-		c.phase = runtimeLifecycleResetting
+		if c.retireWorkAdmission() {
+			shutdown = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown)
+			reset = newRuntimeLifecycleTransition(runtimeLifecycleTransitionReset)
+			c.transition = shutdown
+			c.pendingReset = reset
+			c.phase = runtimeLifecycleShuttingDown
+			cancel = c.cancelRun
+		} else {
+			reset = newRuntimeLifecycleTransition(runtimeLifecycleTransitionReset)
+			c.transition = reset
+			c.phase = runtimeLifecycleResetting
+		}
 	}
 	c.mu.Unlock()
 	if cancel != nil {
@@ -426,7 +663,7 @@ func (c *agentLifecycleCoordinator) claimTransition(transition *runtimeLifecycle
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.transition != transition || transition.kind != kind || transition.claimed {
+	if c.transition != transition || transition.kind != kind || transition.claimed || transition.complete {
 		return false
 	}
 	transition.claimed = true
@@ -492,23 +729,34 @@ func (c *agentLifecycleCoordinator) completeShutdownTransition(transition *runti
 		return
 	}
 	c.mu.Lock()
-	if c.transition != transition || transition.kind != runtimeLifecycleTransitionShutdown {
+	if c.transition != transition || transition.kind != runtimeLifecycleTransitionShutdown || transition.complete {
 		c.mu.Unlock()
 		return
 	}
+	c.workMu.Lock()
+	if c.transitionExecutor != nil {
+		result = errors.Join(result, c.transitionExecutor.Done())
+	}
 	transition.result = result
+	transition.complete = true
 	c.runMode = AgentRunModeStopped
 	c.runCtx = nil
 	c.cancelRun = nil
+	c.runOwner = nil
+	c.transitionExecutor = nil
+	c.watcherExpected = false
 	c.retryDone = nil
 	if c.pendingReset != nil {
+		c.workRetiring = true
 		c.phase = runtimeLifecycleResetting
 		c.transition = c.pendingReset
 		c.pendingReset = nil
 	} else {
+		c.workRetiring = false
 		c.phase = runtimeLifecycleStopped
 		c.transition = nil
 	}
+	c.workMu.Unlock()
 	close(transition.done)
 	c.mu.Unlock()
 }
@@ -518,11 +766,12 @@ func (c *agentLifecycleCoordinator) completeResetTransition(transition *runtimeL
 		return
 	}
 	c.mu.Lock()
-	if c.transition != transition || transition.kind != runtimeLifecycleTransitionReset {
+	if c.transition != transition || transition.kind != runtimeLifecycleTransitionReset || transition.complete {
 		c.mu.Unlock()
 		return
 	}
 	transition.result = result
+	transition.complete = true
 	if clearCells {
 		c.cells = map[string]*agentLifecycleCell{}
 	}
@@ -530,6 +779,12 @@ func (c *agentLifecycleCoordinator) completeResetTransition(transition *runtimeL
 	c.runMode = AgentRunModeStopped
 	c.runCtx = nil
 	c.cancelRun = nil
+	c.workMu.Lock()
+	c.runOwner = nil
+	c.transitionExecutor = nil
+	c.workRetiring = false
+	c.workMu.Unlock()
+	c.watcherExpected = false
 	c.transition = nil
 	c.pendingReset = nil
 	c.retryDone = nil
@@ -538,13 +793,30 @@ func (c *agentLifecycleCoordinator) completeResetTransition(transition *runtimeL
 }
 
 func (c *agentLifecycleCoordinator) replaceLoop(ctx context.Context, agentID, trigger, operationID string, rec *PersistedAgent, subordinate runtimesessions.LifecycleMutationPlan) (context.Context, runtimeeffects.LifecycleToken, chan struct{}, error) {
+	c.executionPublishMu.Lock()
+	defer c.executionPublishMu.Unlock()
 	agentID = strings.TrimSpace(agentID)
 	cell, err := c.lockAgentOperation(agentID)
 	if err != nil {
 		return nil, runtimeeffects.LifecycleToken{}, nil, err
 	}
 	defer cell.opMu.Unlock()
-	return c.replaceLoopLocked(ctx, agentID, trigger, operationID, rec, subordinate, cell)
+	return c.replaceLoopLocked(ctx, agentID, trigger, operationID, rec, subordinate, cell, runtimeeffects.LifecycleToken{})
+}
+
+func (c *agentLifecycleCoordinator) prepareLoopTokenLocked(agentID string, lockedCell *agentLifecycleCell) (runtimeeffects.LifecycleToken, error) {
+	agentID = strings.TrimSpace(agentID)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cell := c.cells[agentID]
+	if cell == nil || cell != lockedCell || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
+		return runtimeeffects.LifecycleToken{}, fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
+	}
+	return runtimeeffects.LifecycleToken{
+		RuntimeEpoch: runtimebus.CurrentRuntimeEpoch(),
+		AgentID:      agentID,
+		Generation:   cell.generation + 1,
+	}, nil
 }
 
 func (c *agentLifecycleCoordinator) lockAgentOperation(agentID string) (*agentLifecycleCell, error) {
@@ -674,7 +946,7 @@ func (c *agentLifecycleCoordinator) acquireExecution(ctx context.Context, agentI
 	return lease, nil
 }
 
-func (c *agentLifecycleCoordinator) replaceLoopLocked(ctx context.Context, agentID, trigger, operationID string, rec *PersistedAgent, subordinate runtimesessions.LifecycleMutationPlan, lockedCell *agentLifecycleCell) (context.Context, runtimeeffects.LifecycleToken, chan struct{}, error) {
+func (c *agentLifecycleCoordinator) replaceLoopLocked(ctx context.Context, agentID, trigger, operationID string, rec *PersistedAgent, subordinate runtimesessions.LifecycleMutationPlan, lockedCell *agentLifecycleCell, preparedToken runtimeeffects.LifecycleToken) (context.Context, runtimeeffects.LifecycleToken, chan struct{}, error) {
 	plan, planHash, err := normalizedLifecycleSubordinate(subordinate)
 	if err != nil {
 		return nil, runtimeeffects.LifecycleToken{}, nil, err
@@ -702,6 +974,13 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(ctx context.Context, agent
 	runCtx, mode, running := c.runCtx, c.runMode, c.phase == runtimeLifecycleRunning
 	nextEpoch := runtimebus.CurrentRuntimeEpoch()
 	nextGeneration := previousGeneration + 1
+	if preparedToken.Valid() {
+		if preparedToken.AgentID != agentID || preparedToken.Generation != nextGeneration {
+			c.mu.Unlock()
+			return nil, runtimeeffects.LifecycleToken{}, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "prepared_execution_token_mismatch", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID})
+		}
+		nextEpoch = preparedToken.RuntimeEpoch
+	}
 	revision := cell.configRevision
 	if rec != nil {
 		var err error
@@ -919,6 +1198,69 @@ func (c *agentLifecycleCoordinator) releaseLoop(token runtimeeffects.LifecycleTo
 	cell.execution.loopDone = nil
 	cell.execution.route = nil
 	cell.execution.routeToken = runtimeeffects.LifecycleToken{}
+	return nil
+}
+
+func (c *agentLifecycleCoordinator) abortUnlaunchedLoopLocked(ctx context.Context, agentID string, token runtimeeffects.LifecycleToken, done chan struct{}, lockedCell *agentLifecycleCell) error {
+	if c == nil || lockedCell == nil || !token.Valid() {
+		return errors.New("unlaunched agent execution requires lifecycle cell and token")
+	}
+	agentID = strings.TrimSpace(agentID)
+	c.mu.Lock()
+	cell := c.cells[agentID]
+	if cell == nil || cell != lockedCell || cell.execution == nil || cell.execution.token != token {
+		c.mu.Unlock()
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", "abort_unlaunched_loop", map[string]any{"agent_id": agentID})
+	}
+	execution := cell.execution
+	execution.fenced = true
+	if execution.cancelGeneration != nil {
+		execution.cancelGeneration()
+	}
+	plan, planHash, err := normalizedLifecycleSubordinate(runtimesessions.LifecycleMutationPlan{})
+	if err != nil {
+		c.mu.Unlock()
+		return err
+	}
+	operationID := uuid.NewString()
+	requestHash := lifecycleRequestHash("start_failed", agentID, cell.configRevision, planHash)
+	if c.store != nil {
+		_, err = c.store.CommitAgentLifecycleTransition(context.WithoutCancel(ctx), AgentLifecycleTransition{
+			OperationID: operationID, OperationKind: "start_failed", RequestHash: requestHash,
+			AgentID: agentID, Trigger: "start_failed", ExpectedEpoch: cell.epoch, ExpectedGeneration: cell.generation,
+			ExpectedPhase: cell.phase, TargetEpoch: cell.epoch, TargetGeneration: cell.generation,
+			TargetPhase: AgentLifecycleRegistered, ConfigRevision: cell.configRevision, RunMode: AgentRunModeStopped,
+			Subordinate: plan, Now: time.Now().UTC(),
+		})
+	} else if c.sessions != nil {
+		_, _, err = c.sessions.ApplyLifecycleProjection(context.WithoutCancel(ctx), runtimesessions.LifecycleProjectionRequest{
+			OperationID: operationID, RequestHash: requestHash, AgentID: agentID,
+			Expected: token, Target: token, TargetPhase: string(AgentLifecycleRegistered), Plan: plan, Now: time.Now().UTC(),
+		})
+	}
+	if err != nil {
+		cell.phase = AgentLifecycleFailed
+		cell.runMode = AgentRunModeStopped
+	} else {
+		cell.phase = AgentLifecycleRegistered
+		cell.runMode = AgentRunModeStopped
+	}
+	execution.loopCancel = nil
+	execution.loopDone = nil
+	execution.route = nil
+	execution.routeToken = runtimeeffects.LifecycleToken{}
+	settled := execution.loopSettled
+	execution.loopSettled = nil
+	c.mu.Unlock()
+	if done != nil {
+		close(done)
+	}
+	if settled != nil {
+		close(settled)
+	}
+	if err != nil {
+		return fmt.Errorf("persist fail-closed unlaunched agent execution: %w", err)
+	}
 	return nil
 }
 
