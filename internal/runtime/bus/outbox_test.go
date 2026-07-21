@@ -143,7 +143,7 @@ func (s *directRecipientTransactionalStore) beginPreparedPublish(ctx context.Con
 	s.events = append(s.events, evt)
 	s.active = append(s.active, evt.ID())
 	s.mu.Unlock()
-	_ = runtimepipeline.QueuePipelineRollbackAction(ctx, func() {
+	_ = runtimepipeline.QueuePipelineRollbackAction(ctx, func(context.Context) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.events = previousEvents
@@ -319,8 +319,8 @@ func TestEngineDispatcherQueuesWhenPipelineSQLTxActive(t *testing.T) {
 			time.Now().UTC(),
 		),
 	}
-	postCommitActions := make([]func(), 0, 1)
-	rollbackActions := make([]func(), 0, 1)
+	postCommitActions := make([]runtimepipeline.OwnerAction, 0, 1)
+	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 1)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
 	txctx = runtimebus.WithCommitPublishTransaction(txctx, store)
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommitActions)
@@ -386,8 +386,8 @@ func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t 
 
 		Recipients: recipients,
 	}}
-	postCommitActions := make([]func(), 0, 1)
-	rollbackActions := make([]func(), 0, 1)
+	postCommitActions := make([]runtimepipeline.OwnerAction, 0, 1)
+	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 1)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommitActions)
 	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
@@ -676,8 +676,8 @@ func TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack(t *testin
 			if err != nil {
 				t.Fatalf("Begin: %v", err)
 			}
-			rollbackActions := []func(){}
-			postCommitActions := []func(){}
+			rollbackActions := []runtimepipeline.OwnerAction{}
+			postCommitActions := []runtimepipeline.OwnerAction{}
 			ctx := runtimepipeline.WithPipelineRollbackActions(runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx), &rollbackActions)
 			ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
 			ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
@@ -839,8 +839,8 @@ func TestEngineOutboxConflictingSameIDBatchRollsBackOrderedOutcomes(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	rollbackActions := []func(){}
-	postCommitActions := []func(){}
+	rollbackActions := []runtimepipeline.OwnerAction{}
+	postCommitActions := []runtimepipeline.OwnerAction{}
 	ctx := runtimepipeline.WithPipelineRollbackActions(runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx), &rollbackActions)
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
 	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
@@ -1152,7 +1152,7 @@ func TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedMan
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	internalCh := eb.SubscribeInternal("workflow-runtime", events.EventType("custom.emitted"))
+	internalCh := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("custom.emitted"))
 	agentCh := eb.Subscribe("agent-a", events.EventType("custom.emitted"))
 
 	intent := runtimeengine.EmitIntent{
@@ -1225,7 +1225,7 @@ func TestEngineOutboxAndDispatcher_RoutesPendingInternalDeliveriesToRouteInterce
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	internalCh := eb.SubscribeInternal("workflow-runtime", events.EventType("custom.emitted"))
+	internalCh := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("custom.emitted"))
 	defer eb.Unsubscribe("workflow-runtime")
 
 	intent := runtimeengine.EmitIntent{
@@ -1455,8 +1455,8 @@ func TestPublishDirectInMutationRejectsFilteredExplicitRecipient(t *testing.T) {
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: eventtest.UUID("wrong-entity"), FlowInstance: "wrong-flow"}),
 		time.Now().UTC(),
 	)
-	postCommit := make([]func(), 0, 1)
-	rollback := make([]func(), 0, 1)
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
+	rollback := make([]runtimepipeline.OwnerAction, 0, 1)
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
 	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)

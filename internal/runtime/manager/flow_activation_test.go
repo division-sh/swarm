@@ -78,8 +78,8 @@ func newFlowActivationManager(t *testing.T, bus Bus, instances flowInstancePersi
 	}, stores...)
 }
 
-func withFlowActivationPostCommit(ctx context.Context, actions *[]func()) context.Context {
-	rollback := make([]func(), 0, 1)
+func withFlowActivationPostCommit(ctx context.Context, actions *[]runtimepipeline.OwnerAction) context.Context {
+	rollback := make([]runtimepipeline.OwnerAction, 0, 1)
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, actions)
 	return runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
 }
@@ -514,7 +514,7 @@ func TestActivateFlowInstanceDefersAgentStartupUntilMutationCommit(t *testing.T)
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle("")
-	postCommit := make([]func(), 0, 1)
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
 	ctx := runtimepipeline.WithPipelineSQLTxContext(testAuthorActivityContext(context.Background()), &sql.Tx{})
 	ctx = withFlowActivationPostCommit(ctx, &postCommit)
 
@@ -790,7 +790,7 @@ func TestActivateFlowInstanceQueuedAutoEmitUsesProjectedConfigPayload(t *testing
 		},
 		Required: []string{"component_id"},
 	})
-	postCommit := make([]func(), 0, 1)
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
 	ctx := withFlowActivationPostCommit(testAuthorActivityContext(context.Background()), &postCommit)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Config = map[string]any{"component_id": "component-1"}
@@ -844,7 +844,7 @@ func TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable(t *testi
 	bundle := testFlowBundle("task.started")
 	const runID = "22222222-2222-2222-2222-222222222215"
 	const triggerEventID = "55555555-5555-5555-5555-555555555555"
-	postCommit := make([]func(), 0, 1)
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	ctx = withFlowActivationPostCommit(ctx, &postCommit)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
@@ -950,7 +950,7 @@ func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t 
 	instances := &flowActivationTestInstanceStore{}
 	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle("task.started")
-	postCommit := make([]func(), 0, 1)
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
 	ctx := withFlowActivationPostCommit(testAuthorActivityContext(context.Background()), &postCommit)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Config = map[string]any{
@@ -1254,7 +1254,7 @@ func TestDeactivateFlowInstanceQueuesTerminalSideEffectsUntilPostCommitWhenAvail
 	if err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	postCommit := make([]func(), 0, 1)
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
 	ctx := withFlowActivationPostCommit(flowActivationRunContext(), &postCommit)
 	if err := am.DeactivateFlowInstance(ctx, "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance: %v", err)
@@ -1313,7 +1313,7 @@ func TestDeactivateFlowInstanceLogsPostCommitAgentFailureWithoutRouteRemoval(t *
 	if err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	postCommit := make([]func(), 0, 1)
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
 	ctx := withFlowActivationPostCommit(flowActivationRunContext(), &postCommit)
 	if err := am.DeactivateFlowInstance(ctx, "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance returned pre-commit error: %v", err)
@@ -1348,7 +1348,7 @@ func TestDeactivateFlowInstanceLogsPostCommitRouteFailureAfterAgentTeardown(t *t
 	if err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	postCommit := make([]func(), 0, 1)
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
 	ctx := withFlowActivationPostCommit(flowActivationRunContext(), &postCommit)
 	if err := am.DeactivateFlowInstance(ctx, "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance returned pre-commit error: %v", err)

@@ -405,8 +405,8 @@ func (l *WorkflowTimerLifecycle) queueEnsureRegistered(ctx context.Context, ref 
 	if l == nil || l.coordinator == nil || l.coordinator.timerScheduler == nil {
 		return nil
 	}
-	action := func() {
-		postCommitCtx := withoutSQLTxContext(context.WithoutCancel(ctx))
+	action := func(actionCtx context.Context) {
+		postCommitCtx := withoutSQLTxContext(actionCtx)
 		if err := l.ensureRegisteredImmediately(postCommitCtx, ref); err != nil {
 			l.logFailure(postCommitCtx, "workflow_timer_register_failed", ref, err)
 			l.startRegistrationRecovery(ref)
@@ -418,7 +418,7 @@ func (l *WorkflowTimerLifecycle) queueEnsureRegistered(ctx context.Context, ref 
 		}
 		return nil
 	}
-	action()
+	action(ctx)
 	return nil
 }
 
@@ -427,8 +427,8 @@ func (l *WorkflowTimerLifecycle) queueCancellation(ctx context.Context, activati
 		return nil
 	}
 	schedule := activation.schedule()
-	action := func() {
-		postCommitCtx := withoutSQLTxContext(context.WithoutCancel(ctx))
+	action := func(actionCtx context.Context) {
+		postCommitCtx := withoutSQLTxContext(actionCtx)
 		if l.coordinator.timerScheduler != nil {
 			if err := l.coordinator.timerScheduler.CancelExact(schedule); err != nil {
 				l.logFailure(postCommitCtx, "workflow_timer_cancel_failed", activation.Ref, err)
@@ -447,7 +447,7 @@ func (l *WorkflowTimerLifecycle) queueCancellation(ctx context.Context, activati
 		}
 		return nil
 	}
-	action()
+	action(ctx)
 	return nil
 }
 
@@ -577,8 +577,8 @@ func workflowTimerScheduleMatchesActivation(schedule Schedule, activation Workfl
 
 func (l *WorkflowTimerLifecycle) queueAfterFire(ctx context.Context, previous, next WorkflowTimerActivation) error {
 	previousSchedule := previous.schedule()
-	action := func() {
-		postCommitCtx := withoutSQLTxContext(context.WithoutCancel(ctx))
+	action := func(actionCtx context.Context) {
+		postCommitCtx := withoutSQLTxContext(actionCtx)
 		if l.coordinator.timerScheduleStore != nil {
 			if err := l.coordinator.timerScheduleStore.ReleaseSchedule(postCommitCtx, previousSchedule); err != nil {
 				l.logFailure(postCommitCtx, "workflow_timer_claim_release_failed", previous.Ref, err)

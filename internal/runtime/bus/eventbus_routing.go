@@ -20,12 +20,177 @@ import (
 
 var errAuthoritativeDeliveryIncomplete = errors.New("authoritative delivery incomplete")
 
+type internalSubscriptionHandle struct {
+	mu           sync.RWMutex
+	retireMu     sync.Mutex
+	bus          *EventBus
+	subscriberID string
+	eventTypes   []events.EventType
+	ch           chan *LocalDelivery
+	active       bool
+	retiring     chan struct{}
+	receiverDone chan struct{}
+	ready        chan struct{}
+	retireOnce   sync.Once
+	completeOnce sync.Once
+	readyOnce    sync.Once
+	restart      bool
+	retained     []*LocalDelivery
+}
+
+func newInternalSubscriptionHandle(bus *EventBus, subscriberID string, eventTypes []events.EventType) *internalSubscriptionHandle {
+	return &internalSubscriptionHandle{
+		bus:          bus,
+		subscriberID: strings.TrimSpace(subscriberID),
+		eventTypes:   append([]events.EventType(nil), eventTypes...),
+		ch:           make(chan *LocalDelivery, 128),
+		active:       true,
+		retiring:     make(chan struct{}),
+		receiverDone: make(chan struct{}),
+		ready:        make(chan struct{}),
+	}
+}
+
+func (h *internalSubscriptionHandle) Deliveries() <-chan *LocalDelivery {
+	if h == nil {
+		return nil
+	}
+	return h.ch
+}
+
+func (h *internalSubscriptionHandle) Retiring() <-chan struct{} {
+	if h == nil {
+		return nil
+	}
+	return h.retiring
+}
+
+func (h *internalSubscriptionHandle) MarkReady() {
+	if h == nil {
+		return
+	}
+	h.readyOnce.Do(func() { close(h.ready) })
+	if h.bus != nil {
+		h.bus.notifyInternalSubscriptionChanged()
+	}
+}
+
+func (h *internalSubscriptionHandle) Complete(restart bool) error {
+	if h == nil {
+		return nil
+	}
+	completed := false
+	h.completeOnce.Do(func() {
+		completed = true
+		h.mu.Lock()
+		h.restart = restart
+		h.mu.Unlock()
+		close(h.receiverDone)
+	})
+	if !completed {
+		return errors.New("internal subscription generation is already complete")
+	}
+	if h.bus == nil {
+		return nil
+	}
+	return h.bus.completeInternalSubscription(h)
+}
+
+func (h *internalSubscriptionHandle) deactivate() {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	h.active = false
+	h.retireOnce.Do(func() { close(h.retiring) })
+	h.mu.Unlock()
+}
+
+func (h *internalSubscriptionHandle) wantsRestart() bool {
+	if h == nil {
+		return false
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.restart
+}
+
+func (h *internalSubscriptionHandle) send(ctx context.Context, evt events.Event, handoff events.DeliveryRoute) agentRouteSendResult {
+	if h == nil || h.bus == nil {
+		return agentRouteSendInactive
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if !h.active || h.ch == nil {
+		return agentRouteSendInactive
+	}
+	owner := h.bus.workOwnerForContext(ctx)
+	if owner == nil {
+		return agentRouteSendInactive
+	}
+	delivery, err := owner.NewRoutedEventDelivery(localDeliveryContext(ctx), evt, handoff)
+	if err != nil {
+		return agentRouteSendInactive
+	}
+	if err := trackLocalDeliveryCompletion(ctx, delivery); err != nil {
+		_ = delivery.Complete()
+		return agentRouteSendInactive
+	}
+	timer := time.NewTimer(deliverySendTimeout)
+	defer timer.Stop()
+	select {
+	case h.ch <- delivery:
+		return agentRouteSendDelivered
+	case <-ctx.Done():
+		_ = delivery.Complete()
+		return agentRouteSendContextDone
+	case <-timer.C:
+		_ = delivery.Complete()
+		return agentRouteSendTimedOut
+	}
+}
+
+func (h *internalSubscriptionHandle) retireAndWait(ctx context.Context, store EventStore) error {
+	if h == nil {
+		return nil
+	}
+	h.retireMu.Lock()
+	defer h.retireMu.Unlock()
+	h.deactivate()
+	select {
+	case <-h.receiverDone:
+	case <-ctx.Done():
+		return fmt.Errorf("wait for internal subscriber %s receiver: %w", h.subscriberID, ctx.Err())
+	}
+	for {
+		if len(h.retained) == 0 {
+			select {
+			case delivery := <-h.ch:
+				if delivery != nil {
+					h.retained = append(h.retained, delivery)
+				}
+			default:
+				return nil
+			}
+		}
+		if len(h.retained) == 0 {
+			continue
+		}
+		if err := settleBufferedLocalDelivery(ctx, store, h.retained[0]); err != nil {
+			return err
+		}
+		h.retained = h.retained[1:]
+	}
+}
+
 type agentRouteHandle struct {
-	mu     sync.RWMutex
-	token  runtimeeffects.LifecycleToken
-	ch     chan *LocalDelivery
-	owner  *worklifetime.RouteOccurrence
-	active bool
+	mu       sync.RWMutex
+	retireMu sync.Mutex
+	token    runtimeeffects.LifecycleToken
+	ch       chan *LocalDelivery
+	owner    *worklifetime.RouteOccurrence
+	active   bool
+	retained []*LocalDelivery
 }
 
 func newAgentRouteHandle(token runtimeeffects.LifecycleToken, ch chan *LocalDelivery, owner *worklifetime.RouteOccurrence) *agentRouteHandle {
@@ -94,18 +259,27 @@ func (r *agentRouteHandle) retireAndWait(ctx context.Context, store EventStore) 
 	if r == nil || r.owner == nil {
 		return nil
 	}
+	r.retireMu.Lock()
+	defer r.retireMu.Unlock()
 	r.deactivate()
 	for {
-		select {
-		case delivery := <-r.ch:
-			if delivery != nil {
-				if err := settleBufferedLocalDelivery(ctx, store, delivery); err != nil {
-					return err
+		if len(r.retained) == 0 {
+			select {
+			case delivery := <-r.ch:
+				if delivery != nil {
+					r.retained = append(r.retained, delivery)
 				}
+			default:
+				return r.owner.RetireAndWait(ctx)
 			}
-		default:
-			return r.owner.RetireAndWait(ctx)
 		}
+		if len(r.retained) == 0 {
+			continue
+		}
+		if err := settleBufferedLocalDelivery(ctx, store, r.retained[0]); err != nil {
+			return err
+		}
+		r.retained = r.retained[1:]
 	}
 }
 
@@ -577,12 +751,16 @@ type agentRecipient struct {
 	ch           chan *LocalDelivery
 	kind         inMemorySubscriberKind
 	route        *agentRouteHandle
+	internal     *internalSubscriptionHandle
 	runtimeOwner worklifetime.Occurrence
 }
 
 func (r agentRecipient) send(ctx context.Context, evt events.Event, handoff events.DeliveryRoute) agentRouteSendResult {
 	if r.route != nil {
 		return r.route.send(ctx, evt, handoff)
+	}
+	if r.internal != nil {
+		return r.internal.send(ctx, evt, handoff)
 	}
 	delivery, err := r.runtimeOwner.NewRoutedEventDelivery(localDeliveryContext(ctx), evt, handoff)
 	if err != nil {
@@ -702,7 +880,10 @@ func (eb *EventBus) snapshotRoutePlanRecipientChans(agentIDs []string, planned [
 		if kind == "" {
 			kind = inMemorySubscriberAgent
 		}
-		out = append(out, agentRecipient{agentID: id, ch: ch, kind: kind, route: eb.agentRouteHandles[id], runtimeOwner: eb.workOwner})
+		out = append(out, agentRecipient{
+			agentID: id, ch: ch, kind: kind, route: eb.agentRouteHandles[id],
+			internal: eb.internalHandles[id], runtimeOwner: eb.workOwner,
+		})
 	}
 	return out
 }

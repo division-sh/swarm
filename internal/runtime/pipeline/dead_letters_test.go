@@ -435,7 +435,7 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 
 	seedPipelineEventRecord(t, testAuthorActivityContext(t, context.Background()), db, evt)
 	seedPipelineNodeDeliveryAuthority(t, db, evt, "node-a")
-	postCommit := make([]func(), 0, 1)
+	postCommit := make([]OwnerAction, 0, 1)
 	override := &PipelineReceiptOverride{}
 	ctx := WithPipelinePostCommitActions(testAuthorActivityContext(t, context.Background()), &postCommit)
 	ctx = WithPipelineReceiptOverride(ctx, override)

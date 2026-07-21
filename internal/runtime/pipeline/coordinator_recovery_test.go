@@ -862,7 +862,7 @@ func TestRecoveryManager_ReplaysSubscribedInternalOnlyUsingCommittedReplayScope(
 		parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC())
 	commitRecoveryEvent(t, ctx, pg, child, nil, runtimereplayclaim.CommittedReplayScopeSubscribed)
 
-	internalCh := bus.SubscribeInternal("workflow-runtime", events.EventType("system.recover.internal"))
+	internalCh := internalSubscriptionDeliveriesForTest(t, bus, "workflow-runtime", events.EventType("system.recover.internal"))
 
 	rm := runtimepipeline.NewRecoveryManagerWith(pg, capture)
 	if err := rm.Recover(ctx); err != nil {
@@ -914,7 +914,7 @@ func TestRecoveryManager_DirectEmptyManifestDoesNotBroadenToCurrentInternalSubsc
 		parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC())
 	commitRecoveryEvent(t, ctx, pg, child, nil, runtimereplayclaim.CommittedReplayScopeDirect)
 
-	internalCh := bus.SubscribeInternal("workflow-runtime", events.EventType("system.recover.direct_empty"))
+	internalCh := internalSubscriptionDeliveriesForTest(t, bus, "workflow-runtime", events.EventType("system.recover.direct_empty"))
 
 	rm := runtimepipeline.NewRecoveryManagerWith(pg, capture)
 	if err := rm.Recover(ctx); err != nil {

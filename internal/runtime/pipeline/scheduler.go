@@ -89,18 +89,19 @@ func (s Schedule) CanonicalWorkflowTimer() bool {
 }
 
 type Scheduler struct {
-	mu      sync.Mutex
-	onFire  func(context.Context, Schedule)
-	tasks   map[string]*scheduledTask
-	retired []<-chan struct{}
-	stopped bool
-	owner   worklifetime.Occurrence
+	mu       sync.Mutex
+	onFire   func(context.Context, Schedule)
+	tasks    map[string]*scheduledTask
+	draining map[*scheduledTask]struct{}
+	stopped  bool
+	owner    worklifetime.Occurrence
 }
 
 type scheduledTask struct {
 	stop  chan struct{}
 	done  chan struct{}
 	lease *worklifetime.Lease
+	owner worklifetime.Occurrence
 }
 
 type cronSpec struct {
@@ -114,13 +115,17 @@ func NewSchedulerWithWorkOwner(owner worklifetime.Occurrence, callbacks ...func(
 		cb = callbacks[0]
 	}
 	return &Scheduler{
-		onFire: cb,
-		tasks:  make(map[string]*scheduledTask),
-		owner:  owner,
+		onFire:   cb,
+		tasks:    make(map[string]*scheduledTask),
+		draining: make(map[*scheduledTask]struct{}),
+		owner:    owner,
 	}
 }
 
-func (s *Scheduler) Register(sc Schedule) error {
+func (s *Scheduler) Register(ctx context.Context, sc Schedule) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if sc.AgentID == "" || sc.EventType == "" {
 		return errors.New("agent_id and event_type are required")
 	}
@@ -157,33 +162,33 @@ func (s *Scheduler) Register(sc Schedule) error {
 		s.mu.Unlock()
 		return errors.New("scheduler requires a runtime work occurrence")
 	}
-	lease, err := s.owner.Begin(context.Background())
+	owner := s.owner
+	if contextual, ok := worklifetime.OccurrenceFromContext(ctx); ok {
+		owner = contextual
+	}
+	lease, err := owner.Begin(ownerActionAdmissionContext(ctx))
 	if err != nil {
 		s.mu.Unlock()
 		return fmt.Errorf("admit scheduled task: %w", err)
 	}
 	key := scheduleKey(sc)
 	if existing, ok := s.tasks[key]; ok {
-		close(existing.stop)
-		s.retired = append(s.retired, existing.done)
-		delete(s.tasks, key)
+		s.retireTaskLocked(key, existing)
 	}
-	task := &scheduledTask{stop: make(chan struct{}), done: make(chan struct{}), lease: lease}
+	task := &scheduledTask{stop: make(chan struct{}), done: make(chan struct{}), lease: lease, owner: owner}
 	s.tasks[key] = task
 	s.mu.Unlock()
 
 	switch sc.Mode {
 	case "once":
 		go func() {
-			defer close(task.done)
-			defer func() { _ = task.lease.Done() }()
+			defer s.finishTask(key, task)
 			s.runOnce(task, key, sc)
 		}()
 		return nil
 	case "cron":
 		go func() {
-			defer close(task.done)
-			defer func() { _ = task.lease.Done() }()
+			defer s.finishTask(key, task)
 			s.runCron(task, key, sc, spec)
 		}()
 		return nil
@@ -196,8 +201,10 @@ func (s *Scheduler) Wait(ctx context.Context) error {
 		return nil
 	}
 	s.mu.Lock()
-	done := make([]<-chan struct{}, 0, len(s.retired)+len(s.tasks))
-	done = append(done, s.retired...)
+	done := make([]<-chan struct{}, 0, len(s.draining)+len(s.tasks))
+	for task := range s.draining {
+		done = append(done, task.done)
+	}
 	for _, task := range s.tasks {
 		done = append(done, task.done)
 	}
@@ -222,9 +229,7 @@ func (s *Scheduler) Cancel(agentID string, eventType string) error {
 		if !scheduleKeyMatchesAgentEvent(key, agentID, eventType) {
 			continue
 		}
-		close(task.stop)
-		s.retired = append(s.retired, task.done)
-		delete(s.tasks, key)
+		s.retireTaskLocked(key, task)
 	}
 	return nil
 }
@@ -240,9 +245,7 @@ func (s *Scheduler) CancelExact(sc Schedule) error {
 	if !ok {
 		return nil
 	}
-	close(task.stop)
-	s.retired = append(s.retired, task.done)
-	delete(s.tasks, key)
+	s.retireTaskLocked(key, task)
 	return nil
 }
 
@@ -254,9 +257,7 @@ func (s *Scheduler) Stop() {
 	}
 	s.stopped = true
 	for key, task := range s.tasks {
-		close(task.stop)
-		s.retired = append(s.retired, task.done)
-		delete(s.tasks, key)
+		s.retireTaskLocked(key, task)
 	}
 }
 
@@ -277,7 +278,7 @@ func (s *Scheduler) runOnce(task *scheduledTask, key string, sc Schedule) {
 		if scheduledTaskStopped(task) {
 			return
 		}
-		s.fire(worklifetime.WithOccurrence(task.lease.Context(), s.owner), sc)
+		s.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), sc)
 		s.unregisterTask(key, task)
 	}
 }
@@ -296,7 +297,7 @@ func (s *Scheduler) runCron(task *scheduledTask, key string, sc Schedule, spec c
 				if scheduledTaskStopped(task) {
 					return
 				}
-				s.fire(worklifetime.WithOccurrence(task.lease.Context(), s.owner), sc)
+				s.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), sc)
 			}
 		}
 	}
@@ -318,7 +319,7 @@ func (s *Scheduler) runCron(task *scheduledTask, key string, sc Schedule, spec c
 			if scheduledTaskStopped(task) {
 				return
 			}
-			s.fire(worklifetime.WithOccurrence(task.lease.Context(), s.owner), sc)
+			s.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), sc)
 		}
 	}
 }
@@ -348,8 +349,36 @@ func (s *Scheduler) unregisterTask(key string, task *scheduledTask) {
 	if !ok || current != task {
 		return
 	}
-	s.retired = append(s.retired, task.done)
-	delete(s.tasks, key)
+	s.retireTaskLocked(key, task)
+}
+
+func (s *Scheduler) retireTaskLocked(key string, task *scheduledTask) {
+	if task == nil {
+		return
+	}
+	if current := s.tasks[key]; current == task {
+		delete(s.tasks, key)
+	}
+	if s.draining == nil {
+		s.draining = make(map[*scheduledTask]struct{})
+	}
+	s.draining[task] = struct{}{}
+	select {
+	case <-task.stop:
+	default:
+		close(task.stop)
+	}
+}
+
+func (s *Scheduler) finishTask(key string, task *scheduledTask) {
+	_ = task.lease.Done()
+	s.mu.Lock()
+	if current := s.tasks[key]; current == task {
+		delete(s.tasks, key)
+	}
+	delete(s.draining, task)
+	close(task.done)
+	s.mu.Unlock()
 }
 
 func scheduleKey(sc Schedule) string {

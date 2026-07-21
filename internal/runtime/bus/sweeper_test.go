@@ -216,7 +216,7 @@ func TestSweepUndispatched_ReplaysSubscribedInternalOnlyUsingReplayScope(t *test
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	internalCh := eb.SubscribeInternal("workflow-runtime", events.EventType("custom.internal"))
+	internalCh := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("custom.internal"))
 
 	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
 	if err != nil {
@@ -256,7 +256,7 @@ func TestSweepUndispatched_ReplaysSubscribedMixedRecipientsUsingReplayScope(t *t
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	internalCh := eb.SubscribeInternal("workflow-runtime", events.EventType("custom.mixed"))
+	internalCh := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("custom.mixed"))
 	agentCh := eb.Subscribe("agent-a", events.EventType("custom.mixed"))
 
 	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
@@ -300,7 +300,7 @@ func TestSweepUndispatched_DirectScopeDoesNotBroadenToCurrentInternalSubscribers
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	internalCh := eb.SubscribeInternal("workflow-runtime", events.EventType("custom.direct"))
+	internalCh := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("custom.direct"))
 	agentCh := eb.Subscribe("agent-a", events.EventType("custom.direct"))
 
 	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
@@ -341,7 +341,7 @@ func TestSweepUndispatched_DirectEmptyManifestDoesNotBroadenToCurrentInternalSub
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	internalCh := eb.SubscribeInternal("workflow-runtime", events.EventType("custom.direct.empty"))
+	internalCh := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("custom.direct.empty"))
 
 	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
 	if err != nil {

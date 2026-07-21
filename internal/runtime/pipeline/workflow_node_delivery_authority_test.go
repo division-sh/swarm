@@ -24,7 +24,7 @@ func TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority(
 	evt := seedDeliveryAuthorityEvent(t, db, runCtx)
 	seedDeliveryAuthorityWorkflowInstance(t, pc, runCtx, evt.EntityID())
 
-	postCommit := make([]func(), 0, 1)
+	postCommit := make([]OwnerAction, 0, 1)
 	ictx := WithPipelinePostCommitActions(ctx, &postCommit)
 	passthrough, _, err := pc.Intercept(ictx, evt)
 	if err != nil {
@@ -66,7 +66,7 @@ func TestPipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutGenericAu
 	if err != nil {
 		t.Fatalf("NewDeliveryEvent: %v", err)
 	}
-	targetPostCommit := make([]func(), 0, 1)
+	targetPostCommit := make([]OwnerAction, 0, 1)
 	targetCtx := WithPipelinePostCommitActions(ctx, &targetPostCommit)
 	passthrough, _, err := pc.InterceptDeliveryRoute(targetCtx, delivery, route)
 	if err != nil {
@@ -156,7 +156,7 @@ func TestPipelineCoordinatorInterceptReplayScopeMarkerDoesNotAuthorizeConcreteNo
 	seedDeliveryAuthorityWorkflowInstance(t, pc, runCtx, evt.EntityID())
 	seedDeliveryAuthorityNodeDelivery(t, db, evt.ID(), "__runtime_replay_scope__")
 
-	postCommit := make([]func(), 0, 1)
+	postCommit := make([]OwnerAction, 0, 1)
 	ictx := WithPipelinePostCommitActions(ctx, &postCommit)
 	passthrough, _, err := pc.Intercept(ictx, evt)
 	if err != nil {
@@ -195,7 +195,7 @@ func TestPipelineCoordinatorInterceptTerminalNodeDeliveryDoesNotAuthorizeExecuti
 			seedDeliveryAuthorityWorkflowInstance(t, pc, runCtx, evt.EntityID())
 			seedDeliveryAuthorityNodeDeliveryStatus(t, db, evt.ID(), "node-a", tc.status, tc.retryCount)
 
-			postCommit := make([]func(), 0, 1)
+			postCommit := make([]OwnerAction, 0, 1)
 			ictx := WithPipelinePostCommitActions(ctx, &postCommit)
 			passthrough, _, err := pc.Intercept(ictx, evt)
 			if err != nil {

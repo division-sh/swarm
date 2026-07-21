@@ -15,7 +15,7 @@ func ClaimAndRegisterSchedule(ctx context.Context, store SchedulePersistence, sc
 			return false, nil
 		}
 	}
-	if err := scheduler.Register(sc); err != nil {
+	if err := scheduler.Register(ctx, sc); err != nil {
 		if store != nil {
 			_ = store.ReleaseSchedule(ctx, sc)
 		}

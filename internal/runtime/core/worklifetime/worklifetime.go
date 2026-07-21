@@ -467,7 +467,7 @@ func (r *RuntimeOccurrence) Begin(ctx context.Context) (*Lease, error) {
 	if r == nil {
 		return nil, errors.New("runtime occurrence is required")
 	}
-	return r.occurrence.begin(ctx)
+	return r.occurrence.begin(WithOccurrence(ctx, r))
 }
 
 func (r *RuntimeOccurrence) Fence() error {
@@ -559,7 +559,7 @@ func (s *StandingOccurrence) Begin(ctx context.Context) (*Lease, error) {
 	if s == nil {
 		return nil, errors.New("standing occurrence is required")
 	}
-	return s.occurrence.begin(ctx)
+	return s.occurrence.begin(WithOccurrence(ctx, s))
 }
 
 func (s *StandingOccurrence) Fence() error {
@@ -634,6 +634,20 @@ func (r *RuntimeOccurrence) NewRoute(ctx context.Context, identity RouteIdentity
 	}
 	identity.AgentID = strings.TrimSpace(identity.AgentID)
 	return &RouteOccurrence{occurrence: r.occurrence.newChild(nil), identity: identity, owner: r}, nil
+}
+
+func (s *StandingOccurrence) NewRoute(ctx context.Context, identity RouteIdentity) (*RouteOccurrence, error) {
+	if s == nil {
+		return nil, errors.New("standing occurrence is required")
+	}
+	if err := identity.validate(); err != nil {
+		return nil, err
+	}
+	if err := s.occurrence.gate.admits(); err != nil {
+		return nil, fmt.Errorf("admit standing route occurrence: %w", err)
+	}
+	identity.AgentID = strings.TrimSpace(identity.AgentID)
+	return &RouteOccurrence{occurrence: s.occurrence.newChild(nil), identity: identity, owner: s}, nil
 }
 
 func (r *RouteOccurrence) Begin(ctx context.Context) (*Lease, error) {
@@ -721,7 +735,7 @@ func (s *SelectedForkOccurrence) Begin(ctx context.Context) (*Lease, error) {
 	if s == nil {
 		return nil, errors.New("selected-fork occurrence is required")
 	}
-	return s.occurrence.begin(ctx)
+	return s.occurrence.begin(WithOccurrence(ctx, s))
 }
 
 func (s *SelectedForkOccurrence) RetireAndWait(ctx context.Context) error {

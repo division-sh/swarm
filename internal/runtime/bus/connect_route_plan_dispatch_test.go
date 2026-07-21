@@ -581,8 +581,8 @@ func connectReceiverPinAddressCollisionSource(subscriberType string, distinctEve
 }
 
 func runConnectRoutePlanCommitScope(ctx context.Context, transaction CommitPublishTransaction, fn func(context.Context) error) error {
-	postCommit := make([]func(), 0, 2)
-	rollback := make([]func(), 0, 2)
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 2)
+	rollback := make([]runtimepipeline.OwnerAction, 0, 2)
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
 	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
 	ctx = WithCommitPublishTransaction(ctx, transaction)
@@ -1084,7 +1084,7 @@ func TestEventBusPublishInMutation_ConnectRoutePlanPersistsSharedRoutePlan(t *te
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	want := connectRoutePlanStaticDeliveryRoute()
-	postCommitActions := make([]func(), 0, 1)
+	postCommitActions := make([]runtimepipeline.OwnerAction, 0, 1)
 	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommitActions)
 
 	if err := runConnectRoutePlanCommitScope(ctx, store, func(commitCtx context.Context) error {
@@ -1449,7 +1449,7 @@ func TestEventBusPublish_ConnectRoutePlanCreatesTemplateInstanceOnMissingCreate(
 		t.Fatalf("retry delivery routes = %#v, want reused instance route %#v", store.routes[retry.ID()], want)
 	}
 
-	replayTarget := eb.SubscribeInternal(want.SubscriberID)
+	replayTarget := subscribeInternalDeliveriesForTest(t, eb, want.SubscriberID)
 	store.flowInstances = []ActiveFlowInstanceDescriptor{{
 		InstanceID:    "drift",
 		EntityID:      eventtest.UUID("ent-drift"),
@@ -1613,7 +1613,7 @@ func TestCommittedReplayReusesPersistedSyntheticCarryWithoutReminting(t *testing
 		t.Fatalf("persisted delivery routes = %#v, want create-resolution route %#v", store.routes[eventID], want)
 	}
 
-	replayTarget := eb.SubscribeInternal(want.SubscriberID)
+	replayTarget := subscribeInternalDeliveriesForTest(t, eb, want.SubscriberID)
 	store.flowInstanceDescriptorCalls = 0
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish same event retry: %v", err)
@@ -1791,7 +1791,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 		t.Fatalf("persisted delivery routes = %#v, want select existing route %#v", store.routes[eventID], want)
 	}
 
-	replayTarget := eb.SubscribeInternal("account-node-one")
+	replayTarget := subscribeInternalDeliveriesForTest(t, eb, "account-node-one")
 	store.flowInstances = []ActiveFlowInstanceDescriptor{{
 		InstanceID:    "drift",
 		EntityID:      eventtest.UUID("ent-drift"),
@@ -2026,7 +2026,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 		t.Fatalf("retry persisted routes = %#v, want reused route %#v", store.routes[retryID], createdWant)
 	}
 
-	replayTarget := eb.SubscribeInternal("account-node-" + activation.Instance.InstanceID)
+	replayTarget := subscribeInternalDeliveriesForTest(t, eb, "account-node-"+activation.Instance.InstanceID)
 	store.flowInstances = []ActiveFlowInstanceDescriptor{{
 		InstanceID:    "drift",
 		EntityID:      eventtest.UUID("ent-drift"),
@@ -2373,7 +2373,7 @@ func TestEventBusPublish_ConnectRoutePlanCreateRejectSameEventRetryIsNoOpAndExpl
 		t.Fatalf("initial activations = %d, want 1", len(store.activations))
 	}
 	activation := store.activations[0]
-	replayTarget := eb.SubscribeInternal("consumer-node-" + activation.Instance.InstanceID)
+	replayTarget := subscribeInternalDeliveriesForTest(t, eb, "consumer-node-"+activation.Instance.InstanceID)
 	store.flowInstanceDescriptorCalls = 0
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
@@ -2585,8 +2585,8 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "one")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(one): %v", err)
 	}
-	consumerOne := eb.SubscribeInternal("consumer-node-one")
-	consumerTwo := eb.SubscribeInternal("consumer-node-two")
+	consumerOne := subscribeInternalDeliveriesForTest(t, eb, "consumer-node-one")
+	consumerTwo := subscribeInternalDeliveriesForTest(t, eb, "consumer-node-two")
 	eventID := uuid.NewString()
 	evt := eventtest.RunCreatingRootIngress(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())

@@ -171,7 +171,7 @@ func TestSQLiteWorkflowInstanceStore_RunPipelineMutationUsesRuntimeMutationRunne
 		if !ok || tx == nil {
 			return errors.New("pipeline transaction is required")
 		}
-		if !QueuePipelinePostCommitAction(txctx, func() {
+		if !QueuePipelinePostCommitAction(txctx, func(context.Context) {
 			atomic.AddInt32(&postCommitActions, 1)
 		}) {
 			return errors.New("queue pipeline post-commit action")
@@ -314,8 +314,8 @@ func (r *recordingRuntimeMutationRunner) RunRuntimeMutationContext(ctx context.C
 			_ = tx.Rollback()
 		}
 	}()
-	postCommit := make([]func(), 0, 4)
-	rollbackActions := make([]func(), 0, 4)
+	postCommit := make([]OwnerAction, 0, 4)
+	rollbackActions := make([]OwnerAction, 0, 4)
 	txctx := withPipelinePostCommitActions(WithPipelineSQLTxContext(ctx, tx), &postCommit)
 	txctx = withPipelineRollbackActions(txctx, &rollbackActions)
 	storyctx, err := runtimeauthoractivity.Begin(txctx, tx, runtimeauthoractivity.DialectSQLite)

@@ -81,7 +81,7 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 			return err
 		}
 		intentCtx = publicationClaim.BindContext(intentCtx)
-		if publicationClaim != nil && !runtimepipeline.QueuePipelineRollbackAction(intentCtx, func() { publicationClaim.Release(intentCtx) }) {
+		if publicationClaim != nil && !runtimepipeline.QueuePipelineRollbackAction(intentCtx, func(actionCtx context.Context) { publicationClaim.Release(actionCtx) }) {
 			publicationClaim.Release(intentCtx)
 			return errors.New("engine outbox requires event publication rollback ownership")
 		}
@@ -113,8 +113,8 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 		if o.bus.testLifecycleProbe != nil {
 			event := intent.Event
 			routePlan := plan
-			runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
-				o.bus.notifyTestPublishPersisted(context.WithoutCancel(ctx), event, routePlan)
+			runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
+				o.bus.notifyTestPublishPersisted(actionCtx, event, routePlan)
 			})
 		}
 		o.bus.setPendingInternalDeliveryRoutes(intent.Event.ID(), plan.InternalDeliveryRoutes())
@@ -164,10 +164,10 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		queuedIntents := clonePostCommitEmitIntents(intents)
-		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
-			postCommitActions := make([]func(), 0, 4)
-			rollbackActions := make([]func(), 0, 4)
-			dispatchCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)))
+		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
+			postCommitActions := make([]runtimepipeline.OwnerAction, 0, 4)
+			rollbackActions := make([]runtimepipeline.OwnerAction, 0, 4)
+			dispatchCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
 			dispatchCtx = runtimepipeline.WithPipelinePostCommitActions(dispatchCtx, &postCommitActions)
 			dispatchCtx = runtimepipeline.WithPipelineRollbackActions(dispatchCtx, &rollbackActions)
 			if err := d.DispatchPostCommit(dispatchCtx, queuedIntents); err != nil {
@@ -419,7 +419,7 @@ func (eb *EventBus) stagePendingOutboxOperation(ctx context.Context, intent runt
 		sequence: sequence, intent: intent, outcome: outcome, publicationClaim: publicationClaim,
 	})
 	eb.mu.Unlock()
-	_ = runtimepipeline.QueuePipelineRollbackAction(ctx, func() {
+	_ = runtimepipeline.QueuePipelineRollbackAction(ctx, func(context.Context) {
 		eb.removePendingOutboxOperation(eventID, sequence)
 	})
 }

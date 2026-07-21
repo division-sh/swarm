@@ -15,7 +15,6 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -63,7 +62,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		return err
 	}
 	defer func() { _ = lease.Done() }()
-	ctx = worklifetime.WithOccurrence(lease.Context(), am.workOwner)
+	ctx = lease.Context()
 	if req.Context.Empty() {
 		req.Context = events.DeliveryContextFromContext(ctx)
 	}
@@ -137,8 +136,8 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		if err := am.installFlowInstanceRoute(ctx, req); err != nil {
 			return err
 		}
-		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
-			postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)))
+		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
+			postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
 			if err := am.installFlowInstanceAgents(postCommitCtx, req, schema, scope); err != nil {
 				am.logFlowInstanceActivationSideEffectFailure(req, err)
 			}
@@ -153,12 +152,11 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		if !ok {
 			return fmt.Errorf("auto-emit %s constructed no event", autoEmitName)
 		}
-		autoEmitCtx := context.WithoutCancel(ctx)
-		autoEmitCtx = runtimepipeline.WithoutPipelineSQLTxContext(autoEmitCtx)
-		autoEmitCtx = runtimepipeline.WithoutPipelineSQLConnContext(autoEmitCtx)
-		autoEmitCtx = runtimebus.WithoutCommitPublishTransaction(autoEmitCtx)
-		autoEmitCtx = events.WithDeliveryContext(autoEmitCtx, req.Context)
-		publishAutoEmit := func() {
+		publishAutoEmit := func(actionCtx context.Context) {
+			autoEmitCtx := runtimepipeline.WithoutPipelineSQLTxContext(actionCtx)
+			autoEmitCtx = runtimepipeline.WithoutPipelineSQLConnContext(autoEmitCtx)
+			autoEmitCtx = runtimebus.WithoutCommitPublishTransaction(autoEmitCtx)
+			autoEmitCtx = events.WithDeliveryContext(autoEmitCtx, req.Context)
 			if err := am.bus.Publish(autoEmitCtx, autoEmitEvent); err != nil {
 				am.bus.LogRuntime(autoEmitCtx, runtimepipeline.RuntimeLogEntry{
 					Level:     "warn",
@@ -574,7 +572,7 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 		return err
 	}
 	defer func() { _ = lease.Done() }()
-	ctx = worklifetime.WithOccurrence(lease.Context(), am.workOwner)
+	ctx = lease.Context()
 	if am.workflowInstances == nil {
 		return fmt.Errorf("workflow instance store is required")
 	}
@@ -633,17 +631,17 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 		Remover:    remover,
 		FinalState: req.FinalState,
 	}
-	if runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
-		if err := am.applyTerminalFlowInstanceSideEffects(plan); err != nil {
+	if runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
+		if err := am.applyTerminalFlowInstanceSideEffects(actionCtx, plan); err != nil {
 			am.logTerminalFlowInstanceSideEffectFailure(plan, err)
 		}
 	}) {
 		return nil
 	}
-	return am.applyTerminalFlowInstanceSideEffects(plan)
+	return am.applyTerminalFlowInstanceSideEffects(ctx, plan)
 }
 
-func (am *AgentManager) applyTerminalFlowInstanceSideEffects(plan terminalFlowInstanceSideEffectPlan) error {
+func (am *AgentManager) applyTerminalFlowInstanceSideEffects(ctx context.Context, plan terminalFlowInstanceSideEffectPlan) error {
 	var agentErrs []error
 	for _, agentID := range plan.AgentIDs {
 		if err := am.TeardownAgent(agentID); err != nil && !errors.Is(err, ErrAgentNotFound) {
@@ -656,7 +654,7 @@ func (am *AgentManager) applyTerminalFlowInstanceSideEffects(plan terminalFlowIn
 	if plan.Remover == nil {
 		return fmt.Errorf("event bus does not support derived flow-instance route removal for %s", plan.FlowPath)
 	}
-	ctx := runtimecorrelation.WithRunID(context.Background(), plan.RunID)
+	ctx = runtimecorrelation.WithRunID(ctx, plan.RunID)
 	if err := plan.Remover.RemoveFlowInstanceRouteContext(ctx, plan.Route); err != nil {
 		return fmt.Errorf("remove flow instance route %s: %w", plan.FlowPath, err)
 	}

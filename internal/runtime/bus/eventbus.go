@@ -43,6 +43,12 @@ type EventBus struct {
 	channels                    map[events.EventType]map[string]chan *LocalDelivery
 	agentChans                  map[string]chan *LocalDelivery
 	agentRouteHandles           map[string]*agentRouteHandle
+	internalHandles             map[string]*internalSubscriptionHandle
+	retiringAgentRoutes         []*agentRouteHandle
+	retiringInternalHandles     []*internalSubscriptionHandle
+	resetInProgress             bool
+	resetDone                   chan struct{}
+	internalChanged             chan struct{}
 	subscriptions               map[string][]events.EventType
 	subscriptionKinds           map[string]inMemorySubscriberKind
 	pendingInternalByID         map[string][]events.DeliveryRoute
@@ -176,6 +182,12 @@ const (
 	inMemorySubscriberInternal inMemorySubscriberKind = "internal"
 )
 
+func closedSignal() chan struct{} {
+	done := make(chan struct{})
+	close(done)
+	return done
+}
+
 func NewEventBus(store EventStore) (*EventBus, error) {
 	return NewEventBusWithOptions(store, EventBusOptions{})
 }
@@ -208,6 +220,9 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		channels:                    make(map[events.EventType]map[string]chan *LocalDelivery),
 		agentChans:                  make(map[string]chan *LocalDelivery),
 		agentRouteHandles:           make(map[string]*agentRouteHandle),
+		internalHandles:             make(map[string]*internalSubscriptionHandle),
+		resetDone:                   closedSignal(),
+		internalChanged:             make(chan struct{}),
 		subscriptions:               make(map[string][]events.EventType),
 		subscriptionKinds:           make(map[string]inMemorySubscriberKind),
 		runtimeAgentDescriptors:     make(map[string]ActiveAgentDescriptor),
@@ -381,10 +396,10 @@ func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowIns
 			}
 		}
 		if !hadStagedRoute {
-			postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)))
-			if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
+			if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
+				actionCtx = runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
 				if err := table.AddFlowInstanceRoute(req); err != nil {
-					_ = eb.LogRuntime(postCommitCtx, runtimepipeline.RuntimeLogEntry{
+					_ = eb.LogRuntime(actionCtx, runtimepipeline.RuntimeLogEntry{
 						Level: "error", Message: "Post-commit flow-instance route publication failed",
 						Component: "eventbus", Action: "flow_instance_route_post_commit_publish_failed",
 						Detail: map[string]any{"instance_path": req.Identity.InstancePath, "error": err.Error()},
@@ -402,7 +417,7 @@ func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowIns
 	addedRoute := !hadRoute && table.HasFlowInstanceRoute(req.Identity)
 	if addedRoute {
 		if _, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok {
-			if !runtimepipeline.QueuePipelineRollbackAction(ctx, func() {
+			if !runtimepipeline.QueuePipelineRollbackAction(ctx, func(context.Context) {
 				_ = table.RemoveFlowInstanceRoute(req.Identity)
 			}) {
 				_ = table.RemoveFlowInstanceRoute(req.Identity)
@@ -486,34 +501,73 @@ func (eb *EventBus) SetInterceptors(interceptors ...EventInterceptor) {
 	eb.mu.Unlock()
 }
 
-func (eb *EventBus) ResetInMemoryState() error {
+func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	if eb == nil {
 		return nil
 	}
 	eb.mu.Lock()
+	if eb.resetInProgress {
+		eb.mu.Unlock()
+		return errors.New("event bus reset is already in progress")
+	}
 	routeTable, err := eb.deriveBootRouteTableLocked()
 	if err != nil {
 		eb.mu.Unlock()
 		return err
 	}
+	eb.resetInProgress = true
+	eb.resetDone = make(chan struct{})
 	pendingClaims := make([]*pipelinePublicationClaim, 0, len(eb.pendingOutboxByID))
 	for _, operations := range eb.pendingOutboxByID {
 		for _, operation := range operations {
 			pendingClaims = append(pendingClaims, operation.publicationClaim)
 		}
 	}
-	routes := make([]*agentRouteHandle, 0, len(eb.agentRouteHandles))
+	routes := append([]*agentRouteHandle(nil), eb.retiringAgentRoutes...)
 	for _, route := range eb.agentRouteHandles {
 		route.deactivate()
 		routes = append(routes, route)
 	}
-	internalChannels := make([]chan *LocalDelivery, 0, len(eb.agentChans))
-	for subscriberID, ch := range eb.agentChans {
-		if eb.agentRouteHandles[subscriberID] == nil {
-			internalChannels = append(internalChannels, ch)
-		}
+	internalHandles := append([]*internalSubscriptionHandle(nil), eb.retiringInternalHandles...)
+	for _, handle := range eb.internalHandles {
+		handle.deactivate()
+		internalHandles = append(internalHandles, handle)
 	}
+	eb.channels = make(map[events.EventType]map[string]chan *LocalDelivery)
+	eb.agentChans = make(map[string]chan *LocalDelivery)
+	eb.agentRouteHandles = make(map[string]*agentRouteHandle)
+	eb.internalHandles = make(map[string]*internalSubscriptionHandle)
+	eb.subscriptions = make(map[string][]events.EventType)
+	eb.subscriptionKinds = make(map[string]inMemorySubscriberKind)
+	eb.pendingInternalByID = make(map[string][]events.DeliveryRoute)
+	eb.pendingOutboxByID = make(map[string][]pendingOutboxOperation)
+	eb.retiringAgentRoutes = nil
+	eb.retiringInternalHandles = nil
+	eb.routeTable = routeTable
+	eb.rebuildRoutePlanners()
+	eb.notifyInternalSubscriptionChangedLocked()
 	eb.mu.Unlock()
+
+	resetOpened := false
+	defer func() {
+		if resetOpened {
+			return
+		}
+		eb.mu.Lock()
+		if resetErr != nil {
+			for _, route := range routes {
+				eb.retainRetiringAgentRouteLocked(route)
+			}
+			for _, handle := range internalHandles {
+				eb.retainRetiringInternalHandleLocked(handle)
+			}
+		}
+		eb.resetInProgress = false
+		close(eb.resetDone)
+		resetOpened = true
+		eb.notifyInternalSubscriptionChangedLocked()
+		eb.mu.Unlock()
+	}()
 
 	// Retained queues and claims are lifecycle evidence. Prove their durable
 	// handoff and settle their leases before erasing any in-memory owner map.
@@ -522,31 +576,59 @@ func (eb *EventBus) ResetInMemoryState() error {
 			return retireErr
 		}
 	}
-	for _, ch := range internalChannels {
-		if drainErr := drainBufferedLocalDeliveryChannel(context.Background(), eb.store, ch); drainErr != nil {
-			return drainErr
+	for _, handle := range internalHandles {
+		if retireErr := handle.retireAndWait(context.Background(), eb.store); retireErr != nil {
+			return retireErr
 		}
 	}
 	for _, claim := range pendingClaims {
 		claim.Release(context.Background())
 	}
 
+	// Reset's deferred epilogue opens admission. Runners that acknowledged the
+	// retire signal then resubscribe and report readiness through the same
+	// lifecycle handle; no raw channel is silently reused.
+	restartIDs := make([]string, 0, len(internalHandles))
+	for _, handle := range internalHandles {
+		if handle.wantsRestart() {
+			restartIDs = append(restartIDs, handle.subscriberID)
+		}
+	}
 	eb.mu.Lock()
-	eb.channels = make(map[events.EventType]map[string]chan *LocalDelivery)
-	eb.agentChans = make(map[string]chan *LocalDelivery)
-	eb.agentRouteHandles = make(map[string]*agentRouteHandle)
-	eb.subscriptions = make(map[string][]events.EventType)
-	eb.subscriptionKinds = make(map[string]inMemorySubscriberKind)
-	eb.pendingInternalByID = make(map[string][]events.DeliveryRoute)
-	eb.pendingOutboxByID = make(map[string][]pendingOutboxOperation)
-	eb.routeTable = routeTable
-	eb.rebuildRoutePlanners()
+	eb.resetInProgress = false
+	close(eb.resetDone)
+	resetOpened = true
+	eb.notifyInternalSubscriptionChangedLocked()
 	eb.mu.Unlock()
+	for _, subscriberID := range uniqueStrings(restartIDs) {
+		if err := eb.waitForInternalSubscriptionReady(context.Background(), subscriberID); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 func (eb *EventBus) WaitForQuiescence(ctx context.Context) error {
-	if eb == nil || eb.workOwner == nil {
+	if eb == nil {
+		return nil
+	}
+	eb.mu.Lock()
+	routes := append([]*agentRouteHandle(nil), eb.retiringAgentRoutes...)
+	handles := append([]*internalSubscriptionHandle(nil), eb.retiringInternalHandles...)
+	eb.mu.Unlock()
+	for _, route := range routes {
+		if err := route.retireAndWait(ctx, eb.store); err != nil {
+			return err
+		}
+		eb.removeRetiringAgentRoute(route)
+	}
+	for _, handle := range handles {
+		if err := handle.retireAndWait(ctx, eb.store); err != nil {
+			return err
+		}
+		eb.removeRetiringInternalHandle(handle)
+	}
+	if eb.workOwner == nil {
 		return nil
 	}
 	return eb.workOwner.Wait(ctx)
@@ -591,10 +673,18 @@ func (eb *EventBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToken, admis
 	ch := make(chan *LocalDelivery, 128)
 	route := newAgentRouteHandle(token, ch, owner)
 	eb.mu.Lock()
-	old := eb.detachSubscriberLocked(agentID)
+	old, oldInternal := eb.detachSubscriberLocked(agentID)
 	eb.mu.Unlock()
 	if old != nil {
 		if err := old.retireAndWait(context.Background(), eb.store); err != nil {
+			eb.retainRetiringAgentRoute(old)
+			_ = route.retireAndWait(context.Background(), eb.store)
+			return nil
+		}
+	}
+	if oldInternal != nil {
+		if err := oldInternal.retireAndWait(context.Background(), eb.store); err != nil {
+			eb.retainRetiringInternalHandle(oldInternal)
 			_ = route.retireAndWait(context.Background(), eb.store)
 			return nil
 		}
@@ -639,15 +729,61 @@ func (eb *EventBus) RemoveAgentRoute(token runtimeeffects.LifecycleToken) {
 		eb.mu.Unlock()
 		return
 	}
-	route := eb.detachSubscriberLocked(agentID)
+	route, _ := eb.detachSubscriberLocked(agentID)
 	eb.mu.Unlock()
 	if route != nil {
-		_ = route.retireAndWait(context.Background(), eb.store)
+		if err := route.retireAndWait(context.Background(), eb.store); err != nil {
+			eb.retainRetiringAgentRoute(route)
+		}
 	}
 }
 
-func (eb *EventBus) SubscribeInternal(subscriberID string, eventTypes ...events.EventType) <-chan *LocalDelivery {
-	return eb.subscribe(subscriberID, inMemorySubscriberInternal, eventTypes...)
+func (eb *EventBus) SubscribeInternal(ctx context.Context, subscriberID string, eventTypes ...events.EventType) (worklifetime.InternalSubscription, error) {
+	if eb == nil || eb.workOwner == nil {
+		return nil, errors.New("event bus runtime work owner is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	subscriberID = strings.TrimSpace(subscriberID)
+	if subscriberID == "" {
+		return nil, errors.New("internal subscriber id is required")
+	}
+	for {
+		eb.mu.Lock()
+		if eb.resetInProgress {
+			resetDone := eb.resetDone
+			eb.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-resetDone:
+				continue
+			}
+		}
+		if existing := eb.internalHandles[subscriberID]; existing != nil {
+			eb.mu.Unlock()
+			return nil, fmt.Errorf("internal subscriber %s already has an active generation", subscriberID)
+		}
+		handle := newInternalSubscriptionHandle(eb, subscriberID, eventTypes)
+		eb.internalHandles[subscriberID] = handle
+		eb.agentChans[subscriberID] = handle.ch
+		eb.subscriptionKinds[subscriberID] = inMemorySubscriberInternal
+		for _, eventType := range eventTypes {
+			eventType = events.EventType(strings.TrimSpace(string(eventType)))
+			if eventType == "" {
+				continue
+			}
+			eb.subscriptions[subscriberID] = AppendUniqueEventType(eb.subscriptions[subscriberID], eventType)
+			if eb.channels[eventType] == nil {
+				eb.channels[eventType] = make(map[string]chan *LocalDelivery)
+			}
+			eb.channels[eventType][subscriberID] = handle.ch
+		}
+		eb.notifyInternalSubscriptionChangedLocked()
+		eb.mu.Unlock()
+		return handle, nil
+	}
 }
 
 func (eb *EventBus) subscribe(subscriberID string, kind inMemorySubscriberKind, eventTypes ...events.EventType) <-chan *LocalDelivery {
@@ -689,21 +825,34 @@ func (eb *EventBus) Unsubscribe(agentID string) {
 		return
 	}
 	ch := eb.agentChans[agentID]
-	eb.detachSubscriberLocked(agentID)
+	_, internal := eb.detachSubscriberLocked(agentID)
 	eb.mu.Unlock()
+	if internal != nil {
+		// Receiver completion is a separate lifecycle fact. Retain the exact
+		// generation for WaitForQuiescence rather than blocking here or
+		// pretending the receiver has exited.
+		eb.retainRetiringInternalHandle(internal)
+		return
+	}
 	if err := drainBufferedLocalDeliveryChannel(context.Background(), eb.store, ch); err != nil {
 		diaglog.ProcessLog(diaglog.LevelError, "eventbus", "internal subscriber retirement failed closed", "subscriber_id", agentID, "error", err.Error())
 	}
 }
 
-func (eb *EventBus) detachSubscriberLocked(agentID string) *agentRouteHandle {
+func (eb *EventBus) detachSubscriberLocked(agentID string) (*agentRouteHandle, *internalSubscriptionHandle) {
 	var detached *agentRouteHandle
+	var internal *internalSubscriptionHandle
 	if route := eb.agentRouteHandles[agentID]; route != nil {
 		route.deactivate()
 		detached = route
 	}
+	if handle := eb.internalHandles[agentID]; handle != nil {
+		handle.deactivate()
+		internal = handle
+	}
 	delete(eb.agentChans, agentID)
 	delete(eb.agentRouteHandles, agentID)
+	delete(eb.internalHandles, agentID)
 	delete(eb.subscriptions, agentID)
 	delete(eb.subscriptionKinds, agentID)
 	for et := range eb.channels {
@@ -712,7 +861,129 @@ func (eb *EventBus) detachSubscriberLocked(agentID string) *agentRouteHandle {
 			delete(eb.channels, et)
 		}
 	}
-	return detached
+	eb.notifyInternalSubscriptionChangedLocked()
+	return detached, internal
+}
+
+func (eb *EventBus) completeInternalSubscription(handle *internalSubscriptionHandle) error {
+	if eb == nil || handle == nil {
+		return nil
+	}
+	eb.mu.Lock()
+	natural := eb.internalHandles[handle.subscriberID] == handle
+	if natural {
+		_, _ = eb.detachSubscriberLocked(handle.subscriberID)
+	}
+	eb.mu.Unlock()
+	if !natural {
+		return nil
+	}
+	if err := handle.retireAndWait(context.Background(), eb.store); err != nil {
+		eb.retainRetiringInternalHandle(handle)
+		return err
+	}
+	return nil
+}
+
+func (eb *EventBus) notifyInternalSubscriptionChanged() {
+	if eb == nil {
+		return
+	}
+	eb.mu.Lock()
+	eb.notifyInternalSubscriptionChangedLocked()
+	eb.mu.Unlock()
+}
+
+func (eb *EventBus) notifyInternalSubscriptionChangedLocked() {
+	if eb.internalChanged != nil {
+		close(eb.internalChanged)
+	}
+	eb.internalChanged = make(chan struct{})
+}
+
+func (eb *EventBus) waitForInternalSubscriptionReady(ctx context.Context, subscriberID string) error {
+	for {
+		eb.mu.Lock()
+		handle := eb.internalHandles[subscriberID]
+		changed := eb.internalChanged
+		eb.mu.Unlock()
+		if handle != nil {
+			select {
+			case <-handle.ready:
+				return nil
+			default:
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for internal subscriber %s readiness: %w", subscriberID, ctx.Err())
+		case <-changed:
+		}
+	}
+}
+
+func (eb *EventBus) retainRetiringAgentRoute(route *agentRouteHandle) {
+	if eb == nil || route == nil {
+		return
+	}
+	eb.mu.Lock()
+	eb.retainRetiringAgentRouteLocked(route)
+	eb.mu.Unlock()
+}
+
+func (eb *EventBus) retainRetiringAgentRouteLocked(route *agentRouteHandle) {
+	for _, existing := range eb.retiringAgentRoutes {
+		if existing == route {
+			return
+		}
+	}
+	eb.retiringAgentRoutes = append(eb.retiringAgentRoutes, route)
+}
+
+func (eb *EventBus) removeRetiringAgentRoute(route *agentRouteHandle) {
+	if eb == nil || route == nil {
+		return
+	}
+	eb.mu.Lock()
+	defer eb.mu.Unlock()
+	for i, existing := range eb.retiringAgentRoutes {
+		if existing == route {
+			eb.retiringAgentRoutes = append(eb.retiringAgentRoutes[:i], eb.retiringAgentRoutes[i+1:]...)
+			return
+		}
+	}
+}
+
+func (eb *EventBus) retainRetiringInternalHandle(handle *internalSubscriptionHandle) {
+	if eb == nil || handle == nil {
+		return
+	}
+	eb.mu.Lock()
+	eb.retainRetiringInternalHandleLocked(handle)
+	eb.mu.Unlock()
+}
+
+func (eb *EventBus) retainRetiringInternalHandleLocked(handle *internalSubscriptionHandle) {
+	for _, existing := range eb.retiringInternalHandles {
+		if existing == handle {
+			return
+		}
+	}
+	eb.retiringInternalHandles = append(eb.retiringInternalHandles, handle)
+}
+
+func (eb *EventBus) removeRetiringInternalHandle(handle *internalSubscriptionHandle) {
+	if eb == nil || handle == nil {
+		return
+	}
+	eb.mu.Lock()
+	defer eb.mu.Unlock()
+	for i, existing := range eb.retiringInternalHandles {
+		if existing == handle {
+			eb.retiringInternalHandles = append(eb.retiringInternalHandles[:i], eb.retiringInternalHandles[i+1:]...)
+			return
+		}
+	}
 }
 
 func (eb *EventBus) deriveBootRouteTableLocked() (*RouteTable, error) {

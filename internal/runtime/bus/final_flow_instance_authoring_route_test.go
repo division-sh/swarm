@@ -124,7 +124,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 		t.Fatalf("post-publish route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
 	}
 
-	retryTarget := eb.SubscribeInternal(persistedRoutes[0].SubscriberID)
+	retryTarget := subscribeInternalDeliveriesForTest(t, eb, persistedRoutes[0].SubscriberID)
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish same-event retry: %v", err)
 	}

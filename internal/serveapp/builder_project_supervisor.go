@@ -67,6 +67,7 @@ type runtimeProjectSupervisor struct {
 	currentBundleSourceFact         runtimecorrelation.BundleSourceFact
 	currentBundleIdentity           runtimecontracts.BundleIdentity
 	runtimeContexts                 *runtime.RuntimeContextManager
+	pendingReplacement              *pendingRuntimeReplacement
 	sourceReplacementDisabledReason string
 }
 
@@ -259,6 +260,9 @@ func (s *runtimeProjectSupervisor) CloseProject(ctx context.Context) (builderpkg
 func (s *runtimeProjectSupervisor) CloseProjectWithShutdownOptions(ctx context.Context, opts runtime.ShutdownOptions) (builderpkg.ProjectStatus, error) {
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
+	if err := s.completePendingReplacement(); err != nil {
+		return s.CurrentProject(), fmt.Errorf("finalize pending runtime replacement before close: %w", err)
+	}
 	s.mu.RLock()
 	manager := s.runtimeContexts
 	bundleHash := strings.TrimSpace(s.currentBundleSourceFact.BundleHash)
@@ -281,6 +285,9 @@ func (s *runtimeProjectSupervisor) CloseProjectWithShutdownOptions(ctx context.C
 func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir string) (builderpkg.ProjectStatus, error) {
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
+	if err := s.completePendingReplacement(); err != nil {
+		return s.CurrentProject(), fmt.Errorf("finalize pending runtime replacement: %w", err)
+	}
 	if reason := s.sourceReplacementDisabled(); reason != "" {
 		return s.CurrentProject(), fmt.Errorf("project source replacement is disabled: %s", reason)
 	}
@@ -382,6 +389,8 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		return builderpkg.ProjectStatus{}, err
 	}
 	admissionCandidate.catalog = candidateCatalog
+	admissionCandidate.channelPlans = append([]packs.SatisfactionPlan(nil), candidateChannelPlans...)
+	admissionCandidate.channelBindings = append([]packs.OutboundBindingPlan(nil), candidateChannelBindings...)
 	status, err := s.replaceCurrentRuntimeWithSourceAndAdmission(ctx, resolvedRoot, source, bundle, bundleSourceFact, bundleIdentity, newRT, newRT.WorkOccurrence(), &admissionCandidate)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err
@@ -398,6 +407,90 @@ type processAdmissionCandidate struct {
 	catalog          *providertriggers.CatalogSnapshot
 	state            runtime.ProcessAdmissionState
 	survivingTargets map[string][]runtime.StandingTarget
+	channelPlans     []packs.SatisfactionPlan
+	channelBindings  []packs.OutboundBindingPlan
+}
+
+type pendingRuntimeReplacement struct {
+	mu          sync.Mutex
+	handoff     *runtime.StartupOwnershipHandoff
+	publication *runtime.PreparedRuntimeContextReplacement
+	root        string
+	source      semanticview.Source
+	bundle      *runtimecontracts.WorkflowContractBundle
+	fact        runtimecorrelation.BundleSourceFact
+	identity    runtimecontracts.BundleIdentity
+	runtime     *runtime.Runtime
+	admission   *processAdmissionCandidate
+	finalized   bool
+}
+
+func cloneProcessAdmissionCandidate(candidate *processAdmissionCandidate) *processAdmissionCandidate {
+	if candidate == nil {
+		return nil
+	}
+	cloned := *candidate
+	cloned.state.InstalledSubjects = packs.CloneSubjects(candidate.state.InstalledSubjects)
+	cloned.survivingTargets = make(map[string][]runtime.StandingTarget, len(candidate.survivingTargets))
+	for bundleHash, targets := range candidate.survivingTargets {
+		cloned.survivingTargets[bundleHash] = append([]runtime.StandingTarget(nil), targets...)
+	}
+	cloned.channelPlans = append([]packs.SatisfactionPlan(nil), candidate.channelPlans...)
+	cloned.channelBindings = append([]packs.OutboundBindingPlan(nil), candidate.channelBindings...)
+	return &cloned
+}
+
+func (s *runtimeProjectSupervisor) completePendingReplacement() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	pending := s.pendingReplacement
+	s.mu.RUnlock()
+	if pending == nil {
+		return nil
+	}
+	pending.mu.Lock()
+	defer pending.mu.Unlock()
+	s.mu.RLock()
+	current := s.pendingReplacement
+	s.mu.RUnlock()
+	if current != pending {
+		return nil
+	}
+	if !pending.finalized {
+		if err := pending.handoff.Finalize(); err != nil {
+			s.setReady(false)
+			return fmt.Errorf("finalize retained runtime startup ownership handoff: %w", err)
+		}
+		pending.finalized = true
+	}
+	if err := pending.publication.Publish(); err != nil {
+		s.setReady(false)
+		return fmt.Errorf("publish finalized runtime replacement: %w", err)
+	}
+	s.mu.Lock()
+	if s.pendingReplacement != pending {
+		s.mu.Unlock()
+		return errors.New("pending runtime replacement changed before publication")
+	}
+	s.currentRoot = strings.TrimSpace(pending.root)
+	s.currentSource = pending.source
+	s.currentBundle = pending.bundle
+	s.currentRT = pending.runtime
+	s.currentBundleSourceFact = pending.fact.Normalized()
+	s.currentBundleIdentity = pending.identity
+	if pending.admission != nil {
+		s.providerTriggers = pending.admission.catalog
+		s.channelPlans = append([]packs.SatisfactionPlan(nil), pending.admission.channelPlans...)
+		s.channelBindings = append([]packs.OutboundBindingPlan(nil), pending.admission.channelBindings...)
+	}
+	s.pendingReplacement = nil
+	if s.ready != nil {
+		s.ready.Store(true)
+	}
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *runtimeProjectSupervisor) compileProcessAdmissionCandidate(ctx context.Context, catalog *providertriggers.CatalogSnapshot) (processAdmissionCandidate, error) {
@@ -481,7 +574,11 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 	s.mu.RLock()
 	manager := s.runtimeContexts
 	oldHash := strings.TrimSpace(s.currentBundleSourceFact.BundleHash)
+	pending := s.pendingReplacement
 	s.mu.RUnlock()
+	if pending != nil {
+		return s.CurrentProject(), errors.New("runtime replacement transition is already pending")
+	}
 	newHash := strings.TrimSpace(fact.BundleHash)
 	if manager != nil && oldHash != "" {
 		plannedTargets, err := newRT.PlanStandingTargets()
@@ -510,8 +607,14 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		s.mu.RUnlock()
 		s.setReady(false)
 		if _, err := manager.BeginBundleHashReplacement(ctx, oldHash, contextDef); err != nil {
+			withdrawErr := fmt.Errorf("withdraw predecessor runtime context for replacement: %w", err)
+			status := manager.LookupBundleHashStatus(oldHash)
+			if status.Found && status.Cause == runtime.RuntimeContextCauseReplacing {
+				restoreErr := s.completeFailedQuiescenceAndRestore(ctx, manager, oldContextDef, oldRT)
+				return s.CurrentProject(), errors.Join(withdrawErr, restoreErr)
+			}
 			s.setReady(true)
-			return s.CurrentProject(), fmt.Errorf("withdraw predecessor runtime context for replacement: %w", err)
+			return s.CurrentProject(), withdrawErr
 		}
 		if err := s.quiesceCurrentRuntimeWithOptions(ctx, oldRT, s.replacementShutdown); err != nil {
 			restoreErr := s.completeFailedQuiescenceAndRestore(ctx, manager, oldContextDef, oldRT)
@@ -521,9 +624,13 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		if err != nil {
 			return s.CurrentProject(), errors.Join(err, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT))
 		}
-		finalized := false
+		transitionRetained := false
+		var publication *runtime.PreparedRuntimeContextReplacement
 		defer func() {
-			if !finalized {
+			if !transitionRetained {
+				if publication != nil {
+					_ = publication.Discard()
+				}
 				_ = handoff.Rollback()
 			}
 		}()
@@ -539,33 +646,38 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 			return s.CurrentProject(), errors.Join(err, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT))
 		}
 		contextDef.StandingTargets = targets
-		if err := handoff.Commit(); err != nil {
+		if admissionCandidate == nil {
+			publication, err = manager.PrepareBundleHashReplacementPublication(oldHash, contextDef)
+		} else {
+			publication, err = manager.PrepareBundleHashReplacementPublicationWithAdmission(oldHash, contextDef, admissionCandidate.survivingTargets, admissionCandidate.state)
+		}
+		if err != nil {
 			_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
 			rollbackErr := handoff.Rollback()
 			return s.CurrentProject(), errors.Join(err, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT))
 		}
-		publish := func() error { return manager.PublishBundleHashReplacement(oldHash, contextDef) }
-		if admissionCandidate != nil {
-			publish = func() error {
-				return manager.PublishBundleHashReplacementWithAdmission(oldHash, contextDef, admissionCandidate.survivingTargets, admissionCandidate.state)
-			}
-		}
-		if err := publish(); err != nil {
-			quiesceErr := s.quiesceCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
+		if err := handoff.Commit(); err != nil {
+			discardErr := publication.Discard()
+			_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
 			rollbackErr := handoff.Rollback()
-			return s.CurrentProject(), errors.Join(err, quiesceErr, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT))
+			return s.CurrentProject(), errors.Join(err, discardErr, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT))
 		}
-		if admissionCandidate != nil {
-			s.mu.Lock()
-			s.providerTriggers = admissionCandidate.catalog
+		pending := &pendingRuntimeReplacement{
+			handoff: handoff, publication: publication,
+			root: resolvedRoot, source: source, bundle: bundle, fact: fact, identity: identity, runtime: newRT,
+			admission: cloneProcessAdmissionCandidate(admissionCandidate),
+		}
+		s.mu.Lock()
+		if s.pendingReplacement != nil {
 			s.mu.Unlock()
+			return s.CurrentProject(), errors.New("runtime replacement transition is already pending")
 		}
-		oldRT = s.swapCurrentRuntime(resolvedRoot, source, bundle, fact, identity, newRT)
-		if err := handoff.Finalize(); err != nil {
-			finalized = true
-			return s.CurrentProject(), fmt.Errorf("finalize runtime startup ownership handoff: %w", err)
+		s.pendingReplacement = pending
+		s.mu.Unlock()
+		transitionRetained = true
+		if err := s.completePendingReplacement(); err != nil {
+			return s.CurrentProject(), err
 		}
-		finalized = true
 		return s.CurrentProject(), nil
 	}
 	oldRT := s.detachCurrentRuntime()
@@ -703,9 +815,13 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Contex
 	if err != nil {
 		return fmt.Errorf("restore predecessor ownership: %w", err)
 	}
-	finalized := false
+	transitionRetained := false
+	var publication *runtime.PreparedRuntimeContextReplacement
 	defer func() {
-		if !finalized {
+		if !transitionRetained {
+			if publication != nil {
+				_ = publication.Discard()
+			}
 			_ = handoff.Rollback()
 		}
 	}()
@@ -718,25 +834,35 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Contex
 		_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), restored, s.replacementShutdown)
 		return fmt.Errorf("restore predecessor standing targets: %w", err)
 	}
-	if err := handoff.Commit(); err != nil {
-		_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), restored, s.replacementShutdown)
-		return fmt.Errorf("commit predecessor ownership restoration: %w", err)
-	}
 	predecessorContext.Runtime = restored
 	predecessorContext.WorkOwner = restoredWorkOwner
 	predecessorContext.StandingTargets = targets
-	if err := manager.PublishRestoredBundleHashReplacement(predecessorContext.BundleHash, predecessorContext); err != nil {
+	publication, err = manager.PrepareRestoredBundleHashReplacementPublication(predecessorContext.BundleHash, predecessorContext)
+	if err != nil {
+		_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), restored, s.replacementShutdown)
+		return fmt.Errorf("prepare predecessor runtime context restoration: %w", err)
+	}
+	if err := handoff.Commit(); err != nil {
+		discardErr := publication.Discard()
+		_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), restored, s.replacementShutdown)
+		return errors.Join(fmt.Errorf("commit predecessor ownership restoration: %w", err), discardErr)
+	}
+	pending := &pendingRuntimeReplacement{
+		handoff: handoff, publication: publication,
+		root: predecessorRoot, source: predecessorContext.Source, bundle: predecessorBundle,
+		fact: predecessorContext.BundleSourceFact, identity: predecessorContext.BundleIdentity, runtime: restored,
+	}
+	s.mu.Lock()
+	if s.pendingReplacement != nil {
+		s.mu.Unlock()
 		quiesceErr := s.quiesceCurrentRuntimeWithOptions(context.Background(), restored, s.replacementShutdown)
 		rollbackErr := handoff.Rollback()
-		return errors.Join(fmt.Errorf("restore predecessor runtime context: %w", err), quiesceErr, rollbackErr)
+		return errors.Join(errors.New("runtime replacement transition is already pending"), quiesceErr, rollbackErr)
 	}
-	s.swapCurrentRuntime(predecessorRoot, predecessorContext.Source, predecessorBundle, predecessorContext.BundleSourceFact, predecessorContext.BundleIdentity, restored)
-	if err := handoff.Finalize(); err != nil {
-		finalized = true
-		return fmt.Errorf("finalize predecessor ownership restoration: %w", err)
-	}
-	finalized = true
-	return nil
+	s.pendingReplacement = pending
+	s.mu.Unlock()
+	transitionRetained = true
+	return s.completePendingReplacement()
 }
 
 func (s *runtimeProjectSupervisor) completeFailedQuiescenceAndRestore(ctx context.Context, manager *runtime.RuntimeContextManager, predecessorContext runtime.BundleContext, predecessor *runtime.Runtime) error {

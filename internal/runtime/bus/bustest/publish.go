@@ -22,8 +22,8 @@ func CommitPublish(
 	finalize FinalizePublishFunc,
 ) (runtimebus.PreparedPublish, error) {
 	transaction := &Transaction{Begin: begin, Finalize: finalize}
-	postCommit := make([]func(), 0, 4)
-	rollback := make([]func(), 0, 4)
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
+	rollback := make([]runtimepipeline.OwnerAction, 0, 4)
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
 	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
 	prepared, err := plan.PrepareCommitPublish(runtimebus.WithCommitPublishTransaction(ctx, transaction))

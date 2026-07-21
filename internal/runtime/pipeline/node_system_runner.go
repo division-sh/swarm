@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -25,7 +26,7 @@ type systemNodeBus interface {
 }
 
 type ownedInternalSubscriptionBus interface {
-	SubscribeInternal(subscriberID string, eventTypes ...events.EventType) <-chan *worklifetime.EventDelivery
+	SubscribeInternal(context.Context, string, ...events.EventType) (worklifetime.InternalSubscription, error)
 }
 
 type systemNodeRuntimeLogger interface {
@@ -85,23 +86,36 @@ func (n *systemNodeRunner) Run(ctx context.Context) {
 	if n == nil || n.bus == nil || n.handleFn == nil {
 		return
 	}
-	ch := n.subscribe()
-	n.notifySubscribed()
 	for {
-		select {
-		case <-ctx.Done():
+		subscription, err := n.subscribe(ctx)
+		if err != nil {
 			return
-		case delivery, ok := <-ch:
-			if !ok {
-				ch = n.subscribe()
-				n.notifySubscribed()
-				continue
-			}
-			func() {
-				defer func() { _ = delivery.Complete() }()
-				n.ProcessEventForTest(delivery.Context(), delivery.Event())
-			}()
 		}
+		subscription.MarkReady()
+		n.notifySubscribed()
+		for {
+			select {
+			case <-ctx.Done():
+				_ = subscription.Complete(false)
+				return
+			case <-subscription.Retiring():
+				restart := ctx.Err() == nil
+				_ = subscription.Complete(restart)
+				if !restart {
+					return
+				}
+				goto resubscribe
+			case delivery := <-subscription.Deliveries():
+				if delivery == nil {
+					continue
+				}
+				func() {
+					defer func() { _ = delivery.Complete() }()
+					n.ProcessEventForTest(delivery.Context(), delivery.Event())
+				}()
+			}
+		}
+	resubscribe:
 	}
 }
 
@@ -236,19 +250,19 @@ func (n *systemNodeRunner) SetTestLifecycleProbe(probe runtimelifecycleprobe.Obs
 	n.testLifecycleProbe = probe
 }
 
-func (n *systemNodeRunner) subscribe() <-chan *worklifetime.EventDelivery {
+func (n *systemNodeRunner) subscribe(ctx context.Context) (worklifetime.InternalSubscription, error) {
 	if n == nil || n.bus == nil {
-		return nil
+		return nil, errors.New("system node subscription bus is required")
 	}
 	bus, ok := n.bus.(ownedInternalSubscriptionBus)
 	if !ok {
-		return nil
+		return nil, errors.New("system node bus does not expose owned internal subscriptions")
 	}
 	subscriptions := []events.EventType(nil)
 	if n.subscriptionsFn != nil {
 		subscriptions = n.subscriptionsFn()
 	}
-	return bus.SubscribeInternal(n.nodeID, subscriptions...)
+	return bus.SubscribeInternal(ctx, n.nodeID, subscriptions...)
 }
 
 func (n *systemNodeRunner) handle(ctx context.Context, evt events.Event) error {

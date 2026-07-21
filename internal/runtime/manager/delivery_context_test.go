@@ -101,6 +101,57 @@ func TestAgentDeliveryExecutionContextPreservesDeliveryTreeAndGenerationAuthorit
 	}
 }
 
+func TestAgentManagerWorkUsesContextualStandingOccurrence(t *testing.T) {
+	process := worklifetime.NewProcess()
+	runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: "manager-standing-runtime",
+		BundleHash:        "manager-standing-bundle",
+	})
+	if err != nil {
+		t.Fatalf("new runtime occurrence: %v", err)
+	}
+	standing, err := runtimeOwner.NewStanding(context.Background(), worklifetime.StandingIdentity{
+		ServiceID:  "manager-standing-service",
+		RunID:      uuid.NewString(),
+		Generation: 1,
+	})
+	if err != nil {
+		t.Fatalf("new standing occurrence: %v", err)
+	}
+	am := &AgentManager{workOwner: runtimeOwner}
+	lease, err := am.beginWork(worklifetime.WithOccurrence(context.Background(), standing), "standing manager work")
+	if err != nil {
+		t.Fatalf("begin standing manager work: %v", err)
+	}
+	if owner, ok := worklifetime.OccurrenceFromContext(lease.Context()); !ok || owner != standing {
+		t.Fatalf("manager work owner = %v, %v; want standing occurrence", owner, ok)
+	}
+
+	standing.Retire()
+	select {
+	case <-lease.Context().Done():
+	case <-time.After(time.Second):
+		t.Fatal("standing retirement did not cancel manager work")
+	}
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancelWait()
+	if err := standing.Wait(waitCtx); err == nil {
+		t.Fatal("standing wait completed while manager work remained active")
+	}
+	if err := lease.Done(); err != nil {
+		t.Fatalf("settle standing manager work: %v", err)
+	}
+	if err := standing.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire standing occurrence: %v", err)
+	}
+	if _, err := runtimeOwner.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire runtime occurrence: %v", err)
+	}
+	if _, err := process.Join(context.Background()); err != nil {
+		t.Fatalf("join process: %v", err)
+	}
+}
+
 func TestAgentOutputRemainsInPublishAndWaitDeliveryTree(t *testing.T) {
 	process := worklifetime.NewProcess()
 	runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{RuntimeInstanceID: "manager-tree-runtime", BundleHash: "manager-tree-bundle"})
@@ -132,7 +183,7 @@ func TestAgentOutputRemainsInPublishAndWaitDeliveryTree(t *testing.T) {
 		t.Fatalf("spawn delivery-tree agent: %v", err)
 	}
 	am.Run(baseCtx)
-	leafDeliveries := eb.SubscribeInternal("leaf-proof", leafType)
+	leafDeliveries := managerInternalDeliveriesForTest(t, eb, "leaf-proof", leafType)
 	publishDone := make(chan error, 1)
 	go func() { publishDone <- eb.PublishAndWait(baseCtx, rootEvent) }()
 	var leafDelivery *worklifetime.EventDelivery

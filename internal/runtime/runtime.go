@@ -1616,9 +1616,15 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if rt.Stores.SQLDB != nil && rt.Logger != nil {
 	}
 	var bootCheck <-chan *worklifetime.EventDelivery
+	var bootSubscription worklifetime.InternalSubscription
 	if rt.Options.SelfCheck && rt.Bus != nil {
-		bootCheck = rt.Bus.SubscribeInternal(bootstrapSelfCheckSubscriberID, events.EventType("platform.boot"))
-		defer rt.Bus.Unsubscribe(bootstrapSelfCheckSubscriberID)
+		bootSubscription, err = rt.Bus.SubscribeInternal(startCtx, bootstrapSelfCheckSubscriberID, events.EventType("platform.boot"))
+		if err != nil {
+			return fmt.Errorf("subscribe platform.boot self-check: %w", err)
+		}
+		bootSubscription.MarkReady()
+		bootCheck = bootSubscription.Deliveries()
+		defer func() { _ = bootSubscription.Complete(false) }()
 		rt.emitBootProgress(18, "boot_self_check_optional", "ok", "platform.boot self-check subscribed")
 	} else {
 		rt.emitBootProgress(18, "boot_self_check_optional", "skipped", "self-check disabled or event bus unavailable")

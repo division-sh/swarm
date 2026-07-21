@@ -15,11 +15,23 @@ type recordingInternalSubscriptionBus struct {
 	eventTypes []events.EventType
 }
 
-func (b *recordingInternalSubscriptionBus) SubscribeInternal(subscriber string, eventTypes ...events.EventType) <-chan *worklifetime.EventDelivery {
+type recordingInternalSubscription struct {
+	deliveries chan *worklifetime.EventDelivery
+	retiring   chan struct{}
+}
+
+func (s *recordingInternalSubscription) Deliveries() <-chan *worklifetime.EventDelivery {
+	return s.deliveries
+}
+func (s *recordingInternalSubscription) Retiring() <-chan struct{} { return s.retiring }
+func (*recordingInternalSubscription) MarkReady()                  {}
+func (*recordingInternalSubscription) Complete(bool) error         { return nil }
+
+func (b *recordingInternalSubscriptionBus) SubscribeInternal(_ context.Context, subscriber string, eventTypes ...events.EventType) (worklifetime.InternalSubscription, error) {
 	b.mode = "internal"
 	b.subscriber = subscriber
 	b.eventTypes = append([]events.EventType(nil), eventTypes...)
-	return make(chan *worklifetime.EventDelivery, 1)
+	return &recordingInternalSubscription{deliveries: make(chan *worklifetime.EventDelivery, 1), retiring: make(chan struct{})}, nil
 }
 
 func (*recordingInternalSubscriptionBus) Publish(context.Context, events.Event) error { return nil }
@@ -41,9 +53,9 @@ func TestPipelineCoordinatorSubscribe_UsesInternalSubscribers(t *testing.T) {
 	bus := &recordingInternalSubscriptionBus{}
 	pc := &PipelineCoordinator{bus: bus}
 
-	ch := pc.subscribe()
-	if ch == nil {
-		t.Fatal("subscribe returned nil channel")
+	subscription, err := pc.subscribe(context.Background())
+	if err != nil || subscription == nil {
+		t.Fatalf("subscribe = %v, %v", subscription, err)
 	}
 	if bus.mode != "internal" {
 		t.Fatalf("subscription mode = %q, want internal", bus.mode)
@@ -62,9 +74,9 @@ func TestSystemNodeRunnerSubscribe_UsesInternalSubscribers(t *testing.T) {
 		t.Fatal("newSystemNodeRunner returned nil")
 	}
 
-	ch := runner.subscribe()
-	if ch == nil {
-		t.Fatal("subscribe returned nil channel")
+	subscription, err := runner.subscribe(context.Background())
+	if err != nil || subscription == nil {
+		t.Fatalf("subscribe = %v, %v", subscription, err)
 	}
 	if bus.mode != "internal" {
 		t.Fatalf("subscription mode = %q, want internal", bus.mode)

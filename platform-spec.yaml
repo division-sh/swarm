@@ -5404,7 +5404,10 @@ engine:
         pre-visibility candidate failure quiesces the candidate, transfers lease authority back, and starts a fresh runtime
         from the predecessor's admitted source before restoring manager visibility. Aliasing one lease into two active
         runtimes is prohibited. Candidate and restored runtime loops inherit the serve-process lifetime context; bounded
-        replacement/recovery operation contexts MUST NOT become their post-commit lifetime owner.
+        replacement/recovery operation contexts MUST NOT become their post-commit lifetime owner. A committed handoff is
+        retained until exact finalization succeeds. Finalization failure keeps readiness and runtime selection unavailable;
+        retry consumes the same handoff and cannot reacquire, infer, roll forward through metadata-only publication, or
+        expose the candidate before the typed authority transition is final.
     - name: event_delivery_receipt_and_replay_rows
       owner: runtimebus.EventStore, runtimebus.EventMutationRunner/EventMutation, backend store implementations, runtimemanager.ManagerPersistence, and runtimereplayclaim committed replay contracts
       sqlite_owner: internal/store.SQLiteRuntimeStore delivery, receipt, pipeline receipt, committed replay scope, and replay-claim methods
@@ -30403,20 +30406,21 @@ process_local_work_lifetime_authority:
     forbidden: [arbitrary_scope_hierarchy, free_string_identity, process_global_task_registry, nil_or_noop_async_owner, legacy_occurrence_adoption]
   admission_and_settlement:
     begin: Every enqueue, spawn, callback registration, channel send, or buffer escape acquires its opaque occurrence lease before the work becomes reachable. Admission after a fence or retirement fails closed.
-    context: The lease supplies the cancellation context and exact occurrence authority consumed by nested producers. Metadata snapshots and raw lookup APIs never expose an executable Runtime pointer.
+    context: The lease supplies the cancellation context and exact occurrence authority consumed by nested producers. Admission detaches caller cancellation before accepted work escapes; queued callbacks receive and execute on the lease context, so request completion cannot cancel accepted work while occurrence retirement always does. Metadata snapshots and raw lookup APIs never expose an executable Runtime pointer.
     done: Every accepted lease settles exactly once after execution, error, cancellation, or exact durable handoff. Duplicate settlement is invalid and cannot decrement another occurrence.
-    wait: Wait is event-driven and joins accepted work without counter polling, sleeps, or stable-tick heuristics.
+    wait: Wait is event-driven and joins accepted work without counter polling, sleeps, or stable-tick heuristics. Scheduler ownership retains only active or currently draining tasks; completed one-shot history is removed at completion and cannot accumulate as a second lifetime ledger.
   queue_carriers:
-    event_bus: Every exact-agent and internal EventBus item is an opaque owned carrier from send through buffer, dequeue, execution, or handoff. A queued callback owns a lease at registration, including time between commit and callback start.
+    event_bus: Every exact-agent and internal EventBus item is an opaque owned carrier from send through buffer, dequeue, execution, or handoff. A queued callback owns a lease at registration, including time between commit and callback start. Internal subscriptions are lifecycle generations with one send/retirement linearization boundary, a distinct retire signal, receiver completion, and readiness acknowledgement. Reset retires and joins each predecessor receiver, restarts requested generations, and waits for their readiness before completing.
     route_generation: A route delivery acquires both the exact route occurrence and its runtime/selected-fork occurrence. Route replacement retires and joins only the predecessor route. Late predecessor completion cannot mutate or unblock its successor.
-    reset: EventBus reset retires and joins retained carriers and claims before clearing owner maps or counters. Clearing memory never manufactures quiescence.
+    standing_composition: Work admitted from a standing context carries the exact standing occurrence as its nested producer authority. Event deliveries and routes compose standing plus runtime ownership so suspend/reset cannot finish while any non-durably-discharged standing descendant remains live.
+    reset: EventBus reset retires and joins retained carriers and claims before clearing owner maps or counters. A snapshotted sender either completes admission before retirement drains it or observes the retired handle and admits nothing. Clearing memory never manufactures quiescence.
   durable_handoff:
     rule: Local ownership may end before execution only after the private selected-store adapter proves the exact event and exact delivery route obligation are committed.
     boundary: This proof carries no eligibility, retry, claim, outcome, settlement, liveness, or replay semantics; those remain governed by their durable owners.
-    failure: Missing, forged, wrong-event, wrong-route, or unreadable proof fails closed and leaves local ownership unsettled.
+    failure: Missing, forged, wrong-event, wrong-route, or unreadable proof fails closed and leaves local ownership unsettled. The exact carrier and its retirement authority remain reachable for retry until proof and settlement both succeed.
   replacement_and_standing:
     fence: Admission fencing is reversible only while the occurrence is not retired and has drained. Retirement is irreversible.
-    runtime_replacement: Runtime selection and occurrence acquisition are atomic under the runtime-context selector lock. Every failure after predecessor retirement restores, if possible, through a fully started fresh runtime occurrence from immutable predecessor metadata; it never republishes the retired occurrence. Failed compensation remains unavailable.
+    runtime_replacement: Runtime selection and occurrence acquisition are atomic under the runtime-context selector lock. Normal, restored, and process-admission-aware replacement use one staged publication that installs metadata, the exact executable runtime occurrence, fresh standing occurrences, and catalog authority atomically. A context is loaded only when acquisition can begin on that exact candidate. A drain timeout never reopens or republishes a partially fenced predecessor. Every failure after predecessor retirement restores, if possible, through a fully started fresh runtime occurrence from immutable predecessor metadata; it never republishes the retired occurrence. Failed compensation remains unavailable.
     standing_service: Suspend/reset closes domain admission and drains the current standing occurrence before durable commit. Pre-commit failure may reopen the unretired occurrence. Successful suspend retires it; resume/reset publishes a fresh process occurrence even when durable standing identity is unchanged.
   shutdown_and_store_release:
     ordering:
@@ -30547,7 +30551,15 @@ managed_agent_capability_surface:
     monotonicity: Evidence may be added or narrowed from confirmed to unavailable/mismatch. Unavailable or mismatch evidence and mismatch facts cannot be removed, rewritten, or widened for the life of the surface.
   startup_preflight:
     owner: one provider-contract-aware managed preflight implementation that produces startup_probe surfaces and persists both successful and failed operation/evidence facts
-    startup_authority: Every cold-start and prepared-handoff state change compare-and-sets the exact persisted lease head. transition_ordinal is strictly consecutive across the lease even when handoff-local state_version restarts; rollback persists rolled_back plus restored active as one transaction. A restored active rollback head may prepare a later fully identified handoff candidate, but active status alone never admits candidate execution and the complete probe/commit protocol applies again. Missing/stale predecessors, ordinal gaps, partial rollback, and best-effort finalization fail closed on PostgreSQL and SQLite.
+    startup_authority: >
+      Every cold-start and prepared-handoff state change compare-and-sets the exact persisted lease head. transition_ordinal is
+      strictly consecutive across the lease even when handoff-local state_version restarts; rollback persists rolled_back plus
+      restored active as one transaction. A restored active rollback head may prepare a later fully identified handoff
+      candidate, but active status alone never admits candidate execution and the complete probe/commit protocol applies
+      again. A committed handoff whose finalization has not succeeded remains an explicit retained supervisor transition:
+      readiness and runtime selection stay unavailable, the exact handoff is retried without reacquisition, and selector
+      publication occurs only after finalization succeeds. Missing/stale predecessors, ordinal gaps, partial rollback,
+      discarded committed handoffs, and best-effort finalization fail closed on PostgreSQL and SQLite.
     normal_cold_start: Settle every actor probe under the exact startup authority, persist the resulting surface identities, admit execution, and only then replay recoverable agent work or start managed-agent loops. System nodes may hydrate, subscribe, and queue work before admission, but cannot authorize provider turns or execute managed-agent deliveries until admission.
     normal_replacement: Probe candidate actors under prepared handoff authority before commit; execute only after commit/admission. Probe failure rolls back without exposing candidate execution.
     selected_contract_fork: Consume the exact current selected-fork completion authority and derive the selected managed-execution admission; settle provider/MCP preflight before gateway use, agent-loop start, or fork-event publication.

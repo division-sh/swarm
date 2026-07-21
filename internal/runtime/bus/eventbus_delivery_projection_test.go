@@ -69,7 +69,7 @@ func TestCreateSyntheticCarryFailsClosedOnDynamicPayloadCollisionBeforeHandler(t
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := eb.SubscribeInternal("validator")
+	ch := subscribeInternalDeliveriesForTest(t, eb, "validator")
 	evt := eventtest.RunCreatingRootIngress("collision-event", events.EventType("validation.requested"), "", "", json.RawMessage(`{"validation_case_id":"producer-value"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	route := events.DeliveryRoute{
 		SubscriberType:    "node",
@@ -103,7 +103,7 @@ func TestDeliveryRouteProjectionHasOneProductionOwner(t *testing.T) {
 	if _, _, err := eb.runNodeDeliveryRouteInterceptors(context.Background(), evt, []events.DeliveryRoute{route}, []DeliveryRouteInterceptor{interceptor}); err != nil {
 		t.Fatalf("run route interceptor: %v", err)
 	}
-	ch := eb.SubscribeInternal("validator")
+	ch := subscribeInternalDeliveriesForTest(t, eb, "validator")
 	if err := eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{"validator"}, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("deliver live route: %v", err)
 	}

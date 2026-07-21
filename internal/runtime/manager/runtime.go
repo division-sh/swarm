@@ -1211,7 +1211,10 @@ func (am *AgentManager) replayAgentBacklogDetailed(ctx context.Context, agentID 
 		if am.isAuthBreakerTripped() {
 			return summary, nil
 		}
-		eventCtx := worklifetime.WithOccurrence(lease.Context, am.workOwner)
+		eventCtx := lease.Context
+		if _, ok := worklifetime.OccurrenceFromContext(eventCtx); !ok {
+			eventCtx = worklifetime.WithOccurrence(eventCtx, am.workOwner)
+		}
 		result := am.processEventDetailed(eventCtx, agent, evt)
 		summary.observe(result.record)
 		if startupManagerReplayDiagnosticsEnabled(ctx) {
@@ -1759,7 +1762,11 @@ func (am *AgentManager) beginWork(ctx context.Context, kind string) (*worklifeti
 	if am == nil || am.workOwner == nil {
 		return nil, fmt.Errorf("%s requires a runtime work occurrence", strings.TrimSpace(kind))
 	}
-	lease, err := am.workOwner.Begin(ctx)
+	owner := am.workOwner
+	if contextualOwner, ok := worklifetime.OccurrenceFromContext(ctx); ok {
+		owner = contextualOwner
+	}
+	lease, err := owner.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("admit %s: %w", strings.TrimSpace(kind), err)
 	}
