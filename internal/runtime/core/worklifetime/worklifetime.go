@@ -527,6 +527,7 @@ func (m *ManagerRunOccurrence) beginClass(ctx context.Context, companion Occurre
 	if m == nil {
 		return nil, errors.New("manager run occurrence is required")
 	}
+	companion = normalizeManagerCompanion(m, companion)
 	projection := &ManagerWorkOccurrence{manager: m, companion: companion}
 	if companion == nil {
 		var lease *Lease
@@ -565,6 +566,17 @@ func (m *ManagerRunOccurrence) beginClass(ctx context.Context, companion Occurre
 	lease.parent = companionLease
 	lease.ctx = WithOccurrence(lease.Context(), projection)
 	return lease, nil
+}
+
+func normalizeManagerCompanion(manager *ManagerRunOccurrence, companion Occurrence) Occurrence {
+	for companion != nil {
+		current, ok := companion.(*ManagerWorkOccurrence)
+		if !ok || current == nil || current.manager != manager {
+			return companion
+		}
+		companion = current.companion
+	}
+	return nil
 }
 
 func (m *ManagerWorkOccurrence) Begin(ctx context.Context) (*Lease, error) {

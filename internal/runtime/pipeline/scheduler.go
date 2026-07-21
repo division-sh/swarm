@@ -98,11 +98,12 @@ type Scheduler struct {
 }
 
 type scheduledTask struct {
-	stop     chan struct{}
-	done     chan struct{}
-	lease    *worklifetime.Lease
-	owner    worklifetime.Occurrence
-	schedule Schedule
+	stop          chan struct{}
+	done          chan struct{}
+	lease         *worklifetime.Lease
+	owner         worklifetime.Occurrence
+	standingOwner *worklifetime.StandingOccurrence
+	schedule      Schedule
 }
 
 type cronSpec struct {
@@ -176,7 +177,11 @@ func (s *Scheduler) Register(ctx context.Context, sc Schedule) error {
 	if existing, ok := s.tasks[key]; ok {
 		s.retireTaskLocked(key, existing)
 	}
-	task := &scheduledTask{stop: make(chan struct{}), done: make(chan struct{}), lease: lease, owner: owner, schedule: cloneSchedule(sc)}
+	standingOwner, _ := worklifetime.StandingProjection(owner)
+	task := &scheduledTask{
+		stop: make(chan struct{}), done: make(chan struct{}), lease: lease,
+		owner: owner, standingOwner: standingOwner, schedule: cloneSchedule(sc),
+	}
 	s.tasks[key] = task
 	s.mu.Unlock()
 
@@ -254,7 +259,7 @@ func (s *Scheduler) CancelExact(sc Schedule) error {
 // occurrence and joins the scheduler goroutines before the occurrence itself
 // is drained. The returned schedules are the only facts RestoreOccurrence may
 // project again after a pre-commit transition failure.
-func (s *Scheduler) ParkOccurrence(ctx context.Context, owner worklifetime.Occurrence) ([]Schedule, error) {
+func (s *Scheduler) ParkOccurrence(ctx context.Context, owner *worklifetime.StandingOccurrence) ([]Schedule, error) {
 	if s == nil || owner == nil {
 		return nil, nil
 	}
@@ -265,7 +270,7 @@ func (s *Scheduler) ParkOccurrence(ctx context.Context, owner worklifetime.Occur
 	tasks := make([]*scheduledTask, 0)
 	schedules := make([]Schedule, 0)
 	for key, task := range s.tasks {
-		if task == nil || task.owner != owner {
+		if task == nil || task.standingOwner != owner {
 			continue
 		}
 		tasks = append(tasks, task)

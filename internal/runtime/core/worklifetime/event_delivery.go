@@ -19,6 +19,7 @@ type Occurrence interface {
 	NewRoute(context.Context, RouteIdentity) (*RouteOccurrence, error)
 	NewEventDelivery(context.Context, events.Event) (*EventDelivery, error)
 	NewRoutedEventDelivery(context.Context, events.Event, events.DeliveryRoute) (*EventDelivery, error)
+	standingProjection() *StandingOccurrence
 	workOccurrence()
 }
 
@@ -63,6 +64,29 @@ func (*RuntimeOccurrence) workOccurrence()      {}
 func (*StandingOccurrence) workOccurrence()     {}
 func (*SelectedForkOccurrence) workOccurrence() {}
 func (*ManagerWorkOccurrence) workOccurrence()  {}
+
+func (*RuntimeOccurrence) standingProjection() *StandingOccurrence { return nil }
+func (s *StandingOccurrence) standingProjection() *StandingOccurrence {
+	return s
+}
+func (*SelectedForkOccurrence) standingProjection() *StandingOccurrence { return nil }
+func (m *ManagerWorkOccurrence) standingProjection() *StandingOccurrence {
+	if m == nil || m.companion == nil {
+		return nil
+	}
+	return m.companion.standingProjection()
+}
+
+// StandingProjection returns the exact standing generation represented by a
+// fixed occurrence, including a Manager work projection. It does not expose
+// arbitrary parentage or the Manager's raw companion.
+func StandingProjection(owner Occurrence) (*StandingOccurrence, bool) {
+	if owner == nil {
+		return nil, false
+	}
+	standing := owner.standingProjection()
+	return standing, standing != nil
+}
 
 func (d *EventDelivery) Context() context.Context {
 	if d == nil || d.ctx == nil {
@@ -169,22 +193,21 @@ func (r *RouteOccurrence) NewRoutedEventDelivery(ctx context.Context, event even
 }
 
 func (r *RouteOccurrence) newEventDelivery(ctx context.Context, event events.Event, route events.DeliveryRoute) (*EventDelivery, error) {
-	delivery, err := newEventDelivery(ctx, event, route, r.owner, r.Begin)
+	contextOwner, ok := OccurrenceFromContext(ctx)
+	if !ok || contextOwner == nil || contextOwner == r.owner {
+		return newEventDelivery(ctx, event, route, r.owner, r.Begin)
+	}
+	companion, err := contextOwner.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
-	contextOwner, ok := OccurrenceFromContext(ctx)
-	standing, ok := contextOwner.(*StandingOccurrence)
-	if !ok || standing == nil || contextOwner == r.owner {
-		return delivery, nil
-	}
-	companion, err := standing.Begin(ctx)
+	delivery, err := newEventDelivery(companion.Context(), event, route, r.owner, r.Begin)
 	if err != nil {
-		_ = delivery.Complete()
+		_ = companion.Done()
 		return nil, err
 	}
 	delivery.companion = companion
-	delivery.ctx = WithOccurrence(delivery.ctx, standing)
+	delivery.ctx = WithOccurrence(delivery.ctx, contextOwner)
 	return delivery, nil
 }
 

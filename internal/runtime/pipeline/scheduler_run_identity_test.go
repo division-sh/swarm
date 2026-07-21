@@ -100,6 +100,117 @@ func TestSchedulerBindsTaskToContextualStandingOccurrence(t *testing.T) {
 	}
 }
 
+func TestSchedulerParksDirectAndManagerComposedStandingSchedules(t *testing.T) {
+	for _, composed := range []bool{false, true} {
+		name := "direct"
+		if composed {
+			name = "manager_composed"
+		}
+		t.Run(name, func(t *testing.T) {
+			process := worklifetime.NewProcess()
+			runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{RuntimeInstanceID: "scheduler-" + name, BundleHash: "bundle-" + name})
+			if err != nil {
+				t.Fatalf("new runtime: %v", err)
+			}
+			predecessor, err := runtimeOwner.NewStanding(context.Background(), worklifetime.StandingIdentity{ServiceID: "timer-service", RunID: uuid.NewString(), Generation: 1})
+			if err != nil {
+				t.Fatalf("new predecessor standing: %v", err)
+			}
+			successor, err := runtimeOwner.NewStanding(context.Background(), worklifetime.StandingIdentity{ServiceID: "timer-service", RunID: uuid.NewString(), Generation: 2})
+			if err != nil {
+				t.Fatalf("new successor standing: %v", err)
+			}
+			var manager *worklifetime.ManagerRunOccurrence
+			owner := worklifetime.Occurrence(predecessor)
+			var producer *worklifetime.Lease
+			if composed {
+				manager, err = worklifetime.NewManagerRunOccurrence(context.Background(), runtimeOwner, worklifetime.ManagerRunIdentity{Generation: 1})
+				if err != nil {
+					t.Fatalf("new manager run occurrence: %v", err)
+				}
+				producer, err = manager.Begin(context.Background(), predecessor)
+				if err != nil {
+					t.Fatalf("begin manager standing work: %v", err)
+				}
+				var ok bool
+				owner, ok = worklifetime.OccurrenceFromContext(producer.Context())
+				if !ok {
+					t.Fatal("manager work context has no occurrence")
+				}
+			}
+			scheduler := NewSchedulerWithWorkOwner(runtimeOwner)
+			schedules := []Schedule{
+				{RunID: uuid.NewString(), AgentID: "agent-a", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: uuid.NewString()},
+				{RunID: uuid.NewString(), AgentID: "agent-a", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: uuid.NewString()},
+			}
+			ctx := worklifetime.WithOccurrence(context.Background(), owner)
+			registered := make([]*scheduledTask, 0, len(schedules))
+			for _, schedule := range schedules {
+				if err := scheduler.Register(ctx, schedule); err != nil {
+					t.Fatalf("register %s: %v", schedule.Mode, err)
+				}
+				task := scheduler.tasks[scheduleKey(schedule)]
+				if task == nil || task.owner != owner || task.standingOwner != predecessor {
+					t.Fatalf("%s task owners = execution:%T %p standing:%p, want %T %p/%p", schedule.Mode, task.owner, task.owner, task.standingOwner, owner, owner, predecessor)
+				}
+				registered = append(registered, task)
+			}
+			if producer != nil {
+				if err := producer.Done(); err != nil {
+					t.Fatalf("settle manager producer: %v", err)
+				}
+			}
+			parked, err := scheduler.ParkOccurrence(context.Background(), predecessor)
+			if err != nil {
+				t.Fatalf("park predecessor: %v", err)
+			}
+			if len(parked) != len(schedules) {
+				t.Fatalf("parked schedules = %#v, want once and cron", parked)
+			}
+			for _, task := range registered {
+				select {
+				case <-task.done:
+				default:
+					t.Fatal("park returned before scheduled task completion")
+				}
+				select {
+				case <-task.lease.Context().Done():
+				default:
+					t.Fatal("park did not cancel scheduled task lease")
+				}
+			}
+			if err := predecessor.RetireAndWait(context.Background()); err != nil {
+				t.Fatalf("retire predecessor: %v", err)
+			}
+			if err := scheduler.RestoreOccurrence(context.Background(), successor, parked); err != nil {
+				t.Fatalf("restore successor schedules: %v", err)
+			}
+			rehydrated, err := scheduler.ParkOccurrence(context.Background(), successor)
+			if err != nil {
+				t.Fatalf("park successor: %v", err)
+			}
+			if len(rehydrated) != len(schedules) {
+				t.Fatalf("successor schedules = %#v, want once and cron", rehydrated)
+			}
+			if manager != nil {
+				if err := manager.RetireAndWait(context.Background()); err != nil {
+					t.Fatalf("retire manager: %v", err)
+				}
+			}
+			if err := successor.RetireAndWait(context.Background()); err != nil {
+				t.Fatalf("retire successor: %v", err)
+			}
+			if _, err := runtimeOwner.RetireAndWait(context.Background()); err != nil {
+				t.Fatalf("retire runtime: %v", err)
+			}
+			process.Retire()
+			if _, err := process.Join(context.Background()); err != nil {
+				t.Fatalf("join process: %v", err)
+			}
+		})
+	}
+}
+
 func TestSchedulerPrunesCompletedOneShotHistory(t *testing.T) {
 	scheduler := NewSchedulerWithWorkOwner(pipelineTestWorkOwner(t))
 	for i := 0; i < 100; i++ {

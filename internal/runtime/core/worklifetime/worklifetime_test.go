@@ -305,6 +305,117 @@ func TestRuntimeRouteDeliveryComposesStandingOwnerUntilDescendantCompletion(t *t
 	}
 }
 
+func TestRuntimeRouteDeliveryRetainsManagerStandingCompositionThroughNestedCompletion(t *testing.T) {
+	process := NewProcess()
+	runtimeOwner, err := process.NewRuntime(context.Background(), RuntimeIdentity{RuntimeInstanceID: "runtime-manager-standing", BundleHash: "bundle-manager-standing"})
+	if err != nil {
+		t.Fatalf("new runtime: %v", err)
+	}
+	standing, err := runtimeOwner.NewStanding(context.Background(), StandingIdentity{ServiceID: "telegram", RunID: uuid.NewString(), Generation: 1})
+	if err != nil {
+		t.Fatalf("new standing occurrence: %v", err)
+	}
+	manager, err := NewManagerRunOccurrence(context.Background(), runtimeOwner, ManagerRunIdentity{Generation: 1})
+	if err != nil {
+		t.Fatalf("new manager run occurrence: %v", err)
+	}
+	producer, err := manager.Begin(context.Background(), standing)
+	if err != nil {
+		t.Fatalf("begin manager standing producer: %v", err)
+	}
+	managerOwner, ok := OccurrenceFromContext(producer.Context())
+	if !ok {
+		t.Fatal("manager producer context has no occurrence")
+	}
+	if projected, ok := StandingProjection(managerOwner); !ok || projected != standing {
+		t.Fatalf("manager standing projection = %p ok=%v, want %p", projected, ok, standing)
+	}
+	nestedProducer, err := manager.Begin(producer.Context(), managerOwner)
+	if err != nil {
+		t.Fatalf("begin nested manager producer: %v", err)
+	}
+	nestedManagerOwner, ok := OccurrenceFromContext(nestedProducer.Context())
+	if !ok {
+		t.Fatal("nested manager producer context has no occurrence")
+	}
+	if nested := nestedManagerOwner.(*ManagerWorkOccurrence); nested.companion != standing {
+		t.Fatalf("nested manager companion = %T %p, want normalized standing %p", nested.companion, nested.companion, standing)
+	}
+	if err := nestedProducer.Done(); err != nil {
+		t.Fatalf("settle nested manager producer: %v", err)
+	}
+
+	route, err := runtimeOwner.NewRoute(context.Background(), RouteIdentity{RuntimeEpoch: 1, AgentID: "normalizer", Generation: 1})
+	if err != nil {
+		t.Fatalf("new runtime route: %v", err)
+	}
+	outerEvent := eventtest.RuntimeControl(uuid.NewString(), events.EventType("telegram.received"), "test", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now())
+	outer, err := route.NewEventDelivery(producer.Context(), outerEvent)
+	if err != nil {
+		t.Fatalf("new manager-standing route delivery: %v", err)
+	}
+	if err := producer.Done(); err != nil {
+		t.Fatalf("settle manager producer: %v", err)
+	}
+	deliveryOwner, ok := OccurrenceFromContext(outer.Context())
+	if !ok || deliveryOwner != managerOwner {
+		t.Fatalf("route delivery owner = %T %p, want exact manager projection %p", deliveryOwner, deliveryOwner, managerOwner)
+	}
+	nestedEvent := eventtest.RuntimeControl(uuid.NewString(), events.EventType("telegram.normalized"), "test", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now())
+	nested, err := deliveryOwner.NewEventDelivery(outer.Context(), nestedEvent)
+	if err != nil {
+		t.Fatalf("new nested manager-standing delivery: %v", err)
+	}
+	if err := outer.Complete(); err != nil {
+		t.Fatalf("complete outer route delivery: %v", err)
+	}
+	if err := outer.Complete(); !errors.Is(err, ErrAlreadySettled) {
+		t.Fatalf("duplicate outer completion = %v, want ErrAlreadySettled", err)
+	}
+	if err := manager.Fence(); err != nil {
+		t.Fatalf("fence manager occurrence: %v", err)
+	}
+	if err := standing.Fence(); err != nil {
+		t.Fatalf("fence standing occurrence: %v", err)
+	}
+	for name, wait := range map[string]func(context.Context) error{"manager": manager.Wait, "standing": standing.Wait} {
+		waitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		err := wait(waitCtx)
+		cancel()
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("%s wait before nested completion = %v, want deadline", name, err)
+		}
+	}
+	if err := nested.Complete(); err != nil {
+		t.Fatalf("complete nested delivery: %v", err)
+	}
+	if err := nested.Complete(); !errors.Is(err, ErrAlreadySettled) {
+		t.Fatalf("duplicate nested completion = %v, want ErrAlreadySettled", err)
+	}
+	if err := manager.Wait(context.Background()); err != nil {
+		t.Fatalf("manager wait after nested completion: %v", err)
+	}
+	if err := standing.Wait(context.Background()); err != nil {
+		t.Fatalf("standing wait after nested completion: %v", err)
+	}
+	if err := route.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire route: %v", err)
+	}
+	if err := manager.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire manager: %v", err)
+	}
+	if err := standing.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire standing: %v", err)
+	}
+	if _, err := runtimeOwner.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire runtime: %v", err)
+	}
+	process.Retire()
+	if _, err := process.Join(context.Background()); err != nil {
+		t.Fatalf("join process: %v", err)
+	}
+}
+
 func TestBeginRetireRaceRejectsLateAdmissionAndJoinsAcceptedWork(t *testing.T) {
 	process := NewProcess()
 	runtime, err := process.NewRuntime(context.Background(), RuntimeIdentity{RuntimeInstanceID: "runtime-1", BundleHash: "bundle-1"})
