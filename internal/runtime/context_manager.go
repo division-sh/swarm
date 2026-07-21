@@ -73,7 +73,7 @@ type runtimeContextEntry struct {
 	runtime          *Runtime
 	workOwner        *worklifetime.RuntimeOccurrence
 	standing         map[string]*worklifetime.StandingOccurrence
-	parkedStanding   map[string][]runtimepipeline.Schedule
+	parkedStanding   map[string]*runtimepipeline.ParkedOccurrence
 	state            RuntimeContextState
 	cause            string
 	shutdownMu       sync.Mutex
@@ -88,7 +88,7 @@ type replacementPublication struct {
 	runtime             *Runtime
 	workOwner           *worklifetime.RuntimeOccurrence
 	standing            map[string]*worklifetime.StandingOccurrence
-	parkedStanding      map[string][]runtimepipeline.Schedule
+	parkedStanding      map[string]*runtimepipeline.ParkedOccurrence
 	survivingContexts   map[string]*BundleContext
 	admissionGeneration string
 	installedSubjects   []packs.Subject
@@ -203,12 +203,12 @@ func restoreReplacementStandingSchedules(publication *replacementPublication) er
 	if publication.runtime == nil || publication.runtime.Scheduler == nil {
 		return errors.New("replacement standing schedules require a candidate scheduler")
 	}
-	for serviceID, schedules := range publication.parkedStanding {
+	for serviceID, parked := range publication.parkedStanding {
 		owner := publication.standing[serviceID]
 		if owner == nil {
 			continue
 		}
-		if err := publication.runtime.Scheduler.RestoreOccurrence(context.Background(), owner, schedules); err != nil {
+		if err := parked.Rebind(context.Background(), publication.runtime.Scheduler, owner); err != nil {
 			return fmt.Errorf("restore replacement standing schedules for %s: %w", serviceID, err)
 		}
 	}
@@ -971,7 +971,7 @@ type standingOccurrenceTransition struct {
 	entry      *runtimeContextEntry
 	occurrence *worklifetime.StandingOccurrence
 	scheduler  *runtimepipeline.Scheduler
-	schedules  []runtimepipeline.Schedule
+	parked     *runtimepipeline.ParkedOccurrence
 }
 
 // StandingServiceTransition is the sole process-local owner for a standing
@@ -1042,8 +1042,8 @@ func (m *RuntimeContextManager) BeginStandingServiceTransition(ctx context.Conte
 		if item.scheduler == nil {
 			continue
 		}
-		schedules, err := item.scheduler.ParkOccurrence(ctx, item.occurrence)
-		item.schedules = schedules
+		parked, err := item.scheduler.ParkOccurrence(ctx, item.occurrence)
+		item.parked = parked
 		if err != nil {
 			return nil, errors.Join(err, transition.Restore(context.Background()))
 		}
@@ -1081,10 +1081,10 @@ func (t *StandingServiceTransition) Restore(ctx context.Context) error {
 		}
 	}
 	for _, item := range t.occurrences {
-		if item.scheduler == nil || len(item.schedules) == 0 {
+		if item.scheduler == nil || item.parked == nil {
 			continue
 		}
-		if err := item.scheduler.RestoreOccurrence(ctx, item.occurrence, item.schedules); err != nil {
+		if err := item.parked.RestoreOriginal(ctx); err != nil {
 			for _, fenced := range t.occurrences {
 				_ = fenced.occurrence.Fence()
 			}
@@ -1474,7 +1474,7 @@ func (m *RuntimeContextManager) BeginBundleHashReplacement(ctx context.Context, 
 		}
 		standing = append(standing, standingOccurrenceTransition{
 			entry: entry, occurrence: occurrence, scheduler: scheduler,
-			schedules: nil,
+			parked: nil,
 		})
 	}
 	if entry.workOwner != nil {
@@ -1489,21 +1489,21 @@ func (m *RuntimeContextManager) BeginBundleHashReplacement(ctx context.Context, 
 	entry.state = RuntimeContextStateUnloaded
 	entry.cause = RuntimeContextCauseReplacing
 	m.mu.Unlock()
-	retainParked := func(parked map[string][]runtimepipeline.Schedule) {
+	retainParked := func(parked map[string]*runtimepipeline.ParkedOccurrence) {
 		m.mu.Lock()
 		entry.parkedStanding = parked
 		m.mu.Unlock()
 	}
-	parked := make(map[string][]runtimepipeline.Schedule)
+	parked := make(map[string]*runtimepipeline.ParkedOccurrence)
 	for i := range standing {
 		item := &standing[i]
 		if item.scheduler == nil {
 			continue
 		}
-		schedules, err := item.scheduler.ParkOccurrence(ctx, item.occurrence)
-		item.schedules = schedules
-		if len(schedules) > 0 {
-			parked[item.occurrence.Identity().ServiceID] = schedules
+		projection, err := item.scheduler.ParkOccurrence(ctx, item.occurrence)
+		item.parked = projection
+		if projection != nil && projection.Count() > 0 {
+			parked[item.occurrence.Identity().ServiceID] = projection
 		}
 		if err != nil {
 			retainParked(parked)
@@ -1639,7 +1639,7 @@ func (m *RuntimeContextManager) prepareReplacementPublicationLocked(existingHash
 		runtime:        runtimeOwner,
 		workOwner:      workOwner,
 		standing:       standing,
-		parkedStanding: cloneParkedStandingSchedules(entry.parkedStanding),
+		parkedStanding: copyParkedStandingOccurrences(entry.parkedStanding),
 	}, nil
 }
 
@@ -1678,18 +1678,13 @@ func (m *RuntimeContextManager) applyReplacementPublicationLocked(publication *r
 	}
 }
 
-func cloneParkedStandingSchedules(in map[string][]runtimepipeline.Schedule) map[string][]runtimepipeline.Schedule {
+func copyParkedStandingOccurrences(in map[string]*runtimepipeline.ParkedOccurrence) map[string]*runtimepipeline.ParkedOccurrence {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make(map[string][]runtimepipeline.Schedule, len(in))
-	for serviceID, schedules := range in {
-		cloned := make([]runtimepipeline.Schedule, 0, len(schedules))
-		for _, schedule := range schedules {
-			schedule.Payload = append([]byte(nil), schedule.Payload...)
-			cloned = append(cloned, schedule)
-		}
-		out[serviceID] = cloned
+	out := make(map[string]*runtimepipeline.ParkedOccurrence, len(in))
+	for serviceID, parked := range in {
+		out[serviceID] = parked
 	}
 	return out
 }

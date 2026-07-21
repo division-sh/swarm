@@ -482,7 +482,7 @@ func assertServedStandingSchedulesRetired(t testing.TB, probe servedStandingSche
 	if err != nil {
 		t.Fatalf("%s inspect %s standing schedules: %v", backend, operation, err)
 	}
-	if len(remaining) != 0 {
+	if remaining.Count() != 0 {
 		t.Fatalf("%s %s left predecessor schedules reachable: %#v", backend, operation, remaining)
 	}
 }
