@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
@@ -1101,8 +1102,8 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := eb.Subscribe("safe-agent", events.EventType("fork.ready"))
-	currentOnly := eb.Subscribe("current-only-agent", events.EventType("fork.ready"))
+	ch := runtimebustest.Subscribe(t, eb, "safe-agent", events.EventType("fork.ready"))
+	currentOnly := runtimebustest.Subscribe(t, eb, "current-only-agent", events.EventType("fork.ready"))
 	eventtestsql.CorruptEventStore(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.exact_persistence",
 		Reason:    "prove historical replay refuses a malformed durable route object",

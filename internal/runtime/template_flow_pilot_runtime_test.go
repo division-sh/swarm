@@ -159,8 +159,6 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			raw := bus.Subscribe("raw-source-listener", events.EventType("producer/account.ready"), events.EventType("account.ready"))
-			defer bus.Unsubscribe("raw-source-listener")
 			evt := eventtest.RunCreatingRootIngress(
 				"99999999-9999-4999-8999-999999999953",
 				events.EventType("producer/account.ready"),
@@ -192,11 +190,6 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 			}
 			if routes := store.deliveryRoutes[evt.ID()]; len(routes) != 0 {
 				t.Fatalf("persisted delivery routes = %#v, want none", routes)
-			}
-			select {
-			case got := <-raw:
-				t.Fatalf("raw subscriber received fail-closed event with flow_instance=%q entity=%q", got.FlowInstance(), got.EntityID())
-			default:
 			}
 		})
 	}

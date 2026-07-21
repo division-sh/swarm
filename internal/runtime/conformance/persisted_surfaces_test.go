@@ -1647,7 +1647,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	replayRecipient := "agent-replay"
-	replayDeliveries := bus.Subscribe(replayRecipient)
+	replayDeliveries := runtimebustest.Subscribe(t, bus, replayRecipient)
 
 	replayRunID := uuid.NewString()
 	replayParentID := uuid.NewString()

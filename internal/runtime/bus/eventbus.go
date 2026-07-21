@@ -12,7 +12,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -634,27 +633,6 @@ func (eb *EventBus) WaitForQuiescence(ctx context.Context) error {
 	return eb.workOwner.Wait(ctx)
 }
 
-func (eb *EventBus) Subscribe(agentID string, eventTypes ...events.EventType) <-chan *LocalDelivery {
-	values := make([]string, 0, len(eventTypes))
-	for _, eventType := range eventTypes {
-		values = append(values, string(eventType))
-	}
-	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-		AgentID: agentID, Subscriptions: values,
-	})
-	if err != nil {
-		return nil
-	}
-	return eb.SubscribeAgent(admission)
-}
-
-func (eb *EventBus) SubscribeAgent(admission semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan *LocalDelivery {
-	if eb == nil || !admission.ValidForAgent(admission.AgentID()) {
-		return nil
-	}
-	return eb.subscribe(admission.AgentID(), inMemorySubscriberAgent, admittedAgentEventTypes(admission)...)
-}
-
 // ReplaceAgentRoute installs one exact lifecycle-generation route. The old
 // channel is detached, not closed: publishers may retain a lock-free snapshot
 // of it and must be allowed to finish without a send-on-closed panic.
@@ -783,59 +761,6 @@ func (eb *EventBus) SubscribeInternal(ctx context.Context, subscriberID string, 
 		eb.notifyInternalSubscriptionChangedLocked()
 		eb.mu.Unlock()
 		return handle, nil
-	}
-}
-
-func (eb *EventBus) subscribe(subscriberID string, kind inMemorySubscriberKind, eventTypes ...events.EventType) <-chan *LocalDelivery {
-	if eb == nil || eb.workOwner == nil {
-		return nil
-	}
-	ch := make(chan *LocalDelivery, 128)
-	eb.mu.Lock()
-	defer eb.mu.Unlock()
-
-	if existing, ok := eb.agentChans[subscriberID]; ok {
-		if _, exactRoute := eb.agentRouteHandles[subscriberID]; exactRoute {
-			return existing
-		}
-		ch = existing
-	} else {
-		eb.agentChans[subscriberID] = ch
-	}
-	eb.subscriptionKinds[subscriberID] = kind
-
-	for _, et := range eventTypes {
-		eb.subscriptions[subscriberID] = AppendUniqueEventType(eb.subscriptions[subscriberID], et)
-		if eb.channels[et] == nil {
-			eb.channels[et] = make(map[string]chan *LocalDelivery)
-		}
-		eb.channels[et][subscriberID] = ch
-	}
-	return ch
-}
-
-func (eb *EventBus) Unsubscribe(agentID string) {
-	agentID = strings.TrimSpace(agentID)
-	if eb == nil || agentID == "" {
-		return
-	}
-	eb.mu.Lock()
-	if _, exactRoute := eb.agentRouteHandles[agentID]; exactRoute {
-		eb.mu.Unlock()
-		return
-	}
-	ch := eb.agentChans[agentID]
-	_, internal := eb.detachSubscriberLocked(agentID)
-	eb.mu.Unlock()
-	if internal != nil {
-		// Receiver completion is a separate lifecycle fact. Retain the exact
-		// generation for WaitForQuiescence rather than blocking here or
-		// pretending the receiver has exited.
-		eb.retainRetiringInternalHandle(internal)
-		return
-	}
-	if err := drainBufferedLocalDeliveryChannel(context.Background(), eb.store, ch); err != nil {
-		diaglog.ProcessLog(diaglog.LevelError, "eventbus", "internal subscriber retirement failed closed", "subscriber_id", agentID, "error", err.Error())
 	}
 }
 

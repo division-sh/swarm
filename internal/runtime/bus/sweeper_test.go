@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
@@ -139,7 +140,7 @@ func TestSweepUndispatchedUsesPersistedDeliveryRecipients(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := eb.Subscribe("agent-a")
+	ch := runtimebustest.Subscribe(t, eb, "agent-a")
 
 	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
 	if err != nil {
@@ -179,7 +180,7 @@ func TestSweepUndispatched_UsesAuthoritativeEmptyFanOutWithoutSubscribedFallback
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := eb.Subscribe("agent-b", events.EventType("custom.routed"))
+	ch := runtimebustest.Subscribe(t, eb, "agent-b", events.EventType("custom.routed"))
 
 	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
 	if err != nil {
@@ -257,7 +258,7 @@ func TestSweepUndispatched_ReplaysSubscribedMixedRecipientsUsingReplayScope(t *t
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	internalCh := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("custom.mixed"))
-	agentCh := eb.Subscribe("agent-a", events.EventType("custom.mixed"))
+	agentCh := runtimebustest.Subscribe(t, eb, "agent-a", events.EventType("custom.mixed"))
 
 	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
 	if err != nil {
@@ -301,7 +302,7 @@ func TestSweepUndispatched_DirectScopeDoesNotBroadenToCurrentInternalSubscribers
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	internalCh := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("custom.direct"))
-	agentCh := eb.Subscribe("agent-a", events.EventType("custom.direct"))
+	agentCh := runtimebustest.Subscribe(t, eb, "agent-a", events.EventType("custom.direct"))
 
 	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
 	if err != nil {
@@ -393,7 +394,7 @@ func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := eb.Subscribe("agent-good")
+	ch := runtimebustest.Subscribe(t, eb, "agent-good")
 
 	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
 	if err != nil {
@@ -438,8 +439,8 @@ func TestSweepUndispatched_TerminallyMarksMissingCommittedReplayScopeAndContinue
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	goodCh := eb.Subscribe("agent-good")
-	missingCh := eb.Subscribe("agent-missing")
+	goodCh := runtimebustest.Subscribe(t, eb, "agent-good")
+	missingCh := runtimebustest.Subscribe(t, eb, "agent-missing")
 
 	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
 	if err != nil {
@@ -500,7 +501,7 @@ func TestSweepUndispatched_ClaimsReplayOwnershipBeforeDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := eb.Subscribe("agent-claim")
+	ch := runtimebustest.Subscribe(t, eb, "agent-claim")
 
 	firstDone := make(chan struct{})
 	go func() {

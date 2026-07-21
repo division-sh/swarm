@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -44,7 +45,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	h := newRuntimeHarness(t, fixtureRoot, true)
 	// Source execution is paused at T; register recipient evidence through runtime APIs before publishing.
 	h.rt.Bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: "test-agent"})
-	_ = h.rt.Bus.Subscribe("test-agent", events.EventType("task.ready"))
+	_ = runtimebustest.Subscribe(t, h.rt.Bus, "test-agent", events.EventType("task.ready"))
 	h.seedInitialState(runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID))
 	pauseCatalogRun(t, h)
 	sourceEventID := publishCatalogTrigger(t, h, expected.triggerSequence()[0], 10*time.Second)

@@ -387,12 +387,12 @@ rows:
     proof_refs:
       - {kind: issue, issue: 1485}
       - {kind: go_test, name: TestConnectRoutePlanReceiverCarrierKeysUseSelectedReceiverIdentity}
-      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanWithOnlySourceAndRawSubscribersFailsClosed}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanWithoutCanonicalSubscriberFailsClosed}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailureSkipsRecipientPlanMaterializer}
     notes: >
       Receiver carriers may locate the concrete runtime handler after selected
-      route identity exists. They are invalid authority for source/raw fallback
-      and cannot revive a failed matched ConnectRoutePlan.
+      route identity exists. They cannot invent a missing canonical receiver or
+      revive a failed matched ConnectRoutePlan.
 
   - id: descriptor_evidence_not_authority
     concept: Descriptor evidence may support approved runtime target materialization but is not route authority.

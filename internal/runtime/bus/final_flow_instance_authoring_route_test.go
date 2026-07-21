@@ -198,8 +198,6 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			raw := eb.Subscribe("raw-source-listener", events.EventType("producer/account.ready"), events.EventType("account.ready"))
-			defer eb.Unsubscribe("raw-source-listener")
 			evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
 				events.EventType("producer/account.ready"),
 				"",
@@ -229,11 +227,6 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 			}
 			if routes := store.routes[evt.ID()]; len(routes) != 0 {
 				t.Fatalf("persisted delivery routes = %#v, want none", routes)
-			}
-			select {
-			case got := <-raw:
-				t.Fatalf("raw subscriber received fail-closed event with flow_instance=%q entity=%q", got.FlowInstance(), got.EntityID())
-			default:
 			}
 		})
 	}

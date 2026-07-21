@@ -229,7 +229,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 						t.Fatalf("NewEventBusWithOptions: %v", err)
 					}
 					if rootReceiver && subscriberType == "agent" {
-						if ch := eb.SubscribeAgent(testAgentSubscriptionAdmission(t, "receiver", "work.accepted", "work.audited")); ch == nil {
+						if ch := subscribeTestAgentAdmission(t, eb, testAgentSubscriptionAdmission(t, "receiver", "work.accepted", "work.audited")); ch == nil {
 							t.Fatal("install typed root-agent subscription")
 						}
 					}
@@ -382,12 +382,12 @@ func TestEventBusPublish_ConnectRoutePlanAddressCollisionRejectsRuntimeResolvedN
 			var agentEvents <-chan *LocalDelivery
 			if tc.subscriberType == "agent" {
 				if tc.distinctEvents {
-					agentEvents = eb.SubscribeAgent(testAgentSubscriptionAdmission(t, "receiver-one", "work.accepted", "work.audited"))
+					agentEvents = subscribeTestAgentAdmission(t, eb, testAgentSubscriptionAdmission(t, "receiver-one", "work.accepted", "work.audited"))
 				} else {
-					agentEvents = eb.SubscribeAgent(testAgentSubscriptionAdmission(t, "receiver-one", "work.accepted"))
+					agentEvents = subscribeTestAgentAdmission(t, eb, testAgentSubscriptionAdmission(t, "receiver-one", "work.accepted"))
 				}
 			} else if tc.mixed {
-				agentEvents = eb.SubscribeAgent(testAgentSubscriptionAdmission(t, "legal-agent-one", "work.accepted"))
+				agentEvents = subscribeTestAgentAdmission(t, eb, testAgentSubscriptionAdmission(t, "legal-agent-one", "work.accepted"))
 			}
 			eventID := uuid.NewString()
 			evt := eventtest.RunCreatingRootIngress(eventID, "producer/work.ready", "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -821,11 +821,11 @@ func TestEventBusConnectRouteDeliversToLiveAgentCarrier(t *testing.T) {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	admission := testAgentSubscriptionAdmissionForFlow(t, "consumer-agent", "consumer", events.EventType("deploy.completed")).CarrierOnly()
-	ch := eb.SubscribeAgent(admission)
+	ch := subscribeTestAgentAdmission(t, eb, admission)
 	if ch == nil {
 		t.Fatal("typed carrier-only agent admission returned no channel")
 	}
-	defer eb.Unsubscribe("consumer-agent")
+	defer unsubscribeTestAgent(eb, "consumer-agent")
 
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
@@ -845,6 +845,9 @@ func TestEventBusConnectRouteDeliversToLiveAgentCarrier(t *testing.T) {
 	case got := <-ch:
 		if got.ID() != evt.ID() {
 			t.Fatalf("delivered event = %q, want %q", got.ID(), evt.ID())
+		}
+		if err := got.Complete(); err != nil {
+			t.Fatalf("complete canonical connect delivery: %v", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("canonical connect did not wake live agent carrier")
@@ -1876,8 +1879,6 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 					t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
 				}
 			}
-			raw := eb.Subscribe("raw-source-listener", events.EventType("producer/account.ready"), events.EventType("account.ready"))
-			defer eb.Unsubscribe("raw-source-listener")
 			eventID := uuid.NewString()
 			evt := eventtest.RunCreatingRootIngress(eventID,
 				events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -1920,7 +1921,6 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 			if routes := store.routes[eventID]; len(routes) != 0 {
 				t.Fatalf("persisted delivery routes = %#v, want none for fail-closed select", routes)
 			}
-			requireNoConnectRoutePlanBusEvent(t, raw, "source/raw subscriber fallback")
 		})
 	}
 }
@@ -2320,7 +2320,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleAdmissionPreservesDuplicateEdg
 				if agentID == "" {
 					t.Fatalf("preflight routes = %#v, want agent subscriber", preflight.DeliveryRoutes)
 				}
-				agentEvents = eb.SubscribeAgent(testAgentSubscriptionAdmission(t, agentID, "deploy.done"))
+				agentEvents = subscribeTestAgentAdmission(t, eb, testAgentSubscriptionAdmission(t, agentID, "deploy.done"))
 			}
 			if err := eb.Publish(context.Background(), evt); err != nil {
 				t.Fatalf("Publish: %v", err)
@@ -2339,6 +2339,9 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleAdmissionPreservesDuplicateEdg
 				case delivered := <-agentEvents:
 					if delivered.ID() != evt.ID() {
 						t.Fatalf("agent delivered event = %s, want %s", delivered.ID(), evt.ID())
+					}
+					if err := delivered.Complete(); err != nil {
+						t.Fatalf("complete admitted agent delivery: %v", err)
 					}
 				case <-time.After(time.Second):
 					t.Fatal("timed out waiting for admitted agent delivery")
@@ -2540,8 +2543,6 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleUnavailableBlocksLowerPreceden
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	raw := eb.Subscribe("raw-source-listener", events.EventType("producer/deploy.done"), events.EventType("deploy.done"))
-	defer eb.Unsubscribe("raw-source-listener")
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -2564,7 +2565,6 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleUnavailableBlocksLowerPreceden
 	if materializerCalled {
 		t.Fatalf("recipient plan materializer was called during publish for lifecycle-unavailable canonical failure")
 	}
-	requireNoConnectRoutePlanBusEvent(t, raw, "source/raw subscriber fallback")
 }
 
 func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescriptorDrift(t *testing.T) {
@@ -2716,8 +2716,6 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKe
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "one")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
-	raw := eb.Subscribe("raw-source-listener", events.EventType("producer/deploy.done"), events.EventType("deploy.done"))
-	defer eb.Unsubscribe("raw-source-listener")
 	eventID := uuid.NewString()
 	evt := eventtest.RunCreatingRootIngress(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"nested":{"source_vertical_id":"v-1"}}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -2758,7 +2756,6 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKe
 	if routes := store.routes[eventID]; len(routes) != 0 {
 		t.Fatalf("persisted delivery routes = %#v, want none for fail-closed renamed instance-key route", routes)
 	}
-	requireNoConnectRoutePlanBusEvent(t, raw, "source/raw subscriber fallback")
 }
 
 func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t *testing.T) {
@@ -2813,8 +2810,6 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 					t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
 				}
 			}
-			raw := eb.Subscribe("raw-source-listener", events.EventType("producer/deploy.done"), events.EventType("deploy.done"))
-			defer eb.Unsubscribe("raw-source-listener")
 			eventID := uuid.NewString()
 			evt := eventtest.RunCreatingRootIngress(eventID,
 				events.EventType("producer/deploy.done"), "", "", json.RawMessage(tc.payload), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -2855,7 +2850,6 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 			if routes := store.routes[eventID]; len(routes) != 0 {
 				t.Fatalf("persisted delivery routes = %#v, want none for fail-closed instance-key route", routes)
 			}
-			requireNoConnectRoutePlanBusEvent(t, raw, "source/raw subscriber fallback")
 		})
 	}
 }
@@ -3048,7 +3042,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForUnsupportedBusinessFieldT
 	}
 }
 
-func TestEventBusPublish_ConnectRoutePlanWithOnlySourceAndRawSubscribersFailsClosed(t *testing.T) {
+func TestEventBusPublish_ConnectRoutePlanWithoutCanonicalSubscriberFailsClosed(t *testing.T) {
 	source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
 		{
 			id:   "producer",
@@ -3081,8 +3075,6 @@ func TestEventBusPublish_ConnectRoutePlanWithOnlySourceAndRawSubscribersFailsClo
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	sourceCh := eb.Subscribe("source-raw-listener", events.EventType("producer/deploy.done"), events.EventType("deploy.done"))
-	defer eb.Unsubscribe("source-raw-listener")
 	eventID := uuid.NewString()
 	evt := eventtest.RunCreatingRootIngress(eventID,
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -3133,7 +3125,6 @@ func TestEventBusPublish_ConnectRoutePlanWithOnlySourceAndRawSubscribersFailsClo
 	if got := store.receiptErrs[eventID]; got == nil || got.Detail.Code != "target_not_subscribed" {
 		t.Fatalf("pipeline receipt failure = %#v, want target_not_subscribed", got)
 	}
-	requireNoConnectRoutePlanBusEvent(t, sourceCh, "source/raw subscriber fallback")
 }
 
 func TestEventBusPublish_ConnectRoutePlanFailsClosedForInvalidLoweredPlan(t *testing.T) {
@@ -3259,8 +3250,8 @@ func TestEventBusPlan_UnmatchedCanonicalRouteUsesLowerPrecedenceFallback(t *test
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := eb.Subscribe("legacy-agent", events.EventType("legacy.event"))
-	defer eb.Unsubscribe("legacy-agent")
+	ch := subscribeTestAgent(t, eb, "legacy-agent", events.EventType("legacy.event"))
+	defer unsubscribeTestAgent(eb, "legacy-agent")
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
 		events.EventType("legacy.event"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 

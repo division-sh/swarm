@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -33,8 +34,8 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	agentID := "agent-run-control"
 	eventType := events.EventType("custom.run_control")
 	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
-	ch := eb.Subscribe(agentID, eventType)
-	defer eb.Unsubscribe(agentID)
+	ch := runtimebustest.Subscribe(t, eb, agentID, eventType)
+	defer runtimebustest.Unsubscribe(eb, agentID)
 
 	pausedRunID := uuid.NewString()
 	otherRunID := uuid.NewString()
@@ -117,8 +118,8 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 	agentID := "agent-run-control-acked"
 	eventType := events.EventType("custom.run_control.acked")
 	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
-	ch := eb.Subscribe(agentID, eventType)
-	defer eb.Unsubscribe(agentID)
+	ch := runtimebustest.Subscribe(t, eb, agentID, eventType)
+	defer runtimebustest.Unsubscribe(eb, agentID)
 
 	runID := uuid.NewString()
 	seedRunControlTestRun(t, ctx, db, runID)
@@ -185,8 +186,8 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 
 	agentID := "agent-run-control-interceptor"
 	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
-	ch := eb.Subscribe(agentID, eventType, deferredType)
-	defer eb.Unsubscribe(agentID)
+	ch := runtimebustest.Subscribe(t, eb, agentID, eventType, deferredType)
+	defer runtimebustest.Unsubscribe(eb, agentID)
 
 	runID := uuid.NewString()
 	seedRunControlTestRun(t, ctx, db, runID)
@@ -257,8 +258,8 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 
 	agentID := "agent-run-control-postcommit"
 	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
-	ch := eb.Subscribe(agentID, eventType, deferredType)
-	defer eb.Unsubscribe(agentID)
+	ch := runtimebustest.Subscribe(t, eb, agentID, eventType, deferredType)
+	defer runtimebustest.Unsubscribe(eb, agentID)
 
 	runID := uuid.NewString()
 	seedRunControlTestRun(t, ctx, db, runID)

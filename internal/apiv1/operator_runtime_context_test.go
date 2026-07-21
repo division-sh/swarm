@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	swruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -33,10 +34,10 @@ const runtimeContextTestBundleHashC = "bundle-v1:sha256:cccccccccccccccccccccccc
 func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := fixture.handler(t)
-	chPrimary := fixture.busA.Subscribe("scan-orchestrator", events.EventType("triage.requested"))
-	defer fixture.busA.Unsubscribe("scan-orchestrator")
-	chSelected := fixture.busB.Subscribe("scan-orchestrator", events.EventType("triage.requested"))
-	defer fixture.busB.Unsubscribe("scan-orchestrator")
+	chPrimary := runtimebustest.Subscribe(t, fixture.busA, "scan-orchestrator", events.EventType("triage.requested"))
+	defer runtimebustest.Unsubscribe(fixture.busA, "scan-orchestrator")
+	chSelected := runtimebustest.Subscribe(t, fixture.busB, "scan-orchestrator", events.EventType("triage.requested"))
+	defer runtimebustest.Unsubscribe(fixture.busB, "scan-orchestrator")
 
 	published := rpcCall(t, handler, eventPublishBodyWithBundleHash("", runtimeContextTestBundleHashB, "triage.requested", `{"topic":"context-b"}`, "", "idem-context-publish"))
 	if published.Error != nil {
@@ -69,8 +70,8 @@ func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *tes
 func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := fixture.handler(t)
-	chSelected := fixture.busB.Subscribe("scan-orchestrator", events.EventType("triage.requested"))
-	defer fixture.busB.Unsubscribe("scan-orchestrator")
+	chSelected := runtimebustest.Subscribe(t, fixture.busB, "scan-orchestrator", events.EventType("triage.requested"))
+	defer runtimebustest.Unsubscribe(fixture.busB, "scan-orchestrator")
 	runID := uuid.NewString()
 	started := rpcCall(t, handler, runStartBodyWithBundleHash(runID, runtimeContextTestBundleHashB, "triage.requested", `{"topic":"seed-existing"}`, "idem-existing-seed"))
 	if started.Error != nil {
@@ -223,10 +224,10 @@ func TestOperatorRuntimeContextManagerRoutesEventReplayByOriginalRunBundle(t *te
 	handler := fixture.handler(t)
 	ctx := testAuthorActivityContext(context.Background())
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, fixture.pg, "agent-a")
-	chPrimary := fixture.busA.Subscribe("agent-a")
-	defer fixture.busA.Unsubscribe("agent-a")
-	chSelected := fixture.busB.Subscribe("agent-a")
-	defer fixture.busB.Unsubscribe("agent-a")
+	chPrimary := runtimebustest.Subscribe(t, fixture.busA, "agent-a")
+	defer runtimebustest.Unsubscribe(fixture.busA, "agent-a")
+	chSelected := runtimebustest.Subscribe(t, fixture.busB, "agent-a")
+	defer runtimebustest.Unsubscribe(fixture.busB, "agent-a")
 	original := seedReplayableOperatorEvent(t, ctx, fixture.pg, "triage.requested", []string{"agent-a"}, eventReplayStatusDelivered)
 	seedRuntimeContextRunBundle(t, fixture.db, original.RunID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted, "")
 

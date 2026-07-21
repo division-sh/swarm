@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
@@ -196,7 +197,7 @@ func newProposedEffectMailboxHandler(
 		BundleHash:    fact.BundleHash,
 	})
 	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: "workflow-runtime"})
-	bus.Subscribe("workflow-runtime", events.EventType("mailbox.card_decided"), events.EventType("platform.activity_requested"))
+	runtimebustest.Subscribe(t, bus, "workflow-runtime", events.EventType("mailbox.card_decided"), events.EventType("platform.activity_requested"))
 	mailbox, ok := persistence.(MailboxAPIStore)
 	if !ok {
 		t.Fatal("persistence store does not implement MailboxAPIStore")

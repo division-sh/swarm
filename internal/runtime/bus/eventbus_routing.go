@@ -747,12 +747,10 @@ func deliveryRouteTargetsBySubscriber(deliveryRoutes []events.DeliveryRoute) map
 }
 
 type agentRecipient struct {
-	agentID      string
-	ch           chan *LocalDelivery
-	kind         inMemorySubscriberKind
-	route        *agentRouteHandle
-	internal     *internalSubscriptionHandle
-	runtimeOwner worklifetime.Occurrence
+	agentID  string
+	kind     inMemorySubscriberKind
+	route    *agentRouteHandle
+	internal *internalSubscriptionHandle
 }
 
 func (r agentRecipient) send(ctx context.Context, evt events.Event, handoff events.DeliveryRoute) agentRouteSendResult {
@@ -762,26 +760,7 @@ func (r agentRecipient) send(ctx context.Context, evt events.Event, handoff even
 	if r.internal != nil {
 		return r.internal.send(ctx, evt, handoff)
 	}
-	delivery, err := r.runtimeOwner.NewRoutedEventDelivery(localDeliveryContext(ctx), evt, handoff)
-	if err != nil {
-		return agentRouteSendInactive
-	}
-	if err := trackLocalDeliveryCompletion(ctx, delivery); err != nil {
-		_ = delivery.Complete()
-		return agentRouteSendInactive
-	}
-	timer := time.NewTimer(deliverySendTimeout)
-	defer timer.Stop()
-	select {
-	case r.ch <- delivery:
-		return agentRouteSendDelivered
-	case <-ctx.Done():
-		_ = delivery.Complete()
-		return agentRouteSendContextDone
-	case <-timer.C:
-		_ = delivery.Complete()
-		return agentRouteSendTimedOut
-	}
+	return agentRouteSendInactive
 }
 
 const workflowRuntimeInternalCarrierID = "workflow-runtime"
@@ -869,21 +848,23 @@ func (eb *EventBus) snapshotRoutePlanRecipientChans(agentIDs []string, planned [
 			if route == nil {
 				continue
 			}
-			out = append(out, agentRecipient{agentID: id, ch: route.ch, kind: inMemorySubscriberAgent, route: route, runtimeOwner: eb.workOwner})
+			out = append(out, agentRecipient{agentID: id, kind: inMemorySubscriberAgent, route: route})
 			continue
 		}
-		ch, ok := eb.agentChans[id]
-		if !ok {
+		if _, ok := eb.agentChans[id]; !ok {
 			continue
 		}
 		kind := eb.subscriptionKinds[id]
 		if kind == "" {
 			kind = inMemorySubscriberAgent
 		}
-		out = append(out, agentRecipient{
-			agentID: id, ch: ch, kind: kind, route: eb.agentRouteHandles[id],
-			internal: eb.internalHandles[id], runtimeOwner: eb.workOwner,
-		})
+		recipient := agentRecipient{
+			agentID: id, kind: kind, route: eb.agentRouteHandles[id], internal: eb.internalHandles[id],
+		}
+		if recipient.route == nil && recipient.internal == nil {
+			continue
+		}
+		out = append(out, recipient)
 	}
 	return out
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -305,8 +306,8 @@ func TestEventBusFlowInstanceRoutePersistsAndDeliversRenderedActivationConfigSub
 		t.Fatalf("persisted subscriber_id = %q, want rendered ceo id", route.SubscriberID)
 	}
 
-	eb.Subscribe("ceo-11111111-1111-4111-8111-111111111111")
-	defer eb.Unsubscribe("ceo-11111111-1111-4111-8111-111111111111")
+	runtimebustest.Subscribe(t, eb, "ceo-11111111-1111-4111-8111-111111111111")
+	defer runtimebustest.Unsubscribe(eb, "ceo-11111111-1111-4111-8111-111111111111")
 	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("event-rendered-route-delivery"),
 		events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 

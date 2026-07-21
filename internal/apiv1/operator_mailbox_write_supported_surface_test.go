@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -221,7 +222,7 @@ func newMailboxWriteSupportedSurfaceHandler(
 		TestLifecycleProbe:  probe,
 	})
 	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: "workflow-runtime"})
-	workflowDeliveries := bus.Subscribe("workflow-runtime", events.EventType("thing.created"))
+	workflowDeliveries := runtimebustest.Subscribe(t, bus, "workflow-runtime", events.EventType("thing.created"))
 	workerOwner := worklifetime.NewProcess()
 	workerLease, err := workerOwner.Begin(context.Background())
 	if err != nil {

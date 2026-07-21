@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -137,8 +138,8 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	seedActiveAPIV1RuntimeBusAgent(t, context.Background(), pg, "scan-orchestrator")
-	ch := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
-	defer bus.Unsubscribe("scan-orchestrator")
+	ch := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
+	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 	body := eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-publish")
 
@@ -224,8 +225,8 @@ func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(
 	}
 	ctx := context.Background()
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
-	ch := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
-	defer bus.Unsubscribe("scan-orchestrator")
+	ch := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
+	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 	body := eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-quick-ack-publish")
 
@@ -407,11 +408,11 @@ func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AdmitFlowOwnedAgentSubscriptions: %v", err)
 	}
-	ch := bus.SubscribeAgent(admission)
+	ch := runtimebustest.SubscribeAdmission(t, bus, admission)
 	if ch == nil {
 		t.Fatal("SubscribeAgent returned nil admitted carrier")
 	}
-	defer bus.Unsubscribe("repo-observer")
+	defer runtimebustest.Unsubscribe(bus, "repo-observer")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 	body := eventPublishBody("", runStartTestFingerprint, "repo-scaffold/repo_scaffold.repo_commit_succeeded", `{"topic":"medicine"}`, "", "idem-flow-scoped")
 
@@ -547,8 +548,8 @@ func TestOperatorEventPublishPostgresUsesPublisherScopeWithPlainRequestContext(t
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	seedActiveAPIV1RuntimeBusAgent(t, context.Background(), pg, "scan-orchestrator")
-	ch := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
-	defer bus.Unsubscribe("scan-orchestrator")
+	ch := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
+	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	published := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithoutBundle("", "scan.requested", `{"topic":"medicine"}`, "", "idem-publish-no-bundle"))
@@ -590,8 +591,8 @@ func TestOperatorEventPublishSQLiteUsesPublisherScopeWithPlainRequestContext(t *
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, sqliteStore, "scan-orchestrator")
-	ch := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
-	defer bus.Unsubscribe("scan-orchestrator")
+	ch := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
+	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandlerWithStores(t, sqliteStore, sqliteStore, sqliteStore, bus, source)
 
 	published := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithoutBundle("", "scan.requested", `{"topic":"medicine"}`, "", "idem-sqlite-publish-no-bundle"))
@@ -646,8 +647,8 @@ func TestOperatorEventPublishPersistsIdempotencyBeforeReadbackFailure(t *testing
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	seedActiveAPIV1RuntimeBusAgent(t, context.Background(), pg, "scan-orchestrator")
-	ch := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
-	defer bus.Unsubscribe("scan-orchestrator")
+	ch := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
+	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	observability := &failOnceEventReadStore{
 		ObservabilityReadStore: pg,
 		err:                    errors.New("transient event readback failure"),
@@ -725,8 +726,8 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 	}
 	ctx := context.Background()
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
-	ch := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
-	defer bus.Unsubscribe("scan-orchestrator")
+	ch := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
+	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandlerWithStores(t, failing, failing, failing, bus, source)
 	body := eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-post-commit-receipt")
 
@@ -789,8 +790,8 @@ func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(
 	}
 	ctx := context.Background()
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
-	ch := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
-	defer bus.Unsubscribe("scan-orchestrator")
+	ch := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
+	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandlerWithStores(t, failing, failing, failing, bus, source)
 	body := eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-post-commit-completion")
 
@@ -907,8 +908,8 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	seedActiveAPIV1RuntimeBusAgent(t, context.Background(), pg, "scan-orchestrator")
-	ch := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
-	defer bus.Unsubscribe("scan-orchestrator")
+	ch := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
+	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	initial := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"first"}`, "", "idem-new-run"))
@@ -986,9 +987,9 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 	}
 	ctx := context.Background()
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
-	initialCh := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
-	followUpCh := bus.Subscribe("scan-orchestrator", events.EventType("scan.followup"))
-	defer bus.Unsubscribe("scan-orchestrator")
+	initialCh := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"), events.EventType("scan.followup"))
+	followUpCh := initialCh
+	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	initial := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"first"}`, "", "idem-followup-initial"))
@@ -1068,8 +1069,8 @@ func TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonical
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "bootstrap-node")
-	initialCh := bus.Subscribe("bootstrap-node", events.EventType("bootstrap.requested"))
-	defer bus.Unsubscribe("bootstrap-node")
+	initialCh := runtimebustest.Subscribe(t, bus, "bootstrap-node", events.EventType("bootstrap.requested"))
+	defer runtimebustest.Unsubscribe(bus, "bootstrap-node")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	initial := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "bootstrap.requested", `{"topic":"first"}`, "", "idem-target-route-initial"))
@@ -1127,8 +1128,8 @@ func TestOperatorEventPublishRootEventTemplateInputNameCollisionPayloadEntityIDD
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "root-orchestrator")
-	ch := bus.Subscribe("root-orchestrator", events.EventType("review.requested"))
-	defer bus.Unsubscribe("root-orchestrator")
+	ch := runtimebustest.Subscribe(t, bus, "root-orchestrator", events.EventType("review.requested"))
+	defer runtimebustest.Unsubscribe(bus, "root-orchestrator")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	initial := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "review.requested", `{"topic":"first"}`, "", "idem-root-template-collision-initial"))
@@ -1183,8 +1184,8 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "bootstrap-node")
-	initialCh := bus.Subscribe("bootstrap-node", events.EventType("bootstrap.requested"))
-	defer bus.Unsubscribe("bootstrap-node")
+	initialCh := runtimebustest.Subscribe(t, bus, "bootstrap-node", events.EventType("bootstrap.requested"))
+	defer runtimebustest.Unsubscribe(bus, "bootstrap-node")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	initial := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "bootstrap.requested", `{"topic":"first"}`, "", "idem-target-route-invalid-initial"))
@@ -1287,8 +1288,8 @@ func TestOperatorEventPublishExplicitRunRequiresRecipientPlanCheckerBeforePersis
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
-	initialCh := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
-	defer bus.Unsubscribe("scan-orchestrator")
+	initialCh := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
+	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	initial := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"first"}`, "", "idem-followup-missing-plan-initial"))
@@ -1334,9 +1335,9 @@ func TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun(t *testing
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, sqliteStore, "scan-orchestrator")
-	initialCh := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
-	followUpCh := bus.Subscribe("scan-orchestrator", events.EventType("scan.followup"))
-	defer bus.Unsubscribe("scan-orchestrator")
+	initialCh := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"), events.EventType("scan.followup"))
+	followUpCh := initialCh
+	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandlerWithStores(t, sqliteStore, sqliteStore, sqliteStore, bus, source)
 
 	initial := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"first"}`, "", "idem-sqlite-followup-initial"))
@@ -1459,8 +1460,8 @@ func TestOperatorEventPublishOperatorReferenceValidatesSameRunProvenance(t *test
 	}
 	ctx := context.Background()
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
-	ch := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
-	defer bus.Unsubscribe("scan-orchestrator")
+	ch := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
+	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	parent := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-source-parent"))
@@ -1756,8 +1757,8 @@ func TestOperatorEventPublishQueuesWhileRuntimePaused(t *testing.T) {
 	ctx := context.Background()
 	agentID := "scan-orchestrator"
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, agentID)
-	ch := bus.Subscribe(agentID, events.EventType("scan.requested"))
-	defer bus.Unsubscribe(agentID)
+	ch := runtimebustest.Subscribe(t, bus, agentID, events.EventType("scan.requested"))
+	defer runtimebustest.Unsubscribe(bus, agentID)
 
 	if _, err := controller.Pause(ctx, runtimeingress.TransitionRequest{
 		Reason:       "test_pause",

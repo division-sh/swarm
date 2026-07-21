@@ -435,7 +435,9 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID
 		}
 	}
 	if running {
-		_ = am.Shutdown()
+		// The current delivery is part of the work this transition must join.
+		// Request the shared shutdown and let its watcher execute the join.
+		am.lifecycle.requestShutdownTransition()
 	}
 }
 

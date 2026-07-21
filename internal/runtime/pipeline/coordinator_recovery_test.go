@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -209,7 +210,7 @@ func TestRecoveryManager_ReplaysPersistedCorrelationEnvelope(t *testing.T) {
 	}
 	capture := &recoveryCapturePublisher{inner: bus}
 	recipientID := "agent-recovery"
-	recipientCh := bus.Subscribe(recipientID)
+	recipientCh := runtimebustest.Subscribe(t, bus, recipientID)
 
 	runID := uuid.NewString()
 	parentID := uuid.NewString()
@@ -410,8 +411,8 @@ func TestRecoveryManager_ReplaysHistoricalForkDeliveryEventReplayRows(t *testing
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	capture := &recoveryCapturePublisher{inner: bus}
-	safeAgent := bus.Subscribe("safe-agent", events.EventType("fork.ready"))
-	currentOnly := bus.Subscribe("current-only-agent", events.EventType("fork.ready"))
+	safeAgent := runtimebustest.Subscribe(t, bus, "safe-agent", events.EventType("fork.ready"))
+	currentOnly := runtimebustest.Subscribe(t, bus, "current-only-agent", events.EventType("fork.ready"))
 
 	rm := runtimepipeline.NewRecoveryManagerWith(pg, capture)
 	if err := rm.Recover(ctx); err != nil {
@@ -523,7 +524,7 @@ func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing
 	if err := pg.UpsertPipelineReceipt(ctx, goodParentID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(good parent): %v", err)
 	}
-	goodRecipientCh := bus.Subscribe(goodRecipientID)
+	goodRecipientCh := runtimebustest.Subscribe(t, bus, goodRecipientID)
 
 	rm := runtimepipeline.NewRecoveryManagerWith(pg, capture)
 	if err := rm.Recover(ctx); err != nil {
@@ -789,8 +790,8 @@ func TestRecoveryManager_UsesPersistedDeliveryRecipientsInsteadOfCurrentSubscrip
 
 	commitRecoveryEvent(t, ctx, pg, child, []string{"agent-a"}, runtimereplayclaim.CommittedReplayScopeDirect)
 
-	agentA := bus.Subscribe("agent-a")
-	agentB := bus.Subscribe("agent-b", events.EventType("system.recover.explicit"))
+	agentA := runtimebustest.Subscribe(t, bus, "agent-a")
+	agentB := runtimebustest.Subscribe(t, bus, "agent-b", events.EventType("system.recover.explicit"))
 
 	rm := runtimepipeline.NewRecoveryManagerWith(pg, capture)
 	if err := rm.Recover(ctx); err != nil {

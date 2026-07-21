@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
@@ -1403,8 +1404,8 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	}
 	outcomeAgent := "gate-outcome-recorder"
 	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: outcomeAgent})
-	outcomeEvents := bus.Subscribe(outcomeAgent, events.EventType("launch.approved"))
-	t.Cleanup(func() { bus.Unsubscribe(outcomeAgent) })
+	outcomeEvents := runtimebustest.Subscribe(t, bus, outcomeAgent, events.EventType("launch.approved"))
+	t.Cleanup(func() { runtimebustest.Unsubscribe(bus, outcomeAgent) })
 
 	newCoordinator := func(bundleHash string) *runtimepipeline.PipelineCoordinator {
 		return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, tc.db, runtimepipeline.PipelineCoordinatorOptions{

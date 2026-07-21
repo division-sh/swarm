@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -36,10 +37,10 @@ func TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency(t *t
 	bus := eventReplayTestBus(t, pg)
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-b")
-	chA := bus.Subscribe("agent-a")
-	defer bus.Unsubscribe("agent-a")
-	chB := bus.Subscribe("agent-b")
-	defer bus.Unsubscribe("agent-b")
+	chA := runtimebustest.Subscribe(t, bus, "agent-a")
+	defer runtimebustest.Unsubscribe(bus, "agent-a")
+	chB := runtimebustest.Subscribe(t, bus, "agent-b")
+	defer runtimebustest.Unsubscribe(bus, "agent-b")
 	original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a", "agent-b"}, eventReplayStatusDelivered)
 	handler := eventReplayTestHandler(t, pg, bus)
 
@@ -172,8 +173,8 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					t.Fatalf("NewEventBusWithOptions: %v", err)
 				}
 				const agentID = "complete-replay-agent"
-				ch := bus.Subscribe(agentID)
-				defer bus.Unsubscribe(agentID)
+				ch := runtimebustest.Subscribe(t, bus, agentID)
+				defer runtimebustest.Unsubscribe(bus, agentID)
 
 				runID := uuid.NewString()
 				parentID := uuid.NewString()
@@ -510,8 +511,8 @@ func TestOperatorEventReplayStoresIdempotencyBeforeAuditPublishReadiness(t *test
 	inner := eventReplayTestBus(t, pg)
 	publisher := &failOnceAuditEventPublisher{inner: inner, err: errors.New("audit publish temporarily unavailable")}
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
-	ch := inner.Subscribe("agent-a")
-	defer inner.Unsubscribe("agent-a")
+	ch := runtimebustest.Subscribe(t, inner, "agent-a")
+	defer runtimebustest.Unsubscribe(inner, "agent-a")
 	original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, eventReplayStatusDelivered)
 	handler := eventReplayTestHandler(t, pg, publisher)
 	body := eventReplayBody(original.EventID, nil, "idem-audit-failure")
@@ -551,8 +552,8 @@ func TestOperatorEventReplayStoresIdempotencyBeforeDirectPublishFanoutError(t *t
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	bus := eventReplayTestBus(t, pg)
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
-	ch := bus.Subscribe("agent-a")
-	defer bus.Unsubscribe("agent-a")
+	ch := runtimebustest.Subscribe(t, bus, "agent-a")
+	defer runtimebustest.Unsubscribe(bus, "agent-a")
 	fillAgentChannel(t, ctx, bus, "agent-a", cap(ch))
 	original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, eventReplayStatusDelivered)
 	handler := eventReplayTestHandler(t, pg, bus)
@@ -603,10 +604,10 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 		bus := eventReplayTestBus(t, pg)
 		seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
 		seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-b")
-		chA := bus.Subscribe("agent-a")
-		defer bus.Unsubscribe("agent-a")
-		chB := bus.Subscribe("agent-b")
-		defer bus.Unsubscribe("agent-b")
+		chA := runtimebustest.Subscribe(t, bus, "agent-a")
+		defer runtimebustest.Unsubscribe(bus, "agent-a")
+		chB := runtimebustest.Subscribe(t, bus, "agent-b")
+		defer runtimebustest.Unsubscribe(bus, "agent-b")
 		original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a", "agent-b"}, eventReplayStatusDelivered)
 		handler := eventReplayTestHandler(t, pg, bus)
 
@@ -713,8 +714,8 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		bus := eventReplayTestBus(t, pg)
 		seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
-		bus.Subscribe("agent-a")
-		defer bus.Unsubscribe("agent-a")
+		runtimebustest.Subscribe(t, bus, "agent-a")
+		defer runtimebustest.Unsubscribe(bus, "agent-a")
 		original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, eventReplayStatusDelivered)
 		handler := eventReplayTestHandler(t, pg, bus)
 		resp := rpcCall(t, handler, eventReplayBody(original.EventID, []string{"agent-b"}, "idem-not-original"))
@@ -756,8 +757,8 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
 			bus := eventReplayTestBus(t, pg)
 			seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
-			bus.Subscribe("agent-a")
-			defer bus.Unsubscribe("agent-a")
+			runtimebustest.Subscribe(t, bus, "agent-a")
+			defer runtimebustest.Unsubscribe(bus, "agent-a")
 			original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, status)
 			handler := eventReplayTestHandler(t, pg, bus)
 			resp := rpcCall(t, handler, eventReplayBody(original.EventID, nil, "idem-not-eligible-"+status))
@@ -797,10 +798,10 @@ func TestOperatorAgentReplayProjectsSingletonEventReplayOwner(t *testing.T) {
 	bus := eventReplayTestBus(t, pg)
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
 	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-b")
-	chA := bus.Subscribe("agent-a")
-	defer bus.Unsubscribe("agent-a")
-	chB := bus.Subscribe("agent-b")
-	defer bus.Unsubscribe("agent-b")
+	chA := runtimebustest.Subscribe(t, bus, "agent-a")
+	defer runtimebustest.Unsubscribe(bus, "agent-a")
+	chB := runtimebustest.Subscribe(t, bus, "agent-b")
+	defer runtimebustest.Unsubscribe(bus, "agent-b")
 	original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a", "agent-b"}, eventReplayStatusDelivered)
 	handler := eventReplayTestHandler(t, pg, bus)
 
@@ -861,8 +862,8 @@ func TestOperatorAgentReplayFailClosedCases(t *testing.T) {
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		bus := eventReplayTestBus(t, pg)
 		seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
-		bus.Subscribe("agent-a")
-		defer bus.Unsubscribe("agent-a")
+		runtimebustest.Subscribe(t, bus, "agent-a")
+		defer runtimebustest.Unsubscribe(bus, "agent-a")
 		original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, eventReplayStatusDelivered)
 		handler := eventReplayTestHandler(t, pg, bus)
 
@@ -905,8 +906,8 @@ func TestOperatorAgentReplayFailClosedCases(t *testing.T) {
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		bus := eventReplayTestBus(t, pg)
 		seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
-		bus.Subscribe("agent-a")
-		defer bus.Unsubscribe("agent-a")
+		runtimebustest.Subscribe(t, bus, "agent-a")
+		defer runtimebustest.Unsubscribe(bus, "agent-a")
 		original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, eventReplayStatusPending)
 		handler := eventReplayTestHandler(t, pg, bus)
 
@@ -937,8 +938,8 @@ func TestOperatorEventReplayQueuesWhenDispatchGated(t *testing.T) {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
-			ch := bus.Subscribe("agent-a")
-			defer bus.Unsubscribe("agent-a")
+			ch := runtimebustest.Subscribe(t, bus, "agent-a")
+			defer runtimebustest.Unsubscribe(bus, "agent-a")
 			original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, eventReplayStatusDelivered)
 			handler := eventReplayTestHandler(t, pg, bus)
 
