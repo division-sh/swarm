@@ -515,7 +515,7 @@ func TestNewRuntime_SchedulerMarksSchedulesFiredThroughCanonicalTerminalHelper(t
 		At:        time.Now().Add(10 * time.Millisecond),
 		EntityID:  "ent-001",
 	}
-	if err := rt.Scheduler.Register(sc); err != nil {
+	if err := rt.Scheduler.Register(context.Background(), sc); err != nil {
 		t.Fatalf("Register(schedule): %v", err)
 	}
 

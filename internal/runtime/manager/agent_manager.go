@@ -325,8 +325,8 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 			if err != nil {
 				return err
 			}
-			postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)))
-			if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
+			if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
+				postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
 				if err := am.publishCommittedAgent(postCommitCtx, rec, a, subscriptionAdmission, result); err != nil && am.bus != nil {
 					_ = am.bus.LogRuntime(postCommitCtx, runtimepipeline.RuntimeLogEntry{
 						Level: "error", Message: "Post-commit agent publication failed",

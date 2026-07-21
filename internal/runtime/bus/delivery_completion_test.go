@@ -42,8 +42,8 @@ func TestEventBusPublishAndWaitJoinsOnlyAcceptedDeliveryTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create event bus: %v", err)
 	}
-	rootEvents := eb.SubscribeInternal("root-handler", events.EventType("custom.root"))
-	leafEvents := eb.SubscribeInternal("leaf-handler", events.EventType("custom.leaf"))
+	rootEvents := subscribeInternalDeliveriesForTest(t, eb, "root-handler", events.EventType("custom.root"))
+	leafEvents := subscribeInternalDeliveriesForTest(t, eb, "leaf-handler", events.EventType("custom.leaf"))
 	leafAccepted := make(chan struct{})
 	releaseLeaf := make(chan struct{})
 	handlerErr := make(chan error, 1)

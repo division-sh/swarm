@@ -2,6 +2,9 @@ package bus
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -9,6 +12,22 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 )
+
+type failOnceLocalDeliveryHandoffStore struct {
+	InMemoryEventStore
+	mu       sync.Mutex
+	attempts int
+}
+
+func (s *failOnceLocalDeliveryHandoffStore) ProveLocalDeliveryHandoff(context.Context, string, events.DeliveryRoute) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.attempts++
+	if s.attempts == 1 {
+		return errors.New("injected handoff proof failure")
+	}
+	return nil
+}
 
 func TestEventBusAgentRouteReplacementWaitsForExactDequeuedPredecessor(t *testing.T) {
 	eb, err := newScopedTestEventBus(nil)
@@ -105,5 +124,184 @@ func TestEventBusAgentRouteBufferedRemovalFailsClosedWithoutDurableHandoff(t *te
 	}
 	if got := eb.ReplaceAgentRoute(newToken, testAgentSubscriptionAdmission(t, newToken.AgentID, events.EventType("test.work"))); got != nil {
 		t.Fatal("successor route published after unproven buffered handoff")
+	}
+}
+
+func TestEventBusAgentRouteFailedHandoffRetainsCarrierForExactRetry(t *testing.T) {
+	store := &failOnceLocalDeliveryHandoffStore{}
+	eb, err := newScopedTestEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 1}
+	newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 2}
+	eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.work")))
+	evt := eventtest.RuntimeControl("work-buffered-retry", events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
+	if err := eb.deliverToAgents(context.Background(), evt, []string{"agent-a"}); err != nil {
+		t.Fatalf("deliver event: %v", err)
+	}
+	if got := eb.ReplaceAgentRoute(newToken, testAgentSubscriptionAdmission(t, newToken.AgentID, events.EventType("test.work"))); got != nil {
+		t.Fatal("successor route published after first handoff proof failed")
+	}
+	if err := eb.WaitForQuiescence(context.Background()); err != nil {
+		t.Fatalf("retry retained handoff and join: %v", err)
+	}
+	store.mu.Lock()
+	attempts := store.attempts
+	store.mu.Unlock()
+	if attempts != 2 {
+		t.Fatalf("handoff proof attempts = %d, want exact fail-once retry", attempts)
+	}
+}
+
+func TestEventBusResetRetiresAndRestartsInternalSubscriptionGeneration(t *testing.T) {
+	eb, err := newScopedTestEventBus(InMemoryEventStore{})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ready := make(chan int, 2)
+	received := make(chan string, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for generation := 1; ; generation++ {
+			subscription, err := eb.SubscribeInternal(ctx, "reset-proof", events.EventType("test.work"))
+			if err != nil {
+				return
+			}
+			subscription.MarkReady()
+			ready <- generation
+			for {
+				select {
+				case <-ctx.Done():
+					_ = subscription.Complete(false)
+					return
+				case <-subscription.Retiring():
+					restart := ctx.Err() == nil
+					_ = subscription.Complete(restart)
+					if !restart {
+						return
+					}
+					goto nextGeneration
+				case delivery := <-subscription.Deliveries():
+					if delivery != nil {
+						received <- delivery.ID()
+						_ = delivery.Complete()
+					}
+				}
+			}
+		nextGeneration:
+		}
+	}()
+	if generation := <-ready; generation != 1 {
+		t.Fatalf("initial generation = %d", generation)
+	}
+	if err := eb.ResetInMemoryState(); err != nil {
+		t.Fatalf("ResetInMemoryState: %v", err)
+	}
+	if generation := <-ready; generation != 2 {
+		t.Fatalf("replacement generation = %d", generation)
+	}
+	evt := eventtest.RuntimeControl("after-reset", events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
+	if err := eb.deliverToAgents(context.Background(), evt, []string{"reset-proof"}); err != nil {
+		t.Fatalf("deliver after reset: %v", err)
+	}
+	select {
+	case eventID := <-received:
+		if eventID != evt.ID() {
+			t.Fatalf("event id = %q, want %q", eventID, evt.ID())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("replacement internal subscription did not receive event")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("internal subscription receiver did not exit")
+	}
+}
+
+func TestEventBusSnapshottedInternalSendLinearizesWithReset(t *testing.T) {
+	eb, err := newScopedTestEventBus(InMemoryEventStore{})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ready := make(chan struct{}, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			subscription, subscribeErr := eb.SubscribeInternal(ctx, "reset-race-proof", events.EventType("test.work"))
+			if subscribeErr != nil {
+				return
+			}
+			subscription.MarkReady()
+			ready <- struct{}{}
+			for {
+				select {
+				case <-ctx.Done():
+					_ = subscription.Complete(false)
+					return
+				case <-subscription.Retiring():
+					_ = subscription.Complete(true)
+					goto nextGeneration
+				case delivery := <-subscription.Deliveries():
+					if delivery != nil {
+						_ = delivery.Complete()
+					}
+				}
+			}
+		nextGeneration:
+		}
+	}()
+	<-ready
+
+	for i := 0; i < 64; i++ {
+		recipients := eb.snapshotRoutePlanRecipientChans(
+			[]string{"reset-race-proof"},
+			[]RoutePlanLiveRecipient{{RecipientID: "reset-race-proof", SubscriberType: routePlanSubscriberAgent}},
+		)
+		if len(recipients) != 1 || recipients[0].internal == nil {
+			t.Fatalf("iteration %d snapshot = %#v, want one internal generation", i, recipients)
+		}
+		evt := eventtest.RuntimeControl(
+			fmt.Sprintf("reset-race-%d", i), events.EventType("test.work"), "test", "", []byte(`{}`), 0,
+			"run-1", "", events.EventEnvelope{}, time.Now(),
+		)
+		start := make(chan struct{})
+		result := make(chan agentRouteSendResult, 1)
+		resetErr := make(chan error, 1)
+		go func(recipient agentRecipient) {
+			<-start
+			result <- recipient.send(context.Background(), evt, events.DeliveryRoute{})
+		}(recipients[0])
+		go func() {
+			<-start
+			resetErr <- eb.ResetInMemoryState()
+		}()
+		close(start)
+		if sendResult := <-result; sendResult != agentRouteSendDelivered && sendResult != agentRouteSendInactive {
+			t.Fatalf("iteration %d send result = %v, want delivered or retirement-fenced", i, sendResult)
+		}
+		if err := <-resetErr; err != nil {
+			t.Fatalf("iteration %d ResetInMemoryState: %v", i, err)
+		}
+		<-ready
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("internal subscription receiver did not exit")
+	}
+	joinCtx, joinCancel := context.WithTimeout(context.Background(), time.Second)
+	defer joinCancel()
+	if err := eb.WaitForQuiescence(joinCtx); err != nil {
+		t.Fatalf("join after reset/send races: %v", err)
 	}
 }

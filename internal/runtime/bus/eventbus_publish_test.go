@@ -73,8 +73,8 @@ func (t *testCommitPublishTransaction) FinalizePreparedPublish(ctx context.Conte
 }
 
 func prepareTestCommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan, transaction *testCommitPublishTransaction) (runtimebus.PreparedPublish, error) {
-	postCommit := make([]func(), 0, 4)
-	rollback := make([]func(), 0, 4)
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
+	rollback := make([]runtimepipeline.OwnerAction, 0, 4)
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
 	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
 	prepared, err := plan.PrepareCommitPublish(runtimebus.WithCommitPublishTransaction(ctx, transaction))
@@ -1743,8 +1743,8 @@ func TestEventBusPublish_KeepsInternalSubscribersLiveOnlyUnderDescriptorPlanning
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	workflowCh := eb.SubscribeInternal("workflow-runtime", events.EventType("custom.trigger"))
-	nodeCh := eb.SubscribeInternal("scan-orchestrator", events.EventType("custom.trigger"))
+	workflowCh := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("custom.trigger"))
+	nodeCh := subscribeInternalDeliveriesForTest(t, eb, "scan-orchestrator", events.EventType("custom.trigger"))
 	agentCh := eb.Subscribe("agent-a", events.EventType("custom.trigger"))
 	missingCh := eb.Subscribe("agent-missing", events.EventType("custom.trigger"))
 
@@ -1793,7 +1793,7 @@ func TestEventBusPublishDeferred_UsesCanonicalSubscribedRecipientFiltering(t *te
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	workflowCh := eb.SubscribeInternal("workflow-runtime", events.EventType("custom.middle"))
+	workflowCh := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("custom.middle"))
 	agentCh := eb.Subscribe("agent-a", events.EventType("custom.middle"))
 	otherCh := eb.Subscribe("agent-b", events.EventType("custom.middle"))
 
@@ -2900,7 +2900,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersis
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			internal := eb.SubscribeInternal("internal-"+string(tc.eventType), tc.eventType)
+			internal := subscribeInternalDeliveriesForTest(t, eb, "internal-"+string(tc.eventType), tc.eventType)
 			defer eb.Unsubscribe("internal-" + string(tc.eventType))
 
 			if err := eb.Publish(ctx, tc.event(tc.eventID, tc.eventType)); err != nil {
@@ -3454,7 +3454,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 		}
 	}
 
-	live := eb.SubscribeInternal("workflow-runtime", events.EventType(eventType))
+	live := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType(eventType))
 	defer eb.Unsubscribe("workflow-runtime")
 	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
@@ -4063,7 +4063,7 @@ func TestEventBusPublish_RecordsNestedPackageConnectLocalizedEvent(t *testing.T)
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	eb.SubscribeInternal("child-aggregator")
+	subscribeInternalDeliveriesForTest(t, eb, "child-aggregator")
 	defer eb.Unsubscribe("child-aggregator")
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)

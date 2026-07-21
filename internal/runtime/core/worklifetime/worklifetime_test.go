@@ -192,6 +192,57 @@ func TestChildOccurrencesIgnoreConstructionCancellationAndFollowOwnerRetirement(
 	}
 }
 
+func TestRuntimeRouteDeliveryComposesStandingOwnerUntilDescendantCompletion(t *testing.T) {
+	process := NewProcess()
+	runtime, err := process.NewRuntime(context.Background(), RuntimeIdentity{RuntimeInstanceID: "runtime-standing", BundleHash: "bundle-standing"})
+	if err != nil {
+		t.Fatalf("new runtime: %v", err)
+	}
+	standing, err := runtime.NewStanding(context.Background(), StandingIdentity{ServiceID: "telegram", RunID: uuid.NewString(), Generation: 1})
+	if err != nil {
+		t.Fatalf("new standing occurrence: %v", err)
+	}
+	route, err := runtime.NewRoute(context.Background(), RouteIdentity{RuntimeEpoch: 1, AgentID: "normalizer", Generation: 1})
+	if err != nil {
+		t.Fatalf("new runtime route: %v", err)
+	}
+	evt := eventtest.RuntimeControl(uuid.NewString(), events.EventType("telegram.received"), "test", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now())
+	delivery, err := route.NewEventDelivery(WithOccurrence(context.Background(), standing), evt)
+	if err != nil {
+		t.Fatalf("new standing-owned route delivery: %v", err)
+	}
+	if owner, ok := OccurrenceFromContext(delivery.Context()); !ok || owner != standing {
+		t.Fatalf("delivery context owner = %T, want exact standing occurrence", owner)
+	}
+	if err := standing.Fence(); err != nil {
+		t.Fatalf("fence standing occurrence: %v", err)
+	}
+	waitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := standing.Wait(waitCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("standing wait before descendant completion = %v, want deadline", err)
+	}
+	if err := delivery.Complete(); err != nil {
+		t.Fatalf("complete descendant delivery: %v", err)
+	}
+	if err := standing.Wait(context.Background()); err != nil {
+		t.Fatalf("standing wait after descendant completion: %v", err)
+	}
+	if err := route.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire route: %v", err)
+	}
+	if err := standing.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire standing: %v", err)
+	}
+	if _, err := runtime.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire runtime: %v", err)
+	}
+	process.Retire()
+	if _, err := process.Join(context.Background()); err != nil {
+		t.Fatalf("join process: %v", err)
+	}
+}
+
 func TestBeginRetireRaceRejectsLateAdmissionAndJoinsAcceptedWork(t *testing.T) {
 	process := NewProcess()
 	runtime, err := process.NewRuntime(context.Background(), RuntimeIdentity{RuntimeInstanceID: "runtime-1", BundleHash: "bundle-1"})

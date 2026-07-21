@@ -49,7 +49,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationRetriesBusyAndFlushesPostCommitOnc
 				return errors.New("runtime mutation transaction is required")
 			}
 			atomic.AddInt32(&attempts, 1)
-			if !runtimepipeline.QueuePipelinePostCommitAction(txctx, func() {
+			if !runtimepipeline.QueuePipelinePostCommitAction(txctx, func(context.Context) {
 				atomic.AddInt32(&postCommitActions, 1)
 			}) {
 				return errors.New("queue pipeline post-commit action")
@@ -202,7 +202,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationPostCommitCanReenterRuntimeMutatio
 			`, uuid.NewString(), time.Now().UTC()); err != nil {
 				return err
 			}
-			if !runtimepipeline.QueuePipelinePostCommitAction(txctx, func() {
+			if !runtimepipeline.QueuePipelinePostCommitAction(txctx, func(context.Context) {
 				innerCtx := runtimepipeline.WithoutPipelineSQLTxContext(ctx)
 				innerDone <- store.RunRuntimeMutation(innerCtx, func(innerTxCtx context.Context, innerTx *sql.Tx) error {
 					_, err := innerTx.ExecContext(innerTxCtx, `

@@ -36,7 +36,7 @@ type MutationEventPublisher interface {
 }
 
 type Scheduler interface {
-	Register(runtimepipeline.Schedule) error
+	Register(context.Context, runtimepipeline.Schedule) error
 	Stop()
 }
 

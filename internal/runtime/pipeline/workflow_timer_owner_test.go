@@ -1070,7 +1070,7 @@ func TestWorkflowTimerLifecycleSchedulerRetryPreservesOccurrenceOnBothStores(t *
 			t.Cleanup(scheduler.Stop)
 			pc.bus = bus
 			pc.timerScheduler = scheduler
-			if err := scheduler.Register(activation.schedule()); err != nil {
+			if err := scheduler.Register(context.Background(), activation.schedule()); err != nil {
 				t.Fatalf("register workflow timer: %v", err)
 			}
 
@@ -1139,8 +1139,8 @@ func TestWorkflowTimerLifecyclePostgresReleasesClaimOnlyAfterOuterCommit(t *test
 				_ = tx.Rollback()
 			}
 		})
-		actions := make([]func(), 0, 1)
-		rollbackActions := make([]func(), 0, 1)
+		actions := make([]OwnerAction, 0, 1)
+		rollbackActions := make([]OwnerAction, 0, 1)
 		txctx := withPipelinePostCommitActions(WithPipelineSQLTxContext(ctx, tx), &actions)
 		txctx = withPipelineRollbackActions(txctx, &rollbackActions)
 		txctx, err = runtimeauthoractivity.Begin(txctx, tx, runtimeauthoractivity.DialectPostgres)

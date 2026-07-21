@@ -32,7 +32,7 @@ func (pc *PipelineCoordinator) persistGenericSchedule(ctx context.Context, sched
 			}, err)
 		}
 	}
-	if !queuePipelinePostCommitAction(ctx, func() { register(withoutSQLTxContext(ctx)) }) {
+	if !queuePipelinePostCommitAction(ctx, func(actionCtx context.Context) { register(withoutSQLTxContext(actionCtx)) }) {
 		register(ctx)
 	}
 	return nil
@@ -54,16 +54,16 @@ func (pc *PipelineCoordinator) cancelGenericSchedule(ctx context.Context, schedu
 	if pc.timerScheduler == nil {
 		return nil
 	}
-	cancel := func() {
+	cancel := func(actionCtx context.Context) {
 		if err := pc.timerScheduler.CancelExact(schedule); err != nil {
-			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "generic_schedule_cancel_failed", "", schedule.EventType, schedule.AgentID, schedule.EffectiveEntityID(), map[string]any{
+			pc.logRuntimeWarn(actionCtx, runtimeWorkflowID, "generic_schedule_cancel_failed", "", schedule.EventType, schedule.AgentID, schedule.EffectiveEntityID(), map[string]any{
 				"task_id": strings.TrimSpace(schedule.TaskID),
 				"mode":    strings.TrimSpace(schedule.Mode),
 			}, err)
 		}
 	}
 	if !queuePipelinePostCommitAction(ctx, cancel) {
-		cancel()
+		cancel(ctx)
 	}
 	return nil
 }

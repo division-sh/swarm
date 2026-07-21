@@ -144,8 +144,8 @@ func TestPipelineActivityIntentWriterDefersRuntimeLogUntilPostCommit(t *testing.
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	writer := pipelineActivityIntentWriter{coordinator: pc}
-	postCommit := []func(){}
-	rollbackActions := []func(){}
+	postCommit := []OwnerAction{}
+	rollbackActions := []OwnerAction{}
 	ctx := WithPipelinePostCommitActions(testAuthorActivityContext(t, context.Background()), &postCommit)
 	ctx = WithPipelineRollbackActions(ctx, &rollbackActions)
 	ctx = WithPipelineSQLTxContext(ctx, &sql.Tx{})
@@ -1491,7 +1491,7 @@ func (r *activityCommitAckLossRunner) RunRuntimeMutationContext(ctx context.Cont
 			_ = tx.Rollback()
 		}
 	}()
-	postCommit := make([]func(), 0, 2)
+	postCommit := make([]OwnerAction, 0, 2)
 	txctx := withPipelinePostCommitActions(WithPipelineSQLTxContext(ctx, tx), &postCommit)
 	storyctx, err := runtimeauthoractivity.Begin(txctx, tx, runtimeauthoractivity.DialectSQLite)
 	if err != nil {

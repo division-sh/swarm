@@ -301,8 +301,8 @@ func (s InMemoryEventStore) CommitPublish(ctx context.Context, plan CommitPublis
 }
 
 func commitPublishInMemory(ctx context.Context, plan CommitPublishPlan, transaction CommitPublishTransaction) (PreparedPublish, error) {
-	postCommit := make([]func(), 0, 4)
-	rollback := make([]func(), 0, 4)
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
+	rollback := make([]runtimepipeline.OwnerAction, 0, 4)
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
 	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
 	prepared, err := plan.PrepareCommitPublish(WithCommitPublishTransaction(ctx, transaction))

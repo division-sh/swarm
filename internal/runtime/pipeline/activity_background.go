@@ -12,6 +12,7 @@ type activityBackgroundNode struct {
 	bus         systemNodeBus
 	mu          sync.Mutex
 	readyHooks  []func()
+	readyOnce   sync.Once
 }
 
 func newActivityBackgroundNode(coordinator *PipelineCoordinator, bus systemNodeBus) *activityBackgroundNode {
@@ -35,23 +36,40 @@ func (n *activityBackgroundNode) Run(ctx context.Context) {
 	if !ok {
 		return
 	}
-	ch := bus.SubscribeInternal(activityDispatcherSubscriberID, activityRequestEventType)
-	n.mu.Lock()
-	hooks := append([]func(){}, n.readyHooks...)
-	n.mu.Unlock()
-	for _, hook := range hooks {
-		hook()
-	}
 	for {
-		select {
-		case <-ctx.Done():
+		subscription, err := bus.SubscribeInternal(ctx, activityDispatcherSubscriberID, activityRequestEventType)
+		if err != nil {
 			return
-		case delivery, ok := <-ch:
-			if !ok {
-				return
-			}
-			_, _ = n.coordinator.handleActivityRequestEvent(delivery.Context(), delivery.Event())
-			_ = delivery.Complete()
 		}
+		subscription.MarkReady()
+		n.readyOnce.Do(func() {
+			n.mu.Lock()
+			hooks := append([]func(){}, n.readyHooks...)
+			n.mu.Unlock()
+			for _, hook := range hooks {
+				hook()
+			}
+		})
+		for {
+			select {
+			case <-ctx.Done():
+				_ = subscription.Complete(false)
+				return
+			case <-subscription.Retiring():
+				restart := ctx.Err() == nil
+				_ = subscription.Complete(restart)
+				if !restart {
+					return
+				}
+				goto resubscribe
+			case delivery := <-subscription.Deliveries():
+				if delivery == nil {
+					continue
+				}
+				_, _ = n.coordinator.handleActivityRequestEvent(delivery.Context(), delivery.Event())
+				_ = delivery.Complete()
+			}
+		}
+	resubscribe:
 	}
 }

@@ -37,6 +37,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
@@ -44,6 +45,94 @@ import (
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 )
+
+type failOnceFinalizeStartupOwnershipStore struct {
+	delegate runtimestartupownership.Store
+
+	mu               sync.Mutex
+	prepareCount     int
+	finalizeAttempts int
+	failed           bool
+}
+
+func (s *failOnceFinalizeStartupOwnershipStore) AcquireRuntimeStartupOwnership(ctx context.Context, req runtimestartupownership.AcquireRequest) (runtimestartupownership.Lease, error) {
+	lease, err := s.delegate.AcquireRuntimeStartupOwnership(ctx, req)
+	if err != nil || lease == nil {
+		return lease, err
+	}
+	return &failOnceFinalizeStartupOwnershipLease{delegate: lease, owner: s}, nil
+}
+
+func (s *failOnceFinalizeStartupOwnershipStore) counts() (int, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.prepareCount, s.finalizeAttempts
+}
+
+type failOnceFinalizeStartupOwnershipLease struct {
+	delegate runtimestartupownership.Lease
+	owner    *failOnceFinalizeStartupOwnershipStore
+}
+
+func (l *failOnceFinalizeStartupOwnershipLease) Authority() (runtimestartupownership.Authority, error) {
+	return l.delegate.Authority()
+}
+
+func (l *failOnceFinalizeStartupOwnershipLease) MarkProbesSettled(ctx context.Context, surfaceIDs []string) (runtimestartupownership.Authority, error) {
+	return l.delegate.MarkProbesSettled(ctx, surfaceIDs)
+}
+
+func (l *failOnceFinalizeStartupOwnershipLease) AdmitExecution(ctx context.Context) (runtimestartupownership.Authority, error) {
+	return l.delegate.AdmitExecution(ctx)
+}
+
+func (l *failOnceFinalizeStartupOwnershipLease) PrepareHandoff(ctx context.Context, req runtimestartupownership.HandoffRequest) (runtimestartupownership.Handoff, error) {
+	handoff, err := l.delegate.PrepareHandoff(ctx, req)
+	if err != nil || handoff == nil {
+		return handoff, err
+	}
+	l.owner.mu.Lock()
+	l.owner.prepareCount++
+	l.owner.mu.Unlock()
+	return &failOnceFinalizeStartupOwnershipHandoff{delegate: handoff, owner: l.owner}, nil
+}
+
+func (l *failOnceFinalizeStartupOwnershipLease) Release(ctx context.Context) error {
+	return l.delegate.Release(ctx)
+}
+
+type failOnceFinalizeStartupOwnershipHandoff struct {
+	delegate runtimestartupownership.Handoff
+	owner    *failOnceFinalizeStartupOwnershipStore
+}
+
+func (h *failOnceFinalizeStartupOwnershipHandoff) Authority() (runtimestartupownership.Authority, error) {
+	return h.delegate.Authority()
+}
+
+func (h *failOnceFinalizeStartupOwnershipHandoff) MarkProbesSettled(ctx context.Context, surfaceIDs []string) (runtimestartupownership.Authority, error) {
+	return h.delegate.MarkProbesSettled(ctx, surfaceIDs)
+}
+
+func (h *failOnceFinalizeStartupOwnershipHandoff) Commit(ctx context.Context) (runtimestartupownership.Authority, error) {
+	return h.delegate.Commit(ctx)
+}
+
+func (h *failOnceFinalizeStartupOwnershipHandoff) Rollback(ctx context.Context) (runtimestartupownership.Authority, error) {
+	return h.delegate.Rollback(ctx)
+}
+
+func (h *failOnceFinalizeStartupOwnershipHandoff) Finalize(ctx context.Context) (runtimestartupownership.Authority, error) {
+	h.owner.mu.Lock()
+	h.owner.finalizeAttempts++
+	if !h.owner.failed {
+		h.owner.failed = true
+		h.owner.mu.Unlock()
+		return runtimestartupownership.Authority{}, errors.New("injected startup ownership finalize failure")
+	}
+	h.owner.mu.Unlock()
+	return h.delegate.Finalize(ctx)
+}
 
 func TestRuntimeProjectSupervisorRejectsHarnessInputReplacementBeforeQuiesce(t *testing.T) {
 	repo := canonicalrouting.RepoRoot(t)
@@ -649,6 +738,8 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 				}
 				t.Run(name, func(t *testing.T) {
 					stores := backend.open(t)
+					startupOwnership := &failOnceFinalizeStartupOwnershipStore{delegate: stores.StartupOwnership}
+					stores.StartupOwnership = startupOwnership
 					processWorkOwner := newSupervisorTestProcessOwner(t)
 					runtimeInstanceID := "11111111-1111-1111-1111-111111111111"
 					var active, maxActive atomic.Int32
@@ -696,7 +787,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					if predecessor.Manager == nil || !predecessor.Manager.IsRunning() || !predecessor.Bus.OutboxSweeperActive() {
 						t.Fatal("full-store predecessor manager/outbox consumers did not start")
 					}
-					if err := predecessor.Scheduler.Register(runtimepipeline.Schedule{
+					if err := predecessor.Scheduler.Register(context.Background(), runtimepipeline.Schedule{
 						AgentID: "replacement-proof", EventType: "platform.boot", Mode: "once", At: time.Now().Add(time.Hour),
 					}); err != nil {
 						t.Fatalf("register pending predecessor schedule: %v", err)
@@ -738,8 +829,25 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						context.Background(), "/new", source, bundle, newFact,
 						runtimecontracts.BundleIdentity{BundleHash: newHash}, candidate, candidate.WorkOccurrence(),
 					)
-					if err != nil {
-						t.Fatalf("replaceCurrentRuntimeWithSource: %v", err)
+					if err == nil || !strings.Contains(err.Error(), "injected startup ownership finalize failure") {
+						t.Fatalf("first replacement finalization error = %v", err)
+					}
+					if supervisor.ready.Load() || supervisor.pendingReplacement == nil || supervisor.CurrentRuntime() != predecessor {
+						t.Fatalf("failed finalization visibility = status:%#v ready:%v runtime:%p pending:%#v", status, supervisor.ready.Load(), supervisor.CurrentRuntime(), supervisor.pendingReplacement)
+					}
+					lookup := manager.LookupBundleHashStatus(oldHash)
+					if lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseReplacing {
+						t.Fatalf("failed finalization selector = %#v, want unavailable replacing", lookup)
+					}
+					if prepareCount, finalizeAttempts := startupOwnership.counts(); prepareCount != 1 || finalizeAttempts != 1 {
+						t.Fatalf("failed finalization counts = prepare:%d finalize:%d, want 1/1", prepareCount, finalizeAttempts)
+					}
+					if err := supervisor.completePendingReplacement(); err != nil {
+						t.Fatalf("retry retained replacement finalization: %v", err)
+					}
+					status = supervisor.CurrentProject()
+					if prepareCount, finalizeAttempts := startupOwnership.counts(); prepareCount != 1 || finalizeAttempts != 2 {
+						t.Fatalf("retried finalization counts = prepare:%d finalize:%d, want exact retained handoff 1/2", prepareCount, finalizeAttempts)
 					}
 					if !status.Loaded || supervisor.CurrentRuntime() != candidate {
 						t.Fatalf("replacement status/runtime = %#v/%p, want loaded candidate %p", status, supervisor.CurrentRuntime(), candidate)
@@ -750,8 +858,20 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					if got := maxActive.Load(); got != 1 {
 						t.Fatalf("simultaneous predecessor/candidate system consumers = %d, want one", got)
 					}
-					if err := candidate.Shutdown(); err != nil {
-						t.Fatalf("shutdown replacement: %v", err)
+					successor := newRuntime(newHash)
+					successor.SystemNodes = []runtimepipeline.BackgroundNode{newReplacementOverlapProbeNode(&active, &maxActive)}
+					status, err = supervisor.replaceCurrentRuntimeWithSource(
+						context.Background(), "/successor", source, bundle, newFact,
+						runtimecontracts.BundleIdentity{BundleHash: newHash}, successor, successor.WorkOccurrence(),
+					)
+					if err != nil || !status.Loaded || supervisor.CurrentRuntime() != successor {
+						t.Fatalf("later replacement = status:%#v runtime:%p err:%v, want successor %p", status, supervisor.CurrentRuntime(), err, successor)
+					}
+					if prepareCount, finalizeAttempts := startupOwnership.counts(); prepareCount != 2 || finalizeAttempts != 3 {
+						t.Fatalf("later replacement counts = prepare:%d finalize:%d, want 2/3", prepareCount, finalizeAttempts)
+					}
+					if err := successor.Shutdown(); err != nil {
+						t.Fatalf("shutdown later replacement: %v", err)
 					}
 
 					rollbackPredecessor := newRuntime(newHash)
@@ -759,7 +879,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					if err := rollbackPredecessor.Start(context.Background()); err != nil {
 						t.Fatalf("start rollback predecessor: %v", err)
 					}
-					if err := rollbackPredecessor.Scheduler.Register(runtimepipeline.Schedule{
+					if err := rollbackPredecessor.Scheduler.Register(context.Background(), runtimepipeline.Schedule{
 						AgentID: "rollback-proof", EventType: "platform.boot", Mode: "once", At: time.Now().Add(time.Hour),
 					}); err != nil {
 						t.Fatalf("register pending rollback schedule: %v", err)
@@ -807,7 +927,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					if err == nil || !strings.Contains(err.Error(), "injected post-start precommit failure") {
 						t.Fatalf("precommit replacement error = %v", err)
 					}
-					lookup := rollbackManager.LookupBundleHashStatus(newHash)
+					lookup = rollbackManager.LookupBundleHashStatus(newHash)
 					if !lookup.Loaded() || lookup.Context.Runtime != nil || rollbackSupervisor.CurrentRuntime() != restored {
 						t.Fatalf("precommit rollback authority = %#v/%p, want restored runtime %p", lookup, rollbackSupervisor.CurrentRuntime(), restored)
 					}

@@ -104,9 +104,9 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 			EntityID:  intent.EntityID.String(),
 			Detail:    detail,
 		}
-		logCtx := WithoutPipelineSQLTxContext(context.WithoutCancel(ctx))
-		logIntent := func() {
-			_ = w.coordinator.bus.LogRuntime(logCtx, entry)
+		logIntent := func(actionCtx context.Context) {
+			actionCtx = WithoutPipelineSQLTxContext(actionCtx)
+			_ = w.coordinator.bus.LogRuntime(actionCtx, entry)
 		}
 		if _, txActive := PipelineSQLTxFromContext(ctx); txActive {
 			if !QueuePipelinePostCommitAction(ctx, logIntent) {
@@ -114,7 +114,7 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 			}
 			continue
 		}
-		if err := w.coordinator.bus.LogRuntime(logCtx, entry); err != nil {
+		if err := w.coordinator.bus.LogRuntime(WithoutPipelineSQLTxContext(ctx), entry); err != nil {
 			return err
 		}
 	}

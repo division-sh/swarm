@@ -228,7 +228,7 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 		TaskID:       in.TaskID,
 		Payload:      payload,
 	}
-	if err := e.scheduler.Register(schedule); err != nil {
+	if err := e.scheduler.Register(ctx, schedule); err != nil {
 		return nil, err
 	}
 	if e.scheduleStore != nil {

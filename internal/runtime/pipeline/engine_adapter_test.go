@@ -3153,9 +3153,9 @@ func TestPipelineEngineTimerApplierPersistsTimersAndDefersSchedulerToPostCommit(
 		timerScheduler:     scheduler,
 		timerScheduleStore: store,
 	}
-	actions := make([]func(), 0, 2)
+	actions := make([]OwnerAction, 0, 2)
 	ctx := withPipelinePostCommitActions(testAuthorActivityContext(t, context.Background()), &actions)
-	rollbackActions := make([]func(), 0, 2)
+	rollbackActions := make([]OwnerAction, 0, 2)
 	ctx = withPipelineRollbackActions(ctx, &rollbackActions)
 	sc := Schedule{
 		AgentID:   "owner",
@@ -3183,9 +3183,9 @@ func TestPipelineEngineTimerApplierPersistsTimersAndDefersSchedulerToPostCommit(
 		t.Fatalf("scheduler tasks after flush = %d, want 1", got)
 	}
 
-	cancelActions := make([]func(), 0, 1)
+	cancelActions := make([]OwnerAction, 0, 1)
 	cancelCtx := withPipelinePostCommitActions(testAuthorActivityContext(t, context.Background()), &cancelActions)
-	cancelRollbackActions := make([]func(), 0, 1)
+	cancelRollbackActions := make([]OwnerAction, 0, 1)
 	cancelCtx = withPipelineRollbackActions(cancelCtx, &cancelRollbackActions)
 	if err := pc.cancelGenericSchedule(cancelCtx, sc); err != nil {
 		t.Fatalf("cancelGenericSchedule: %v", err)

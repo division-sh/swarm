@@ -206,34 +206,47 @@ func (pc *PipelineCoordinator) Run(ctx context.Context) {
 	if pc == nil || pc.bus == nil {
 		return
 	}
-	ch := pc.subscribe()
-	pc.notifyTestSubscribed()
 	for {
-		select {
-		case <-ctx.Done():
+		subscription, err := pc.subscribe(ctx)
+		if err != nil {
 			return
-		case delivery, ok := <-ch:
-			if !ok {
-				ch = pc.subscribe()
-				pc.notifyTestSubscribed()
-				continue
-			}
-			evt := delivery.Event()
-			deliveryCtx := delivery.Context()
-			if _, err := pc.handleEventResult(deliveryCtx, evt); err != nil && pc.bus != nil {
-				pc.bus.LogRuntime(deliveryCtx, RuntimeLogEntry{
-					Level:     "error",
-					Message:   "Workflow handler execution failed",
-					Component: runtimeWorkflowID,
-					Action:    "handler_error",
-					EventID:   strings.TrimSpace(evt.ID()),
-					EventType: strings.TrimSpace(string(evt.Type())),
-					EntityID:  workflowEventEntityID(evt),
-					Failure:   pipelineRuntimeFailure(err, runtimeWorkflowID, "handle_event"),
-				})
-			}
-			_ = delivery.Complete()
 		}
+		subscription.MarkReady()
+		pc.notifyTestSubscribed()
+		for {
+			select {
+			case <-ctx.Done():
+				_ = subscription.Complete(false)
+				return
+			case <-subscription.Retiring():
+				restart := ctx.Err() == nil
+				_ = subscription.Complete(restart)
+				if !restart {
+					return
+				}
+				goto resubscribe
+			case delivery := <-subscription.Deliveries():
+				if delivery == nil {
+					continue
+				}
+				evt := delivery.Event()
+				deliveryCtx := delivery.Context()
+				if _, err := pc.handleEventResult(deliveryCtx, evt); err != nil && pc.bus != nil {
+					pc.bus.LogRuntime(deliveryCtx, RuntimeLogEntry{
+						Level:     "error",
+						Message:   "Workflow handler execution failed",
+						Component: runtimeWorkflowID,
+						Action:    "handler_error",
+						EventID:   strings.TrimSpace(evt.ID()),
+						EventType: strings.TrimSpace(string(evt.Type())),
+						EntityID:  workflowEventEntityID(evt),
+						Failure:   pipelineRuntimeFailure(err, runtimeWorkflowID, "handle_event"),
+					})
+				}
+				_ = delivery.Complete()
+			}
+		}
+	resubscribe:
 	}
 }
 
@@ -368,13 +381,13 @@ func (pc *PipelineCoordinator) interceptPolicy(ctx context.Context, eventType st
 	return pc.workflowNodeInterceptPolicy(ctx, eventType, evt)
 }
 
-func (pc *PipelineCoordinator) subscribe() <-chan *worklifetime.EventDelivery {
+func (pc *PipelineCoordinator) subscribe(ctx context.Context) (worklifetime.InternalSubscription, error) {
 	bus, ok := pc.bus.(ownedInternalSubscriptionBus)
 	if !ok {
-		return nil
+		return nil, errors.New("pipeline bus does not expose owned internal subscriptions")
 	}
 	subscriptions := workflowRuntimeSubscriptions(pc.WorkflowNodes())
-	return bus.SubscribeInternal(runtimeWorkflowID, subscriptions...)
+	return bus.SubscribeInternal(ctx, runtimeWorkflowID, subscriptions...)
 }
 
 func (pc *PipelineCoordinator) handleEvent(ctx context.Context, evt events.Event) bool {
@@ -557,16 +570,16 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			*collector = append(*collector, emitted)
 			continue
 		}
-		publishDeadLetter := func() {
-			if err := pc.publish(ctx, "platform.dead_letter", entityID, deadLetterPayload); err != nil {
-				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_publish_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, map[string]any{
+		publishDeadLetter := func(actionCtx context.Context) {
+			if err := pc.publish(actionCtx, "platform.dead_letter", entityID, deadLetterPayload); err != nil {
+				pc.logRuntimeWarn(actionCtx, "workflow-runtime", "intercepted_emit_dead_letter_publish_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, map[string]any{
 					"intercepted_event_type": eventType,
 					"handler_node":           nodeID,
 				}, err)
 			}
 		}
 		if !queuePipelinePostCommitAction(ctx, publishDeadLetter) {
-			publishDeadLetter()
+			publishDeadLetter(ctx)
 		}
 	}
 }

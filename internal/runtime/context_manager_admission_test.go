@@ -128,6 +128,110 @@ func TestRuntimeContextManagerPublishesOneAdmissionGenerationAcrossAllContexts(t
 	}
 }
 
+func TestRuntimeContextManagerAdmissionReplacementPublishesExactExecutableCandidate(t *testing.T) {
+	for _, changedHash := range []bool{false, true} {
+		changedHash := changedHash
+		name := "same_hash"
+		if changedHash {
+			name = "changed_hash"
+		}
+		t.Run(name, func(t *testing.T) {
+			oldCatalog := runtimeAdmissionTestCatalog(t, "a")
+			newCatalog := runtimeAdmissionTestCatalog(t, "b")
+			predecessor := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", oldCatalog)
+			survivor := runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", oldCatalog)
+			manager, err := newTestRuntimeContextManagerWithAdmission(
+				t, nil, runtimeAdmissionTestState(t, oldCatalog), predecessor, survivor,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			candidateHash := runtimeContextTestHashA
+			if changedHash {
+				candidateHash = "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+			}
+			candidate := runtimeAdmissionTestContext(t, candidateHash, "primary", newCatalog)
+			updates := map[string][]StandingTarget{
+				runtimeContextTestHashB: runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", newCatalog).StandingTargets,
+			}
+			state := runtimeAdmissionTestState(t, newCatalog)
+			if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, candidate); err != nil {
+				t.Fatalf("BeginBundleHashReplacement: %v", err)
+			}
+			prepared, err := manager.PrepareBundleHashReplacementPublicationWithAdmission(
+				runtimeContextTestHashA, candidate, updates, state,
+			)
+			if err != nil {
+				t.Fatalf("PrepareBundleHashReplacementPublicationWithAdmission: %v", err)
+			}
+			if err := prepared.Publish(); err != nil {
+				t.Fatalf("Publish: %v", err)
+			}
+
+			lookup := manager.LookupBundleHashStatus(candidateHash)
+			if !lookup.Loaded() || lookup.Context == nil || lookup.Context.Runtime != nil || lookup.Context.WorkOwner != nil {
+				t.Fatalf("published candidate metadata = %#v, want loaded without raw execution authority", lookup)
+			}
+			use, acquired, err := manager.AcquireBundleHash(context.Background(), candidateHash)
+			if err != nil || use == nil || !acquired.Loaded() || use.Runtime() != candidate.Runtime {
+				t.Fatalf("published candidate acquisition = use:%#v lookup:%#v err:%v", use, acquired, err)
+			}
+			if err := use.Done(); err != nil {
+				t.Fatalf("settle candidate acquisition: %v", err)
+			}
+			if changedHash {
+				if stale := manager.LookupBundleHashStatus(runtimeContextTestHashA); stale.Found {
+					t.Fatalf("changed-hash predecessor still registered: %#v", stale)
+				}
+			}
+		})
+	}
+}
+
+func TestRuntimeContextManagerBlockedStandingDescendantLeavesReplacementUnavailable(t *testing.T) {
+	catalog := runtimeAdmissionTestCatalog(t, "a")
+	predecessor := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	manager, err := newTestRuntimeContextManagerWithAdmission(
+		t, nil, runtimeAdmissionTestState(t, catalog), predecessor,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	standing := manager.contexts[runtimeContextTestHashA].standing["service-primary"]
+	descendant, err := standing.Begin(context.Background())
+	if err != nil {
+		t.Fatalf("begin standing descendant: %v", err)
+	}
+	settled := false
+	defer func() {
+		if !settled {
+			_ = descendant.Done()
+		}
+	}()
+
+	candidate := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	timedOut, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := manager.BeginBundleHashReplacement(timedOut, runtimeContextTestHashA, candidate); err == nil || !strings.Contains(err.Error(), "drain predecessor standing occurrence") {
+		t.Fatalf("blocked replacement error = %v", err)
+	}
+	lookup := manager.LookupBundleHashStatus(runtimeContextTestHashA)
+	if lookup.Loaded() || lookup.Cause != RuntimeContextCauseReplacing || lookup.Context != nil {
+		t.Fatalf("blocked replacement lookup = %#v, want unavailable replacing", lookup)
+	}
+	if use, acquired, err := manager.AcquireBundleHash(context.Background(), runtimeContextTestHashA); use != nil || acquired.Loaded() {
+		t.Fatalf("blocked replacement acquisition = use:%#v lookup:%#v err:%v", use, acquired, err)
+	}
+	if err := descendant.Done(); err != nil {
+		t.Fatalf("settle standing descendant: %v", err)
+	}
+	settled = true
+	if err := standing.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire timed-out predecessor standing occurrence: %v", err)
+	}
+}
+
 func TestRuntimeContextManagerRejectsIncompleteAdmissionGenerationWithoutMutation(t *testing.T) {
 	oldCatalog := runtimeAdmissionTestCatalog(t, "a")
 	newCatalog := runtimeAdmissionTestCatalog(t, "b")

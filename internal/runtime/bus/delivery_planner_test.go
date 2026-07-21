@@ -778,7 +778,7 @@ func TestResolveInternalRecipientsForRoutedNodePlanning_DoesNotSelectParentConcr
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	eb.SubscribeInternal("parent-carrier", events.EventType("child/inst-1/micro.started"))
+	subscribeInternalDeliveriesForTest(t, eb, "parent-carrier", events.EventType("child/inst-1/micro.started"))
 	defer eb.Unsubscribe("parent-carrier")
 
 	evt := eventtest.RunCreatingRootIngress(

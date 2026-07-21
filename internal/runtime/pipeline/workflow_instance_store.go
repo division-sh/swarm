@@ -518,8 +518,8 @@ func (s *WorkflowInstanceStore) runInPipelineTransactionOnce(ctx context.Context
 	if err != nil {
 		return err
 	}
-	postCommit := make([]func(), 0, 4)
-	rollbackActions := make([]func(), 0, 4)
+	postCommit := make([]OwnerAction, 0, 4)
+	rollbackActions := make([]OwnerAction, 0, 4)
 	txctx := WithPipelineSQLConnContext(ctx, conn)
 	txctx = WithPipelineSQLTxContext(txctx, tx)
 	txctx = withPipelinePostCommitActions(txctx, &postCommit)

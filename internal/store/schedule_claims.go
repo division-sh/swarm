@@ -217,9 +217,9 @@ func (s *PostgresStore) applyScheduleTerminalTransition(
 		return nil
 	}
 	if _, activeTx := runtimepipeline.PipelineSQLTxFromContext(ctx); activeTx {
-		postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)))
-		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
-			_ = s.ReleaseSchedule(postCommitCtx, sc)
+		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
+			actionCtx = runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
+			_ = s.ReleaseSchedule(actionCtx, sc)
 		}) {
 			return fmt.Errorf("schedule claim release requires post-commit ownership")
 		}

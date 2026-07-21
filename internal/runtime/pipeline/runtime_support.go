@@ -433,152 +433,160 @@ func WithoutPipelineSQLTxContext(ctx context.Context) context.Context {
 	return withoutSQLTxContext(ctx)
 }
 
-func withPipelinePostCommitActions(ctx context.Context, actions *[]func()) context.Context {
+type OwnerAction func(context.Context)
+
+func ownerActionAdmissionContext(ctx context.Context) context.Context {
+	ctx = context.WithoutCancel(ctx)
+	ctx = WithoutPipelineSQLTxContext(ctx)
+	return WithoutPipelineSQLConnContext(ctx)
+}
+
+func withPipelinePostCommitActions(ctx context.Context, actions *[]OwnerAction) context.Context {
 	if actions == nil {
 		return ctx
 	}
 	return context.WithValue(ctx, pipelinePostCommitActionsKey{}, actions)
 }
 
-func WithPipelinePostCommitActions(ctx context.Context, actions *[]func()) context.Context {
+func WithPipelinePostCommitActions(ctx context.Context, actions *[]OwnerAction) context.Context {
 	return withPipelinePostCommitActions(ctx, actions)
 }
 
-func queuePipelinePostCommitAction(ctx context.Context, fn func()) bool {
+func queuePipelinePostCommitAction(ctx context.Context, fn OwnerAction) bool {
 	if ctx == nil || fn == nil {
 		return false
 	}
-	actions, ok := ctx.Value(pipelinePostCommitActionsKey{}).(*[]func())
-	rollback, rollbackOK := ctx.Value(pipelineRollbackActionsKey{}).(*[]func())
+	actions, ok := ctx.Value(pipelinePostCommitActionsKey{}).(*[]OwnerAction)
+	rollback, rollbackOK := ctx.Value(pipelineRollbackActionsKey{}).(*[]OwnerAction)
 	owner, ownerOK := worklifetime.OccurrenceFromContext(ctx)
 	if !ok || actions == nil || !rollbackOK || rollback == nil || !ownerOK {
 		return false
 	}
-	lease, err := owner.Begin(ctx)
+	lease, err := owner.Begin(ownerActionAdmissionContext(ctx))
 	if err != nil {
 		return false
 	}
 	var once sync.Once
 	settle := func() { once.Do(func() { _ = lease.Done() }) }
-	*actions = append(*actions, func() {
+	*actions = append(*actions, func(context.Context) {
 		defer settle()
-		fn()
+		fn(lease.Context())
 	})
-	*rollback = append(*rollback, settle)
+	*rollback = append(*rollback, func(context.Context) { settle() })
 	return true
 }
 
-func QueuePipelinePostCommitAction(ctx context.Context, fn func()) bool {
+func QueuePipelinePostCommitAction(ctx context.Context, fn OwnerAction) bool {
 	return queuePipelinePostCommitAction(ctx, fn)
 }
 
-func flushPipelinePostCommitActions(actions []func()) {
+func flushPipelinePostCommitActions(actions []OwnerAction) {
 	for _, fn := range actions {
 		if fn != nil {
-			fn()
+			fn(context.Background())
 		}
 	}
 }
 
-func FlushPipelinePostCommitActions(actions []func()) {
+func FlushPipelinePostCommitActions(actions []OwnerAction) {
 	flushPipelinePostCommitActions(actions)
 }
 
-func withPipelineRollbackActions(ctx context.Context, actions *[]func()) context.Context {
+func withPipelineRollbackActions(ctx context.Context, actions *[]OwnerAction) context.Context {
 	if actions == nil {
 		return ctx
 	}
 	return context.WithValue(ctx, pipelineRollbackActionsKey{}, actions)
 }
 
-func WithPipelineRollbackActions(ctx context.Context, actions *[]func()) context.Context {
+func WithPipelineRollbackActions(ctx context.Context, actions *[]OwnerAction) context.Context {
 	return withPipelineRollbackActions(ctx, actions)
 }
 
-func queuePipelineRollbackAction(ctx context.Context, fn func()) bool {
+func queuePipelineRollbackAction(ctx context.Context, fn OwnerAction) bool {
 	if ctx == nil || fn == nil {
 		return false
 	}
-	actions, ok := ctx.Value(pipelineRollbackActionsKey{}).(*[]func())
-	postCommit, postCommitOK := ctx.Value(pipelinePostCommitActionsKey{}).(*[]func())
+	actions, ok := ctx.Value(pipelineRollbackActionsKey{}).(*[]OwnerAction)
+	postCommit, postCommitOK := ctx.Value(pipelinePostCommitActionsKey{}).(*[]OwnerAction)
 	owner, ownerOK := worklifetime.OccurrenceFromContext(ctx)
 	if !ok || actions == nil || !postCommitOK || postCommit == nil || !ownerOK {
 		return false
 	}
-	lease, err := owner.Begin(ctx)
+	lease, err := owner.Begin(ownerActionAdmissionContext(ctx))
 	if err != nil {
 		return false
 	}
 	var once sync.Once
 	settle := func() { once.Do(func() { _ = lease.Done() }) }
-	*actions = append(*actions, func() {
+	*actions = append(*actions, func(context.Context) {
 		defer settle()
-		fn()
+		fn(lease.Context())
 	})
-	*postCommit = append(*postCommit, settle)
+	*postCommit = append(*postCommit, func(context.Context) { settle() })
 	return true
 }
 
-func QueuePipelineRollbackAction(ctx context.Context, fn func()) bool {
+func QueuePipelineRollbackAction(ctx context.Context, fn OwnerAction) bool {
 	return queuePipelineRollbackAction(ctx, fn)
 }
 
-func flushPipelineRollbackActions(actions []func()) {
+func flushPipelineRollbackActions(actions []OwnerAction) {
 	for i := len(actions) - 1; i >= 0; i-- {
 		if actions[i] != nil {
-			actions[i]()
+			actions[i](context.Background())
 		}
 	}
 }
 
-func FlushPipelineRollbackActions(actions []func()) {
+func FlushPipelineRollbackActions(actions []OwnerAction) {
 	flushPipelineRollbackActions(actions)
 }
 
-func withPipelineAfterPublishActions(ctx context.Context, actions *[]func()) context.Context {
+func withPipelineAfterPublishActions(ctx context.Context, actions *[]OwnerAction) context.Context {
 	if actions == nil {
 		return ctx
 	}
 	return context.WithValue(ctx, pipelineAfterPublishActionsKey{}, actions)
 }
 
-func WithPipelineAfterPublishActions(ctx context.Context, actions *[]func()) context.Context {
+func WithPipelineAfterPublishActions(ctx context.Context, actions *[]OwnerAction) context.Context {
 	return withPipelineAfterPublishActions(ctx, actions)
 }
 
-func queuePipelineAfterPublishAction(ctx context.Context, fn func()) bool {
+func queuePipelineAfterPublishAction(ctx context.Context, fn OwnerAction) bool {
 	if ctx == nil || fn == nil {
 		return false
 	}
-	actions, ok := ctx.Value(pipelineAfterPublishActionsKey{}).(*[]func())
+	actions, ok := ctx.Value(pipelineAfterPublishActionsKey{}).(*[]OwnerAction)
 	owner, ownerOK := worklifetime.OccurrenceFromContext(ctx)
 	if !ok || actions == nil || !ownerOK {
 		return false
 	}
-	lease, err := owner.Begin(ctx)
+	lease, err := owner.Begin(ownerActionAdmissionContext(ctx))
 	if err != nil {
 		return false
 	}
-	*actions = append(*actions, func() {
+	*actions = append(*actions, func(context.Context) {
 		defer func() { _ = lease.Done() }()
-		fn()
+		fn(lease.Context())
 	})
 	return true
 }
 
-func QueuePipelineAfterPublishAction(ctx context.Context, fn func()) bool {
+func QueuePipelineAfterPublishAction(ctx context.Context, fn OwnerAction) bool {
 	return queuePipelineAfterPublishAction(ctx, fn)
 }
 
-func flushPipelineAfterPublishActions(actions []func()) {
+func flushPipelineAfterPublishActions(actions []OwnerAction) {
 	for _, fn := range actions {
 		if fn != nil {
-			fn()
+			fn(context.Background())
 		}
 	}
 }
 
-func FlushPipelineAfterPublishActions(actions []func()) {
+func FlushPipelineAfterPublishActions(actions []OwnerAction) {
 	flushPipelineAfterPublishActions(actions)
 }
 
@@ -674,11 +682,11 @@ func WithPipelineEmitCollectors(ctx context.Context, eventsCollector *[]events.E
 	return ctx
 }
 
-func pipelinePostCommitActionsFromContext(ctx context.Context) (*[]func(), bool) {
+func pipelinePostCommitActionsFromContext(ctx context.Context) (*[]OwnerAction, bool) {
 	if ctx == nil {
 		return nil, false
 	}
-	actions, ok := ctx.Value(pipelinePostCommitActionsKey{}).(*[]func())
+	actions, ok := ctx.Value(pipelinePostCommitActionsKey{}).(*[]OwnerAction)
 	return actions, ok && actions != nil
 }
 

@@ -524,7 +524,7 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 	}
 	txctx := WithCommitPublishTransaction(ctx, transaction)
 	txctx = publicationClaim.BindContext(txctx)
-	if publicationClaim != nil && !runtimepipeline.QueuePipelineRollbackAction(txctx, func() { publicationClaim.Release(txctx) }) {
+	if publicationClaim != nil && !runtimepipeline.QueuePipelineRollbackAction(txctx, func(actionCtx context.Context) { publicationClaim.Release(actionCtx) }) {
 		publicationClaim.Release(txctx)
 		return PreparedPublish{}, errors.New("event mutation rollback actions are required for pipeline publication claim")
 	}
@@ -570,8 +570,8 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 		return PreparedPublish{}, fmt.Errorf("finalize event publish: %w", err)
 	}
 	if eb.testLifecycleProbe != nil {
-		runtimepipeline.QueuePipelinePostCommitAction(txctx, func() {
-			eb.notifyTestPublishPersisted(context.WithoutCancel(txctx), evt, inboundPlan)
+		runtimepipeline.QueuePipelinePostCommitAction(txctx, func(actionCtx context.Context) {
+			eb.notifyTestPublishPersisted(actionCtx, evt, inboundPlan)
 		})
 	}
 	if inboundPlan.TargetFailure != "" {
@@ -590,7 +590,7 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 // PublishInMutation preserves the general producer surface by preparing inside
 // the active mutation and queueing dispatch after commit.
 func (eb *EventBus) PublishInMutation(ctx context.Context, evt events.Event) error {
-	if eb != nil && eb.workOwner != nil {
+	if _, ok := worklifetime.OccurrenceFromContext(ctx); !ok && eb != nil && eb.workOwner != nil {
 		ctx = worklifetime.WithOccurrence(ctx, eb.workOwner)
 	}
 	prepared, err := eb.PreparePublishInMutation(ctx, evt)
@@ -638,8 +638,8 @@ func (eb *EventBus) queuePreparedPublishInMutation(ctx context.Context, prepared
 		return errors.New("typed CommitPublish transaction context is required")
 	}
 	txctx := ctx
-	if !runtimepipeline.QueuePipelinePostCommitAction(txctx, func() {
-		dispatchCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(txctx)))
+	if !runtimepipeline.QueuePipelinePostCommitAction(txctx, func(actionCtx context.Context) {
+		dispatchCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
 		if err := eb.DispatchPreparedPublish(dispatchCtx, prepared); err != nil {
 			eb.reportLocalDispatchFailure("post_commit_dispatch_failed", prepared.Event, err)
 		}
@@ -732,14 +732,16 @@ func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared P
 	if eb == nil || eb.workOwner == nil {
 		return errors.New("asynchronous event dispatch requires a runtime work occurrence")
 	}
-	lease, err := eb.workOwner.Begin(ctx)
+	owner := eb.workOwnerForContext(ctx)
+	admissionCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)))
+	lease, err := owner.Begin(admissionCtx)
 	if err != nil {
 		return fmt.Errorf("admit asynchronous event dispatch: %w", err)
 	}
-	dispatchCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)))
+	dispatchCtx := lease.Context()
 	go func() {
 		defer func() { _ = lease.Done() }()
-		if err := eb.dispatchPreparedPublish(bindWorkContext(dispatchCtx, lease, eb.workOwner), prepared); err != nil {
+		if err := eb.dispatchPreparedPublish(bindWorkContext(dispatchCtx, lease, owner), prepared); err != nil {
 			eb.reportLocalDispatchFailure("async_dispatch_failed", prepared.Event, err)
 		}
 	}()
@@ -753,14 +755,16 @@ func (eb *EventBus) dispatchCommittedPublishAsync(ctx context.Context, evt event
 	if eb == nil || eb.workOwner == nil {
 		return errors.New("asynchronous committed dispatch requires a runtime work occurrence")
 	}
-	lease, err := eb.workOwner.Begin(ctx)
+	owner := eb.workOwnerForContext(ctx)
+	admissionCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)))
+	lease, err := owner.Begin(admissionCtx)
 	if err != nil {
 		return fmt.Errorf("admit asynchronous committed dispatch: %w", err)
 	}
-	dispatchCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)))
+	dispatchCtx := lease.Context()
 	go func() {
 		defer func() { _ = lease.Done() }()
-		dispatchCtx = bindWorkContext(dispatchCtx, lease, eb.workOwner)
+		dispatchCtx = bindWorkContext(dispatchCtx, lease, owner)
 		defer publicationClaim.Release(dispatchCtx)
 		if err := eb.completeCommittedPublishDispatch(dispatchCtx, evt, inboundPlan); err != nil {
 			eb.reportLocalDispatchFailure("async_committed_dispatch_failed", evt, err)
@@ -788,8 +792,8 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 
 	inboundPlan = inboundPlan.Normalized()
 	deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
-	postCommitActions := make([]func(), 0, 8)
-	afterPublishActions := make([]func(), 0, 4)
+	postCommitActions := make([]runtimepipeline.OwnerAction, 0, 8)
+	afterPublishActions := make([]runtimepipeline.OwnerAction, 0, 4)
 	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
 	ctx = runtimepipeline.WithPipelineTransitionCollector(ctx, &deferredTransitions)
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
@@ -1430,11 +1434,18 @@ func (eb *EventBus) beginRuntimeWork(ctx context.Context) (*worklifetime.Lease, 
 	if eb.workOwner == nil {
 		return nil, errors.New("event bus requires a process work occurrence")
 	}
-	lease, err := eb.workOwner.Begin(ctx)
+	lease, err := eb.workOwnerForContext(ctx).Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("admit event bus work: %w", err)
 	}
 	return lease, nil
+}
+
+func (eb *EventBus) workOwnerForContext(ctx context.Context) worklifetime.Occurrence {
+	if owner, ok := worklifetime.OccurrenceFromContext(ctx); ok {
+		return owner
+	}
+	return eb.workOwner
 }
 
 func bindWorkContext(ctx context.Context, lease *worklifetime.Lease, owner worklifetime.Occurrence) context.Context {
@@ -1442,7 +1453,9 @@ func bindWorkContext(ctx context.Context, lease *worklifetime.Lease, owner workl
 		return ctx
 	}
 	workCtx := lease.Context()
-	workCtx = worklifetime.WithOccurrence(workCtx, owner)
+	if _, ok := worklifetime.OccurrenceFromContext(workCtx); !ok {
+		workCtx = worklifetime.WithOccurrence(workCtx, owner)
+	}
 	if scope, ok := runtimeauthoractivity.ScopeFromContext(ctx); ok {
 		workCtx = runtimeauthoractivity.WithScope(workCtx, scope)
 	}
@@ -1589,7 +1602,7 @@ func (eb *EventBus) publishPersistedRecipients(ctx context.Context, evt events.E
 	passthrough := true
 	deferred := []events.Event(nil)
 	if replayInterceptors && scope == runtimereplayclaim.CommittedReplayScopeSubscribed {
-		postCommitActions := make([]func(), 0, 8)
+		postCommitActions := make([]runtimepipeline.OwnerAction, 0, 8)
 		deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
 		receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
 		ctx = runtimepipeline.WithPipelineTransitionCollector(ctx, &deferredTransitions)

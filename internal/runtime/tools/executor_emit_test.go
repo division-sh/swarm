@@ -1126,7 +1126,13 @@ func TestHandleEmitTool_FailsClosedForConnectedOutputWithoutCanonicalRouteAuthor
 	source := emitRoutePlanSource(nil)
 	store := newEmitRoutePlanStore()
 	eb := newEmitRoutePlanEventBus(t, store, source)
-	raw := eb.SubscribeInternal("raw-listener", events.EventType("producer/deploy.done"), events.EventType("deploy.done"))
+	rawSubscription, err := eb.SubscribeInternal(context.Background(), "raw-listener", events.EventType("producer/deploy.done"), events.EventType("deploy.done"))
+	if err != nil {
+		t.Fatalf("SubscribeInternal: %v", err)
+	}
+	rawSubscription.MarkReady()
+	t.Cleanup(func() { _ = rawSubscription.Complete(false) })
+	raw := rawSubscription.Deliveries()
 	emitRegistry := NewEmitRegistry(source, nil)
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
@@ -1150,7 +1156,7 @@ func TestHandleEmitTool_FailsClosedForConnectedOutputWithoutCanonicalRouteAuthor
 		"",
 		events.EventEnvelope{},
 		time.Now().UTC()))
-	_, err := exec.handleEmitTool(ctx, actor, "emit_deploy_done", map[string]any{})
+	_, err = exec.handleEmitTool(ctx, actor, "emit_deploy_done", map[string]any{})
 	if err == nil {
 		t.Fatal("handleEmitTool error = nil, want target_required_missing")
 	}

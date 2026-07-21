@@ -20,6 +20,16 @@ type Occurrence interface {
 	workOccurrence()
 }
 
+// InternalSubscription is one process-local subscriber generation. The bus
+// retires the generation separately from its delivery channel so a snapshotted
+// sender cannot publish into an orphaned queue.
+type InternalSubscription interface {
+	Deliveries() <-chan *EventDelivery
+	Retiring() <-chan struct{}
+	MarkReady()
+	Complete(restart bool) error
+}
+
 // EventDelivery is the process-local EventBus carrier. It can only be minted
 // by a fixed typed occurrence, so a queued event always owns lifetime before
 // it escapes the producer.
@@ -27,6 +37,7 @@ type EventDelivery struct {
 	event     events.Event
 	route     events.DeliveryRoute
 	lease     *Lease
+	companion *Lease
 	ctx       context.Context
 	once      sync.Once
 	err       error
@@ -47,6 +58,7 @@ func newEventDelivery(ctx context.Context, event events.Event, route events.Deli
 }
 
 func (*RuntimeOccurrence) workOccurrence()      {}
+func (*StandingOccurrence) workOccurrence()     {}
 func (*SelectedForkOccurrence) workOccurrence() {}
 
 func (d *EventDelivery) Context() context.Context {
@@ -90,6 +102,9 @@ func (d *EventDelivery) Complete() error {
 	d.once.Do(func() {
 		run = true
 		d.err = d.lease.Done()
+		if d.companion != nil {
+			d.err = errors.Join(d.err, d.companion.Done())
+		}
 		d.mu.Lock()
 		d.completed = true
 		callbacks := append([]func(){}, d.callbacks...)
@@ -140,14 +155,48 @@ func (r *RouteOccurrence) NewEventDelivery(ctx context.Context, event events.Eve
 	if r == nil {
 		return nil, errors.New("route occurrence is required")
 	}
-	return newEventDelivery(ctx, event, events.DeliveryRoute{}, r.owner, r.Begin)
+	return r.newEventDelivery(ctx, event, events.DeliveryRoute{})
 }
 
 func (r *RouteOccurrence) NewRoutedEventDelivery(ctx context.Context, event events.Event, route events.DeliveryRoute) (*EventDelivery, error) {
 	if r == nil {
 		return nil, errors.New("route occurrence is required")
 	}
-	return newEventDelivery(ctx, event, route, r.owner, r.Begin)
+	return r.newEventDelivery(ctx, event, route)
+}
+
+func (r *RouteOccurrence) newEventDelivery(ctx context.Context, event events.Event, route events.DeliveryRoute) (*EventDelivery, error) {
+	delivery, err := newEventDelivery(ctx, event, route, r.owner, r.Begin)
+	if err != nil {
+		return nil, err
+	}
+	contextOwner, ok := OccurrenceFromContext(ctx)
+	standing, ok := contextOwner.(*StandingOccurrence)
+	if !ok || standing == nil || contextOwner == r.owner {
+		return delivery, nil
+	}
+	companion, err := standing.Begin(ctx)
+	if err != nil {
+		_ = delivery.Complete()
+		return nil, err
+	}
+	delivery.companion = companion
+	delivery.ctx = WithOccurrence(delivery.ctx, standing)
+	return delivery, nil
+}
+
+func (s *StandingOccurrence) NewEventDelivery(ctx context.Context, event events.Event) (*EventDelivery, error) {
+	if s == nil {
+		return nil, errors.New("standing occurrence is required")
+	}
+	return newEventDelivery(ctx, event, events.DeliveryRoute{}, s, s.Begin)
+}
+
+func (s *StandingOccurrence) NewRoutedEventDelivery(ctx context.Context, event events.Event, route events.DeliveryRoute) (*EventDelivery, error) {
+	if s == nil {
+		return nil, errors.New("standing occurrence is required")
+	}
+	return newEventDelivery(ctx, event, route, s, s.Begin)
 }
 
 func (s *SelectedForkOccurrence) NewEventDelivery(ctx context.Context, event events.Event) (*EventDelivery, error) {

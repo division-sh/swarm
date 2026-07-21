@@ -80,8 +80,8 @@ func (s *PostgresStore) runPostgresRuntimeMutation(ctx context.Context, fn func(
 	if err != nil {
 		return err
 	}
-	postCommit := make([]func(), 0, 4)
-	rollbackActions := make([]func(), 0, 4)
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
+	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 4)
 	txctx := runtimepipeline.WithPipelineSQLConnContext(ctx, conn)
 	txctx = runtimepipeline.WithPipelineSQLTxContext(txctx, tx)
 	if eventCtx, ok := eventCommitterForPipelineContext(txctx, s); ok {
@@ -201,7 +201,7 @@ func (s *SQLiteRuntimeStore) runRuntimeMutationOnce(ctx context.Context, fn func
 	return nil
 }
 
-func (s *SQLiteRuntimeStore) runRuntimeMutationOnceLocked(ctx context.Context, fn func(context.Context, *sql.Tx) error) ([]func(), error) {
+func (s *SQLiteRuntimeStore) runRuntimeMutationOnceLocked(ctx context.Context, fn func(context.Context, *sql.Tx) error) ([]runtimepipeline.OwnerAction, error) {
 	s.mutationMu.Lock()
 	defer s.mutationMu.Unlock()
 
@@ -209,8 +209,8 @@ func (s *SQLiteRuntimeStore) runRuntimeMutationOnceLocked(ctx context.Context, f
 	if err != nil {
 		return nil, err
 	}
-	postCommit := make([]func(), 0, 4)
-	rollbackActions := make([]func(), 0, 4)
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
+	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 4)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
 	if eventCtx, ok := eventCommitterForPipelineContext(txctx, s); ok {
 		txctx = eventCtx
