@@ -24,6 +24,7 @@ type internalSubscriptionHandle struct {
 	mu           sync.RWMutex
 	retireMu     sync.Mutex
 	bus          *EventBus
+	lifecycleCtx context.Context
 	subscriberID string
 	eventTypes   []events.EventType
 	ch           chan *LocalDelivery
@@ -38,9 +39,10 @@ type internalSubscriptionHandle struct {
 	retained     []*LocalDelivery
 }
 
-func newInternalSubscriptionHandle(bus *EventBus, subscriberID string, eventTypes []events.EventType) *internalSubscriptionHandle {
+func newInternalSubscriptionHandle(ctx context.Context, bus *EventBus, subscriberID string, eventTypes []events.EventType) *internalSubscriptionHandle {
 	return &internalSubscriptionHandle{
 		bus:          bus,
+		lifecycleCtx: ctx,
 		subscriberID: strings.TrimSpace(subscriberID),
 		eventTypes:   append([]events.EventType(nil), eventTypes...),
 		ch:           make(chan *LocalDelivery, 128),
@@ -113,6 +115,13 @@ func (h *internalSubscriptionHandle) wantsRestart() bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.restart
+}
+
+func (h *internalSubscriptionHandle) restartContext() context.Context {
+	if h == nil {
+		return nil
+	}
+	return h.lifecycleCtx
 }
 
 func (h *internalSubscriptionHandle) send(ctx context.Context, evt events.Event, handoff events.DeliveryRoute) agentRouteSendResult {

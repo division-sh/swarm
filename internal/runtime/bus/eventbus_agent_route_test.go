@@ -288,6 +288,58 @@ func TestEventBusResetRetiresAndRestartsInternalSubscriptionGeneration(t *testin
 	}
 }
 
+func TestEventBusResetStopsWaitingWhenRestartingSubscriberContextIsCancelled(t *testing.T) {
+	eb, err := newScopedTestEventBus(InMemoryEventStore{})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	retired := make(chan struct{})
+	allowResubscribe := make(chan struct{})
+	receiverDone := make(chan struct{})
+	go func() {
+		defer close(receiverDone)
+		for {
+			subscription, subscribeErr := eb.SubscribeInternal(ctx, "cancelled-restart-proof", events.EventType("test.work"))
+			if subscribeErr != nil {
+				return
+			}
+			subscription.MarkReady()
+			select {
+			case <-ctx.Done():
+				_ = subscription.Complete(false)
+				return
+			case <-subscription.Retiring():
+				_ = subscription.Complete(true)
+				close(retired)
+				<-allowResubscribe
+			}
+		}
+	}()
+
+	if err := eb.waitForInternalSubscriptionReady(ctx, "cancelled-restart-proof"); err != nil {
+		t.Fatalf("wait for initial subscription: %v", err)
+	}
+	resetDone := make(chan error, 1)
+	go func() { resetDone <- eb.ResetInMemoryState() }()
+	<-retired
+	cancel()
+	close(allowResubscribe)
+	select {
+	case err := <-resetDone:
+		if err != nil {
+			t.Fatalf("ResetInMemoryState: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reset waited for a subscriber generation whose lifecycle context was cancelled")
+	}
+	select {
+	case <-receiverDone:
+	case <-time.After(time.Second):
+		t.Fatal("cancelled internal subscriber did not exit")
+	}
+}
+
 func TestEventBusSnapshottedInternalSendLinearizesWithReset(t *testing.T) {
 	eb, err := newScopedTestEventBus(InMemoryEventStore{})
 	if err != nil {
