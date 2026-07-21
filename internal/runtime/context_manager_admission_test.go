@@ -2,15 +2,19 @@ package runtime
 
 import (
 	"context"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/google/uuid"
 )
 
 func TestValidateRuntimeContextSetWithAdmissionDoesNotActivateStandingOccurrences(t *testing.T) {
@@ -235,6 +239,27 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 			if err := managerWork.Done(); err != nil {
 				t.Fatalf("settle Manager-composed replacement work: %v", err)
 			}
+			route, err := predecessor.WorkOwner.NewRoute(context.Background(), worklifetime.RouteIdentity{
+				RuntimeEpoch: 1, AgentID: "replacement-route", Generation: 1,
+			})
+			if err != nil {
+				t.Fatalf("create replacement route: %v", err)
+			}
+			routeProducer, err := managerOwner.Begin(context.Background(), standing)
+			if err != nil {
+				t.Fatalf("begin Manager-composed route producer: %v", err)
+			}
+			routeEvent := eventtest.RuntimeControl(
+				uuid.NewString(), events.EventType("standing.replacement.route"), "replacement-proof", "", []byte(`{}`),
+				0, uuid.NewString(), "", events.EventEnvelope{}, time.Now(),
+			)
+			delivery, err := route.NewEventDelivery(routeProducer.Context(), routeEvent)
+			if err != nil {
+				t.Fatalf("create Manager-composed replacement delivery: %v", err)
+			}
+			if err := routeProducer.Done(); err != nil {
+				t.Fatalf("settle Manager-composed route producer: %v", err)
+			}
 
 			candidateHash := runtimeContextTestHashA
 			if changedHash {
@@ -242,8 +267,44 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 			}
 			candidate := runtimeAdmissionTestContext(t, candidateHash, "primary", catalog)
 			candidate.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(candidate.WorkOwner)
-			if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, candidate); err != nil {
-				t.Fatalf("begin replacement with parked schedules: %v", err)
+			replacementDone := make(chan error, 1)
+			go func() {
+				_, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, candidate)
+				replacementDone <- err
+			}()
+			for {
+				select {
+				case err := <-replacementDone:
+					t.Fatalf("replacement completed before fencing the Manager-composed standing owner: %v", err)
+				default:
+				}
+				probe, err := standing.Begin(context.Background())
+				if err != nil {
+					break
+				}
+				if err := probe.Done(); err != nil {
+					t.Fatalf("settle replacement fence probe: %v", err)
+				}
+				goruntime.Gosched()
+			}
+			select {
+			case err := <-replacementDone:
+				t.Fatalf("replacement completed while Manager-composed routed descendant remained live: %v", err)
+			default:
+			}
+			if err := delivery.Complete(); err != nil {
+				t.Fatalf("complete Manager-composed replacement delivery: %v", err)
+			}
+			select {
+			case err := <-replacementDone:
+				if err != nil {
+					t.Fatalf("begin replacement with parked schedules: %v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("replacement did not complete after Manager-composed routed descendant")
+			}
+			if err := route.RetireAndWait(context.Background()); err != nil {
+				t.Fatalf("retire replacement route: %v", err)
 			}
 			prepared, err := manager.PrepareBundleHashReplacementPublicationWithAdmission(
 				runtimeContextTestHashA, candidate, nil, runtimeAdmissionTestState(t, catalog),
