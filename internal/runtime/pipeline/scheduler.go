@@ -104,6 +104,43 @@ type scheduledTask struct {
 	owner         worklifetime.Occurrence
 	standingOwner *worklifetime.StandingOccurrence
 	schedule      Schedule
+	state         scheduledTaskState
+	retiring      bool
+}
+
+type scheduledTaskState uint8
+
+const (
+	scheduledTaskArmed scheduledTaskState = iota
+	scheduledTaskFiring
+	scheduledTaskSettled
+)
+
+type parkedProjection struct {
+	task          *scheduledTask
+	schedule      Schedule
+	originalOwner worklifetime.Occurrence
+	observedState scheduledTaskState
+	restorable    bool
+}
+
+type parkedOccurrenceState uint8
+
+const (
+	parkedOccurrencePending parkedOccurrenceState = iota
+	parkedOccurrenceRestored
+	parkedOccurrenceRebound
+)
+
+// ParkedOccurrence is the scheduler-owned authority for one standing
+// transition. It deliberately keeps original execution owners and timer state
+// private so callers cannot weaken rollback to bare schedule facts.
+type ParkedOccurrence struct {
+	mu            sync.Mutex
+	scheduler     *Scheduler
+	standingOwner *worklifetime.StandingOccurrence
+	projections   []parkedProjection
+	state         parkedOccurrenceState
 }
 
 type cronSpec struct {
@@ -256,25 +293,185 @@ func (s *Scheduler) CancelExact(sc Schedule) error {
 }
 
 // ParkOccurrence withdraws every local timer projection owned by one exact
-// occurrence and joins the scheduler goroutines before the occurrence itself
-// is drained. The returned schedules are the only facts RestoreOccurrence may
-// project again after a pre-commit transition failure.
-func (s *Scheduler) ParkOccurrence(ctx context.Context, owner *worklifetime.StandingOccurrence) ([]Schedule, error) {
+// occurrence. Firing and parking linearize under the scheduler lock: an armed
+// projection is restorable, a firing one-shot is consumed, and a firing cron
+// becomes restorable only after its callback settles.
+func (s *Scheduler) ParkOccurrence(ctx context.Context, owner *worklifetime.StandingOccurrence) (*ParkedOccurrence, error) {
 	if s == nil || owner == nil {
 		return nil, nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	parked := &ParkedOccurrence{scheduler: s, standingOwner: owner}
 	s.mu.Lock()
-	tasks := make([]*scheduledTask, 0)
-	schedules := make([]Schedule, 0)
 	for key, task := range s.tasks {
 		if task == nil || task.standingOwner != owner {
 			continue
 		}
+		projection := parkedProjection{
+			task:          task,
+			schedule:      cloneSchedule(task.schedule),
+			originalOwner: task.owner,
+			observedState: task.state,
+		}
+		projection.restorable = projection.observedState == scheduledTaskArmed ||
+			(projection.observedState == scheduledTaskFiring && task.schedule.Mode == "cron")
+		parked.projections = append(parked.projections, projection)
+		s.retireTaskLocked(key, task)
+	}
+	s.mu.Unlock()
+	if err := parked.wait(ctx); err != nil {
+		return parked, fmt.Errorf("park occurrence schedules: %w", err)
+	}
+	return parked, nil
+}
+
+// Count returns the number of projections eligible for rollback or fresh
+// generation rebinding after predecessor settlement.
+func (p *ParkedOccurrence) Count() int {
+	if p == nil {
+		return 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	count := 0
+	for _, projection := range p.projections {
+		if projection.restorable {
+			count++
+		}
+	}
+	return count
+}
+
+// RestoreOriginal rolls an aborted transition back under every task's exact
+// original execution owner. It waits for all predecessor callbacks first and
+// never substitutes the standing projection for a composed Manager owner.
+func (p *ParkedOccurrence) RestoreOriginal(ctx context.Context) error {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.state != parkedOccurrencePending {
+		return errors.New("parked occurrence projection is already settled")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := p.wait(ctx); err != nil {
+		return fmt.Errorf("join parked predecessor schedules: %w", err)
+	}
+	for _, projection := range p.projections {
+		if !projection.restorable {
+			continue
+		}
+		standing, ok := worklifetime.StandingProjection(projection.originalOwner)
+		if !ok || standing != p.standingOwner {
+			return errors.New("parked schedule original owner no longer projects the exact standing occurrence")
+		}
+	}
+	if err := p.restore(ctx, p.scheduler, nil); err != nil {
+		return err
+	}
+	p.state = parkedOccurrenceRestored
+	return nil
+}
+
+// Rebind projects eligible schedule facts under one distinct fresh standing
+// generation. Predecessor Manager ownership is intentionally not retained.
+func (p *ParkedOccurrence) Rebind(ctx context.Context, scheduler *Scheduler, owner *worklifetime.StandingOccurrence) error {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.state != parkedOccurrencePending {
+		return errors.New("parked occurrence projection is already settled")
+	}
+	if scheduler == nil || owner == nil {
+		return errors.New("rebind parked schedules requires scheduler and fresh standing owner")
+	}
+	if owner == p.standingOwner {
+		return errors.New("rebind parked schedules requires a distinct fresh standing owner")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := p.wait(ctx); err != nil {
+		return fmt.Errorf("join parked predecessor schedules: %w", err)
+	}
+	if err := p.restore(ctx, scheduler, owner); err != nil {
+		return err
+	}
+	p.state = parkedOccurrenceRebound
+	return nil
+}
+
+func (p *ParkedOccurrence) wait(ctx context.Context) error {
+	if p == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for _, projection := range p.projections {
+		if projection.task == nil {
+			continue
+		}
+		select {
+		case <-projection.task.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+func (p *ParkedOccurrence) restore(ctx context.Context, scheduler *Scheduler, freshOwner *worklifetime.StandingOccurrence) error {
+	if scheduler == nil {
+		return errors.New("restore parked schedules requires scheduler")
+	}
+	restored := make([]Schedule, 0, len(p.projections))
+	for _, projection := range p.projections {
+		if !projection.restorable {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return errors.Join(err, scheduler.cancelAndWait(context.Background(), restored))
+		}
+		executionOwner := projection.originalOwner
+		if freshOwner != nil {
+			executionOwner = freshOwner
+		}
+		if executionOwner == nil {
+			return errors.Join(errors.New("restore parked schedule requires exact execution owner"), scheduler.cancelAndWait(context.Background(), restored))
+		}
+		registerCtx := worklifetime.WithOccurrence(ctx, executionOwner)
+		if err := scheduler.Register(registerCtx, cloneSchedule(projection.schedule)); err != nil {
+			return errors.Join(fmt.Errorf("restore parked schedule: %w", err), scheduler.cancelAndWait(context.Background(), restored))
+		}
+		restored = append(restored, projection.schedule)
+	}
+	return nil
+}
+
+func (s *Scheduler) cancelAndWait(ctx context.Context, schedules []Schedule) error {
+	if s == nil || len(schedules) == 0 {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.mu.Lock()
+	tasks := make([]*scheduledTask, 0, len(schedules))
+	for _, schedule := range schedules {
+		key := scheduleKey(schedule)
+		task := s.tasks[key]
+		if task == nil {
+			continue
+		}
 		tasks = append(tasks, task)
-		schedules = append(schedules, cloneSchedule(task.schedule))
 		s.retireTaskLocked(key, task)
 	}
 	s.mu.Unlock()
@@ -282,34 +479,8 @@ func (s *Scheduler) ParkOccurrence(ctx context.Context, owner *worklifetime.Stan
 		select {
 		case <-task.done:
 		case <-ctx.Done():
-			return schedules, fmt.Errorf("park occurrence schedules: %w", ctx.Err())
+			return ctx.Err()
 		}
-	}
-	return schedules, nil
-}
-
-// RestoreOccurrence reprojects a previously parked set under one exact live
-// occurrence. It never infers an owner from schedule fields.
-func (s *Scheduler) RestoreOccurrence(ctx context.Context, owner worklifetime.Occurrence, schedules []Schedule) error {
-	if len(schedules) == 0 {
-		return nil
-	}
-	if s == nil || owner == nil {
-		return errors.New("restore occurrence schedules requires scheduler and exact owner")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	ctx = worklifetime.WithOccurrence(ctx, owner)
-	restored := make([]Schedule, 0, len(schedules))
-	for _, schedule := range schedules {
-		if err := s.Register(ctx, cloneSchedule(schedule)); err != nil {
-			for _, prior := range restored {
-				_ = s.CancelExact(prior)
-			}
-			return fmt.Errorf("restore parked schedule: %w", err)
-		}
-		restored = append(restored, schedule)
 	}
 	return nil
 }
@@ -340,11 +511,11 @@ func (s *Scheduler) runOnce(task *scheduledTask, key string, sc Schedule) {
 	case <-task.lease.Context().Done():
 		return
 	case <-timer.C:
-		if scheduledTaskStopped(task) {
+		if !s.beginTaskFire(key, task) {
 			return
 		}
 		s.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), sc)
-		s.unregisterTask(key, task)
+		s.endTaskFire(task, false)
 	}
 }
 
@@ -359,10 +530,13 @@ func (s *Scheduler) runCron(task *scheduledTask, key string, sc Schedule, spec c
 			case <-task.lease.Context().Done():
 				return
 			case <-ticker.C:
-				if scheduledTaskStopped(task) {
+				if !s.beginTaskFire(key, task) {
 					return
 				}
 				s.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), sc)
+				if !s.endTaskFire(task, true) {
+					return
+				}
 			}
 		}
 	}
@@ -381,40 +555,45 @@ func (s *Scheduler) runCron(task *scheduledTask, key string, sc Schedule, spec c
 			timer.Stop()
 			return
 		case <-timer.C:
-			if scheduledTaskStopped(task) {
+			if !s.beginTaskFire(key, task) {
 				return
 			}
 			s.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), sc)
+			if !s.endTaskFire(task, true) {
+				return
+			}
 		}
 	}
 }
 
-func scheduledTaskStopped(task *scheduledTask) bool {
-	if task == nil {
-		return true
-	}
-	select {
-	case <-task.stop:
-		return true
-	default:
+func (s *Scheduler) beginTaskFire(key string, task *scheduledTask) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if task == nil || s.tasks[key] != task || task.retiring || task.state != scheduledTaskArmed {
 		return false
 	}
+	task.state = scheduledTaskFiring
+	return true
+}
+
+func (s *Scheduler) endTaskFire(task *scheduledTask, recurring bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if task == nil || task.state != scheduledTaskFiring {
+		return false
+	}
+	if task.retiring || !recurring {
+		task.state = scheduledTaskSettled
+		return false
+	}
+	task.state = scheduledTaskArmed
+	return true
 }
 
 func (s *Scheduler) fire(ctx context.Context, sc Schedule) {
 	if s.onFire != nil {
 		s.onFire(ctx, sc)
 	}
-}
-
-func (s *Scheduler) unregisterTask(key string, task *scheduledTask) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	current, ok := s.tasks[key]
-	if !ok || current != task {
-		return
-	}
-	s.retireTaskLocked(key, task)
 }
 
 func (s *Scheduler) retireTaskLocked(key string, task *scheduledTask) {
@@ -428,6 +607,7 @@ func (s *Scheduler) retireTaskLocked(key string, task *scheduledTask) {
 		s.draining = make(map[*scheduledTask]struct{})
 	}
 	s.draining[task] = struct{}{}
+	task.retiring = true
 	select {
 	case <-task.stop:
 	default:
@@ -438,6 +618,7 @@ func (s *Scheduler) retireTaskLocked(key string, task *scheduledTask) {
 func (s *Scheduler) finishTask(key string, task *scheduledTask) {
 	_ = task.lease.Done()
 	s.mu.Lock()
+	task.state = scheduledTaskSettled
 	if current := s.tasks[key]; current == task {
 		delete(s.tasks, key)
 	}

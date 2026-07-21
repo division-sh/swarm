@@ -219,8 +219,10 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 				t.Fatalf("create replacement Manager owner: %v", err)
 			}
 			t.Cleanup(func() {
-				if err := managerOwner.RetireAndWait(context.Background()); err != nil {
-					t.Errorf("retire replacement Manager owner: %v", err)
+				if managerOwner != nil {
+					if err := managerOwner.RetireAndWait(context.Background()); err != nil {
+						t.Errorf("retire replacement Manager owner: %v", err)
+					}
 				}
 			})
 			managerWork, err := managerOwner.Begin(context.Background(), standing)
@@ -316,19 +318,16 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 				t.Fatalf("publish replacement: %v", err)
 			}
 			freshStanding := manager.contexts[candidateHash].standing[serviceID]
+			if err := managerOwner.RetireAndWait(context.Background()); err != nil {
+				t.Fatalf("retire predecessor Manager owner: %v", err)
+			}
+			managerOwner = nil
 			parked, err := candidate.Runtime.Scheduler.ParkOccurrence(context.Background(), freshStanding)
 			if err != nil {
 				t.Fatalf("inspect rehydrated schedules: %v", err)
 			}
-			if len(parked) != 2 {
+			if parked.Count() != 2 {
 				t.Fatalf("rehydrated schedules = %#v, want future one-shot and recurring cron", parked)
-			}
-			modes := map[string]bool{}
-			for _, schedule := range parked {
-				modes[schedule.Mode] = true
-			}
-			if !modes["once"] || !modes["cron"] {
-				t.Fatalf("rehydrated schedule modes = %#v, want once and cron", modes)
 			}
 		})
 	}
@@ -344,7 +343,17 @@ func TestStandingServiceTransitionRollbackRestoresExactOwnerSchedulesBeforeAdmis
 	}
 	serviceID := contextDef.StandingTargets[0].ServiceID
 	standing := manager.contexts[runtimeContextTestHashA].standing[serviceID]
-	ownerCtx := worklifetime.WithOccurrence(context.Background(), standing)
+	managerOwner, err := worklifetime.NewManagerRunOccurrence(
+		context.Background(), contextDef.WorkOwner, worklifetime.ManagerRunIdentity{Generation: 1},
+	)
+	if err != nil {
+		t.Fatalf("create rollback Manager owner: %v", err)
+	}
+	managerWork, err := managerOwner.Begin(context.Background(), standing)
+	if err != nil {
+		t.Fatalf("begin rollback Manager work: %v", err)
+	}
+	ownerCtx := managerWork.Context()
 	for _, schedule := range []runtimepipeline.Schedule{
 		{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "future-once"},
 		{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "recurring-cron"},
@@ -352,6 +361,9 @@ func TestStandingServiceTransitionRollbackRestoresExactOwnerSchedulesBeforeAdmis
 		if err := contextDef.Runtime.Scheduler.Register(ownerCtx, schedule); err != nil {
 			t.Fatalf("register %s schedule: %v", schedule.Mode, err)
 		}
+	}
+	if err := managerWork.Done(); err != nil {
+		t.Fatalf("settle rollback Manager work: %v", err)
 	}
 
 	transition, err := manager.BeginStandingServiceTransition(context.Background(), serviceID)
@@ -369,19 +381,74 @@ func TestStandingServiceTransitionRollbackRestoresExactOwnerSchedulesBeforeAdmis
 		t.Fatalf("standing admission after rollback: %v", err)
 	}
 	lease.Done()
+	if err := managerOwner.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire rollback Manager owner: %v", err)
+	}
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), time.Second)
+	defer cancelWait()
+	if err := contextDef.Runtime.Scheduler.Wait(waitCtx); err != nil {
+		t.Fatalf("Manager retirement did not join rollback-restored schedules: %v", err)
+	}
 	parked, err := contextDef.Runtime.Scheduler.ParkOccurrence(context.Background(), standing)
 	if err != nil {
-		t.Fatalf("inspect restored schedules: %v", err)
+		t.Fatalf("inspect schedules after Manager retirement: %v", err)
 	}
-	if len(parked) != 2 {
-		t.Fatalf("restored schedules = %#v, want future one-shot and recurring cron", parked)
+	if parked.Count() != 0 {
+		t.Fatalf("rollback weakened Manager-composed schedules to standing-only ownership: %#v", parked)
 	}
-	modes := map[string]bool{}
-	for _, schedule := range parked {
-		modes[schedule.Mode] = true
+}
+
+func TestStandingServiceTransitionRollbackFailsClosedWhenOriginalManagerRetires(t *testing.T) {
+	catalog := runtimeAdmissionTestCatalog(t, "a")
+	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	contextDef.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(contextDef.WorkOwner)
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), contextDef)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !modes["once"] || !modes["cron"] {
-		t.Fatalf("restored schedule modes = %#v, want once and cron", modes)
+	serviceID := contextDef.StandingTargets[0].ServiceID
+	standing := manager.contexts[runtimeContextTestHashA].standing[serviceID]
+	managerOwner, err := worklifetime.NewManagerRunOccurrence(
+		context.Background(), contextDef.WorkOwner, worklifetime.ManagerRunIdentity{Generation: 1},
+	)
+	if err != nil {
+		t.Fatalf("create rollback Manager owner: %v", err)
+	}
+	managerWork, err := managerOwner.Begin(context.Background(), standing)
+	if err != nil {
+		t.Fatalf("begin rollback Manager work: %v", err)
+	}
+	if err := contextDef.Runtime.Scheduler.Register(managerWork.Context(), runtimepipeline.Schedule{
+		RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "retired-manager-cron",
+	}); err != nil {
+		t.Fatalf("register Manager-composed schedule: %v", err)
+	}
+	if err := managerWork.Done(); err != nil {
+		t.Fatalf("settle rollback Manager work: %v", err)
+	}
+
+	transition, err := manager.BeginStandingServiceTransition(context.Background(), serviceID)
+	if err != nil {
+		t.Fatalf("begin standing transition: %v", err)
+	}
+	if err := transition.Wait(context.Background()); err != nil {
+		t.Fatalf("drain standing transition: %v", err)
+	}
+	if err := managerOwner.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire original Manager owner: %v", err)
+	}
+	if err := transition.Restore(context.Background()); err == nil {
+		t.Fatal("rollback succeeded after the exact original Manager owner retired")
+	}
+	if lease, err := standing.Begin(context.Background()); err == nil {
+		_ = lease.Done()
+		t.Fatal("failed rollback reopened standing admission")
+	}
+	if !manager.standingServiceSuppressedLocked(serviceID) {
+		t.Fatal("failed rollback republished standing ingress")
+	}
+	if err := standing.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire failed-rollback standing occurrence: %v", err)
 	}
 }
 
@@ -436,7 +503,7 @@ func TestPreparedStandingSuccessorOwnsSchedulesBeforePublication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inspect prepared successor schedules: %v", err)
 	}
-	if len(parked) != 2 {
+	if parked.Count() != 2 {
 		t.Fatalf("prepared successor schedules = %#v, want future one-shot and recurring cron", parked)
 	}
 }

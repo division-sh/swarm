@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -160,11 +162,14 @@ func TestSchedulerParksDirectAndManagerComposedStandingSchedules(t *testing.T) {
 					t.Fatalf("settle manager producer: %v", err)
 				}
 			}
+			if err := predecessor.Fence(); err != nil {
+				t.Fatalf("fence predecessor: %v", err)
+			}
 			parked, err := scheduler.ParkOccurrence(context.Background(), predecessor)
 			if err != nil {
 				t.Fatalf("park predecessor: %v", err)
 			}
-			if len(parked) != len(schedules) {
+			if parked.Count() != len(schedules) {
 				t.Fatalf("parked schedules = %#v, want once and cron", parked)
 			}
 			for _, task := range registered {
@@ -179,23 +184,49 @@ func TestSchedulerParksDirectAndManagerComposedStandingSchedules(t *testing.T) {
 					t.Fatal("park did not cancel scheduled task lease")
 				}
 			}
+			if err := predecessor.Reopen(); err != nil {
+				t.Fatalf("reopen predecessor: %v", err)
+			}
+			if err := parked.RestoreOriginal(context.Background()); err != nil {
+				t.Fatalf("rollback predecessor schedules: %v", err)
+			}
+			for _, schedule := range schedules {
+				task := scheduler.tasks[scheduleKey(schedule)]
+				if task == nil || task.owner != owner || task.standingOwner != predecessor {
+					t.Fatalf("rollback %s owners = execution:%T %p standing:%p, want %T %p/%p", schedule.Mode, task.owner, task.owner, task.standingOwner, owner, owner, predecessor)
+				}
+			}
+			if err := predecessor.Fence(); err != nil {
+				t.Fatalf("fence rollback predecessor: %v", err)
+			}
+			parked, err = scheduler.ParkOccurrence(context.Background(), predecessor)
+			if err != nil {
+				t.Fatalf("park rollback predecessor: %v", err)
+			}
+			if manager != nil {
+				if err := manager.RetireAndWait(context.Background()); err != nil {
+					t.Fatalf("retire predecessor manager: %v", err)
+				}
+				manager = nil
+			}
 			if err := predecessor.RetireAndWait(context.Background()); err != nil {
 				t.Fatalf("retire predecessor: %v", err)
 			}
-			if err := scheduler.RestoreOccurrence(context.Background(), successor, parked); err != nil {
+			if err := parked.Rebind(context.Background(), scheduler, successor); err != nil {
 				t.Fatalf("restore successor schedules: %v", err)
+			}
+			for _, schedule := range schedules {
+				task := scheduler.tasks[scheduleKey(schedule)]
+				if task == nil || task.owner != successor || task.standingOwner != successor {
+					t.Fatalf("successor %s owners = execution:%T %p standing:%p, want fresh standing %p", schedule.Mode, task.owner, task.owner, task.standingOwner, successor)
+				}
 			}
 			rehydrated, err := scheduler.ParkOccurrence(context.Background(), successor)
 			if err != nil {
 				t.Fatalf("park successor: %v", err)
 			}
-			if len(rehydrated) != len(schedules) {
+			if rehydrated.Count() != len(schedules) {
 				t.Fatalf("successor schedules = %#v, want once and cron", rehydrated)
-			}
-			if manager != nil {
-				if err := manager.RetireAndWait(context.Background()); err != nil {
-					t.Fatalf("retire manager: %v", err)
-				}
 			}
 			if err := successor.RetireAndWait(context.Background()); err != nil {
 				t.Fatalf("retire successor: %v", err)
@@ -208,6 +239,172 @@ func TestSchedulerParksDirectAndManagerComposedStandingSchedules(t *testing.T) {
 				t.Fatalf("join process: %v", err)
 			}
 		})
+	}
+}
+
+func TestSchedulerParkRestoreLinearizesFiringOnceAndCron(t *testing.T) {
+	for _, composed := range []bool{false, true} {
+		for _, mode := range []string{"once", "cron"} {
+			name := mode + "_direct"
+			if composed {
+				name = mode + "_manager_composed"
+			}
+			t.Run(name, func(t *testing.T) {
+				process := worklifetime.NewProcess()
+				runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+					RuntimeInstanceID: "firing-" + name,
+					BundleHash:        "bundle-" + name,
+				})
+				if err != nil {
+					t.Fatalf("new runtime: %v", err)
+				}
+				standing, err := runtimeOwner.NewStanding(context.Background(), worklifetime.StandingIdentity{
+					ServiceID: "timer-service", RunID: uuid.NewString(), Generation: 1,
+				})
+				if err != nil {
+					t.Fatalf("new standing: %v", err)
+				}
+				owner := worklifetime.Occurrence(standing)
+				var manager *worklifetime.ManagerRunOccurrence
+				var producer *worklifetime.Lease
+				if composed {
+					manager, err = worklifetime.NewManagerRunOccurrence(context.Background(), runtimeOwner, worklifetime.ManagerRunIdentity{Generation: 1})
+					if err != nil {
+						t.Fatalf("new manager: %v", err)
+					}
+					producer, err = manager.Begin(context.Background(), standing)
+					if err != nil {
+						t.Fatalf("begin manager standing work: %v", err)
+					}
+					owner, _ = worklifetime.OccurrenceFromContext(producer.Context())
+				}
+
+				started := make(chan int32, 4)
+				releaseFirst := make(chan struct{})
+				var calls atomic.Int32
+				var active atomic.Int32
+				var overlap atomic.Bool
+				scheduler := NewSchedulerWithWorkOwner(runtimeOwner, func(context.Context, Schedule) {
+					call := calls.Add(1)
+					if active.Add(1) > 1 {
+						overlap.Store(true)
+					}
+					if call <= 2 {
+						started <- call
+					}
+					if call == 1 {
+						<-releaseFirst
+					}
+					active.Add(-1)
+				})
+				schedule := Schedule{
+					RunID: uuid.NewString(), AgentID: "agent-a", EventType: "timer." + mode,
+					Mode: mode, TaskID: uuid.NewString(),
+				}
+				if mode == "once" {
+					schedule.At = time.Now()
+				} else {
+					schedule.Cron = "@every 1ms"
+				}
+				if err := scheduler.Register(worklifetime.WithOccurrence(context.Background(), owner), schedule); err != nil {
+					t.Fatalf("register firing schedule: %v", err)
+				}
+				if producer != nil {
+					if err := producer.Done(); err != nil {
+						t.Fatalf("settle manager producer: %v", err)
+					}
+				}
+				select {
+				case call := <-started:
+					if call != 1 {
+						t.Fatalf("first callback number = %d", call)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("timer callback did not start")
+				}
+
+				parkCtx, cancelPark := context.WithCancel(context.Background())
+				cancelPark()
+				parked, err := scheduler.ParkOccurrence(parkCtx, standing)
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("park firing schedule error = %v, want canceled", err)
+				}
+				wantRestorable := 0
+				if mode == "cron" {
+					wantRestorable = 1
+				}
+				if parked.Count() != wantRestorable {
+					t.Fatalf("restorable firing %s projections = %d, want %d", mode, parked.Count(), wantRestorable)
+				}
+				restoreDone := make(chan error, 1)
+				go func() {
+					restoreDone <- parked.RestoreOriginal(context.Background())
+				}()
+				select {
+				case err := <-restoreDone:
+					t.Fatalf("rollback returned before predecessor callback settlement: %v", err)
+				case call := <-started:
+					t.Fatalf("rollback started callback %d before predecessor settlement", call)
+				case <-time.After(20 * time.Millisecond):
+				}
+				if calls.Load() != 1 || overlap.Load() {
+					t.Fatalf("callback state before predecessor release = calls:%d overlap:%t", calls.Load(), overlap.Load())
+				}
+				close(releaseFirst)
+				if err := <-restoreDone; err != nil {
+					t.Fatalf("restore after callback settlement: %v", err)
+				}
+				if mode == "cron" {
+					select {
+					case call := <-started:
+						if call != 2 {
+							t.Fatalf("restored cron callback number = %d", call)
+						}
+					case <-time.After(time.Second):
+						t.Fatal("restored cron did not fire")
+					}
+				}
+				if mode == "once" && calls.Load() != 1 {
+					t.Fatalf("consumed one-shot callback count = %d, want 1", calls.Load())
+				}
+				if overlap.Load() {
+					t.Fatal("restored callback overlapped its predecessor")
+				}
+
+				if manager != nil {
+					if err := manager.RetireAndWait(context.Background()); err != nil {
+						t.Fatalf("retire manager: %v", err)
+					}
+					waitCtx, cancelWait := context.WithTimeout(context.Background(), time.Second)
+					if err := scheduler.Wait(waitCtx); err != nil {
+						cancelWait()
+						t.Fatalf("Manager retirement did not join restored schedule: %v", err)
+					}
+					cancelWait()
+					remaining, err := scheduler.ParkOccurrence(context.Background(), standing)
+					if err != nil {
+						t.Fatalf("inspect schedules after Manager retirement: %v", err)
+					}
+					if remaining.Count() != 0 {
+						t.Fatalf("Manager retirement left %d standing-only schedule(s)", remaining.Count())
+					}
+				}
+				if err := standing.RetireAndWait(context.Background()); err != nil {
+					t.Fatalf("retire standing: %v", err)
+				}
+				scheduler.Stop()
+				if err := scheduler.Wait(context.Background()); err != nil {
+					t.Fatalf("wait scheduler: %v", err)
+				}
+				if _, err := runtimeOwner.RetireAndWait(context.Background()); err != nil {
+					t.Fatalf("retire runtime: %v", err)
+				}
+				process.Retire()
+				if _, err := process.Join(context.Background()); err != nil {
+					t.Fatalf("join process: %v", err)
+				}
+			})
+		}
 	}
 }
 
