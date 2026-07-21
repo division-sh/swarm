@@ -116,6 +116,9 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 	lifecycle := newAgentLifecycleCoordinator(opts.LifecycleStore, opts.Sessions)
 	lifecycle.baseContext = opts.BaseContext
 	lifecycle.bindRoutes(bus)
+	if opts.WorkOwner != nil {
+		_ = lifecycle.prepareRunOwner(opts.BaseContext, opts.WorkOwner)
+	}
 	return &AgentManager{
 		bus:                             bus,
 		factory:                         factory,
@@ -213,10 +216,10 @@ func (am *AgentManager) runtimePlatformControlEventContext(ctx context.Context) 
 }
 
 func (am *AgentManager) WaitForQuiescence(ctx context.Context) error {
-	if am == nil || am.workOwner == nil {
+	if am == nil || am.lifecycle == nil {
 		return nil
 	}
-	return am.workOwner.Wait(ctx)
+	return am.lifecycle.waitForWork(ctx)
 }
 
 func (am *AgentManager) PublishEvent(ctx context.Context, evt events.Event) error {

@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -80,6 +81,113 @@ func TestReplayAgentBacklog_UsesRuntimeShutdownAdmissionOwnerBeforeStoreAccess(t
 	}
 	if store.listPendingCalled.Load() {
 		t.Fatal("ReplayAgentBacklog touched the store even though runtime shutdown admission was already closed")
+	}
+}
+
+func TestManagerGenerationBarrierRejectsLateWorkAndJoinsAcceptedWork(t *testing.T) {
+	for _, mode := range []struct {
+		name string
+		run  func(*AgentManager, context.Context) error
+	}{
+		{name: "standard", run: (*AgentManager).Run},
+		{name: "authoritative_delivery_only", run: (*AgentManager).RunAuthoritativeDeliveryOnly},
+	} {
+		for _, transition := range []string{"shutdown", "reset"} {
+			t.Run(mode.name+"/"+transition, func(t *testing.T) {
+				am := newTestAgentManager(t, nil, nil)
+				if err := mode.run(am, managedExecutionTestContext(t, context.Background())); err != nil {
+					t.Fatalf("start manager: %v", err)
+				}
+				accepted, err := am.beginWork(context.Background(), "blocked flow activation")
+				if err != nil {
+					t.Fatalf("admit accepted work: %v", err)
+				}
+				transitionDone := make(chan error, 1)
+				go func() {
+					if transition == "reset" {
+						transitionDone <- am.ResetRuntimeState()
+						return
+					}
+					transitionDone <- am.ShutdownWithOptions(ShutdownOptions{Grace: time.Second})
+				}()
+				waitForManagerShuttingDown(t, am)
+				for _, kind := range []string{"late flow activation", "late flow deactivation", "late directive heartbeat"} {
+					if lease, err := am.beginWork(context.Background(), kind); err == nil {
+						_ = lease.Done()
+						t.Fatalf("%s admitted after Manager retirement began", kind)
+					}
+				}
+				select {
+				case err := <-transitionDone:
+					t.Fatalf("%s completed before accepted Manager work settled: %v", transition, err)
+				default:
+				}
+				if err := accepted.Done(); err != nil {
+					t.Fatalf("settle accepted work: %v", err)
+				}
+				select {
+				case err := <-transitionDone:
+					if err != nil {
+						t.Fatalf("%s: %v", transition, err)
+					}
+				case <-time.After(time.Second):
+					t.Fatalf("%s did not complete after accepted work settled", transition)
+				}
+			})
+		}
+	}
+}
+
+func TestManagerReservedTransitionExecutorSurvivesOuterFenceBeforeRun(t *testing.T) {
+	process := worklifetime.NewProcess()
+	runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: "manager-prestart-shutdown-runtime",
+		BundleHash:        "manager-prestart-shutdown-bundle",
+	})
+	if err != nil {
+		t.Fatalf("create runtime occurrence: %v", err)
+	}
+	manager := NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{WorkOwner: runtimeOwner})
+	work, err := manager.beginWork(context.Background(), "pre-start manager work")
+	if err != nil {
+		t.Fatalf("admit pre-start manager work: %v", err)
+	}
+	if err := work.Done(); err != nil {
+		t.Fatalf("settle pre-start manager work: %v", err)
+	}
+	if err := runtimeOwner.Fence(); err != nil {
+		t.Fatalf("fence outer runtime occurrence: %v", err)
+	}
+	if err := manager.ShutdownWithOptions(ShutdownOptions{Grace: time.Second}); err != nil {
+		t.Fatalf("shutdown never-started manager after outer fence: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := runtimeOwner.RetireAndWait(ctx); err != nil {
+		t.Fatalf("retire outer runtime occurrence: %v", err)
+	}
+	if _, err := process.Join(ctx); err != nil {
+		t.Fatalf("join process occurrence: %v", err)
+	}
+}
+
+func TestIdleManagerConstructionOwnsNoRuntimeLease(t *testing.T) {
+	process := worklifetime.NewProcess()
+	runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: "idle-manager-runtime",
+		BundleHash:        "idle-manager-bundle",
+	})
+	if err != nil {
+		t.Fatalf("create runtime occurrence: %v", err)
+	}
+	_ = NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{WorkOwner: runtimeOwner})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := runtimeOwner.RetireAndWait(ctx); err != nil {
+		t.Fatalf("idle manager retained runtime lease: %v", err)
+	}
+	if _, err := process.Join(ctx); err != nil {
+		t.Fatalf("join process occurrence: %v", err)
 	}
 }
 

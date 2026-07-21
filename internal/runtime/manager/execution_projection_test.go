@@ -25,12 +25,58 @@ type projectionTestRoute struct {
 }
 
 type projectionTestBus struct {
-	mu      sync.Mutex
-	routes  map[string]projectionTestRoute
-	history map[string][]projectionTestRoute
-	removed []runtimeeffects.LifecycleToken
-	store   runtimebus.EventStore
-	owner   worklifetime.Occurrence
+	mu            sync.Mutex
+	routes        map[string]projectionTestRoute
+	history       map[string][]projectionTestRoute
+	removed       []runtimeeffects.LifecycleToken
+	store         runtimebus.EventStore
+	owner         worklifetime.Occurrence
+	prepareErr    bool
+	publishErr    error
+	beforePublish func()
+}
+
+type projectionTestRoutePreparation struct {
+	bus       *projectionTestBus
+	route     projectionTestRoute
+	published bool
+	discarded bool
+}
+
+func (p *projectionTestRoutePreparation) Deliveries() <-chan *worklifetime.EventDelivery {
+	if p == nil {
+		return nil
+	}
+	return p.route.channel
+}
+
+func (p *projectionTestRoutePreparation) Publish() error {
+	if p == nil || p.bus == nil || p.discarded {
+		return context.Canceled
+	}
+	if p.bus.beforePublish != nil {
+		p.bus.beforePublish()
+	}
+	p.bus.mu.Lock()
+	defer p.bus.mu.Unlock()
+	if p.bus.publishErr != nil {
+		return p.bus.publishErr
+	}
+	p.bus.routes[p.route.token.AgentID] = p.route
+	p.bus.history[p.route.token.AgentID] = append(p.bus.history[p.route.token.AgentID], p.route)
+	p.published = true
+	return nil
+}
+
+func (p *projectionTestRoutePreparation) Discard() error {
+	if p == nil || p.discarded {
+		return nil
+	}
+	p.discarded = true
+	if p.published {
+		p.bus.RemoveAgentRoute(p.route.token)
+	}
+	return nil
 }
 
 func newProjectionTestBus() *projectionTestBus {
@@ -67,9 +113,12 @@ func (*projectionTestBus) ResetInMemoryState() error      { return nil }
 func (*projectionTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error {
 	return nil
 }
-func (b *projectionTestBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan *worklifetime.EventDelivery {
+func (b *projectionTestBus) PrepareAgentRoute(token runtimeeffects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) runtimebus.AgentRoutePreparation {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.prepareErr {
+		return nil
+	}
 	patterns := admission.RoutePatterns()
 	subscriptions := make([]events.EventType, 0, len(patterns))
 	for _, pattern := range patterns {
@@ -79,9 +128,15 @@ func (b *projectionTestBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToke
 		token: token, channel: make(chan *worklifetime.EventDelivery, 128),
 		subscriptions: append([]events.EventType(nil), subscriptions...),
 	}
-	b.routes[token.AgentID] = route
-	b.history[token.AgentID] = append(b.history[token.AgentID], route)
-	return route.channel
+	return &projectionTestRoutePreparation{bus: b, route: route}
+}
+
+func (b *projectionTestBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan *worklifetime.EventDelivery {
+	prepared := b.PrepareAgentRoute(token, admission)
+	if prepared == nil || prepared.Publish() != nil {
+		return nil
+	}
+	return prepared.Deliveries()
 }
 func (b *projectionTestBus) RemoveAgentRoute(token runtimeeffects.LifecycleToken) {
 	b.mu.Lock()
@@ -287,6 +342,56 @@ func TestExecutionProjectionReconfigureSerializesBothRunModes(t *testing.T) {
 				t.Fatal("current generation did not handle event")
 			}
 		})
+	}
+}
+
+func TestExecutionPreparationFailuresCompensateBeforeLaunchInBothRunModes(t *testing.T) {
+	for _, mode := range []struct {
+		name string
+		run  func(*AgentManager, context.Context) error
+	}{
+		{name: "standard", run: (*AgentManager).Run},
+		{name: "authoritative_delivery_only", run: (*AgentManager).RunAuthoritativeDeliveryOnly},
+	} {
+		for _, failure := range []string{"prepare", "publish", "owner_fence_during_publish"} {
+			t.Run(mode.name+"/"+failure, func(t *testing.T) {
+				bus := newProjectionTestBus()
+				factory := &projectionTestFactory{handled: make(chan int, 1)}
+				am := newProjectionTestManager(t, bus, factory.Build)
+				const agentID = "projection-start-failure"
+				if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: "live", ID: agentID, Subscriptions: []string{"test.old"}}); err != nil {
+					t.Fatalf("SpawnAgent: %v", err)
+				}
+				switch failure {
+				case "prepare":
+					bus.prepareErr = true
+				case "publish":
+					bus.publishErr = context.Canceled
+				case "owner_fence_during_publish":
+					bus.beforePublish = func() { am.lifecycle.requestShutdownTransition() }
+				}
+
+				err := mode.run(am, managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
+				if err == nil {
+					t.Fatalf("%s start succeeded despite %s failure", mode.name, failure)
+				}
+				if _, live := bus.current(agentID); live {
+					t.Fatal("failed start left a reachable agent route")
+				}
+				am.lifecycle.mu.Lock()
+				cell := am.lifecycle.cells[agentID]
+				phase := cell.phase
+				loopDone := cell.execution.loopDone
+				routeToken := cell.execution.routeToken
+				am.lifecycle.mu.Unlock()
+				if phase != AgentLifecycleRegistered || loopDone != nil || routeToken.Valid() {
+					t.Fatalf("failed start left phase=%q loop_done=%v route=%+v", phase, loopDone != nil, routeToken)
+				}
+				if err := am.ShutdownWithOptions(ShutdownOptions{Grace: time.Second}); err != nil {
+					t.Fatalf("shutdown after compensated start failure: %v", err)
+				}
+			})
+		}
 	}
 }
 

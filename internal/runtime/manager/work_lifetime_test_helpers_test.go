@@ -51,7 +51,7 @@ func newTestManagerWorkOwner(t *testing.T) worklifetime.Occurrence {
 
 func newTestAgentManager(t *testing.T, bus Bus, factory AgentFactory, stores ...ManagerPersistence) *AgentManager {
 	t.Helper()
-	return NewAgentManagerWithOptions(bus, factory, AgentManagerOptions{WorkOwner: newTestManagerWorkOwner(t)}, stores...)
+	return newTestAgentManagerWithOptions(t, bus, factory, AgentManagerOptions{}, stores...)
 }
 
 func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory, opts AgentManagerOptions, stores ...ManagerPersistence) *AgentManager {
@@ -59,5 +59,11 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = newTestManagerWorkOwner(t)
 	}
-	return NewAgentManagerWithOptions(bus, factory, opts, stores...)
+	manager := NewAgentManagerWithOptions(bus, factory, opts, stores...)
+	t.Cleanup(func() {
+		if err := manager.ShutdownWithOptions(ShutdownOptions{Grace: 5 * time.Second}); err != nil {
+			t.Errorf("shutdown manager test work owner: %v", err)
+		}
+	})
+	return manager
 }

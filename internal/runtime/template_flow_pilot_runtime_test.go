@@ -47,10 +47,10 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	manager = runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
-	})
+	}))
 
 	evt := eventtest.RunCreatingRootIngress(
 		"99999999-9999-4999-8999-999999999952",

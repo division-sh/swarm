@@ -225,7 +225,7 @@ func TestResetRuntimeStateFailureAlwaysLeavesResetPhase(t *testing.T) {
 			if cellExists != tt.wantCellAfter {
 				t.Fatalf("lifecycle cell exists = %v, want %v", cellExists, tt.wantCellAfter)
 			}
-			if _, started := am.lifecycle.beginRun(testAuthorActivityContext(context.Background()), AgentRunModeStandard); !started {
+			if _, started, err := am.lifecycle.beginRun(testAuthorActivityContext(context.Background()), AgentRunModeStandard, am.workOwner); err != nil || !started {
 				t.Fatal("runtime remained blocked after reset failure")
 			}
 			transition := am.lifecycle.requestShutdownTransition()
@@ -233,6 +233,9 @@ func TestResetRuntimeStateFailureAlwaysLeavesResetPhase(t *testing.T) {
 				t.Fatal("claim shutdown transition")
 			}
 			am.lifecycle.cancelShutdownWork()
+			if err := am.lifecycle.retireRunOwner(context.Background()); err != nil {
+				t.Fatalf("retire manager run owner: %v", err)
+			}
 			am.lifecycle.completeShutdownTransition(transition, nil)
 		})
 	}

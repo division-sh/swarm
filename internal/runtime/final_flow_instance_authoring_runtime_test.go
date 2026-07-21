@@ -54,10 +54,10 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	manager = runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
-	})
+	}))
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),

@@ -259,10 +259,10 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 	if sqliteStore, ok := backend.(*store.SQLiteRuntimeStore); ok {
 		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, sqliteStore)
 	}
-	manager = runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{
+	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{
 		WorkflowInstances: workflowStore,
 		WorkOwner:         workOwner,
-	})
+	}))
 	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
 	if err != nil {
 		t.Fatalf("LoadWorkflowDefinition: %v", err)

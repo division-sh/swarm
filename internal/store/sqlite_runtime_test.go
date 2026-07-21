@@ -417,12 +417,12 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 	}
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 	bus := &sqliteFlowActivationBus{}
-	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		WorkflowInstances: workflowStore,
 		LLMBackend:        "anthropic",
 		LifecycleStore:    sqliteStore,
 		WorkOwner:         storeTestWorkOwner(t),
-	}, sqliteStore)
+	}, sqliteStore))
 	bundle := sqliteFlowActivationBundle()
 
 	req := sqliteFlowActivationRequest(bundle, "review", "inst-1", "parent-ent", "review/inst-1")
@@ -462,12 +462,12 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	}
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 	bus := &sqliteFlowActivationBus{}
-	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		WorkflowInstances: workflowStore,
 		LLMBackend:        "anthropic",
 		LifecycleStore:    sqliteStore,
 		WorkOwner:         storeTestWorkOwner(t),
-	}, sqliteStore)
+	}, sqliteStore))
 	bundle := sqliteFlowActivationBundle()
 
 	start := make(chan struct{})

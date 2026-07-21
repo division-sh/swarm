@@ -491,9 +491,9 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, func(runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
-	}, runtimemanager.AgentManagerOptions{WorkOwner: storeTestWorkOwner(t)}, faults)
+	}, runtimemanager.AgentManagerOptions{WorkOwner: storeTestWorkOwner(t)}, faults))
 	if err := manager.RegisterEphemeralAgentForExecution(testAuthorActivityContext(), runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Role: "test"},
 		Status: "active",

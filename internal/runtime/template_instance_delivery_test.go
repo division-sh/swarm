@@ -177,11 +177,11 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+	manager := ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
-	})
+	}))
 	activationCalls := 0
 	var activationErr error
 	module := newRuntimeTestWorkflowModule(t, source)
@@ -278,11 +278,11 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+	manager := ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
-	})
+	}))
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
@@ -364,11 +364,11 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	manager = runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
-	})
+	}))
 	evt := eventtest.RunCreatingRootIngress(
 		"99999999-9999-4999-8999-999999999940",
 		events.EventType("producer/deploy.done"),
@@ -427,11 +427,11 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+	manager := ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
-	})
+	}))
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
@@ -546,11 +546,11 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+	manager := ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
-	})
+	}))
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
@@ -935,10 +935,10 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 				if err != nil {
 					t.Fatalf("NewEventBusWithOptions: %v", err)
 				}
-				manager = runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+				manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 					WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 					WorkflowInstances: workflowStore,
-				})
+				}))
 
 				candidate := providerRollbackStandingCandidate(ctx)
 				standing, err := workflowStore.ReconcileStandingService(ctx, candidate)

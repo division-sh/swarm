@@ -14,6 +14,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
@@ -65,6 +66,16 @@ func storeTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
 func storeTestWorkContext(t *testing.T, ctx context.Context) context.Context {
 	t.Helper()
 	return worklifetime.WithOccurrence(ctx, storeTestWorkOwner(t))
+}
+
+func ownStoreTestAgentManager(t *testing.T, manager *runtimemanager.AgentManager) *runtimemanager.AgentManager {
+	t.Helper()
+	t.Cleanup(func() {
+		if err := manager.Shutdown(); err != nil {
+			t.Errorf("shutdown store test manager: %v", err)
+		}
+	})
+	return manager
 }
 
 func newStoreTestEventBus(t *testing.T, store runtimebus.EventStore, options ...runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {

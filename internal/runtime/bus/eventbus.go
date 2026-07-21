@@ -630,13 +630,116 @@ func (eb *EventBus) WaitForQuiescence(ctx context.Context) error {
 	if eb.workOwner == nil {
 		return nil
 	}
-	return eb.workOwner.Wait(ctx)
+	return eb.workOwner.WaitForQuiescence(ctx)
 }
 
-// ReplaceAgentRoute installs one exact lifecycle-generation route. The old
-// channel is detached, not closed: publishers may retain a lock-free snapshot
-// of it and must be allowed to finish without a send-on-closed panic.
-func (eb *EventBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan *LocalDelivery {
+// AgentRoutePreparation owns an exact route generation before it becomes
+// reachable. Agent lifecycle persistence can therefore fail without exposing a
+// route, while post-commit publication failure still has one exact cleanup
+// authority.
+type AgentRoutePreparation interface {
+	Deliveries() <-chan *LocalDelivery
+	Publish() error
+	Discard() error
+}
+
+type preparedAgentRoute struct {
+	mu         sync.Mutex
+	bus        *EventBus
+	token      runtimeeffects.LifecycleToken
+	eventTypes []events.EventType
+	route      *agentRouteHandle
+	ch         chan *LocalDelivery
+	published  bool
+	discarded  bool
+}
+
+func (p *preparedAgentRoute) Deliveries() <-chan *LocalDelivery {
+	if p == nil {
+		return nil
+	}
+	return p.ch
+}
+
+func (p *preparedAgentRoute) Publish() error {
+	if p == nil || p.bus == nil || p.route == nil {
+		return errors.New("prepared agent route is required")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.published {
+		return nil
+	}
+	if p.discarded {
+		return errors.New("prepared agent route is no longer active")
+	}
+	eb := p.bus
+	agentID := strings.TrimSpace(p.token.AgentID)
+	eb.mu.Lock()
+	old, oldInternal := eb.detachSubscriberLocked(agentID)
+	eb.mu.Unlock()
+	if old != nil {
+		if err := old.retireAndWait(context.Background(), eb.store); err != nil {
+			eb.retainRetiringAgentRoute(old)
+			p.discarded = true
+			_ = p.route.retireAndWait(context.Background(), eb.store)
+			return fmt.Errorf("retire predecessor agent route: %w", err)
+		}
+	}
+	if oldInternal != nil {
+		if err := oldInternal.retireAndWait(context.Background(), eb.store); err != nil {
+			eb.retainRetiringInternalHandle(oldInternal)
+			p.discarded = true
+			_ = p.route.retireAndWait(context.Background(), eb.store)
+			return fmt.Errorf("retire predecessor internal route: %w", err)
+		}
+	}
+	eb.mu.Lock()
+	eb.agentChans[agentID] = p.ch
+	eb.agentRouteHandles[agentID] = p.route
+	eb.subscriptionKinds[agentID] = inMemorySubscriberAgent
+	for _, eventType := range p.eventTypes {
+		eventType = events.EventType(strings.TrimSpace(string(eventType)))
+		if eventType == "" {
+			continue
+		}
+		eb.subscriptions[agentID] = AppendUniqueEventType(eb.subscriptions[agentID], eventType)
+		if eb.channels[eventType] == nil {
+			eb.channels[eventType] = make(map[string]chan *LocalDelivery)
+		}
+		eb.channels[eventType][agentID] = p.ch
+	}
+	eb.mu.Unlock()
+	p.published = true
+	return nil
+}
+
+func (p *preparedAgentRoute) Discard() error {
+	if p == nil || p.route == nil {
+		return nil
+	}
+	p.mu.Lock()
+	if p.discarded {
+		p.mu.Unlock()
+		return nil
+	}
+	p.discarded = true
+	published := p.published
+	eb := p.bus
+	token := p.token
+	route := p.route
+	p.mu.Unlock()
+	if published && eb != nil {
+		eb.RemoveAgentRoute(token)
+		return nil
+	}
+	if eb == nil {
+		return nil
+	}
+	return route.retireAndWait(context.Background(), eb.store)
+}
+
+func (eb *EventBus) PrepareAgentRoute(token runtimeeffects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) AgentRoutePreparation {
 	if eb == nil || eb.workOwner == nil || !token.Valid() || !admission.ValidForAgent(token.AgentID) {
 		return nil
 	}
@@ -650,40 +753,17 @@ func (eb *EventBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToken, admis
 	}
 	ch := make(chan *LocalDelivery, 128)
 	route := newAgentRouteHandle(token, ch, owner)
-	eb.mu.Lock()
-	old, oldInternal := eb.detachSubscriberLocked(agentID)
-	eb.mu.Unlock()
-	if old != nil {
-		if err := old.retireAndWait(context.Background(), eb.store); err != nil {
-			eb.retainRetiringAgentRoute(old)
-			_ = route.retireAndWait(context.Background(), eb.store)
-			return nil
-		}
+	return &preparedAgentRoute{bus: eb, token: token, eventTypes: eventTypes, route: route, ch: ch}
+}
+
+// ReplaceAgentRoute remains the direct exact-generation operation for callers
+// that have no separate durable lifecycle transition.
+func (eb *EventBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan *LocalDelivery {
+	prepared := eb.PrepareAgentRoute(token, admission)
+	if prepared == nil || prepared.Publish() != nil {
+		return nil
 	}
-	if oldInternal != nil {
-		if err := oldInternal.retireAndWait(context.Background(), eb.store); err != nil {
-			eb.retainRetiringInternalHandle(oldInternal)
-			_ = route.retireAndWait(context.Background(), eb.store)
-			return nil
-		}
-	}
-	eb.mu.Lock()
-	eb.agentChans[agentID] = ch
-	eb.agentRouteHandles[agentID] = route
-	eb.subscriptionKinds[agentID] = inMemorySubscriberAgent
-	for _, eventType := range eventTypes {
-		eventType = events.EventType(strings.TrimSpace(string(eventType)))
-		if eventType == "" {
-			continue
-		}
-		eb.subscriptions[agentID] = AppendUniqueEventType(eb.subscriptions[agentID], eventType)
-		if eb.channels[eventType] == nil {
-			eb.channels[eventType] = make(map[string]chan *LocalDelivery)
-		}
-		eb.channels[eventType][agentID] = ch
-	}
-	eb.mu.Unlock()
-	return ch
+	return prepared.Deliveries()
 }
 
 func admittedAgentEventTypes(admission semanticview.FlowOwnedAgentSubscriptionAdmission) []events.EventType {

@@ -13,7 +13,9 @@ import (
 // this package. Consumers cannot invent a generic or string-keyed work owner.
 type Occurrence interface {
 	Begin(context.Context) (*Lease, error)
+	BeginStanding(context.Context) (*Lease, error)
 	Wait(context.Context) error
+	WaitForQuiescence(context.Context) error
 	NewRoute(context.Context, RouteIdentity) (*RouteOccurrence, error)
 	NewEventDelivery(context.Context, events.Event) (*EventDelivery, error)
 	NewRoutedEventDelivery(context.Context, events.Event, events.DeliveryRoute) (*EventDelivery, error)
@@ -60,6 +62,7 @@ func newEventDelivery(ctx context.Context, event events.Event, route events.Deli
 func (*RuntimeOccurrence) workOccurrence()      {}
 func (*StandingOccurrence) workOccurrence()     {}
 func (*SelectedForkOccurrence) workOccurrence() {}
+func (*ManagerWorkOccurrence) workOccurrence()  {}
 
 func (d *EventDelivery) Context() context.Context {
 	if d == nil || d.ctx == nil {
@@ -211,4 +214,18 @@ func (s *SelectedForkOccurrence) NewRoutedEventDelivery(ctx context.Context, eve
 		return nil, errors.New("selected-fork occurrence is required")
 	}
 	return newEventDelivery(ctx, event, route, s, s.Begin)
+}
+
+func (m *ManagerWorkOccurrence) NewEventDelivery(ctx context.Context, event events.Event) (*EventDelivery, error) {
+	if m == nil || m.manager == nil {
+		return nil, errors.New("manager work occurrence is required")
+	}
+	return newEventDelivery(ctx, event, events.DeliveryRoute{}, m, m.Begin)
+}
+
+func (m *ManagerWorkOccurrence) NewRoutedEventDelivery(ctx context.Context, event events.Event, route events.DeliveryRoute) (*EventDelivery, error) {
+	if m == nil || m.manager == nil {
+		return nil, errors.New("manager work occurrence is required")
+	}
+	return newEventDelivery(ctx, event, route, m, m.Begin)
 }

@@ -98,10 +98,11 @@ type Scheduler struct {
 }
 
 type scheduledTask struct {
-	stop  chan struct{}
-	done  chan struct{}
-	lease *worklifetime.Lease
-	owner worklifetime.Occurrence
+	stop     chan struct{}
+	done     chan struct{}
+	lease    *worklifetime.Lease
+	owner    worklifetime.Occurrence
+	schedule Schedule
 }
 
 type cronSpec struct {
@@ -175,7 +176,7 @@ func (s *Scheduler) Register(ctx context.Context, sc Schedule) error {
 	if existing, ok := s.tasks[key]; ok {
 		s.retireTaskLocked(key, existing)
 	}
-	task := &scheduledTask{stop: make(chan struct{}), done: make(chan struct{}), lease: lease, owner: owner}
+	task := &scheduledTask{stop: make(chan struct{}), done: make(chan struct{}), lease: lease, owner: owner, schedule: cloneSchedule(sc)}
 	s.tasks[key] = task
 	s.mu.Unlock()
 
@@ -246,6 +247,65 @@ func (s *Scheduler) CancelExact(sc Schedule) error {
 		return nil
 	}
 	s.retireTaskLocked(key, task)
+	return nil
+}
+
+// ParkOccurrence withdraws every local timer projection owned by one exact
+// occurrence and joins the scheduler goroutines before the occurrence itself
+// is drained. The returned schedules are the only facts RestoreOccurrence may
+// project again after a pre-commit transition failure.
+func (s *Scheduler) ParkOccurrence(ctx context.Context, owner worklifetime.Occurrence) ([]Schedule, error) {
+	if s == nil || owner == nil {
+		return nil, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.mu.Lock()
+	tasks := make([]*scheduledTask, 0)
+	schedules := make([]Schedule, 0)
+	for key, task := range s.tasks {
+		if task == nil || task.owner != owner {
+			continue
+		}
+		tasks = append(tasks, task)
+		schedules = append(schedules, cloneSchedule(task.schedule))
+		s.retireTaskLocked(key, task)
+	}
+	s.mu.Unlock()
+	for _, task := range tasks {
+		select {
+		case <-task.done:
+		case <-ctx.Done():
+			return schedules, fmt.Errorf("park occurrence schedules: %w", ctx.Err())
+		}
+	}
+	return schedules, nil
+}
+
+// RestoreOccurrence reprojects a previously parked set under one exact live
+// occurrence. It never infers an owner from schedule fields.
+func (s *Scheduler) RestoreOccurrence(ctx context.Context, owner worklifetime.Occurrence, schedules []Schedule) error {
+	if len(schedules) == 0 {
+		return nil
+	}
+	if s == nil || owner == nil {
+		return errors.New("restore occurrence schedules requires scheduler and exact owner")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx = worklifetime.WithOccurrence(ctx, owner)
+	restored := make([]Schedule, 0, len(schedules))
+	for _, schedule := range schedules {
+		if err := s.Register(ctx, cloneSchedule(schedule)); err != nil {
+			for _, prior := range restored {
+				_ = s.CancelExact(prior)
+			}
+			return fmt.Errorf("restore parked schedule: %w", err)
+		}
+		restored = append(restored, schedule)
+	}
 	return nil
 }
 
@@ -391,6 +451,11 @@ func scheduleKey(sc Schedule) string {
 		strings.TrimSpace(sc.TaskID),
 		strings.TrimSpace(sc.EffectiveTimerID()),
 	}, "|")
+}
+
+func cloneSchedule(sc Schedule) Schedule {
+	sc.Payload = append([]byte(nil), sc.Payload...)
+	return sc
 }
 
 func scheduleKeyMatchesAgentEvent(key, agentID, eventType string) bool {

@@ -468,7 +468,9 @@ func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) 
 		return nil, nil, fmt.Errorf("standing activation requires a runtime work occurrence")
 	}
 	ctx = rt.authorActivityContext(ctx)
-	ctx = worklifetime.WithRuntimeOccurrence(ctx, rt.workOccurrence)
+	if _, hasPreparedOwner := worklifetime.OccurrenceFromContext(ctx); !hasPreparedOwner {
+		ctx = worklifetime.WithRuntimeOccurrence(ctx, rt.workOccurrence)
+	}
 	if rt.Stores.PipelineStore == nil || rt.Manager == nil || rt.Pipeline == nil {
 		return nil, nil, fmt.Errorf("standing activation requires pipeline store, pipeline, and agent manager")
 	}
