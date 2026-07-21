@@ -12,9 +12,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
@@ -36,7 +38,9 @@ import (
 	"github.com/google/uuid"
 )
 
-type telegramPhraseBotLLMRuntime struct{}
+type telegramPhraseBotLLMRuntime struct {
+	onContinue func(context.Context, *runtimellm.Session, runtimellm.Message) error
+}
 
 func (telegramPhraseBotLLMRuntime) ProviderContract() runtimellm.ProviderContract {
 	return runtimellm.AnthropicAPIProviderContract()
@@ -66,7 +70,12 @@ func (authorActivityHeadFailureEventStore) ListAuthorActivity(context.Context, r
 	return runtimeauthoractivity.ListResult{}, errors.New("author activity list must not run after head failure")
 }
 
-func (telegramPhraseBotLLMRuntime) ContinueSession(ctx context.Context, session *runtimellm.Session, message runtimellm.Message) (*runtimellm.Response, error) {
+func (r telegramPhraseBotLLMRuntime) ContinueSession(ctx context.Context, session *runtimellm.Session, message runtimellm.Message) (*runtimellm.Response, error) {
+	if r.onContinue != nil {
+		if err := r.onContinue(ctx, session, message); err != nil {
+			return nil, err
+		}
+	}
 	surface, ok := managedcapabilities.FromContext(ctx)
 	if !ok {
 		return nil, fmt.Errorf("phrase-bot requires managed capability surface")
@@ -130,8 +139,11 @@ func TestServedParityHarnessStandingServiceLifecycle(t *testing.T) {
 func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)
+	managerProbe := &servedManagerScheduleProjectionProbe{}
+	telegramGate := &servedTelegramDeliveryGate{}
 	telegramCalls := make(chan struct{}, 4)
 	telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		telegramGate.awaitRelease()
 		telegramCalls <- struct{}{}
 		w.Header().Set("content-type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
@@ -159,7 +171,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 			ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
 			StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 			SelfCheck: true, RequireBundleMatch: false, Dev: true, Verbose: true,
-			TestLLMRuntime:          telegramPhraseBotLLMRuntime{},
+			TestLLMRuntime:          telegramPhraseBotLLMRuntime{onContinue: managerProbe.observe},
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		}
 	case servedparity.BackendExplicitPostgres:
@@ -188,7 +200,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 			PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true,
 			APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 			SelfCheck: true, RequireBundleMatch: false, Dev: true, Verbose: true,
-			TestLLMRuntime:          telegramPhraseBotLLMRuntime{},
+			TestLLMRuntime:          telegramPhraseBotLLMRuntime{onContinue: managerProbe.observe},
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		}
 	default:
@@ -207,9 +219,18 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	}
 	firstEndpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString()) + "/v1/rpc"
 	serviceID, firstRunID, firstGeneration := loadServedStandingOwner(t, db, string(backend))
-	firstSchedules := registerServedStandingScheduleProjections(t, firstManager, firstRunID)
+	firstScheduleResult := managerProbe.arm(t, firstManager, firstRunID)
+	firstRouteRelease, firstRouteStarted := telegramGate.blockNext()
+	if entity := sendStandingTelegramUpdate(t, strings.TrimSuffix(firstEndpoint, "/v1/rpc"), 9000, 42); entity == "" {
+		t.Fatalf("%s initial standing service returned empty entity", backend)
+	}
+	firstSchedules := waitForServedManagerScheduleProjection(t, firstScheduleResult, backend, "suspend")
+	telegramGate.waitForStart(t, firstRouteStarted, backend, "suspend")
 	suspendKey := "standing-suspend-" + string(backend)
-	suspended := invokeServedStandingOperation(t, firstEndpoint, "standing.suspend", serviceID, suspendKey)
+	suspendOutcome := startServedStandingOperation(firstEndpoint, "standing.suspend", serviceID, suspendKey)
+	assertServedStandingOperationWaitsForRoute(t, suspendOutcome, firstRouteRelease, backend, "suspend")
+	requireStandingLifecycleTelegramCall(t, telegramCalls, backend, "suspend route release")
+	suspended := waitForServedStandingOperation(t, suspendOutcome, backend, "standing.suspend")
 	if suspended.EffectiveState != "suspended" || suspended.Transition != "suspended" || suspended.RunID != firstRunID {
 		t.Fatalf("%s suspend result = %#v", backend, suspended)
 	}
@@ -236,19 +257,24 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	if resumed.EffectiveState != "active" || resumed.Transition != "operator_resumed" || resumed.RunID != firstRunID {
 		t.Fatalf("%s resume result = %#v", backend, resumed)
 	}
-	if entity := sendStandingTelegramUpdate(t, strings.TrimSuffix(secondEndpoint, "/v1/rpc"), 9002, 42); entity == "" {
+	resumedScheduleResult := managerProbe.arm(t, secondManager, firstRunID)
+	resetRouteRelease, resetRouteStarted := telegramGate.blockNext()
+	if entity := sendStandingTelegramUpdate(t, strings.TrimSuffix(secondEndpoint, "/v1/rpc"), 9002, 84); entity == "" {
 		t.Fatalf("%s resumed standing service returned empty entity", backend)
 	}
-	requireStandingLifecycleTelegramCall(t, telegramCalls, backend, "resume")
+	resumedSchedules := waitForServedManagerScheduleProjection(t, resumedScheduleResult, backend, "reset")
+	telegramGate.waitForStart(t, resetRouteStarted, backend, "reset")
 	assertServedStandingState(t, db, string(backend), serviceID, firstRunID, firstGeneration, "active", "running")
-	resumedSchedules := registerServedStandingScheduleProjections(t, secondManager, firstRunID)
 
 	resetKey := "standing-reset-" + string(backend)
-	reset := invokeServedStandingOperation(t, secondEndpoint, "standing.reset", serviceID, resetKey)
+	resetOutcome := startServedStandingOperation(secondEndpoint, "standing.reset", serviceID, resetKey)
+	assertServedStandingOperationWaitsForRoute(t, resetOutcome, resetRouteRelease, backend, "reset")
+	requireStandingLifecycleTelegramCall(t, telegramCalls, backend, "reset route release")
+	reset := waitForServedStandingOperation(t, resetOutcome, backend, "standing.reset")
 	if reset.EffectiveState != "active" || reset.Transition != "reset" || reset.Generation != firstGeneration+1 || reset.RunID == firstRunID {
 		t.Fatalf("%s reset result = %#v", backend, reset)
 	}
-	if entity := sendStandingTelegramUpdate(t, strings.TrimSuffix(secondEndpoint, "/v1/rpc"), 9003, 42); entity == "" {
+	if entity := sendStandingTelegramUpdate(t, strings.TrimSuffix(secondEndpoint, "/v1/rpc"), 9003, 126); entity == "" {
 		t.Fatalf("%s reset standing service returned empty entity", backend)
 	}
 	requireStandingLifecycleTelegramCall(t, telegramCalls, backend, "reset")
@@ -282,7 +308,158 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 
 type servedStandingScheduleProbe struct {
 	scheduler  *runtimepipeline.Scheduler
-	occurrence worklifetime.Occurrence
+	occurrence *worklifetime.StandingOccurrence
+}
+
+type servedManagerScheduleProjectionProbe struct {
+	mu      sync.Mutex
+	pending *servedManagerScheduleProjectionRequest
+}
+
+type servedManagerScheduleProjectionRequest struct {
+	scheduler  *runtimepipeline.Scheduler
+	runID      string
+	standing   *worklifetime.StandingOccurrence
+	completion chan servedManagerScheduleProjectionResult
+}
+
+type servedManagerScheduleProjectionResult struct {
+	probe servedStandingScheduleProbe
+	err   error
+}
+
+func (p *servedManagerScheduleProjectionProbe) arm(t testing.TB, manager *runtimepkg.RuntimeContextManager, runID string) <-chan servedManagerScheduleProjectionResult {
+	t.Helper()
+	use, lookup, err := manager.AcquireIngress(context.Background(), "chat", "telegram")
+	if err != nil {
+		t.Fatalf("acquire standing ingress for Manager schedule proof: %v", err)
+	}
+	if use == nil || !lookup.Found || use.Runtime() == nil || use.Runtime().Scheduler == nil {
+		t.Fatalf("standing ingress Manager schedule owner is unavailable: %#v", lookup)
+	}
+	owner, ok := worklifetime.OccurrenceFromContext(use.WorkContext())
+	if !ok {
+		_ = use.Done()
+		t.Fatal("standing ingress Manager schedule setup has no exact occurrence")
+	}
+	standing, ok := worklifetime.StandingProjection(owner)
+	if !ok {
+		_ = use.Done()
+		t.Fatalf("standing ingress Manager schedule setup owner %T has no standing projection", owner)
+	}
+	request := &servedManagerScheduleProjectionRequest{
+		scheduler:  use.Runtime().Scheduler,
+		runID:      strings.TrimSpace(runID),
+		standing:   standing,
+		completion: make(chan servedManagerScheduleProjectionResult, 1),
+	}
+	if err := use.Done(); err != nil {
+		t.Fatalf("settle standing ingress Manager schedule setup: %v", err)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.pending != nil {
+		t.Fatal("Manager schedule projection proof is already armed")
+	}
+	p.pending = request
+	return request.completion
+}
+
+func (p *servedManagerScheduleProjectionProbe) observe(ctx context.Context, _ *runtimellm.Session, message runtimellm.Message) error {
+	if message.Role == "tool" {
+		return nil
+	}
+	p.mu.Lock()
+	request := p.pending
+	p.pending = nil
+	p.mu.Unlock()
+	if request == nil {
+		return nil
+	}
+	fail := func(err error) error {
+		request.completion <- servedManagerScheduleProjectionResult{err: err}
+		return err
+	}
+	owner, ok := worklifetime.OccurrenceFromContext(ctx)
+	if !ok {
+		return fail(errors.New("Manager event execution has no exact occurrence"))
+	}
+	if _, ok := owner.(*worklifetime.ManagerWorkOccurrence); !ok {
+		return fail(fmt.Errorf("Manager event execution owner = %T, want *worklifetime.ManagerWorkOccurrence", owner))
+	}
+	standing, ok := worklifetime.StandingProjection(owner)
+	if !ok || standing != request.standing {
+		return fail(fmt.Errorf("Manager event execution standing projection = %p/%t, want %p", standing, ok, request.standing))
+	}
+	for _, schedule := range []runtimepipeline.Schedule{
+		{RunID: request.runID, AgentID: "standing-manager-proof", EventType: "standing.manager.proof.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: uuid.NewString()},
+		{RunID: request.runID, AgentID: "standing-manager-proof", EventType: "standing.manager.proof.cron", Mode: "cron", Cron: "@every 1h", TaskID: uuid.NewString()},
+	} {
+		if err := request.scheduler.Register(ctx, schedule); err != nil {
+			return fail(fmt.Errorf("register Manager-composed served standing %s schedule: %w", schedule.Mode, err))
+		}
+	}
+	result := servedManagerScheduleProjectionResult{probe: servedStandingScheduleProbe{scheduler: request.scheduler, occurrence: standing}}
+	request.completion <- result
+	return nil
+}
+
+func waitForServedManagerScheduleProjection(t testing.TB, result <-chan servedManagerScheduleProjectionResult, backend servedparity.Backend, operation string) servedStandingScheduleProbe {
+	t.Helper()
+	select {
+	case completed := <-result:
+		if completed.err != nil {
+			t.Fatalf("%s Manager-composed schedule registration before %s: %v", backend, operation, completed.err)
+		}
+		return completed.probe
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s timed out waiting for Manager-composed schedule registration before %s", backend, operation)
+		return servedStandingScheduleProbe{}
+	}
+}
+
+type servedTelegramDeliveryGate struct {
+	mu      sync.Mutex
+	pending chan struct{}
+	started chan struct{}
+}
+
+func (g *servedTelegramDeliveryGate) blockNext() (chan struct{}, <-chan struct{}) {
+	release := make(chan struct{})
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.pending != nil {
+		panic("Telegram delivery gate is already armed")
+	}
+	g.pending = release
+	g.started = make(chan struct{})
+	return release, g.started
+}
+
+func (g *servedTelegramDeliveryGate) awaitRelease() {
+	g.mu.Lock()
+	release := g.pending
+	started := g.started
+	g.pending = nil
+	g.started = nil
+	g.mu.Unlock()
+	if release == nil {
+		return
+	}
+	close(started)
+	<-release
+}
+
+func (g *servedTelegramDeliveryGate) waitForStart(t testing.TB, started <-chan struct{}, backend servedparity.Backend, operation string) {
+	t.Helper()
+	if started == nil {
+		t.Fatalf("%s Telegram delivery gate was not armed before %s", backend, operation)
+	}
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s timed out waiting for routed Telegram descendant before %s", backend, operation)
+	}
 }
 
 func waitForServedStandingContextManager(t testing.TB, ready <-chan *runtimepkg.RuntimeContextManager, backend servedparity.Backend) *runtimepkg.RuntimeContextManager {
@@ -297,36 +474,6 @@ func waitForServedStandingContextManager(t testing.TB, ready <-chan *runtimepkg.
 		t.Fatalf("%s timed out waiting for served standing context manager", backend)
 		return nil
 	}
-}
-
-func registerServedStandingScheduleProjections(t testing.TB, manager *runtimepkg.RuntimeContextManager, runID string) servedStandingScheduleProbe {
-	t.Helper()
-	use, lookup, err := manager.AcquireIngress(context.Background(), "chat", "telegram")
-	if err != nil {
-		t.Fatalf("acquire standing ingress for schedule proof: %v", err)
-	}
-	if use == nil || !lookup.Found || use.Runtime() == nil || use.Runtime().Scheduler == nil {
-		t.Fatalf("standing ingress schedule owner is unavailable: %#v", lookup)
-	}
-	occurrence, ok := worklifetime.OccurrenceFromContext(use.WorkContext())
-	if !ok || occurrence == nil {
-		_ = use.Done()
-		t.Fatal("standing ingress work context has no exact occurrence")
-	}
-	for _, schedule := range []runtimepipeline.Schedule{
-		{RunID: runID, AgentID: "standing-proof", EventType: "standing.proof.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: uuid.NewString()},
-		{RunID: runID, AgentID: "standing-proof", EventType: "standing.proof.cron", Mode: "cron", Cron: "@every 1h", TaskID: uuid.NewString()},
-	} {
-		if err := use.Runtime().Scheduler.Register(use.WorkContext(), schedule); err != nil {
-			_ = use.Done()
-			t.Fatalf("register served standing %s schedule: %v", schedule.Mode, err)
-		}
-	}
-	probe := servedStandingScheduleProbe{scheduler: use.Runtime().Scheduler, occurrence: occurrence}
-	if err := use.Done(); err != nil {
-		t.Fatalf("settle standing ingress schedule registration: %v", err)
-	}
-	return probe
 }
 
 func assertServedStandingSchedulesRetired(t testing.TB, probe servedStandingScheduleProbe, backend servedparity.Backend, operation string) {
@@ -361,6 +508,83 @@ func invokeServedStandingOperation(t *testing.T, endpoint, method, serviceID, id
 		t.Fatalf("decode %s result: %v\n%s", method, err, string(response.Result))
 	}
 	return result
+}
+
+type servedStandingOperationOutcome struct {
+	result servedStandingOperationResult
+	err    error
+}
+
+func startServedStandingOperation(endpoint, method, serviceID, idempotencyKey string) <-chan servedStandingOperationOutcome {
+	completed := make(chan servedStandingOperationOutcome, 1)
+	go func() {
+		result, err := requestServedStandingOperation(endpoint, method, serviceID, idempotencyKey)
+		completed <- servedStandingOperationOutcome{result: result, err: err}
+	}()
+	return completed
+}
+
+func requestServedStandingOperation(endpoint, method, serviceID, idempotencyKey string) (servedStandingOperationResult, error) {
+	body, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "id": method + "-ownership-proof", "method": method,
+		"params": map[string]any{
+			"service_id": serviceID, "reason": "served parity proof", "idempotency_key": idempotencyKey,
+		},
+	})
+	if err != nil {
+		return servedStandingOperationResult{}, fmt.Errorf("marshal %s request: %w", method, err)
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return servedStandingOperationResult{}, fmt.Errorf("build %s request: %w", method, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiv1.DefaultLoopbackAPIToken)
+	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return servedStandingOperationResult{}, fmt.Errorf("post %s request: %w", method, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return servedStandingOperationResult{}, fmt.Errorf("%s HTTP status = %d, want 200", method, response.StatusCode)
+	}
+	var envelope servedJSONRPCEnvelope
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		return servedStandingOperationResult{}, fmt.Errorf("decode %s envelope: %w", method, err)
+	}
+	if envelope.Error != nil {
+		return servedStandingOperationResult{}, fmt.Errorf("%s error = %#v", method, envelope.Error)
+	}
+	var result servedStandingOperationResult
+	if err := json.Unmarshal(envelope.Result, &result); err != nil {
+		return servedStandingOperationResult{}, fmt.Errorf("decode %s result: %w", method, err)
+	}
+	return result, nil
+}
+
+func assertServedStandingOperationWaitsForRoute(t testing.TB, outcome <-chan servedStandingOperationOutcome, release chan struct{}, backend servedparity.Backend, operation string) {
+	t.Helper()
+	select {
+	case completed := <-outcome:
+		close(release)
+		t.Fatalf("%s %s completed before its routed Manager descendant settled: result=%#v err=%v", backend, operation, completed.result, completed.err)
+	case <-time.After(100 * time.Millisecond):
+		close(release)
+	}
+}
+
+func waitForServedStandingOperation(t testing.TB, outcome <-chan servedStandingOperationOutcome, backend servedparity.Backend, method string) servedStandingOperationResult {
+	t.Helper()
+	select {
+	case completed := <-outcome:
+		if completed.err != nil {
+			t.Fatalf("%s %s: %v", backend, method, completed.err)
+		}
+		return completed.result
+	case <-time.After(15 * time.Second):
+		t.Fatalf("%s timed out waiting for %s after routed descendant settlement", backend, method)
+		return servedStandingOperationResult{}
+	}
 }
 
 func configureStandingLifecycleCredentials(t *testing.T) {

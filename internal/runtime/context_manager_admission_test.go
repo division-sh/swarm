@@ -208,7 +208,22 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 			}
 			serviceID := predecessor.StandingTargets[0].ServiceID
 			standing := manager.contexts[runtimeContextTestHashA].standing[serviceID]
-			ownerCtx := worklifetime.WithOccurrence(context.Background(), standing)
+			managerOwner, err := worklifetime.NewManagerRunOccurrence(
+				context.Background(), predecessor.WorkOwner, worklifetime.ManagerRunIdentity{Generation: 1},
+			)
+			if err != nil {
+				t.Fatalf("create replacement Manager owner: %v", err)
+			}
+			t.Cleanup(func() {
+				if err := managerOwner.RetireAndWait(context.Background()); err != nil {
+					t.Errorf("retire replacement Manager owner: %v", err)
+				}
+			})
+			managerWork, err := managerOwner.Begin(context.Background(), standing)
+			if err != nil {
+				t.Fatalf("begin Manager-composed replacement work: %v", err)
+			}
+			ownerCtx := managerWork.Context()
 			for _, schedule := range []runtimepipeline.Schedule{
 				{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "future-once"},
 				{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "recurring-cron"},
@@ -216,6 +231,9 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 				if err := predecessor.Runtime.Scheduler.Register(ownerCtx, schedule); err != nil {
 					t.Fatalf("register %s schedule: %v", schedule.Mode, err)
 				}
+			}
+			if err := managerWork.Done(); err != nil {
+				t.Fatalf("settle Manager-composed replacement work: %v", err)
 			}
 
 			candidateHash := runtimeContextTestHashA
