@@ -587,10 +587,10 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	// Reset's deferred epilogue opens admission. Runners that acknowledged the
 	// retire signal then resubscribe and report readiness through the same
 	// lifecycle handle; no raw channel is silently reused.
-	restartIDs := make([]string, 0, len(internalHandles))
+	restartHandles := make([]*internalSubscriptionHandle, 0, len(internalHandles))
 	for _, handle := range internalHandles {
 		if handle.wantsRestart() {
-			restartIDs = append(restartIDs, handle.subscriberID)
+			restartHandles = append(restartHandles, handle)
 		}
 	}
 	eb.mu.Lock()
@@ -599,8 +599,18 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	resetOpened = true
 	eb.notifyInternalSubscriptionChangedLocked()
 	eb.mu.Unlock()
-	for _, subscriberID := range uniqueStrings(restartIDs) {
-		if err := eb.waitForInternalSubscriptionReady(context.Background(), subscriberID); err != nil {
+	for _, handle := range restartHandles {
+		restartCtx := handle.restartContext()
+		if restartCtx == nil {
+			return fmt.Errorf("internal subscriber %s restart lifecycle context is required", handle.subscriberID)
+		}
+		if restartCtx.Err() != nil {
+			continue
+		}
+		if err := eb.waitForInternalSubscriptionReady(restartCtx, handle.subscriberID); err != nil {
+			if restartCtx.Err() != nil {
+				continue
+			}
 			return err
 		}
 	}
@@ -823,7 +833,7 @@ func (eb *EventBus) SubscribeInternal(ctx context.Context, subscriberID string, 
 			eb.mu.Unlock()
 			return nil, fmt.Errorf("internal subscriber %s already has an active generation", subscriberID)
 		}
-		handle := newInternalSubscriptionHandle(eb, subscriberID, eventTypes)
+		handle := newInternalSubscriptionHandle(ctx, eb, subscriberID, eventTypes)
 		eb.internalHandles[subscriberID] = handle
 		eb.agentChans[subscriberID] = handle.ch
 		eb.subscriptionKinds[subscriberID] = inMemorySubscriberInternal
