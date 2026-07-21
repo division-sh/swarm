@@ -32,6 +32,24 @@ const (
 	runtimeLifecycleResetting    runtimeLifecyclePhase = "resetting"
 )
 
+type runtimeLifecycleTransitionKind string
+
+const (
+	runtimeLifecycleTransitionShutdown runtimeLifecycleTransitionKind = "shutdown"
+	runtimeLifecycleTransitionReset    runtimeLifecycleTransitionKind = "reset"
+)
+
+type runtimeLifecycleTransition struct {
+	kind    runtimeLifecycleTransitionKind
+	done    chan struct{}
+	claimed bool
+	result  error
+}
+
+func newRuntimeLifecycleTransition(kind runtimeLifecycleTransitionKind) *runtimeLifecycleTransition {
+	return &runtimeLifecycleTransition{kind: kind, done: make(chan struct{})}
+}
+
 type agentLifecycleCell struct {
 	opMu           sync.Mutex
 	epoch          int64
@@ -91,16 +109,19 @@ func (l *agentExecutionLease) Release() {
 }
 
 type agentLifecycleCoordinator struct {
-	mu          sync.Mutex
-	store       AgentLifecyclePersistence
-	sessions    runtimesessions.LifecycleProjection
-	phase       runtimeLifecyclePhase
-	runMode     AgentRunMode
-	runCtx      context.Context
-	baseContext context.Context
-	cancelRun   context.CancelFunc
-	cells       map[string]*agentLifecycleCell
-	routes      agentRouteBus
+	mu           sync.Mutex
+	store        AgentLifecyclePersistence
+	sessions     runtimesessions.LifecycleProjection
+	phase        runtimeLifecyclePhase
+	runMode      AgentRunMode
+	runCtx       context.Context
+	baseContext  context.Context
+	cancelRun    context.CancelFunc
+	transition   *runtimeLifecycleTransition
+	pendingReset *runtimeLifecycleTransition
+	retryDone    <-chan struct{}
+	cells        map[string]*agentLifecycleCell
+	routes       agentRouteBus
 }
 
 func (c *agentLifecycleCoordinator) context() context.Context {
@@ -305,6 +326,9 @@ func (c *agentLifecycleCoordinator) beginRun(parent context.Context, mode AgentR
 	c.runCtx, c.cancelRun = context.WithCancel(root)
 	c.phase = runtimeLifecycleRunning
 	c.runMode = mode
+	c.transition = nil
+	c.pendingReset = nil
+	c.retryDone = nil
 	return c.runCtx, true
 }
 
@@ -320,13 +344,105 @@ func (c *agentLifecycleCoordinator) phaseSnapshot() runtimeLifecyclePhase {
 	return c.phase
 }
 
-func (c *agentLifecycleCoordinator) beginShutdownAdmission() bool {
+func (c *agentLifecycleCoordinator) abortRunStart() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.phase == runtimeLifecycleShuttingDown || c.phase == runtimeLifecycleResetting {
+	if c.cancelRun != nil {
+		c.cancelRun()
+	}
+	c.phase = runtimeLifecycleStopped
+	c.runMode = AgentRunModeStopped
+	c.runCtx = nil
+	c.cancelRun = nil
+	c.transition = nil
+	c.pendingReset = nil
+	c.retryDone = nil
+	c.mu.Unlock()
+}
+
+func (c *agentLifecycleCoordinator) requestShutdownTransition() *runtimeLifecycleTransition {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	var cancel context.CancelFunc
+	var transition *runtimeLifecycleTransition
+	switch c.phase {
+	case runtimeLifecycleRunning:
+		transition = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown)
+		c.transition = transition
+		c.phase = runtimeLifecycleShuttingDown
+		cancel = c.cancelRun
+	case runtimeLifecycleShuttingDown, runtimeLifecycleResetting:
+		transition = c.transition
+	case runtimeLifecycleStopped:
+		transition = nil
+	}
+	c.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	return transition
+}
+
+func (c *agentLifecycleCoordinator) requestResetTransition() (*runtimeLifecycleTransition, *runtimeLifecycleTransition) {
+	if c == nil {
+		return nil, nil
+	}
+	c.mu.Lock()
+	var cancel context.CancelFunc
+	var shutdown *runtimeLifecycleTransition
+	var reset *runtimeLifecycleTransition
+	switch c.phase {
+	case runtimeLifecycleRunning:
+		shutdown = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown)
+		reset = newRuntimeLifecycleTransition(runtimeLifecycleTransitionReset)
+		c.transition = shutdown
+		c.pendingReset = reset
+		c.phase = runtimeLifecycleShuttingDown
+		cancel = c.cancelRun
+	case runtimeLifecycleShuttingDown:
+		shutdown = c.transition
+		if c.pendingReset == nil {
+			c.pendingReset = newRuntimeLifecycleTransition(runtimeLifecycleTransitionReset)
+		}
+		reset = c.pendingReset
+	case runtimeLifecycleResetting:
+		reset = c.transition
+	case runtimeLifecycleStopped:
+		reset = newRuntimeLifecycleTransition(runtimeLifecycleTransitionReset)
+		c.transition = reset
+		c.phase = runtimeLifecycleResetting
+	}
+	c.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	return shutdown, reset
+}
+
+func (c *agentLifecycleCoordinator) claimTransition(transition *runtimeLifecycleTransition, kind runtimeLifecycleTransitionKind) bool {
+	if c == nil || transition == nil {
 		return false
 	}
-	c.phase = runtimeLifecycleShuttingDown
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.transition != transition || transition.kind != kind || transition.claimed {
+		return false
+	}
+	transition.claimed = true
+	return true
+}
+
+func (c *agentLifecycleCoordinator) setRetryDone(done <-chan struct{}) bool {
+	if c == nil || done == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.phase != runtimeLifecycleRunning || c.retryDone != nil {
+		return false
+	}
+	c.retryDone = done
 	return true
 }
 
@@ -360,6 +476,9 @@ func (c *agentLifecycleCoordinator) cancelShutdownWork() (context.Context, []<-c
 			done = append(done, execution.leaseDrained)
 		}
 	}
+	if c.retryDone != nil {
+		done = append(done, c.retryDone)
+	}
 	ctx := c.runCtx
 	c.mu.Unlock()
 	for _, token := range routeTokens {
@@ -368,39 +487,53 @@ func (c *agentLifecycleCoordinator) cancelShutdownWork() (context.Context, []<-c
 	return ctx, done
 }
 
-func (c *agentLifecycleCoordinator) finishShutdown() {
-	c.mu.Lock()
-	c.phase = runtimeLifecycleStopped
-	c.runMode = AgentRunModeStopped
-	c.runCtx = nil
-	c.cancelRun = nil
-	c.mu.Unlock()
-}
-
-func (c *agentLifecycleCoordinator) beginReset() {
-	c.mu.Lock()
-	c.phase = runtimeLifecycleResetting
-	c.mu.Unlock()
-}
-
-func (c *agentLifecycleCoordinator) finishReset() {
-	c.mu.Lock()
-	c.cells = map[string]*agentLifecycleCell{}
-	c.phase = runtimeLifecycleStopped
-	c.runMode = AgentRunModeStopped
-	c.runCtx = nil
-	c.cancelRun = nil
-	c.mu.Unlock()
-}
-
-func (c *agentLifecycleCoordinator) abortReset() {
-	c.mu.Lock()
-	if c.phase == runtimeLifecycleResetting {
-		c.phase = runtimeLifecycleStopped
-		c.runMode = AgentRunModeStopped
-		c.runCtx = nil
-		c.cancelRun = nil
+func (c *agentLifecycleCoordinator) completeShutdownTransition(transition *runtimeLifecycleTransition, result error) {
+	if c == nil || transition == nil {
+		return
 	}
+	c.mu.Lock()
+	if c.transition != transition || transition.kind != runtimeLifecycleTransitionShutdown {
+		c.mu.Unlock()
+		return
+	}
+	transition.result = result
+	c.runMode = AgentRunModeStopped
+	c.runCtx = nil
+	c.cancelRun = nil
+	c.retryDone = nil
+	if c.pendingReset != nil {
+		c.phase = runtimeLifecycleResetting
+		c.transition = c.pendingReset
+		c.pendingReset = nil
+	} else {
+		c.phase = runtimeLifecycleStopped
+		c.transition = nil
+	}
+	close(transition.done)
+	c.mu.Unlock()
+}
+
+func (c *agentLifecycleCoordinator) completeResetTransition(transition *runtimeLifecycleTransition, result error, clearCells bool) {
+	if c == nil || transition == nil {
+		return
+	}
+	c.mu.Lock()
+	if c.transition != transition || transition.kind != runtimeLifecycleTransitionReset {
+		c.mu.Unlock()
+		return
+	}
+	transition.result = result
+	if clearCells {
+		c.cells = map[string]*agentLifecycleCell{}
+	}
+	c.phase = runtimeLifecycleStopped
+	c.runMode = AgentRunModeStopped
+	c.runCtx = nil
+	c.cancelRun = nil
+	c.transition = nil
+	c.pendingReset = nil
+	c.retryDone = nil
+	close(transition.done)
 	c.mu.Unlock()
 }
 

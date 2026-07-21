@@ -37,7 +37,6 @@ type Bus interface {
 	Publish(ctx context.Context, evt events.Event) error
 	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
 	PublishPersistedRecipients(ctx context.Context, evt events.Event, recipients []string) error
-	Unsubscribe(agentID string)
 	Store() runtimebus.EventStore
 	ResetInMemoryState() error
 	LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) error

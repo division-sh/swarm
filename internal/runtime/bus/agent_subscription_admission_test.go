@@ -2,8 +2,7 @@ package bus
 
 import (
 	"context"
-	"fmt"
-	"slices"
+	"reflect"
 	"testing"
 	"time"
 
@@ -16,32 +15,11 @@ func testAgentSubscriptionAdmission(t *testing.T, agentID string, eventTypes ...
 	return testAgentSubscriptionAdmissionForFlow(t, agentID, "", eventTypes...)
 }
 
-func TestEventBusRawSubscribeRejectsQualifiedExactAuthority(t *testing.T) {
-	eb, err := newScopedTestEventBus(InMemoryEventStore{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	eventType := events.EventType("producer/task.done")
-	if ch := eb.Subscribe("raw-agent", eventType); ch != nil {
-		t.Fatalf("raw Subscribe(%q) returned a live channel", eventType)
-	}
-	if recipients := eb.ResolveSubscribedRecipients(string(eventType)); len(recipients) != 0 {
-		t.Fatalf("raw Subscribe(%q) recipients = %#v, want none", eventType, recipients)
-	}
-}
-
-func TestEventBusRawSubscribeConsumesRootAdmissionForExactAndWildcard(t *testing.T) {
-	eb, err := newScopedTestEventBus(InMemoryEventStore{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for index, eventType := range []events.EventType{"task.ready", "task.*"} {
-		agentID := fmt.Sprintf("root-agent-%d", index)
-		if ch := eb.Subscribe(agentID, eventType); ch == nil {
-			t.Fatalf("raw root Subscribe(%q) returned nil channel", eventType)
-		}
-		if recipients := eb.ResolveSubscribedRecipients("task.ready"); !slices.Contains(recipients, agentID) {
-			t.Fatalf("raw root Subscribe(%q) recipients = %#v, want %s", eventType, recipients, agentID)
+func TestEventBusHasNoTokenlessAgentSubscriptionSurface(t *testing.T) {
+	eventBusType := reflect.TypeOf((*EventBus)(nil))
+	for _, method := range []string{"Subscribe", "SubscribeAgent", "Unsubscribe"} {
+		if _, ok := eventBusType.MethodByName(method); ok {
+			t.Fatalf("EventBus retains tokenless production method %s", method)
 		}
 	}
 }
@@ -53,11 +31,11 @@ func TestEventBusTypedAdmissionExecutesSameScopeExactAndWildcard(t *testing.T) {
 	}
 	admission := testAgentSubscriptionAdmissionForFlow(t, "reviewer", "review/inst-1",
 		events.EventType("task.ready"), events.EventType("task.*"))
-	ch := eb.SubscribeAgent(admission)
+	ch := subscribeTestAgentAdmission(t, eb, admission)
 	if ch == nil {
 		t.Fatal("typed admission returned nil channel")
 	}
-	defer eb.Unsubscribe("reviewer")
+	defer unsubscribeTestAgent(eb, "reviewer")
 
 	for index, eventType := range []events.EventType{"review/inst-1/task.ready", "review/inst-1/task.done"} {
 		evt := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-admitted-"+string(rune('a'+index))), eventType, "test", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -68,6 +46,9 @@ func TestEventBusTypedAdmissionExecutesSameScopeExactAndWildcard(t *testing.T) {
 		case got := <-ch:
 			if got.ID() != evt.ID() {
 				t.Fatalf("received %s, want %s", got.ID(), evt.ID())
+			}
+			if err := got.Complete(); err != nil {
+				t.Fatalf("complete %s: %v", eventType, err)
 			}
 		case <-time.After(time.Second):
 			t.Fatalf("timed out waiting for %s", eventType)

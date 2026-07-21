@@ -722,7 +722,7 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 	})
 	eb.SetInterceptors(coordinator)
 	eb.RegisterRuntimeActiveAgentDescriptor(bus.ActiveAgentDescriptor{AgentID: "provider-agent"})
-	outcomes := eb.Subscribe("provider-agent", events.EventType("human_task.deferred"), events.EventType("human_task.approved"))
+	outcomes := runtimebustest.Subscribe(t, eb, "provider-agent", events.EventType("human_task.deferred"), events.EventType("human_task.approved"))
 	return eb, outcomes
 }
 

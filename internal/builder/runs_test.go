@@ -117,8 +117,8 @@ func TestRunHubStartRunPublishesTypedEntityEnvelope(t *testing.T) {
 	rt, acquirer := newTestOwnedEventBus(t, commitStore, runtimebus.EventBusOptions{})
 	eb := rt.Bus
 	hub := newRunHub(acquirer, nil, nil, nil)
-	analysisEvents := eb.Subscribe("analysis-observer", "analysis.requested")
-	reviewEvents := eb.Subscribe("review-observer", "review.requested")
+	analysisEvents := runtimebustest.Subscribe(t, eb, "analysis-observer", "analysis.requested")
+	reviewEvents := runtimebustest.Subscribe(t, eb, "review-observer", "review.requested")
 
 	if err := hub.startRun(context.Background(), runID, map[string]any{
 		"analysis.requested": map[string]any{

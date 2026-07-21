@@ -19,6 +19,14 @@ type failOnceLocalDeliveryHandoffStore struct {
 	attempts int
 }
 
+type provenLocalDeliveryHandoffStore struct {
+	InMemoryEventStore
+}
+
+func (provenLocalDeliveryHandoffStore) ProveLocalDeliveryHandoff(context.Context, string, events.DeliveryRoute) error {
+	return nil
+}
+
 func (s *failOnceLocalDeliveryHandoffStore) ProveLocalDeliveryHandoff(context.Context, string, events.DeliveryRoute) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -107,6 +115,62 @@ func TestEventBusAgentRouteRemovalWaitsForDequeuedWork(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("route removal did not join completed work")
+	}
+}
+
+func TestEventBusSnapshottedAgentRouteSendLinearizesWithRemoval(t *testing.T) {
+	eb, err := newScopedTestEventBus(provenLocalDeliveryHandoffStore{})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	for generation := uint64(1); generation <= 64; generation++ {
+		token := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-race", Generation: generation}
+		if ch := eb.ReplaceAgentRoute(token, testAgentSubscriptionAdmission(t, token.AgentID, events.EventType("test.work"))); ch == nil {
+			t.Fatalf("generation %d route was not installed", generation)
+		}
+		recipients := eb.snapshotRecipientChans([]string{token.AgentID})
+		if len(recipients) != 1 || recipients[0].route == nil {
+			t.Fatalf("generation %d snapshot = %#v, want exact route handle", generation, recipients)
+		}
+		evt := eventtest.RuntimeControl(
+			fmt.Sprintf("route-race-%d", generation), events.EventType("test.work"), "test", "", []byte(`{}`), 0,
+			"run-1", "", events.EventEnvelope{}, time.Now(),
+		)
+		start := make(chan struct{})
+		sendResult := make(chan agentRouteSendResult, 1)
+		removed := make(chan struct{})
+		go func(recipient agentRecipient) {
+			<-start
+			sendResult <- recipient.send(context.Background(), evt, events.DeliveryRoute{})
+		}(recipients[0])
+		go func() {
+			<-start
+			eb.RemoveAgentRoute(token)
+			close(removed)
+		}()
+		close(start)
+		if result := <-sendResult; result != agentRouteSendDelivered && result != agentRouteSendInactive {
+			t.Fatalf("generation %d send result = %v, want delivered-before-retirement or inactive-after-retirement", generation, result)
+		}
+		select {
+		case <-removed:
+		case <-time.After(time.Second):
+			t.Fatalf("generation %d route removal did not join linearized send", generation)
+		}
+	}
+	joinCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := eb.WaitForQuiescence(joinCtx); err != nil {
+		t.Fatalf("WaitForQuiescence after route races: %v", err)
+	}
+}
+
+func TestAgentRecipientWithoutExactLifecycleHandleFailsClosed(t *testing.T) {
+	recipient := agentRecipient{agentID: "orphan", kind: inMemorySubscriberAgent}
+	evt := eventtest.RuntimeControl("orphan-send", events.EventType("test.work"), "test", "", []byte(`{}`), 0,
+		"run-1", "", events.EventEnvelope{}, time.Now())
+	if result := recipient.send(context.Background(), evt, events.DeliveryRoute{}); result != agentRouteSendInactive {
+		t.Fatalf("send result = %v, want inactive without exact lifecycle handle", result)
 	}
 }
 

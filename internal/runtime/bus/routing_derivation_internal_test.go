@@ -153,8 +153,8 @@ func TestEventBusPublish_UsesRouteTableWildcardSubscriberResolution(t *testing.T
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	ch := eb.Subscribe("operating-observer")
-	defer eb.Unsubscribe("operating-observer")
+	ch := subscribeTestAgent(t, eb, "operating-observer")
+	defer unsubscribeTestAgent(eb, "operating-observer")
 	recorder := NewEmittedEventsRecorder()
 	ctx := WithEmittedEventsRecorder(context.Background(), recorder)
 

@@ -228,9 +228,12 @@ func TestResetRuntimeStateFailureAlwaysLeavesResetPhase(t *testing.T) {
 			if _, started := am.lifecycle.beginRun(testAuthorActivityContext(context.Background()), AgentRunModeStandard); !started {
 				t.Fatal("runtime remained blocked after reset failure")
 			}
-			am.lifecycle.beginShutdownAdmission()
+			transition := am.lifecycle.requestShutdownTransition()
+			if !am.lifecycle.claimTransition(transition, runtimeLifecycleTransitionShutdown) {
+				t.Fatal("claim shutdown transition")
+			}
 			am.lifecycle.cancelShutdownWork()
-			am.lifecycle.finishShutdown()
+			am.lifecycle.completeShutdownTransition(transition, nil)
 		})
 	}
 }

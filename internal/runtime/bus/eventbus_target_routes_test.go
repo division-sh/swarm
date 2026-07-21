@@ -314,8 +314,8 @@ func TestEventBusPublish_TargetedNodeConsumeSuppressesLiveRecipientDelivery(t *t
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	live := eb.SubscribeAgent(testAgentSubscriptionAdmissionForFlow(t, "target-node", "worker", events.EventType(eventType)))
-	defer eb.Unsubscribe("target-node")
+	live := subscribeTestAgentAdmission(t, eb, testAgentSubscriptionAdmissionForFlow(t, "target-node", "worker", events.EventType(eventType)))
+	defer unsubscribeTestAgent(eb, "target-node")
 	evt := eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType(eventType),
@@ -408,8 +408,8 @@ func TestEventBusAgentDispatchIgnoresSameIDNodeRouteTargets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := eb.SubscribeAgent(testAgentSubscriptionAdmissionForFlow(t, "shared-subscriber", "review/inst-1", events.EventType("review/inst-1/task.started")))
-	defer eb.Unsubscribe("shared-subscriber")
+	ch := subscribeTestAgentAdmission(t, eb, testAgentSubscriptionAdmissionForFlow(t, "shared-subscriber", "review/inst-1", events.EventType("review/inst-1/task.started")))
+	defer unsubscribeTestAgent(eb, "shared-subscriber")
 
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
 		events.EventType("review/inst-1/task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -435,7 +435,7 @@ func TestEventBusWorkflowRuntimeCarrierPrefersConcreteNodeRouteOverPlaceholder(t
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, workflowRuntimeInternalCarrierID, events.EventType("review/task.started"))
-	defer eb.Unsubscribe(workflowRuntimeInternalCarrierID)
+	defer unsubscribeTestAgent(eb, workflowRuntimeInternalCarrierID)
 
 	contextRef := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:route-carrier"}}
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("review/task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -1139,7 +1139,7 @@ func TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBefor
 			}
 			concreteEventType := "repo-scaffold/inst-1/" + tc.eventType
 			ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType(concreteEventType))
-			defer eb.Unsubscribe("workflow-runtime")
+			defer unsubscribeTestAgent(eb, "workflow-runtime")
 			evt := eventtest.RunCreatingRootIngress(
 				eventID,
 				events.EventType(tc.eventType),
@@ -1413,7 +1413,7 @@ func TestEventBusPublish_WildcardStaticServiceNodePersistsRouteBeforeInternalCar
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType(eventType))
-	defer eb.Unsubscribe("workflow-runtime")
+	defer unsubscribeTestAgent(eb, "workflow-runtime")
 	evt := eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType(eventType),
@@ -1875,7 +1875,7 @@ func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *te
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	eb.RegisterRuntimeActiveAgentDescriptor(ActiveAgentDescriptor{AgentID: "workflow-runtime"})
-	ch := eb.Subscribe("workflow-runtime", events.EventType("thing.created"))
+	ch := subscribeTestAgent(t, eb, "workflow-runtime", events.EventType("thing.created"))
 	evt := eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("thing.created"),

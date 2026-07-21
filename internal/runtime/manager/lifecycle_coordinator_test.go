@@ -513,9 +513,12 @@ func TestLifecycleCoordinatorConcurrentReplacementsCommitAdjacentGenerations(t *
 			t.Fatalf("generation[%d] = %d, want adjacent %d; all=%v", i, generation, want, got)
 		}
 	}
-	coordinator.beginShutdownAdmission()
+	transition := coordinator.requestShutdownTransition()
+	if !coordinator.claimTransition(transition, runtimeLifecycleTransitionShutdown) {
+		t.Fatal("claim shutdown transition")
+	}
 	coordinator.cancelShutdownWork()
-	coordinator.finishShutdown()
+	coordinator.completeShutdownTransition(transition, nil)
 }
 
 func lifecycleTestPersistedAgent() PersistedAgent {

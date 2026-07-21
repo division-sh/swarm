@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -47,8 +48,8 @@ func TestCompleteEventSnapshotDispatchesThroughRecoveryOwnersOnSQLiteAndPostgres
 		for _, surface := range []string{"startup", "global_sweeper", "run_queue", "decision_obligation"} {
 			t.Run(backend+"/"+surface, func(t *testing.T) {
 				fixture := newCompleteEventDispatchFixture(t, backend, surface == "decision_obligation")
-				ch := fixture.bus.Subscribe(fixture.agentID, fixture.event.Type())
-				defer fixture.bus.Unsubscribe(fixture.agentID)
+				ch := runtimebustest.Subscribe(t, fixture.bus, fixture.agentID, fixture.event.Type())
+				defer runtimebustest.Unsubscribe(fixture.bus, fixture.agentID)
 
 				if err := fixture.updateChainDepth(-1); err == nil {
 					t.Fatalf("%s schema admitted negative chain_depth", backend)

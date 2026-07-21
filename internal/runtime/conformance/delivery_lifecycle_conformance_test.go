@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -253,8 +254,8 @@ func requireCanonicalDeliveryLifecycleSurface(t *testing.T, ctx context.Context,
 func (fx *deliveryLifecycleFixture) publishDirectEvent(t *testing.T, ctx context.Context) string {
 	t.Helper()
 	eventID := uuid.NewString()
-	ch := fx.bus.Subscribe(fx.agentID)
-	defer fx.bus.Unsubscribe(fx.agentID)
+	ch := runtimebustest.Subscribe(t, fx.bus, fx.agentID)
+	defer runtimebustest.Unsubscribe(fx.bus, fx.agentID)
 
 	evt := eventtest.RunCreatingRootIngress(
 		eventID,

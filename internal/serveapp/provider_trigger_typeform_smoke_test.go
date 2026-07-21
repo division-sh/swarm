@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -50,8 +51,8 @@ func TestTypeformManualLiveHTTPSWebhookSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := bus.Subscribe(agentID, events.EventType(providerEventName))
-	defer bus.Unsubscribe(agentID)
+	ch := runtimebustest.Subscribe(t, bus, agentID, events.EventType(providerEventName))
+	defer runtimebustest.Unsubscribe(bus, agentID)
 
 	responseCapture := newProviderTriggerSmokeResponseCapture()
 	baseURL := startProviderTriggerSmokeServer(t, ctx, listenAddr, bus, sqliteStore, responseCapture, runtimepkg.InboundTarget{

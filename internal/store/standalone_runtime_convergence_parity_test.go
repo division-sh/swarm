@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -50,11 +51,11 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 						event := test.make(uuid.NewString(), time.Date(2026, 7, 19, 20, index, 0, 0, time.UTC))
 						var delivery <-chan *runtimebus.LocalDelivery
 						if routed {
-							delivery = eventBus.Subscribe(agentID, event.Type())
+							delivery = runtimebustest.Subscribe(t, eventBus, agentID, event.Type())
 							if delivery == nil {
 								t.Fatal("Subscribe returned nil")
 							}
-							defer eventBus.Unsubscribe(agentID)
+							defer runtimebustest.Unsubscribe(eventBus, agentID)
 						}
 						if err := eventBus.Publish(ctx, event); err != nil {
 							t.Fatalf("Publish: %v", err)

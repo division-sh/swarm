@@ -99,7 +99,6 @@ search_dimensions:
       - internal/runtime/bus/eventbus.go
       - internal/runtime/bus/eventbus_routing.go
       - internal/runtime/bus/delivery_planner.go
-      - internal/runtime/bus/eventbus_publish_test.go
     canonical_layer: invalid_old_authority
     classified_paths_required: true
   - id: pending_agent_subscription_recovery_authority
@@ -1084,6 +1083,18 @@ seam_families:
       Direct SQL fixtures remain proof consumers only when they assert typed
       semantic recipient identity and do not redefine route authority from row
       counts alone.
+  - id: exact_lifecycle_test_route_adapters
+    layer: test_fixture_semantics
+    classification: valid_consumer
+    paths:
+      - internal/runtime/bus/bustest/routes.go
+      - internal/runtime/bus/test_routes_test.go
+    search_dimensions: [live_agent_subscription_route_authority]
+    notes: >
+      Test-only subscription adapters install and retire exact lifecycle-token
+      route generations. Tests consume and settle the real local carriers;
+      the adapters do not expose production tokenless subscription or
+      retirement authority.
   - id: catalog_and_fixture_route_behavior
     layer: test_fixture_semantics
     classification: valid_consumer

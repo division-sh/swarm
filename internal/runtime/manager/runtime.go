@@ -138,44 +138,34 @@ func (am *AgentManager) Shutdown() error {
 }
 
 func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
-	return am.shutdownWithOptions(opts, false)
-}
-
-func (am *AgentManager) shutdownWithOptions(opts ShutdownOptions, continueReset bool) error {
 	grace, err := ResolveShutdownGrace(opts.Grace)
 	if err != nil {
 		return err
 	}
-	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
-	defer cancelDrain()
+	return waitForRuntimeLifecycleTransition(am.lifecycle.requestShutdownTransition(), grace, "shutdown drain")
+}
 
-	if am.lifecycle.phaseSnapshot() == runtimeLifecycleShuttingDown {
+func waitForRuntimeLifecycleTransition(transition *runtimeLifecycleTransition, grace time.Duration, operation string) error {
+	if transition == nil {
 		return nil
 	}
-	am.lifecycle.beginShutdownAdmission()
-
-	var shutdownErr error
-	_, loopDone := am.lifecycle.cancelShutdownWork()
-	if drainCtx.Err() != nil {
-		shutdownErr = fmt.Errorf("agent manager shutdown drain timed out after %s", grace)
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	timedOut := false
+	select {
+	case <-transition.done:
+	case <-timer.C:
+		timedOut = true
+		<-transition.done
 	}
-	for _, done := range loopDone {
-		select {
-		case <-done:
-		case <-drainCtx.Done():
-			if shutdownErr == nil {
-				shutdownErr = fmt.Errorf("agent manager shutdown drain timed out after %s", grace)
-			}
-			<-done
-		}
+	if !timedOut {
+		return transition.result
 	}
-
-	if continueReset {
-		am.lifecycle.beginReset()
-	} else {
-		am.lifecycle.finishShutdown()
+	timeoutErr := fmt.Errorf("agent manager %s timed out after %s", strings.TrimSpace(operation), grace)
+	if transition.result != nil {
+		return errors.Join(timeoutErr, transition.result)
 	}
-	return shutdownErr
+	return timeoutErr
 }
 
 func (am *AgentManager) Count() int {
@@ -736,6 +726,10 @@ func (am *AgentManager) Run(ctx context.Context) error {
 	am.runMu.Lock()
 	am.authBreakerTripped = false
 	am.runMu.Unlock()
+	if err := am.startShutdownWatcher(runCtx, "manager shutdown watcher"); err != nil {
+		am.lifecycle.abortRunStart()
+		return err
+	}
 
 	for _, agentID := range am.lifecycle.executionIDs() {
 		_, _ = am.replaceExecution(runCtx, agentID, "start", "", nil)
@@ -743,28 +737,23 @@ func (am *AgentManager) Run(ctx context.Context) error {
 
 	retryLease, err := am.beginWork(runCtx, "manager retry loop")
 	if err != nil {
+		transition := am.lifecycle.requestShutdownTransition()
+		grace, _ := ResolveShutdownGrace(DefaultShutdownOptions().Grace)
+		_ = waitForRuntimeLifecycleTransition(transition, grace, "failed-start shutdown drain")
 		return err
 	}
+	retryDone := make(chan struct{})
+	if !am.lifecycle.setRetryDone(retryDone) {
+		_ = retryLease.Done()
+		transition := am.lifecycle.requestShutdownTransition()
+		grace, _ := ResolveShutdownGrace(DefaultShutdownOptions().Grace)
+		_ = waitForRuntimeLifecycleTransition(transition, grace, "failed-start shutdown drain")
+		return errRuntimeShuttingDown
+	}
 	go func() {
+		defer close(retryDone)
 		defer func() { _ = retryLease.Done() }()
 		am.retryLoop(retryLease.Context())
-	}()
-
-	watchLease, err := am.beginWork(runCtx, "manager shutdown watcher")
-	if err != nil {
-		return err
-	}
-	go func() {
-		defer func() { _ = watchLease.Done() }()
-		<-watchLease.Context().Done()
-		initiated := am.lifecycle.beginShutdownAdmission()
-		if initiated {
-			_, done := am.lifecycle.cancelShutdownWork()
-			for _, wait := range done {
-				<-wait
-			}
-			am.lifecycle.finishShutdown()
-		}
 	}()
 	return nil
 }
@@ -790,26 +779,35 @@ func (am *AgentManager) RunAuthoritativeDeliveryOnly(ctx context.Context) error 
 	am.runMu.Lock()
 	am.authBreakerTripped = false
 	am.runMu.Unlock()
+	if err := am.startShutdownWatcher(runCtx, "authoritative manager shutdown watcher"); err != nil {
+		am.lifecycle.abortRunStart()
+		return err
+	}
 
 	for _, agentID := range am.lifecycle.executionIDs() {
 		_, _ = am.replaceExecution(runCtx, agentID, "start", "", nil)
 	}
+	return nil
+}
 
-	watchLease, err := am.beginWork(runCtx, "authoritative manager shutdown watcher")
+func (am *AgentManager) startShutdownWatcher(runCtx context.Context, kind string) error {
+	watchLease, err := am.beginWork(runCtx, kind)
 	if err != nil {
 		return err
 	}
 	go func() {
-		defer func() { _ = watchLease.Done() }()
 		<-watchLease.Context().Done()
-		initiated := am.lifecycle.beginShutdownAdmission()
-		if initiated {
-			_, done := am.lifecycle.cancelShutdownWork()
-			for _, wait := range done {
-				<-wait
-			}
-			am.lifecycle.finishShutdown()
+		transition := am.lifecycle.requestShutdownTransition()
+		if !am.lifecycle.claimTransition(transition, runtimeLifecycleTransitionShutdown) {
+			_ = watchLease.Done()
+			return
 		}
+		_, done := am.lifecycle.cancelShutdownWork()
+		for _, wait := range done {
+			<-wait
+		}
+		settleErr := watchLease.Done()
+		am.lifecycle.completeShutdownTransition(transition, settleErr)
 	}()
 	return nil
 }
@@ -1333,25 +1331,34 @@ func platformResetSourceAuthorized(source string) bool {
 }
 
 func (am *AgentManager) resetRuntimeState(source string) error {
-	if err := am.shutdownWithOptions(DefaultShutdownOptions(), true); err != nil {
-		am.lifecycle.abortReset()
-		return err
+	shutdown, reset := am.lifecycle.requestResetTransition()
+	if shutdown != nil {
+		grace, _ := ResolveShutdownGrace(DefaultShutdownOptions().Grace)
+		if err := waitForRuntimeLifecycleTransition(shutdown, grace, "reset shutdown drain"); err != nil {
+			if am.lifecycle.claimTransition(reset, runtimeLifecycleTransitionReset) {
+				am.lifecycle.completeResetTransition(reset, err, false)
+			} else if reset != nil {
+				<-reset.done
+			}
+			return err
+		}
 	}
-	resetFinalized := false
-	stateCleared := false
-	defer func() {
-		if resetFinalized {
-			return
+	if !am.lifecycle.claimTransition(reset, runtimeLifecycleTransitionReset) {
+		if reset == nil {
+			return nil
 		}
-		if stateCleared {
-			am.lifecycle.finishReset()
-			return
-		}
-		am.lifecycle.abortReset()
-	}()
+		<-reset.done
+		return reset.result
+	}
+	stateCleared, err := am.executeResetRuntimeState(source)
+	am.lifecycle.completeResetTransition(reset, err, stateCleared)
+	return err
+}
+
+func (am *AgentManager) executeResetRuntimeState(source string) (bool, error) {
 	if killer, ok := am.workspaces.(workspace.OrphanKiller); ok && killer != nil {
 		if err := killer.KillOrphanProcesses(am.runtimeContext()); err != nil {
-			return fmt.Errorf("kill workspace orphan processes: %w", err)
+			return false, fmt.Errorf("kill workspace orphan processes: %w", err)
 		}
 	}
 	if resetter, ok := am.sessions.(sessions.Resetter); ok && resetter != nil {
@@ -1379,7 +1386,7 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 	}
 	if am.bus != nil {
 		if err := am.bus.ResetInMemoryState(); err != nil {
-			return fmt.Errorf("reset event bus state: %w", err)
+			return false, fmt.Errorf("reset event bus state: %w", err)
 		}
 	}
 	source = strings.TrimSpace(source)
@@ -1391,11 +1398,11 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 			"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
 		})
 		if err != nil {
-			return fmt.Errorf("marshal platform.reset payload: %w", err)
+			return false, fmt.Errorf("marshal platform.reset payload: %w", err)
 		}
 		platformResetEvent, err = newPlatformStandaloneRuntimeControlEvent(events.EventType("platform.reset"), payload, events.EventEnvelope{}, time.Now())
 		if err != nil {
-			return err
+			return false, err
 		}
 		hasPlatformResetEvent = true
 	}
@@ -1412,7 +1419,7 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 	am.poisonMu.Lock()
 	am.poisonPanicCounts = make(map[string]int)
 	am.poisonMu.Unlock()
-	stateCleared = true
+	stateCleared := true
 	if am.resetRuntimeOwnedState != nil {
 		am.resetRuntimeOwnedState()
 	}
@@ -1424,12 +1431,10 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 	}
 	if hasPlatformResetEvent {
 		if err := am.bus.Publish(am.runtimeContext(), platformResetEvent); err != nil {
-			return fmt.Errorf("publish platform.reset: %w", err)
+			return stateCleared, fmt.Errorf("publish platform.reset: %w", err)
 		}
 	}
-	am.lifecycle.finishReset()
-	resetFinalized = true
-	return nil
+	return stateCleared, nil
 }
 
 func resetOrphanedSessionsDetail(summary sessions.ResetSummary, source string) map[string]any {

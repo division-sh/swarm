@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -302,8 +303,8 @@ func TestEngineDispatcherQueuesWhenPipelineSQLTxActive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := eb.Subscribe("agent-a", events.EventType("custom.emitted"))
-	defer eb.Unsubscribe("agent-a")
+	ch := runtimebustest.Subscribe(t, eb, "agent-a", events.EventType("custom.emitted"))
+	defer runtimebustest.Unsubscribe(eb, "agent-a")
 
 	intent := runtimeengine.EmitIntent{
 		Event: eventtest.RunCreatingRootIngress(
@@ -371,10 +372,10 @@ func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t 
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	originalCh := eb.Subscribe("agent-original", events.EventType("custom.snapshot"))
-	defer eb.Unsubscribe("agent-original")
-	mutatedCh := eb.Subscribe("agent-mutated", events.EventType("custom.snapshot"))
-	defer eb.Unsubscribe("agent-mutated")
+	originalCh := runtimebustest.Subscribe(t, eb, "agent-original", events.EventType("custom.snapshot"))
+	defer runtimebustest.Unsubscribe(eb, "agent-original")
+	mutatedCh := runtimebustest.Subscribe(t, eb, "agent-mutated", events.EventType("custom.snapshot"))
+	defer runtimebustest.Unsubscribe(eb, "agent-mutated")
 
 	payload := []byte(`{"value":"original"}`)
 	targetSet := []events.RouteIdentity{{FlowInstance: "flow-original", EntityID: eventtest.UUID("entity-original")}}
@@ -568,8 +569,8 @@ func TestEngineOutboxExactDuplicateDispatchIsOperationNoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	reviewer := eb.Subscribe("reviewer")
-	lateReviewer := eb.Subscribe("late-reviewer")
+	reviewer := runtimebustest.Subscribe(t, eb, "reviewer")
+	lateReviewer := runtimebustest.Subscribe(t, eb, "late-reviewer")
 	intent := runtimeengine.EmitIntent{
 		Event: eventtest.RunCreatingRootIngress(
 			eventtest.UUID("evt-exact-duplicate-operation"),
@@ -649,7 +650,7 @@ func TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack(t *testin
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
-			reviewer := eb.Subscribe("reviewer")
+			reviewer := runtimebustest.Subscribe(t, eb, "reviewer")
 			intent := runtimeengine.EmitIntent{
 				Event: eventtest.RunCreatingRootIngress(
 					eventtest.UUID("evt-outbox-claim-"+name),
@@ -730,7 +731,7 @@ func TestEngineOutboxPreservesAppendOutcomeForEveryIntentInBatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	reviewer := eb.Subscribe("reviewer")
+	reviewer := runtimebustest.Subscribe(t, eb, "reviewer")
 	intent := runtimeengine.EmitIntent{
 		Event:      eventtest.RunCreatingRootIngress(eventtest.UUID("evt-same-batch"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()),
 		Recipients: []string{"reviewer"},
@@ -776,7 +777,7 @@ func TestEngineOutboxPreexistingExactDuplicateBatchDispatchesZero(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	reviewer := eb.Subscribe("reviewer")
+	reviewer := runtimebustest.Subscribe(t, eb, "reviewer")
 	intent := runtimeengine.EmitIntent{
 		Event:      eventtest.RunCreatingRootIngress(eventtest.UUID("evt-preexisting-batch"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()),
 		Recipients: []string{"reviewer"},
@@ -825,7 +826,7 @@ func TestEngineOutboxConflictingSameIDBatchRollsBackOrderedOutcomes(t *testing.T
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	reviewer := eb.Subscribe("reviewer")
+	reviewer := runtimebustest.Subscribe(t, eb, "reviewer")
 	intent := runtimeengine.EmitIntent{
 		Event:      eventtest.RunCreatingRootIngress(eventtest.UUID("evt-conflicting-batch"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1","value":"first"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()),
 		Recipients: []string{"reviewer"},
@@ -898,7 +899,7 @@ func TestEngineOutboxDistinctIntentBatchDispatchesEachOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	reviewer := eb.Subscribe("reviewer")
+	reviewer := runtimebustest.Subscribe(t, eb, "reviewer")
 	intents := []runtimeengine.EmitIntent{
 		{Event: eventtest.RunCreatingRootIngress(eventtest.UUID("evt-distinct-1"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1","ordinal":1}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()), Recipients: []string{"reviewer"}},
 		{Event: eventtest.RunCreatingRootIngress(eventtest.UUID("evt-distinct-2"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1","ordinal":2}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()), Recipients: []string{"reviewer"}},
@@ -1027,9 +1028,9 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	controlCh := eb.Subscribe("control-plane")
-	matchCh := eb.Subscribe("reviewer-ent-1")
-	otherCh := eb.Subscribe("reviewer-ent-2")
+	controlCh := runtimebustest.Subscribe(t, eb, "control-plane")
+	matchCh := runtimebustest.Subscribe(t, eb, "reviewer-ent-1")
+	otherCh := runtimebustest.Subscribe(t, eb, "reviewer-ent-2")
 
 	intent := runtimeengine.EmitIntent{
 		Event: eventtest.RunCreatingRootIngress(
@@ -1153,7 +1154,7 @@ func TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedMan
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	internalCh := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("custom.emitted"))
-	agentCh := eb.Subscribe("agent-a", events.EventType("custom.emitted"))
+	agentCh := runtimebustest.Subscribe(t, eb, "agent-a", events.EventType("custom.emitted"))
 
 	intent := runtimeengine.EmitIntent{
 		Event: eventtest.RunCreatingRootIngress(
@@ -1226,7 +1227,7 @@ func TestEngineOutboxAndDispatcher_RoutesPendingInternalDeliveriesToRouteInterce
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	internalCh := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("custom.emitted"))
-	defer eb.Unsubscribe("workflow-runtime")
+	defer runtimebustest.Unsubscribe(eb, "workflow-runtime")
 
 	intent := runtimeengine.EmitIntent{
 		Event: eventtest.RunCreatingRootIngress(
@@ -1331,7 +1332,7 @@ func TestEngineDispatcher_DirectIntentUsesExplicitRecipientsWhenManifestWasNotPe
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	recipientCh := eb.Subscribe("agent-a")
+	recipientCh := runtimebustest.Subscribe(t, eb, "agent-a")
 
 	intent := runtimeengine.EmitIntent{
 		Event: eventtest.RunCreatingRootIngress(
@@ -1383,7 +1384,7 @@ func TestEngineDispatcher_TransactionalDirectIntentHonorsEmptyPersistedManifest(
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	filteredCh := eb.Subscribe("reviewer-ent-2")
+	filteredCh := runtimebustest.Subscribe(t, eb, "reviewer-ent-2")
 
 	intent := runtimeengine.EmitIntent{
 		Event: eventtest.RunCreatingRootIngress(
