@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -31,6 +32,7 @@ type selectedConcreteRuntimeStore interface {
 	runtime.RuntimeLogPersistence
 	store.SchemaBootstrapper
 	runtimebus.EventStore
+	runtimedelivery.Store
 	runtimellm.ConversationPersistence
 	runtimemanager.ManagerPersistence
 	runtimepipeline.SchedulePersistence
@@ -129,6 +131,7 @@ func selectedStoreBundleRoleLedger() []selectedStoreBundleRoleEntry {
 		{Name: "SessionRegistry", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "LLM session registry is required for runtime construction"},
 		{Name: "ConversationStore", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "conversation persistence is required for runtime construction"},
 		{Name: "ManagerStore", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "manager/agent/entity schema persistence is required for runtime construction"},
+		{Name: "DeliveryStore", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "executable delivery construction, claim, settlement, and recovery require the selected canonical lifecycle owner"},
 		{Name: "ScheduleStore", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "timer/schedule persistence is required for runtime construction"},
 		{Name: "MailboxMaterializer", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "mailbox_write materialization is required for runtime construction"},
 		{Name: "MailboxStore", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "tool mailbox persistence is required for runtime construction"},

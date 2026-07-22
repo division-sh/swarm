@@ -22,6 +22,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -54,6 +55,7 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 			ctx:           ctx,
 			db:            db,
 			eventStore:    pg,
+			deliveryStore: pg,
 			inboundStore:  pg,
 			workflowStore: workflowStore,
 			runID:         runID,
@@ -80,6 +82,7 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 			ctx:           ctx,
 			db:            sqliteStore.DB,
 			eventStore:    sqliteStore,
+			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
 			workflowStore: workflowStore,
 			runID:         runID,
@@ -95,6 +98,7 @@ type telegramConnectorSupportedSurfaceBackend struct {
 	ctx           context.Context
 	db            *sql.DB
 	eventStore    runtimebus.EventStore
+	deliveryStore runtimedelivery.Store
 	inboundStore  runtimepkg.InboundPersistence
 	workflowStore *runtimepipeline.WorkflowInstanceStore
 	runID         string
@@ -154,7 +158,7 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 	if err != nil {
 		t.Fatalf("%s NewEventBusWithOptions: %v", backend.name, err)
 	}
-	pc = startTelegramConnectorSupportedSurfaceCoordinator(t, backend.ctx, bus, backend.db, backend.workflowStore, source, credentialStore)
+	pc = startTelegramConnectorSupportedSurfaceCoordinator(t, backend.ctx, bus, backend.db, backend.workflowStore, backend.deliveryStore, source, credentialStore)
 
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
@@ -242,7 +246,7 @@ func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend t
 	if err != nil {
 		t.Fatalf("%s missing-token NewEventBusWithOptions: %v", backend.name, err)
 	}
-	pc = startTelegramConnectorSupportedSurfaceCoordinator(t, backend.ctx, bus, backend.db, backend.workflowStore, source, credentialStore)
+	pc = startTelegramConnectorSupportedSurfaceCoordinator(t, backend.ctx, bus, backend.db, backend.workflowStore, backend.deliveryStore, source, credentialStore)
 
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
@@ -416,6 +420,7 @@ func startTelegramConnectorSupportedSurfaceCoordinator(
 	bus *runtimebus.EventBus,
 	db *sql.DB,
 	workflowStore *runtimepipeline.WorkflowInstanceStore,
+	deliveryStore runtimedelivery.Store,
 	source semanticview.Source,
 	credentialStore runtimecredentials.Store,
 ) *runtimepipeline.PipelineCoordinator {
@@ -434,23 +439,10 @@ func startTelegramConnectorSupportedSurfaceCoordinator(
 		WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
 		Module:        module,
 		WorkflowStore: workflowStore,
+		DeliveryStore: deliveryStore,
 		Credentials:   credentialStore,
 	})
-	subscribed := make(chan struct{}, 1)
-	pc.SetTestSubscribeHook(func() {
-		select {
-		case subscribed <- struct{}{}:
-		default:
-		}
-	})
-	runCtx, cancel := context.WithCancel(ctx)
-	t.Cleanup(cancel)
-	go pc.Run(runCtx)
-	select {
-	case <-subscribed:
-	case <-time.After(telegramConnectorSupportedSurfaceTimeout):
-		t.Fatal("pipeline coordinator did not subscribe")
-	}
+	startConfiguredChannelActivityNode(t, ctx, pc, bus, db)
 	return pc
 }
 

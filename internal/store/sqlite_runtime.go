@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -203,69 +204,23 @@ func (s *SQLiteRuntimeStore) appendAdmittedEventTxOutcome(ctx context.Context, t
 	return runtimebus.EventAppendInserted, nil
 }
 
-func (s *SQLiteRuntimeStore) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
-	return s.InsertEventDeliveriesTx(ctx, nil, eventID, agentIDs)
-}
-
-func (s *SQLiteRuntimeStore) InsertEventDeliveriesTx(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string) error {
-	if err := s.requireCurrentSchema(); err != nil {
-		return err
-	}
-	eventID = strings.TrimSpace(eventID)
-	if eventID == "" || len(agentIDs) == 0 {
-		return nil
-	}
-	if tx == nil {
-		return s.runRuntimeMutation(ctx, "sqlite delivery manifest", func(txctx context.Context, tx *sql.Tx) error {
-			return s.InsertEventDeliveriesTx(txctx, tx, eventID, agentIDs)
-		})
-	}
-	var runID sql.NullString
-	if err := chooseRowQueryer(s.DB, tx).QueryRowContext(ctx, `SELECT run_id FROM events WHERE event_id = ?`, eventID).Scan(&runID); err != nil {
-		return fmt.Errorf("load event run for sqlite delivery manifest: %w", err)
-	}
-	for _, agentID := range agentIDs {
-		agentID = strings.TrimSpace(agentID)
-		if agentID == "" {
-			continue
-		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT OR IGNORE INTO event_deliveries (
-				delivery_id, run_id, event_id, subscriber_type, subscriber_id, delivery_target_route, status, created_at
-			)
-			VALUES (?, ?, ?, 'agent', ?, '{}', 'pending', ?)
-		`, uuid.NewString(), sqliteNullString(runID.String), eventID, agentID, time.Now().UTC()); err != nil {
-			return fmt.Errorf("insert sqlite event delivery: %w", err)
-		}
-	}
-	return nil
-}
-
 func (s *SQLiteRuntimeStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return nil, runtimereplayclaim.ErrAuthoritativeRecipientManifestUnavailable
 	}
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT subscriber_id
-		FROM event_deliveries
-		WHERE event_id = ?
-		  AND subscriber_type = 'agent'
-		ORDER BY created_at ASC, subscriber_id ASC
-	`, eventID)
+	snapshots, err := s.deliverySnapshotsForEvent(ctx, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite delivery recipients: %w", err)
 	}
-	defer rows.Close()
 	out := make([]string, 0)
-	for rows.Next() {
-		var recipient string
-		if err := rows.Scan(&recipient); err != nil {
-			return nil, fmt.Errorf("scan sqlite delivery recipient: %w", err)
+	for _, snapshot := range snapshots {
+		if snapshot.Route.SubscriberType == "agent" {
+			out = append(out, strings.TrimSpace(snapshot.SubscriberID))
 		}
-		out = append(out, strings.TrimSpace(recipient))
 	}
-	return out, rows.Err()
+	sort.Strings(out)
+	return out, nil
 }
 
 func (s *SQLiteRuntimeStore) UpsertAgent(ctx context.Context, rec runtimemanager.PersistedAgent) error {

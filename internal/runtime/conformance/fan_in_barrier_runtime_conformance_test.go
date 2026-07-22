@@ -14,6 +14,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -28,6 +29,7 @@ import (
 
 type fanInBarrierConformanceStore interface {
 	runtimebus.EventStore
+	runtimedelivery.Store
 	runtimebus.FlowInstanceRoutePersistence
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 }
@@ -192,6 +194,7 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{
 		WorkflowInstances: workflowStore,
 		WorkOwner:         workOwner,
+		DeliveryStore:     backend,
 	}))
 	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
 	if err != nil {
@@ -211,6 +214,7 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		Module:            module,
 		InstanceActivator: manager.ActivateFlowInstance,
 		WorkflowStore:     workflowStore,
+		DeliveryStore:     backend,
 	})
 	return fanInBarrierRuntime{bus: eventBus, diagnostics: diagnosticBus, workflowStore: workflowStore}
 }

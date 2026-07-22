@@ -295,7 +295,6 @@ func assertSelectedContractForkRuntimeRows(t testing.TB, db *sql.DB, forkRunID, 
 		"events",
 		"entity_state",
 		"event_deliveries",
-		"event_receipts",
 		"selected_contract_bindings",
 		"selected_contract_executions",
 		"selected_contract_route_recoveries",
@@ -313,6 +312,7 @@ func assertSelectedContractForkRuntimeRows(t testing.TB, db *sql.DB, forkRunID, 
 		  AND event_id = $2::uuid
 		  AND subscriber_type = 'agent'
 		  AND subscriber_id = 'test-agent'
+		  AND status = 'delivered'
 	`, forkRunID, forkEventID).Scan(&agentDeliveries); err != nil {
 		t.Fatalf("count fork agent deliveries: %v", err)
 	}
@@ -326,8 +326,8 @@ func assertSelectedContractForkRuntimeRows(t testing.TB, db *sql.DB, forkRunID, 
 	`, forkEventID).Scan(&agentReceipts); err != nil {
 		t.Fatalf("count fork agent receipts: %v", err)
 	}
-	if agentDeliveries != 1 || agentReceipts != 1 {
-		t.Fatalf("fork runtime rows deliveries=%d receipts=%d, want 1/1", agentDeliveries, agentReceipts)
+	if agentDeliveries != 1 || agentReceipts != 0 {
+		t.Fatalf("fork runtime rows delivered_agent_obligations=%d agent_platform_receipts=%d, want 1/0", agentDeliveries, agentReceipts)
 	}
 
 	var typedRuntimeDiagnostics int

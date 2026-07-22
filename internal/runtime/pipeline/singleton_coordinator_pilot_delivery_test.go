@@ -45,8 +45,9 @@ func TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback
 	)
 	seedSingletonCoordinatorPilotEvent(t, db, ctx, evt)
 	seedSingletonCoordinatorPilotNodeDelivery(t, db, ctx, evt.ID(), singletoncoordinatorpilot.NodeID, target)
+	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: singletoncoordinatorpilot.NodeID, Target: target}
 
-	handled, err := pc.dispatchWorkflowNodeEventResult(ctx, evt)
+	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
 	if err != nil {
 		t.Fatalf("dispatchWorkflowNodeEventResult: %v", err)
 	}
@@ -131,6 +132,7 @@ func newSingletonCoordinatorPilotPipelineCoordinator(t *testing.T, db *sql.DB, b
 		t.Fatalf("LoadWorkflowNodes: %v", err)
 	}
 	workflowStore := NewWorkflowInstanceStore(db)
+	deliveryStore := newPipelineTestDeliveryOwnerForDB(t, db)
 	pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{
 			bundle:         bundle,
@@ -140,6 +142,7 @@ func newSingletonCoordinatorPilotPipelineCoordinator(t *testing.T, db *sql.DB, b
 			actionRegistry: NewContractActionRegistry(source),
 		},
 		WorkflowStore: workflowStore,
+		DeliveryStore: deliveryStore,
 	})
 	return pc, workflowStore
 }
@@ -174,19 +177,7 @@ func seedSingletonCoordinatorPilotEvent(t *testing.T, db *sql.DB, ctx context.Co
 
 func seedSingletonCoordinatorPilotNodeDelivery(t *testing.T, db *sql.DB, ctx context.Context, eventID, nodeID string, target events.RouteIdentity) {
 	t.Helper()
-	targetRaw, err := json.Marshal(target.Normalized())
-	if err != nil {
-		t.Fatalf("marshal delivery target route: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, delivery_target_route, status, retry_count, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'node', $3, $4::jsonb, 'pending', 0, now()
-		)
-	`, testPipelineRunID, eventID, nodeID, string(targetRaw)); err != nil {
-		t.Fatalf("seed singleton coordinator pilot node delivery: %v", err)
-	}
+	seedPipelineTestNodeDelivery(t, ctx, db, eventID, nodeID, target)
 }
 
 func assertSingletonCoordinatorPilotDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, want string) {

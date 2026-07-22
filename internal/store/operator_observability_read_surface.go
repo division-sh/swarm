@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
@@ -254,7 +255,7 @@ func (r *OperatorObservabilityReadSurface) ListOperatorEvents(ctx context.Contex
 		return OperatorEventListResult{}, err
 	}
 	opts = defaultOperatorEventListOptions(opts)
-	args := make([]any, 0, 16)
+	args := make([]any, 0, 12)
 	where := []string{"TRUE"}
 	add := func(value any) int {
 		args = append(args, value)
@@ -276,32 +277,6 @@ func (r *OperatorObservabilityReadSurface) ListOperatorEvents(ctx context.Contex
 		n := add(opts.Source)
 		where = append(where, fmt.Sprintf("COALESCE(e.produced_by, '') = $%d", n))
 	}
-	deliveryWhere := make([]string, 0, 3)
-	if opts.Filter.DeliveryStatus != "" {
-		n := add(opts.Filter.DeliveryStatus)
-		deliveryWhere = append(deliveryWhere, fmt.Sprintf("d.status = $%d", n))
-	}
-	if opts.Filter.SubscriberID != "" {
-		n := add(opts.Filter.SubscriberID)
-		deliveryWhere = append(deliveryWhere, fmt.Sprintf("d.subscriber_id = $%d", n))
-	}
-	if opts.Filter.SubscriberType != "" {
-		n := add(opts.Filter.SubscriberType)
-		deliveryWhere = append(deliveryWhere, fmt.Sprintf("d.subscriber_type = $%d", n))
-	}
-	if len(deliveryWhere) > 0 {
-		where = append(where, fmt.Sprintf(
-			"EXISTS (SELECT 1 FROM event_deliveries d WHERE d.event_id = e.event_id AND %s)",
-			strings.Join(deliveryWhere, " AND "),
-		))
-	}
-	if opts.Filter.ReasonCode != "" {
-		n := add(opts.Filter.ReasonCode)
-		where = append(where, fmt.Sprintf(`(
-			EXISTS (SELECT 1 FROM event_deliveries d WHERE d.event_id = e.event_id AND d.reason_code = $%d)
-			OR EXISTS (SELECT 1 FROM dead_letters dl WHERE dl.original_event_id = e.event_id AND (dl.failure->>'class' = $%d OR dl.failure->'detail'->>'code' = $%d))
-		)`, n, n, n))
-	}
 	if opts.Filter.HasDeadLetter != nil {
 		exists := "EXISTS"
 		if !*opts.Filter.HasDeadLetter {
@@ -320,6 +295,8 @@ func (r *OperatorObservabilityReadSurface) ListOperatorEvents(ctx context.Contex
 		n := add(opts.Until.UTC())
 		where = append(where, fmt.Sprintf("e.created_at <= $%d", n))
 	}
+	var scanCreatedAt time.Time
+	var scanEventID string
 	if opts.Cursor != "" {
 		cursor, err := decodeObservabilityPositionCursor(opts.Cursor, "event.list")
 		if err != nil {
@@ -332,48 +309,67 @@ func (r *OperatorObservabilityReadSurface) ListOperatorEvents(ctx context.Contex
 		if err != nil || strings.TrimSpace(cursor.ID) == "" {
 			return OperatorEventListResult{}, ErrInvalidObservabilityCursor
 		}
-		nTime := add(createdAt.UTC())
-		nID := add(cursor.ID)
-		if opts.Order == "asc" {
-			where = append(where, fmt.Sprintf("(e.created_at > $%d OR (e.created_at = $%d AND e.event_id::text > $%d))", nTime, nTime, nID))
-		} else {
-			where = append(where, fmt.Sprintf("(e.created_at < $%d OR (e.created_at = $%d AND e.event_id::text < $%d))", nTime, nTime, nID))
-		}
+		scanCreatedAt = createdAt.UTC()
+		scanEventID = cursor.ID
 	}
-	limitArg := add(opts.Limit + 1)
 	orderSQL := "DESC"
 	if opts.Order == "asc" {
 		orderSQL = "ASC"
 	}
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT e.event_id::text
-		FROM events e
-		WHERE `+strings.Join(where, " AND ")+fmt.Sprintf(`
-		ORDER BY e.created_at %s, e.event_id::text %s
-		LIMIT $%d
-	`, orderSQL, orderSQL, limitArg), args...)
-	if err != nil {
-		return OperatorEventListResult{}, fmt.Errorf("list operator events: %w", err)
-	}
-	defer rows.Close()
-	ids := []string{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return OperatorEventListResult{}, fmt.Errorf("scan operator event id: %w", err)
+	events := make([]OperatorEventFull, 0, opts.Limit+1)
+	for len(events) <= opts.Limit {
+		pageArgs := append([]any(nil), args...)
+		pageWhere := append([]string(nil), where...)
+		if scanEventID != "" {
+			pageArgs = append(pageArgs, scanCreatedAt, scanEventID)
+			timeArg, idArg := len(pageArgs)-1, len(pageArgs)
+			comparison := "<"
+			if opts.Order == "asc" {
+				comparison = ">"
+			}
+			pageWhere = append(pageWhere, fmt.Sprintf("(e.created_at %s $%d OR (e.created_at = $%d AND e.event_id::text %s $%d))", comparison, timeArg, timeArg, comparison, idArg))
 		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		return OperatorEventListResult{}, fmt.Errorf("read operator event ids: %w", err)
-	}
-	events := make([]OperatorEventFull, 0, minInt(len(ids), opts.Limit))
-	for _, id := range ids {
-		event, err := r.LoadOperatorEvent(ctx, id)
+		pageArgs = append(pageArgs, opts.Limit+1)
+		rows, err := r.db.QueryContext(ctx, `
+			SELECT e.event_id::text, e.created_at
+			FROM events e
+			WHERE `+strings.Join(pageWhere, " AND ")+fmt.Sprintf(`
+			ORDER BY e.created_at %s, e.event_id::text %s
+			LIMIT $%d
+		`, orderSQL, orderSQL, len(pageArgs)), pageArgs...)
 		if err != nil {
-			return OperatorEventListResult{}, err
+			return OperatorEventListResult{}, fmt.Errorf("list operator events: %w", err)
 		}
-		events = append(events, event)
+		candidates := 0
+		for rows.Next() {
+			var id string
+			var createdAt time.Time
+			if err := rows.Scan(&id, &createdAt); err != nil {
+				rows.Close()
+				return OperatorEventListResult{}, fmt.Errorf("scan operator event id: %w", err)
+			}
+			candidates++
+			scanEventID, scanCreatedAt = id, createdAt.UTC()
+			event, err := r.LoadOperatorEvent(ctx, id)
+			if err != nil {
+				rows.Close()
+				return OperatorEventListResult{}, err
+			}
+			if operatorEventMatchesListFilter(event, opts.Filter) {
+				events = append(events, event)
+				if len(events) > opts.Limit {
+					break
+				}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return OperatorEventListResult{}, fmt.Errorf("read operator event ids: %w", err)
+		}
+		rows.Close()
+		if candidates < opts.Limit+1 || len(events) > opts.Limit {
+			break
+		}
 	}
 	nextCursor := ""
 	if len(events) > opts.Limit {
@@ -390,6 +386,37 @@ func (r *OperatorObservabilityReadSurface) ListOperatorEvents(ctx context.Contex
 		events = []OperatorEventFull{}
 	}
 	return OperatorEventListResult{Events: events, NextCursor: nextCursor}, nil
+}
+
+func operatorEventMatchesListFilter(event OperatorEventFull, filter OperatorEventListFilter) bool {
+	if filter.DeliveryStatus != "" || filter.SubscriberID != "" || filter.SubscriberType != "" {
+		matched := false
+		for _, delivery := range event.Deliveries {
+			if (filter.DeliveryStatus == "" || delivery.Status == filter.DeliveryStatus) &&
+				(filter.SubscriberID == "" || delivery.SubscriberID == filter.SubscriberID) &&
+				(filter.SubscriberType == "" || delivery.SubscriberType == filter.SubscriberType) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	if filter.ReasonCode != "" {
+		for _, delivery := range event.Deliveries {
+			if delivery.ReasonCode == filter.ReasonCode {
+				return true
+			}
+		}
+		for _, deadLetter := range event.DeadLetters {
+			if string(deadLetter.Failure.Class) == filter.ReasonCode || deadLetter.Failure.Detail.Code == filter.ReasonCode {
+				return true
+			}
+		}
+		return false
+	}
+	return true
 }
 
 func (r *OperatorObservabilityReadSurface) LoadOperatorEvent(ctx context.Context, eventID string) (OperatorEventFull, error) {
@@ -439,50 +466,20 @@ func (r *OperatorObservabilityReadSurface) LoadOperatorEvent(ctx context.Context
 }
 
 func (r *OperatorObservabilityReadSurface) loadOperatorEventDeliveries(ctx context.Context, eventID string) ([]OperatorEventDelivery, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT
-			d.delivery_id::text,
-			COALESCE(d.subscriber_type, ''),
-			COALESCE(d.subscriber_id, ''),
-			COALESCE(d.active_session_id::text, ''),
-				COALESCE(d.status, ''),
-				COALESCE(d.reason_code, ''),
-				COALESCE(d.failure, 'null'::jsonb),
-				COALESCE(d.retry_count, 0),
-				d.created_at,
-				d.started_at,
-				d.delivered_at
-			FROM event_deliveries d
-		WHERE d.event_id::text = $1
-		  AND NOT (
-			d.subscriber_type = 'node'
-			AND d.subscriber_id = '__runtime_replay_scope__'
-		  )
-		ORDER BY d.created_at ASC, d.delivery_id::text ASC
-	`, eventID)
+	reader, ok := r.owner.(interface {
+		deliverySnapshotsForEvent(context.Context, string) ([]runtimedelivery.Snapshot, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("operator event deliveries require canonical delivery snapshots")
+	}
+	snapshots, err := reader.deliverySnapshotsForEvent(ctx, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("load operator event deliveries: %w", err)
 	}
-	defer rows.Close()
-	out := []OperatorEventDelivery{}
-	for rows.Next() {
-		var item OperatorEventDelivery
-		var rawFailure []byte
-		var createdAt, startedAt, finishedAt sql.NullTime
-		if err := rows.Scan(&item.DeliveryID, &item.SubscriberType, &item.SubscriberID, &item.SessionID, &item.Status, &item.ReasonCode, &rawFailure, &item.RetryCount, &createdAt, &startedAt, &finishedAt); err != nil {
-			return nil, fmt.Errorf("scan operator event delivery: %w", err)
-		}
-		item.Failure, err = decodeStoredFailure(rawFailure)
-		if err != nil {
-			return nil, fmt.Errorf("decode operator event delivery failure: %w", err)
-		}
-		item.CreatedAt = nullTimePtr(createdAt)
-		item.StartedAt = nullTimePtr(startedAt)
-		item.FinishedAt = nullTimePtr(finishedAt)
+	out := make([]OperatorEventDelivery, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		item := operatorEventDeliveryFromSnapshot(snapshot)
 		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read operator event deliveries: %w", err)
 	}
 	return out, nil
 }
@@ -503,8 +500,6 @@ func EnrichOperatorDeliveryFailureEvidence(deliveries []OperatorEventDelivery, d
 	for _, delivery := range deliveries {
 		delivery.Status = strings.TrimSpace(delivery.Status)
 		delivery.ReasonCode = strings.TrimSpace(delivery.ReasonCode)
-		delivery.RetryEligible = OperatorDeliveryRetryEligible(delivery.Status)
-		delivery.Terminal = OperatorDeliveryTerminal(delivery.Status)
 		if delivery.Status == "dead_letter" && len(deadLetters) > 0 {
 			delivery.DeadLetters = append([]OperatorDeadLetterRecord(nil), deadLetters...)
 		}
@@ -516,17 +511,27 @@ func EnrichOperatorDeliveryFailureEvidence(deliveries []OperatorEventDelivery, d
 	return out
 }
 
-func OperatorDeliveryRetryEligible(status string) bool {
-	return strings.TrimSpace(status) == "failed"
-}
-
-func OperatorDeliveryTerminal(status string) bool {
-	switch strings.TrimSpace(status) {
-	case "delivered", "dead_letter":
-		return true
-	default:
-		return false
+func operatorEventDeliveryFromSnapshot(snapshot runtimedelivery.Snapshot) OperatorEventDelivery {
+	item := OperatorEventDelivery{
+		DeliveryID: snapshot.DeliveryID, SubscriberType: string(snapshot.SubscriberClass),
+		SubscriberID: snapshot.SubscriberID, SessionID: snapshot.ActiveSessionID,
+		Status: string(snapshot.Status), ReasonCode: snapshot.ReasonCode,
+		Failure: runtimefailures.CloneEnvelope(snapshot.Failure), RetryCount: snapshot.RetryCount,
+		RetryEligible: snapshot.RetryEligible, Terminal: snapshot.Terminal(),
 	}
+	if !snapshot.CreatedAt.IsZero() {
+		created := snapshot.CreatedAt
+		item.CreatedAt = &created
+	}
+	if !snapshot.StartedAt.IsZero() {
+		started := snapshot.StartedAt
+		item.StartedAt = &started
+	}
+	if !snapshot.SettledAt.IsZero() {
+		settled := snapshot.SettledAt
+		item.FinishedAt = &settled
+	}
+	return item
 }
 
 func nullTimePtr(value sql.NullTime) *time.Time {

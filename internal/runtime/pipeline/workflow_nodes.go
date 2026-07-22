@@ -14,7 +14,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -53,40 +52,6 @@ func workflowNodesSnapshot(nodes []WorkflowNode) []WorkflowNode {
 		out = append(out, nodeCopy)
 	}
 	return out
-}
-
-func workflowSubscriptions(nodes []WorkflowNode) []events.EventType {
-	seen := make(map[events.EventType]struct{})
-	out := make([]events.EventType, 0, 32)
-	for _, node := range nodes {
-		for _, evt := range node.Subscriptions {
-			if _, ok := seen[evt]; ok {
-				continue
-			}
-			seen[evt] = struct{}{}
-			out = append(out, evt)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return strings.Compare(string(out[i]), string(out[j])) < 0 })
-	return out
-}
-
-func workflowRuntimeSubscriptions(nodes []WorkflowNode) []events.EventType {
-	subscriptions := workflowSubscriptions(nodes)
-	for _, required := range []events.EventType{activityRequestEventType, workflowGateDecisionEventType, decisionCardDeferredEventType, decisionCardExpiredEventType} {
-		found := false
-		for _, eventType := range subscriptions {
-			if eventType == required {
-				found = true
-				break
-			}
-		}
-		if !found {
-			subscriptions = append(subscriptions, required)
-		}
-	}
-	sort.Slice(subscriptions, func(i, j int) bool { return strings.Compare(string(subscriptions[i]), string(subscriptions[j])) < 0 })
-	return subscriptions
 }
 
 func workflowNodeSubscriptions(nodes []WorkflowNode, nodeID string) []events.EventType {
@@ -795,27 +760,11 @@ func deriveWorkflowEventPolicy(source semanticview.Source, eventType string, dri
 	}
 }
 
-func (pc *PipelineCoordinator) BackgroundNodes(bus systemNodeBus, db *sql.DB) []BackgroundNode {
-	return pc.BackgroundNodesWithReceiptStore(bus, db, pc.workflowStore)
-}
-
-func (pc *PipelineCoordinator) BackgroundNodesWithReceiptStore(bus systemNodeBus, db *sql.DB, receiptStore SystemNodeReceiptPersistence) []BackgroundNode {
+func (pc *PipelineCoordinator) BackgroundNodes(bus systemNodeBus, _ *sql.DB) []BackgroundNode {
 	if pc == nil || bus == nil {
 		return nil
 	}
-	retryBase := workflowHandlerRetryBase(pc.SemanticSource())
 	out := make([]BackgroundNode, 0, 1)
-	for _, node := range pc.WorkflowNodes() {
-		if strings.TrimSpace(node.ExecutionType) != runtimecontracts.SystemNodeExecutionType {
-			continue
-		}
-		if executor := pc.backgroundWorkflowExecutor(strings.TrimSpace(node.ID)); executor != nil {
-			if bg := newBackgroundWorkflowNodeWithReceiptStoreAndRetryBase(executor, bus, db, receiptStore, retryBase); bg != nil {
-				bg.SetTestLifecycleProbe(pc.testLifecycleProbe)
-				out = append(out, bg)
-			}
-		}
-	}
 	out = append(out, newActivityBackgroundNode(pc, bus))
 	return out
 }
@@ -941,7 +890,7 @@ func (pc *PipelineCoordinator) workflowNodeConnectedInputFailureApplies(ctx cont
 	if _, ok := workflowNodeDeliveryRoute(ctx); ok {
 		return true, nil
 	}
-	return pc.workflowNodeDeliveryAuthority(ctx, nodeID, evt)
+	return false, nil
 }
 
 func (pc *PipelineCoordinator) dispatchWorkflowNodeEvent(ctx context.Context, evt events.Event) bool {
@@ -965,7 +914,6 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResult(ctx context.Conte
 			return handledAny || handled, err
 		}
 		if handled {
-			pc.markWorkflowNodeProcessed(ctx, nodeID, evt)
 			handledAny = true
 		}
 	}
@@ -983,228 +931,6 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryRouteMatches(ctx context.Cont
 	return pc.workflowNodeMatchesDeliveryTarget(nodeID, eventTarget)
 }
 
-func (pc *PipelineCoordinator) markWorkflowNodeProcessed(ctx context.Context, nodeID string, evt events.Event) {
-	if pc == nil || pc.workflowStore == nil {
-		return
-	}
-	nodeID = strings.TrimSpace(nodeID)
-	eventID := strings.TrimSpace(evt.ID())
-	if nodeID == "" || eventID == "" {
-		return
-	}
-	if !pc.eventReceiptsAvailable(ctx) {
-		return
-	}
-	target := systemNodeDeliveryTarget(evt)
-	sideEffects := systemNodeProcessedReceiptSideEffects(nodeID, eventID, target)
-	var err error
-	if !target.Empty() {
-		err = pc.workflowStore.MarkSystemNodeProcessedAndSettleDeliveryForTarget(ctx, nodeID, eventID, target, sideEffects)
-	} else {
-		err = pc.workflowStore.MarkSystemNodeProcessedAndSettleDelivery(ctx, nodeID, eventID, sideEffects)
-	}
-	if err != nil {
-		if logger, ok := pc.bus.(systemNodeRuntimeLogger); ok && logger != nil {
-			logger.LogRuntime(ctx, RuntimeLogEntry{
-				Level:     "error",
-				Message:   "Marking the workflow node event as processed failed",
-				Component: nodeID,
-				Action:    "mark_processed_failed",
-				EventID:   eventID,
-				EventType: strings.TrimSpace(string(evt.Type())),
-				EntityID:  workflowEventEntityID(evt),
-				Failure:   pipelineDependencyFailure(err, "mark_processed_failed", nodeID, "settle_delivery"),
-			})
-		}
-		return
-	}
-	pc.convergeWorkflowNodeNormalRunCompletion(ctx, nodeID, evt)
-	pc.notifyTestLifecycleDeliveryStatus(ctx, nodeID, evt, "delivered")
-}
-
-func (pc *PipelineCoordinator) markWorkflowNodeDeliveryInProgress(ctx context.Context, nodeID string, evt events.Event) bool {
-	if pc == nil || pc.workflowStore == nil {
-		return false
-	}
-	nodeID = strings.TrimSpace(nodeID)
-	eventID := strings.TrimSpace(evt.ID())
-	if nodeID == "" || eventID == "" {
-		return false
-	}
-	if !pc.eventReceiptsAvailable(ctx) {
-		return false
-	}
-	if target := systemNodeDeliveryTarget(evt); !target.Empty() {
-		if err := pc.workflowStore.MarkSystemNodeDeliveryInProgressForTarget(ctx, nodeID, eventID, target, DefaultSystemNodeRetryLimit); err != nil {
-			pc.logWorkflowNodeDeliveryTransitionError(ctx, nodeID, evt, "mark_delivery_in_progress_failed", "Marking the targeted workflow node delivery in progress failed", err)
-			return false
-		}
-		pc.notifyTestLifecycleDeliveryStatus(ctx, nodeID, evt, "in_progress")
-		return true
-	}
-	if err := pc.workflowStore.MarkSystemNodeDeliveryInProgress(ctx, nodeID, eventID, DefaultSystemNodeRetryLimit); err != nil {
-		pc.logWorkflowNodeDeliveryTransitionError(ctx, nodeID, evt, "mark_delivery_in_progress_failed", "Marking the workflow node delivery in progress failed", err)
-		return false
-	}
-	pc.notifyTestLifecycleDeliveryStatus(ctx, nodeID, evt, "in_progress")
-	return true
-}
-
-func (pc *PipelineCoordinator) markWorkflowNodeDeliveryDeadLetter(ctx context.Context, nodeID string, evt events.Event, reasonCode string, failure *runtimefailures.Envelope, retryCount int) {
-	if pc == nil || pc.workflowStore == nil {
-		return
-	}
-	nodeID = strings.TrimSpace(nodeID)
-	eventID := strings.TrimSpace(evt.ID())
-	if nodeID == "" || eventID == "" {
-		return
-	}
-	if !pc.eventReceiptsAvailable(ctx) {
-		return
-	}
-	target := systemNodeDeliveryTarget(evt)
-	sideEffects := systemNodeDeadLetterReceiptSideEffects(nodeID, eventID, reasonCode, retryCount, target)
-	var err error
-	if !target.Empty() {
-		err = pc.workflowStore.MarkSystemNodeDeliveryDeadLetterForTarget(ctx, nodeID, eventID, target, reasonCode, failure, retryCount, sideEffects)
-	} else {
-		err = pc.workflowStore.MarkSystemNodeDeliveryDeadLetter(ctx, nodeID, eventID, reasonCode, failure, retryCount, sideEffects)
-	}
-	if err != nil {
-		pc.logWorkflowNodeDeliveryTransitionError(ctx, nodeID, evt, "mark_delivery_dead_letter_failed", "Marking the workflow node delivery as dead_letter failed", err)
-		return
-	}
-	pc.convergeWorkflowNodeNormalRunCompletion(ctx, nodeID, evt)
-	pc.notifyTestLifecycleDeliveryStatus(ctx, nodeID, evt, "dead_letter")
-}
-
-func (pc *PipelineCoordinator) logWorkflowNodeDeliveryTransitionError(ctx context.Context, nodeID string, evt events.Event, action, message string, err error) {
-	if pc == nil || err == nil {
-		return
-	}
-	if logger, ok := pc.bus.(systemNodeRuntimeLogger); ok && logger != nil {
-		logger.LogRuntime(ctx, RuntimeLogEntry{
-			Level:     "error",
-			Message:   message,
-			Component: nodeID,
-			Action:    action,
-			EventID:   strings.TrimSpace(evt.ID()),
-			EventType: strings.TrimSpace(string(evt.Type())),
-			EntityID:  workflowEventEntityID(evt),
-			Failure:   pipelineDependencyFailure(err, action, nodeID, "delivery_transition"),
-		})
-	}
-}
-
-func (pc *PipelineCoordinator) workflowNodeDeliveryAuthorized(ctx context.Context, nodeID string, evt events.Event) bool {
-	if pc == nil {
-		return false
-	}
-	nodeID = strings.TrimSpace(nodeID)
-	eventID := strings.TrimSpace(evt.ID())
-	target := systemNodeDeliveryTarget(evt)
-	ok, err := pc.workflowNodeDeliveryAuthority(ctx, nodeID, evt)
-	if !target.Empty() {
-		if err != nil {
-			if logger, logOK := pc.bus.(systemNodeRuntimeLogger); logOK && logger != nil {
-				logger.LogRuntime(ctx, RuntimeLogEntry{
-					Level:     "error",
-					Message:   "Checking targeted workflow node delivery authority failed",
-					Component: nodeID,
-					Action:    "delivery_authority_check_failed",
-					EventID:   eventID,
-					EventType: strings.TrimSpace(string(evt.Type())),
-					EntityID:  workflowEventEntityID(evt),
-					Failure:   pipelineDependencyFailure(err, "delivery_authority_check_failed", nodeID, "check_target_delivery_authority"),
-				})
-			}
-			return false
-		}
-		if !ok {
-			if logger, logOK := pc.bus.(systemNodeRuntimeLogger); logOK && logger != nil {
-				logger.LogRuntime(ctx, RuntimeLogEntry{
-					Level:     "error",
-					Message:   "Targeted workflow node delivery authority is missing; handler execution skipped",
-					Component: nodeID,
-					Action:    "delivery_authority_missing",
-					EventID:   eventID,
-					EventType: strings.TrimSpace(string(evt.Type())),
-					EntityID:  workflowEventEntityID(evt),
-				})
-			}
-		}
-		return ok
-	}
-	if err != nil {
-		if logger, logOK := pc.bus.(systemNodeRuntimeLogger); logOK && logger != nil {
-			logger.LogRuntime(ctx, RuntimeLogEntry{
-				Level:     "error",
-				Message:   "Checking workflow node delivery authority failed",
-				Component: nodeID,
-				Action:    "delivery_authority_check_failed",
-				EventID:   eventID,
-				EventType: strings.TrimSpace(string(evt.Type())),
-				EntityID:  workflowEventEntityID(evt),
-				Failure:   pipelineDependencyFailure(err, "delivery_authority_check_failed", nodeID, "check_delivery_authority"),
-			})
-		}
-		return false
-	}
-	if !ok {
-		if logger, logOK := pc.bus.(systemNodeRuntimeLogger); logOK && logger != nil {
-			logger.LogRuntime(ctx, RuntimeLogEntry{
-				Level:     "error",
-				Message:   "Workflow node delivery authority is missing; handler execution skipped",
-				Component: nodeID,
-				Action:    "delivery_authority_missing",
-				EventID:   eventID,
-				EventType: strings.TrimSpace(string(evt.Type())),
-				EntityID:  workflowEventEntityID(evt),
-			})
-		}
-	}
-	return ok
-}
-
-func (pc *PipelineCoordinator) workflowNodeDeliveryAuthority(ctx context.Context, nodeID string, evt events.Event) (bool, error) {
-	if pc == nil || !pc.eventReceiptsAvailable(ctx) || pc.workflowStore == nil {
-		return false, nil
-	}
-	nodeID = strings.TrimSpace(nodeID)
-	eventID := strings.TrimSpace(evt.ID())
-	if nodeID == "" || eventID == "" {
-		return false, nil
-	}
-	if target := systemNodeDeliveryTarget(evt); !target.Empty() {
-		return pc.workflowStore.SystemNodeDeliveryAuthorizedForTarget(ctx, nodeID, eventID, target, DefaultSystemNodeRetryLimit)
-	}
-	return pc.workflowStore.SystemNodeDeliveryAuthorized(ctx, nodeID, eventID, DefaultSystemNodeRetryLimit)
-}
-
-func (pc *PipelineCoordinator) workflowNodeEventProcessed(ctx context.Context, nodeID string, evt events.Event) bool {
-	if pc == nil || pc.workflowStore == nil {
-		return false
-	}
-	nodeID = strings.TrimSpace(nodeID)
-	eventID := strings.TrimSpace(evt.ID())
-	if nodeID == "" || eventID == "" {
-		return false
-	}
-	if !pc.eventReceiptsAvailable(ctx) {
-		return false
-	}
-	if target := systemNodeDeliveryTarget(evt); !target.Empty() {
-		ok, err := pc.workflowStore.SystemNodeProcessedForTarget(ctx, nodeID, eventID, target)
-		return err == nil && ok
-	}
-	ok, err := pc.workflowStore.SystemNodeProcessed(ctx, nodeID, eventID)
-	return err == nil && ok
-}
-
-func (pc *PipelineCoordinator) eventReceiptsAvailable(ctx context.Context) bool {
-	return pc != nil && pc.workflowStore != nil
-}
-
 func (pc *PipelineCoordinator) convergeWorkflowNodeNormalRunCompletion(ctx context.Context, nodeID string, evt events.Event) {
 	if pc == nil || pc.bus == nil {
 		return
@@ -1213,21 +939,21 @@ func (pc *PipelineCoordinator) convergeWorkflowNodeNormalRunCompletion(ctx conte
 	if eventID == "" {
 		return
 	}
-	converger, ok := pc.bus.(systemNodeNormalRunCompletionConverger)
+	converger, ok := pc.bus.(systemNodeDeliveryRunCompletionConverger)
 	if !ok || converger == nil {
 		return
 	}
-	if err := converger.ConvergeNormalRunCompletionForEvent(ctx, eventID); err != nil {
+	if err := converger.ConvergeDeliveryRunCompletion(ctx, evt); err != nil {
 		if logger, ok := pc.bus.(systemNodeRuntimeLogger); ok && logger != nil {
 			logger.LogRuntime(ctx, RuntimeLogEntry{
 				Level:     "error",
 				Message:   "Converging normal run completion after workflow node receipt failed",
 				Component: nodeID,
-				Action:    "normal_run_completion_failed",
+				Action:    "delivery_run_completion_failed",
 				EventID:   eventID,
 				EventType: strings.TrimSpace(string(evt.Type())),
 				EntityID:  workflowEventEntityID(evt),
-				Failure:   pipelineDependencyFailure(err, "normal_run_completion_failed", nodeID, "converge_run_completion"),
+				Failure:   pipelineDependencyFailure(err, "delivery_run_completion_failed", nodeID, "converge_delivery_run_completion"),
 			})
 		}
 	}

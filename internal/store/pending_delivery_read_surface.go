@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -10,10 +9,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/lib/pq"
+	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
+	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
 )
 
-const canonicalPendingDeliveryBackoff = time.Minute
 const pendingAgentDeliveryCursorKind = "agent.diagnose.queue"
 
 const DefaultPendingAgentDeliveryDetailLimit = 50
@@ -48,14 +47,12 @@ type PendingAgentDeliveryDetail struct {
 }
 
 type pendingAgentDeliveryRecord struct {
-	AgentID             string
-	Event               events.Event
-	DeliveryFound       bool
-	DeliveryStatus      string
-	DeliveryRetryCount  int
-	DeliveryCreatedAt   time.Time
-	DeliveryDeliveredAt sql.NullTime
-	ReceiptFound        bool
+	AgentID            string
+	Event              events.Event
+	DeliveryFound      bool
+	DeliveryStatus     string
+	DeliveryRetryCount int
+	DeliveryCreatedAt  time.Time
 }
 
 type pendingAgentDeliveryCursor struct {
@@ -70,55 +67,8 @@ type pendingAgentDeliveryCursorPosition struct {
 }
 
 func (r pendingAgentDeliveryRecord) isPending(now time.Time) bool {
-	if r.DeliveryFound {
-		switch strings.TrimSpace(strings.ToLower(r.DeliveryStatus)) {
-		case "pending", "in_progress":
-			return true
-		case "failed":
-			if r.DeliveryRetryCount >= 2 {
-				return false
-			}
-			attemptAt := r.DeliveryCreatedAt
-			if r.DeliveryDeliveredAt.Valid {
-				attemptAt = r.DeliveryDeliveredAt.Time
-			}
-			return !attemptAt.After(now.Add(-canonicalPendingDeliveryBackoff))
-		default:
-			return false
-		}
-	}
-	return !r.ReceiptFound
-}
-
-// Pending truth is delivery-backed. Receipts can only confirm that a delivery-backed
-// attempt already completed; they must not become a substitute ownership source.
-func canonicalPendingDeliveryPredicateSQL(deliveryAlias, receiptAlias string) string {
-	return fmt.Sprintf(`(
-		(
-			%s.delivery_id IS NOT NULL
-			AND (
-				%s.status IN ('pending', 'in_progress')
-				OR (
-					%s.status = 'failed'
-					AND COALESCE(%s.retry_count, 0) < 2
-					AND COALESCE(%s.delivered_at, %s.created_at) <= now() - interval '1 minute'
-				)
-			)
-		)
-		OR (
-			%s.delivery_id IS NULL
-			AND %s.event_id IS NULL
-		)
-	)`,
-		deliveryAlias,
-		deliveryAlias,
-		deliveryAlias,
-		deliveryAlias,
-		deliveryAlias,
-		deliveryAlias,
-		deliveryAlias,
-		receiptAlias,
-	)
+	_ = now
+	return r.DeliveryFound
 }
 
 func (r pendingAgentDeliveryRecord) pendingAgeSec(now time.Time) int {
@@ -239,88 +189,36 @@ func normalizePendingAgentIDs(agentIDs []string) []string {
 }
 
 func (s *PostgresStore) listPendingAgentDeliveryRecordsSpec(ctx context.Context, agentIDs []string, since time.Time) ([]pendingAgentDeliveryRecord, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT
-			d.subscriber_id,
-			e.event_id::text,
-			TRUE,
-			COALESCE(d.status, ''),
-			COALESCE(d.retry_count, 0),
-			d.created_at,
-			d.delivered_at,
-			CASE WHEN r.event_id IS NULL THEN FALSE ELSE TRUE END
-		FROM event_deliveries d
-		INNER JOIN events e ON e.event_id = d.event_id
-		LEFT JOIN runs run ON run.run_id = e.run_id
-		LEFT JOIN event_receipts r
-			ON r.event_id = d.event_id
-			AND r.subscriber_type = 'agent'
-			AND r.subscriber_id = d.subscriber_id
-		WHERE d.subscriber_type = 'agent'
-		  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
-		  AND d.subscriber_id = ANY($1)
-		  AND ($2::timestamptz IS NULL OR e.created_at >= $2::timestamptz)
-		  AND `+canonicalPendingDeliveryPredicateSQL("d", "r")+`
-		ORDER BY d.subscriber_id ASC, e.created_at ASC, e.event_id ASC
-	`, pq.Array(agentIDs), pendingDeliverySinceArg(since))
-	if err != nil {
-		return nil, fmt.Errorf("query pending agent delivery records: %w", err)
-	}
-	out := make([]pendingAgentDeliveryRecord, 0)
-	eventIDs := make([]string, 0)
-	for rows.Next() {
-		var record pendingAgentDeliveryRecord
-		var eventID string
-		if err := rows.Scan(
-			&record.AgentID, &eventID, &record.DeliveryFound, &record.DeliveryStatus,
-			&record.DeliveryRetryCount, &record.DeliveryCreatedAt, &record.DeliveryDeliveredAt,
-			&record.ReceiptFound,
-		); err != nil {
-			_ = rows.Close()
-			return nil, fmt.Errorf("scan pending agent delivery record: %w", err)
-		}
-		record.AgentID = strings.TrimSpace(record.AgentID)
-		out = append(out, record)
-		eventIDs = append(eventIDs, strings.TrimSpace(eventID))
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, fmt.Errorf("read pending agent delivery records: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("close pending agent delivery records: %w", err)
-	}
-	uniqueIDs, err := pendingDeliveryEventRecordIDs(eventIDs)
-	if err != nil {
-		return nil, err
-	}
-	records, err := loadPostgresEventIdentities(ctx, s.DB, uniqueIDs)
-	if err != nil {
-		return nil, err
-	}
-	eventsByID := make(map[string]events.Event, len(records))
-	for _, durable := range records {
-		event, err := decodeEventRecord(durable)
+	out := []pendingAgentDeliveryRecord{}
+	for _, agentID := range agentIDs {
+		snapshots, err := postgresDeliveryAdapter.EligibleAgentSnapshots(ctx, s.DB, agentID, since)
 		if err != nil {
 			return nil, err
 		}
-		eventsByID[durable.EventID] = event.Event()
-	}
-	for index, eventID := range eventIDs {
-		event, ok := eventsByID[eventID]
-		if !ok {
-			return nil, fmt.Errorf("pending agent delivery event %s was not hydrated", eventID)
+		for _, snapshot := range snapshots {
+			durable, found, err := eventrecordpostgres.Load(ctx, s.DB, snapshot.EventID)
+			if err != nil || !found {
+				if err == nil {
+					err = eventrecord.Missing(snapshot.EventID)
+				}
+				return nil, err
+			}
+			admitted, err := durable.Decode()
+			if err != nil {
+				return nil, err
+			}
+			delivery, err := events.NewDeliveryEvent(admitted.Event(), snapshot.Route)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, pendingAgentDeliveryRecord{
+				AgentID: snapshot.SubscriberID, Event: delivery.Event(), DeliveryFound: true,
+				DeliveryStatus: string(snapshot.Status), DeliveryRetryCount: snapshot.RetryCount,
+				DeliveryCreatedAt: snapshot.CreatedAt,
+			})
 		}
-		out[index].Event = event
 	}
 	return out, nil
-}
-
-func pendingDeliverySinceArg(since time.Time) any {
-	if since.IsZero() {
-		return nil
-	}
-	return since
 }
 
 func pendingAgentDeliveryPageFromRecords(records []pendingAgentDeliveryRecord, now time.Time, limit int, cursor *pendingAgentDeliveryCursorPosition) (PendingAgentDeliveryPage, error) {

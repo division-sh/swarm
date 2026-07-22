@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
@@ -107,19 +108,22 @@ func applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx, lineage runForkAc
 }
 
 func requireRunForkSourceFreezeReady(ctx context.Context, tx *sql.Tx, sourceRunID string, now time.Time) error {
+	deliveries, err := postgresDeliveryAdapter.ActiveRunSnapshots(ctx, tx, sourceRunID)
+	if err != nil {
+		return fmt.Errorf("inspect source freeze delivery authority: %w", err)
+	}
+	blockers := make([]string, 0, 1)
+	for _, delivery := range deliveries {
+		if delivery.Status == runtimedelivery.StatusInProgress {
+			blockers = append(blockers, "claimed_delivery")
+			break
+		}
+	}
 	checks := []struct {
 		name  string
 		query string
 		args  []any
 	}{
-		{
-			name: "claimed_delivery",
-			query: `SELECT EXISTS (
-				SELECT 1 FROM event_deliveries
-				WHERE run_id = $1::uuid AND status = 'in_progress'
-			)`,
-			args: []any{sourceRunID},
-		},
 		{
 			name: "leased_session",
 			query: `SELECT EXISTS (
@@ -160,7 +164,6 @@ func requireRunForkSourceFreezeReady(ctx context.Context, tx *sql.Tx, sourceRunI
 			args: []any{sourceRunID, now},
 		},
 	}
-	blockers := make([]string, 0, len(checks))
 	for _, check := range checks {
 		var blocked bool
 		if err := tx.QueryRowContext(ctx, check.query, check.args...).Scan(&blocked); err != nil {

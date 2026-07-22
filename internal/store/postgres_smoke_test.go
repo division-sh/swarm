@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -122,15 +123,17 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		time.Now(),
 	)
 
-	if err := commitSemanticEventFixture(ctx, pg, evt); err != nil {
-		t.Fatalf("append event: %v", err)
+	if err := commitSemanticEventFixtureWithAgents(ctx, pg, evt, []string{"control-plane"}); err != nil {
+		t.Fatalf("append event with exact delivery: %v", err)
 	}
-	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{"control-plane"}); err != nil {
-		t.Fatalf("insert deliveries: %v", err)
+	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "control-plane"}
+	claimed, err := pg.ClaimAgentDelivery(ctx, evt, route)
+	if err != nil {
+		t.Fatalf("claim delivery: %v", err)
 	}
 	activeSessionID := uuid.NewString()
-	if err := pg.MarkEventDeliveryInProgress(ctx, evt.ID(), "control-plane", activeSessionID); err != nil {
-		t.Fatalf("mark delivery in progress: %v", err)
+	if _, err := pg.BindAgentSession(ctx, claimed.Claim, activeSessionID); err != nil {
+		t.Fatalf("bind delivery session: %v", err)
 	}
 	var inProgressStatus, inProgressReason, gotActiveSession string
 	if err := db.QueryRowContext(ctx, `
@@ -143,14 +146,14 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	if inProgressStatus != "in_progress" {
 		t.Fatalf("in-progress delivery status = %q, want in_progress", inProgressStatus)
 	}
-	if inProgressReason != "agent_processing" {
-		t.Fatalf("in-progress delivery reason = %q, want agent_processing", inProgressReason)
+	if inProgressReason != "" {
+		t.Fatalf("in-progress delivery reason = %q, want empty", inProgressReason)
 	}
 	if gotActiveSession != activeSessionID {
 		t.Fatalf("active_session_id = %q, want %q", gotActiveSession, activeSessionID)
 	}
-	if err := pg.UpsertEventReceipt(ctx, evt.ID(), "control-plane", "processed", nil); err != nil {
-		t.Fatalf("upsert receipt: %v", err)
+	if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
+		t.Fatalf("settle delivery: %v", err)
 	}
 	var deliveryStatus, deliveryReason, receiptReason, clearedActiveSession string
 	if err := db.QueryRowContext(ctx, `
@@ -163,21 +166,21 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	if deliveryStatus != "delivered" {
 		t.Fatalf("delivery status = %q, want delivered", deliveryStatus)
 	}
-	if deliveryReason != "agent_processed" {
-		t.Fatalf("delivery reason = %q, want agent_processed", deliveryReason)
+	if deliveryReason != "" {
+		t.Fatalf("delivery reason = %q, want empty", deliveryReason)
 	}
 	if clearedActiveSession != "" {
 		t.Fatalf("active_session_id = %q, want cleared", clearedActiveSession)
 	}
 	if err := db.QueryRowContext(ctx, `
 		SELECT COALESCE(reason_code, '')
-		FROM event_receipts
-		WHERE event_id = $1::uuid AND subscriber_id = 'control-plane'
-	`, evt.ID()).Scan(&receiptReason); err != nil {
-		t.Fatalf("load receipt reason: %v", err)
+		FROM event_delivery_outcomes
+		WHERE delivery_id = $1::uuid
+	`, claimed.Snapshot.DeliveryID).Scan(&receiptReason); err != nil {
+		t.Fatalf("load delivery outcome reason: %v", err)
 	}
-	if receiptReason != "agent_processed" {
-		t.Fatalf("receipt reason = %q, want agent_processed", receiptReason)
+	if receiptReason != "" {
+		t.Fatalf("delivery outcome reason = %q, want empty", receiptReason)
 	}
 
 	// Mailbox.

@@ -234,18 +234,11 @@ func normalRunCompletionPipelinesSettledTx(ctx context.Context, tx *sql.Tx, runI
 }
 
 func normalRunCompletionDeliveriesSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
-	var active bool
-	if err := tx.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM event_deliveries d
-			WHERE d.run_id = $1::uuid
-			  AND `+activeRunQuiescenceDeliveryPredicateSQL("d")+`
-		)
-	`, runID).Scan(&active); err != nil {
+	summary, err := postgresDeliveryAdapter.SummarizeRun(ctx, tx, runID)
+	if err != nil {
 		return false, fmt.Errorf("check normal run active deliveries: %w", err)
 	}
-	return !active, nil
+	return summary.Settled(), nil
 }
 
 func normalRunCompletionTimersSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {

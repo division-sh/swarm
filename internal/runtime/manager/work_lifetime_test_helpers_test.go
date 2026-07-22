@@ -7,6 +7,7 @@ import (
 	"time"
 
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
 type managerTestWorkFixture struct {
@@ -58,6 +59,14 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 	t.Helper()
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = newTestManagerWorkOwner(t)
+	}
+	if opts.DeliveryStore == nil && len(stores) > 0 {
+		if deliveryStore, ok := any(stores[0]).(runtimedelivery.Store); ok {
+			opts.DeliveryStore = deliveryStore
+		}
+	}
+	if opts.DeliveryStore == nil {
+		opts.DeliveryStore = newManagerDeliveryTestStore(t)
 	}
 	manager := NewAgentManagerWithOptions(bus, factory, opts, stores...)
 	t.Cleanup(func() {

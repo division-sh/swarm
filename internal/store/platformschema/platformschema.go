@@ -211,6 +211,12 @@ func platformTableOrder(name string) int {
 		return 70
 	case "event_deliveries":
 		return 80
+	case "event_delivery_attempts":
+		return 81
+	case "event_delivery_outcomes":
+		return 82
+	case "committed_replay_scopes":
+		return 83
 	case "run_fork_delivery_event_replays":
 		return 85
 	case "event_receipts":

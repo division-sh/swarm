@@ -56,7 +56,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 	}
 	assertCleanupTableResult(t, result, "runs", 2, 2)
 	assertCleanupTableResult(t, result, "events", 5, 5)
-	assertCleanupTableResult(t, result, "event_receipts", 3, 3)
+	assertCleanupTableResult(t, result, "event_receipts", 1, 1)
 	assertCleanupTableResult(t, result, "dead_letters", 1, 1)
 	assertCleanupTableResult(t, result, "timers", 3, 3)
 	assertCleanupTableResult(t, result, "conversation_forks", 1, 1)
@@ -576,7 +576,6 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	preservedTimerID := uuid.NewString()
 	replyContextID := "reply-v1:cleanup-" + uuid.NewString()
 	mailboxID := uuid.NewString()
-	crossRunDeliveryID := uuid.NewString()
 	entityID := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source) VALUES ('agent-a', 'cleanup', 'operator', 'regular', TRUE, 'authored')`); err != nil {
 		t.Fatalf("seed agent: %v", err)
@@ -614,12 +613,6 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		VALUES ($1::uuid, 'running', $2::uuid, $3::uuid)
 	`, lateRunID, runID, eventID); err != nil {
 		t.Fatalf("seed preserved late fork run: %v", err)
-	}
-	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-a', 'pending')
-	`, crossRunDeliveryID, lateRunID, eventID); err != nil {
-		t.Fatalf("seed cross-run delivery: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO entity_mutations (mutation_id, run_id, entity_id, field, caused_by_event, writer_type, writer_id)
@@ -693,9 +686,6 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	if got := countRowsWhere(t, ctx, pg, "agent_sessions", `session_id = $1::uuid`, activeSessionID); got != 0 {
 		t.Fatalf("cleanup session rows after cleanup = %d, want deleted", got)
 	}
-	if got := countRowsWhere(t, ctx, pg, "event_deliveries", `delivery_id = $1::uuid`, crossRunDeliveryID); got != 0 {
-		t.Fatalf("cross-run delivery rows after cleanup = %d, want deleted by event owner", got)
-	}
 	if got := countRowsWhere(t, ctx, pg, "timers", `timer_id = $1::uuid`, cleanupTimerID); got != 0 {
 		t.Fatalf("cleanup timer rows after cleanup = %d, want deleted", got)
 	}
@@ -761,8 +751,6 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 	preservedForkRunID := uuid.NewString()
 	cleanupEventID := uuid.NewString()
 	preservedSourceEventID := uuid.NewString()
-	cleanupDeliveryID := uuid.NewString()
-	preservedDeliveryID := uuid.NewString()
 	entityID := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status) VALUES
@@ -781,14 +769,11 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 	if err := insertCanonicalEventRecordFixture(ctx, pg, preservedSourceEvent); err != nil {
 		t.Fatalf("seed preserved source event: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-a', 'pending')
-	`, cleanupDeliveryID, preservedSourceRunID, preservedSourceEventID); err != nil {
-		t.Fatalf("seed source delivery: %v", err)
-	}
+	sourceRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	cleanupDelivery := seedAgentDeliveryStateFixture(t, ctx, pg, preservedSourceEvent, sourceRoute, "queued", nil)
+	cleanupDeliveryID := cleanupDelivery.DeliveryID
 	if err := commitDeliveryReplayEventFixture(
-		ctx, pg, preservedSourceEvent, cleanupRunID, cleanupDeliveryID, preservedDeliveryID, "agent", "agent-a", seededAt.Add(time.Second),
+		ctx, pg, preservedSourceEvent, cleanupRunID, cleanupDeliveryID, "", "agent", "agent-a", seededAt.Add(time.Second),
 	); err != nil {
 		t.Fatalf("seed delivery replay: %v", err)
 	}
@@ -857,7 +842,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 	assertCleanupTableResult(t, result, "run_fork_selected_contract_executions", 1, 1)
 	assertCleanupTableResult(t, result, "run_fork_selected_contract_branch_divergences", 1, 1)
 	assertCleanupTableResult(t, result, "run_fork_selected_contract_route_recoveries", 1, 1)
-	assertCleanupTableResult(t, result, "event_deliveries", 3, 3)
+	assertCleanupTableResult(t, result, "event_deliveries", 1, 1)
 	assertCleanupTableResult(t, result, "events", 2, 2)
 	for _, table := range []string{
 		"run_fork_delivery_event_replays",
@@ -1135,8 +1120,6 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	sourceEvent := uuid.NewString()
 	forkEvent := uuid.NewString()
 	noRunEvent := uuid.NewString()
-	sourceDelivery := uuid.NewString()
-	forkDelivery := uuid.NewString()
 	sessionID := uuid.NewString()
 	entityID := uuid.NewString()
 	timerRun := uuid.NewString()
@@ -1209,14 +1192,11 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	if err := commitDiagnosticRuntimeLogFixture(ctx, pg, noRunSemanticEvent); err != nil {
 		t.Fatalf("seed preserved runtime-log event: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-a', 'dead_letter')
-	`, sourceDelivery, runA, sourceEvent); err != nil {
-		t.Fatalf("seed source delivery: %v", err)
-	}
+	sourceRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	sourceFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "cleanup_source_exhausted", nil)
+	sourceDeliverySnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, sourceSemanticEvent, sourceRoute, "exhausted", &sourceFailure)
 	if err := commitDeliveryReplayEventFixture(
-		ctx, pg, sourceSemanticEvent, runB, sourceDelivery, forkDelivery, "agent", "agent-a", seededAt.Add(4*time.Second),
+		ctx, pg, sourceSemanticEvent, runB, sourceDeliverySnapshot.DeliveryID, "", "agent", "agent-a", seededAt.Add(4*time.Second),
 	); err != nil {
 		t.Fatalf("seed delivery replay event: %v", err)
 	}
@@ -1242,11 +1222,9 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, side_effects) VALUES
-			($1::uuid, 'agent', 'agent-a', 'dead_letter', '{}'::jsonb),
-			($2::uuid, 'node', 'node-a', 'success', '{}'::jsonb),
-			($3::uuid, 'platform', 'pipeline', 'success', '{}'::jsonb),
-			($4::uuid, 'platform', 'preserved', 'success', '{}'::jsonb)
-	`, sourceEvent, forkEvent, timerForkEvent, noRunEvent); err != nil {
+			($1::uuid, 'platform', 'pipeline', 'success', '{}'::jsonb),
+			($2::uuid, 'platform', 'preserved', 'success', '{}'::jsonb)
+	`, timerForkEvent, noRunEvent); err != nil {
 		t.Fatalf("seed receipts: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `

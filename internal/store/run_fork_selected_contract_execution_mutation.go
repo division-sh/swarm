@@ -12,6 +12,7 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
@@ -531,6 +532,10 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 			_ = tx.Rollback()
 		}
 	}()
+	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	if err != nil {
+		return err
+	}
 
 	var status string
 	if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid FOR UPDATE`, forkRunID).Scan(&status); err != nil {
@@ -544,6 +549,9 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 	}
 	if err := guardDestructiveResetSourceForkDependencies(ctx, tx, []string{forkRunID}); err != nil {
 		return fmt.Errorf("discard selected-contract fork with dependent lineage: %w", err)
+	}
+	if _, err := postgresDeliveryAdapter.TerminalizeRun(storyctx, tx, forkRunID, "fork_discarded"); err != nil {
+		return fmt.Errorf("terminalize selected-contract fork deliveries before discard: %w", err)
 	}
 	var preserveCompletionEvidence bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1::uuid)`, forkRunID).Scan(&preserveCompletionEvidence); err != nil {
@@ -642,7 +650,10 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 			return fmt.Errorf("delete selected-contract fork run: %w", err)
 		}
 	}
-	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
+		return fmt.Errorf("finalize selected-contract fork discard activity: %w", err)
+	}
+	if err := commitPostgresRunForkRevisionTx(storyctx, tx); err != nil {
 		return fmt.Errorf("commit selected-contract fork discard: %w", err)
 	}
 	committed = true
@@ -991,23 +1002,14 @@ func ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(ctx context.Co
 	query := `
 		SELECT EXISTS (
 			SELECT 1
-			FROM event_deliveries d
-			JOIN LATERAL (
-				SELECT MAX(revision) AS revision
-				FROM run_fork_fact_revisions
-				WHERE run_id = d.run_id
-				  AND family = 'event_deliveries'
-				  AND fact_key = d.delivery_id::text
-				  AND present
-			) history ON TRUE
-			WHERE d.run_id = $1::uuid
-			  AND d.subscriber_type = $2
-			  AND d.subscriber_id = $3
-			  AND d.reason_code = ANY($4::text[])
-			  AND history.revision > $5
+			FROM run_fork_fact_revisions
+			WHERE run_id = $1::uuid
+			  AND family = 'committed_replay_scopes'
+			  AND revision > $2
+			  AND present
 		)
 	`
-	if err := q.QueryRowContext(ctx, query, sourceRunID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, pq.Array(runForkReplayScopeMarkerReasonCodes()), forkRevision).Scan(&exists); err != nil {
+	if err := q.QueryRowContext(ctx, query, sourceRunID, forkRevision).Scan(&exists); err != nil {
 		return fmt.Errorf("check selected-contract source_committed_replay_scope_advanced_after_fork_point: %w", err)
 	}
 	if exists {
@@ -1015,10 +1017,6 @@ func ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(ctx context.Co
 		return runForkReplayResumeError(code, RunForkReplayResumeFactSourceAdvanced, fmt.Sprintf("selected-contract committed replay-scope marker policy blocked: %s", code))
 	}
 	return nil
-}
-
-func runForkReplayScopeMarkerReasonCodes() []string {
-	return []string{replayScopeReasonDirect, replayScopeReasonSubscribed}
 }
 
 func runForkSelectedContractConversationAdvancedFacts(facts []string) []string {
@@ -1033,34 +1031,30 @@ func runForkSelectedContractConversationAdvancedFacts(facts []string) []string {
 }
 
 func ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling(ctx context.Context, q timerReconstructionQueryer, lineage runForkActivationLineage) error {
-	var exists bool
-	query := `
-		SELECT EXISTS (
-			SELECT 1
-			FROM event_deliveries d
-			JOIN LATERAL (
-				SELECT MAX(revision) AS revision
-				FROM run_fork_fact_revisions
-				WHERE run_id = d.run_id
-				  AND family = 'event_deliveries'
-				  AND fact_key = d.delivery_id::text
-				  AND present
-			) history ON TRUE
-			WHERE d.run_id = $1::uuid
-			  AND history.revision > $2
-			  AND (
-					d.status = 'in_progress'
-					OR d.active_session_id IS NOT NULL
-					OR (d.started_at IS NOT NULL AND d.delivered_at IS NULL)
-			  )
-		)
-	`
-	if err := q.QueryRowContext(ctx, query, lineage.SourceRunID, lineage.ForkEventRevision).Scan(&exists); err != nil {
-		return fmt.Errorf("check selected-contract source_active_conversation_session_coupling_after_fork_point: %w", err)
+	snapshots, err := postgresDeliveryAdapter.SnapshotsForRun(ctx, q, lineage.SourceRunID)
+	if err != nil {
+		return fmt.Errorf("check selected-contract source delivery snapshots: %w", err)
 	}
-	if exists {
-		code := "source_active_conversation_session_coupling_after_fork_point"
-		return runForkReplayResumeError(code, RunForkReplayResumeFactSessionHistory, fmt.Sprintf("%s blocked unsafe post-T active source delivery/session coupling: %s", RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner, code))
+	for _, snapshot := range snapshots {
+		activeCoupling := snapshot.Status == runtimedelivery.StatusInProgress || snapshot.ActiveSessionID != "" || (!snapshot.StartedAt.IsZero() && !snapshot.Terminal())
+		if !activeCoupling {
+			continue
+		}
+		var revision sql.NullInt64
+		if err := q.QueryRowContext(ctx, `
+			SELECT MAX(revision)
+			FROM run_fork_fact_revisions
+			WHERE run_id = $1::uuid
+			  AND family = 'event_deliveries'
+			  AND fact_key = $2
+			  AND present
+		`, lineage.SourceRunID, snapshot.DeliveryID).Scan(&revision); err != nil {
+			return fmt.Errorf("check selected-contract source delivery revision: %w", err)
+		}
+		if revision.Valid && revision.Int64 > lineage.ForkEventRevision {
+			code := "source_active_conversation_session_coupling_after_fork_point"
+			return runForkReplayResumeError(code, RunForkReplayResumeFactSessionHistory, fmt.Sprintf("%s blocked unsafe post-T active source delivery/session coupling: %s", RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner, code))
+		}
 	}
 	return nil
 }
@@ -1120,18 +1114,36 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 	if missingLineage > 0 {
 		return runForkReplayResumeError("fork_selected_contract_execution_lineage_missing", RunForkReplayResumeFactForkReplayState, "fork activation blocked: fork_selected_contract_execution_lineage_missing")
 	}
+	deliverySnapshots, err := postgresDeliveryAdapter.SnapshotsForRun(ctx, tx, forkRunID)
+	if err != nil {
+		return fmt.Errorf("check selected-contract fork delivery snapshots: %w", err)
+	}
+	selectedAgents := []string{}
+	for _, snapshot := range deliverySnapshots {
+		if snapshot.SubscriberClass != runtimedelivery.SubscriberAgent {
+			continue
+		}
+		var selected bool
+		if err := tx.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM run_fork_selected_contract_executions x
+				WHERE x.fork_event_id = $1::uuid
+				  AND x.fork_run_id = $2::uuid
+				  AND x.source_event_id = ANY($3::uuid[])
+			)
+		`, snapshot.EventID, forkRunID, pq.Array(allowedEvents)).Scan(&selected); err != nil {
+			return fmt.Errorf("check selected-contract delivery lineage: %w", err)
+		}
+		if selected {
+			selectedAgents = append(selectedAgents, snapshot.SubscriberID)
+		}
+	}
+	selectedAgents = uniqueNonEmptyStrings(selectedAgents)
 
 	var strayEvents int
 	if err := tx.QueryRowContext(ctx, `
 		WITH RECURSIVE selected_agents AS (
-			SELECT DISTINCT d.subscriber_id AS agent_id
-			FROM event_deliveries d
-			INNER JOIN run_fork_selected_contract_executions x
-				ON x.fork_event_id = d.event_id
-			   AND x.fork_run_id = $1::uuid
-			   AND x.source_event_id = ANY($2::uuid[])
-			WHERE d.run_id = $1::uuid
-			  AND d.subscriber_type = 'agent'
+			SELECT unnest($4::text[]) AS agent_id
 		),
 		selected_tree AS (
 			SELECT e.event_id
@@ -1163,26 +1175,26 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 		  AND NOT EXISTS (
 			SELECT 1 FROM selected_tree tree WHERE tree.event_id = e.event_id
 		  )
-	`, forkRunID, pq.Array(allowedEvents), pq.Array(runForkSelectedContractForkLocalRuntimePlatformEventNames())).Scan(&strayEvents); err != nil {
+	`, forkRunID, pq.Array(allowedEvents), pq.Array(runForkSelectedContractForkLocalRuntimePlatformEventNames()), pq.Array(selectedAgents)).Scan(&strayEvents); err != nil {
 		return fmt.Errorf("check selected-contract fork event lineage: %w", err)
 	}
 	if strayEvents > 0 {
 		return runForkReplayResumeError("fork_events_not_selected_contract_lineage", RunForkReplayResumeFactForkReplayState, "fork activation blocked: fork_events_not_selected_contract_lineage")
 	}
 
-	var strayDeliveries int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_deliveries d
-		WHERE d.run_id = $1::uuid
-		  AND NOT EXISTS (
-			SELECT 1 FROM events e WHERE e.run_id = $1::uuid AND e.event_id = d.event_id
-		  )
-	`, forkRunID).Scan(&strayDeliveries); err != nil {
-		return fmt.Errorf("check selected-contract fork deliveries: %w", err)
-	}
-	if strayDeliveries > 0 {
-		return runForkReplayResumeError("fork_deliveries_not_selected_contract_lineage", RunForkReplayResumeFactForkReplayState, "fork activation blocked: fork_deliveries_not_selected_contract_lineage")
+	checkedEvents := map[string]struct{}{}
+	for _, snapshot := range deliverySnapshots {
+		if _, ok := checkedEvents[snapshot.EventID]; ok {
+			continue
+		}
+		checkedEvents[snapshot.EventID] = struct{}{}
+		var belongs bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events WHERE run_id = $1::uuid AND event_id = $2::uuid)`, forkRunID, snapshot.EventID).Scan(&belongs); err != nil {
+			return fmt.Errorf("check selected-contract fork delivery event: %w", err)
+		}
+		if !belongs {
+			return runForkReplayResumeError("fork_deliveries_not_selected_contract_lineage", RunForkReplayResumeFactForkReplayState, "fork activation blocked: fork_deliveries_not_selected_contract_lineage")
+		}
 	}
 	return nil
 }

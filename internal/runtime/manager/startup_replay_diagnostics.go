@@ -41,9 +41,6 @@ type startupManagerReplayReasonCode string
 
 const (
 	startupManagerReplayReasonReplayed             startupManagerReplayReasonCode = "persisted_event_replayed"
-	startupManagerReplayReasonReceiptProcessed     startupManagerReplayReasonCode = "event_receipt_already_processed"
-	startupManagerReplayReasonReceiptDeadLettered  startupManagerReplayReasonCode = "event_receipt_dead_lettered"
-	startupManagerReplayReasonDuplicateInFlight    startupManagerReplayReasonCode = "event_already_in_flight"
 	startupManagerReplayReasonBudgetSuppressed     startupManagerReplayReasonCode = "budget_suppressed"
 	startupManagerReplayReasonDirectiveIntercepted startupManagerReplayReasonCode = "directive_intercepted"
 	startupManagerReplayReasonSessionLeased        startupManagerReplayReasonCode = "session_currently_leased"

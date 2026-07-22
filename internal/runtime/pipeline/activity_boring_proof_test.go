@@ -75,6 +75,7 @@ func TestActivityBoringProofHandAuthoredFlowDispatchesOutsideTransactionAndReuse
 			}
 
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), sourceEvent.RunID())
+			ctx = withWorkflowNodeDeliveryRoute(ctx, activityBoringNodeRoute(sourceEvent, "scanner"))
 			handled, err := fixture.pc.handleEventResult(ctx, sourceEvent)
 			if err != nil {
 				t.Fatalf("hand-authored source handleEventResult: %v", err)
@@ -121,6 +122,7 @@ func TestActivityBoringProofHandAuthoredFlowCrashAfterRequestBeforeResultComplet
 	fixture := newActivityBoringFullFlowFixture(t, activityBoringStorePostgres, server.URL, false)
 	seedActivityBoringSourceFlow(t, fixture, activityBoringStorePostgres, sourceEvent)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), sourceEvent.RunID())
+	ctx = withWorkflowNodeDeliveryRoute(ctx, activityBoringNodeRoute(sourceEvent, "scanner"))
 	handled, err := fixture.pc.handleEventResult(ctx, sourceEvent)
 	if err != nil {
 		t.Fatalf("source handleEventResult before crash: %v", err)
@@ -184,6 +186,7 @@ func TestActivityBoringProofHandAuthoredReadOnlyForkReexecuteUsesForkLocalIdenti
 			for _, evt := range []events.Event{sourceEvent, forkEvent} {
 				seedActivityBoringSourceFlow(t, fixture, tc.kind, evt)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), evt.RunID())
+				ctx = withWorkflowNodeDeliveryRoute(ctx, activityBoringNodeRoute(evt, "scanner"))
 				handled, err := fixture.pc.handleEventResult(ctx, evt)
 				if err != nil {
 					t.Fatalf("hand-authored fork source handleEventResult(%s): %v", evt.RunID(), err)
@@ -472,9 +475,11 @@ func newActivityBoringCoordinator(t *testing.T, db *sql.DB, kind activityBoringS
 	if kind == activityBoringStoreSQLite {
 		store = newSQLiteWorkflowInstanceStoreForTest(t, db)
 	}
+	deliveryStore := newPipelineTestDeliveryOwnerForDB(t, db)
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
 		Module:        staticSemanticWorkflowModule{source: activityBoringSource(serverURL)},
 		WorkflowStore: store,
+		DeliveryStore: deliveryStore,
 	})
 	return activityBoringFixture{db: db, bus: bus, pc: pc}
 }
@@ -508,6 +513,7 @@ func newActivityBoringFullFlowCoordinator(t *testing.T, db *sql.DB, kind activit
 		store = newSQLiteWorkflowInstanceStoreForTest(t, db)
 	}
 	bundle := activityBoringFullFlowBundle(serverURL)
+	deliveryStore := newPipelineTestDeliveryOwnerForDB(t, db)
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{
 			bundle:   bundle,
@@ -523,6 +529,7 @@ func newActivityBoringFullFlowCoordinator(t *testing.T, db *sql.DB, kind activit
 			}},
 		},
 		WorkflowStore: store,
+		DeliveryStore: deliveryStore,
 	})
 	bus.coordinator = pc
 	return activityBoringFixture{db: db, bus: bus, pc: pc}
@@ -870,7 +877,8 @@ func seedActivityBoringSourceFlow(t *testing.T, fixture activityBoringFixture, k
 	if err := appendActivityBoringEvent(ctx, fixture.db, kind, evt); err != nil {
 		t.Fatalf("seed activity boring source event: %v", err)
 	}
-	if err := seedActivityBoringNodeDelivery(ctx, fixture.db, kind, evt, "scanner"); err != nil {
+	owner := configurePipelineTestDeliveryOwner(t, fixture.pc)
+	if err := owner.commitInitial(ctx, evt, activityBoringNodeRoute(evt, "scanner")); err != nil {
 		t.Fatalf("seed activity boring node delivery: %v", err)
 	}
 	entityID := strings.TrimSpace(evt.EntityID())
@@ -893,34 +901,11 @@ func seedActivityBoringSourceFlow(t *testing.T, fixture activityBoringFixture, k
 	}
 }
 
-func seedActivityBoringNodeDelivery(ctx context.Context, db *sql.DB, kind activityBoringStoreKind, evt events.Event, nodeID string) error {
-	if db == nil {
-		return nil
-	}
-	runID := strings.TrimSpace(evt.RunID())
-	if runID == "" {
-		runID = testPipelineRunID
-	}
-	switch kind {
-	case activityBoringStoreSQLite:
-		_, err := db.ExecContext(ctx, `
-			INSERT OR IGNORE INTO event_deliveries (
-				delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, created_at
-			)
-			VALUES (?, ?, ?, 'node', ?, 'pending', 0, ?)
-		`, uuid.NewString(), runID, evt.ID(), nodeID, time.Now().UTC())
-		return err
-	case activityBoringStorePostgres:
-		_, err := db.ExecContext(ctx, `
-			INSERT INTO event_deliveries (
-				run_id, event_id, subscriber_type, subscriber_id, status, retry_count, created_at
-			)
-			VALUES ($1::uuid, $2::uuid, 'node', $3, 'pending', 0, now())
-			ON CONFLICT DO NOTHING
-		`, runID, evt.ID(), nodeID)
-		return err
-	default:
-		return nil
+func activityBoringNodeRoute(evt events.Event, nodeID string) events.DeliveryRoute {
+	return events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   strings.TrimSpace(nodeID),
+		Target:         events.RouteIdentity{EntityID: strings.TrimSpace(evt.EntityID())},
 	}
 }
 

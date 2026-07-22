@@ -349,21 +349,6 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 				TimerScheduler: scheduler, TimerScheduleStore: scheduleStore,
 			})
 			bus.SetInterceptors(coordinator)
-			runCtx, cancelRun := context.WithCancel(ctx)
-			t.Cleanup(cancelRun)
-			subscribed := make(chan struct{}, 1)
-			coordinator.SetTestSubscribeHook(func() {
-				select {
-				case subscribed <- struct{}{}:
-				default:
-				}
-			})
-			go coordinator.Run(runCtx)
-			select {
-			case <-subscribed:
-			case <-time.After(2 * time.Second):
-				t.Fatal("workflow coordinator did not subscribe after restart")
-			}
 			if err := coordinator.RestoreWorkflowTimers(ctx); err != nil {
 				t.Fatalf("RestoreWorkflowTimers: %v", err)
 			}

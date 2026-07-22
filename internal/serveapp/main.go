@@ -32,6 +32,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
@@ -124,6 +125,7 @@ type storeBundle struct {
 	SessionRegistry              sessions.Registry
 	ConversationStore            runtimellm.ConversationPersistence
 	ManagerStore                 runtimemanager.ManagerPersistence
+	DeliveryStore                runtimedelivery.Store
 	ScheduleStore                runtimepipeline.SchedulePersistence
 	MailboxMaterializer          runtimepipeline.MailboxWriteMaterializationStore
 	MailboxStore                 runtimetools.MailboxPersistence
@@ -288,6 +290,7 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) st
 		SessionRegistry:             pg,
 		ConversationStore:           pg,
 		ManagerStore:                pg,
+		DeliveryStore:               pg,
 		ScheduleStore:               pg,
 		MailboxMaterializer:         pg,
 		MailboxStore:                pg,
@@ -1939,6 +1942,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			SessionRegistry:             sqliteStore,
 			ConversationStore:           sqliteStore,
 			ManagerStore:                sqliteStore,
+			DeliveryStore:               sqliteStore,
 			ScheduleStore:               sqliteStore,
 			MailboxMaterializer:         sqliteStore,
 			MailboxStore:                sqliteStore,

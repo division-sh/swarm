@@ -3,9 +3,20 @@ package pipeline
 import (
 	"context"
 	"sync"
+
+	"github.com/division-sh/swarm/internal/events"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 )
 
 const activityDispatcherSubscriberID = "workflow-activity-dispatcher"
+
+type ownedInternalSubscriptionBus interface {
+	SubscribeInternal(context.Context, string, ...events.EventType) (worklifetime.InternalSubscription, error)
+}
+
+type systemNodeBus interface {
+	Publish(context.Context, events.Event) error
+}
 
 type activityBackgroundNode struct {
 	coordinator *PipelineCoordinator

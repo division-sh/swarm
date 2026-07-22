@@ -10,9 +10,9 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
-	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
@@ -108,28 +108,40 @@ func TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude(t 
 				eventID, events.EventType("freeze.pending"), eventtest.Producer(events.EventProducerPlatform, "test"),
 				"", []byte(`{}`), 0, fixture.sourceRun, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, fixture.forkedAt.Add(-time.Minute),
 			)
+			route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "freeze-agent"}
+			var claim runtimedelivery.Claim
 			if fixture.postgres != nil {
-				if err := commitSemanticEventFixture(ctx, fixture.postgres, event); err != nil {
+				if err := commitSemanticEventFixtureWithAgents(ctx, fixture.postgres, event, []string{"freeze-agent"}); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := fixture.db.ExecContext(ctx, `INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, created_at) VALUES ($1::uuid, $2::uuid, 'agent', 'freeze-agent', 'pending', $3)`, fixture.sourceRun, eventID, fixture.forkedAt); err != nil {
+				claimed, err := fixture.postgres.ClaimAgentDelivery(ctx, event, route)
+				if err != nil {
 					t.Fatal(err)
+				}
+				claim = claimed.Claim
+				if _, err := fixture.postgres.SettleSuccess(ctx, claim, nil, 0); err != nil {
+					t.Fatalf("settle source delivery before freeze: %v", err)
 				}
 			} else {
-				if err := commitSemanticEventFixture(ctx, fixture.sqlite, event); err != nil {
+				if err := commitSemanticEventFixtureWithAgents(ctx, fixture.sqlite, event, []string{"freeze-agent"}); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := fixture.db.ExecContext(ctx, `INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, created_at) VALUES (?, ?, 'agent', 'freeze-agent', 'pending', ?)`, fixture.sourceRun, eventID, fixture.forkedAt); err != nil {
+				claimed, err := fixture.sqlite.ClaimAgentDelivery(ctx, event, route)
+				if err != nil {
 					t.Fatal(err)
+				}
+				claim = claimed.Claim
+				if _, err := fixture.sqlite.SettleSuccess(ctx, claim, nil, 0); err != nil {
+					t.Fatalf("settle source delivery before freeze: %v", err)
 				}
 			}
 			fixture.freeze(t)
 
 			if fixture.postgres != nil {
-				assertForkedEventConsumerRefusals(t, fixture.postgres, eventID)
+				assertForkedEventConsumerRefusals(t, fixture.postgres, event, route, claim)
 				assertForkedEventSelectors(t, fixture.postgres, fixture.sourceRun, eventID)
 			} else {
-				assertForkedEventConsumerRefusals(t, fixture.sqlite, eventID)
+				assertForkedEventConsumerRefusals(t, fixture.sqlite, event, route, claim)
 				assertForkedEventSelectors(t, fixture.sqlite, fixture.sourceRun, eventID)
 			}
 			var status string
@@ -137,24 +149,24 @@ func TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude(t 
 			if fixture.postgres != nil {
 				query = `SELECT status FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_id = 'freeze-agent'`
 			}
-			if err := fixture.db.QueryRowContext(ctx, query, eventID).Scan(&status); err != nil || status != "pending" {
+			if err := fixture.db.QueryRowContext(ctx, query, eventID).Scan(&status); err != nil || status != "delivered" {
 				t.Fatalf("preserved delivery status = %q, %v", status, err)
 			}
 		})
 	}
 }
 
-func assertForkedEventConsumerRefusals(t *testing.T, store any, eventID string) {
+func assertForkedEventConsumerRefusals(t *testing.T, store any, event events.Event, route events.DeliveryRoute, claim runtimedelivery.Claim) {
 	t.Helper()
 	ctx := testAuthorActivityBundleSourceContext()
-	routes := []events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "late-agent"}}
 	switch s := store.(type) {
 	case *PostgresStore:
-		requireForkedSourceRefusal(t, "delivery route", s.InsertEventDeliveryRoutes(ctx, eventID, routes))
-		requireForkedSourceRefusal(t, "replay scope", s.UpsertCommittedReplayScope(ctx, eventID, runtimereplayclaim.CommittedReplayScopeSubscribed))
-		requireForkedSourceRefusal(t, "pipeline receipt", s.UpsertPipelineReceipt(ctx, eventID, "processed", nil))
-		requireForkedSourceRefusal(t, "delivery progress", s.MarkEventDeliveryInProgress(ctx, eventID, "freeze-agent", uuid.NewString()))
-		requireForkedSourceRefusal(t, "agent receipt", s.UpsertEventReceipt(ctx, eventID, "freeze-agent", runtimemanager.ReceiptStatusProcessed, nil))
+		_, err := s.ClaimAgentDelivery(ctx, event, route)
+		requireForkedSourceRefusal(t, "delivery claim", err)
+		_, err = s.SettleSuccess(ctx, claim, nil, 0)
+		requireForkedSourceRefusal(t, "delivery settlement", err)
+		requireForkedSourceRefusal(t, "replay scope", s.UpsertCommittedReplayScope(ctx, event.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed))
+		requireForkedSourceRefusal(t, "pipeline receipt", s.UpsertPipelineReceipt(ctx, event.ID(), "processed", nil))
 		for label, claim := range map[string]func(context.Context, string) (interface{ Release(context.Context) error }, bool, error){
 			"replay claim": func(ctx context.Context, id string) (interface{ Release(context.Context) error }, bool, error) {
 				lease, ok, err := s.ClaimPipelineReplay(ctx, id)
@@ -165,12 +177,12 @@ func assertForkedEventConsumerRefusals(t *testing.T, store any, eventID string) 
 				return lease, ok, err
 			},
 		} {
-			lease, claimed, err := claim(ctx, eventID)
+			lease, claimed, err := claim(ctx, event.ID())
 			if err != nil || claimed || lease != nil {
 				t.Fatalf("%s = lease:%v claimed:%v err:%v", label, lease, claimed, err)
 			}
 		}
-		lease, claimed, err := s.ClaimPipelinePublication(ctx, eventID)
+		lease, claimed, err := s.ClaimPipelinePublication(ctx, event.ID())
 		if err != nil || !claimed || lease == nil {
 			t.Fatalf("publication serialization claim = lease:%v claimed:%v err:%v", lease, claimed, err)
 		}
@@ -178,11 +190,12 @@ func assertForkedEventConsumerRefusals(t *testing.T, store any, eventID string) 
 			t.Fatalf("release publication serialization claim: %v", err)
 		}
 	case *SQLiteRuntimeStore:
-		requireForkedSourceRefusal(t, "delivery route", s.InsertEventDeliveryRoutes(ctx, eventID, routes))
-		requireForkedSourceRefusal(t, "replay scope", s.UpsertCommittedReplayScope(ctx, eventID, runtimereplayclaim.CommittedReplayScopeSubscribed))
-		requireForkedSourceRefusal(t, "pipeline receipt", s.UpsertPipelineReceipt(ctx, eventID, "processed", nil))
-		requireForkedSourceRefusal(t, "delivery progress", s.MarkEventDeliveryInProgress(ctx, eventID, "freeze-agent", uuid.NewString()))
-		requireForkedSourceRefusal(t, "agent receipt", s.UpsertEventReceipt(ctx, eventID, "freeze-agent", runtimemanager.ReceiptStatusProcessed, nil))
+		_, err := s.ClaimAgentDelivery(ctx, event, route)
+		requireForkedSourceRefusal(t, "delivery claim", err)
+		_, err = s.SettleSuccess(ctx, claim, nil, 0)
+		requireForkedSourceRefusal(t, "delivery settlement", err)
+		requireForkedSourceRefusal(t, "replay scope", s.UpsertCommittedReplayScope(ctx, event.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed))
+		requireForkedSourceRefusal(t, "pipeline receipt", s.UpsertPipelineReceipt(ctx, event.ID(), "processed", nil))
 		for label, claim := range map[string]func(context.Context, string) (interface{ Release(context.Context) error }, bool, error){
 			"replay claim": func(ctx context.Context, id string) (interface{ Release(context.Context) error }, bool, error) {
 				lease, ok, err := s.ClaimPipelineReplay(ctx, id)
@@ -193,12 +206,12 @@ func assertForkedEventConsumerRefusals(t *testing.T, store any, eventID string) 
 				return lease, ok, err
 			},
 		} {
-			lease, claimed, err := claim(ctx, eventID)
+			lease, claimed, err := claim(ctx, event.ID())
 			if err != nil || claimed || lease != nil {
 				t.Fatalf("%s = lease:%v claimed:%v err:%v", label, lease, claimed, err)
 			}
 		}
-		lease, claimed, err := s.ClaimPipelinePublication(ctx, eventID)
+		lease, claimed, err := s.ClaimPipelinePublication(ctx, event.ID())
 		if err != nil || !claimed || lease == nil {
 			t.Fatalf("publication serialization claim = lease:%v claimed:%v err:%v", lease, claimed, err)
 		}

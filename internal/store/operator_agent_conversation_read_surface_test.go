@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -98,6 +100,10 @@ func (s fakeAgentConversationReadSource) ListAgentDeliveryLifecycleFacts(_ conte
 		out[agentID] = s.lifecycle[agentID]
 	}
 	return out, s.err
+}
+
+func (s fakeAgentConversationReadSource) deliverySnapshotsForAgent(context.Context, string, time.Time) ([]runtimedelivery.Snapshot, error) {
+	return []runtimedelivery.Snapshot{}, nil
 }
 
 func (s fakeAgentConversationReadSource) ListOperatorConversationTurns(_ context.Context, opts OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error) {
@@ -499,6 +505,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 	failedOldEventID := uuid.NewString()
 	deadEventID := uuid.NewString()
 	otherAgentEventID := uuid.NewString()
+	eventsByID := make(map[string]events.Event, 4)
 	for _, event := range []struct {
 		id   string
 		name string
@@ -508,30 +515,22 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 		{deadEventID, "task.dead"},
 		{otherAgentEventID, "task.other"},
 	} {
-		seedOperatorAgentEvent(t, ctx, pg, event.id, runID, event.name, entityID, now.Add(-10*time.Minute))
+		eventsByID[event.id] = seedOperatorAgentEvent(t, ctx, pg, event.id, runID, event.name, entityID, now.Add(-10*time.Minute))
 	}
-	failedNewDeliveryID := uuid.NewString()
-	failedOldDeliveryID := uuid.NewString()
-	deadDeliveryID := uuid.NewString()
-	otherDeliveryID := uuid.NewString()
-	newFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "new_failure", nil))
-	oldFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "old_failure", nil))
-	terminalFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassRetryExhausted, "terminal_failure", nil))
-	otherAgentFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "other_agent_failure", nil))
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, failure, delivered_at, created_at
-		) VALUES
-			($1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-1', 'failed', 2, 'handler_error', $4::jsonb, $5, $6),
-			($7::uuid, $2::uuid, $8::uuid, 'agent', 'agent-1', 'failed', 1, 'handler_error', $9::jsonb, $10, $6),
-			($11::uuid, $2::uuid, $12::uuid, 'agent', 'agent-1', 'dead_letter', 3, 'retry_exhausted', $13::jsonb, $14, $6),
-			($15::uuid, $2::uuid, $16::uuid, 'agent', 'agent-2', 'failed', 1, 'handler_error', $17::jsonb, $5, $6)
-	`, failedNewDeliveryID, runID, failedNewEventID, newFailure, now.Add(-1*time.Minute), now.Add(-15*time.Minute),
-		failedOldDeliveryID, failedOldEventID, oldFailure, now.Add(-2*time.Minute),
-		deadDeliveryID, deadEventID, terminalFailure, now.Add(-3*time.Minute),
-		otherDeliveryID, otherAgentEventID, otherAgentFailure); err != nil {
-		t.Fatalf("seed deliveries: %v", err)
-	}
+	agentOneRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"}
+	agentTwoRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-2"}
+	oldFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "old_failure", nil)
+	oldSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[failedOldEventID], agentOneRoute, runtimedelivery.StateRetrying, &oldFailure)
+	terminalFailureEnvelope := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "terminal_failure", nil)
+	deadSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[deadEventID], agentOneRoute, runtimedelivery.StateExhausted, &terminalFailureEnvelope)
+	otherAgentFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "other_agent_failure", nil)
+	seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[otherAgentEventID], agentTwoRoute, runtimedelivery.StateRetrying, &otherAgentFailure)
+	newFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "new_failure", nil)
+	newSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[failedNewEventID], agentOneRoute, runtimedelivery.StateRetrying, &newFailure)
+	failedNewDeliveryID := newSnapshot.DeliveryID
+	failedOldDeliveryID := oldSnapshot.DeliveryID
+	deadDeliveryID := deadSnapshot.DeliveryID
+	terminalFailure := mustMarshalTestFailure(t, terminalFailureEnvelope)
 	deadLetterID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO dead_letters (
@@ -561,7 +560,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 	if len(first.Failures) != 1 || first.Failures[0].DeliveryID != failedNewDeliveryID || first.Failures[0].Status != "failed" {
 		t.Fatalf("first failures page = %#v", first.Failures)
 	}
-	if first.Failures[0].EventName != "task.failed.new" || first.Failures[0].RunID != runID || first.Failures[0].EntityID != entityID || first.Failures[0].RetryCount != 2 {
+	if first.Failures[0].EventName != "task.failed.new" || first.Failures[0].RunID != runID || first.Failures[0].EntityID != entityID || first.Failures[0].RetryCount != 1 {
 		t.Fatalf("failure row = %#v", first.Failures[0])
 	}
 	if first.FailuresNextCursor == "" {
@@ -881,6 +880,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 	deadLetterEventID := uuid.NewString()
 	failedOtherRunEventID := uuid.NewString()
 	otherAgentEventID := uuid.NewString()
+	eventsByID := make(map[string]events.Event, 7)
 	for _, event := range []struct {
 		id    string
 		runID string
@@ -894,39 +894,25 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 		{failedOtherRunEventID, otherRunID, "task.failed"},
 		{otherAgentEventID, runID, "task.other_agent"},
 	} {
-		seedOperatorAgentEvent(t, ctx, pg, event.id, event.runID, event.name, entityID, base.Add(-10*time.Minute))
+		eventsByID[event.id] = seedOperatorAgentEvent(t, ctx, pg, event.id, event.runID, event.name, entityID, base.Add(-10*time.Minute))
 	}
-	pendingDeliveryID := uuid.NewString()
-	inProgressDeliveryID := uuid.NewString()
-	deliveredDeliveryID := uuid.NewString()
-	failedDeliveryID := uuid.NewString()
-	deadLetterDeliveryID := uuid.NewString()
-	failedOtherRunDeliveryID := uuid.NewString()
-	otherAgentDeliveryID := uuid.NewString()
-	temporaryFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "temporary", nil))
-	boomFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "boom", nil))
-	terminalFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassRetryExhausted, "terminal", nil))
-	otherRunFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "other_run_boom", nil))
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, failure, started_at, delivered_at, created_at
-		) VALUES
-			($1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-1', 'pending', 1, 'retry_scheduled', $4::jsonb, NULL, NULL, $5),
-			($6::uuid, $2::uuid, $7::uuid, 'agent', 'agent-1', 'in_progress', 2, 'handler_started', NULL, $8, NULL, $9),
-			($10::uuid, $2::uuid, $11::uuid, 'agent', 'agent-1', 'delivered', 0, NULL, NULL, $12, $13, $14),
-			($15::uuid, $2::uuid, $16::uuid, 'agent', 'agent-1', 'failed', 3, 'handler_error', $17::jsonb, $18, $19, $20),
-			($21::uuid, $2::uuid, $22::uuid, 'agent', 'agent-1', 'dead_letter', 4, 'retry_exhausted', $23::jsonb, $24, $25, $26),
-			($27::uuid, $28::uuid, $29::uuid, 'agent', 'agent-1', 'failed', 2, 'handler_error', $30::jsonb, $31, $32, $33),
-			($34::uuid, $2::uuid, $35::uuid, 'agent', 'agent-2', 'delivered', 0, NULL, NULL, $12, $13, $14)
-	`, pendingDeliveryID, runID, pendingEventID, temporaryFailure, base.Add(-4*time.Minute),
-		inProgressDeliveryID, inProgressEventID, base.Add(-3*time.Minute-50*time.Second), base.Add(-3*time.Minute),
-		deliveredDeliveryID, deliveredEventID, base.Add(-2*time.Minute-50*time.Second), base.Add(-2*time.Minute-40*time.Second), base.Add(-2*time.Minute),
-		failedDeliveryID, failedEventID, boomFailure, base.Add(-1*time.Minute-50*time.Second), base.Add(-1*time.Minute-40*time.Second), base.Add(-1*time.Minute),
-		deadLetterDeliveryID, deadLetterEventID, terminalFailure, base.Add(-50*time.Second), base.Add(-40*time.Second), base,
-		failedOtherRunDeliveryID, otherRunID, failedOtherRunEventID, otherRunFailure, base.Add(-5*time.Minute-50*time.Second), base.Add(-5*time.Minute-40*time.Second), base.Add(-5*time.Minute),
-		otherAgentDeliveryID, otherAgentEventID); err != nil {
-		t.Fatalf("seed deliveries: %v", err)
-	}
+	agentOneRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"}
+	agentTwoRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-2"}
+	pendingSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[pendingEventID], agentOneRoute, runtimedelivery.StateQueued, nil)
+	inProgressSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[inProgressEventID], agentOneRoute, runtimedelivery.StateLaunching, nil)
+	deliveredSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[deliveredEventID], agentOneRoute, runtimedelivery.StateDelivered, nil)
+	boomFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "boom", nil)
+	failedSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[failedEventID], agentOneRoute, runtimedelivery.StateRetrying, &boomFailure)
+	terminalFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "terminal", nil)
+	deadLetterSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[deadLetterEventID], agentOneRoute, runtimedelivery.StateExhausted, &terminalFailure)
+	otherRunFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "other_run_boom", nil)
+	seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[failedOtherRunEventID], agentOneRoute, runtimedelivery.StateRetrying, &otherRunFailure)
+	seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[otherAgentEventID], agentTwoRoute, runtimedelivery.StateDelivered, nil)
+	pendingDeliveryID := pendingSnapshot.DeliveryID
+	inProgressDeliveryID := inProgressSnapshot.DeliveryID
+	deliveredDeliveryID := deliveredSnapshot.DeliveryID
+	failedDeliveryID := failedSnapshot.DeliveryID
+	deadLetterDeliveryID := deadLetterSnapshot.DeliveryID
 
 	first, err := pg.LoadOperatorAgentDeliveryLifecycle(ctx, "agent-1", OperatorAgentDeliveryLifecycleOptions{
 		RunID:    runID,
@@ -966,10 +952,10 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 			runID:       runID,
 			entityID:    entityID,
 			status:      "dead_letter",
-			retryCount:  4,
-			reasonCode:  "retry_exhausted",
+			retryCount:  0,
+			reasonCode:  "terminal",
 			failureCode: "terminal",
-			createdAt:   base,
+			createdAt:   deadLetterSnapshot.CreatedAt,
 			wantStarted: true,
 			wantDone:    true,
 		},
@@ -980,12 +966,10 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 			runID:       runID,
 			entityID:    entityID,
 			status:      "failed",
-			retryCount:  3,
-			reasonCode:  "handler_error",
+			retryCount:  1,
 			failureCode: "boom",
-			createdAt:   base.Add(-1 * time.Minute),
+			createdAt:   failedSnapshot.CreatedAt,
 			wantStarted: true,
-			wantDone:    true,
 		},
 		{
 			deliveryID:  deliveredDeliveryID,
@@ -995,7 +979,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 			entityID:    entityID,
 			status:      "delivered",
 			retryCount:  0,
-			createdAt:   base.Add(-2 * time.Minute),
+			createdAt:   deliveredSnapshot.CreatedAt,
 			wantStarted: true,
 			wantDone:    true,
 		},
@@ -1006,22 +990,19 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 			runID:       runID,
 			entityID:    entityID,
 			status:      "in_progress",
-			retryCount:  2,
-			reasonCode:  "handler_started",
-			createdAt:   base.Add(-3 * time.Minute),
+			retryCount:  0,
+			createdAt:   inProgressSnapshot.CreatedAt,
 			wantStarted: true,
 		},
 		{
-			deliveryID:  pendingDeliveryID,
-			eventID:     pendingEventID,
-			eventName:   "task.pending",
-			runID:       runID,
-			entityID:    entityID,
-			status:      "pending",
-			retryCount:  1,
-			reasonCode:  "retry_scheduled",
-			failureCode: "temporary",
-			createdAt:   base.Add(-4 * time.Minute),
+			deliveryID: pendingDeliveryID,
+			eventID:    pendingEventID,
+			eventName:  "task.pending",
+			runID:      runID,
+			entityID:   entityID,
+			status:     "pending",
+			retryCount: 0,
+			createdAt:  pendingSnapshot.CreatedAt,
 		},
 	})
 }
@@ -1074,6 +1055,7 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 	deadLetterEventID := uuid.NewString()
 	failedOtherRunEventID := uuid.NewString()
 	otherAgentEventID := uuid.NewString()
+	eventsByID := make(map[string]events.Event, 7)
 	for _, event := range []struct {
 		id    string
 		runID string
@@ -1094,38 +1076,25 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 		if err := commitSemanticEventFixture(ctx, sqliteStore, fixture); err != nil {
 			t.Fatalf("seed sqlite event %s: %v", event.name, err)
 		}
+		eventsByID[event.id] = fixture
 	}
-	pendingDeliveryID := uuid.NewString()
-	inProgressDeliveryID := uuid.NewString()
-	deliveredDeliveryID := uuid.NewString()
-	failedDeliveryID := uuid.NewString()
-	deadLetterDeliveryID := uuid.NewString()
-	failedOtherRunDeliveryID := uuid.NewString()
-	otherAgentDeliveryID := uuid.NewString()
-	temporaryFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "temporary", nil))
-	boomFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "boom", nil))
-	terminalFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassRetryExhausted, "terminal", nil))
-	otherRunFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "other_run_boom", nil))
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, failure, started_at, delivered_at, created_at
-		) VALUES
-			(?, ?, ?, 'agent', 'agent-1', 'pending', 1, 'retry_scheduled', ?, NULL, NULL, ?),
-			(?, ?, ?, 'agent', 'agent-1', 'in_progress', 2, 'handler_started', NULL, ?, NULL, ?),
-			(?, ?, ?, 'agent', 'agent-1', 'delivered', 0, NULL, NULL, ?, ?, ?),
-			(?, ?, ?, 'agent', 'agent-1', 'failed', 3, 'handler_error', ?, ?, ?, ?),
-			(?, ?, ?, 'agent', 'agent-1', 'dead_letter', 4, 'retry_exhausted', ?, ?, ?, ?),
-			(?, ?, ?, 'agent', 'agent-1', 'failed', 2, 'handler_error', ?, ?, ?, ?),
-			(?, ?, ?, 'agent', 'agent-2', 'delivered', 0, NULL, NULL, ?, ?, ?)
-	`, pendingDeliveryID, runID, pendingEventID, temporaryFailure, base.Add(-4*time.Minute),
-		inProgressDeliveryID, runID, inProgressEventID, base.Add(-3*time.Minute-50*time.Second), base.Add(-3*time.Minute),
-		deliveredDeliveryID, runID, deliveredEventID, base.Add(-2*time.Minute-50*time.Second), base.Add(-2*time.Minute-40*time.Second), base.Add(-2*time.Minute),
-		failedDeliveryID, runID, failedEventID, boomFailure, base.Add(-1*time.Minute-50*time.Second), base.Add(-1*time.Minute-40*time.Second), base.Add(-1*time.Minute),
-		deadLetterDeliveryID, runID, deadLetterEventID, terminalFailure, base.Add(-50*time.Second), base.Add(-40*time.Second), base,
-		failedOtherRunDeliveryID, otherRunID, failedOtherRunEventID, otherRunFailure, base.Add(-5*time.Minute-50*time.Second), base.Add(-5*time.Minute-40*time.Second), base.Add(-5*time.Minute),
-		otherAgentDeliveryID, runID, otherAgentEventID, base.Add(-2*time.Minute-50*time.Second), base.Add(-2*time.Minute-40*time.Second), base.Add(-2*time.Minute)); err != nil {
-		t.Fatalf("seed sqlite deliveries: %v", err)
-	}
+	agentOneRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"}
+	agentTwoRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-2"}
+	pendingSnapshot := seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[pendingEventID], agentOneRoute, runtimedelivery.StateQueued, nil)
+	inProgressSnapshot := seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[inProgressEventID], agentOneRoute, runtimedelivery.StateLaunching, nil)
+	deliveredSnapshot := seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[deliveredEventID], agentOneRoute, runtimedelivery.StateDelivered, nil)
+	boomFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "boom", nil)
+	failedSnapshot := seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[failedEventID], agentOneRoute, runtimedelivery.StateRetrying, &boomFailure)
+	terminalFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "terminal", nil)
+	deadLetterSnapshot := seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[deadLetterEventID], agentOneRoute, runtimedelivery.StateExhausted, &terminalFailure)
+	otherRunFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "other_run_boom", nil)
+	seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[failedOtherRunEventID], agentOneRoute, runtimedelivery.StateRetrying, &otherRunFailure)
+	seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[otherAgentEventID], agentTwoRoute, runtimedelivery.StateDelivered, nil)
+	pendingDeliveryID := pendingSnapshot.DeliveryID
+	inProgressDeliveryID := inProgressSnapshot.DeliveryID
+	deliveredDeliveryID := deliveredSnapshot.DeliveryID
+	failedDeliveryID := failedSnapshot.DeliveryID
+	deadLetterDeliveryID := deadLetterSnapshot.DeliveryID
 
 	first, err := sqliteStore.LoadOperatorAgentDeliveryLifecycle(ctx, "agent-1", OperatorAgentDeliveryLifecycleOptions{
 		RunID:    runID,
@@ -1165,10 +1134,10 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 			runID:       runID,
 			entityID:    entityID,
 			status:      "dead_letter",
-			retryCount:  4,
-			reasonCode:  "retry_exhausted",
+			retryCount:  0,
+			reasonCode:  "terminal",
 			failureCode: "terminal",
-			createdAt:   base,
+			createdAt:   deadLetterSnapshot.CreatedAt,
 			wantStarted: true,
 			wantDone:    true,
 		},
@@ -1179,12 +1148,10 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 			runID:       runID,
 			entityID:    entityID,
 			status:      "failed",
-			retryCount:  3,
-			reasonCode:  "handler_error",
+			retryCount:  1,
 			failureCode: "boom",
-			createdAt:   base.Add(-1 * time.Minute),
+			createdAt:   failedSnapshot.CreatedAt,
 			wantStarted: true,
-			wantDone:    true,
 		},
 		{
 			deliveryID:  deliveredDeliveryID,
@@ -1194,7 +1161,7 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 			entityID:    entityID,
 			status:      "delivered",
 			retryCount:  0,
-			createdAt:   base.Add(-2 * time.Minute),
+			createdAt:   deliveredSnapshot.CreatedAt,
 			wantStarted: true,
 			wantDone:    true,
 		},
@@ -1205,22 +1172,19 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 			runID:       runID,
 			entityID:    entityID,
 			status:      "in_progress",
-			retryCount:  2,
-			reasonCode:  "handler_started",
-			createdAt:   base.Add(-3 * time.Minute),
+			retryCount:  0,
+			createdAt:   inProgressSnapshot.CreatedAt,
 			wantStarted: true,
 		},
 		{
-			deliveryID:  pendingDeliveryID,
-			eventID:     pendingEventID,
-			eventName:   "task.pending",
-			runID:       runID,
-			entityID:    entityID,
-			status:      "pending",
-			retryCount:  1,
-			reasonCode:  "retry_scheduled",
-			failureCode: "temporary",
-			createdAt:   base.Add(-4 * time.Minute),
+			deliveryID: pendingDeliveryID,
+			eventID:    pendingEventID,
+			eventName:  "task.pending",
+			runID:      runID,
+			entityID:   entityID,
+			status:     "pending",
+			retryCount: 0,
+			createdAt:  pendingSnapshot.CreatedAt,
 		},
 	})
 }
@@ -1242,6 +1206,13 @@ type expectedAgentDeliveryLifecycleRow struct {
 
 func assertAgentDeliveryLifecycleRows(t *testing.T, got []OperatorAgentDeliveryLifecycleRow, want []expectedAgentDeliveryLifecycleRow) {
 	t.Helper()
+	want = append([]expectedAgentDeliveryLifecycleRow(nil), want...)
+	sort.Slice(want, func(i, j int) bool {
+		if !want[i].createdAt.Equal(want[j].createdAt) {
+			return want[i].createdAt.After(want[j].createdAt)
+		}
+		return want[i].deliveryID > want[j].deliveryID
+	})
 	if len(got) != len(want) {
 		t.Fatalf("delivery lifecycle rows = %#v, want %d rows", got, len(want))
 	}
@@ -1274,7 +1245,7 @@ func assertAgentDeliveryLifecycleRows(t *testing.T, got []OperatorAgentDeliveryL
 	}
 }
 
-func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsFailsClosedOnDeadLetterMismatch(t *testing.T) {
+func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsUsesLifecycleOutcomeWithoutDeadLetterRecord(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := newTestPostgresStore(t, db)
@@ -1297,31 +1268,23 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsFailsClosedOnDeadLe
 	}
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	deliveryID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	seedOperatorAgentEvent(t, ctx, pg, eventID, runID, "task.dead", "", time.Now().UTC())
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, delivered_at, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-1', 'dead_letter', 1, now(), now()
-		)
-	`, deliveryID, runID, eventID); err != nil {
-		t.Fatalf("seed delivery: %v", err)
-	}
+	event := seedOperatorAgentEvent(t, ctx, pg, eventID, runID, "task.dead", "", time.Now().UTC())
+	failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "missing_dead_letter_record", nil)
+	seedAgentDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"}, runtimedelivery.StateExhausted, &failure)
 
-	_, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, "agent-1", OperatorAgentDeliveryDiagnosticsOptions{})
-	if err == nil {
-		t.Fatal("LoadOperatorAgentDeliveryDiagnostics returned success for dead_letter delivery without record")
+	got, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, "agent-1", OperatorAgentDeliveryDiagnosticsOptions{})
+	if err != nil {
+		t.Fatalf("LoadOperatorAgentDeliveryDiagnostics: %v", err)
 	}
-	if !strings.Contains(err.Error(), "without a dead_letters record") {
-		t.Fatalf("error = %v, want dead_letters reconciliation failure", err)
+	if got.Summary.DeadLetters24h != 1 || len(got.DeadLetters) != 1 || len(got.DeadLetters[0].DeadLetterRecords) != 0 {
+		t.Fatalf("delivery diagnostics = %#v, want one canonical lifecycle outcome and no legacy dead-letter record", got)
 	}
 }
 
-func seedOperatorAgentEvent(t *testing.T, ctx context.Context, pg *PostgresStore, eventID, runID, eventName, entityID string, createdAt time.Time) {
+func seedOperatorAgentEvent(t *testing.T, ctx context.Context, pg *PostgresStore, eventID, runID, eventName, entityID string, createdAt time.Time) events.Event {
 	t.Helper()
 	envelope := events.EventEnvelope{}
 	if entityID != "" {
@@ -1338,6 +1301,7 @@ func seedOperatorAgentEvent(t *testing.T, ctx context.Context, pg *PostgresStore
 	if err := commitSemanticEventFixture(ctx, pg, event); err != nil {
 		t.Fatalf("seed operator-agent event %s: %v", eventName, err)
 	}
+	return event
 }
 
 func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsAbsentLifecycle(t *testing.T) {

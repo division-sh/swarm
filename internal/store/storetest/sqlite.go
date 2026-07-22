@@ -21,6 +21,45 @@ func StartSQLiteRuntimeStore(t testing.TB) *store.SQLiteRuntimeStore {
 	return StartSQLiteRuntimeStoreWithContext(t, context.Background())
 }
 
+// StartSQLiteRuntimeStorePair returns independently constructed store handles
+// over one canonical file-backed database. It is used to prove behavior that
+// must survive process-local store reconstruction.
+func StartSQLiteRuntimeStorePair(t testing.TB) (*store.SQLiteRuntimeStore, *store.SQLiteRuntimeStore) {
+	t.Helper()
+
+	platformSpec, plans := canonicalPlatformPlans(t)
+	dbPath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+	open := func() *store.SQLiteRuntimeStore {
+		sqliteStore, err := store.NewSQLiteRuntimeStore(dbPath)
+		if err != nil {
+			t.Fatalf("NewSQLiteRuntimeStore: %v", err)
+		}
+		if err := sqliteStore.BootstrapSchema(context.Background(), store.SchemaBootstrapRequest{
+			PlatformPlans: plans,
+			Origin: store.RuntimeStoreOrigin{
+				SwarmVersion:    "storetest",
+				PlatformVersion: platformSpec.Platform.Version,
+				CreatedAt:       time.Now().UTC(),
+			},
+		}); err != nil {
+			_ = sqliteStore.Close()
+			t.Fatalf("BootstrapSchema: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := sqliteStore.Close(); err != nil {
+				t.Errorf("close sqlite runtime store: %v", err)
+			}
+		})
+		return sqliteStore
+	}
+	primary := open()
+	reconstructed := open()
+	if _, err := os.Stat(dbPath); err != nil {
+		t.Fatalf("sqlite runtime store did not create file-backed db at %s: %v", dbPath, err)
+	}
+	return primary, reconstructed
+}
+
 func StartSQLiteRuntimeStoreWithContext(t testing.TB, ctx context.Context) *store.SQLiteRuntimeStore {
 	t.Helper()
 

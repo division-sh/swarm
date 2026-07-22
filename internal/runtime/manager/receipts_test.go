@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -56,6 +59,7 @@ func (b *recordingReceiptBus) LogRuntime(_ context.Context, entry runtimepipelin
 type recordingCompletionReceiptBus struct {
 	recordingReceiptBus
 	normalCompletionEvents []string
+	completionErr          error
 }
 
 type projectedEmergencyBudgetGuard struct{}
@@ -81,88 +85,37 @@ func TestProjectedBudgetEmergencySuppressesDeliveryButNotThresholdEvent(t *testi
 	}
 }
 
-func (b *recordingCompletionReceiptBus) ConvergeNormalRunCompletionForEvent(_ context.Context, eventID string) error {
-	b.normalCompletionEvents = append(b.normalCompletionEvents, strings.TrimSpace(eventID))
-	return nil
+func (b *recordingCompletionReceiptBus) ConvergeDeliveryRunCompletion(_ context.Context, evt events.Event) error {
+	b.normalCompletionEvents = append(b.normalCompletionEvents, strings.TrimSpace(evt.ID()))
+	return b.completionErr
 }
 
-type receiptReaderStub struct {
-	receipt     EventReceipt
-	found       bool
-	upsertErrs  []error
-	upsertCalls int
-	lastStatus  ReceiptStatus
-	lastFailure *runtimefailures.Envelope
-}
+type receiptReaderStub struct{}
 
 func (*receiptReaderStub) UpsertAgent(context.Context, PersistedAgent) error { return nil }
 func (*receiptReaderStub) LoadAgents(context.Context) ([]PersistedAgent, error) {
 	return nil, nil
 }
 func (*receiptReaderStub) EnsureEntitySchema(context.Context, string) error { return nil }
-func (s *receiptReaderStub) UpsertEventReceipt(_ context.Context, _, _ string, status ReceiptStatus, failure *runtimefailures.Envelope) error {
-	s.upsertCalls++
-	s.lastStatus = status
-	s.lastFailure = runtimefailures.CloneEnvelope(failure)
-	if len(s.upsertErrs) == 0 {
-		return nil
-	}
-	err := s.upsertErrs[0]
-	s.upsertErrs = s.upsertErrs[1:]
-	return err
-}
-func (*receiptReaderStub) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
-	return nil, nil
-}
-func (*receiptReaderStub) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
-	return nil, nil
-}
-func (s *receiptReaderStub) GetEventReceipt(context.Context, string, string) (EventReceipt, bool, error) {
-	return s.receipt, s.found, nil
-}
 
-func TestWriteReceiptConvergesNormalRunCompletionAfterReceiptPersists(t *testing.T) {
+func TestDeliverySettlementConvergesRunCompletionWithExactEvent(t *testing.T) {
 	bus := &recordingCompletionReceiptBus{}
-	store := &receiptReaderStub{
-		receipt: EventReceipt{
-			EventID: "event-1",
-			AgentID: "agent-1",
-			Status:  ReceiptStatusProcessed,
-		},
-		found: true,
-	}
-	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{}, store)
-
-	am.writeReceipt(testAuthorActivityContext(context.Background()), receiptTestEvent("event-1"), "agent-1", ReceiptStatusProcessed, nil)
-
-	if store.upsertCalls != 1 {
-		t.Fatalf("receipt upsert calls = %d, want 1", store.upsertCalls)
-	}
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{})
+	am.convergeDeliveryRunCompletion(testAuthorActivityContext(context.Background()), receiptTestEvent("event-1"), "agent-1")
 	if len(bus.normalCompletionEvents) != 1 || bus.normalCompletionEvents[0] != "event-1" {
-		t.Fatalf("normal completion events = %#v, want event-1", bus.normalCompletionEvents)
+		t.Fatalf("delivery completion events = %#v, want event-1", bus.normalCompletionEvents)
 	}
 }
 
-func TestWriteReceiptConvergesNormalRunCompletionAfterReceiptRetryPersists(t *testing.T) {
-	bus := &recordingCompletionReceiptBus{}
-	store := &receiptReaderStub{
-		receipt: EventReceipt{
-			EventID: "event-1",
-			AgentID: "agent-1",
-			Status:  ReceiptStatusProcessed,
-		},
-		found:      true,
-		upsertErrs: []error{context.Canceled, nil},
-	}
-	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{}, store)
-
-	am.writeReceipt(testAuthorActivityContext(context.Background()), receiptTestEvent("event-1"), "agent-1", ReceiptStatusProcessed, nil)
-
-	if store.upsertCalls != 2 {
-		t.Fatalf("receipt upsert calls = %d, want 2", store.upsertCalls)
-	}
+func TestDeliveryRunCompletionFailureIsVisible(t *testing.T) {
+	bus := &recordingCompletionReceiptBus{completionErr: errors.New("completion unavailable")}
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{})
+	am.convergeDeliveryRunCompletion(testAuthorActivityContext(context.Background()), receiptTestEvent("event-1"), "agent-1")
 	if len(bus.normalCompletionEvents) != 1 || bus.normalCompletionEvents[0] != "event-1" {
-		t.Fatalf("normal completion events = %#v, want event-1", bus.normalCompletionEvents)
+		t.Fatalf("delivery completion events = %#v, want event-1", bus.normalCompletionEvents)
+	}
+	if len(bus.runtimeLogs) != 1 || bus.runtimeLogs[0].Action != "delivery_run_completion_failed" {
+		t.Fatalf("runtime logs = %#v, want visible delivery completion failure", bus.runtimeLogs)
 	}
 }
 
@@ -254,17 +207,20 @@ func (a partialOutputRetryAgent) OnEvent(_ context.Context, inbound events.Event
 func TestProcessEventDeterministicOutputIdentitySurvivesPartialSuccessRetry(t *testing.T) {
 	store := &partialOutputRetryStore{persisted: map[string]bool{}}
 	bus := &partialOutputRetryBus{store: store, failSecond: true}
-	manager := newTestAgentManager(t, bus, nil, store)
+	deliveryStore := newManagerDeliveryTestStore(t)
+	manager := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore}, store)
 	inbound := eventtest.RunCreatingRootIngress(uuid.NewString(), "input.received", "gateway", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 	agent := partialOutputRetryAgent{id: "agent-a"}
+	ctx := managerAgentDeliveryContext(testAuthorActivityContext(context.Background()), agent.ID())
 
-	first := manager.processEventDetailed(testAuthorActivityContext(context.Background()), agent, inbound)
+	first := manager.processEventDetailed(ctx, agent, inbound)
 	if first.err == nil || len(bus.succeeded) != 1 {
 		t.Fatalf("first attempt err=%v succeeded=%v", first.err, bus.succeeded)
 	}
 	firstOutputID := bus.succeeded[0]
 	bus.failSecond = false
-	second := manager.processEventDetailed(testAuthorActivityContext(context.Background()), agent, inbound)
+	deliveryStore.makeRetryEligible(t, inbound, agent.ID())
+	second := manager.processEventDetailed(ctx, agent, inbound)
 	if second.err != nil {
 		t.Fatalf("retry error = %v", second.err)
 	}
@@ -476,16 +432,7 @@ func TestRecordDeadLetterEscalation_RequiresThreshold(t *testing.T) {
 
 func TestMaybeEscalateDeadLetter_PublishesTypedFlowInstanceEnvelope(t *testing.T) {
 	bus := &recordingReceiptBus{}
-	store := &receiptReaderStub{
-		found: true,
-		receipt: EventReceipt{
-			EventID:    "evt-1",
-			AgentID:    "agent-a",
-			Status:     ReceiptStatusDeadLetter,
-			RetryCount: 2,
-			Failure:    testFailure("handler_failed"),
-		},
-	}
+	store := &receiptReaderStub{}
 	am := newTestAgentManager(t, bus, nil)
 	am.store = store
 	registerReceiptTestAgent(t, am, runtimeactors.AgentConfig{
@@ -496,8 +443,19 @@ func TestMaybeEscalateDeadLetter_PublishesTypedFlowInstanceEnvelope(t *testing.T
 	})
 
 	evt := receiptTestEvent("evt-1")
+	snapshot := runtimedelivery.Snapshot{
+		DeliveryID: uuid.NewString(),
+		EventID:    evt.ID(),
+		Status:     runtimedelivery.StatusDeadLetter,
+		RetryCount: 2,
+		ReasonCode: "retry_exhausted",
+		Failure:    testFailure("handler_failed"),
+		SettledAt:  time.Now().UTC(),
+		CreatedAt:  time.Now().Add(-time.Minute).UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	}
 	for i := 0; i < deadLetterEscalationThreshold; i++ {
-		am.maybeEscalateDeadLetter(testAuthorActivityContext(context.Background()), evt, "agent-a")
+		am.maybeEscalateDeadLetter(testAuthorActivityContext(context.Background()), evt, "agent-a", snapshot)
 	}
 
 	if len(bus.published) != 1 {
@@ -600,15 +558,15 @@ func TestRecordPoisonQuarantine_RequiresDistinctEntities(t *testing.T) {
 func TestProcessEvent_PropagatesInboundParentWithoutTraceSeeding(t *testing.T) {
 	agent := &traceRecordingAgent{}
 	am := newTestAgentManager(t, nil, nil)
-	evt := eventtest.RunCreatingRootIngress("evt-123",
-		events.EventType("discovery/market_research.scan_assigned"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-123"),
+		events.EventType("discovery/market_research.scan_assigned"), "", "", nil, 0, eventtest.UUID("trace-parent-run"), "", events.EventEnvelope{}, time.Time{})
 	evt = eventtest.ForDelivery(evt, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:agent-delivery"}})
 
-	if err := am.processEvent(testAuthorActivityContext(context.Background()), agent, evt); err != nil {
+	if err := am.processEvent(managerAgentDeliveryContext(testAuthorActivityContext(context.Background()), agent.ID()), agent, evt); err != nil {
 		t.Fatalf("processEvent: %v", err)
 	}
-	if agent.parent != "evt-123" {
-		t.Fatalf("parent event = %q, want evt-123", agent.parent)
+	if agent.parent != evt.ID() {
+		t.Fatalf("parent event = %q, want %s", agent.parent, evt.ID())
 	}
 	if agent.replyContextID != "reply-v1:agent-delivery" {
 		t.Fatalf("agent reply context = %q", agent.replyContextID)
@@ -617,14 +575,18 @@ func TestProcessEvent_PropagatesInboundParentWithoutTraceSeeding(t *testing.T) {
 
 type deliveryLifecycleStoreStub struct {
 	receiptReaderStub
-	markCalls           []string
 	quiescenceChecks    int
 	quiescedAfterChecks int
 }
 
-func (s *deliveryLifecycleStoreStub) MarkEventDeliveryInProgress(_ context.Context, eventID, agentID, sessionID string) error {
-	s.markCalls = append(s.markCalls, strings.TrimSpace(eventID)+"|"+strings.TrimSpace(agentID)+"|"+strings.TrimSpace(sessionID))
-	return nil
+type renewalTrackingManagerDeliveryStore struct {
+	runtimedelivery.Store
+	renewals atomic.Int64
+}
+
+func (s *renewalTrackingManagerDeliveryStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {
+	s.renewals.Add(1)
+	return s.Store.RenewClaim(ctx, claim)
 }
 
 func (s *deliveryLifecycleStoreStub) ActiveRunDeliveryQuiesced(context.Context, string, string, string) (string, bool, error) {
@@ -636,39 +598,57 @@ func (s *deliveryLifecycleStoreStub) ActiveRunDeliveryQuiesced(context.Context, 
 	return "runtime_nuke_cancelled", true, nil
 }
 
-func TestProcessEvent_LogsLaunchingDeliveryLifecycleTransition(t *testing.T) {
+func TestProcessEvent_RecordsCanonicalDeliveryLifecycleTransitions(t *testing.T) {
 	bus := &recordingReceiptBus{}
 	store := &deliveryLifecycleStoreStub{}
-	am := newTestAgentManager(t, bus, nil, store)
-	evt := eventtest.RunCreatingRootIngress("evt-1", events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	deliveryStore := newManagerDeliveryTestStore(t)
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore}, store)
+	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("lifecycle-event"), events.EventType("task.started"), "", "", nil, 0, eventtest.UUID("lifecycle-run"), "", events.EventEnvelope{}, time.Time{})
 	agent := traceRecordingAgent{parent: ""}
 
-	if err := am.processEvent(testAuthorActivityContext(context.Background()), &agent, evt); err != nil {
+	if err := am.processEvent(managerAgentDeliveryContext(testAuthorActivityContext(context.Background()), agent.ID()), &agent, evt); err != nil {
 		t.Fatalf("processEvent: %v", err)
 	}
-	if len(store.markCalls) != 1 {
-		t.Fatalf("mark calls = %d, want 1", len(store.markCalls))
+	if got := deliveryStore.activityTransitions(t); !reflect.DeepEqual(got, []string{"in_progress", "delivered"}) {
+		t.Fatalf("delivery activity transitions = %#v, want [in_progress delivered]", got)
 	}
-	if len(bus.runtimeLogs) == 0 {
-		t.Fatal("expected runtime logs")
+}
+
+func TestProcessEventRenewsExactClaimAroundAgentHandler(t *testing.T) {
+	bus := &recordingReceiptBus{}
+	baseStore := newManagerDeliveryTestStore(t)
+	deliveryStore := &renewalTrackingManagerDeliveryStore{Store: baseStore}
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
+	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("agent-claim-renewal"), events.EventType("task.started"), "", "", nil, 0, eventtest.UUID("agent-claim-renewal-run"), "", events.EventEnvelope{}, time.Time{})
+	agent := &traceRecordingAgent{}
+	result := am.processEventDetailed(managerAgentDeliveryContext(testAuthorActivityContext(context.Background()), agent.ID()), agent, evt)
+	if result.err != nil {
+		t.Fatalf("process event: %v", result.err)
 	}
-	entry := bus.runtimeLogs[0]
-	if entry.Action != "delivery_lifecycle_transition" {
-		t.Fatalf("action = %q, want delivery_lifecycle_transition", entry.Action)
+	if got := deliveryStore.renewals.Load(); got < 2 {
+		t.Fatalf("claim renewals = %d, want immediate and final handler renewal", got)
 	}
-	detail := entry.Detail.(map[string]any)
-	if detail["delivery_state"] != "launching" || detail["delivery_previous_state"] != "queued" || detail["delivery_reason"] != "agent_processing" {
-		t.Fatalf("launching detail = %#v", detail)
+	obligation, err := runtimedelivery.NewObligation(evt.ID(), evt.RunID(), managerAgentDeliveryRoute(agent.ID()))
+	if err != nil {
+		t.Fatalf("derive agent delivery obligation: %v", err)
+	}
+	snapshot, err := baseStore.Snapshot(context.Background(), obligation.DeliveryID())
+	if err != nil {
+		t.Fatalf("load renewed agent delivery: %v", err)
+	}
+	if snapshot.Status != runtimedelivery.StatusDelivered {
+		t.Fatalf("renewed agent delivery status = %q, want delivered", snapshot.Status)
 	}
 }
 
 func TestProcessEvent_SkipsLateOutputAndReceiptAfterDestructiveResetQuiescence(t *testing.T) {
 	bus := &recordingReceiptBus{}
 	store := &deliveryLifecycleStoreStub{quiescedAfterChecks: 2}
-	am := newTestAgentManager(t, bus, nil, store)
+	deliveryStore := newManagerDeliveryTestStore(t)
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore}, store)
 	agent := &outputRecordingAgent{}
-
-	result := am.processEventDetailed(testAuthorActivityContext(context.Background()), agent, eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("task.started"), "", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Time{})
+	result := am.processEventDetailed(managerAgentDeliveryContext(testAuthorActivityContext(context.Background()), agent.ID()), agent, evt)
 	if result.err != nil {
 		t.Fatalf("processEventDetailed error = %v", result.err)
 	}
@@ -678,8 +658,16 @@ func TestProcessEvent_SkipsLateOutputAndReceiptAfterDestructiveResetQuiescence(t
 	if len(bus.published) != 0 {
 		t.Fatalf("published events = %#v, want none after quiescence", bus.published)
 	}
-	if store.upsertCalls != 0 {
-		t.Fatalf("receipt upserts = %d, want none after quiescence", store.upsertCalls)
+	obligation, err := runtimedelivery.NewObligation(evt.ID(), evt.RunID(), managerAgentDeliveryRoute(agent.ID()))
+	if err != nil {
+		t.Fatalf("derive quiesced delivery obligation: %v", err)
+	}
+	snapshot, err := deliveryStore.Snapshot(context.Background(), obligation.DeliveryID())
+	if err != nil {
+		t.Fatalf("load quiesced delivery: %v", err)
+	}
+	if snapshot.Status != runtimedelivery.StatusInProgress {
+		t.Fatalf("quiesced delivery status = %q, want in_progress for lease recovery", snapshot.Status)
 	}
 	if result.record.ReasonCode != "runtime_nuke_cancelled" {
 		t.Fatalf("reason = %q, want runtime_nuke_cancelled", result.record.ReasonCode)
@@ -689,15 +677,14 @@ func TestProcessEvent_SkipsLateOutputAndReceiptAfterDestructiveResetQuiescence(t
 func TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions(t *testing.T) {
 	cases := []struct {
 		name          string
-		receipt       EventReceipt
 		wantState     string
 		wantTerminal  string
 		wantRetry     int
 		wantReasonRaw string
+		exhaust       bool
 	}{
 		{
 			name:          "retrying",
-			receipt:       EventReceipt{EventID: "evt-1", AgentID: "agent-a", Status: ReceiptStatusError, RetryCount: 1, Failure: testFailure("handler_failed")},
 			wantState:     "retrying",
 			wantTerminal:  "",
 			wantRetry:     1,
@@ -705,23 +692,34 @@ func TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions(t *te
 		},
 		{
 			name:          "exhausted",
-			receipt:       EventReceipt{EventID: "evt-1", AgentID: "agent-a", Status: ReceiptStatusDeadLetter, RetryCount: 2, Failure: testFailure("handler_failed")},
 			wantState:     "exhausted",
 			wantTerminal:  "retry_exhausted",
-			wantRetry:     2,
+			wantRetry:     1,
 			wantReasonRaw: "retry_exhausted",
+			exhaust:       true,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			bus := &recordingReceiptBus{}
-			store := &deliveryLifecycleStoreStub{}
-			store.receipt = tc.receipt
-			store.found = true
-			am := newTestAgentManager(t, bus, nil, store)
-
-			am.writeReceipt(testAuthorActivityContext(context.Background()), receiptTestEvent("evt-1"), "agent-a", ReceiptStatusError, testFailure("handler_failed"))
+			deliveryStore := newManagerDeliveryTestStore(t)
+			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
+			evt := eventtest.RunCreatingRootIngress(eventtest.UUID("write-receipt-"+tc.name), events.EventType("work.requested"), "source", "", nil, 0, eventtest.UUID("write-receipt-run-"+tc.name), "", events.EventEnvelope{}, time.Time{})
+			claim, err := deliveryStore.ClaimAgentDelivery(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRoute("agent-a"))
+			if err != nil {
+				t.Fatalf("claim delivery: %v", err)
+			}
+			if tc.exhaust {
+				am.writeReceipt(runtimedelivery.WithClaim(testAuthorActivityContext(context.Background()), claim.Claim), evt, "agent-a", ReceiptStatusError, testFailure("handler_failed"))
+				deliveryStore.makeRetryEligible(t, evt, "agent-a")
+				claim, err = deliveryStore.ClaimAgentDelivery(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRoute("agent-a"))
+				if err != nil {
+					t.Fatalf("claim retry delivery: %v", err)
+				}
+				bus.runtimeLogs = nil
+			}
+			am.writeReceipt(runtimedelivery.WithClaim(testAuthorActivityContext(context.Background()), claim.Claim), evt, "agent-a", ReceiptStatusError, testFailure("handler_failed"))
 
 			if len(bus.runtimeLogs) != 1 {
 				t.Fatalf("runtime logs = %d, want 1", len(bus.runtimeLogs))
@@ -747,30 +745,30 @@ func TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions(t *te
 	}
 }
 
-func TestWriteReceipt_RetryAfterContextCancellationStillLogsLifecycleTransition(t *testing.T) {
+func TestWriteReceipt_ContextCancellationLeavesClaimForLeaseRecoveryAndLogsFailure(t *testing.T) {
 	bus := &recordingReceiptBus{}
-	store := &deliveryLifecycleStoreStub{}
-	store.receipt = EventReceipt{
-		EventID:    "evt-1",
-		AgentID:    "agent-a",
-		Status:     ReceiptStatusError,
-		RetryCount: 1,
-		Failure:    testFailure("handler_failed"),
+	deliveryStore := newManagerDeliveryTestStore(t)
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
+	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("cancelled-settlement"), events.EventType("work.requested"), "source", "", nil, 0, eventtest.UUID("cancelled-settlement-run"), "", events.EventEnvelope{}, time.Time{})
+	claimed, err := deliveryStore.ClaimAgentDelivery(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRoute("agent-a"))
+	if err != nil {
+		t.Fatalf("claim delivery: %v", err)
 	}
-	store.found = true
-	store.upsertErrs = []error{context.Canceled, nil}
-	am := newTestAgentManager(t, bus, nil, store)
+	ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
+	cancel()
+	am.writeReceipt(runtimedelivery.WithClaim(ctx, claimed.Claim), evt, "agent-a", ReceiptStatusError, testFailure("handler_failed"))
 
-	am.writeReceipt(testAuthorActivityContext(context.Background()), receiptTestEvent("evt-1"), "agent-a", ReceiptStatusError, testFailure("handler_failed"))
-
-	if store.upsertCalls != 2 {
-		t.Fatalf("upsert calls = %d, want 2", store.upsertCalls)
-	}
 	if len(bus.runtimeLogs) != 1 {
 		t.Fatalf("runtime logs = %d, want 1", len(bus.runtimeLogs))
 	}
-	detail := bus.runtimeLogs[0].Detail.(map[string]any)
-	if detail["delivery_state"] != "retrying" || detail["delivery_reason"] != "handler_failure" {
-		t.Fatalf("retry lifecycle detail = %#v", detail)
+	if bus.runtimeLogs[0].Action != "delivery_settlement_failed" {
+		t.Fatalf("runtime log action = %q, want delivery_settlement_failed", bus.runtimeLogs[0].Action)
+	}
+	snapshot, err := deliveryStore.Snapshot(context.Background(), claimed.Claim.DeliveryID())
+	if err != nil {
+		t.Fatalf("load cancelled delivery: %v", err)
+	}
+	if snapshot.Status != runtimedelivery.StatusInProgress || snapshot.ClaimExpiresAt.IsZero() {
+		t.Fatalf("cancelled delivery = status:%q claim_expires_at:%v, want leased in_progress work", snapshot.Status, snapshot.ClaimExpiresAt)
 	}
 }

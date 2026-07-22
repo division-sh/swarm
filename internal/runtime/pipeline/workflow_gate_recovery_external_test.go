@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -348,8 +349,9 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()),
 				events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
 			)
-			seedProposedEffectProofDelivery(t, selected, sourceEvent, "support")
+			sourceRoute := seedProposedEffectProofDelivery(t, selected, sourceEvent, "support")
 			sourceCtx := events.WithDeliveryContext(ctx, sourceEvent.DeliveryContext())
+			sourceCtx = runtimedelivery.WithRoute(sourceCtx, sourceRoute)
 			forward, _, err := coordinator.Intercept(sourceCtx, sourceEvent)
 			if err != nil {
 				t.Fatalf("execute proposal source: %v", err)
@@ -495,8 +497,9 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()),
 					events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
 				)
-				seedProposedEffectProofDelivery(t, selected, proposal, "support")
+				proposalRoute := seedProposedEffectProofDelivery(t, selected, proposal, "support")
 				proposalCtx := events.WithDeliveryContext(ctx, proposal.DeliveryContext())
+				proposalCtx = runtimedelivery.WithRoute(proposalCtx, proposalRoute)
 				consumed, _, routeErr := coordinator.Intercept(proposalCtx, proposal)
 				if routeErr != nil || consumed {
 					t.Fatalf("create %s proposal = forward:%v error:%v", verdict, consumed, routeErr)
@@ -750,8 +753,8 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-rollback",
 				[]byte(`{"chat_id":"support-room","text":"must roll back"}`), 0, runID, "",
 				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
-			seedProposedEffectProofDelivery(t, selected, event, "support")
-			forward, _, err := coordinator.Intercept(ctx, event)
+			route := seedProposedEffectProofDelivery(t, selected, event, "support")
+			forward, _, err := coordinator.Intercept(runtimedelivery.WithRoute(ctx, route), event)
 			if err != nil || forward {
 				t.Fatalf("proposal failure interception = forward:%v error:%v", forward, err)
 			}
@@ -1520,9 +1523,11 @@ func makeGateRecoveryRouteDue(t *testing.T, tc gateRecoveryStoreCase, eventID st
 
 func openSQLiteGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 	selected := storetest.StartSQLiteRuntimeStore(t)
+	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(selected.DB, selected)
+	workflowStore.ConfigureDeliveryLifecycleStore(selected)
 	return gateRecoveryStoreCase{
 		name: "sqlite", db: selected.DB, events: selected, cards: selected,
-		workflowStore: runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(selected.DB, selected),
+		workflowStore: workflowStore,
 	}
 }
 
@@ -1530,9 +1535,11 @@ func openPostgresGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workflowStore.ConfigureDeliveryLifecycleStore(selected)
 	return gateRecoveryStoreCase{
 		name: "postgres", postgres: true, db: db, events: selected, cards: selected,
-		workflowStore: runtimepipeline.NewWorkflowInstanceStore(db),
+		workflowStore: workflowStore,
 	}
 }
 
@@ -1642,10 +1649,12 @@ func assertProposedEffectOutcomeCount(t *testing.T, selected gateRecoveryStoreCa
 	}
 }
 
-func seedProposedEffectProofDelivery(t *testing.T, selected gateRecoveryStoreCase, evt events.Event, nodeID string) {
+func seedProposedEffectProofDelivery(t *testing.T, selected gateRecoveryStoreCase, evt events.Event, nodeID string) events.DeliveryRoute {
 	t.Helper()
 	ctx := testAuthorActivityContext(t, context.Background())
-	storetest.CommitSemanticEventWithRoutes(t, ctx, selected.events, evt, []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: nodeID}}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID}
+	storetest.CommitSemanticEventWithRoutes(t, ctx, selected.events, evt, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	return route
 }
 
 func proposedEffectProofFailure(t *testing.T, selected gateRecoveryStoreCase, eventID string) string {

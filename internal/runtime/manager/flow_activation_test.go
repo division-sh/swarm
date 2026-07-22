@@ -194,15 +194,6 @@ func (s *flowActivationTestStore) CommitAgentLifecycleTransition(_ context.Conte
 	}, nil
 }
 func (*flowActivationTestStore) EnsureEntitySchema(context.Context, string) error { return nil }
-func (*flowActivationTestStore) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, *runtimefailures.Envelope) error {
-	return nil
-}
-func (*flowActivationTestStore) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
-	return nil, nil
-}
-func (*flowActivationTestStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
-	return nil, nil
-}
 
 func (b *flowActivationTestBus) Publish(ctx context.Context, evt events.Event) error {
 	b.published = append(b.published, evt)

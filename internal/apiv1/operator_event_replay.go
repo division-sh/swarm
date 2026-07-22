@@ -18,15 +18,9 @@ import (
 
 const (
 	eventReplayIdempotencyTTL      = 24 * time.Hour
-	eventReplayScopeSubscriberID   = "__runtime_replay_scope__"
 	eventReplaySyntheticEventName  = "event.replayed"
 	eventReplayDefaultActorSource  = "swarm-cli:anonymous"
 	eventReplaySubscriberTypeAgent = "agent"
-	eventReplayStatusDelivered     = "delivered"
-	eventReplayStatusFailed        = "failed"
-	eventReplayStatusDeadLetter    = "dead_letter"
-	eventReplayStatusPending       = "pending"
-	eventReplayStatusInProgress    = "in_progress"
 )
 
 type eventReplayPublisher interface {
@@ -372,7 +366,7 @@ func eventReplayTargets(original store.OperatorEventFull, requested []string) ([
 	for _, delivery := range original.Deliveries {
 		subscriberType := strings.TrimSpace(delivery.SubscriberType)
 		subscriberID := strings.TrimSpace(delivery.SubscriberID)
-		if subscriberType != eventReplaySubscriberTypeAgent || subscriberID == "" || subscriberID == eventReplayScopeSubscriberID {
+		if subscriberType != eventReplaySubscriberTypeAgent || subscriberID == "" {
 			continue
 		}
 		if _, seen := originalBySubscriber[subscriberID]; seen {
@@ -406,18 +400,12 @@ func eventReplayTargets(original store.OperatorEventFull, requested []string) ([
 }
 
 func validateReplayEligibleDelivery(eventID string, delivery store.OperatorEventDelivery) error {
-	switch strings.TrimSpace(delivery.Status) {
-	case eventReplayStatusDelivered, eventReplayStatusFailed, eventReplayStatusDeadLetter:
+	if delivery.Terminal {
 		return nil
-	case eventReplayStatusPending, eventReplayStatusInProgress, "":
-		data := eventReplayDeliveryFailureEvidence(eventID, delivery)
-		data["reason"] = "original delivery is not terminal"
-		return NewApplicationError(EventReplayNotEligibleCode, false, data)
-	default:
-		data := eventReplayDeliveryFailureEvidence(eventID, delivery)
-		data["reason"] = "unsupported delivery status"
-		return NewApplicationError(EventReplayNotEligibleCode, false, data)
 	}
+	data := eventReplayDeliveryFailureEvidence(eventID, delivery)
+	data["reason"] = "original delivery is not terminal"
+	return NewApplicationError(EventReplayNotEligibleCode, false, data)
 }
 
 func deliveriesForSubscribers(eventID string, index map[string]store.OperatorEventDelivery, subscribers []string) ([]eventReplayDelivery, error) {
@@ -513,7 +501,7 @@ func eventReplayNewDeliveries(deliveries []store.OperatorEventDelivery, original
 	out := make([]eventReplayDelivery, 0, len(deliveries))
 	for _, delivery := range deliveries {
 		subscriberID := strings.TrimSpace(delivery.SubscriberID)
-		if strings.TrimSpace(delivery.SubscriberType) != eventReplaySubscriberTypeAgent || subscriberID == "" || subscriberID == eventReplayScopeSubscriberID {
+		if strings.TrimSpace(delivery.SubscriberType) != eventReplaySubscriberTypeAgent || subscriberID == "" {
 			continue
 		}
 		out = append(out, eventReplayDeliveryFromStore(delivery, sourceBySubscriber[subscriberID]))
@@ -549,8 +537,8 @@ func eventReplayDeliveryFailureEvidence(eventID string, delivery store.OperatorE
 		"subscriber_id":  strings.TrimSpace(delivery.SubscriberID),
 		"status":         strings.TrimSpace(delivery.Status),
 		"retry_count":    delivery.RetryCount,
-		"retry_eligible": delivery.RetryEligible || store.OperatorDeliveryRetryEligible(delivery.Status),
-		"terminal":       delivery.Terminal || store.OperatorDeliveryTerminal(delivery.Status),
+		"retry_eligible": delivery.RetryEligible,
+		"terminal":       delivery.Terminal,
 		"dead_letters":   append([]store.OperatorDeadLetterRecord(nil), delivery.DeadLetters...),
 	}
 	if reason := strings.TrimSpace(delivery.ReasonCode); reason != "" {

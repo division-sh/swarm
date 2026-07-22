@@ -204,8 +204,8 @@ func assertDynamicFlowInstanceFlowMatchTargetedNodeDelivery(t testing.TB, h *run
 	} else if err != nil {
 		t.Fatalf("query targeted event delivery: %v", err)
 	}
-	if deliveryStatus != "delivered" || reasonCode != "node_processed" || deliveryFlowInstance != flowInstance || deliveryEntityID != wantEntityID {
-		t.Fatalf("targeted event delivery = status:%q reason:%q route:%q/%q, want delivered node_processed for %q/%q", deliveryStatus, reasonCode, deliveryFlowInstance, deliveryEntityID, flowInstance, wantEntityID)
+	if deliveryStatus != "delivered" || reasonCode != "" || deliveryFlowInstance != flowInstance || deliveryEntityID != wantEntityID {
+		t.Fatalf("targeted event delivery = status:%q reason:%q route:%q/%q, want canonically delivered with no failure reason for %q/%q", deliveryStatus, reasonCode, deliveryFlowInstance, deliveryEntityID, flowInstance, wantEntityID)
 	}
 
 	var deliveryCount int

@@ -46,7 +46,6 @@ var productionRuntimeConstructorAllowlist = map[runtimeConstructorCallsite]int{
 	{Path: "internal/runtime/manager/event_construction.go", Scope: "newPlatformStandaloneRuntimeControlEvent", Constructor: "NewStandaloneRuntimeControlEvent"}:                 1,
 	{Path: "internal/runtime/manager/event_construction.go", Scope: "newPlatformStandaloneRuntimeDiagnosticEvent", Constructor: "NewStandaloneRuntimeDiagnosticEvent"}:           1,
 	{Path: "internal/runtime/pipeline/coordinator.go", Scope: "newPipelineRuntimeDiagnostic", Constructor: "NewCausalRuntimeDiagnosticEvent"}:                                    1,
-	{Path: "internal/runtime/pipeline/node_system_runner.go", Scope: "systemNodeRunner.emitDeadLetter", Constructor: "NewCausalRuntimeDiagnosticEvent"}:                          1,
 	{Path: "internal/runtime/pipeline/workflow_gate_lifecycle.go", Scope: "PipelineCoordinator.publishWorkflowGateSuperseded", Constructor: "NewRunScopedRuntimeControlEvent"}:   1,
 	{Path: "internal/runtime/pipeline/workflow_gate_terminal.go", Scope: "WorkflowInstanceStore.supersedeWorkflowInstanceGates", Constructor: "NewRunScopedRuntimeControlEvent"}: 1,
 	{Path: "internal/runtime/pipeline/workflow_timer_owner.go", Scope: "WorkflowTimerLifecycle.Fire", Constructor: "NewRunScopedRuntimeControlEvent"}:                            1,

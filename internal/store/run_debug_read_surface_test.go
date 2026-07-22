@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -154,6 +156,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 		}
 	}
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, targetEventID, targetRunID, "scan.requested", events.EventProducerAgent, "test", targetEntityID, "", now.Add(-4*time.Minute))
+	targetEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, targetEventID)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, otherEventID, otherRunID, "scan.requested", events.EventProducerAgent, "test", otherEntityID, "", now.Add(-3*time.Minute))
 	seedPostgresEntityStateRows(t, db, ctx, targetRunID, targetEntityID, targetSecondEntityID)
 	seedPostgresEntityStateRows(t, db, ctx, otherRunID, otherEntityID)
@@ -189,23 +192,18 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 	`, targetRunID, targetEntityID, targetEventID, `"queued"`, `"running"`, now.Add(2*time.Minute), otherRunID, otherEntityID, otherEventID, `"queued"`, `"failed"`, now.Add(3*time.Minute)); err != nil {
 		t.Fatalf("seed mutations: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-			INSERT INTO event_deliveries (
-				run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, failure, delivered_at, created_at
-			)
-			VALUES ($1::uuid, $2::uuid, 'agent', 'agent-1', 'dead_letter', 2, 'handler_error', $3::jsonb, $4, $5)
-		`, targetRunID, targetEventID, mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassRetryExhausted, "handler_failed", nil)), now.Add(10*time.Second), now.Add(5*time.Second)); err != nil {
-		t.Fatalf("seed delivery: %v", err)
-	}
-	successDeliveryID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, delivered_at, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, 'node', 'node-success', 'delivered', 0, 'node_processed', $4, $5)
-		`, successDeliveryID, targetRunID, targetEventID, now.Add(20*time.Second), now.Add(15*time.Second)); err != nil {
-		t.Fatalf("seed successful delivery: %v", err)
-	}
+	failedDeliveryEnvelope := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "handler_failed", nil)
+	failedDelivery := seedDeliveryStateFixture(t, ctx, pg, targetEvent, events.DeliveryRoute{
+		SubscriberType: string(runtimedelivery.SubscriberAgent),
+		SubscriberID:   "agent-1",
+	}, runtimedelivery.StateExhausted, &failedDeliveryEnvelope)
+	setPostgresDeliveryFixtureTimes(t, ctx, db, failedDelivery, now.Add(5*time.Second), now.Add(10*time.Second))
+	successfulDelivery := seedDeliveryStateFixture(t, ctx, pg, targetEvent, events.DeliveryRoute{
+		SubscriberType: string(runtimedelivery.SubscriberNode),
+		SubscriberID:   "node-success",
+	}, runtimedelivery.StateDelivered, nil)
+	setPostgresDeliveryFixtureTimes(t, ctx, db, successfulDelivery, now.Add(15*time.Second), now.Add(20*time.Second))
+	successDeliveryID := successfulDelivery.DeliveryID
 	if err := runtimedeadletters.Insert(ctx, db, runtimedeadletters.Record{
 		OriginalEventID: targetEventID,
 		OriginalEvent:   "scan.requested",
@@ -261,7 +259,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 	if len(report.FailedDeliveries) != 1 {
 		t.Fatalf("FailedDeliveries len = %d, want 1: %#v", len(report.FailedDeliveries), report.FailedDeliveries)
 	}
-	if got := report.FailedDeliveries[0]; got.SubscriberType != "agent" || got.RetryCount != 2 || got.RetryEligible || !got.Terminal || len(got.DeadLetters) != 1 {
+	if got := report.FailedDeliveries[0]; got.SubscriberType != "agent" || got.RetryCount != 0 || got.RetryEligible || !got.Terminal || len(got.DeadLetters) != 1 {
 		t.Fatalf("FailedDeliveries[0] = %#v", got)
 	}
 	if report.FailedDeliveries[0].DeliveryID == successDeliveryID {
@@ -292,10 +290,30 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 	`, blockedRunID, readyRunID, now.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, activeEventID, blockedRunID, "quiescence.active_delivery", events.EventProducerPlatform, "test", "", "", now.Add(-50*time.Second))
+	activeEvent := eventtest.PersistedRuntimeControlForProducer(
+		activeEventID, events.EventType("quiescence.active_delivery"), eventtest.Producer(events.EventProducerPlatform, "test"), "", []byte(`{}`), 0,
+		blockedRunID, "", events.EventEnvelope{}, now.Add(-50*time.Second),
+	)
+	if err := commitSemanticEventFixtureWithAgents(ctx, pg, activeEvent, []string{"agent-active"}); err != nil {
+		t.Fatalf("seed active delivery event: %v", err)
+	}
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, unsettledEventID, blockedRunID, "quiescence.missing_pipeline_receipt", events.EventProducerPlatform, "test", "", "", now.Add(-40*time.Second))
 	seedPostgresRuntimeLogEventRecordFixture(t, ctx, pg, runtimeLogEventID, blockedRunID, "", []byte(`{}`), now.Add(-30*time.Second))
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, readyEventID, readyRunID, "quiescence.ready", events.EventProducerPlatform, "test", "", "", now.Add(-20*time.Second))
+	readyEvent := eventtest.PersistedRuntimeControlForProducer(
+		readyEventID, events.EventType("quiescence.ready"), eventtest.Producer(events.EventProducerPlatform, "test"), "", []byte(`{}`), 0,
+		readyRunID, "", events.EventEnvelope{}, now.Add(-20*time.Second),
+	)
+	if err := commitSemanticEventFixtureWithAgents(ctx, pg, readyEvent, []string{"agent-done"}); err != nil {
+		t.Fatalf("seed ready delivery event: %v", err)
+	}
+	readyRoute := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "agent-done"}
+	readyClaim, err := pg.ClaimAgentDelivery(ctx, readyEvent, readyRoute)
+	if err != nil {
+		t.Fatalf("claim ready delivery: %v", err)
+	}
+	if _, err := pg.SettleSuccess(ctx, readyClaim.Claim, nil, 0); err != nil {
+		t.Fatalf("settle ready delivery: %v", err)
+	}
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, inboundEvidenceEventID, readyRunID, events.EventTypePlatformInboundRecord, events.EventProducerPlatform, "test", "", "", now.Add(-20*time.Second))
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, directiveEvidenceEventID, readyRunID, events.EventTypePlatformAgentDirective, events.EventProducerPlatform, "test", "", "", now.Add(-20*time.Second))
 	if err := pg.UpsertPipelineReceipt(ctx, activeEventID, "processed", nil); err != nil {
@@ -303,17 +321,6 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 	}
 	if err := pg.UpsertPipelineReceipt(ctx, readyEventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt ready event: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
-		)
-		VALUES
-			($1::uuid, $2::uuid, 'agent', 'agent-active', 'pending', 0, 'matched_agent_subscription', now()),
-			($1::uuid, $2::uuid, $3, $4, 'pending', 0, 'replay_scope_marker', now()),
-			($5::uuid, $6::uuid, 'agent', 'agent-done', 'delivered', 0, 'handled', now())
-	`, blockedRunID, activeEventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, readyRunID, readyEventID); err != nil {
-		t.Fatalf("seed deliveries: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
@@ -372,7 +379,6 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	deliveryID := uuid.NewString()
 	sessionID := uuid.NewString()
 	turnID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -387,6 +393,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 		t.Fatalf("seed run: %v", err)
 	}
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", now)
+	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 	seedRunDebugAgent(t, pg, ctx, "agent-source", entityID, agentmemory.Authored(true), "flow-a")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
@@ -402,20 +409,38 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	`, sessionID, runID, now.Add(1*time.Second), now.Add(3*time.Second)); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status,
-			retry_count, reason_code, failure, active_session_id, delivery_context,
-			delivery_payload_projection, started_at, created_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-source', 'failed',
-			2, 'handler_error', $4::jsonb, $5::uuid, jsonb_build_object('reply', jsonb_build_object('id', $8::text)),
-			jsonb_build_object('fields', jsonb_build_object('validation_case_id', $9::text)), $6, $7
-		)
-	`, deliveryID, runID, eventID, mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "trace_failure", nil)), sessionID, now.Add(1*time.Second), now.Add(500*time.Millisecond), replyContextID, projectedInstanceID); err != nil {
-		t.Fatalf("seed delivery: %v", err)
+	projection, err := events.NewDeliveryPayloadProjection(map[string]string{"validation_case_id": projectedInstanceID})
+	if err != nil {
+		t.Fatalf("construct delivery payload projection: %v", err)
 	}
+	route := events.DeliveryRoute{
+		SubscriberType:    string(runtimedelivery.SubscriberAgent),
+		SubscriberID:      "agent-source",
+		Context:           events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
+		PayloadProjection: projection,
+	}
+	if err := commitDeliveryObligationFixture(ctx, pg, event, route); err != nil {
+		t.Fatalf("commit delivery: %v", err)
+	}
+	claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
+	if err != nil {
+		t.Fatalf("claim delivery: %v", err)
+	}
+	if _, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
+		t.Fatalf("bind delivery session: %v", err)
+	}
+	failure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "trace_failure", nil)
+	failedDelivery, err := pg.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
+		Disposition: runtimedelivery.FailureRetry,
+		ReasonCode:  "handler_error",
+		Failure:     &failure,
+		RetryBase:   time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("settle delivery failure: %v", err)
+	}
+	setPostgresDeliveryFixtureTimes(t, ctx, db, failedDelivery, now.Add(500*time.Millisecond), now.Add(1*time.Second))
+	deliveryID := failedDelivery.DeliveryID
 	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, pg, runID, "agent-source", sessionID, turnID, "session", "entity:"+entityID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
@@ -447,7 +472,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	if got.DeliveryID != deliveryID || got.DeliveryStatus != "failed" || got.SubscriberID != "agent-source" {
 		t.Fatalf("delivery trace = %#v", got)
 	}
-	if got.DeliveryReasonCode != "handler_error" || got.DeliveryFailure == nil || got.DeliveryFailure.Detail.Code != "trace_failure" || got.DeliveryRetryCount != 2 || !got.DeliveryRetryEligible || got.DeliveryTerminal {
+	if got.DeliveryReasonCode != "handler_error" || got.DeliveryFailure == nil || got.DeliveryFailure.Detail.Code != "trace_failure" || got.DeliveryRetryCount != 1 || !got.DeliveryRetryEligible || got.DeliveryTerminal {
 		t.Fatalf("delivery failure trace evidence = %#v", got)
 	}
 	if got.ReplyContextID != replyContextID {
@@ -477,7 +502,6 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	deliveryID := uuid.NewString()
 	sessionID := uuid.NewString()
 	turnID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -491,6 +515,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 		t.Fatalf("seed run: %v", err)
 	}
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", base)
+	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 	seedRunDebugAgent(t, pg, ctx, "agent-late", entityID, agentmemory.Authored(true), "flow-a")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
@@ -506,17 +531,20 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 	`, sessionID, runID, base.Add(2*time.Second), base.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, reason_code, active_session_id, started_at, created_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-late', 'in_progress', 'session_started',
-			$4::uuid, $5, $5
-		)
-	`, deliveryID, runID, eventID, sessionID, base.Add(2*time.Second)); err != nil {
-		t.Fatalf("seed late delivery: %v", err)
+	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "agent-late"}
+	if err := commitDeliveryObligationFixture(ctx, pg, event, route); err != nil {
+		t.Fatalf("commit late delivery: %v", err)
 	}
+	claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
+	if err != nil {
+		t.Fatalf("claim late delivery: %v", err)
+	}
+	lateDelivery, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID)
+	if err != nil {
+		t.Fatalf("bind late delivery session: %v", err)
+	}
+	setPostgresDeliveryFixtureTimes(t, ctx, db, lateDelivery, base.Add(2*time.Second), base.Add(2*time.Second))
+	deliveryID := lateDelivery.DeliveryID
 	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, pg, runID, "agent-late", sessionID, turnID, "session", "entity:"+entityID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
@@ -554,7 +582,6 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	deliveryID := uuid.NewString()
 	sessionID := uuid.NewString()
 	turnID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -567,6 +594,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 		t.Fatalf("seed run: %v", err)
 	}
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "task.started", events.EventProducerPlatform, "builder", entityID, "", now)
+	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 	seedRunDebugAgent(t, pg, ctx, "agent-task", entityID, agentmemory.PlatformDefault(), "")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
@@ -580,16 +608,11 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 	`, sessionID, entityID, runID, now.Add(1*time.Second), now.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed audit session: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-task', 'delivered', 'handled', $4
-		)
-	`, deliveryID, runID, eventID, now.Add(500*time.Millisecond)); err != nil {
-		t.Fatalf("seed delivery: %v", err)
-	}
+	delivered := seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{
+		SubscriberType: string(runtimedelivery.SubscriberAgent),
+		SubscriberID:   "agent-task",
+	}, runtimedelivery.StateDelivered, nil)
+	setPostgresDeliveryFixtureTimes(t, ctx, db, delivered, now.Add(500*time.Millisecond), now.Add(500*time.Millisecond))
 	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, pg, runID, "agent-task", sessionID, turnID, "task", "entity:"+entityID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (

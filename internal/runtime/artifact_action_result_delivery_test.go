@@ -53,7 +53,16 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 			t.Cleanup(cleanup)
 			ctx := seedRuntimeTestRun(t, db)
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
-			bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
+			var pc *runtimepipeline.PipelineCoordinator
+			bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
+				ContractBundle: source,
+				InterceptorProvider: func() []runtimebus.EventInterceptor {
+					if pc == nil {
+						return nil
+					}
+					return []runtimebus.EventInterceptor{pc}
+				},
+			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -63,10 +72,11 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 			}
 			module := newRuntimeTestWorkflowModule(t, source)
 			resultHandlerStarted := make(chan string, 4)
-			pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+			pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
 				Module:        module,
 				WorkflowStore: workflowStore,
+				DeliveryStore: pg,
 				ArtifactRoot:  t.TempDir(),
 				TestWorkflowNodeHandlerStartHook: func(_ context.Context, nodeID string, evt events.Event) error {
 					if strings.TrimSpace(nodeID) == "repo-scaffold-node" && strings.TrimSpace(string(evt.Type())) == resultEventType {
@@ -78,16 +88,6 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 					return nil
 				},
 			})
-			subscribed := make(chan struct{}, 1)
-			pc.SetTestSubscribeHook(func() { subscribed <- struct{}{} })
-			runCtx, cancel := context.WithCancel(ctx)
-			t.Cleanup(cancel)
-			go pc.Run(runCtx)
-			select {
-			case <-subscribed:
-			case <-time.After(2 * time.Second):
-				t.Fatal("workflow runtime did not subscribe")
-			}
 			if err := bus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("repo-scaffold", "inst-1")}); err != nil {
 				t.Fatalf("AddFlowInstanceRoute: %v", err)
 			}
@@ -133,20 +133,10 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 				  AND subscriber_type = 'node'
 				  AND subscriber_id = 'repo-scaffold-node'
 				  AND status = 'delivered'
-				  AND reason_code = 'node_processed'
-				  AND delivered_at IS NOT NULL
+				  AND settled_at IS NOT NULL
 				  AND delivery_target_route @> $2::jsonb
 			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON("repo-scaffold/inst-1"))
-			waitArtifactActionResultDBCount(t, ctx, db, `
-				SELECT COUNT(*)
-				FROM event_receipts
-				WHERE event_id = $1::uuid
-					  AND subscriber_type = 'node'
-					  AND subscriber_id = 'repo-scaffold-node'
-					  AND entity_id = $2::uuid
-					  AND flow_instance = $3
-					  AND outcome = 'no_op'
-				`, 1, resultEventID, artifactActionResultEntityID, "repo-scaffold/inst-1")
+			waitRuntimeNodeDeliveryOutcome(t, ctx, db, resultEventID, "repo-scaffold-node")
 		})
 	}
 }
@@ -212,7 +202,16 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			t.Cleanup(cleanup)
 			ctx := seedRuntimeTestRun(t, db)
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
-			bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
+			var pc *runtimepipeline.PipelineCoordinator
+			bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
+				ContractBundle: source,
+				InterceptorProvider: func() []runtimebus.EventInterceptor {
+					if pc == nil {
+						return nil
+					}
+					return []runtimebus.EventInterceptor{pc}
+				},
+			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -222,10 +221,11 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			}
 			module := newRuntimeTestWorkflowModule(t, source)
 			resultHandlerStarted := make(chan string, 4)
-			pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+			pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
 				Module:        module,
 				WorkflowStore: workflowStore,
+				DeliveryStore: pg,
 				ArtifactRoot:  t.TempDir(),
 				TestWorkflowNodeHandlerStartHook: func(_ context.Context, nodeID string, evt events.Event) error {
 					if strings.TrimSpace(nodeID) == "repo-scaffold-node" && strings.TrimSpace(string(evt.Type())) == resultEventType {
@@ -237,16 +237,6 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 					return nil
 				},
 			})
-			subscribed := make(chan struct{}, 1)
-			pc.SetTestSubscribeHook(func() { subscribed <- struct{}{} })
-			runCtx, cancel := context.WithCancel(ctx)
-			t.Cleanup(cancel)
-			go pc.Run(runCtx)
-			select {
-			case <-subscribed:
-			case <-time.After(2 * time.Second):
-				t.Fatal("workflow runtime did not subscribe")
-			}
 
 			requestPayload, err := json.Marshal(map[string]any{
 				"request_id": tc.requestID,
@@ -290,20 +280,10 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 				  AND subscriber_type = 'node'
 				  AND subscriber_id = 'repo-scaffold-node'
 				  AND status = 'delivered'
-				  AND reason_code = 'node_processed'
-				  AND delivered_at IS NOT NULL
+				  AND settled_at IS NOT NULL
 				  AND delivery_target_route @> $2::jsonb
 			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON(tc.wantFlowPath))
-			waitArtifactActionResultDBCount(t, ctx, db, `
-				SELECT COUNT(*)
-				FROM event_receipts
-				WHERE event_id = $1::uuid
-				  AND subscriber_type = 'node'
-				  AND subscriber_id = 'repo-scaffold-node'
-				  AND entity_id = $2::uuid
-				  AND flow_instance = $3
-				  AND outcome = 'no_op'
-			`, 1, resultEventID, artifactActionResultEntityID, tc.wantFlowPath)
+			waitRuntimeNodeDeliveryOutcome(t, ctx, db, resultEventID, "repo-scaffold-node")
 		})
 	}
 }
@@ -453,7 +433,22 @@ func waitArtifactActionResultDBCount(t *testing.T, ctx context.Context, db *sql.
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("count = %d, want %d for query %s", got, want, strings.TrimSpace(query))
+			var diagnostics string
+			if len(args) > 0 {
+				_ = db.QueryRowContext(ctx, `
+					SELECT jsonb_build_object(
+						'deliveries', COALESCE(jsonb_agg(jsonb_build_object(
+						'status', d.status,
+						'target', d.delivery_target_route,
+						'claim_version', d.claim_version,
+						'outcomes', (SELECT COALESCE(jsonb_agg(to_jsonb(o)), '[]'::jsonb) FROM event_delivery_outcomes o WHERE o.delivery_id = d.delivery_id)
+						)), '[]'::jsonb),
+						'receipts', (SELECT COALESCE(jsonb_agg(to_jsonb(r)), '[]'::jsonb) FROM event_receipts r WHERE r.event_id = $1::uuid)
+					)::text
+					FROM event_deliveries d WHERE d.event_id = $1::uuid
+				`, args[0]).Scan(&diagnostics)
+			}
+			t.Fatalf("count = %d, want %d for query %s; deliveries=%s", got, want, strings.TrimSpace(query), diagnostics)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}

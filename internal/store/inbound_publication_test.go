@@ -56,6 +56,7 @@ func TestSQLiteInboundPublicationOperationCommitsRetriesAndRollsBackAtomically(t
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	store.SetEventPayloadValidator(currentPlatformPayloadValidatorForStoreTest(t))
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
+	workflowStore.ConfigureDeliveryLifecycleStore(store)
 	runInboundPublicationOperationProof(t, store.DB, true, store, workflowStore)
 }
 
@@ -64,7 +65,9 @@ func TestPostgresInboundPublicationOperationCommitsRetriesAndRollsBackAtomically
 	t.Cleanup(cleanup)
 	store := admitTestPostgresStore(t, db)
 	store.SetEventPayloadValidator(currentPlatformPayloadValidatorForStoreTest(t))
-	runInboundPublicationOperationProof(t, db, false, store, runtimepipeline.NewWorkflowInstanceStore(db))
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workflowStore.ConfigureDeliveryLifecycleStore(store)
+	runInboundPublicationOperationProof(t, db, false, store, workflowStore)
 }
 
 func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, store inboundPublicationProofStore, workflowStore *runtimepipeline.WorkflowInstanceStore) {
@@ -454,9 +457,9 @@ func runInboundPublicationCorruptionProof(t *testing.T, ctx context.Context, db 
 				t.Fatal(err)
 			}
 			execInboundPublicationProofSQL(t, db, sqlite,
-				`DELETE FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = $2 AND subscriber_id = $3`,
-				`DELETE FROM event_deliveries WHERE event_id = ? AND subscriber_type = ? AND subscriber_id = ?`,
-				rawID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID)
+				`DELETE FROM committed_replay_scopes WHERE event_id = $1::uuid`,
+				`DELETE FROM committed_replay_scopes WHERE event_id = ?`,
+				rawID)
 		}},
 		{name: "durable prepared parent", mutate: func(t *testing.T, request runtimeinbound.Request) {
 			execInboundPublicationProofSQL(t, db, sqlite,

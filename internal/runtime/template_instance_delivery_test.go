@@ -42,25 +42,25 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 	t.Cleanup(cleanup)
 	ctx := seedRuntimeTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
+	var pc *runtimepipeline.PipelineCoordinator
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
+		ContractBundle: source,
+		InterceptorProvider: func() []runtimebus.EventInterceptor {
+			if pc == nil {
+				return nil
+			}
+			return []runtimebus.EventInterceptor{pc}
+		},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	module := newRuntimeTestWorkflowModule(t, source)
-	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		WorkOwner: runtimeTestEventBusWorkOwner(t, bus),
-		Module:    module,
+	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
+		Module:        module,
+		DeliveryStore: pg,
 	})
-	subscribed := make(chan struct{}, 1)
-	pc.SetTestSubscribeHook(func() { subscribed <- struct{}{} })
-	runCtx, cancel := context.WithCancel(ctx)
-	t.Cleanup(cancel)
-	go pc.Run(runCtx)
-	select {
-	case <-subscribed:
-	case <-time.After(2 * time.Second):
-		t.Fatal("workflow runtime did not subscribe")
-	}
 	if err := bus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
@@ -85,10 +85,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		t.Fatalf("Publish: %v", err)
 	}
 
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_receipts
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator' AND outcome = 'no_op'
-	`, 1, eventID)
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, eventID, "lifecycle-orchestrator")
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
@@ -97,10 +94,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator'
 	`, 1, eventID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
-	`, 1, eventID)
+	assertRuntimeCommittedReplayScope(t, ctx, db, eventID)
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM events
 		WHERE event_name = 'operating/opco.ceo_ready'
@@ -181,13 +175,15 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
+		DeliveryStore:     pg,
 	}))
 	activationCalls := 0
 	var activationErr error
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		WorkOwner: runtimeTestEventBusWorkOwner(t, bus),
-		Module:    module,
+		WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
+		Module:        module,
+		DeliveryStore: pg,
 		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 			activationCalls++
 			activationErr = manager.ActivateFlowInstance(ctx, req)
@@ -216,10 +212,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	if activationCalls != 1 || activationErr != nil {
 		t.Fatalf("flow activation calls = %d, error = %v; want one successful activation", activationCalls, activationErr)
 	}
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_receipts
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node' AND outcome = 'no_op'
-	`, 1, spinup.ID())
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, spinup.ID(), "portfolio-node")
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node'
@@ -227,12 +220,9 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node'
-		  AND delivered_at IS NOT NULL AND created_at < delivered_at
+		  AND settled_at IS NOT NULL AND created_at < settled_at
 	`, 1, spinup.ID())
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
-	`, 1, spinup.ID())
+	assertRuntimeCommittedReplayScope(t, ctx, db, spinup.ID())
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
@@ -242,18 +232,12 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
 	`, nil)
 	assertRuntimeEventPayloadProductOnly(t, ctx, db, autoEventID)
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_receipts
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator' AND outcome = 'no_op'
-	`, 1, autoEventID)
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, autoEventID, "lifecycle-orchestrator")
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator'
 	`, 1, autoEventID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
-	`, 1, autoEventID)
+	assertRuntimeCommittedReplayScope(t, ctx, db, autoEventID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
@@ -282,6 +266,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
+		DeliveryStore:     pg,
 	}))
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
@@ -289,6 +274,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 		Module:            module,
 		InstanceActivator: manager.ActivateFlowInstance,
 		WorkflowStore:     workflowStore,
+		DeliveryStore:     pg,
 	})
 	bus.SetInterceptors(pc)
 
@@ -431,6 +417,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
+		DeliveryStore:     pg,
 	}))
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
@@ -438,17 +425,8 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		Module:            module,
 		InstanceActivator: manager.ActivateFlowInstance,
 		WorkflowStore:     workflowStore,
+		DeliveryStore:     pg,
 	})
-	subscribed := make(chan struct{}, 1)
-	pc.SetTestSubscribeHook(func() { subscribed <- struct{}{} })
-	runCtx, cancel := context.WithCancel(ctx)
-	t.Cleanup(cancel)
-	go pc.Run(runCtx)
-	select {
-	case <-subscribed:
-	case <-time.After(2 * time.Second):
-		t.Fatal("workflow runtime did not subscribe")
-	}
 
 	mailbox := eventtest.RunCreatingRootIngress(
 		"99999999-9999-4999-8999-999999999913",
@@ -466,10 +444,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		t.Fatalf("PublishAcknowledged mailbox: %v", err)
 	}
 
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_receipts
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'approval-router' AND outcome = 'no_op'
-	`, 1, mailbox.ID())
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, mailbox.ID(), "approval-router")
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'approval-router'
@@ -477,7 +452,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'approval-router'
-		  AND delivered_at IS NOT NULL AND created_at < delivered_at
+		  AND settled_at IS NOT NULL AND created_at < settled_at
 	`, 1, mailbox.ID())
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
@@ -488,10 +463,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		SELECT event_id::text FROM events
 		WHERE event_name = 'opco.spinup_requested'
 	`, nil)
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_receipts
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node' AND outcome = 'no_op'
-	`, 1, spinupEventID)
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, spinupEventID, "portfolio-node")
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node'
@@ -499,12 +471,9 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node'
-		  AND delivered_at IS NOT NULL AND created_at < delivered_at
+		  AND settled_at IS NOT NULL AND created_at < settled_at
 	`, 1, spinupEventID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
-	`, 1, spinupEventID)
+	assertRuntimeCommittedReplayScope(t, ctx, db, spinupEventID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
@@ -515,18 +484,12 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
 	`, nil)
 	assertRuntimeEventPayloadProductOnly(t, ctx, db, autoEventID)
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_receipts
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator' AND outcome = 'no_op'
-	`, 1, autoEventID)
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, autoEventID, "lifecycle-orchestrator")
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator'
 	`, 1, autoEventID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
-	`, 1, autoEventID)
+	assertRuntimeCommittedReplayScope(t, ctx, db, autoEventID)
 	componentEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
 		WHERE event_name = 'operating/component_scaffold.spawn_requested'
@@ -541,7 +504,16 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 	t.Cleanup(cleanup)
 	ctx := seedRuntimeTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
+	var pc *runtimepipeline.PipelineCoordinator
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
+		ContractBundle: source,
+		InterceptorProvider: func() []runtimebus.EventInterceptor {
+			if pc == nil {
+				return nil
+			}
+			return []runtimebus.EventInterceptor{pc}
+		},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -550,24 +522,16 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
+		DeliveryStore:     pg,
 	}))
 	module := newRuntimeTestWorkflowModule(t, source)
-	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		Module:            module,
 		InstanceActivator: manager.ActivateFlowInstance,
 		WorkflowStore:     workflowStore,
+		DeliveryStore:     pg,
 	})
-	subscribed := make(chan struct{}, 1)
-	pc.SetTestSubscribeHook(func() { subscribed <- struct{}{} })
-	runCtx, cancel := context.WithCancel(ctx)
-	t.Cleanup(cancel)
-	go pc.Run(runCtx)
-	select {
-	case <-subscribed:
-	case <-time.After(2 * time.Second):
-		t.Fatal("workflow runtime did not subscribe")
-	}
 
 	mailbox := eventtest.RunCreatingRootIngress(
 		"99999999-9999-4999-8999-999999999912",
@@ -586,10 +550,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		t.Fatalf("Publish mailbox: %v", err)
 	}
 
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_receipts
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'approval-router' AND outcome = 'no_op'
-	`, 1, mailbox.ID())
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, mailbox.ID(), "approval-router")
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'approval-router'
@@ -599,18 +560,12 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		SELECT event_id::text FROM events
 		WHERE event_name = 'opco.spinup_requested'
 	`, nil)
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_receipts
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node' AND outcome = 'no_op'
-	`, 1, spinupEventID)
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, spinupEventID, "portfolio-node")
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node'
 	`, 1, spinupEventID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
-	`, 1, spinupEventID)
+	assertRuntimeCommittedReplayScope(t, ctx, db, spinupEventID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
@@ -621,18 +576,12 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
 	`, nil)
 	assertRuntimeEventPayloadProductOnly(t, ctx, db, autoEventID)
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_receipts
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator' AND outcome = 'no_op'
-	`, 1, autoEventID)
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, autoEventID, "lifecycle-orchestrator")
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator'
 	`, 1, autoEventID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
-	`, 1, autoEventID)
+	assertRuntimeCommittedReplayScope(t, ctx, db, autoEventID)
 	componentEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
 		WHERE event_name = 'operating/component_scaffold.spawn_requested'
@@ -1503,4 +1452,30 @@ func assertRuntimeDBCount(t *testing.T, ctx context.Context, db *sql.DB, query s
 	if got != want {
 		t.Fatalf("count = %d, want %d for query %s", got, want, strings.TrimSpace(query))
 	}
+}
+
+func waitRuntimeNodeDeliveryOutcome(t *testing.T, ctx context.Context, db *sql.DB, eventID, nodeID string) {
+	t.Helper()
+	waitRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*)
+		FROM event_deliveries d
+		JOIN event_delivery_outcomes o
+		  ON o.delivery_id = d.delivery_id
+		 AND o.claim_version = d.claim_version
+		WHERE d.event_id = $1::uuid
+		  AND d.subscriber_type = 'node'
+		  AND d.subscriber_id = $2
+		  AND d.status = 'delivered'
+		  AND d.settled_at IS NOT NULL
+		  AND o.outcome = 'delivered'
+	`, 1, eventID, nodeID)
+}
+
+func assertRuntimeCommittedReplayScope(t *testing.T, ctx context.Context, db *sql.DB, eventID string) {
+	t.Helper()
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*)
+		FROM committed_replay_scopes
+		WHERE event_id = $1::uuid AND scope = 'subscribed'
+	`, 1, eventID)
 }

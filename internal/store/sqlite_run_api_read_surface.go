@@ -172,18 +172,11 @@ func (s *SQLiteRuntimeStore) LoadRunDebugReport(ctx context.Context, runID strin
 
 func (s *SQLiteRuntimeStore) sqliteRunTestQuiescence(ctx context.Context, runID string) (RunTestQuiescence, error) {
 	var out RunTestQuiescence
-	if err := s.DB.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_deliveries
-		WHERE run_id = ?
-		  AND NOT (COALESCE(subscriber_type, '') = ? AND COALESCE(subscriber_id, '') = ?)
-		  AND (
-			status IN ('pending', 'in_progress')
-			OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
-		  )
-	`, runID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID).Scan(&out.ActiveDeliveries); err != nil {
+	summary, err := s.SummarizeRun(ctx, runID)
+	if err != nil {
 		return RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence active deliveries: %w", err)
 	}
+	out.ActiveDeliveries = summary.Pending + summary.InProgress + summary.RetryScheduled
 	quiescenceArgs := append([]any{runID}, diagnosticDirectReplayEventArgs()...)
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
@@ -366,108 +359,39 @@ func (s *SQLiteRuntimeStore) sqliteRunDebugEventCounts(ctx context.Context, runI
 }
 
 func (s *SQLiteRuntimeStore) sqliteRunDebugDeliveryCounts(ctx context.Context, runID string) ([]RunDebugDeliveryCount, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT COALESCE(subscriber_id, ''), COALESCE(status, ''), COUNT(*)
-		FROM event_deliveries
-		WHERE run_id = ?
-		  AND NOT (COALESCE(subscriber_type, '') = ? AND COALESCE(subscriber_id, '') = ?)
-		GROUP BY COALESCE(subscriber_id, ''), COALESCE(status, '')
-		ORDER BY COALESCE(subscriber_id, '') ASC, COALESCE(status, '') ASC
-	`, runID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID)
+	snapshots, err := s.deliverySnapshotsForRun(ctx, runID)
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite run debug delivery counts: %w", err)
 	}
-	defer rows.Close()
-	out := []RunDebugDeliveryCount{}
-	for rows.Next() {
-		var item RunDebugDeliveryCount
-		if err := rows.Scan(&item.SubscriberID, &item.Status, &item.Count); err != nil {
-			return nil, fmt.Errorf("scan sqlite run debug delivery count: %w", err)
-		}
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read sqlite run debug delivery counts: %w", err)
-	}
-	return out, nil
+	return runDebugDeliveryCountsFromSnapshots(snapshots), nil
 }
 
 func (s *SQLiteRuntimeStore) sqliteRunDebugFailureDeliveries(ctx context.Context, runID string, limit int) ([]RunDebugFailureDelivery, error) {
 	if limit <= 0 {
 		limit = 10
 	}
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT
-			e.event_id,
-			COALESCE(e.event_name, ''),
-			COALESCE(e.entity_id, ''),
-			d.delivery_id,
-			COALESCE(d.subscriber_type, ''),
-			COALESCE(d.subscriber_id, ''),
-			COALESCE(d.active_session_id, ''),
-			COALESCE(d.status, ''),
-			COALESCE(d.reason_code, ''),
-			COALESCE(d.failure, 'null'),
-			COALESCE(d.retry_count, 0),
-			d.created_at,
-			d.started_at,
-			d.delivered_at
-		FROM event_deliveries d
-		INNER JOIN events e ON e.event_id = d.event_id
-		WHERE d.run_id = ?
-		  AND NOT (COALESCE(d.subscriber_type, '') = ? AND COALESCE(d.subscriber_id, '') = ?)
-		  AND COALESCE(d.status, '') IN ('failed', 'dead_letter')
-		ORDER BY COALESCE(d.delivered_at, d.started_at, d.created_at, e.created_at) DESC, d.delivery_id DESC
-		LIMIT ?
-	`, runID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, limit)
+	snapshots, err := s.deliverySnapshotsForRun(ctx, runID)
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite run failed deliveries: %w", err)
 	}
-	defer rows.Close()
-	out := []RunDebugFailureDelivery{}
-	for rows.Next() {
-		var item RunDebugFailureDelivery
-		var rawFailure any
-		var createdRaw, startedRaw, finishedRaw any
-		if err := rows.Scan(
-			&item.EventID,
-			&item.EventName,
-			&item.EntityID,
-			&item.DeliveryID,
-			&item.SubscriberType,
-			&item.SubscriberID,
-			&item.SessionID,
-			&item.Status,
-			&item.ReasonCode,
-			&rawFailure,
-			&item.RetryCount,
-			&createdRaw,
-			&startedRaw,
-			&finishedRaw,
-		); err != nil {
-			return nil, fmt.Errorf("scan sqlite run failed delivery: %w", err)
-		}
-		item.Failure, err = decodeStoredFailure(rawFailure)
-		if err != nil {
-			return nil, fmt.Errorf("decode sqlite run failed delivery failure: %w", err)
-		}
-		item.CreatedAt = sqliteTraceTimePtr(createdRaw)
-		item.StartedAt = sqliteTraceTimePtr(startedRaw)
-		item.FinishedAt = sqliteTraceTimePtr(finishedRaw)
-		normalizeRunDebugFailureDelivery(&item)
-		if item.Status == "dead_letter" {
-			deadLetters, err := s.sqliteOperatorEventDeadLetters(ctx, item.EventID)
+	return runDebugFailuresFromSnapshots(snapshots, limit,
+		func(eventID string) (deliveryLifecycleEventMetadata, error) {
+			record, found, err := loadSQLiteEventIdentity(ctx, s.DB, eventID)
 			if err != nil {
-				return nil, err
+				return deliveryLifecycleEventMetadata{}, err
 			}
-			item.DeadLetters = deadLetters
-		}
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read sqlite run failed deliveries: %w", err)
-	}
-	return out, nil
+			if !found {
+				return deliveryLifecycleEventMetadata{}, fmt.Errorf("delivery event %s not found", eventID)
+			}
+			admitted, err := decodeEventRecord(record)
+			if err != nil {
+				return deliveryLifecycleEventMetadata{}, err
+			}
+			event := admitted.Event()
+			return deliveryLifecycleEventMetadata{EventName: string(event.Type()), RunID: event.RunID(), EntityID: event.EntityID()}, nil
+		}, func(eventID string) ([]OperatorDeadLetterRecord, error) {
+			return s.sqliteOperatorEventDeadLetters(ctx, eventID)
+		})
 }
 
 func (s *SQLiteRuntimeStore) sqliteRunDebugEvents(ctx context.Context, runID string, limit int) ([]RunDebugEvent, error) {

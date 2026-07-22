@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -1210,27 +1211,28 @@ func (am *AgentManager) replayAgentBacklogDetailed(ctx context.Context, agentID 
 	}
 	defer lease.Release()
 	agent := lease.Agent
-	since := time.Now().Add(-30 * 24 * time.Hour)
-	if !lease.StartedAt.IsZero() {
-		since = lease.StartedAt
-	}
-	pending, err := am.pendingEventsForAgent(lease.Context, agentID, lease.Subscriptions, since)
-	if err != nil {
-		if startupManagerReplayDiagnosticsEnabled(ctx) {
-			failure := failureEnvelope(err, "agent-manager", "load_pending_backlog")
-			record := startupManagerReplayRecord{
-				AgentID:    agentID,
-				Outcome:    startupManagerReplayOutcomeDropped,
-				ReasonCode: startupManagerReplayReasonBacklogLoadFailed,
-				Failure:    failure,
+	for {
+		pending, err := am.pendingDeliveriesForAgent(lease.Context, agentID, 1)
+		if err != nil {
+			if startupManagerReplayDiagnosticsEnabled(ctx) {
+				failure := failureEnvelope(err, "agent-manager", "load_pending_backlog")
+				record := startupManagerReplayRecord{
+					AgentID:    agentID,
+					Outcome:    startupManagerReplayOutcomeDropped,
+					ReasonCode: startupManagerReplayReasonBacklogLoadFailed,
+					Failure:    failure,
+				}
+				summary.observe(record)
+				logStartupManagerReplayAftermath(ctx, am.bus, record)
+				return summary, nil
 			}
-			summary.observe(record)
-			logStartupManagerReplayAftermath(ctx, am.bus, record)
-			return summary, nil
+			return summary, err
 		}
-		return summary, err
-	}
-	for _, evt := range pending {
+		if len(pending) == 0 {
+			break
+		}
+		execution := pending[0]
+		evt := execution.Event
 		if am.isAuthBreakerTripped() {
 			return summary, nil
 		}
@@ -1238,6 +1240,8 @@ func (am *AgentManager) replayAgentBacklogDetailed(ctx context.Context, agentID 
 		if _, ok := worklifetime.OccurrenceFromContext(eventCtx); !ok {
 			eventCtx = worklifetime.WithOccurrence(eventCtx, am.workOwner)
 		}
+		eventCtx = runtimedelivery.WithRoute(eventCtx, execution.Snapshot.Route)
+		eventCtx = runtimedelivery.WithClaim(eventCtx, execution.Claim)
 		result := am.processEventDetailed(eventCtx, agent, evt)
 		summary.observe(result.record)
 		if startupManagerReplayDiagnosticsEnabled(ctx) {
@@ -1261,6 +1265,9 @@ func (am *AgentManager) replayAgentBacklogDetailed(ctx context.Context, agentID 
 			if failure, ok := runtimefailures.As(result.err); ok && failure.Failure.Class == runtimefailures.ClassAuthenticationNeeded {
 				return summary, nil
 			}
+		}
+		if lease.Context.Err() != nil {
+			return summary, nil
 		}
 	}
 	return summary, nil
@@ -1301,41 +1308,15 @@ func legacyAgentControlError(err error) error {
 	return err
 }
 
-func (am *AgentManager) pendingEventsForAgent(
-	ctx context.Context,
-	agentID string,
-	subscriptions []events.EventType,
-	since time.Time,
-) ([]events.Event, error) {
-	pending := make([]events.Event, 0, 400)
-	pendingByID := make(map[string]events.Event)
-
-	direct, err := am.store.ListPendingEventsForAgent(ctx, agentID, since, 300)
+func (am *AgentManager) pendingDeliveriesForAgent(ctx context.Context, agentID string, limit int) ([]runtimedelivery.AgentExecution, error) {
+	if am.deliveryStore == nil {
+		return nil, fmt.Errorf("delivery lifecycle owner unavailable")
+	}
+	deliveries, err := am.deliveryStore.ClaimAgentBacklog(ctx, agentID, limit)
 	if err != nil {
-		return nil, fmt.Errorf("load pending delivered events for %s: %w", agentID, err)
+		return nil, fmt.Errorf("claim pending deliveries for %s: %w", agentID, err)
 	}
-	for _, evt := range direct {
-		pendingByID[evt.ID()] = evt
-	}
-
-	subscribed, err := am.store.ListPendingSubscribedEvents(ctx, agentID, subscriptions, since, 300)
-	if err != nil {
-		return nil, fmt.Errorf("load pending subscribed events for %s: %w", agentID, err)
-	}
-	for _, evt := range subscribed {
-		pendingByID[evt.ID()] = evt
-	}
-
-	for _, evt := range pendingByID {
-		pending = append(pending, evt)
-	}
-	sort.SliceStable(pending, func(i, j int) bool {
-		if pending[i].CreatedAt().Equal(pending[j].CreatedAt()) {
-			return pending[i].ID() < pending[j].ID()
-		}
-		return pending[i].CreatedAt().Before(pending[j].CreatedAt())
-	})
-	return pending, nil
+	return deliveries, nil
 }
 
 func (am *AgentManager) ResetRuntimeState() error {
@@ -1445,9 +1426,6 @@ func (am *AgentManager) executeResetRuntimeState(source string) (bool, error) {
 			entities[entityID] = struct{}{}
 		}
 	}
-	am.activeEventMu.Lock()
-	am.activeEventKeys = make(map[string]struct{})
-	am.activeEventMu.Unlock()
 	am.poisonMu.Lock()
 	am.poisonPanicCounts = make(map[string]int)
 	am.poisonMu.Unlock()
@@ -1760,6 +1738,29 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 							evtCtx := agentDeliveryExecutionContext(eventWork.Context(), loopCtx, token, deliveryOwner)
 							evtCtx = runtimecorrelation.WithInboundEvent(evtCtx, evt)
 							evtCtx = runtimecorrelation.WithRunID(evtCtx, strings.TrimSpace(evt.RunID()))
+							route := delivery.HandoffRoute()
+							evtCtx = runtimedelivery.WithRoute(evtCtx, route)
+							if am.deliveryStore == nil {
+								if am.bus != nil {
+									am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
+										Level: "error", Component: "agent-manager", Action: "delivery_lifecycle_owner_missing",
+										EventID: strings.TrimSpace(evt.ID()), EventType: strings.TrimSpace(string(evt.Type())), AgentID: agent.ID(),
+									})
+								}
+								return true
+							}
+							claimed, claimErr := am.deliveryStore.ClaimAgentDelivery(evtCtx, evt, route)
+							if claimErr != nil {
+								if am.bus != nil {
+									am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
+										Level: "error", Component: "agent-manager", Action: "delivery_claim_failed",
+										EventID: strings.TrimSpace(evt.ID()), EventType: strings.TrimSpace(string(evt.Type())), AgentID: agent.ID(),
+										Failure: failureEnvelope(claimErr, "agent-manager", "claim_delivery"),
+									})
+								}
+								return false
+							}
+							evtCtx = runtimedelivery.WithClaim(evtCtx, claimed.Claim)
 							err, evtPanicked, evtPanicText, evtStackTrace := am.safeProcessEvent(evtCtx, agent, evt)
 							if evtPanicked {
 								panicCount := am.incrementPoisonPanicCount(agent.ID(), evt.ID())

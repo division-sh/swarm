@@ -347,7 +347,3 @@ func (InMemoryEventStore) ListEventDeliveryRecipients(context.Context, string) (
 	return nil, runtimereplayclaim.ErrAuthoritativeRecipientManifestUnavailable
 }
 func (InMemoryEventStore) SupportsPersistedReplay() bool { return false }
-
-func (InMemoryEventStore) ProveLocalDeliveryHandoff(context.Context, string, events.DeliveryRoute) error {
-	return errors.New("in-memory event store has no durable delivery handoff")
-}

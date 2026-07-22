@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
@@ -75,8 +76,16 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 							if status != "running" || countRunConvergenceDeliveries(t, fixture, ctx, event.ID()) != 1 {
 								t.Fatalf("pre-receipt state = run:%q deliveries:%d, want running/1", status, countRunConvergenceDeliveries(t, fixture, ctx, event.ID()))
 							}
-							if err := fixture.store.UpsertEventReceipt(ctx, event.ID(), agentID, runtimemanager.ReceiptStatusProcessed, nil); err != nil {
-								t.Fatalf("UpsertEventReceipt: %v", err)
+							route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agentID}
+							claimed, err := fixture.store.ClaimAgentDelivery(ctx, event, route)
+							if err != nil {
+								t.Fatalf("ClaimAgentDelivery: %v", err)
+							}
+							if _, err := fixture.store.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
+								t.Fatalf("SettleSuccess: %v", err)
+							}
+							if err := eventBus.ConvergeDeliveryRunCompletion(ctx, event); err != nil {
+								t.Fatalf("ConvergeDeliveryRunCompletion: %v", err)
 							}
 						}
 						status, runID, triggerID, triggerType := loadRunConvergenceFacts(t, fixture, ctx, event.ID())
@@ -238,6 +247,14 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 	if status != "running" || runID != event.RunID() || triggerID != event.ID() || triggerType != string(event.Type()) {
 		t.Fatalf("standalone routed authority = status:%q run:%q trigger:%q/%q", status, runID, triggerID, triggerType)
 	}
+	claims := make([]runtimedelivery.Claim, 0, len(routes))
+	for _, route := range routes {
+		claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
+		if err != nil {
+			t.Fatalf("ClaimAgentDelivery(%s): %v", route.SubscriberID, err)
+		}
+		claims = append(claims, claimed.Claim)
+	}
 
 	if _, err := pg.DB.ExecContext(ctx, `
 		CREATE OR REPLACE FUNCTION slow_receipt_delivery_sync()
@@ -262,10 +279,11 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 	}
 
 	errCh := make(chan error, len(agents))
-	for _, agentID := range agents {
-		agentID := agentID
+	for _, claim := range claims {
+		claim := claim
 		go func() {
-			errCh <- pg.UpsertEventReceipt(ctx, event.ID(), agentID, runtimemanager.ReceiptStatusProcessed, nil)
+			_, err := pg.SettleSuccess(ctx, claim, nil, 0)
+			errCh <- err
 		}()
 	}
 	for i := range agents {
@@ -277,6 +295,9 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 		case <-time.After(10 * time.Second):
 			t.Fatal("timed out waiting for concurrent processed receipts")
 		}
+	}
+	if err := pg.ConvergeStandaloneRuntimePlatformRun(ctx, event); err != nil {
+		t.Fatalf("converge settled standalone runtime event: %v", err)
 	}
 	status, _, _, _ = loadRunConvergenceFacts(t, fixture, ctx, event.ID())
 	if status != "completed" {

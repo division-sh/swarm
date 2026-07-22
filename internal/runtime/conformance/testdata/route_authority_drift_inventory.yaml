@@ -1,7 +1,7 @@
 version: 1
 kind: route_authority_drift_inventory
 issue: 1364
-implementation_issues: [1364, 1494, 1495, 1496, 1545, 1546, 1552, 1577, 1826, 2085]
+implementation_issues: [1364, 1494, 1495, 1496, 1545, 1546, 1552, 1577, 1826, 2085, 2105]
 parent_issues: [1340, 1353, 1481, 1493, 1738, 1786, 1827, 2084]
 watchlist: runtime_operations.delivery_and_replay_ownership
 policy:
@@ -35,8 +35,8 @@ search_dimensions:
     minimum_matching_files: 110
     required_paths:
       - platform-spec.yaml
-      - internal/store/event_receipt_store.go
-      - internal/store/sqlite_runtime_delivery_replay.go
+      - internal/runtime/deliverylifecycle/adapter.go
+      - internal/store/platformschema/platformschema.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
       - internal/serveapp/main_runtime_test.go
     canonical_layer: durable_delivery_authority
@@ -45,9 +45,9 @@ search_dimensions:
     minimum_matching_files: 23
     required_paths:
       - internal/events/types.go
-      - internal/runtime/bus/eventbus.go
-      - internal/store/events.go
-      - internal/store/sqlite_runtime_delivery_replay.go
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/deliverylifecycle/model.go
+      - internal/store/delivery_lifecycle.go
     canonical_layer: route_plan_authority
   - id: route_plan
     pattern: '\bRoutePlan\b|route_plan|route plan'
@@ -94,7 +94,6 @@ search_dimensions:
       - internal/runtime/manager/generic_agent_support.go
       - internal/runtime/manager/flow_activation.go
       - internal/runtime/manager/agent_manager.go
-      - internal/runtime/manager/runtime.go
       - internal/runtime/tools/executor_agents.go
       - internal/runtime/bus/eventbus.go
       - internal/runtime/bus/eventbus_routing.go
@@ -102,13 +101,12 @@ search_dimensions:
     canonical_layer: invalid_old_authority
     classified_paths_required: true
   - id: pending_agent_subscription_recovery_authority
-    pattern: '\bListPendingSubscribedEvents\b|\bpendingEventsForAgent\b'
-    minimum_matching_files: 19
+    pattern: '\bClaimAgentBacklog\b|\bClaimAgentDelivery\b|eligible agent delivery'
+    minimum_matching_files: 9
     required_paths:
-      - internal/runtime/manager/runtime.go
-      - internal/runtime/manager/types.go
-      - internal/store/event_receipt_store.go
-      - internal/store/sqlite_runtime_delivery_replay.go
+      - internal/runtime/deliverylifecycle/model.go
+      - internal/runtime/manager/receipts.go
+      - internal/store/delivery_lifecycle.go
     canonical_layer: invalid_old_authority
     classified_paths_required: true
   - id: flow_owned_subscription_pattern_authority
@@ -126,12 +124,9 @@ search_dimensions:
     classified_paths_required: true
   - id: pipeline_internal_carrier_registration
     pattern: 'type ownedInternalSubscriptionBus interface|bus\.SubscribeInternal\(|Test(PipelineCoordinator|SystemNodeRunner|ActivityDispatcher)Subscribe_UsesInternalSubscribers'
-    minimum_matching_files: 4
+    minimum_matching_files: 1
     required_paths:
-      - internal/runtime/pipeline/coordinator.go
-      - internal/runtime/pipeline/node_system_runner.go
       - internal/runtime/pipeline/activity_background.go
-      - internal/runtime/pipeline/internal_subscription_test.go
     canonical_layer: invalid_old_authority
     classified_paths_required: true
   - id: route_table_resolve
@@ -299,17 +294,18 @@ search_dimensions:
     minimum_matching_files: 63
     required_paths:
       - platform-spec.yaml
-      - internal/store/event_receipt_store.go
-      - internal/store/sqlite_runtime_delivery_replay.go
+      - internal/store/run_completion.go
+      - internal/store/sqlite_run_completion.go
       - internal/serveapp/main_runtime_test.go
     canonical_layer: completion_evidence_non_authority
   - id: settlement_backfill
-    pattern: '(?i)settlement|backfill|SettleDelivery'
+    pattern: '(?i)settlement|delivery outcome|Settle(Success|Failure)'
     minimum_matching_files: 18
     required_paths:
       - platform-spec.yaml
-      - internal/runtime/pipeline/system_node_receipt_store.go
-    canonical_layer: completion_evidence_non_authority
+      - internal/runtime/deliverylifecycle/adapter.go
+      - internal/runtime/pipeline/coordinator.go
+    canonical_layer: execution_admission
   - id: replay_scope
     pattern: 'replay_scope|replay-scope|replay scope|CommittedReplayScope'
     minimum_matching_files: 37
@@ -340,24 +336,23 @@ search_dimensions:
     minimum_matching_files: 7
     required_paths:
       - platform-spec.yaml
-      - internal/store/sqlite_runtime_delivery_replay.go
-      - internal/store/events.go
+      - internal/runtime/deliverylifecycle/adapter.go
+      - internal/runtime/deliverylifecycle/snapshot_fact.go
     canonical_layer: durable_delivery_authority
   - id: delivery_authority_writers
-    pattern: 'InsertEventDelivery|PersistEventWithDelivery|PublishPersistedRecipients'
-    minimum_matching_files: 23
+    pattern: 'CommitInitial|commitInitialDeliveryObligationsTx|CommitPublish'
+    minimum_matching_files: 20
     required_paths:
-      - internal/store/events.go
-      - internal/store/sqlite_runtime_delivery_replay.go
+      - internal/runtime/deliverylifecycle/adapter.go
+      - internal/store/delivery_lifecycle.go
       - internal/runtime/bus/eventbus_publish.go
-      - internal/runtime/bus/final_flow_instance_authoring_route_test.go
     canonical_layer: durable_delivery_authority
   - id: execution_admission_settlement
-    pattern: 'MarkSystemNodeProcessed|SettleDelivery|SystemNodeProcessed|delivery authority'
-    minimum_matching_files: 7
+    pattern: 'ClaimNodeDelivery|SettleSuccess|SettleFailure|DeliveryLifecycleStore'
+    minimum_matching_files: 15
     required_paths:
-      - internal/runtime/pipeline/node_system_runner.go
-      - internal/runtime/pipeline/system_node_receipt_store.go
+      - internal/runtime/deliverylifecycle/adapter.go
+      - internal/runtime/pipeline/coordinator.go
       - internal/runtime/pipeline/workflow_node_delivery_authority_test.go
     canonical_layer: execution_admission
   - id: publish_plan_consumers
@@ -652,6 +647,7 @@ seam_families:
       - internal/runtime/manager/generic_agent_support.go
       - internal/runtime/manager/lifecycle_coordinator.go
       - internal/runtime/manager/native_tool_admission_test.go
+      - internal/runtime/manager/receipts.go
       - internal/runtime/manager/receipts_test.go
       - internal/runtime/manager/reconfigure_test.go
       - internal/runtime/manager/recovery_test.go
@@ -666,12 +662,10 @@ seam_families:
       - internal/runtime/tools/executor_agents.go
       - internal/runtime/tools/executor_agents_test.go
       - internal/store/agent_lifecycle_subordinate_test.go
-      - internal/store/delivery_receipt_invariants_test.go
+      - internal/store/delivery_lifecycle.go
+      - internal/store/delivery_lifecycle_fixture_test.go
       - internal/store/event_producer_identity_lifecycle_parity_test.go
-      - internal/store/event_receipt_store.go
-      - internal/store/manager_retry_policy_test.go
       - internal/store/postgres_store_additional_test.go
-      - internal/store/sqlite_runtime_delivery_replay.go
       - internal/store/sqlite_runtime_test.go
     search_dimensions: [live_agent_subscription_route_authority, pending_agent_subscription_recovery_authority, connect_route_plan, route_plan_source_reason]
     invalid_authority:
@@ -759,8 +753,6 @@ seam_families:
     paths:
       - internal/runtime/pipeline/activity_background.go
       - internal/runtime/pipeline/coordinator.go
-      - internal/runtime/pipeline/internal_subscription_test.go
-      - internal/runtime/pipeline/node_system_runner.go
       - internal/runtime/pipeline/runtime_support.go
     search_dimensions: [pipeline_internal_carrier_registration, live_agent_subscription_route_authority]
     invalid_authority:
@@ -910,7 +902,6 @@ seam_families:
       - internal/runtime/pipeline/activity_boring_proof_test.go
       - internal/runtime/pipeline/handler_engine_transaction_test.go
       - internal/runtime/pipeline/fixture_module_test.go
-      - internal/runtime/pipeline/internal_subscription_test.go
       - internal/runtime/pipeline/coordinator.go
       - internal/runtime/pipeline/contextual_runtime_lineage_test.go
       - internal/runtime/pipeline/runtime_support.go
@@ -959,12 +950,12 @@ seam_families:
     layer: durable_delivery_authority
     classification: canonical_owner
     paths:
-      - internal/store/events.go
-      - internal/store/sqlite_runtime_delivery_replay.go
-      - internal/store/event_delivery_routes_test.go
-      - internal/store/postgres.go
-      - internal/store/sqlite_schema.go
-    search_dimensions: [event_deliveries, delivery_route_model, delivery_authority_writers, delivery_target_route]
+      - internal/runtime/deliverylifecycle/model.go
+      - internal/runtime/deliverylifecycle/adapter.go
+      - internal/store/delivery_lifecycle.go
+      - internal/store/event_commit.go
+      - internal/store/delivery_lifecycle_boundary_guard_test.go
+    search_dimensions: [event_deliveries, delivery_route_model, delivery_authority_writers, delivery_target_route, pending_agent_subscription_recovery_authority]
     notes: >
       Store writers persist typed delivery authority and delivery targets. They
       are the physical sink, not independent route planners.
@@ -973,10 +964,11 @@ seam_families:
     classification: valid_consumer
     paths:
       - internal/runtime/pipeline/workflow_nodes.go
-      - internal/runtime/pipeline/node_system_runner.go
-      - internal/runtime/pipeline/system_node_receipt_store.go
+      - internal/runtime/pipeline/coordinator.go
+      - internal/runtime/deliverylifecycle/model.go
+      - internal/runtime/pipeline/delivery_lifecycle_test_owner_test.go
       - internal/runtime/pipeline/workflow_node_delivery_authority_test.go
-    search_dimensions: [event_deliveries, execution_admission_settlement]
+    search_dimensions: [event_deliveries, execution_admission_settlement, pending_agent_subscription_recovery_authority]
     notes: >
       Workflow-node execution consumes committed typed node delivery authority
       and fails closed when authority is missing. It must not produce route
@@ -1000,24 +992,23 @@ seam_families:
       They must not create, replace, or repair typed workflow-node delivery
       authority.
   - id: receipts_settlement_backfill
-    layer: completion_evidence_non_authority
-    classification: non_authoritative_observer_projection
+    layer: execution_admission
+    classification: canonical_owner
     paths:
-      - internal/store/event_receipt_store.go
-      - internal/store/manager_retry_policy_test.go
-      - internal/runtime/pipeline/system_node_receipt_store.go
-      - internal/runtime/pipeline/node_system_runner_completion_test.go
+      - internal/runtime/deliverylifecycle/model.go
+      - internal/runtime/deliverylifecycle/adapter.go
+      - internal/store/delivery_lifecycle.go
+      - internal/runtime/conformance/delivery_lifecycle_conformance_test.go
       - platform-spec.yaml
     search_dimensions: [event_receipts, settlement_backfill, execution_admission_settlement]
     invalid_authority:
-      - event_receipts
-      - processed receipts
-      - settlement
-      - backfill
-      - retry counters
+      - platform event_receipts as executable-delivery authority
+      - processed-marker backfill
+      - caller-owned retry counters or settlement policy
     notes: >
-      Receipts and settlement are completion evidence. They cannot authorize a
-      handler or backfill missing pre-execution node delivery rows.
+      The canonical lifecycle owns exact claims, attempts, outcomes, and
+      settlement. Platform receipts remain event-level completion evidence and
+      cannot authorize or repair executable delivery obligations.
   - id: replay_recovery_and_fork_consumers
     layer: replay_recovery_consumers
     classification: valid_consumer
@@ -1073,12 +1064,31 @@ seam_families:
     layer: test_fixture_semantics
     classification: valid_consumer
     paths:
+      - internal/apiv1/operator_event_replay_test.go
+      - internal/apiv1/sqlite_agent_usage_supported_surface_test.go
+      - internal/apiv1/sqlite_observability_supported_surface_test.go
       - internal/serveapp/main_runtime_test.go
+      - internal/runtime/manager/delivery_lifecycle_test_helpers_test.go
+      - internal/runtime/manager/failure_test.go
+      - internal/runtime/pipeline/delivery_lifecycle_test_owner_test.go
+      - internal/store/agent_lifecycle_read_surface_test.go
+      - internal/store/author_activity_receipt_parity_test.go
       - internal/store/run_fork_selected_contract_execution_mutation_test.go
-      - internal/store/manager_retry_policy_test.go
+      - internal/store/delivery_lifecycle_fixture_test.go
+      - internal/store/postgres_smoke_test.go
+      - internal/store/preservation_cleanup_test.go
+      - internal/store/run_completion_test.go
       - internal/store/run_control_test.go
+      - internal/store/run_debug_read_surface_test.go
+      - internal/store/run_fork_planner_test.go
+      - internal/store/run_fork_source_freeze_consumers_test.go
+      - internal/store/sqlite_run_trace_parity_test.go
+      - internal/store/standalone_runtime_convergence_parity_test.go
+      - internal/store/standing_service_store_test.go
       - internal/runtime/template_instance_delivery_test.go
-    search_dimensions: [event_name_type, entity_context, run_source_event_context, event_deliveries, event_receipts, delivery_authority_writers]
+      - internal/dashboard/server/observability_sql_test.go
+      - internal/runtime/runforkexecution/execution_test.go
+    search_dimensions: [event_name_type, entity_context, run_source_event_context, event_deliveries, event_receipts, delivery_authority_writers, pending_agent_subscription_recovery_authority]
     notes: >
       Direct SQL fixtures remain proof consumers only when they assert typed
       semantic recipient identity and do not redefine route authority from row

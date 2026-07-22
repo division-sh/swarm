@@ -34,7 +34,7 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 	eventtestsql.CorruptEventStore(t, ctx, store.DB, runtimeauthoractivity.DialectSQLite, eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.named_operation_atomicity",
 		Reason:    "prove recovery fails closed when durable replay-scope evidence is missing",
-	}, `DELETE FROM event_deliveries WHERE event_id = ? AND subscriber_type = ? AND subscriber_id = ?`, "", executableID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID)
+	}, `DELETE FROM committed_replay_scopes WHERE event_id = ?`, "", executableID)
 
 	globalMissing, err := store.ListEventsMissingPipelineReceipt(ctx, now.Add(-time.Hour), 20)
 	if err != nil {
@@ -96,7 +96,7 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 	eventtestsql.CorruptEventStore(t, ctx, pg.DB, runtimeauthoractivity.DialectPostgres, eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.named_operation_atomicity",
 		Reason:    "prove recovery fails closed when durable replay-scope evidence is missing",
-	}, "", `DELETE FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = $2 AND subscriber_id = $3`, executableID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID)
+	}, "", `DELETE FROM committed_replay_scopes WHERE event_id = $1::uuid`, executableID)
 
 	globalMissing, err := pg.ListEventsMissingPipelineReceipt(ctx, now.Add(-time.Hour), 20)
 	if err != nil {

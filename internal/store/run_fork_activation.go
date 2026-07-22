@@ -449,6 +449,8 @@ func runForkSourceAdvancedCode(family string) (string, bool) {
 		return "source_current_state_advanced_after_fork_point", true
 	case "event_deliveries":
 		return "source_deliveries_advanced_after_fork_point", true
+	case "committed_replay_scopes":
+		return "source_committed_replay_scope_advanced_after_fork_point", true
 	case "event_receipts":
 		return "source_receipts_advanced_after_fork_point", true
 	case "dead_letters":
@@ -469,12 +471,18 @@ func runForkSourceAdvancedCode(family string) (string, bool) {
 }
 
 func ensureRunForkActivationNoForkReplayState(ctx context.Context, tx *sql.Tx, forkRunID string) error {
+	deliveries, err := postgresDeliveryAdapter.SnapshotsForRun(ctx, tx, forkRunID)
+	if err != nil {
+		return fmt.Errorf("check fork_deliveries_already_exist: %w", err)
+	}
+	if len(deliveries) > 0 {
+		return runForkReplayResumeError("fork_deliveries_already_exist", RunForkReplayResumeFactForkReplayState, "fork activation blocked: fork_deliveries_already_exist")
+	}
 	checks := []struct {
 		code  string
 		query string
 	}{
 		{"fork_events_already_exist", `SELECT EXISTS (SELECT 1 FROM events WHERE run_id = $1::uuid)`},
-		{"fork_deliveries_already_exist", `SELECT EXISTS (SELECT 1 FROM event_deliveries WHERE run_id = $1::uuid)`},
 		{"fork_sessions_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = $1::uuid)`},
 		{"fork_conversation_audits_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_conversation_audits WHERE run_id = $1::uuid)`},
 		{"fork_turns_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_turns WHERE run_id = $1::uuid)`},

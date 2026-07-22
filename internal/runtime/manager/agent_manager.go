@@ -15,8 +15,10 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -31,6 +33,8 @@ type AgentManager struct {
 	bus                             Bus
 	factory                         AgentFactory
 	store                           ManagerPersistence
+	deliveryStore                   runtimedelivery.Store
+	testLifecycleProbe              runtimelifecycleprobe.Observer
 	sessions                        sessions.Registry
 	semanticSource                  semanticview.Source
 	promptResolver                  runtimecontracts.PromptResolver
@@ -44,8 +48,6 @@ type AgentManager struct {
 	modelAliases                    llmselection.ModelAliases
 	requireModelResolution          bool
 	throttleSuppressPrefixes        []string
-	activeEventMu                   sync.Mutex
-	activeEventKeys                 map[string]struct{}
 	workflowInstances               flowInstancePersistence
 	workOwner                       worklifetime.Occurrence
 	selectedContractRouteRecoveries map[string]SelectedContractRouteRecoveryTruth
@@ -76,7 +78,6 @@ const (
 	poisonEventEntityThreshold    = 3
 	deadLetterEscalationThreshold = 3
 	deadLetterEscalationWindow    = 10 * time.Minute
-	receiptWriteTimeout           = 3 * time.Second
 	runtimeSpecVersion            = "v2.2.1"
 )
 
@@ -123,6 +124,8 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		bus:                             bus,
 		factory:                         factory,
 		store:                           store,
+		deliveryStore:                   opts.DeliveryStore,
+		testLifecycleProbe:              opts.TestLifecycleProbe,
 		workspaces:                      opts.Workspaces,
 		sessions:                        opts.Sessions,
 		semanticSource:                  opts.SemanticSource,
@@ -141,7 +144,6 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		llmBackend:                      normalizeManagerLLMBackend(opts.LLMBackend),
 		modelAliases:                    llmselection.EffectiveModelAliases(opts.ModelAliases),
 		requireModelResolution:          opts.RequireModelResolution,
-		activeEventKeys:                 make(map[string]struct{}),
 		lifecycle:                       lifecycle,
 		baseContext:                     opts.BaseContext,
 		poisonPanicCounts:               make(map[string]int),

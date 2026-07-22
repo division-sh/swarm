@@ -51,9 +51,9 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 	}); err != nil {
 		t.Fatalf("seed parent workflow instance: %v", err)
 	}
-	seedExactOnceEventDelivery(t, workflowStore, ctx, parent, "fanout-node")
+	parentRoute := seedExactOnceEventDelivery(t, workflowStore, ctx, parent, "fanout-node")
 
-	handled, err := pc.dispatchWorkflowNodeEventResult(ctx, parent)
+	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, parentRoute), parent)
 	if err != nil {
 		t.Fatalf("dispatch parent fan-out event: %v", err)
 	}
@@ -86,7 +86,8 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 	}
 
 	for _, child := range children {
-		handled, err := pc.dispatchWorkflowNodeEventResult(ctx, child)
+		route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "spawn-node"}
+		handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), child)
 		if err != nil {
 			t.Fatalf("dispatch child create_flow_instance event: %v", err)
 		}

@@ -320,35 +320,6 @@ func loadRunForkEntityStates(snapshot *runForkRevisionSnapshot) ([]RunForkEntity
 	return out, nil
 }
 
-func classifyRunForkPendingWork(item RunForkPendingWork, deadLetter bool) string {
-	if item.SubscriberType == replayScopeMarkerSubscriberType && item.SubscriberID == replayScopeMarkerSubscriberID {
-		if _, ok := committedReplayScopeFromReasonCode(item.ReasonCode); ok {
-			return RunForkPendingClassificationCommittedReplay
-		}
-	}
-	if deadLetter || strings.TrimSpace(item.Status) == "dead_letter" || strings.TrimSpace(item.ReceiptOutcome) == "dead_letter" {
-		return RunForkPendingClassificationDeadLetter
-	}
-	switch strings.TrimSpace(item.Status) {
-	case "pending":
-		return RunForkPendingClassificationPending
-	case "in_progress":
-		return RunForkPendingClassificationInProgress
-	case "failed":
-		if item.RetryCount < 2 {
-			return RunForkPendingClassificationFailedRetryable
-		}
-		return RunForkPendingClassificationFailedTerminal
-	case "delivered":
-		return RunForkPendingClassificationDeliveredCompleted
-	default:
-		if item.ReceiptAt != nil {
-			return RunForkPendingClassificationDeliveredCompleted
-		}
-		return RunForkPendingClassificationPending
-	}
-}
-
 func runForkPendingReferencesActiveSession(pending []RunForkPendingWork) bool {
 	for _, item := range pending {
 		if strings.TrimSpace(item.ActiveSessionID) != "" {

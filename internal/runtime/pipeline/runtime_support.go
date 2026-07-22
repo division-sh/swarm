@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -78,6 +79,7 @@ func withWorkflowNodeDeliveryRoute(ctx context.Context, route events.DeliveryRou
 	}
 	route = route.Normalized()
 	ctx = events.WithDeliveryContext(ctx, route.Context)
+	ctx = runtimedelivery.WithRoute(ctx, route)
 	return context.WithValue(ctx, workflowNodeDeliveryRouteKey{}, route)
 }
 

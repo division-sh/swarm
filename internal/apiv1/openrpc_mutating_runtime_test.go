@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -584,23 +585,23 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 
 		{Method: "event.replay", Params: map[string]any{"event_id": "missing", "idempotency_key": "idem-error"}, Code: EventNotFoundCode},
 		{Method: "event.replay", Params: map[string]any{"event_id": "evt-empty", "idempotency_key": "idem-error"}, Code: EventReplayNoDeliveryHistoryCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.observability.events["evt-empty"] = mutatingProbeOriginalEvent("evt-empty", nil, eventReplayStatusDelivered)
+			s.observability.events["evt-empty"] = mutatingProbeOriginalEvent("evt-empty", nil, runtimedelivery.StatusDelivered)
 		}}},
 		{Method: "event.replay", Params: map[string]any{"event_id": "evt-1", "subscribers": []any{"agent-b"}, "idempotency_key": "idem-error"}, Code: EventReplaySubscriberNotOriginalCode},
 		{Method: "event.replay", Params: map[string]any{"event_id": "evt-1", "idempotency_key": "idem-error"}, Code: EventReplaySubscriberUnavailableCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.missingRecipients = []string{"agent-a"} }}},
 		{Method: "event.replay", Params: map[string]any{"event_id": "evt-pending", "idempotency_key": "idem-error"}, Code: EventReplayNotEligibleCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.observability.events["evt-pending"] = mutatingProbeOriginalEvent("evt-pending", []string{"agent-a"}, eventReplayStatusPending)
+			s.observability.events["evt-pending"] = mutatingProbeOriginalEvent("evt-pending", []string{"agent-a"}, runtimedelivery.StatusPending)
 		}}},
 		{Method: "event.replay", Params: map[string]any{"event_id": "evt-1", "idempotency_key": "idem-error"}, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.checkErr = runtimebus.ErrPayloadValidation }}},
 
 		{Method: "agent.replay", Params: map[string]any{"event_id": "missing", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventNotFoundCode},
 		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-empty", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventReplayNoDeliveryHistoryCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.observability.events["evt-empty"] = mutatingProbeOriginalEvent("evt-empty", nil, eventReplayStatusDelivered)
+			s.observability.events["evt-empty"] = mutatingProbeOriginalEvent("evt-empty", nil, runtimedelivery.StatusDelivered)
 		}}},
 		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "agent_id": "agent-b", "idempotency_key": "idem-error"}, Code: EventReplaySubscriberNotOriginalCode},
 		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventReplaySubscriberUnavailableCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.missingRecipients = []string{"agent-a"} }}},
 		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-pending", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventReplayNotEligibleCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.observability.events["evt-pending"] = mutatingProbeOriginalEvent("evt-pending", []string{"agent-a"}, eventReplayStatusPending)
+			s.observability.events["evt-pending"] = mutatingProbeOriginalEvent("evt-pending", []string{"agent-a"}, runtimedelivery.StatusPending)
 		}}},
 		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.checkErr = runtimebus.ErrPayloadValidation }}},
 
@@ -891,7 +892,7 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 			bundleHash: runStartTestBundleHash,
 		},
 	}
-	state.observability.events["evt-1"] = mutatingProbeOriginalEvent("evt-1", []string{"agent-a"}, eventReplayStatusDelivered)
+	state.observability.events["evt-1"] = mutatingProbeOriginalEvent("evt-1", []string{"agent-a"}, runtimedelivery.StatusDelivered)
 	state.events = &mutatingProbeEventPublisher{state: state}
 	state.runFork = &mutatingProbeRunForkExecutor{state: state}
 	state.testSetup = &mutatingProbeTestSetupStore{state: state}
@@ -1296,8 +1297,9 @@ func (p *mutatingProbeEventPublisher) PublishDirect(_ context.Context, evt event
 			SubscriberType: eventReplaySubscriberTypeAgent,
 			SubscriberID:   recipient,
 			SessionID:      "sess-" + recipient,
-			Status:         eventReplayStatusDelivered,
+			Status:         string(runtimedelivery.StatusDelivered),
 			RetryCount:     i,
+			Terminal:       true,
 		})
 	}
 	p.state.storeEvent(evt, deliveries)
@@ -1375,7 +1377,7 @@ func (s *mutatingRuntimeProbeState) storeEvent(evt events.Event, deliveries []st
 	s.observability.events[evt.ID()] = view
 }
 
-func mutatingProbeOriginalEvent(eventID string, subscribers []string, status string) store.OperatorEventFull {
+func mutatingProbeOriginalEvent(eventID string, subscribers []string, status runtimedelivery.Status) store.OperatorEventFull {
 	deliveries := make([]store.OperatorEventDelivery, 0, len(subscribers))
 	for _, subscriber := range subscribers {
 		deliveries = append(deliveries, store.OperatorEventDelivery{
@@ -1383,7 +1385,9 @@ func mutatingProbeOriginalEvent(eventID string, subscribers []string, status str
 			SubscriberType: eventReplaySubscriberTypeAgent,
 			SubscriberID:   subscriber,
 			SessionID:      "sess-" + subscriber,
-			Status:         status,
+			Status:         string(status),
+			RetryEligible:  status == runtimedelivery.StatusFailed,
+			Terminal:       status.Terminal(),
 		})
 	}
 	event := eventtest.PersistedChildForProducer(

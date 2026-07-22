@@ -143,16 +143,17 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 			evt := eventtest.RunCreatingRootIngress(eventID,
 				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EventEnvelope{}, time.Now().UTC())
 
-			seedExactOnceEventDelivery(t, pc.workflowStore, ctx, evt, "w-node")
+			route := seedExactOnceEventDelivery(t, pc.workflowStore, ctx, evt, "w-node")
+			deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, route)
 
-			handled, err := pc.dispatchWorkflowNodeEventResult(ctx, evt)
+			handled, err := pc.dispatchWorkflowNodeEventResult(deliveryCtx, evt)
 			if err != nil {
 				t.Fatalf("first dispatchWorkflowNodeEventResult: %v", err)
 			}
 			if !handled {
 				t.Fatal("first dispatch handled = false, want true")
 			}
-			handled, err = pc.dispatchWorkflowNodeEventResult(ctx, evt)
+			handled, err = pc.dispatchWorkflowNodeEventResult(deliveryCtx, evt)
 			if err != nil {
 				t.Fatalf("second dispatchWorkflowNodeEventResult: %v", err)
 			}
@@ -166,7 +167,7 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 			if got := mailbox.calls; got != 1 {
 				t.Fatalf("mailbox materialization calls after duplicate dispatch = %d, want 1", got)
 			}
-			assertReceiptCount(t, pc.workflowStore, ctx, eventID, "w-node", 1)
+			assertDeliveryOutcomeCount(t, pc.workflowStore, ctx, eventID, "w-node", 1)
 			assertDeliveryStatusCount(t, pc.workflowStore, ctx, eventID, "w-node", "delivered", 1)
 			assertMutationCount(t, pc.workflowStore, ctx, eventID, "amount", "entity_initial_value", "create_entity", 1)
 			assertMutationCount(t, pc.workflowStore, ctx, eventID, "amount", "workflow_instance_store", "upsert", 1)
@@ -192,8 +193,10 @@ func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *WorkflowInstanceSt
 		t.Fatalf("load workflow nodes: %v", err)
 	}
 	bus := &recordingPipelineBus{}
+	deliveryStore := newPipelineTestDeliveryOwner(t, db, store.isSQLite())
 	return NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
 		WorkflowStore:       store,
+		DeliveryStore:       deliveryStore,
 		TimerScheduleStore:  &recordingScheduleStore{},
 		MailboxMaterializer: &recordingMailboxWriteMaterializer{},
 		Module: &previewWorkflowModule{
@@ -256,25 +259,19 @@ func sqliteExactOnceRunContext(t *testing.T, db *sql.DB) context.Context {
 	return ctx
 }
 
-func seedExactOnceEventDelivery(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, evt events.Event, nodeID string) {
+func seedExactOnceEventDelivery(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, evt events.Event, nodeID string) events.DeliveryRoute {
 	t.Helper()
 	seedExactOnceEvent(t, store, ctx, evt)
-	runID := runtimecorrelation.RunIDFromContext(ctx)
-	if store.isSQLite() {
-		if _, err := store.db.ExecContext(ctx, `
-			INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, created_at)
-			VALUES (?, ?, ?, 'node', ?, 'pending', 0, ?)
-		`, uuid.NewString(), runID, evt.ID(), nodeID, evt.CreatedAt()); err != nil {
-			t.Fatalf("seed sqlite delivery: %v", err)
-		}
-		return
+	owner, ok := store.DeliveryLifecycleStore().(*pipelineTestDeliveryOwner)
+	if !ok {
+		owner = newPipelineTestDeliveryOwner(t, store.db, store.isSQLite())
+		store.ConfigureDeliveryLifecycleStore(owner)
 	}
-	if _, err := store.db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, retry_count, created_at)
-		VALUES ($1::uuid, $2::uuid, 'node', $3, 'pending', 0, $4)
-	`, runID, evt.ID(), nodeID, evt.CreatedAt()); err != nil {
-		t.Fatalf("seed postgres delivery: %v", err)
+	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID}
+	if err := owner.commitInitial(ctx, evt, route); err != nil {
+		t.Fatalf("seed exact node delivery: %v", err)
 	}
+	return route
 }
 
 func seedExactOnceEvent(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, evt events.Event) {
@@ -319,32 +316,34 @@ func assertMutationCount(t *testing.T, store *WorkflowInstanceStore, ctx context
 	}
 }
 
-func assertReceiptCount(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, eventID, nodeID string, want int) {
+func assertDeliveryOutcomeCount(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, eventID, nodeID string, want int) {
 	t.Helper()
 	var got int
 	var err error
 	if store.isSQLite() {
 		err = store.db.QueryRowContext(ctx, `
 			SELECT COUNT(*)
-			FROM event_receipts
-			WHERE event_id = ?
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = ?
+			FROM event_delivery_outcomes o
+			JOIN event_deliveries d ON d.delivery_id = o.delivery_id
+			WHERE d.event_id = ?
+			  AND d.subscriber_type = 'node'
+			  AND d.subscriber_id = ?
 		`, eventID, nodeID).Scan(&got)
 	} else {
 		err = store.db.QueryRowContext(ctx, `
 			SELECT COUNT(*)
-			FROM event_receipts
-			WHERE event_id = $1::uuid
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = $2
+			FROM event_delivery_outcomes o
+			JOIN event_deliveries d ON d.delivery_id = o.delivery_id
+			WHERE d.event_id = $1::uuid
+			  AND d.subscriber_type = 'node'
+			  AND d.subscriber_id = $2
 		`, eventID, nodeID).Scan(&got)
 	}
 	if err != nil {
-		t.Fatalf("count event_receipts: %v", err)
+		t.Fatalf("count event delivery outcomes: %v", err)
 	}
 	if got != want {
-		t.Fatalf("event receipt count = %d, want %d", got, want)
+		t.Fatalf("event delivery outcome count = %d, want %d", got, want)
 	}
 }
 

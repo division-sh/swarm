@@ -33,6 +33,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -64,6 +65,7 @@ type Stores struct {
 	SessionRegistry     sessions.Registry
 	ConversationStore   llm.ConversationPersistence
 	ManagerStore        runtimemanager.ManagerPersistence
+	DeliveryStore       runtimedelivery.Store
 	ScheduleStore       runtimepipeline.SchedulePersistence
 	MailboxMaterializer runtimepipeline.MailboxWriteMaterializationStore
 	DecisionCards       decisioncard.Store
@@ -1010,6 +1012,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, stores.SQLDB, runtimepipeline.PipelineCoordinatorOptions{
 			Module:        opts.WorkflowModule,
 			WorkflowStore: pipelineStore,
+			DeliveryStore: stores.DeliveryStore,
 			InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 				if managerRef == nil {
 					return fmt.Errorf("flow instance activator is required")
@@ -1044,7 +1047,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			WorkOwner:                        workOccurrence,
 		})
 		if rt.Pipeline != nil {
-			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodesWithReceiptStore(rt.Bus, stores.SQLDB, pipelineStore)...)
+			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodes(rt.Bus, stores.SQLDB)...)
 		}
 	}
 
@@ -1187,6 +1190,8 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, runtimemanager.AgentManagerOptions{
 		BaseContext:            rt.authorActivityContext(context.Background()),
 		LifecycleStore:         lifecycleStore,
+		DeliveryStore:          stores.DeliveryStore,
+		TestLifecycleProbe:     opts.TestLifecycleProbe,
 		Workspaces:             rt.Workspace,
 		Sessions:               stores.SessionRegistry,
 		SemanticSource:         source,
@@ -1480,19 +1485,34 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	if skipPersistentStartupRecovery {
 		rt.emitBootProgress(11, "manager_recovery_if_enabled", "skipped", "persistent startup recovery disabled")
-	} else if rt.Config.Runtime.RecoveryOnStartup && rt.Manager != nil {
-		startupRecoveryDecision.ManagerRecoveryAttempted = true
-		_, err := rt.Manager.HydrateForStartup(ctx)
-		if err != nil {
-			rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, err)
+	} else if !rt.Config.Runtime.RecoveryOnStartup {
+		rt.emitBootProgress(11, "manager_recovery_if_enabled", "skipped", "recovery_on_startup disabled")
+	} else {
+		recovered := make([]string, 0, 2)
+		if rt.Pipeline != nil {
+			if err := rt.Pipeline.RecoverNodeDeliveries(ctx); err != nil {
+				rt.emitBootProgress(11, "manager_recovery_if_enabled", "FAILED", err.Error())
+				return fmt.Errorf("recover executable workflow-node deliveries: %w", err)
+			}
+			recovered = append(recovered, "workflow-node deliveries")
+		}
+		if rt.Manager != nil {
+			startupRecoveryDecision.ManagerRecoveryAttempted = true
+			_, err := rt.Manager.HydrateForStartup(ctx)
+			if err != nil {
+				rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, err)
+			}
+			recovered = append(recovered, "agent state")
 		}
 		status := "ok"
 		if startupRecoveryDecision.Outcome == startupRecoveryOutcomeDegraded {
 			status = string(startupRecoveryDecision.Outcome)
 		}
-		rt.emitBootProgress(11, "manager_recovery_if_enabled", status, "state hydrated; replay awaits managed execution admission")
-	} else {
-		rt.emitBootProgress(11, "manager_recovery_if_enabled", "skipped", "recovery_on_startup disabled or manager unavailable")
+		detail := "no executable delivery consumers available"
+		if len(recovered) > 0 {
+			detail = strings.Join(recovered, " and ") + " hydrated; managed replay awaits execution admission"
+		}
+		rt.emitBootProgress(11, "manager_recovery_if_enabled", status, detail)
 	}
 	if rt.Bus != nil {
 		sweeperConfig := rt.Options.TestOutboxSweeperConfig

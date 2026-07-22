@@ -42,8 +42,9 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 
 	module := newRunCompletionSystemNodeModule(t, source)
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:     module,
-		BundleHash: runStartTestBundleHash,
+		Module:        module,
+		DeliveryStore: pg,
+		BundleHash:    runStartTestBundleHash,
 	})
 
 	runID := "11111111-1111-4111-8111-111111111111"
@@ -62,7 +63,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 
 	eventID := triggerEventIDForRun(t, db, runID)
 	assertPipelineReceiptSucceeded(t, db, eventID)
-	assertSystemNodeReceiptPersisted(t, db, eventID, "pipeline")
+	assertSystemNodeOutcomePersisted(t, db, eventID, "pipeline")
 	assertSystemNodeDeliverySettled(t, db, eventID, "pipeline")
 	assertRunEntityTerminal(t, db, runID, "done")
 
@@ -170,35 +171,36 @@ func triggerEventIDForRun(t *testing.T, db *sql.DB, runID string) string {
 func assertSystemNodeDeliverySettled(t *testing.T, db *sql.DB, eventID, nodeID string) {
 	t.Helper()
 	var status, reason string
-	var deliveredAt sql.NullTime
+	var settledAt sql.NullTime
 	if err := db.QueryRow(`
-		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), delivered_at
+		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), settled_at
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
 		  AND subscriber_id = $2
-	`, eventID, nodeID).Scan(&status, &reason, &deliveredAt); err != nil {
+	`, eventID, nodeID).Scan(&status, &reason, &settledAt); err != nil {
 		t.Fatalf("load system-node delivery: %v", err)
 	}
-	if status != "delivered" || reason != "node_processed" || !deliveredAt.Valid {
-		t.Fatalf("system-node delivery = status:%q reason:%q delivered:%v, want delivered/node_processed/delivered_at", status, reason, deliveredAt.Valid)
+	if status != "delivered" || reason != "" || !settledAt.Valid {
+		t.Fatalf("system-node delivery = status:%q reason:%q settled:%v, want canonical delivered settlement", status, reason, settledAt.Valid)
 	}
 }
 
-func assertSystemNodeReceiptPersisted(t *testing.T, db *sql.DB, eventID, nodeID string) {
+func assertSystemNodeOutcomePersisted(t *testing.T, db *sql.DB, eventID, nodeID string) {
 	t.Helper()
 	var outcome, reason string
 	if err := db.QueryRow(`
-		SELECT COALESCE(outcome, ''), COALESCE(reason_code, '')
-		FROM event_receipts
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = $2
+		SELECT COALESCE(o.outcome, ''), COALESCE(o.reason_code, '')
+		FROM event_delivery_outcomes o
+		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
+		WHERE d.event_id = $1::uuid
+		  AND d.subscriber_type = 'node'
+		  AND d.subscriber_id = $2
 	`, eventID, nodeID).Scan(&outcome, &reason); err != nil {
-		t.Fatalf("load system-node receipt: %v", err)
+		t.Fatalf("load system-node outcome: %v", err)
 	}
-	if outcome != "no_op" || reason != "idempotent_no_op" {
-		t.Fatalf("system-node receipt = outcome:%q reason:%q, want no_op/idempotent_no_op", outcome, reason)
+	if outcome != "delivered" || reason != "" {
+		t.Fatalf("system-node outcome = outcome:%q reason:%q, want delivered with no failure reason", outcome, reason)
 	}
 }
 

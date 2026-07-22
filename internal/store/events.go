@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,11 +16,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
-	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -27,10 +27,8 @@ import (
 )
 
 const (
-	replayScopeMarkerSubscriberType = "node"
-	replayScopeMarkerSubscriberID   = "__runtime_replay_scope__"
-	replayScopeReasonDirect         = "replay_scope_direct"
-	replayScopeReasonSubscribed     = "replay_scope_subscribed"
+	replayScopeReasonDirect     = "replay_scope_direct"
+	replayScopeReasonSubscribed = "replay_scope_subscribed"
 )
 
 type rowQueryer interface {
@@ -125,24 +123,8 @@ func requireEventRunNotForked(ctx context.Context, db storerunlifecycle.DBTX, ev
 	return nil
 }
 
-func requireActiveRunForPipelineReceipt(ctx context.Context, db storerunlifecycle.DBTX, eventID string, dialect storerunlifecycle.Dialect) error {
-	var query string
-	switch dialect {
-	case storerunlifecycle.DialectPostgres:
-		query = `SELECT EXISTS (SELECT 1 FROM event_deliveries WHERE event_id = $1::uuid AND status = 'dead_letter' AND reason_code IN ($2, $3))`
-	case storerunlifecycle.DialectSQLite:
-		query = `SELECT EXISTS (SELECT 1 FROM event_deliveries WHERE event_id = ? AND status = 'dead_letter' AND reason_code IN (?, ?))`
-	default:
-		return fmt.Errorf("require active pipeline receipt run: unsupported dialect %q", dialect)
-	}
-	var quiesced bool
-	if err := db.QueryRowContext(ctx, query, strings.TrimSpace(eventID), destructivereset.QuiescenceReasonCode, runtimerunquiescence.ServeAbandonReasonCode).Scan(&quiesced); err != nil {
-		return fmt.Errorf("inspect pipeline receipt quiescence: %w", err)
-	}
-	if quiesced {
-		return nil
-	}
-	return requireActiveRunForEvent(ctx, db, eventID, dialect)
+func (s *PostgresStore) requireActiveRunForPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID string) error {
+	return requireActiveRunForEvent(ctx, tx, eventID, storerunlifecycle.DialectPostgres)
 }
 
 func eventReadQueryerFromContext(ctx context.Context, db *sql.DB) eventReadQueryer {
@@ -219,28 +201,6 @@ func validateOptionalEntityUUID(raw string) (string, error) {
 	return raw, nil
 }
 
-func (s *PostgresStore) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
-	return s.InsertEventDeliveriesTx(ctx, nil, eventID, agentIDs)
-}
-
-func (s *PostgresStore) InsertEventDeliveriesTx(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string) error {
-	if err := s.requireCurrentSchema(); err != nil {
-		return err
-	}
-	if len(agentIDs) == 0 {
-		return nil
-	}
-	if tx == nil {
-		return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			return s.InsertEventDeliveriesTx(txctx, tx, eventID, agentIDs)
-		})
-	}
-	if err := requireActiveRunForEvent(ctx, tx, eventID, storerunlifecycle.DialectPostgres); err != nil {
-		return err
-	}
-	return s.insertEventDeliveriesSpec(ctx, tx, eventID, agentIDs)
-}
-
 func (s *PostgresStore) UpsertCommittedReplayScope(
 	ctx context.Context,
 	eventID string,
@@ -307,7 +267,7 @@ func (s *PostgresStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx,
 			return s.UpsertPipelineReceiptTx(txctx, tx, eventID, status, failure)
 		})
 	}
-	if err := requireActiveRunForPipelineReceipt(ctx, tx, eventID, storerunlifecycle.DialectPostgres); err != nil {
+	if err := s.requireActiveRunForPipelineReceiptTx(ctx, tx, eventID); err != nil {
 		return err
 	}
 	eventID = strings.TrimSpace(eventID)
@@ -468,33 +428,21 @@ func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID
 	if eventID == "" {
 		return nil, nil
 	}
-	query := `
-		SELECT subscriber_id
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-		ORDER BY subscriber_id ASC
-	`
-	rows, err := eventReadQueryerFromContext(ctx, s.DB).QueryContext(ctx, query, eventID)
+	snapshots, err := s.deliverySnapshotsForEvent(ctx, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("list event delivery recipients: %w", err)
 	}
-	defer rows.Close()
-
 	recipients := make([]string, 0, 8)
-	for rows.Next() {
-		var agentID string
-		if err := rows.Scan(&agentID); err != nil {
-			return nil, fmt.Errorf("scan event delivery recipient: %w", err)
+	for _, snapshot := range snapshots {
+		if snapshot.SubscriberClass != runtimedelivery.SubscriberAgent {
+			continue
 		}
-		agentID = strings.TrimSpace(agentID)
+		agentID := strings.TrimSpace(snapshot.SubscriberID)
 		if agentID != "" {
 			recipients = append(recipients, agentID)
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read event delivery recipients: %w", err)
-	}
+	sort.Strings(recipients)
 	return recipients, nil
 }
 
@@ -506,32 +454,20 @@ func (s *PostgresStore) ListEventDeliveryTargets(ctx context.Context, eventID st
 	if eventID == "" {
 		return nil, nil
 	}
-	rows, err := eventReadQueryerFromContext(ctx, s.DB).QueryContext(ctx, `
-		SELECT subscriber_id, COALESCE(delivery_target_route, '{}'::jsonb)
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-		ORDER BY created_at ASC, subscriber_id ASC
-	`, eventID)
+	snapshots, err := s.deliverySnapshotsForEvent(ctx, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("list event delivery targets: %w", err)
 	}
-	defer rows.Close()
 	out := map[string]events.RouteIdentity{}
-	for rows.Next() {
-		var subscriberID string
-		var raw json.RawMessage
-		if err := rows.Scan(&subscriberID, &raw); err != nil {
-			return nil, fmt.Errorf("scan event delivery target: %w", err)
+	for _, snapshot := range snapshots {
+		if snapshot.SubscriberClass != runtimedelivery.SubscriberAgent {
+			continue
 		}
-		route := decodeRouteIdentityJSON(raw)
+		route := snapshot.Route.Target
 		if route.Empty() {
 			continue
 		}
-		out[strings.TrimSpace(subscriberID)] = route
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read event delivery targets: %w", err)
+		out[strings.TrimSpace(snapshot.SubscriberID)] = route
 	}
 	if len(out) == 0 {
 		return nil, nil
@@ -547,41 +483,13 @@ func (s *PostgresStore) ListEventDeliveryRoutes(ctx context.Context, eventID str
 	if eventID == "" {
 		return nil, nil
 	}
-	rows, err := eventReadQueryerFromContext(ctx, s.DB).QueryContext(ctx, `
-		SELECT subscriber_type, subscriber_id,
-		       COALESCE(delivery_target_route, '{}'::jsonb),
-		       COALESCE(delivery_context, '{}'::jsonb),
-		       COALESCE(delivery_payload_projection, '{}'::jsonb)
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND NOT (subscriber_type = $2 AND subscriber_id = $3)
-		ORDER BY created_at ASC, delivery_id ASC
-	`, eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID)
+	snapshots, err := s.deliverySnapshotsForEvent(ctx, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("list event delivery routes: %w", err)
 	}
-	defer rows.Close()
-	out := make([]events.DeliveryRoute, 0, 8)
-	for rows.Next() {
-		var subscriberType, subscriberID string
-		var raw, contextRaw, projectionRaw json.RawMessage
-		if err := rows.Scan(&subscriberType, &subscriberID, &raw, &contextRaw, &projectionRaw); err != nil {
-			return nil, fmt.Errorf("scan event delivery route: %w", err)
-		}
-		projection, err := decodeDeliveryPayloadProjectionJSON(projectionRaw)
-		if err != nil {
-			return nil, fmt.Errorf("decode event delivery route projection (%s=%s): %w", subscriberType, subscriberID, err)
-		}
-		out = append(out, events.DeliveryRoute{
-			SubscriberType:    subscriberType,
-			SubscriberID:      subscriberID,
-			Target:            decodeRouteIdentityJSON(raw),
-			Context:           decodeDeliveryContextJSON(contextRaw),
-			PayloadProjection: projection,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read event delivery routes: %w", err)
+	out := make([]events.DeliveryRoute, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		out = append(out, snapshot.Route)
 	}
 	return events.NormalizeDeliveryRoutes(out), nil
 }
@@ -597,25 +505,21 @@ func (s *PostgresStore) LoadCommittedReplayScope(
 	if eventID == "" {
 		return "", runtimereplayclaim.ErrMissingCommittedReplayScope
 	}
-	var reasonCode string
+	var rawScope string
 	err := eventReadQueryerFromContext(ctx, s.DB).QueryRowContext(ctx, `
-		SELECT COALESCE(reason_code, '')
-		FROM event_deliveries
+		SELECT scope
+		FROM committed_replay_scopes
 		WHERE event_id = $1::uuid
-		  AND subscriber_type = $2
-		  AND subscriber_id = $3
-		ORDER BY created_at DESC, delivery_id DESC
-		LIMIT 1
-	`, eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID).Scan(&reasonCode)
+	`, eventID).Scan(&rawScope)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return "", runtimereplayclaim.ErrMissingCommittedReplayScope
 	case err != nil:
 		return "", fmt.Errorf("load committed replay scope: %w", err)
 	}
-	scope, ok := committedReplayScopeFromReasonCode(reasonCode)
-	if !ok {
-		return "", fmt.Errorf("load committed replay scope: unrecognized reason_code %q", strings.TrimSpace(reasonCode))
+	scope := runtimereplayclaim.CommittedReplayScope(strings.TrimSpace(rawScope))
+	if _, err := committedReplayScopeReasonCode(scope); err != nil {
+		return "", fmt.Errorf("load committed replay scope: %w", err)
 	}
 	return scope, nil
 }
@@ -750,87 +654,6 @@ func isTransientEventStoreConnectionError(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "bad connection")
 }
 
-func (s *PostgresStore) insertEventDeliveriesSpec(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string) error {
-	return s.insertEventDeliveriesWithTargetsSpec(ctx, tx, eventID, agentIDs, nil)
-}
-
-func (s *PostgresStore) InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error {
-	return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return s.InsertEventDeliveriesWithTargetsTx(txctx, tx, eventID, agentIDs, deliveryTargets)
-	})
-}
-
-func (s *PostgresStore) InsertEventDeliveriesWithTargetsTx(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error {
-	if err := s.requireCurrentSchema(); err != nil {
-		return err
-	}
-	if tx == nil {
-		return s.InsertEventDeliveriesWithTargets(ctx, eventID, agentIDs, deliveryTargets)
-	}
-	return s.insertEventDeliveriesWithTargetsSpec(ctx, tx, eventID, agentIDs, deliveryTargets)
-}
-
-func (s *PostgresStore) InsertEventDeliveryRoutes(ctx context.Context, eventID string, deliveryRoutes []events.DeliveryRoute) error {
-	return s.InsertEventDeliveryRoutesTx(ctx, nil, eventID, deliveryRoutes)
-}
-
-func (s *PostgresStore) InsertEventDeliveryRoutesTx(ctx context.Context, tx *sql.Tx, eventID string, deliveryRoutes []events.DeliveryRoute) error {
-	if err := s.requireCurrentSchema(); err != nil {
-		return err
-	}
-	if tx == nil {
-		return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			return s.InsertEventDeliveryRoutesTx(txctx, tx, eventID, deliveryRoutes)
-		})
-	}
-	if err := requireActiveRunForEvent(ctx, tx, eventID, storerunlifecycle.DialectPostgres); err != nil {
-		return err
-	}
-	return s.insertEventDeliveryRoutesSpec(ctx, tx, eventID, deliveryRoutes)
-}
-
-func (s *PostgresStore) insertEventDeliveryRoutesSpec(ctx context.Context, tx *sql.Tx, eventID string, deliveryRoutes []events.DeliveryRoute) error {
-	if err := events.ValidateDeliveryRouteProjections(deliveryRoutes); err != nil {
-		return err
-	}
-	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
-	if len(deliveryRoutes) == 0 {
-		return nil
-	}
-	execFn := s.DB.ExecContext
-	if tx != nil {
-		execFn = tx.ExecContext
-	}
-	q := `
-			INSERT INTO event_deliveries (
-				run_id, event_id, subscriber_type, subscriber_id, reason_code,
-				delivery_target_route, delivery_context, delivery_payload_projection, created_at
-			)
-			SELECT e.run_id, e.event_id, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, now()
-			FROM events e
-			WHERE e.event_id = $1::uuid
-			ON CONFLICT DO NOTHING
-		`
-	for _, route := range deliveryRoutes {
-		route = route.Normalized()
-		if route.SubscriberType == "" || route.SubscriberID == "" {
-			continue
-		}
-		projectionRaw, err := deliveryPayloadProjectionJSON(route.PayloadProjection)
-		if err != nil {
-			return fmt.Errorf("encode event delivery projection (%s=%s): %w", route.SubscriberType, route.SubscriberID, err)
-		}
-		args := []any{
-			eventID, route.SubscriberType, route.SubscriberID, deliveryRouteReasonCode(route),
-			string(routeIdentityJSON(route.Target)), string(deliveryContextJSON(route.Context)), string(projectionRaw),
-		}
-		if _, err := execFn(ctx, q, args...); err != nil {
-			return fmt.Errorf("insert event delivery (%s=%s): %w", route.SubscriberType, route.SubscriberID, err)
-		}
-	}
-	return nil
-}
-
 func deliveryContextJSON(deliveryContext events.DeliveryContext) json.RawMessage {
 	deliveryContext = deliveryContext.Normalized()
 	if deliveryContext.Empty() {
@@ -888,37 +711,6 @@ func deliveryRouteReasonCode(route events.DeliveryRoute) string {
 	}
 }
 
-func (s *PostgresStore) insertEventDeliveriesWithTargetsSpec(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error {
-	execFn := s.DB.ExecContext
-	if tx != nil {
-		execFn = tx.ExecContext
-	}
-	q := `
-				INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, reason_code, delivery_target_route, created_at)
-				SELECT e.run_id, e.event_id, 'agent', $2, 'matched_agent_subscription', $3::jsonb, now()
-				FROM events e
-				WHERE e.event_id = $1::uuid
-				ON CONFLICT DO NOTHING
-			`
-	seen := make(map[string]struct{}, len(agentIDs))
-	for _, agentID := range agentIDs {
-		agentID = strings.TrimSpace(agentID)
-		if agentID == "" {
-			continue
-		}
-		if _, ok := seen[agentID]; ok {
-			continue
-		}
-		seen[agentID] = struct{}{}
-		args := []any{eventID, agentID}
-		args = append(args, string(routeIdentityJSON(deliveryTargets[agentID])))
-		if _, err := execFn(ctx, q, args...); err != nil {
-			return fmt.Errorf("insert event delivery (agent=%s): %w", agentID, err)
-		}
-	}
-	return nil
-}
-
 func (s *PostgresStore) upsertCommittedReplayScopeSpec(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -929,44 +721,32 @@ func (s *PostgresStore) upsertCommittedReplayScopeSpec(
 	if eventID == "" {
 		return nil
 	}
-	reasonCode, err := committedReplayScopeReasonCode(scope)
-	if err != nil {
+	if _, err := committedReplayScopeReasonCode(scope); err != nil {
 		return err
 	}
+	now := time.Now().UTC()
 	execFn := s.DB.ExecContext
+	queryFn := s.DB.QueryRowContext
 	if tx != nil {
 		execFn = tx.ExecContext
+		queryFn = tx.QueryRowContext
 	}
 	res, err := execFn(ctx, `
-		UPDATE event_deliveries
-		SET reason_code = $4,
-		    status = 'delivered',
-		    delivered_at = now()
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = $2
-		  AND subscriber_id = $3
-	`, eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, reasonCode)
+		INSERT INTO committed_replay_scopes (event_id, run_id, scope, created_at, updated_at)
+		SELECT e.event_id, e.run_id, $2, $3, $3 FROM events e WHERE e.event_id = $1::uuid
+		ON CONFLICT (event_id) DO NOTHING
+	`, eventID, string(scope), now)
 	if err != nil {
-		return fmt.Errorf("update committed replay scope: %w", err)
-	}
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("update committed replay scope rows: %w", err)
-	}
-	if rows > 0 {
-		return nil
-	}
-	q := `
-			INSERT INTO event_deliveries (
-				run_id, event_id, subscriber_type, subscriber_id, status, reason_code, delivered_at, created_at
-			)
-			SELECT
-				e.run_id, e.event_id, $2, $3, 'delivered', $4, now(), now()
-			FROM events e
-			WHERE e.event_id = $1::uuid
-		`
-	if _, err := execFn(ctx, q, eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, reasonCode); err != nil {
 		return fmt.Errorf("insert committed replay scope: %w", err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		var persisted string
+		if err := queryFn(ctx, `SELECT scope FROM committed_replay_scopes WHERE event_id = $1::uuid`, eventID).Scan(&persisted); err != nil {
+			return fmt.Errorf("read committed replay scope duplicate: %w", err)
+		}
+		if strings.TrimSpace(persisted) != string(scope) {
+			return fmt.Errorf("committed replay scope conflicts with persisted scope")
+		}
 	}
 	return nil
 }
@@ -1014,20 +794,12 @@ func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.T
 			$2, NULLIF($3,''), $4::jsonb, $5::jsonb, now()
 		FROM events e
 		WHERE e.event_id = $1::uuid
-		  AND NOT EXISTS (
-			SELECT 1
-			FROM event_deliveries d
-			WHERE d.event_id = e.event_id
-			  AND d.status = 'dead_letter'
-			  AND d.reason_code IN ($6, $7)
-		  )
 		ON CONFLICT (event_id, subscriber_type, subscriber_id) DO UPDATE SET
 			outcome = EXCLUDED.outcome,
 			reason_code = EXCLUDED.reason_code,
 			failure = EXCLUDED.failure,
 			side_effects = EXCLUDED.side_effects,
 			processed_at = now()
-		WHERE COALESCE(event_receipts.reason_code, '') NOT IN ($6, $7)
 	`
 	execFn := s.DB.ExecContext
 	if tx != nil {
@@ -1035,7 +807,7 @@ func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.T
 	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
 		execFn = conn.ExecContext
 	}
-	if _, err := execFn(ctx, q, eventID, outcome, reasonCode, failureJSON, string(sideEffects), destructivereset.QuiescenceReasonCode, runtimerunquiescence.ServeAbandonReasonCode); err != nil {
+	if _, err := execFn(ctx, q, eventID, outcome, reasonCode, failureJSON, string(sideEffects)); err != nil {
 		return fmt.Errorf("upsert pipeline receipt: %w", err)
 	}
 	return nil
@@ -1137,48 +909,65 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 }
 
 func (s *PostgresStore) listEventsWithPendingDeliveriesForRunSpec(ctx context.Context, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
-	exclusionArgs := diagnosticDirectReplayEventArgs()
-	limitPlaceholder := 3 + len(exclusionArgs)
-	args := append([]any{runID, since}, exclusionArgs...)
-	args = append(args, limit)
-	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
-		SELECT e.event_id::text
-		FROM events e
-		JOIN runs run ON run.run_id = e.run_id
-		WHERE e.run_id = $1::uuid
-		  AND run.status IN ('running', 'paused')
-		  AND e.created_at >= $2
-		  AND EXISTS (
-			SELECT 1
-			FROM event_deliveries d
-			WHERE d.event_id = e.event_id
-			  AND d.run_id = e.run_id
-			  AND d.status = 'pending'
-		  )
-		  AND %s
-		ORDER BY e.created_at ASC
-		LIMIT $%d
-	`, postgresDiagnosticDirectReplayExclusionSQL("e", 3), limitPlaceholder), args...)
+	var active bool
+	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = $1::uuid AND status IN ('running', 'paused'))`, runID).Scan(&active); err != nil {
+		return nil, fmt.Errorf("inspect pending-delivery run: %w", err)
+	}
+	if !active {
+		return []events.PersistedReplayEvent{}, nil
+	}
+	snapshots, err := postgresDeliveryAdapter.SnapshotsForRun(ctx, s.DB, runID)
 	if err != nil {
-		return nil, fmt.Errorf("list run events with pending deliveries: %w", err)
+		return nil, fmt.Errorf("list run pending delivery snapshots: %w", err)
 	}
-	defer rows.Close()
+	records, err := hydratePostgresPersistedReplayEvents(ctx, s.DB, pendingDeliveryEventIDs(snapshots, since))
+	if err != nil {
+		return nil, err
+	}
+	return filterExecutableReplayEvents(records, limit), nil
+}
 
-	eventIDs := make([]string, 0, limit)
-	for rows.Next() {
-		var eventID string
-		if err := rows.Scan(&eventID); err != nil {
-			return nil, fmt.Errorf("scan run event with pending deliveries: %w", err)
+func pendingDeliveryEventIDs(snapshots []runtimedelivery.Snapshot, since time.Time) []string {
+	filtered := make([]runtimedelivery.Snapshot, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		if snapshot.Status == runtimedelivery.StatusPending && !snapshot.CreatedAt.Before(since) {
+			filtered = append(filtered, snapshot)
 		}
-		eventIDs = append(eventIDs, eventID)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read run events with pending deliveries: %w", err)
+	sort.Slice(filtered, func(i, j int) bool {
+		if !filtered[i].CreatedAt.Equal(filtered[j].CreatedAt) {
+			return filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
+		}
+		return filtered[i].EventID < filtered[j].EventID
+	})
+	seen := map[string]struct{}{}
+	ids := make([]string, 0, len(filtered))
+	for _, snapshot := range filtered {
+		if _, ok := seen[snapshot.EventID]; ok {
+			continue
+		}
+		seen[snapshot.EventID] = struct{}{}
+		ids = append(ids, snapshot.EventID)
 	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("close run events with pending deliveries: %w", err)
+	return ids
+}
+
+func filterExecutableReplayEvents(records []events.PersistedReplayEvent, limit int) []events.PersistedReplayEvent {
+	excluded := map[events.EventType]struct{}{}
+	for _, eventType := range events.DiagnosticDirectEventTypes() {
+		excluded[eventType] = struct{}{}
 	}
-	return hydratePostgresPersistedReplayEvents(ctx, s.DB, eventIDs)
+	out := make([]events.PersistedReplayEvent, 0, min(limit, len(records)))
+	for _, record := range records {
+		if _, skip := excluded[record.Event.Type()]; skip {
+			continue
+		}
+		out = append(out, record)
+		if len(out) == limit {
+			break
+		}
+	}
+	return out
 }
 
 func chooseRowQueryer(db *sql.DB, tx *sql.Tx) rowQueryer {
@@ -1282,6 +1071,9 @@ func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status strin
 	var snap storerunlifecycle.Snapshot
 	err = s.runAuthorActivityMutation(ctx, "postgres mark run terminal", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
+		if _, err := postgresDeliveryAdapter.TerminalizeRun(txctx, tx, runID, "run_"+status); err != nil {
+			return err
+		}
 		snap, err = storerunlifecycle.MarkTerminal(txctx, tx, runID, status, failure, endedAt, runLifecycleOptions())
 		if err != nil {
 			return err
@@ -1395,7 +1187,7 @@ func isStandaloneRuntimePlatformRunRecord(rec standaloneRuntimePlatformRunRecord
 
 func (s *PostgresStore) convergeStandaloneRuntimePlatformRunByEventID(
 	ctx context.Context,
-	db storerunlifecycle.DBTX,
+	db *sql.Tx,
 	eventID string,
 ) error {
 	eventID = sanitizeOptionalUUID(eventID)
@@ -1412,11 +1204,11 @@ func (s *PostgresStore) convergeStandaloneRuntimePlatformRunByEventID(
 	case "failed", "cancelled", "forked":
 		return fmt.Errorf("standalone runtime platform run %s already terminal with status %s", rec.RunID, strings.TrimSpace(rec.RunStatus))
 	}
-	active, err := storerunlifecycle.HasActiveDeliveries(ctx, db, rec.RunID)
+	summary, err := postgresDeliveryAdapter.SummarizeRun(ctx, db, rec.RunID)
 	if err != nil {
 		return err
 	}
-	if active {
+	if !summary.Settled() {
 		return nil
 	}
 	_, err = storerunlifecycle.MarkTerminal(ctx, db, rec.RunID, "completed", nil, time.Now().UTC(), runLifecycleOptions())

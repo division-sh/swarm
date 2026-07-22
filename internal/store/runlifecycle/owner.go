@@ -424,28 +424,6 @@ func SyncCounts(ctx context.Context, db DBTX, runID string) error {
 	return nil
 }
 
-func HasActiveDeliveries(ctx context.Context, db DBTX, runID string) (bool, error) {
-	if db == nil {
-		return false, nil
-	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return false, nil
-	}
-	var active bool
-	if err := db.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM event_deliveries
-			WHERE run_id = $1::uuid
-			  AND status IN ('pending', 'in_progress')
-		)
-	`, runID).Scan(&active); err != nil {
-		return false, fmt.Errorf("load active deliveries: %w", err)
-	}
-	return active, nil
-}
-
 func LoadSnapshot(ctx context.Context, db DBTX, runID string, opts EnsureActiveOptions) (Snapshot, error) {
 	runID = strings.TrimSpace(runID)
 	if db == nil || runID == "" {
@@ -606,15 +584,6 @@ func MarkTerminal(ctx context.Context, db DBTX, runID, status string, failure *r
 	if opts.HasCounterCols && opts.HasEntityStateCountSrc {
 		if err := SyncCounts(ctx, db, runID); err != nil {
 			return Snapshot{}, err
-		}
-	}
-	if status == "completed" || status == "failed" {
-		active, err := HasActiveDeliveries(ctx, db, runID)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		if active {
-			return Snapshot{}, fmt.Errorf("run %s still has active deliveries", runID)
 		}
 	}
 	setClauses := []string{"status = $2"}

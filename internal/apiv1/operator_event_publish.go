@@ -798,9 +798,6 @@ func eventPublishDeliveries(in []store.OperatorEventDelivery) []eventPublishDeli
 	out := make([]eventPublishDelivery, 0, len(in))
 	seen := map[string]struct{}{}
 	for _, delivery := range in {
-		if strings.TrimSpace(delivery.SubscriberID) == "__runtime_replay_scope__" {
-			continue
-		}
 		item := eventPublishDeliveryFromStore(delivery)
 		key := strings.Join([]string{item.DeliveryID, item.SubscriberType, item.SubscriberID, item.Status}, "\x00")
 		if _, ok := seen[key]; ok {
@@ -828,8 +825,8 @@ func eventPublishDeliveryFromStore(delivery store.OperatorEventDelivery) eventPu
 		Failure:        runtimefailures.CloneEnvelope(delivery.Failure),
 		Attempt:        attempt,
 		RetryCount:     delivery.RetryCount,
-		RetryEligible:  delivery.RetryEligible || store.OperatorDeliveryRetryEligible(status),
-		Terminal:       delivery.Terminal || store.OperatorDeliveryTerminal(status),
+		RetryEligible:  delivery.RetryEligible,
+		Terminal:       delivery.Terminal,
 		CreatedAt:      cloneTimePtr(delivery.CreatedAt),
 		StartedAt:      cloneTimePtr(delivery.StartedAt),
 		FinishedAt:     cloneTimePtr(delivery.FinishedAt),

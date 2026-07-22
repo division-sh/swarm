@@ -202,16 +202,13 @@ rows:
       - {kind: spec_ref, path: platform-spec.yaml, ref: execution_admission}
       - {kind: spec_ref, path: platform-spec.yaml, ref: workflow_node_route_authority}
       - {kind: artifact, path: internal/runtime/pipeline/workflow_nodes.go}
-      - {kind: artifact, path: internal/runtime/pipeline/node_system_runner.go}
-      - {kind: artifact, path: internal/runtime/pipeline/system_node_receipt_store.go}
+      - {kind: artifact, path: internal/runtime/pipeline/coordinator.go}
+      - {kind: artifact, path: internal/runtime/deliverylifecycle/model.go}
     proof_refs:
       - {kind: issue, issue: 1293}
       - {kind: go_test, name: TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority}
-      - {kind: go_test, name: TestPipelineCoordinatorInterceptReplayScopeMarkerDoesNotAuthorizeConcreteNode}
       - {kind: go_test, name: TestPipelineCoordinatorInterceptSettlesAuthorizedNodeDelivery}
-      - {kind: go_test, name: TestSystemNodeRunner_SkipsWithoutPersistedNodeDeliveryAuthority}
-      - {kind: go_test, name: TestSystemNodeProcessedSettlementFailsWithoutNodeDeliveryAuthority}
-      - {kind: go_test, name: TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithoutDeliveryAuthority}
+      - {kind: go_test, name: TestExecutableDeliveryLifecycleParity}
       - {kind: go_test, name: TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite}
       - {kind: go_test, name: TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres}
     notes: >
@@ -529,26 +526,24 @@ rows:
       must not create, repair, or replace missing typed RoutePlan recipients.
 
   - id: receipts_settlement_backfill_not_authority
-    concept: Receipts, settlement, backfill, processed markers, dead letters, and retry counters describe post-authority work.
+    concept: The executable-delivery lifecycle owns exact claims, attempts, outcomes, and settlement; platform receipts remain event-level evidence only.
     classification: add_to_matrix
     tier: required_pr_smoke
     proof_dimensions: [negative_authority, persistence_authority, required_pr_smoke]
     invalid_authority:
-      - event_receipts
-      - settlement and backfill
-      - processed markers
-      - dead-letter state
-      - retry counters
+      - platform event_receipts as executable-delivery authority
+      - settlement or processed-marker backfill
+      - caller-owned dead-letter or retry policy
     owner_refs:
-      - {kind: spec_ref, path: platform-spec.yaml, ref: completion_evidence}
-      - {kind: spec_ref, path: platform-spec.yaml, ref: event_receipts}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: delivery_lifecycle_contract}
+      - {kind: artifact, path: internal/runtime/deliverylifecycle/model.go}
     proof_refs:
-      - {kind: go_test, name: TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScopeSeparately}
-      - {kind: go_test, name: TestSystemNodeRunner_MarkProcessedSettlesNodeDeliveryAndTriggersNormalRunCompletion}
-      - {kind: go_test, name: TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecordsReceipt}
+      - {kind: go_test, name: TestExecutableDeliveryLifecycleParity}
+      - {kind: go_test, name: TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority}
+      - {kind: go_test, name: TestPipelineCoordinatorInterceptSettlesAuthorizedNodeDelivery}
     notes: >
-      Completion evidence remains after-the-fact evidence. It cannot authorize
-      workflow-node delivery when the committed event_deliveries row is absent.
+      Only the lifecycle owner can authorize and settle executable work.
+      Platform completion evidence cannot repair a missing delivery obligation.
 
   - id: replay_markers_not_authority
     concept: Replay-scope markers and replay lineage are gated replay evidence, not arbitrary fresh recipient authority.

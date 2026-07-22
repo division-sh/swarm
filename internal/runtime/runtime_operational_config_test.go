@@ -18,7 +18,6 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
@@ -42,15 +41,6 @@ func (s *recoveryGuardManagerStore) LoadAgents(context.Context) ([]runtimemanage
 }
 
 func (*recoveryGuardManagerStore) EnsureEntitySchema(context.Context, string) error { return nil }
-func (*recoveryGuardManagerStore) UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, *runtimefailures.Envelope) error {
-	return nil
-}
-func (*recoveryGuardManagerStore) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
-	return nil, nil
-}
-func (*recoveryGuardManagerStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
-	return nil, nil
-}
 
 type recoveryGuardEventStore struct {
 	runtimeagentcontrol.DirectiveOperationStore

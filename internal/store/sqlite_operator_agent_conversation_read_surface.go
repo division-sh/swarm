@@ -3,8 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -70,46 +68,25 @@ func (s *SQLiteRuntimeStore) ListAgentDeliveryLifecycleFacts(ctx context.Context
 }
 
 func (s *SQLiteRuntimeStore) listSQLiteAgentLifecycleRecords(ctx context.Context, agentIDs []string) ([]agentLifecycleDeliveryRecord, error) {
-	placeholders := make([]string, 0, len(agentIDs))
-	args := make([]any, 0, len(agentIDs))
-	for _, agentID := range agentIDs {
-		placeholders = append(placeholders, "?")
-		args = append(args, agentID)
-	}
-	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
-		SELECT
-			d.subscriber_id,
-			COALESCE(d.status, ''),
-			COALESCE(d.active_session_id, ''),
-			d.created_at,
-			d.delivered_at
-		FROM event_deliveries d
-		WHERE d.subscriber_type = 'agent'
-		  AND d.subscriber_id IN (%s)
-		  AND COALESCE(d.status, '') IN ('pending', 'in_progress', 'failed', 'dead_letter')
-	`, strings.Join(placeholders, ",")), args...)
-	if err != nil {
-		return nil, fmt.Errorf("query sqlite agent lifecycle records: %w", err)
-	}
-	defer rows.Close()
-
 	out := make([]agentLifecycleDeliveryRecord, 0)
-	for rows.Next() {
-		var record agentLifecycleDeliveryRecord
-		if err := rows.Scan(
-			&record.AgentID,
-			&record.Status,
-			&record.ActiveSessionID,
-			&record.CreatedAt,
-			&record.DeliveredAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan sqlite agent lifecycle record: %w", err)
+	for _, agentID := range agentIDs {
+		snapshots, err := s.deliverySnapshotsForAgent(ctx, agentID, time.Unix(0, 0).UTC())
+		if err != nil {
+			return nil, err
 		}
-		record.AgentID = strings.TrimSpace(record.AgentID)
-		out = append(out, record)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read sqlite agent lifecycle rows: %w", err)
+		for _, snapshot := range snapshots {
+			if snapshot.Status == "delivered" {
+				continue
+			}
+			record := agentLifecycleDeliveryRecord{
+				AgentID: snapshot.SubscriberID, Status: string(snapshot.Status),
+				ActiveSessionID: snapshot.ActiveSessionID, CreatedAt: snapshot.CreatedAt,
+			}
+			if !snapshot.SettledAt.IsZero() {
+				record.DeliveredAt = sql.NullTime{Time: snapshot.SettledAt, Valid: true}
+			}
+			out = append(out, record)
+		}
 	}
 	return out, nil
 }
@@ -515,36 +492,29 @@ func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryDi
 	}
 
 	opts = defaultOperatorAgentDeliveryDiagnosticsOptions(opts)
-	summary, err := r.loadAgentDeliveryDiagnosticsSummary(ctx, agentID)
+	snapshots, err := r.store.deliverySnapshotsForAgent(ctx, agentID, time.Unix(0, 0).UTC())
 	if err != nil {
 		return OperatorAgentDeliveryDiagnostics{}, err
 	}
-	failures, failuresNext, err := r.listAgentDeliveryFailures(ctx, agentID, opts.FailureLimit, opts.FailureCursor)
-	if err != nil {
-		return OperatorAgentDeliveryDiagnostics{}, err
-	}
-	if err := r.assertAgentDeadLetterDeliveriesHaveRecords(ctx, agentID); err != nil {
-		return OperatorAgentDeliveryDiagnostics{}, err
-	}
-	deadLetters, deadLettersNext, err := r.listAgentDeadLetterDeliveries(ctx, agentID, opts.DeadLetterLimit, opts.DeadLetterCursor)
-	if err != nil {
-		return OperatorAgentDeliveryDiagnostics{}, err
-	}
-	result := OperatorAgentDeliveryDiagnostics{
-		AgentID:               agentID,
-		Summary:               summary,
-		Failures:              failures,
-		FailuresNextCursor:    failuresNext,
-		DeadLetters:           deadLetters,
-		DeadLettersNextCursor: deadLettersNext,
-	}
-	if result.Failures == nil {
-		result.Failures = []OperatorAgentDeliveryFailure{}
-	}
-	if result.DeadLetters == nil {
-		result.DeadLetters = []OperatorAgentDeadLetterDelivery{}
-	}
-	return result, nil
+	return buildAgentDeliveryDiagnostics(agentID, snapshots, opts,
+		func(eventID string) (deliveryLifecycleEventMetadata, error) {
+			record, found, err := loadSQLiteEventIdentity(ctx, r.db, eventID)
+			if err != nil {
+				return deliveryLifecycleEventMetadata{}, err
+			}
+			if !found {
+				return deliveryLifecycleEventMetadata{}, fmt.Errorf("delivery event %s not found", eventID)
+			}
+			admitted, err := decodeEventRecord(record)
+			if err != nil {
+				return deliveryLifecycleEventMetadata{}, err
+			}
+			event := admitted.Event()
+			return deliveryLifecycleEventMetadata{EventName: string(event.Type()), RunID: event.RunID(), EntityID: event.EntityID()}, nil
+		},
+		func(eventID string) ([]OperatorDeadLetterRecord, error) {
+			return r.store.sqliteOperatorEventDeadLetters(ctx, eventID)
+		})
 }
 
 func (r *sqliteOperatorAgentConversationReadSurface) requireAgentDeliveryDiagnosticsAccess() error {
@@ -570,235 +540,4 @@ func (r *sqliteOperatorAgentConversationReadSurface) ensureAgentDeliveryDiagnost
 		return ErrAgentNotFound
 	}
 	return nil
-}
-
-func (r *sqliteOperatorAgentConversationReadSurface) loadAgentDeliveryDiagnosticsSummary(ctx context.Context, agentID string) (OperatorAgentDeliveryDiagnosticsSummary, error) {
-	var summary OperatorAgentDeliveryDiagnosticsSummary
-	if err := r.db.QueryRowContext(ctx, `
-		SELECT
-			COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN status = 'dead_letter' THEN 1 ELSE 0 END), 0)
-		FROM event_deliveries
-		WHERE subscriber_type = 'agent'
-		  AND subscriber_id = ?
-		  AND COALESCE(delivered_at, created_at) >= datetime('now', '-24 hours')
-	`, agentID).Scan(&summary.Failures24h, &summary.DeadLetters24h); err != nil {
-		return OperatorAgentDeliveryDiagnosticsSummary{}, fmt.Errorf("load sqlite agent delivery diagnostics summary: %w", err)
-	}
-	return summary, nil
-}
-
-func (r *sqliteOperatorAgentConversationReadSurface) listAgentDeliveryFailures(ctx context.Context, agentID string, limit int, cursorRaw string) ([]OperatorAgentDeliveryFailure, string, error) {
-	cursorClause, args, err := sqliteAgentDeliveryDiagnosticsCursorClause(agentID, cursorRaw, "agent.delivery_diagnostics.failures", "failure_cursor")
-	if err != nil {
-		return nil, "", err
-	}
-	args = append(args, limit+1)
-	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT
-			d.delivery_id,
-			d.event_id,
-			COALESCE(e.event_name, ''),
-			COALESCE(e.run_id, ''),
-			COALESCE(e.entity_id, ''),
-			COALESCE(d.reason_code, ''),
-			COALESCE(d.failure, 'null'),
-			COALESCE(d.retry_count, 0),
-			COALESCE(d.delivered_at, d.created_at) AS occurred_at
-		FROM event_deliveries d
-		INNER JOIN events e ON e.event_id = d.event_id
-		WHERE d.subscriber_type = 'agent'
-		  AND d.subscriber_id = ?
-		  AND d.status = 'failed'
-		  %s
-		ORDER BY occurred_at DESC, d.delivery_id DESC
-		LIMIT ?
-	`, cursorClause), args...)
-	if err != nil {
-		return nil, "", fmt.Errorf("list sqlite agent delivery failures: %w", err)
-	}
-	defer rows.Close()
-
-	out := []OperatorAgentDeliveryFailure{}
-	for rows.Next() {
-		var (
-			item          OperatorAgentDeliveryFailure
-			rawFailure    any
-			occurredAtRaw any
-		)
-		if err := rows.Scan(
-			&item.DeliveryID,
-			&item.EventID,
-			&item.EventName,
-			&item.RunID,
-			&item.EntityID,
-			&item.ReasonCode,
-			&rawFailure,
-			&item.RetryCount,
-			&occurredAtRaw,
-		); err != nil {
-			return nil, "", fmt.Errorf("scan sqlite agent delivery failure: %w", err)
-		}
-		item.Failure, err = decodeStoredFailure(rawFailure)
-		if err != nil {
-			return nil, "", fmt.Errorf("decode sqlite agent delivery failure: %w", err)
-		}
-		if at, ok, err := sqliteTimeValue(occurredAtRaw); err != nil {
-			return nil, "", fmt.Errorf("scan sqlite agent delivery failure occurred_at: %w", err)
-		} else if ok {
-			item.OccurredAt = at
-		}
-		item.Status = "failed"
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, "", fmt.Errorf("read sqlite agent delivery failures: %w", err)
-	}
-	nextCursor := ""
-	if len(out) > limit {
-		nextCursor = encodeAgentDeliveryDiagnosticsCursor("agent.delivery_diagnostics.failures", out[limit-1].OccurredAt, out[limit-1].DeliveryID)
-		out = out[:limit]
-	}
-	return out, nextCursor, nil
-}
-
-func (r *sqliteOperatorAgentConversationReadSurface) assertAgentDeadLetterDeliveriesHaveRecords(ctx context.Context, agentID string) error {
-	var deliveryID string
-	err := r.db.QueryRowContext(ctx, `
-		SELECT d.delivery_id
-		FROM event_deliveries d
-		WHERE d.subscriber_type = 'agent'
-		  AND d.subscriber_id = ?
-		  AND d.status = 'dead_letter'
-		  AND NOT EXISTS (
-			SELECT 1
-			FROM dead_letters dl
-			WHERE dl.original_event_id = d.event_id
-		  )
-		ORDER BY COALESCE(d.delivered_at, d.created_at) DESC, d.delivery_id DESC
-		LIMIT 1
-	`, agentID).Scan(&deliveryID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("check sqlite agent dead-letter delivery reconciliation: %w", err)
-	}
-	return fmt.Errorf("agent delivery diagnostics owner found dead_letter delivery %s without a dead_letters record", deliveryID)
-}
-
-func (r *sqliteOperatorAgentConversationReadSurface) listAgentDeadLetterDeliveries(ctx context.Context, agentID string, limit int, cursorRaw string) ([]OperatorAgentDeadLetterDelivery, string, error) {
-	cursorClause, args, err := sqliteAgentDeliveryDiagnosticsCursorClause(agentID, cursorRaw, "agent.delivery_diagnostics.dead_letters", "dead_letter_cursor")
-	if err != nil {
-		return nil, "", err
-	}
-	args = append(args, limit+1)
-	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT
-			d.delivery_id,
-			d.event_id,
-			COALESCE(e.event_name, ''),
-			COALESCE(e.run_id, ''),
-			COALESCE(e.entity_id, ''),
-			COALESCE(d.reason_code, ''),
-			COALESCE(d.failure, 'null'),
-			COALESCE(d.retry_count, 0),
-			COALESCE(d.delivered_at, d.created_at) AS occurred_at,
-			COALESCE((
-				SELECT json_group_array(json_object(
-					'dead_letter_id', dead_letter_id,
-					'failure', json(failure),
-					'retry_count', COALESCE(retry_count, 0),
-					'chain_depth', COALESCE(chain_depth, 0),
-					'handler_node', COALESCE(handler_node, ''),
-					'created_at', strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', created_at)
-				))
-				FROM (
-					SELECT *
-					FROM dead_letters dl
-					WHERE dl.original_event_id = d.event_id
-					ORDER BY dl.created_at ASC, dl.dead_letter_id ASC
-				) ordered_dead_letters
-			), '[]') AS dead_letter_records
-		FROM event_deliveries d
-		INNER JOIN events e ON e.event_id = d.event_id
-		WHERE d.subscriber_type = 'agent'
-		  AND d.subscriber_id = ?
-		  AND d.status = 'dead_letter'
-		  %s
-		ORDER BY occurred_at DESC, d.delivery_id DESC
-		LIMIT ?
-	`, cursorClause), args...)
-	if err != nil {
-		return nil, "", fmt.Errorf("list sqlite agent dead-letter deliveries: %w", err)
-	}
-	defer rows.Close()
-
-	out := []OperatorAgentDeadLetterDelivery{}
-	for rows.Next() {
-		var (
-			item          OperatorAgentDeadLetterDelivery
-			rawFailure    any
-			occurredAtRaw any
-			recordsRaw    []byte
-		)
-		if err := rows.Scan(
-			&item.DeliveryID,
-			&item.EventID,
-			&item.EventName,
-			&item.RunID,
-			&item.EntityID,
-			&item.ReasonCode,
-			&rawFailure,
-			&item.RetryCount,
-			&occurredAtRaw,
-			&recordsRaw,
-		); err != nil {
-			return nil, "", fmt.Errorf("scan sqlite agent dead-letter delivery: %w", err)
-		}
-		item.Failure, err = decodeStoredFailure(rawFailure)
-		if err != nil {
-			return nil, "", fmt.Errorf("decode sqlite agent dead-letter delivery failure: %w", err)
-		}
-		if at, ok, err := sqliteTimeValue(occurredAtRaw); err != nil {
-			return nil, "", fmt.Errorf("scan sqlite agent dead-letter occurred_at: %w", err)
-		} else if ok {
-			item.OccurredAt = at
-		}
-		item.Status = "dead_letter"
-		if err := json.Unmarshal(recordsRaw, &item.DeadLetterRecords); err != nil {
-			return nil, "", fmt.Errorf("decode sqlite agent dead-letter records: %w", err)
-		}
-		if len(item.DeadLetterRecords) == 0 {
-			return nil, "", fmt.Errorf("agent delivery diagnostics owner returned dead_letter delivery %s without a dead_letters record", item.DeliveryID)
-		}
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, "", fmt.Errorf("read sqlite agent dead-letter deliveries: %w", err)
-	}
-	nextCursor := ""
-	if len(out) > limit {
-		nextCursor = encodeAgentDeliveryDiagnosticsCursor("agent.delivery_diagnostics.dead_letters", out[limit-1].OccurredAt, out[limit-1].DeliveryID)
-		out = out[:limit]
-	}
-	return out, nextCursor, nil
-}
-
-func sqliteAgentDeliveryDiagnosticsCursorClause(agentID, rawCursor, kind, field string) (string, []any, error) {
-	args := []any{agentID}
-	rawCursor = strings.TrimSpace(rawCursor)
-	if rawCursor == "" {
-		return "", args, nil
-	}
-	cursor, err := decodeAgentDeliveryDiagnosticsCursor(rawCursor, kind, field)
-	if err != nil {
-		return "", nil, err
-	}
-	occurredAt, err := time.Parse(time.RFC3339Nano, cursor.OccurredAt)
-	if err != nil || strings.TrimSpace(cursor.DeliveryID) == "" {
-		return "", nil, AgentDeliveryDiagnosticsCursorError{Field: field}
-	}
-	args = append(args, occurredAt.UTC(), occurredAt.UTC(), strings.TrimSpace(cursor.DeliveryID))
-	return "AND (COALESCE(d.delivered_at, d.created_at) < ? OR (COALESCE(d.delivered_at, d.created_at) = ? AND d.delivery_id < ?))", args, nil
 }

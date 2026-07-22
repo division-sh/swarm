@@ -2,19 +2,25 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/store/eventfixture"
+	"github.com/google/uuid"
+	_ "modernc.org/sqlite"
 )
 
 type runtimeShutdownTestAgent struct {
@@ -36,6 +42,179 @@ type runtimeShutdownManagerStore struct {
 	listPendingCalled bool
 }
 
+type runtimeShutdownDeliveryStore struct {
+	runtimedelivery.Store
+	db      *sql.DB
+	adapter *runtimedelivery.Adapter
+	mu      sync.Mutex
+	events  map[string]events.Event
+}
+
+func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+uuid.NewString()+"?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatalf("open runtime shutdown delivery store: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+	for _, ddl := range []string{
+		`CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT)`,
+		`CREATE TABLE events (
+			event_class TEXT NOT NULL, event_id TEXT PRIMARY KEY, run_id TEXT, event_name TEXT NOT NULL,
+			task_id TEXT, entity_id TEXT, flow_instance TEXT, scope TEXT NOT NULL, payload BLOB NOT NULL,
+			execution_mode TEXT NOT NULL, chain_depth INTEGER NOT NULL, produced_by TEXT NOT NULL,
+			produced_by_type TEXT NOT NULL, source_event_id TEXT, created_at TIMESTAMP NOT NULL,
+			routing_source_kind TEXT NOT NULL, routing_source_authority TEXT, source_route BLOB NOT NULL,
+			target_route BLOB NOT NULL, target_set BLOB NOT NULL, operator_reference_event_id TEXT
+		)`,
+		`CREATE TABLE event_deliveries (
+			delivery_id TEXT PRIMARY KEY, run_id TEXT, event_id TEXT NOT NULL, route_identity TEXT NOT NULL,
+			subscriber_type TEXT NOT NULL, subscriber_id TEXT NOT NULL, delivery_target_route BLOB NOT NULL,
+			delivery_context BLOB NOT NULL, delivery_payload_projection BLOB NOT NULL, status TEXT NOT NULL,
+			retry_count INTEGER NOT NULL, max_retries INTEGER NOT NULL, next_eligible_at TIMESTAMP,
+			claim_token TEXT, claim_version INTEGER NOT NULL, claim_expires_at TIMESTAMP,
+			active_session_id TEXT, reason_code TEXT, failure BLOB, started_at TIMESTAMP,
+			settled_at TIMESTAMP, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
+			UNIQUE(event_id, route_identity)
+		)`,
+		`CREATE TABLE event_delivery_attempts (
+			delivery_id TEXT NOT NULL, claim_version INTEGER NOT NULL, claim_token TEXT NOT NULL UNIQUE,
+			started_at TIMESTAMP NOT NULL, lease_expires_at TIMESTAMP NOT NULL, outcome TEXT,
+			reason_code TEXT, failure BLOB, side_effects BLOB NOT NULL DEFAULT '[]', duration_ms INTEGER,
+			completed_at TIMESTAMP, PRIMARY KEY(delivery_id, claim_version)
+		)`,
+		`CREATE TABLE event_delivery_outcomes (
+			delivery_id TEXT NOT NULL, claim_version INTEGER NOT NULL, outcome TEXT NOT NULL,
+			reason_code TEXT, failure BLOB, side_effects BLOB NOT NULL DEFAULT '[]', duration_ms INTEGER NOT NULL,
+			settled_at TIMESTAMP NOT NULL, PRIMARY KEY(delivery_id, claim_version)
+		)`,
+		`CREATE TABLE author_activity_order (
+			singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+			last_sequence BIGINT NOT NULL CHECK (last_sequence >= 0)
+		)`,
+		`CREATE TABLE author_activity_occurrences (
+			occurrence_id TEXT PRIMARY KEY, sequence BIGINT NOT NULL UNIQUE CHECK (sequence > 0),
+			kind TEXT NOT NULL, version INTEGER NOT NULL CHECK (version = 2), transition TEXT NOT NULL,
+			source_owner TEXT NOT NULL, source_identity TEXT NOT NULL, dedup_key TEXT NOT NULL UNIQUE,
+			run_id TEXT, entity_id TEXT, agent_id TEXT, flow_id TEXT, scope_kind TEXT NOT NULL,
+			runtime_instance_id TEXT, bundle_hash TEXT, author_safe_summary TEXT,
+			projection TEXT NOT NULL DEFAULT '{}', failure TEXT, occurred_at TIMESTAMP NOT NULL
+		)`,
+	} {
+		if _, err := db.Exec(ddl); err != nil {
+			t.Fatalf("create runtime shutdown delivery schema: %v", err)
+		}
+	}
+	adapter, err := runtimedelivery.NewAdapter(runtimedelivery.DialectSQLite)
+	if err != nil {
+		t.Fatalf("create runtime shutdown delivery adapter: %v", err)
+	}
+	return &runtimeShutdownDeliveryStore{db: db, adapter: adapter, events: make(map[string]events.Event)}
+}
+
+func (s *runtimeShutdownDeliveryStore) mutate(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	story, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := fn(story, tx); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := runtimeauthoractivity.Finalize(story); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *runtimeShutdownDeliveryStore) ClaimAgentDelivery(ctx context.Context, evt events.Event, route events.DeliveryRoute) (claimed runtimedelivery.ClaimedObligation, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := eventfixture.Insert(ctx, s.db, runtimeauthoractivity.DialectSQLite, evt); err != nil {
+		return claimed, err
+	}
+	s.events[evt.ID()] = evt
+	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
+		if _, err := s.adapter.CommitInitial(story, tx, evt.ID(), evt.RunID(), []events.DeliveryRoute{route}); err != nil {
+			return err
+		}
+		claimed, err = s.adapter.ClaimExact(story, tx, evt, route, runtimedelivery.DefaultLeaseTTL)
+		return err
+	})
+	return claimed, err
+}
+
+func (s *runtimeShutdownDeliveryStore) seedAgentDelivery(t *testing.T, ctx context.Context, evt events.Event, agentID string) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := eventfixture.Insert(ctx, s.db, runtimeauthoractivity.DialectSQLite, evt); err != nil {
+		t.Fatalf("seed runtime delivery event: %v", err)
+	}
+	s.events[evt.ID()] = evt
+	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agentID}
+	if err := s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
+		_, err := s.adapter.CommitInitial(story, tx, evt.ID(), evt.RunID(), []events.DeliveryRoute{route})
+		return err
+	}); err != nil {
+		t.Fatalf("seed runtime delivery obligation: %v", err)
+	}
+}
+
+func (s *runtimeShutdownDeliveryStore) ClaimAgentBacklog(ctx context.Context, agentID string, limit int) (executions []runtimedelivery.AgentExecution, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var claimed []runtimedelivery.ClaimedObligation
+	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
+		claimed, err = s.adapter.ClaimPendingAgent(story, tx, agentID, limit, runtimedelivery.DefaultLeaseTTL)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, obligation := range claimed {
+		evt, ok := s.events[obligation.Snapshot.EventID]
+		if !ok {
+			return nil, runtimedelivery.ErrNotFound
+		}
+		executions = append(executions, runtimedelivery.AgentExecution{
+			Event: evt, Snapshot: obligation.Snapshot, Claim: obligation.Claim,
+		})
+	}
+	return executions, nil
+}
+
+func (s *runtimeShutdownDeliveryStore) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, effects []string, duration time.Duration) (snapshot runtimedelivery.Snapshot, err error) {
+	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
+		snapshot, err = s.adapter.SettleSuccess(story, tx, claim, effects, duration)
+		return err
+	})
+	return snapshot, err
+}
+
+func (s *runtimeShutdownDeliveryStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (snapshot runtimedelivery.Snapshot, err error) {
+	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
+		snapshot, err = s.adapter.RenewClaim(story, tx, claim, runtimedelivery.DefaultLeaseTTL)
+		return err
+	})
+	return snapshot, err
+}
+
+func (s *runtimeShutdownDeliveryStore) SettleFailure(ctx context.Context, claim runtimedelivery.Claim, settlement runtimedelivery.Settlement) (snapshot runtimedelivery.Snapshot, err error) {
+	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
+		snapshot, err = s.adapter.SettleFailure(story, tx, claim, settlement)
+		return err
+	})
+	return snapshot, err
+}
+
 func (*runtimeShutdownManagerStore) UpsertAgent(context.Context, runtimemanager.PersistedAgent) error {
 	return nil
 }
@@ -46,20 +225,6 @@ func (*runtimeShutdownManagerStore) LoadAgents(context.Context) ([]runtimemanage
 
 func (*runtimeShutdownManagerStore) EnsureEntitySchema(context.Context, string) error {
 	return nil
-}
-
-func (*runtimeShutdownManagerStore) UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, *runtimefailures.Envelope) error {
-	return nil
-}
-
-func (s *runtimeShutdownManagerStore) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
-	s.listPendingCalled = true
-	return nil, nil
-}
-
-func (s *runtimeShutdownManagerStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
-	s.listPendingCalled = true
-	return nil, nil
 }
 
 type runtimeShutdownInboundStore struct {
@@ -115,6 +280,7 @@ func (*runtimeShutdownInboundStore) ValidateInboundPublicationIntegrity(context.
 }
 
 func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *testing.T) {
+	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 	bus, err := newRuntimeTestEventBus(t, nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -149,6 +315,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	}, runtimemanager.AgentManagerOptions{
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
 		WorkOwner:                      workOwner,
+		DeliveryStore:                  deliveryStore,
 	}, managerStore)
 	rt.Manager = am
 
@@ -230,6 +397,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 }
 
 func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *testing.T) {
+	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 	bus, err := newRuntimeTestEventBus(t, nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -260,6 +428,7 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 	}, runtimemanager.AgentManagerOptions{
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
 		WorkOwner:                      workOwner,
+		DeliveryStore:                  deliveryStore,
 	})
 	rt.Manager = am
 

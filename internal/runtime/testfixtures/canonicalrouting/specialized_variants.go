@@ -241,10 +241,8 @@ func inboundAdmissionNodes() string {
 		fmt.Fprintf(&out, `    %s:
       data_accumulation:
         writes:
-          - op: set
-            target: entity.records
-            key: {ref: payload.provider_event_id}
-            value: {ref: payload.provider_event_id}
+          - target_field: service_id
+            value: {literal: standing}
 `, event)
 	}
 	return out.String()

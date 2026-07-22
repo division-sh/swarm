@@ -16,6 +16,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -96,7 +97,7 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 				t.Fatalf("event.publish deliveries = %#v, want durable workflow-runtime and reviewer node snapshot", deliveries)
 			}
 
-			releaseMailboxWritePendingNodeDeliveries(t, db, bus, probe, tc.name, eventID)
+			releaseMailboxWritePendingNodeDeliveries(t, testAuthorActivityContextForSource(ctx, fact), db, bus, probe, tc.name, eventID)
 			waitForMailboxWriteSupportedSurface(t, handler, db, bus, runID, eventID, tc.name)
 		})
 	}
@@ -144,7 +145,7 @@ func TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends(t 
 			autoResult := asMap(t, auto.Result)
 			autoEventID := stringValue(t, autoResult["event_id"], "event_id")
 			autoRunID := stringValue(t, autoResult["run_id"], "run_id")
-			releaseMailboxWritePendingNodeDeliveries(t, db, bus, probe, tc.name, autoEventID)
+			releaseMailboxWritePendingNodeDeliveries(t, testAuthorActivityContextForSource(ctx, fact), db, bus, probe, tc.name, autoEventID)
 			waitForConditionalRuleEntityState(t, db, autoRunID, tc.name, "approved", 50)
 			assertMailboxListCount(t, handler, autoRunID, 0)
 
@@ -155,7 +156,7 @@ func TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends(t 
 			humanResult := asMap(t, human.Result)
 			humanEventID := stringValue(t, humanResult["event_id"], "event_id")
 			humanRunID := stringValue(t, humanResult["run_id"], "run_id")
-			releaseMailboxWritePendingNodeDeliveries(t, db, bus, probe, tc.name, humanEventID)
+			releaseMailboxWritePendingNodeDeliveries(t, testAuthorActivityContextForSource(ctx, fact), db, bus, probe, tc.name, humanEventID)
 			waitForConditionalRuleMailboxWrite(t, handler, db, bus, humanRunID, humanEventID, tc.name)
 			waitForConditionalRuleEntityState(t, db, humanRunID, tc.name, "awaiting_human", 250)
 		})
@@ -217,6 +218,7 @@ func newMailboxWriteSupportedSurfaceHandler(
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		Module:              module,
 		WorkflowStore:       workflowStore,
+		DeliveryStore:       persistence.(runtimedelivery.Store),
 		MailboxMaterializer: materializer,
 		BundleHash:          fact.BundleHash,
 		TestLifecycleProbe:  probe,
@@ -295,7 +297,7 @@ func newMailboxWriteSupportedSurfaceHandler(
 	return handler, bus
 }
 
-func releaseMailboxWritePendingNodeDeliveries(t *testing.T, db *sql.DB, bus *runtimebus.EventBus, probe *runtimelifecycleprobe.Probe, backend, eventID string) {
+func releaseMailboxWritePendingNodeDeliveries(t *testing.T, parent context.Context, db *sql.DB, bus *runtimebus.EventBus, probe *runtimelifecycleprobe.Probe, backend, eventID string) {
 	t.Helper()
 	if bus == nil {
 		t.Fatalf("%s runtime bus is required to release pending node deliveries", backend)
@@ -304,7 +306,7 @@ func releaseMailboxWritePendingNodeDeliveries(t *testing.T, db *sql.DB, bus *run
 	waitForMailboxWriteLifecycleDeliveryStatus(t, probe, backend, eventID, nodeID, "pending")
 	if status := mailboxWriteNodeDeliveryStatus(t, db, backend, eventID, nodeID); status == "pending" {
 		evt := loadMailboxWritePersistedEvent(t, db, backend, eventID)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 		defer cancel()
 		if err := bus.ReleasePendingPersistedDeliveriesForEvent(ctx, evt); err != nil {
 			t.Fatalf("%s release pending node deliveries for event %s: %v", backend, eventID, err)
@@ -358,11 +360,11 @@ func mailboxWriteNodeDeliverySubscriberID(t *testing.T, db *sql.DB, backend, eve
 		t.Fatalf("%s node delivery subscriber lookup requires event id", backend)
 	}
 	sqlText := ""
-	args := []any{eventID, eventReplayScopeSubscriberID}
+	args := []any{eventID}
 	if strings.HasPrefix(backend, "sqlite") {
-		sqlText = `SELECT subscriber_id FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id <> ? ORDER BY subscriber_id LIMIT 1`
+		sqlText = `SELECT subscriber_id FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' ORDER BY subscriber_id LIMIT 1`
 	} else {
-		sqlText = `SELECT subscriber_id FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id <> $2 ORDER BY subscriber_id LIMIT 1`
+		sqlText = `SELECT subscriber_id FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' ORDER BY subscriber_id LIMIT 1`
 	}
 	nodeID := ""
 	if err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(&nodeID); err != nil {
@@ -787,30 +789,27 @@ func waitForSQLiteNodeMaterializerFailure(t *testing.T, db *sql.DB, probe *runti
 	if _, err := probe.WaitForDeliveryStatus(ctx, eventID, "node", nodeID, "dead_letter"); err != nil {
 		t.Fatalf("sqlite node/%s materializer failure lifecycle for event %s: %v", nodeID, eventID, err)
 	}
-	var lastStatus, lastReason, lastFailureCode, lastReceiptOutcome, lastReceiptReason, lastReceiptFailureCode string
+	var lastStatus, lastReason, lastFailureCode, lastOutcome, lastOutcomeReason, lastOutcomeFailureCode string
 	if err := db.QueryRow(`
 			SELECT
 				COALESCE(d.status, ''),
 				COALESCE(d.reason_code, ''),
 				COALESCE(json_extract(d.failure, '$.detail.code'), ''),
-				COALESCE(r.outcome, ''),
-				COALESCE(r.reason_code, ''),
-				COALESCE(json_extract(r.failure, '$.detail.code'), '')
+				COALESCE(o.outcome, ''),
+				COALESCE(o.reason_code, ''),
+				COALESCE(json_extract(o.failure, '$.detail.code'), '')
 			FROM event_deliveries d
-			LEFT JOIN event_receipts r
-			  ON r.event_id = d.event_id
-			 AND r.subscriber_type = 'node'
-			 AND r.subscriber_id = d.subscriber_id
+			LEFT JOIN event_delivery_outcomes o ON o.delivery_id = d.delivery_id
 			WHERE d.event_id = ?
 			  AND d.subscriber_type = 'node'
 			  AND d.subscriber_id = ?
 			LIMIT 1
-		`, eventID, nodeID).Scan(&lastStatus, &lastReason, &lastFailureCode, &lastReceiptOutcome, &lastReceiptReason, &lastReceiptFailureCode); err != nil {
+		`, eventID, nodeID).Scan(&lastStatus, &lastReason, &lastFailureCode, &lastOutcome, &lastOutcomeReason, &lastOutcomeFailureCode); err != nil {
 		t.Fatalf("sqlite node/%s materializer failure row for event %s: %v", nodeID, eventID, err)
 	}
-	if lastStatus != "dead_letter" || lastReceiptOutcome != "dead_letter" ||
-		lastFailureCode == "" || lastReceiptFailureCode != lastFailureCode {
-		t.Fatalf("sqlite node/%s materializer failure = delivery status:%q reason:%q failure:%q receipt outcome:%q reason:%q failure:%q, want dead_letter canonical materializer failure", nodeID, lastStatus, lastReason, lastFailureCode, lastReceiptOutcome, lastReceiptReason, lastReceiptFailureCode)
+	if lastStatus != "dead_letter" || lastOutcome != "dead_letter" ||
+		lastFailureCode == "" || lastOutcomeFailureCode != lastFailureCode || lastOutcomeReason != lastReason {
+		t.Fatalf("sqlite node/%s materializer failure = delivery status:%q reason:%q failure:%q outcome:%q reason:%q failure:%q, want one canonical dead-letter outcome", nodeID, lastStatus, lastReason, lastFailureCode, lastOutcome, lastOutcomeReason, lastOutcomeFailureCode)
 	}
 }
 

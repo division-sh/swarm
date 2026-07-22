@@ -32,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -1462,39 +1463,43 @@ func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelec
 		storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "task.completed",
 			eventtest.Producer(events.EventProducerExternal, "runtime"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC().Add(-5*time.Minute))
 	}
+	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"}
+	routeIdentity, err := route.Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetRaw, _ := json.Marshal(route.Target)
+	contextRaw, _ := json.Marshal(route.Context)
+	projectionRaw, _ := json.Marshal(route.PayloadProjection)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, failure, delivered_at, created_at
+			delivery_id, run_id, event_id, route_identity, subscriber_type, subscriber_id,
+			delivery_target_route, delivery_context, delivery_payload_projection,
+			status, retry_count, max_retries, next_eligible_at, claim_token, claim_version,
+			claim_expires_at, reason_code, failure, started_at, settled_at, created_at, updated_at
 		) VALUES
-			($1::uuid, $2::uuid, 'agent', 'agent-1', 'pending', 0, NULL, NULL, now() - interval '7 minutes'),
-			($1::uuid, $3::uuid, 'agent', 'agent-1', 'failed', 1, $6::jsonb, now() - interval '2 minutes', now() - interval '5 minutes'),
-			($1::uuid, $4::uuid, 'agent', 'agent-1', 'in_progress', 0, NULL, NULL, now() - interval '6 minutes'),
-			($1::uuid, $5::uuid, 'agent', 'agent-1', 'dead_letter', 2, $7::jsonb, now() - interval '1 minute', now() - interval '8 minutes')
+			($6::uuid, $1::uuid, $2::uuid, $10, 'agent', 'agent-1', $11::jsonb, $12::jsonb, $13::jsonb, 'pending', 0, 1, now(), NULL, 0, NULL, NULL, NULL, NULL, NULL, now() - interval '7 minutes', now() - interval '7 minutes'),
+			($7::uuid, $1::uuid, $3::uuid, $10, 'agent', 'agent-1', $11::jsonb, $12::jsonb, $13::jsonb, 'failed', 1, 1, now() - interval '1 minute', NULL, 1, NULL, 'handler_failure', $14::jsonb, now() - interval '4 minutes', NULL, now() - interval '5 minutes', now() - interval '2 minutes'),
+			($8::uuid, $1::uuid, $4::uuid, $10, 'agent', 'agent-1', $11::jsonb, $12::jsonb, $13::jsonb, 'in_progress', 0, 1, NULL, $15::uuid, 1, now() + interval '5 minutes', NULL, NULL, now() - interval '6 minutes', NULL, now() - interval '6 minutes', now() - interval '6 minutes'),
+			($9::uuid, $1::uuid, $5::uuid, $10, 'agent', 'agent-1', $11::jsonb, $12::jsonb, $13::jsonb, 'dead_letter', 1, 1, NULL, NULL, 1, NULL, 'terminal_failure', $16::jsonb, now() - interval '8 minutes', now() - interval '1 minute', now() - interval '8 minutes', now() - interval '1 minute')
 	`, runID, pendingEventID, failedEventID, inProgressNoReceiptEventID, deadEventID,
-		mustMarshalFailure(t, testFailure("retryable_failure")), mustMarshalFailure(t, testFailure("terminal_dead_letter"))); err != nil {
+		uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), routeIdentity.String(), string(targetRaw), string(contextRaw), string(projectionRaw),
+		mustMarshalFailure(t, testFailure("retryable_failure")), uuid.NewString(), mustMarshalFailure(t, testFailure("terminal_dead_letter"))); err != nil {
 		t.Fatalf("seed deliveries: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, outcome, side_effects, failure, processed_at
-		) VALUES
-			($1::uuid, 'agent', 'agent-1', 'dead_letter', '{"manager_status":"error","retry_count":1}'::jsonb, $3::jsonb, now() - interval '2 minutes'),
-			($2::uuid, 'agent', 'agent-1', 'success', '{"manager_status":"dead_letter","retry_count":2}'::jsonb, NULL, now())
-	`, failedEventID, deadEventID, mustMarshalFailure(t, testFailure("retryable_failure"))); err != nil {
-		t.Fatalf("seed conflicting receipts: %v", err)
-	}
 
-	pending, err := pg.ListPendingEventsForAgent(ctx, "agent-1", time.Now().Add(-time.Hour), 20)
+	pendingPage, err := pg.ListPendingAgentDeliveryDetails(ctx, store.PendingAgentDeliveryListOptions{AgentID: "agent-1", Since: time.Now().Add(-time.Hour), Limit: 20})
 	if err != nil {
-		t.Fatalf("ListPendingEventsForAgent: %v", err)
+		t.Fatalf("ListPendingAgentDeliveryDetails: %v", err)
 	}
+	pending := pendingPage.PendingDeliveries
 	factsByAgent, err := pg.ListPendingAgentDeliveryFacts(ctx, []string{"agent-1"}, time.Now().Add(-time.Hour))
 	if err != nil {
 		t.Fatalf("ListPendingAgentDeliveryFacts: %v", err)
 	}
 	gotPendingIDs := make([]string, 0, len(pending))
-	for _, evt := range pending {
-		gotPendingIDs = append(gotPendingIDs, evt.ID())
+	for _, detail := range pending {
+		gotPendingIDs = append(gotPendingIDs, detail.EventID)
 	}
 	slices.Sort(gotPendingIDs)
 	wantPendingIDs := []string{failedEventID, inProgressNoReceiptEventID, pendingEventID}
@@ -1553,16 +1558,16 @@ func TestSQLAgentReader_ListGenericAgents_UsesFullPendingDeliveryFactHorizon(t *
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "task.completed",
-		eventtest.Producer(events.EventProducerExternal, "runtime"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC().Add(-45*24*time.Hour))
+	event := eventtest.ExistingRunRootIngress(eventID, "task.completed", "runtime", "", []byte(`{}`), 0, runID,
+		events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC().Add(-45*24*time.Hour))
+	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"}
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, delivered_at, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'agent', 'agent-1', 'pending', 0, NULL, now() - interval '45 days'
-		)
-	`, runID, eventID); err != nil {
-		t.Fatalf("seed delivery: %v", err)
+		UPDATE event_deliveries
+		SET created_at = now() - interval '45 days', updated_at = now() - interval '45 days'
+		WHERE event_id = $1::uuid
+	`, eventID); err != nil {
+		t.Fatalf("backdate canonical delivery fixture: %v", err)
 	}
 
 	factsByAgent, err := pg.ListPendingAgentDeliveryFacts(ctx, []string{"agent-1"}, time.Time{})

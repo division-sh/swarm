@@ -16,7 +16,7 @@ import (
 
 type eventCommitTxStore interface {
 	appendAdmittedEventTxOutcome(context.Context, *sql.Tx, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
-	InsertEventDeliveryRoutesTx(context.Context, *sql.Tx, string, []events.DeliveryRoute) error
+	commitInitialDeliveryObligationsTx(context.Context, *sql.Tx, string, string, []events.DeliveryRoute) error
 	UpsertCommittedReplayScopeTx(context.Context, *sql.Tx, string, runtimereplayclaim.CommittedReplayScope) error
 	UpsertPipelineReceiptTx(context.Context, *sql.Tx, string, string, *runtimefailures.Envelope) error
 	RecordDeadLetterTx(context.Context, *sql.Tx, runtimedeadletters.Record) error
@@ -86,7 +86,7 @@ func (c sqlPublishCommitter) commitNamedEvent(ctx context.Context, operation str
 }
 
 func (c sqlPublishCommitter) commitInitialSideEffects(ctx context.Context, req runtimebus.CommitPublishRequest) error {
-	if err := c.store.InsertEventDeliveryRoutesTx(ctx, c.tx, req.Event.ID(), req.DeliveryRoutes); err != nil {
+	if err := c.store.commitInitialDeliveryObligationsTx(ctx, c.tx, req.Event.ID(), req.Event.Event().RunID(), req.DeliveryRoutes); err != nil {
 		return err
 	}
 	if err := c.store.UpsertCommittedReplayScopeTx(ctx, c.tx, req.Event.ID(), req.ReplayScope); err != nil {

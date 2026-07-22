@@ -70,27 +70,13 @@ func (s *PostgresStore) readDestructiveResetInventoryRuns(ctx context.Context) (
 }
 
 func (s *PostgresStore) readDestructiveResetInventoryDeliveries(ctx context.Context) ([]destructivereset.DeliveryRef, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT delivery_id::text, run_id::text, COALESCE(status, '')
-		FROM event_deliveries
-		WHERE subscriber_type IN ('agent', 'node')
-		  AND `+activeRunQuiescenceDeliveryPredicateSQL("")+`
-		ORDER BY run_id::text, event_id::text, subscriber_type, subscriber_id
-	`)
+	snapshots, err := postgresDeliveryAdapter.ActiveSnapshots(ctx, s.DB)
 	if err != nil {
 		return nil, fmt.Errorf("read destructive reset inventory deliveries: %w", err)
 	}
-	defer rows.Close()
-	var out []destructivereset.DeliveryRef
-	for rows.Next() {
-		var delivery destructivereset.DeliveryRef
-		if err := rows.Scan(&delivery.DeliveryID, &delivery.RunID, &delivery.Status); err != nil {
-			return nil, fmt.Errorf("scan destructive reset inventory delivery: %w", err)
-		}
-		out = append(out, delivery)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read destructive reset inventory delivery rows: %w", err)
+	out := make([]destructivereset.DeliveryRef, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		out = append(out, destructivereset.DeliveryRef{DeliveryID: snapshot.DeliveryID, RunID: snapshot.RunID, Status: string(snapshot.Status)})
 	}
 	return out, nil
 }

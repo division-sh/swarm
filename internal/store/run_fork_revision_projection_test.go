@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 )
 
@@ -23,12 +24,14 @@ func TestRunForkRevisionProjectionPreservesSourceRouteSeparatelyFromReceiverCont
 			},
 		}},
 		Deliveries: []runForkRevisionDelivery{{
-			DeliveryID:     "delivery-1",
-			EventID:        "event-1",
-			SubscriberType: "node",
-			SubscriberID:   "source-node",
-			Status:         "pending",
-			CreatedAt:      at,
+			Snapshot: runtimedelivery.Snapshot{
+				DeliveryID:      "delivery-1",
+				EventID:         "event-1",
+				SubscriberClass: runtimedelivery.SubscriberNode,
+				SubscriberID:    "source-node",
+				Status:          runtimedelivery.StatusPending,
+				CreatedAt:       at,
+			},
 		}},
 	}
 

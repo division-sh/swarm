@@ -20,7 +20,6 @@ type eventProducerIdentityLifecycleStore interface {
 	ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error)
 	ListEventsMissingPipelineReceiptForRun(context.Context, string, time.Time, int) ([]events.PersistedReplayEvent, error)
 	ListEventsWithPendingDeliveriesForRun(context.Context, string, time.Time, int) ([]events.PersistedReplayEvent, error)
-	ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error)
 	ListPendingAgentDeliveryDetails(context.Context, PendingAgentDeliveryListOptions) (PendingAgentDeliveryPage, error)
 	ListDueDecisionRouteObligations(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error)
 	LoadOperatorEvent(context.Context, string) (OperatorEventFull, error)
@@ -144,20 +143,6 @@ func eventProducerIdentityReadbacks(surface eventProducerIdentityLifecycleStore,
 			return events.Event{}, fmt.Errorf("event %s not returned", eventID)
 		}
 	}
-	fromEvents := func(load func() ([]events.Event, error)) func() (events.Event, error) {
-		return func() (events.Event, error) {
-			loaded, err := load()
-			if err != nil {
-				return events.Event{}, err
-			}
-			for _, event := range loaded {
-				if event.ID() == eventID {
-					return event, nil
-				}
-			}
-			return events.Event{}, fmt.Errorf("event %s not returned", eventID)
-		}
-	}
 	since := createdAt.Add(-time.Minute)
 	return []eventProducerIdentityReadback{
 		{
@@ -179,13 +164,6 @@ func eventProducerIdentityReadbacks(surface eventProducerIdentityLifecycleStore,
 			runtimeEvent: true,
 			load: fromReplayRecords(func() ([]events.PersistedReplayEvent, error) {
 				return surface.ListEventsWithPendingDeliveriesForRun(ctx, runID, since, 10)
-			}),
-		},
-		{
-			name:         "subscription_replay",
-			runtimeEvent: true,
-			load: fromEvents(func() ([]events.Event, error) {
-				return surface.ListPendingSubscribedEvents(ctx, agentID, []events.EventType{"test.node_emitted"}, since, 10)
 			}),
 		},
 		{
@@ -380,16 +358,17 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 	if outcome != runtimebus.EventAppendInserted {
 		t.Fatalf("append replay event outcome = %d, want inserted", outcome)
 	}
-	sourceDeliveryID := uuid.NewString()
-	forkDeliveryID := uuid.NewString()
-	if _, err := tx.ExecContext(txctx, `
-		INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, created_at)
-		VALUES
-			($1::uuid, $2::uuid, $3::uuid, 'agent', 'replay-agent', 'delivered', $4),
-			($5::uuid, $6::uuid, $7::uuid, 'agent', 'replay-agent', 'delivered', $4)
-	`, sourceDeliveryID, sourceRunID, sourceEventID, createdAt.Add(2*time.Minute), forkDeliveryID, forkRunID, replayedEventID); err != nil {
-		t.Fatalf("insert replay delivery fixtures: %v", err)
+	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "replay-agent"}
+	sourceProofs, err := postgresDeliveryAdapter.CommitInitial(txctx, tx, sourceEventID, sourceRunID, []events.DeliveryRoute{route})
+	if err != nil || len(sourceProofs) != 1 {
+		t.Fatalf("commit source replay delivery fixture: proofs=%d err=%v", len(sourceProofs), err)
 	}
+	forkProofs, err := postgresDeliveryAdapter.CommitInitial(txctx, tx, replayedEventID, forkRunID, []events.DeliveryRoute{route})
+	if err != nil || len(forkProofs) != 1 {
+		t.Fatalf("commit fork replay delivery fixture: proofs=%d err=%v", len(forkProofs), err)
+	}
+	sourceDeliveryID := sourceProofs[0].DeliveryID()
+	forkDeliveryID := forkProofs[0].DeliveryID()
 	if _, err := tx.ExecContext(txctx, `
 		INSERT INTO run_fork_delivery_event_replays (
 			replay_id, fork_run_id, source_run_id, source_event_id, source_delivery_id,

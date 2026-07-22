@@ -21,21 +21,17 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	seedPostgresSemanticEventRecordFixture(
+	event := seedPostgresSemanticEventRecordFixture(
 		t, ctx, db, eventID, runID, events.EventType("custom.stop"),
 		events.EventProducerPlatform, "test", "", "", time.Now().UTC(),
 	)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, created_at)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'agent-pending', 'pending', now())
-	`, runID, eventID); err != nil {
-		t.Fatalf("seed pending agent delivery: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, created_at)
-		VALUES ($1::uuid, $2::uuid, 'node', 'node-pending', 'pending', now())
-	`, runID, eventID); err != nil {
-		t.Fatalf("seed pending node delivery: %v", err)
+	for _, route := range []events.DeliveryRoute{
+		{SubscriberType: "agent", SubscriberID: "agent-pending"},
+		{SubscriberType: "node", SubscriberID: "node-pending"},
+	} {
+		if err := commitDeliveryObligationFixture(ctx, pg, event, route); err != nil {
+			t.Fatalf("seed pending %s delivery: %v", route.SubscriberType, err)
+		}
 	}
 
 	if _, err := pg.PauseRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test", Now: time.Now().UTC()}); err != nil {
@@ -78,16 +74,17 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 	}
 	var nodeReceiptOutcome, nodeReceiptReason string
 	if err := db.QueryRowContext(ctx, `
-		SELECT outcome, COALESCE(reason_code, '')
-		FROM event_receipts
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = 'node-pending'
+		SELECT o.outcome, COALESCE(o.reason_code, '')
+		FROM event_delivery_outcomes o
+		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
+		WHERE d.event_id = $1::uuid
+		  AND d.subscriber_type = 'node'
+		  AND d.subscriber_id = 'node-pending'
 	`, eventID).Scan(&nodeReceiptOutcome, &nodeReceiptReason); err != nil {
-		t.Fatalf("load stopped node receipt: %v", err)
+		t.Fatalf("load stopped node outcome: %v", err)
 	}
-	if nodeReceiptOutcome != "dead_letter" || nodeReceiptReason != "run_stopped" {
-		t.Fatalf("stopped node receipt = %s/%s, want dead_letter/run_stopped", nodeReceiptOutcome, nodeReceiptReason)
+	if nodeReceiptOutcome != "terminalized" || nodeReceiptReason != "run_stopped" {
+		t.Fatalf("stopped node outcome = %s/%s, want terminalized/run_stopped", nodeReceiptOutcome, nodeReceiptReason)
 	}
 	var receiptCount int
 	if err := db.QueryRowContext(ctx, `

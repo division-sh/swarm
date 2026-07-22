@@ -3,14 +3,14 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
@@ -20,17 +20,6 @@ import (
 )
 
 const activeRunQuiescencePipelineSubscriberID = "pipeline"
-
-type activeRunQuiescenceDeliveryTarget struct {
-	DeliveryID      string
-	RunID           string
-	EventID         string
-	SubscriberType  string
-	SubscriberID    string
-	Status          string
-	ReasonCode      string
-	ActiveSessionID string
-}
 
 func (s *PostgresStore) ApplyServeAbandonActiveRunQuiescence(ctx context.Context, at time.Time) (runtimerunquiescence.Result, error) {
 	return s.ApplyActiveRunQuiescence(ctx, runtimerunquiescence.Request{
@@ -120,23 +109,27 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 	if len(runIDs) == 0 {
 		return out, nil
 	}
-	deliveries, err := lockActiveRunQuiescenceDeliveriesTx(ctx, tx, runIDs)
-	if err != nil {
-		return runtimerunquiescence.Result{}, err
+	active := []runtimedelivery.Snapshot{}
+	for _, runID := range runIDs {
+		snapshots, err := s.activeRunDeliverySnapshotsTx(ctx, tx, runID)
+		if err != nil {
+			return runtimerunquiescence.Result{}, err
+		}
+		active = append(active, snapshots...)
 	}
-	for _, delivery := range deliveries {
+	for _, delivery := range active {
 		out.Deliveries = append(out.Deliveries, runtimerunquiescence.QuiescedDelivery{
 			DeliveryID:      delivery.DeliveryID,
 			RunID:           delivery.RunID,
 			EventID:         delivery.EventID,
-			SubscriberType:  delivery.SubscriberType,
+			SubscriberType:  string(delivery.SubscriberClass),
 			SubscriberID:    delivery.SubscriberID,
-			PreviousStatus:  delivery.Status,
+			PreviousStatus:  string(delivery.Status),
 			Status:          "dead_letter",
 			ReasonCode:      out.ReasonCode,
 			PreviousReason:  delivery.ReasonCode,
 			ActiveSessionID: delivery.ActiveSessionID,
-			Changed:         delivery.Status != "dead_letter" || delivery.ReasonCode != out.ReasonCode,
+			Changed:         true,
 		})
 	}
 	for _, run := range runs {
@@ -160,12 +153,15 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 	}
 
 	eventIDs := map[string]struct{}{}
-	for _, delivery := range deliveries {
-		if err := terminalizeActiveRunQuiescenceDeliveryTx(ctx, tx, delivery, out.ReasonCode, deliveryNote, now); err != nil {
+	for _, runID := range runIDs {
+		transitions, err := s.terminalizeRunDeliveriesTx(ctx, tx, runID, out.ReasonCode)
+		if err != nil {
 			return runtimerunquiescence.Result{}, err
 		}
-		if delivery.EventID != "" {
-			eventIDs[delivery.EventID] = struct{}{}
+		for _, transition := range transitions {
+			if transition.Current.EventID != "" {
+				eventIDs[transition.Current.EventID] = struct{}{}
+			}
 		}
 	}
 	for eventID := range eventIDs {
@@ -205,7 +201,7 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 			runforkrevision.FamilyEventReceipts,
 		}})
 	}
-	if len(deliveries) > 0 {
+	if len(active) > 0 {
 		if _, err := runforkrevision.CaptureChanges(ctx, tx, changes...); err != nil {
 			return runtimerunquiescence.Result{}, err
 		}
@@ -275,23 +271,27 @@ func (s *SQLiteRuntimeStore) ApplyActiveRunQuiescence(ctx context.Context, req r
 			out = attemptOut
 			return nil
 		}
-		deliveries, err := sqliteLockActiveRunQuiescenceDeliveriesTx(txctx, tx, attemptRunIDs)
-		if err != nil {
-			return err
+		active := []runtimedelivery.Snapshot{}
+		for _, runID := range attemptRunIDs {
+			snapshots, err := s.activeRunDeliverySnapshotsTx(txctx, tx, runID)
+			if err != nil {
+				return err
+			}
+			active = append(active, snapshots...)
 		}
-		for _, delivery := range deliveries {
+		for _, delivery := range active {
 			attemptOut.Deliveries = append(attemptOut.Deliveries, runtimerunquiescence.QuiescedDelivery{
 				DeliveryID:      delivery.DeliveryID,
 				RunID:           delivery.RunID,
 				EventID:         delivery.EventID,
-				SubscriberType:  delivery.SubscriberType,
+				SubscriberType:  string(delivery.SubscriberClass),
 				SubscriberID:    delivery.SubscriberID,
-				PreviousStatus:  delivery.Status,
+				PreviousStatus:  string(delivery.Status),
 				Status:          "dead_letter",
 				ReasonCode:      attemptOut.ReasonCode,
 				PreviousReason:  delivery.ReasonCode,
 				ActiveSessionID: delivery.ActiveSessionID,
-				Changed:         delivery.Status != "dead_letter" || delivery.ReasonCode != attemptOut.ReasonCode,
+				Changed:         true,
 			})
 		}
 		for _, run := range runs {
@@ -316,12 +316,15 @@ func (s *SQLiteRuntimeStore) ApplyActiveRunQuiescence(ctx context.Context, req r
 		}
 
 		eventIDs := map[string]struct{}{}
-		for _, delivery := range deliveries {
-			if err := sqliteTerminalizeActiveRunQuiescenceDeliveryTx(txctx, tx, delivery, attemptOut.ReasonCode, deliveryNote, now); err != nil {
+		for _, runID := range attemptRunIDs {
+			transitions, err := s.terminalizeRunDeliveriesTx(txctx, tx, runID, attemptOut.ReasonCode)
+			if err != nil {
 				return err
 			}
-			if delivery.EventID != "" {
-				eventIDs[delivery.EventID] = struct{}{}
+			for _, transition := range transitions {
+				if transition.Current.EventID != "" {
+					eventIDs[transition.Current.EventID] = struct{}{}
+				}
 			}
 		}
 		for eventID := range eventIDs {
@@ -445,50 +448,6 @@ func scanActiveRunQuiescenceRuns(rows *sql.Rows) ([]runtimerunquiescence.Quiesce
 	return out, nil
 }
 
-func lockActiveRunQuiescenceDeliveriesTx(ctx context.Context, tx *sql.Tx, runIDs []string) ([]activeRunQuiescenceDeliveryTarget, error) {
-	rows, err := tx.QueryContext(ctx, `
-		SELECT
-			d.delivery_id::text,
-			d.run_id::text,
-			d.event_id::text,
-			COALESCE(d.subscriber_type, ''),
-			COALESCE(d.subscriber_id, ''),
-			COALESCE(d.status, ''),
-			COALESCE(d.reason_code, ''),
-			COALESCE(d.active_session_id::text, '')
-		FROM event_deliveries d
-		WHERE d.run_id = ANY($1::uuid[])
-		  AND d.subscriber_type IN ('agent', 'node')
-		  AND `+activeRunQuiescenceDeliveryPredicateSQL("d")+`
-		ORDER BY d.run_id::text, d.event_id::text, d.subscriber_type, d.subscriber_id
-		FOR UPDATE
-	`, pq.Array(runIDs))
-	if err != nil {
-		return nil, fmt.Errorf("lock active run quiescence deliveries: %w", err)
-	}
-	defer rows.Close()
-	var out []activeRunQuiescenceDeliveryTarget
-	for rows.Next() {
-		var item activeRunQuiescenceDeliveryTarget
-		if err := rows.Scan(&item.DeliveryID, &item.RunID, &item.EventID, &item.SubscriberType, &item.SubscriberID, &item.Status, &item.ReasonCode, &item.ActiveSessionID); err != nil {
-			return nil, fmt.Errorf("scan active run quiescence delivery: %w", err)
-		}
-		item.DeliveryID = strings.TrimSpace(item.DeliveryID)
-		item.RunID = strings.TrimSpace(item.RunID)
-		item.EventID = strings.TrimSpace(item.EventID)
-		item.SubscriberType = strings.TrimSpace(item.SubscriberType)
-		item.SubscriberID = strings.TrimSpace(item.SubscriberID)
-		item.Status = strings.TrimSpace(item.Status)
-		item.ReasonCode = strings.TrimSpace(item.ReasonCode)
-		item.ActiveSessionID = strings.TrimSpace(item.ActiveSessionID)
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read active run quiescence deliveries: %w", err)
-	}
-	return out, nil
-}
-
 func sqliteLockAllActiveQuiescenceRunsTx(ctx context.Context, tx *sql.Tx) ([]runtimerunquiescence.QuiescedRun, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT run_id, COALESCE(bundle_hash, ''), COALESCE(status, '')
@@ -524,152 +483,6 @@ func sqliteLockActiveQuiescenceRunsTx(ctx context.Context, tx *sql.Tx, runIDs []
 		return nil, fmt.Errorf("lock sqlite active quiescence runs: %w", err)
 	}
 	return scanActiveRunQuiescenceRuns(rows)
-}
-
-func sqliteLockActiveRunQuiescenceDeliveriesTx(ctx context.Context, tx *sql.Tx, runIDs []string) ([]activeRunQuiescenceDeliveryTarget, error) {
-	if len(runIDs) == 0 {
-		return nil, nil
-	}
-	args := make([]any, 0, len(runIDs))
-	for _, runID := range runIDs {
-		args = append(args, runID)
-	}
-	rows, err := tx.QueryContext(ctx, `
-		SELECT
-			d.delivery_id,
-			COALESCE(d.run_id, ''),
-			d.event_id,
-			COALESCE(d.subscriber_type, ''),
-			COALESCE(d.subscriber_id, ''),
-			COALESCE(d.status, ''),
-			COALESCE(d.reason_code, ''),
-			COALESCE(d.active_session_id, '')
-		FROM event_deliveries d
-		WHERE d.run_id IN (`+sqlitePlaceholders(len(runIDs))+`)
-		  AND d.subscriber_type IN ('agent', 'node')
-		  AND `+activeRunQuiescenceDeliveryPredicateSQL("d")+`
-		ORDER BY d.run_id, d.event_id, d.subscriber_type, d.subscriber_id
-	`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("lock sqlite active run quiescence deliveries: %w", err)
-	}
-	defer rows.Close()
-	var out []activeRunQuiescenceDeliveryTarget
-	for rows.Next() {
-		var item activeRunQuiescenceDeliveryTarget
-		if err := rows.Scan(&item.DeliveryID, &item.RunID, &item.EventID, &item.SubscriberType, &item.SubscriberID, &item.Status, &item.ReasonCode, &item.ActiveSessionID); err != nil {
-			return nil, fmt.Errorf("scan sqlite active run quiescence delivery: %w", err)
-		}
-		item.DeliveryID = strings.TrimSpace(item.DeliveryID)
-		item.RunID = strings.TrimSpace(item.RunID)
-		item.EventID = strings.TrimSpace(item.EventID)
-		item.SubscriberType = strings.TrimSpace(item.SubscriberType)
-		item.SubscriberID = strings.TrimSpace(item.SubscriberID)
-		item.Status = strings.TrimSpace(item.Status)
-		item.ReasonCode = strings.TrimSpace(item.ReasonCode)
-		item.ActiveSessionID = strings.TrimSpace(item.ActiveSessionID)
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read sqlite active run quiescence deliveries: %w", err)
-	}
-	return out, nil
-}
-
-func terminalizeActiveRunQuiescenceDeliveryTx(ctx context.Context, tx *sql.Tx, item activeRunQuiescenceDeliveryTarget, reasonCode, note string, at time.Time) error {
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE event_deliveries
-		SET
-			status = 'dead_letter',
-			reason_code = $2,
-			failure = NULL,
-			active_session_id = NULL,
-			delivered_at = COALESCE(delivered_at, $3)
-		WHERE delivery_id = $1::uuid
-		  AND `+activeRunQuiescenceDeliveryPredicateSQL("")+`
-	`, item.DeliveryID, reasonCode, at.UTC()); err != nil {
-		return fmt.Errorf("terminalize active run quiescence delivery %s: %w", item.DeliveryID, err)
-	}
-	sideEffects, err := json.Marshal(map[string]any{
-		"manager_status": "dead_letter",
-		"reason_code":    reasonCode,
-		"note":           note,
-	})
-	if err != nil {
-		return fmt.Errorf("marshal active run quiescence receipt side effects: %w", err)
-	}
-	idempotencyKey := ""
-	if item.SubscriberType == "node" {
-		idempotencyKey = runtimepipeline.SystemNodeReceiptIdempotencyKey(item.SubscriberID, item.EventID)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, reason_code, side_effects, idempotency_key, processed_at
-		)
-		SELECT
-			e.event_id, $2, $3, e.entity_id, e.flow_instance,
-			'dead_letter', $4, $5::jsonb, NULLIF($6, ''), $7
-		FROM events e
-		WHERE e.event_id = $1::uuid
-		ON CONFLICT (event_id, subscriber_type, subscriber_id) DO UPDATE SET
-			outcome = 'dead_letter',
-			reason_code = $4,
-			side_effects = $5::jsonb,
-			idempotency_key = COALESCE(NULLIF($6, ''), event_receipts.idempotency_key),
-			processed_at = $7
-	`, item.EventID, item.SubscriberType, item.SubscriberID, reasonCode, string(sideEffects), idempotencyKey, at.UTC()); err != nil {
-		return fmt.Errorf("upsert active run quiescence delivery receipt: %w", err)
-	}
-	return nil
-}
-
-func sqliteTerminalizeActiveRunQuiescenceDeliveryTx(ctx context.Context, tx *sql.Tx, item activeRunQuiescenceDeliveryTarget, reasonCode, note string, at time.Time) error {
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE event_deliveries
-		SET
-			status = 'dead_letter',
-			reason_code = ?,
-			failure = NULL,
-			active_session_id = NULL,
-			delivered_at = COALESCE(delivered_at, ?)
-		WHERE delivery_id = ?
-		  AND `+activeRunQuiescenceDeliveryPredicateSQL("")+`
-	`, reasonCode, at.UTC(), item.DeliveryID); err != nil {
-		return fmt.Errorf("terminalize sqlite active run quiescence delivery %s: %w", item.DeliveryID, err)
-	}
-	sideEffects, err := json.Marshal(map[string]any{
-		"manager_status": "dead_letter",
-		"reason_code":    reasonCode,
-		"note":           note,
-	})
-	if err != nil {
-		return fmt.Errorf("marshal sqlite active run quiescence receipt side effects: %w", err)
-	}
-	idempotencyKey := ""
-	if item.SubscriberType == "node" {
-		idempotencyKey = runtimepipeline.SystemNodeReceiptIdempotencyKey(item.SubscriberID, item.EventID)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO event_receipts (
-			receipt_id, event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, reason_code, side_effects, idempotency_key, processed_at
-		)
-		SELECT
-			?, e.event_id, ?, ?, e.entity_id, e.flow_instance,
-			'dead_letter', ?, ?, ?, ?
-		FROM events e
-		WHERE e.event_id = ?
-		ON CONFLICT(event_id, subscriber_type, subscriber_id) DO UPDATE SET
-			outcome = 'dead_letter',
-			reason_code = excluded.reason_code,
-			side_effects = excluded.side_effects,
-			idempotency_key = COALESCE(excluded.idempotency_key, event_receipts.idempotency_key),
-			processed_at = excluded.processed_at
-	`, uuid.NewString(), item.SubscriberType, item.SubscriberID, reasonCode, string(sideEffects), sqliteNullString(idempotencyKey), at.UTC(), item.EventID); err != nil {
-		return fmt.Errorf("upsert sqlite active run quiescence delivery receipt: %w", err)
-	}
-	return nil
 }
 
 func upsertActiveRunQuiescencePipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, reasonCode, note string, at time.Time) error {
@@ -863,31 +676,28 @@ func (s *SQLiteRuntimeStore) ActiveRunDeliveryQuiesced(ctx context.Context, even
 	if eventID == "" || subscriberType == "" || subscriberID == "" {
 		return "", false, nil
 	}
-	reasons := activeRunQuiescenceTerminalReasonCodes()
-	args := []any{eventID, subscriberType, subscriberID}
-	for _, reason := range reasons {
-		args = append(args, reason)
-	}
-	var reason string
-	err := s.DB.QueryRowContext(ctx, `
-		SELECT COALESCE(reason_code, '')
-		FROM event_deliveries
-		WHERE event_id = ?
-		  AND subscriber_type = ?
-		  AND subscriber_id = ?
-		  AND status = 'dead_letter'
-		  AND reason_code IN (`+sqlitePlaceholders(len(reasons))+`)
-		ORDER BY reason_code
-		LIMIT 1
-	`, args...).Scan(&reason)
-	switch {
-	case err == sql.ErrNoRows:
-		return "", false, nil
-	case err != nil:
+	snapshots, err := s.deliverySnapshotsForEvent(ctx, eventID)
+	if err != nil {
 		return "", false, fmt.Errorf("check sqlite active run delivery quiescence: %w", err)
-	default:
-		return strings.TrimSpace(reason), true, nil
 	}
+	reasons := map[string]struct{}{}
+	for _, reason := range activeRunQuiescenceTerminalReasonCodes() {
+		reasons[reason] = struct{}{}
+	}
+	matches := []string{}
+	for _, snapshot := range snapshots {
+		if string(snapshot.SubscriberClass) != subscriberType || snapshot.SubscriberID != subscriberID || !snapshot.Terminal() {
+			continue
+		}
+		if _, ok := reasons[snapshot.ReasonCode]; ok {
+			matches = append(matches, snapshot.ReasonCode)
+		}
+	}
+	if len(matches) == 0 {
+		return "", false, nil
+	}
+	sort.Strings(matches)
+	return matches[0], true, nil
 }
 
 func (s *SQLiteRuntimeStore) DestructiveResetDeliveryQuiesced(ctx context.Context, eventID, subscriberType, subscriberID string) (bool, error) {
@@ -912,21 +722,16 @@ func (s *SQLiteRuntimeStore) deliveryQuiescedForReason(ctx context.Context, even
 	if eventID == "" || subscriberType == "" || subscriberID == "" || reasonCode == "" {
 		return false, nil
 	}
-	var ok bool
-	if err := s.DB.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM event_deliveries
-			WHERE event_id = ?
-			  AND subscriber_type = ?
-			  AND subscriber_id = ?
-			  AND status = 'dead_letter'
-			  AND reason_code = ?
-		)
-	`, eventID, subscriberType, subscriberID, reasonCode).Scan(&ok); err != nil {
+	snapshots, err := s.deliverySnapshotsForEvent(ctx, eventID)
+	if err != nil {
 		return false, fmt.Errorf("check sqlite delivery quiescence: %w", err)
 	}
-	return ok, nil
+	for _, snapshot := range snapshots {
+		if string(snapshot.SubscriberClass) == subscriberType && snapshot.SubscriberID == subscriberID && snapshot.Terminal() && snapshot.ReasonCode == reasonCode {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func sqlitePlaceholders(count int) string {
@@ -934,33 +739,6 @@ func sqlitePlaceholders(count int) string {
 		return ""
 	}
 	return strings.TrimRight(strings.Repeat("?,", count), ",")
-}
-
-func activeRunQuiescenceDeliveryPredicateSQL(alias string) string {
-	prefix := ""
-	if strings.TrimSpace(alias) != "" {
-		prefix = strings.TrimSpace(alias) + "."
-	}
-	return `(
-			` + prefix + `status IN ('pending', 'in_progress')
-			OR (
-				` + prefix + `status = 'failed'
-				AND COALESCE(` + prefix + `retry_count, 0) < 2
-			)
-		)`
-}
-
-func activeRunQuiescenceDeliveryTerminal(status, reasonCode string) bool {
-	if strings.TrimSpace(status) != "dead_letter" {
-		return false
-	}
-	reasonCode = strings.TrimSpace(reasonCode)
-	for _, terminalReason := range activeRunQuiescenceTerminalReasonCodes() {
-		if reasonCode == terminalReason {
-			return true
-		}
-	}
-	return false
 }
 
 func activeRunQuiescenceTerminalReasonCodes() []string {

@@ -24,248 +24,10 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 	if !exists {
 		return nil, "", ErrRunNotFound
 	}
-	where := []string{"e.run_id = ?"}
-	args := []any{runID}
-	if opts.Cursor != "" {
-		cursor, err := decodeRunDebugTraceCursor(opts.Cursor)
-		if err != nil {
-			return nil, "", err
-		}
-		eventCreatedAt, err := sqliteRunTraceCursorTime(cursor.EventCreatedAt)
-		if err != nil {
-			return nil, "", err
-		}
-		eventID := strings.TrimSpace(cursor.EventID)
-		deliveryCreatedAt, err := sqliteRunTraceCursorOptionalTime(cursor.DeliveryCreatedAt)
-		if err != nil {
-			return nil, "", err
-		}
-		deliveryID := strings.TrimSpace(cursor.DeliveryID)
-		turnCreatedAt, err := sqliteRunTraceCursorOptionalTime(cursor.TurnCreatedAt)
-		if err != nil {
-			return nil, "", err
-		}
-		turnID := strings.TrimSpace(cursor.TurnID)
-		eventCreatedSQL := sqliteRunTraceSQLTime(eventCreatedAt)
-		deliveryCreatedSQL := sqliteRunTraceSQLTime(deliveryCreatedAt)
-		turnCreatedSQL := sqliteRunTraceSQLTime(turnCreatedAt)
-		floorSQL := sqliteRunTraceSQLTime(sqliteRunTraceCursorFloorTime())
-		where = append(where, `(
-			COALESCE(julianday(e.created_at), julianday(substr(CAST(e.created_at AS TEXT), 1, instr(CAST(e.created_at AS TEXT), ' +') - 1))) > julianday(?)
-			OR (COALESCE(julianday(e.created_at), julianday(substr(CAST(e.created_at AS TEXT), 1, instr(CAST(e.created_at AS TEXT), ' +') - 1))) = julianday(?) AND e.event_id > ?)
-			OR (COALESCE(julianday(e.created_at), julianday(substr(CAST(e.created_at AS TEXT), 1, instr(CAST(e.created_at AS TEXT), ' +') - 1))) = julianday(?) AND e.event_id = ? AND COALESCE(julianday(COALESCE(d.created_at, ?)), julianday(substr(CAST(COALESCE(d.created_at, ?) AS TEXT), 1, instr(CAST(COALESCE(d.created_at, ?) AS TEXT), ' +') - 1))) > julianday(?))
-			OR (COALESCE(julianday(e.created_at), julianday(substr(CAST(e.created_at AS TEXT), 1, instr(CAST(e.created_at AS TEXT), ' +') - 1))) = julianday(?) AND e.event_id = ? AND COALESCE(julianday(COALESCE(d.created_at, ?)), julianday(substr(CAST(COALESCE(d.created_at, ?) AS TEXT), 1, instr(CAST(COALESCE(d.created_at, ?) AS TEXT), ' +') - 1))) = julianday(?) AND COALESCE(d.delivery_id, '') > ?)
-			OR (COALESCE(julianday(e.created_at), julianday(substr(CAST(e.created_at AS TEXT), 1, instr(CAST(e.created_at AS TEXT), ' +') - 1))) = julianday(?) AND e.event_id = ? AND COALESCE(julianday(COALESCE(d.created_at, ?)), julianday(substr(CAST(COALESCE(d.created_at, ?) AS TEXT), 1, instr(CAST(COALESCE(d.created_at, ?) AS TEXT), ' +') - 1))) = julianday(?) AND COALESCE(d.delivery_id, '') = ? AND COALESCE(julianday(COALESCE(t.created_at, ?)), julianday(substr(CAST(COALESCE(t.created_at, ?) AS TEXT), 1, instr(CAST(COALESCE(t.created_at, ?) AS TEXT), ' +') - 1))) > julianday(?))
-			OR (COALESCE(julianday(e.created_at), julianday(substr(CAST(e.created_at AS TEXT), 1, instr(CAST(e.created_at AS TEXT), ' +') - 1))) = julianday(?) AND e.event_id = ? AND COALESCE(julianday(COALESCE(d.created_at, ?)), julianday(substr(CAST(COALESCE(d.created_at, ?) AS TEXT), 1, instr(CAST(COALESCE(d.created_at, ?) AS TEXT), ' +') - 1))) = julianday(?) AND COALESCE(d.delivery_id, '') = ? AND COALESCE(julianday(COALESCE(t.created_at, ?)), julianday(substr(CAST(COALESCE(t.created_at, ?) AS TEXT), 1, instr(CAST(COALESCE(t.created_at, ?) AS TEXT), ' +') - 1))) = julianday(?) AND COALESCE(t.turn_id, '') > ?)
-		)`)
-		args = append(args,
-			eventCreatedSQL,
-			eventCreatedSQL, eventID,
-			eventCreatedSQL, eventID, floorSQL, floorSQL, floorSQL, deliveryCreatedSQL,
-			eventCreatedSQL, eventID, floorSQL, floorSQL, floorSQL, deliveryCreatedSQL, deliveryID,
-			eventCreatedSQL, eventID, floorSQL, floorSQL, floorSQL, deliveryCreatedSQL, deliveryID, floorSQL, floorSQL, floorSQL, turnCreatedSQL,
-			eventCreatedSQL, eventID, floorSQL, floorSQL, floorSQL, deliveryCreatedSQL, deliveryID, floorSQL, floorSQL, floorSQL, turnCreatedSQL, turnID,
-		)
-	}
-	if opts.Since != nil {
-		where = append(where, sqliteRunTraceWatermarkExpression()+" > julianday(?)")
-		args = append(args, sqliteRunTraceSQLTime(opts.Since.UTC()))
-	}
-	if opts.Until != nil {
-		where = append(where, sqliteRunTraceWatermarkExpression()+" <= julianday(?)")
-		args = append(args, sqliteRunTraceSQLTime(opts.Until.UTC()))
-	}
-	appendIn := func(column string, values []string) {
-		if len(values) == 0 {
-			return
-		}
-		placeholders := make([]string, 0, len(values))
-		for _, value := range values {
-			placeholders = append(placeholders, "?")
-			args = append(args, value)
-		}
-		where = append(where, column+" IN ("+strings.Join(placeholders, ",")+")")
-	}
-	appendIn("e.event_name", opts.Filter.EventNames)
-	appendIn("COALESCE(e.entity_id, '')", opts.Filter.EntityIDs)
-	appendIn("COALESCE(d.status, '')", opts.Filter.DeliveryStatuses)
-	appendIn("COALESCE(d.subscriber_id, '')", opts.Filter.SubscriberIDs)
-	appendIn("COALESCE(d.subscriber_type, '')", opts.Filter.SubscriberTypes)
-	if opts.ExcludeRuntimeLogs {
-		where = append(where, "e.event_name <> 'platform.runtime_log'")
-	}
-	args = append(args, opts.Limit+1)
-	rows, err := s.DB.QueryContext(ctx, `
-		WITH trace_sessions AS (
-			SELECT
-				session_id,
-				run_id,
-				'live_session' AS session_kind,
-				memory_enabled,
-				memory_source,
-				COALESCE(status, '') AS status,
-				updated_at
-			FROM agent_sessions
-			UNION ALL
-			SELECT
-				session_id,
-				run_id,
-				'turn_audit' AS session_kind,
-				memory_enabled,
-				memory_source,
-				COALESCE(status, '') AS status,
-				updated_at
-			FROM agent_conversation_audits
-		)
-		SELECT
-			e.event_id, e.event_name, COALESCE(e.source_event_id, ''), COALESCE(e.entity_id, ''),
-			COALESCE(e.produced_by, ''), COALESCE(e.produced_by_type, ''), e.created_at,
-				COALESCE(d.delivery_id, ''), COALESCE(d.subscriber_type, ''), COALESCE(d.subscriber_id, ''),
-				COALESCE(d.status, ''), COALESCE(d.reason_code, ''), COALESCE(d.failure, 'null'), COALESCE(d.retry_count, 0),
-				COALESCE(d.active_session_id, ''),
-				d.created_at, d.started_at, d.delivered_at,
-			COALESCE(ses.session_id, ''), COALESCE(ses.session_kind, ''), COALESCE(ses.memory_enabled, 0), COALESCE(ses.memory_source, ''),
-			COALESCE(ses.status, ''), ses.updated_at,
-			COALESCE(t.turn_id, ''), COALESCE(t.trigger_event_id, ''), COALESCE(t.trigger_event_type, ''),
-			COALESCE(t.flow_instance, ''), COALESCE(t.memory_enabled, 0), COALESCE(t.memory_source, ''), COALESCE(t.entity_id, ''),
-			COALESCE(t.task_id, ''), COALESCE(t.parse_ok, 0), COALESCE(t.retry_count, 0),
-			COALESCE(t.failure, 'null'), t.created_at
-		FROM events e
-		LEFT JOIN event_deliveries d
-			ON d.event_id = e.event_id
-		   AND NOT (
-				d.subscriber_type = 'node'
-				AND d.subscriber_id = '__runtime_replay_scope__'
-		   )
-		LEFT JOIN agent_turns t
-			ON t.run_id = e.run_id
-		   AND t.trigger_event_id = e.event_id
-		   AND (
-				d.delivery_id IS NULL
-				OR (
-					COALESCE(d.subscriber_type, '') = 'agent'
-					AND COALESCE(d.subscriber_id, '') <> ''
-					AND t.agent_id = d.subscriber_id
-				)
-		   )
-		LEFT JOIN trace_sessions ses
-			ON ses.session_id = COALESCE(t.session_id, d.active_session_id)
-		   AND (
-				ses.run_id = e.run_id
-				OR ses.run_id IS NULL
-		   )
-		WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY
-			COALESCE(julianday(e.created_at), julianday(substr(CAST(e.created_at AS TEXT), 1, instr(CAST(e.created_at AS TEXT), ' +') - 1))) ASC,
-			e.event_id ASC,
-			COALESCE(julianday(d.created_at), julianday(substr(CAST(d.created_at AS TEXT), 1, instr(CAST(d.created_at AS TEXT), ' +') - 1))) ASC,
-			d.delivery_id ASC,
-			COALESCE(julianday(t.created_at), julianday(substr(CAST(t.created_at AS TEXT), 1, instr(CAST(t.created_at AS TEXT), ' +') - 1))) ASC,
-			t.turn_id ASC
-		LIMIT ?
-	`, args...)
-	if err != nil {
-		return nil, "", fmt.Errorf("query sqlite run trace: %w", err)
-	}
-	defer rows.Close()
-	out := make([]RunDebugTraceRow, 0, opts.Limit+1)
-	for rows.Next() {
-		var row RunDebugTraceRow
-		var rawDeliveryFailure, rawTurnFailure any
-		var eventCreatedRaw, deliveryCreatedRaw, deliveryStartedRaw, deliveryDeliveredRaw, sessionUpdatedRaw, turnCreatedRaw any
-		if err := rows.Scan(
-			&row.EventID, &row.EventName, &row.SourceEventID, &row.EntityID,
-			&row.EventSource, &row.EventSourceType, &eventCreatedRaw,
-			&row.DeliveryID, &row.SubscriberType, &row.SubscriberID,
-			&row.DeliveryStatus, &row.DeliveryReasonCode, &rawDeliveryFailure, &row.DeliveryRetryCount, &row.ActiveSessionID,
-			&deliveryCreatedRaw, &deliveryStartedRaw, &deliveryDeliveredRaw,
-			&row.SessionID, &row.SessionKind, &row.SessionMemory, &row.SessionMemorySource,
-			&row.SessionStatus, &sessionUpdatedRaw,
-			&row.TurnID, &row.TurnTriggerEventID, &row.TurnTriggerEventType,
-			&row.TurnFlowInstance, &row.TurnMemory, &row.TurnMemorySource, &row.TurnEntityID,
-			&row.TurnTaskID, &row.TurnParseOK, &row.TurnRetryCount,
-			&rawTurnFailure, &turnCreatedRaw,
-		); err != nil {
-			return nil, "", fmt.Errorf("scan sqlite run trace: %w", err)
-		}
-		row.DeliveryFailure, err = decodeStoredFailure(rawDeliveryFailure)
-		if err != nil {
-			return nil, "", fmt.Errorf("decode sqlite run trace delivery failure: %w", err)
-		}
-		row.TurnFailure, err = decodeStoredFailure(rawTurnFailure)
-		if err != nil {
-			return nil, "", fmt.Errorf("decode sqlite run trace turn failure: %w", err)
-		}
-		if at, ok, err := sqliteTimeValue(eventCreatedRaw); err != nil {
-			return nil, "", err
-		} else if ok {
-			row.EventCreatedAt = at
-		}
-		row.DeliveryCreatedAt = sqliteTraceTimePtr(deliveryCreatedRaw)
-		row.DeliveryStartedAt = sqliteTraceTimePtr(deliveryStartedRaw)
-		row.DeliveryDeliveredAt = sqliteTraceTimePtr(deliveryDeliveredRaw)
-		row.DeliveryRetryEligible = OperatorDeliveryRetryEligible(row.DeliveryStatus)
-		row.DeliveryTerminal = OperatorDeliveryTerminal(row.DeliveryStatus)
-		row.SessionUpdatedAt = sqliteTraceTimePtr(sessionUpdatedRaw)
-		row.TurnCreatedAt = sqliteTraceTimePtr(turnCreatedRaw)
-		out = append(out, row)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, "", fmt.Errorf("read sqlite run trace: %w", err)
-	}
-	nextCursor := ""
-	if len(out) > opts.Limit {
-		out = out[:opts.Limit]
-		nextCursor = encodeRunDebugTraceCursor(out[len(out)-1])
-	}
-	return out, nextCursor, nil
-}
-
-const sqliteRunTraceCursorFloor = "0001-01-01T00:00:00Z"
-
-func sqliteRunTraceCursorFloorTime() time.Time {
-	return time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC)
-}
-
-func sqliteRunTraceSQLTime(value time.Time) string {
-	return value.UTC().Format(time.RFC3339Nano)
-}
-
-func sqliteRunTraceCursorTime(raw string) (time.Time, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return time.Time{}, ErrInvalidObservabilityCursor
-	}
-	parsed, err := time.Parse(time.RFC3339Nano, raw)
-	if err != nil {
-		return time.Time{}, ErrInvalidObservabilityCursor
-	}
-	return parsed.UTC(), nil
-}
-
-func sqliteRunTraceCursorOptionalTime(raw string) (time.Time, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return sqliteRunTraceCursorFloorTime(), nil
-	}
-	return sqliteRunTraceCursorTime(raw)
-}
-
-func sqliteRunTraceWatermarkExpression() string {
-	return `max(
-		COALESCE(julianday(e.created_at), julianday(substr(CAST(e.created_at AS TEXT), 1, instr(CAST(e.created_at AS TEXT), ' +') - 1))),
-		COALESCE(julianday(COALESCE(d.created_at, '` + sqliteRunTraceCursorFloor + `')), julianday(substr(CAST(COALESCE(d.created_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), 1, instr(CAST(COALESCE(d.created_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), ' +') - 1))),
-		COALESCE(julianday(COALESCE(d.started_at, '` + sqliteRunTraceCursorFloor + `')), julianday(substr(CAST(COALESCE(d.started_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), 1, instr(CAST(COALESCE(d.started_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), ' +') - 1))),
-		COALESCE(julianday(COALESCE(d.delivered_at, '` + sqliteRunTraceCursorFloor + `')), julianday(substr(CAST(COALESCE(d.delivered_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), 1, instr(CAST(COALESCE(d.delivered_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), ' +') - 1))),
-		COALESCE(julianday(COALESCE(ses.updated_at, '` + sqliteRunTraceCursorFloor + `')), julianday(substr(CAST(COALESCE(ses.updated_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), 1, instr(CAST(COALESCE(ses.updated_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), ' +') - 1))),
-		COALESCE(julianday(COALESCE(t.created_at, '` + sqliteRunTraceCursorFloor + `')), julianday(substr(CAST(COALESCE(t.created_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), 1, instr(CAST(COALESCE(t.created_at, '` + sqliteRunTraceCursorFloor + `') AS TEXT), ' +') - 1)))
-	)`
+	return s.loadProjectedRunDebugTrace(ctx, runID, opts)
 }
 
 func (s *SQLiteRuntimeStore) ListOperatorEvents(ctx context.Context, opts OperatorEventListOptions) (OperatorEventListResult, error) {
-	if opts.Cursor != "" {
-		return OperatorEventListResult{}, ErrInvalidObservabilityCursor
-	}
 	opts = defaultOperatorEventListOptions(opts)
 	where := []string{"1=1"}
 	args := []any{}
@@ -286,7 +48,7 @@ func (s *SQLiteRuntimeStore) ListOperatorEvents(ctx context.Context, opts Operat
 		args = append(args, opts.Source)
 	}
 	if opts.Since != nil {
-		where = append(where, "e.created_at >= ?")
+		where = append(where, "e.created_at > ?")
 		args = append(args, opts.Since.UTC())
 	}
 	if opts.Until != nil {
@@ -296,52 +58,96 @@ func (s *SQLiteRuntimeStore) ListOperatorEvents(ctx context.Context, opts Operat
 	if opts.ExcludeRuntimeLogs {
 		where = append(where, "e.event_name <> 'platform.runtime_log'")
 	}
-	if opts.Filter.DeliveryStatus != "" || opts.Filter.SubscriberID != "" || opts.Filter.SubscriberType != "" || opts.Filter.ReasonCode != "" {
-		where = append(where, `EXISTS (
-			SELECT 1 FROM event_deliveries d
-			WHERE d.event_id = e.event_id
-			  AND (? = '' OR d.status = ?)
-			  AND (? = '' OR d.subscriber_id = ?)
-			  AND (? = '' OR d.subscriber_type = ?)
-			  AND (? = '' OR COALESCE(d.reason_code, '') = ?)
-		)`)
-		args = append(args,
-			opts.Filter.DeliveryStatus, opts.Filter.DeliveryStatus,
-			opts.Filter.SubscriberID, opts.Filter.SubscriberID,
-			opts.Filter.SubscriberType, opts.Filter.SubscriberType,
-			opts.Filter.ReasonCode, opts.Filter.ReasonCode,
-		)
+	if opts.Filter.HasDeadLetter != nil {
+		exists := "EXISTS"
+		if !*opts.Filter.HasDeadLetter {
+			exists = "NOT EXISTS"
+		}
+		where = append(where, exists+" (SELECT 1 FROM dead_letters dl WHERE dl.original_event_id = e.event_id)")
+	}
+	var scanCreatedAt time.Time
+	var scanEventID string
+	if opts.Cursor != "" {
+		cursor, err := decodeObservabilityPositionCursor(opts.Cursor, "event.list")
+		if err != nil || (cursor.Order != "" && cursor.Order != opts.Order) {
+			return OperatorEventListResult{}, ErrInvalidObservabilityCursor
+		}
+		createdAt, err := time.Parse(time.RFC3339Nano, cursor.CreatedAt)
+		if err != nil || strings.TrimSpace(cursor.ID) == "" {
+			return OperatorEventListResult{}, ErrInvalidObservabilityCursor
+		}
+		scanCreatedAt, scanEventID = createdAt.UTC(), cursor.ID
 	}
 	order := "DESC"
-	if strings.EqualFold(opts.Order, "asc") {
+	comparison := "<"
+	if opts.Order == "asc" {
 		order = "ASC"
+		comparison = ">"
 	}
-	args = append(args, opts.Limit)
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT e.event_id
-		FROM events e
-		WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY e.created_at `+order+`, e.event_id `+order+`
-		LIMIT ?
-	`, args...)
-	if err != nil {
-		return OperatorEventListResult{}, fmt.Errorf("query sqlite operator events: %w", err)
-	}
-	defer rows.Close()
 	result := OperatorEventListResult{Events: []OperatorEventFull{}}
-	for rows.Next() {
-		var eventID string
-		if err := rows.Scan(&eventID); err != nil {
-			return OperatorEventListResult{}, fmt.Errorf("scan sqlite operator event id: %w", err)
+	for len(result.Events) <= opts.Limit {
+		pageWhere := append([]string(nil), where...)
+		pageArgs := append([]any(nil), args...)
+		if scanEventID != "" {
+			pageWhere = append(pageWhere, "(e.created_at "+comparison+" ? OR (e.created_at = ? AND e.event_id "+comparison+" ?))")
+			pageArgs = append(pageArgs, scanCreatedAt, scanCreatedAt, scanEventID)
 		}
-		full, err := s.LoadOperatorEvent(ctx, eventID)
+		pageArgs = append(pageArgs, opts.Limit+1)
+		rows, err := s.DB.QueryContext(ctx, `
+			SELECT e.event_id, e.created_at
+			FROM events e
+			WHERE `+strings.Join(pageWhere, " AND ")+`
+			ORDER BY e.created_at `+order+`, e.event_id `+order+`
+			LIMIT ?
+		`, pageArgs...)
 		if err != nil {
-			return OperatorEventListResult{}, err
+			return OperatorEventListResult{}, fmt.Errorf("query sqlite operator events: %w", err)
 		}
-		result.Events = append(result.Events, full)
+		candidates := 0
+		for rows.Next() {
+			var eventID string
+			var createdRaw any
+			if err := rows.Scan(&eventID, &createdRaw); err != nil {
+				rows.Close()
+				return OperatorEventListResult{}, fmt.Errorf("scan sqlite operator event id: %w", err)
+			}
+			createdAt, ok, err := sqliteTimeValue(createdRaw)
+			if err != nil || !ok {
+				rows.Close()
+				if err == nil {
+					err = fmt.Errorf("operator event %s is missing created_at", eventID)
+				}
+				return OperatorEventListResult{}, err
+			}
+			candidates++
+			scanEventID, scanCreatedAt = eventID, createdAt
+			full, err := s.LoadOperatorEvent(ctx, eventID)
+			if err != nil {
+				rows.Close()
+				return OperatorEventListResult{}, err
+			}
+			if operatorEventMatchesListFilter(full, opts.Filter) {
+				result.Events = append(result.Events, full)
+				if len(result.Events) > opts.Limit {
+					break
+				}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return OperatorEventListResult{}, fmt.Errorf("read sqlite operator events: %w", err)
+		}
+		rows.Close()
+		if candidates < opts.Limit+1 || len(result.Events) > opts.Limit {
+			break
+		}
 	}
-	if err := rows.Err(); err != nil {
-		return OperatorEventListResult{}, fmt.Errorf("read sqlite operator events: %w", err)
+	if len(result.Events) > opts.Limit {
+		result.Events = result.Events[:opts.Limit]
+		last := result.Events[len(result.Events)-1]
+		result.NextCursor = encodeObservabilityPositionCursor(observabilityPositionCursor{
+			Kind: "event.list", CreatedAt: last.CreatedAt.UTC().Format(time.RFC3339Nano), ID: last.EventID, Order: opts.Order,
+		})
 	}
 	return result, nil
 }
@@ -489,41 +295,13 @@ func (s *SQLiteRuntimeStore) ListOperatorRuntimeIncidents(ctx context.Context, o
 }
 
 func (s *SQLiteRuntimeStore) sqliteOperatorEventDeliveries(ctx context.Context, eventID string) ([]OperatorEventDelivery, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT delivery_id, subscriber_type, subscriber_id, COALESCE(active_session_id, ''),
-		       status, COALESCE(reason_code, ''), COALESCE(failure, 'null'), COALESCE(retry_count, 0),
-		       created_at, started_at, delivered_at
-		FROM event_deliveries
-		WHERE event_id = ?
-		  AND NOT (
-			subscriber_type = 'node'
-			AND subscriber_id = '__runtime_replay_scope__'
-		  )
-		ORDER BY created_at ASC, delivery_id ASC
-	`, eventID)
+	snapshots, err := s.deliverySnapshotsForEvent(ctx, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite operator event deliveries: %w", err)
 	}
-	defer rows.Close()
-	out := []OperatorEventDelivery{}
-	for rows.Next() {
-		var delivery OperatorEventDelivery
-		var rawFailure any
-		var createdRaw, startedRaw, finishedRaw any
-		if err := rows.Scan(&delivery.DeliveryID, &delivery.SubscriberType, &delivery.SubscriberID, &delivery.SessionID, &delivery.Status, &delivery.ReasonCode, &rawFailure, &delivery.RetryCount, &createdRaw, &startedRaw, &finishedRaw); err != nil {
-			return nil, fmt.Errorf("scan sqlite operator event delivery: %w", err)
-		}
-		delivery.Failure, err = decodeStoredFailure(rawFailure)
-		if err != nil {
-			return nil, fmt.Errorf("decode sqlite operator event delivery failure: %w", err)
-		}
-		delivery.CreatedAt = sqliteTraceTimePtr(createdRaw)
-		delivery.StartedAt = sqliteTraceTimePtr(startedRaw)
-		delivery.FinishedAt = sqliteTraceTimePtr(finishedRaw)
-		out = append(out, delivery)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read sqlite operator event deliveries: %w", err)
+	out := make([]OperatorEventDelivery, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		out = append(out, operatorEventDeliveryFromSnapshot(snapshot))
 	}
 	return out, nil
 }

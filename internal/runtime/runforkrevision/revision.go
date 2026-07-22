@@ -26,6 +26,7 @@ const (
 	FamilyEntityMutations         Family = "entity_mutations"
 	FamilyEntityMetadata          Family = "entity_metadata"
 	FamilyEventDeliveries         Family = "event_deliveries"
+	FamilyCommittedReplayScopes   Family = "committed_replay_scopes"
 	FamilyEventReceipts           Family = "event_receipts"
 	FamilyDeadLetters             Family = "dead_letters"
 	FamilyTimers                  Family = "timers"
@@ -40,6 +41,7 @@ var allFamilies = []Family{
 	FamilyEntityMutations,
 	FamilyEntityMetadata,
 	FamilyEventDeliveries,
+	FamilyCommittedReplayScopes,
 	FamilyEventReceipts,
 	FamilyDeadLetters,
 	FamilyTimers,
@@ -228,6 +230,7 @@ var currentTransactionFamilyQueries = map[Family]string{
 	FamilyEntityMutations:         `SELECT run_id::text AS run_id, 'entity_mutations'::text AS family FROM entity_mutations WHERE xmin::text::bigint = txid_current()`,
 	FamilyEntityMetadata:          `SELECT run_id::text AS run_id, 'entity_metadata'::text AS family FROM entity_state WHERE xmin::text::bigint = txid_current()`,
 	FamilyEventDeliveries:         `SELECT run_id::text AS run_id, 'event_deliveries'::text AS family FROM event_deliveries WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
+	FamilyCommittedReplayScopes:   `SELECT run_id::text AS run_id, 'committed_replay_scopes'::text AS family FROM committed_replay_scopes WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
 	FamilyEventReceipts:           `SELECT e.run_id::text AS run_id, 'event_receipts'::text AS family FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id IS NOT NULL AND r.xmin::text::bigint = txid_current()`,
 	FamilyDeadLetters:             `SELECT e.run_id::text AS run_id, 'dead_letters'::text AS family FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id IS NOT NULL AND d.xmin::text::bigint = txid_current()`,
 	FamilyTimers:                  `SELECT run_id::text AS run_id, 'timers'::text AS family FROM timers WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
@@ -461,6 +464,8 @@ func canonicalProjectionQuery(family Family) string {
 		return canonicalEntityMetadataProjectionSQL
 	case FamilyEventDeliveries:
 		return canonicalEventDeliveriesProjectionSQL
+	case FamilyCommittedReplayScopes:
+		return canonicalCommittedReplayScopesProjectionSQL
 	case FamilyEventReceipts:
 		return canonicalEventReceiptsProjectionSQL
 	case FamilyDeadLetters:
@@ -518,15 +523,30 @@ const canonicalEventDeliveriesProjectionSQL = `
 	SELECT d.delivery_id::text AS fact_key,
 	       jsonb_build_object(
 	           'delivery_id', d.delivery_id, 'event_id', d.event_id,
+	           'run_id', d.run_id, 'route_identity', d.route_identity,
 	           'subscriber_type', d.subscriber_type, 'subscriber_id', d.subscriber_id,
 	           'delivery_target_route', d.delivery_target_route,
 	           'delivery_context', d.delivery_context,
 	           'delivery_payload_projection', d.delivery_payload_projection, 'status', d.status,
-	           'retry_count', d.retry_count, 'reason_code', d.reason_code,
+	           'retry_count', d.retry_count, 'max_retries', d.max_retries,
+	           'next_eligible_at', d.next_eligible_at,
+	           'claim_version', d.claim_version, 'claim_expires_at', d.claim_expires_at,
+	           'reason_code', d.reason_code, 'failure', d.failure,
 	           'active_session_id', d.active_session_id, 'started_at', d.started_at,
-	           'delivered_at', d.delivered_at, 'created_at', d.created_at) AS fact, d.xmin::text::bigint AS source_transaction_id
+	           'settled_at', d.settled_at, 'created_at', d.created_at,
+	           'updated_at', d.updated_at) AS fact, d.xmin::text::bigint AS source_transaction_id
 	FROM event_deliveries d
 	WHERE d.run_id = $1::uuid
+`
+
+const canonicalCommittedReplayScopesProjectionSQL = `
+	SELECT s.event_id::text AS fact_key,
+	       jsonb_build_object(
+	           'event_id', s.event_id, 'run_id', s.run_id, 'scope', s.scope,
+	           'created_at', s.created_at, 'updated_at', s.updated_at) AS fact,
+	       s.xmin::text::bigint AS source_transaction_id
+	FROM committed_replay_scopes s
+	WHERE s.run_id = $1::uuid
 `
 
 const canonicalEventReceiptsProjectionSQL = `

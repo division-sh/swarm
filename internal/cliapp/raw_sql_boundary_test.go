@@ -200,20 +200,16 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "pipeline coordinator owns pipeline SQL dependency injection, not selected capability inference",
 		},
+		"internal/runtime/deliverylifecycle/adapter.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2105,
+			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.selected_runtime_mutation_unit_of_work",
+			Reason:         "the private backend-neutral delivery adapter is the sole executable-delivery SQL owner below the typed lifecycle port",
+		},
 		"internal/runtime/pipeline/engine_adapter.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,
 			Reason:         "pipeline engine adapter uses selected mutation ownership and diagnostic SQL reads under the pipeline owner boundary",
-		},
-		"internal/runtime/pipeline/node_background.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1783,
-			Reason:         "background workflow node carries the pipeline SQL dependency for receipt/delivery unit-of-work ownership",
-		},
-		"internal/runtime/pipeline/node_system_runner.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1783,
-			Reason:         "system node runner delivery receipt/settlement writes are explicit pipeline unit-of-work primitives",
 		},
 		"internal/runtime/pipeline/run_fork_revision_context.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
@@ -261,11 +257,6 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          2007,
 			Reason:         "standing reconciliation, terminalization, and publication admission are the selected-store transaction owner for declaration-owned standing services",
-		},
-		"internal/runtime/pipeline/system_node_receipt_store.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1783,
-			Reason:         "system-node receipt store is the explicit pipeline receipt/delivery SQL owner",
 		},
 		"internal/runtime/pipeline/workflow_entity_type_repair.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,

@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	storepkg "github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -17,7 +18,7 @@ import (
 )
 
 func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
 	seedSQLiteAgentUsageAgent(t, ctx, sqliteStore, "agent-1")
 	seedSQLiteAgentUsageAgent(t, ctx, sqliteStore, "agent-2")
@@ -76,7 +77,7 @@ func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
 }
 
 func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T) {
-	ctx := context.Background()
+	ctx := testAuthorActivityContext(context.Background())
 	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
 	seedSQLiteAgentUsageAgent(t, ctx, sqliteStore, "agent-1")
 
@@ -84,11 +85,10 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
-	deliveryID := uuid.NewString()
 	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	storetest.CommitSemanticEvent(t, ctx, sqliteStore, eventtest.RunCreatingRootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("task.ready"),
 		"agent-usage-fixture",
@@ -99,16 +99,24 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 		"",
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity},
 		now.Add(-time.Minute),
-	))
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, failure, created_at
-		) VALUES (
-			?, ?, ?, 'agent', 'agent-1', 'pending', 1, 'retry_scheduled', ?, ?
-		)
-	`, deliveryID, runID, eventID, mustMarshalTestFailure(t, testFailure("temporary_failure")), now); err != nil {
-		t.Fatalf("seed delivery: %v", err)
+	)
+	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "agent-1"}
+	storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{route}, "subscribed")
+	claimed, err := sqliteStore.ClaimAgentDelivery(ctx, evt, route)
+	if err != nil {
+		t.Fatalf("claim delivery: %v", err)
 	}
+	failure := testFailure("temporary_failure")
+	settled, err := sqliteStore.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
+		Disposition: runtimedelivery.FailureRetry,
+		ReasonCode:  "handler_error",
+		Failure:     failure,
+		RetryBase:   time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("settle delivery failure: %v", err)
+	}
+	deliveryID := settled.DeliveryID
 
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
@@ -129,7 +137,7 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 		t.Fatalf("deliveries = %#v", result["deliveries"])
 	}
 	delivery := asMap(t, deliveries[0])
-	if delivery["delivery_id"] != deliveryID || delivery["event_id"] != eventID || delivery["run_id"] != runID || delivery["entity_id"] != entityID || delivery["status"] != "pending" || delivery["retry_count"] != float64(1) {
+	if delivery["delivery_id"] != deliveryID || delivery["event_id"] != eventID || delivery["run_id"] != runID || delivery["entity_id"] != entityID || delivery["status"] != "failed" || delivery["retry_count"] != float64(1) {
 		t.Fatalf("delivery = %#v", delivery)
 	}
 }

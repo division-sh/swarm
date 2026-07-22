@@ -6,10 +6,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
@@ -492,27 +494,11 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 		return RunDebugReport{}, fmt.Errorf("read event counts: %w", err)
 	}
 
-	deliveryRows, err := s.DB.QueryContext(ctx, `
-		SELECT COALESCE(subscriber_id, ''), COALESCE(status, ''), COUNT(*)
-		FROM event_deliveries
-		WHERE run_id = $1::uuid
-		GROUP BY subscriber_id, status
-		ORDER BY subscriber_id, status
-	`, report.RunID)
+	deliverySnapshots, err := s.deliverySnapshotsForRun(ctx, report.RunID)
 	if err != nil {
 		return RunDebugReport{}, fmt.Errorf("load deliveries: %w", err)
 	}
-	defer deliveryRows.Close()
-	for deliveryRows.Next() {
-		var item RunDebugDeliveryCount
-		if err := deliveryRows.Scan(&item.SubscriberID, &item.Status, &item.Count); err != nil {
-			return RunDebugReport{}, fmt.Errorf("scan deliveries: %w", err)
-		}
-		report.Deliveries = append(report.Deliveries, item)
-	}
-	if err := deliveryRows.Err(); err != nil {
-		return RunDebugReport{}, fmt.Errorf("read deliveries: %w", err)
-	}
+	report.Deliveries = runDebugDeliveryCountsFromSnapshots(deliverySnapshots)
 	failedDeliveries, err := s.loadRunDebugFailureDeliveries(ctx, report.RunID, opts.DeadLetterLimit)
 	if err != nil {
 		return RunDebugReport{}, err
@@ -670,15 +656,11 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 func (s *PostgresStore) loadRunTestQuiescence(ctx context.Context, runID string) (RunTestQuiescence, error) {
 	var out RunTestQuiescence
 	quiescenceArgs := append([]any{runID}, diagnosticDirectReplayEventArgs()...)
-	if err := s.DB.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_deliveries d
-		WHERE d.run_id = $1::uuid
-		  AND NOT (COALESCE(d.subscriber_type, '') = $2 AND COALESCE(d.subscriber_id, '') = $3)
-		  AND `+activeRunQuiescenceDeliveryPredicateSQL("d")+`
-	`, runID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID).Scan(&out.ActiveDeliveries); err != nil {
+	summary, err := s.SummarizeRun(ctx, runID)
+	if err != nil {
 		return RunTestQuiescence{}, fmt.Errorf("load run test quiescence active deliveries: %w", err)
 	}
+	out.ActiveDeliveries = summary.Pending + summary.InProgress + summary.RetryScheduled
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM events e
@@ -727,78 +709,28 @@ func (s *PostgresStore) loadRunDebugFailureDeliveries(ctx context.Context, runID
 	if limit <= 0 {
 		limit = 10
 	}
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT
-			e.event_id::text,
-			COALESCE(e.event_name, ''),
-			COALESCE(e.entity_id::text, ''),
-			d.delivery_id::text,
-			COALESCE(d.subscriber_type, ''),
-			COALESCE(d.subscriber_id, ''),
-			COALESCE(d.active_session_id::text, ''),
-			COALESCE(d.status, ''),
-			COALESCE(d.reason_code, ''),
-			COALESCE(d.failure, 'null'::jsonb),
-			COALESCE(d.retry_count, 0),
-			d.created_at,
-			d.started_at,
-			d.delivered_at
-		FROM event_deliveries d
-		INNER JOIN events e ON e.event_id = d.event_id
-		WHERE d.run_id = $1::uuid
-		  AND NOT (COALESCE(d.subscriber_type, '') = $3 AND COALESCE(d.subscriber_id, '') = $4)
-		  AND COALESCE(d.status, '') IN ('failed', 'dead_letter')
-		ORDER BY COALESCE(d.delivered_at, d.started_at, d.created_at, e.created_at) DESC, d.delivery_id::text DESC
-		LIMIT $2
-	`, runID, limit, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID)
+	snapshots, err := s.deliverySnapshotsForRun(ctx, runID)
 	if err != nil {
 		return nil, fmt.Errorf("load run failed deliveries: %w", err)
 	}
-	defer rows.Close()
-	out := []RunDebugFailureDelivery{}
-	for rows.Next() {
-		var item RunDebugFailureDelivery
-		var rawFailure []byte
-		var createdAt, startedAt, finishedAt sql.NullTime
-		if err := rows.Scan(
-			&item.EventID,
-			&item.EventName,
-			&item.EntityID,
-			&item.DeliveryID,
-			&item.SubscriberType,
-			&item.SubscriberID,
-			&item.SessionID,
-			&item.Status,
-			&item.ReasonCode,
-			&rawFailure,
-			&item.RetryCount,
-			&createdAt,
-			&startedAt,
-			&finishedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan run failed delivery: %w", err)
-		}
-		item.Failure, err = decodeStoredFailure(rawFailure)
-		if err != nil {
-			return nil, fmt.Errorf("decode run failed delivery failure: %w", err)
-		}
-		item.CreatedAt = nullTimePtr(createdAt)
-		item.StartedAt = nullTimePtr(startedAt)
-		item.FinishedAt = nullTimePtr(finishedAt)
-		normalizeRunDebugFailureDelivery(&item)
-		if item.Status == "dead_letter" {
-			deadLetters, err := s.operatorObservabilityReadSurface().loadOperatorEventDeadLetters(ctx, item.EventID)
+	return runDebugFailuresFromSnapshots(snapshots, limit,
+		func(eventID string) (deliveryLifecycleEventMetadata, error) {
+			record, found, err := loadPostgresEventIdentity(ctx, s.DB, eventID)
 			if err != nil {
-				return nil, err
+				return deliveryLifecycleEventMetadata{}, err
 			}
-			item.DeadLetters = deadLetters
-		}
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read run failed deliveries: %w", err)
-	}
-	return out, nil
+			if !found {
+				return deliveryLifecycleEventMetadata{}, fmt.Errorf("delivery event %s not found", eventID)
+			}
+			admitted, err := decodeEventRecord(record)
+			if err != nil {
+				return deliveryLifecycleEventMetadata{}, err
+			}
+			event := admitted.Event()
+			return deliveryLifecycleEventMetadata{EventName: string(event.Type()), RunID: event.RunID(), EntityID: event.EntityID()}, nil
+		}, func(eventID string) ([]OperatorDeadLetterRecord, error) {
+			return s.operatorObservabilityReadSurface().loadOperatorEventDeadLetters(ctx, eventID)
+		})
 }
 
 func normalizeRunDebugFailureDelivery(item *RunDebugFailureDelivery) {
@@ -807,25 +739,89 @@ func normalizeRunDebugFailureDelivery(item *RunDebugFailureDelivery) {
 	}
 	item.Status = strings.TrimSpace(item.Status)
 	item.ReasonCode = strings.TrimSpace(item.ReasonCode)
-	item.RetryEligible = OperatorDeliveryRetryEligible(item.Status)
-	item.Terminal = OperatorDeliveryTerminal(item.Status)
+}
+
+func runDebugDeliveryCountsFromSnapshots(snapshots []runtimedelivery.Snapshot) []RunDebugDeliveryCount {
+	counts := map[string]int{}
+	for _, snapshot := range snapshots {
+		counts[snapshot.SubscriberID+"\x00"+string(snapshot.Status)]++
+	}
+	out := make([]RunDebugDeliveryCount, 0, len(counts))
+	for key, count := range counts {
+		parts := strings.SplitN(key, "\x00", 2)
+		out = append(out, RunDebugDeliveryCount{SubscriberID: parts[0], Status: parts[1], Count: count})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].SubscriberID != out[j].SubscriberID {
+			return out[i].SubscriberID < out[j].SubscriberID
+		}
+		return out[i].Status < out[j].Status
+	})
+	return out
+}
+
+func runDebugFailuresFromSnapshots(
+	snapshots []runtimedelivery.Snapshot,
+	limit int,
+	loadEvent func(string) (deliveryLifecycleEventMetadata, error),
+	loadDeadLetters func(string) ([]OperatorDeadLetterRecord, error),
+) ([]RunDebugFailureDelivery, error) {
+	failed := make([]runtimedelivery.Snapshot, 0)
+	for _, snapshot := range snapshots {
+		if snapshot.Status == runtimedelivery.StatusFailed || snapshot.Status == runtimedelivery.StatusDeadLetter {
+			failed = append(failed, snapshot)
+		}
+	}
+	sort.Slice(failed, func(i, j int) bool {
+		left, right := deliveryDiagnosticOccurredAt(failed[i]), deliveryDiagnosticOccurredAt(failed[j])
+		if !left.Equal(right) {
+			return left.After(right)
+		}
+		return failed[i].DeliveryID > failed[j].DeliveryID
+	})
+	if len(failed) > limit {
+		failed = failed[:limit]
+	}
+	out := make([]RunDebugFailureDelivery, 0, len(failed))
+	for _, snapshot := range failed {
+		metadata, err := loadEvent(snapshot.EventID)
+		if err != nil {
+			return nil, err
+		}
+		item := RunDebugFailureDelivery{
+			EventID: snapshot.EventID, EventName: metadata.EventName, EntityID: metadata.EntityID,
+			DeliveryID: snapshot.DeliveryID, SubscriberType: string(snapshot.SubscriberClass),
+			SubscriberID: snapshot.SubscriberID, SessionID: snapshot.ActiveSessionID,
+			Status: string(snapshot.Status), ReasonCode: snapshot.ReasonCode,
+			Failure: runtimefailures.CloneEnvelope(snapshot.Failure), RetryCount: snapshot.RetryCount,
+			RetryEligible: snapshot.RetryEligible, Terminal: snapshot.Terminal(),
+		}
+		if !snapshot.CreatedAt.IsZero() {
+			at := snapshot.CreatedAt
+			item.CreatedAt = &at
+		}
+		if !snapshot.StartedAt.IsZero() {
+			at := snapshot.StartedAt
+			item.StartedAt = &at
+		}
+		if !snapshot.SettledAt.IsZero() {
+			at := snapshot.SettledAt
+			item.FinishedAt = &at
+		}
+		if snapshot.Status == runtimedelivery.StatusDeadLetter {
+			item.DeadLetters, err = loadDeadLetters(snapshot.EventID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		out = append(out, item)
+	}
+	return out, nil
 }
 
 func (s *PostgresStore) LoadRunDebugTrace(ctx context.Context, runID string, opts RunDebugTraceQueryOptions) ([]RunDebugTraceRow, error) {
 	rows, _, err := s.LoadRunDebugTracePage(ctx, runID, opts)
 	return rows, err
-}
-
-func runDebugTraceWatermarkWhere(operator string, argIndex int) string {
-	return fmt.Sprintf(`
-			  AND GREATEST(
-				e.created_at,
-				COALESCE(d.created_at, '-infinity'::timestamptz),
-				COALESCE(d.started_at, '-infinity'::timestamptz),
-				COALESCE(d.delivered_at, '-infinity'::timestamptz),
-				COALESCE(sess.updated_at, '-infinity'::timestamptz),
-				COALESCE(t.created_at, '-infinity'::timestamptz)
-			  ) %s $%d::timestamptz`, operator, argIndex)
 }
 
 func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string, opts RunDebugTraceQueryOptions) ([]RunDebugTraceRow, string, error) {
@@ -851,243 +847,7 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 		return nil, "", ErrRunNotFound
 	}
 
-	sessionSources := runDebugTraceSessionSources()
-	replyContextSelect := "COALESCE(d.delivery_context->'reply'->>'id', '')"
-	args := []any{runID}
-	cursorWhere := ""
-	if opts.Cursor != "" {
-		cursor, err := decodeRunDebugTraceCursor(opts.Cursor)
-		if err != nil {
-			return nil, "", err
-		}
-		args = append(args,
-			cursor.EventCreatedAt,
-			cursor.EventID,
-			nullableCursorTimestamp(cursor.DeliveryCreatedAt),
-			cursor.DeliveryID,
-			nullableCursorTimestamp(cursor.TurnCreatedAt),
-			cursor.TurnID,
-		)
-		cursorWhere = fmt.Sprintf(`
-		  AND (
-			e.created_at > $%d::timestamptz
-			OR (e.created_at = $%d::timestamptz AND e.event_id::text > $%d)
-			OR (e.created_at = $%d::timestamptz AND e.event_id::text = $%d AND COALESCE(d.created_at, '-infinity'::timestamptz) > $%d::timestamptz)
-			OR (e.created_at = $%d::timestamptz AND e.event_id::text = $%d AND COALESCE(d.created_at, '-infinity'::timestamptz) = $%d::timestamptz AND COALESCE(d.delivery_id::text, '') > $%d)
-			OR (e.created_at = $%d::timestamptz AND e.event_id::text = $%d AND COALESCE(d.created_at, '-infinity'::timestamptz) = $%d::timestamptz AND COALESCE(d.delivery_id::text, '') = $%d AND COALESCE(t.created_at, '-infinity'::timestamptz) > $%d::timestamptz)
-			OR (e.created_at = $%d::timestamptz AND e.event_id::text = $%d AND COALESCE(d.created_at, '-infinity'::timestamptz) = $%d::timestamptz AND COALESCE(d.delivery_id::text, '') = $%d AND COALESCE(t.created_at, '-infinity'::timestamptz) = $%d::timestamptz AND COALESCE(t.turn_id::text, '') > $%d)
-		  )`,
-			2, 2, 3,
-			2, 3, 4,
-			2, 3, 4, 5,
-			2, 3, 4, 5, 6,
-			2, 3, 4, 5, 6, 7,
-		)
-	}
-	sinceWhere := ""
-	if opts.Since != nil {
-		args = append(args, opts.Since.UTC())
-		sinceWhere = runDebugTraceWatermarkWhere(">", len(args))
-	}
-	untilWhere := ""
-	if opts.Until != nil {
-		args = append(args, opts.Until.UTC())
-		untilWhere = runDebugTraceWatermarkWhere("<=", len(args))
-	}
-	filterWhere := ""
-	addTextArrayFilter := func(values []string, expression string) {
-		if len(values) == 0 {
-			return
-		}
-		args = append(args, pq.Array(values))
-		filterWhere += fmt.Sprintf(`
-			  AND %s = ANY($%d::text[])`, expression, len(args))
-	}
-	addTextArrayFilter(opts.Filter.EventNames, "e.event_name")
-	addTextArrayFilter(opts.Filter.EntityIDs, "e.entity_id::text")
-	addTextArrayFilter(opts.Filter.DeliveryStatuses, "d.status")
-	addTextArrayFilter(opts.Filter.SubscriberIDs, "d.subscriber_id")
-	addTextArrayFilter(opts.Filter.SubscriberTypes, "d.subscriber_type")
-	if opts.ExcludeRuntimeLogs {
-		filterWhere += `
-			  AND e.event_name <> 'platform.runtime_log'`
-	}
-	args = append(args, opts.Limit+1)
-	limitArg := len(args)
-	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
-		WITH trace_sessions AS (
-			%s
-		)
-		SELECT
-			e.event_id::text,
-			COALESCE(e.event_name, ''),
-			COALESCE(e.source_event_id::text, ''),
-			COALESCE(e.entity_id::text, ''),
-			COALESCE(e.produced_by, ''),
-			COALESCE(e.produced_by_type, ''),
-			e.created_at,
-			COALESCE(d.delivery_id::text, ''),
-			COALESCE(d.subscriber_type, ''),
-				COALESCE(d.subscriber_id, ''),
-			COALESCE(d.status, ''),
-			COALESCE(d.reason_code, ''),
-			%s,
-			COALESCE(d.delivery_payload_projection, '{}'::jsonb),
-			COALESCE(d.failure, 'null'::jsonb),
-				COALESCE(d.retry_count, 0),
-				COALESCE(d.active_session_id::text, ''),
-				d.created_at,
-			d.started_at,
-			d.delivered_at,
-			COALESCE(sess.session_id::text, ''),
-			COALESCE(sess.session_kind, ''),
-			COALESCE(sess.memory_enabled, false),
-			COALESCE(sess.memory_source, ''),
-			COALESCE(sess.status, ''),
-			sess.updated_at,
-			COALESCE(t.turn_id::text, ''),
-			COALESCE(t.trigger_event_id::text, ''),
-			COALESCE(t.trigger_event_type, ''),
-			COALESCE(t.flow_instance, ''),
-			COALESCE(t.memory_enabled, false),
-			COALESCE(t.memory_source, ''),
-			COALESCE(t.entity_id::text, ''),
-			COALESCE(t.task_id, ''),
-			COALESCE(t.parse_ok, false),
-			COALESCE(t.retry_count, 0),
-			COALESCE(t.failure, 'null'::jsonb),
-			t.created_at
-		FROM events e
-		LEFT JOIN event_deliveries d
-			ON d.event_id = e.event_id
-		   AND NOT (
-				d.subscriber_type = 'node'
-				AND d.subscriber_id = '__runtime_replay_scope__'
-		   )
-		LEFT JOIN agent_turns t
-			ON t.run_id = e.run_id
-		   AND t.trigger_event_id = e.event_id
-		   AND (
-				d.delivery_id IS NULL
-				OR (
-					COALESCE(d.subscriber_type, '') = 'agent'
-					AND COALESCE(d.subscriber_id, '') <> ''
-					AND t.agent_id = d.subscriber_id
-				)
-		   )
-		LEFT JOIN trace_sessions sess
-			ON sess.session_id = COALESCE(t.session_id, d.active_session_id)
-		   AND (
-				sess.run_id = e.run_id
-				OR sess.run_id IS NULL
-		   )
-			WHERE e.run_id = $1::uuid
-			%s
-			%s
-			%s
-			%s
-			ORDER BY
-				e.created_at ASC,
-				e.event_id ASC,
-			d.created_at ASC NULLS FIRST,
-			d.delivery_id ASC NULLS FIRST,
-			t.created_at ASC NULLS FIRST,
-			t.turn_id ASC NULLS FIRST
-		LIMIT $%d
-		`, sessionSources, replyContextSelect, cursorWhere, sinceWhere, untilWhere, filterWhere, limitArg), args...)
-	if err != nil {
-		return nil, "", fmt.Errorf("load run debug trace: %w", err)
-	}
-	defer rows.Close()
-
-	out := make([]RunDebugTraceRow, 0, opts.Limit+1)
-	for rows.Next() {
-		var (
-			item                  RunDebugTraceRow
-			deliveryCreatedAt     sql.NullTime
-			deliveryStartedAt     sql.NullTime
-			deliveryDeliveredAt   sql.NullTime
-			sessionUpdatedAt      sql.NullTime
-			turnCreatedAt         sql.NullTime
-			rawDeliveryProjection []byte
-			rawDeliveryFailure    []byte
-			rawTurnFailure        []byte
-		)
-		if err := rows.Scan(
-			&item.EventID,
-			&item.EventName,
-			&item.SourceEventID,
-			&item.EntityID,
-			&item.EventSource,
-			&item.EventSourceType,
-			&item.EventCreatedAt,
-			&item.DeliveryID,
-			&item.SubscriberType,
-			&item.SubscriberID,
-			&item.DeliveryStatus,
-			&item.DeliveryReasonCode,
-			&item.ReplyContextID,
-			&rawDeliveryProjection,
-			&rawDeliveryFailure,
-			&item.DeliveryRetryCount,
-			&item.ActiveSessionID,
-			&deliveryCreatedAt,
-			&deliveryStartedAt,
-			&deliveryDeliveredAt,
-			&item.SessionID,
-			&item.SessionKind,
-			&item.SessionMemory,
-			&item.SessionMemorySource,
-			&item.SessionStatus,
-			&sessionUpdatedAt,
-			&item.TurnID,
-			&item.TurnTriggerEventID,
-			&item.TurnTriggerEventType,
-			&item.TurnFlowInstance,
-			&item.TurnMemory,
-			&item.TurnMemorySource,
-			&item.TurnEntityID,
-			&item.TurnTaskID,
-			&item.TurnParseOK,
-			&item.TurnRetryCount,
-			&rawTurnFailure,
-			&turnCreatedAt,
-		); err != nil {
-			return nil, "", fmt.Errorf("scan run debug trace: %w", err)
-		}
-		projection, err := decodeDeliveryPayloadProjectionJSON(rawDeliveryProjection)
-		if err != nil {
-			return nil, "", fmt.Errorf("decode run trace delivery payload projection (%s): %w", item.DeliveryID, err)
-		}
-		if !projection.Empty() {
-			item.DeliveryPayloadProjection = &projection
-		}
-		item.DeliveryFailure, err = decodeStoredFailure(rawDeliveryFailure)
-		if err != nil {
-			return nil, "", fmt.Errorf("decode run trace delivery failure: %w", err)
-		}
-		item.TurnFailure, err = decodeStoredFailure(rawTurnFailure)
-		if err != nil {
-			return nil, "", fmt.Errorf("decode run trace turn failure: %w", err)
-		}
-		item.DeliveryCreatedAt = nullableTimePtr(deliveryCreatedAt)
-		item.DeliveryStartedAt = nullableTimePtr(deliveryStartedAt)
-		item.DeliveryDeliveredAt = nullableTimePtr(deliveryDeliveredAt)
-		item.DeliveryRetryEligible = OperatorDeliveryRetryEligible(item.DeliveryStatus)
-		item.DeliveryTerminal = OperatorDeliveryTerminal(item.DeliveryStatus)
-		item.SessionUpdatedAt = nullableTimePtr(sessionUpdatedAt)
-		item.TurnCreatedAt = nullableTimePtr(turnCreatedAt)
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, "", fmt.Errorf("read run debug trace: %w", err)
-	}
-	nextCursor := ""
-	if len(out) > opts.Limit {
-		out = out[:opts.Limit]
-		nextCursor = encodeRunDebugTraceCursor(out[len(out)-1])
-	}
-	return out, nextCursor, nil
+	return s.loadProjectedRunDebugTrace(ctx, runID, opts)
 }
 
 type runDebugTraceCursor struct {

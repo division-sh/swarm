@@ -59,8 +59,9 @@ func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *tes
 	)
 	seedTemplateFlowPilotPipelineEvent(t, db, ctx, evt)
 	seedTemplateFlowPilotPipelineNodeDelivery(t, db, ctx, evt.ID(), "account-node", target)
+	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "account-node", Target: target}
 
-	handled, err := pc.dispatchWorkflowNodeEventResult(ctx, evt)
+	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
 	if err != nil {
 		t.Fatalf("dispatchWorkflowNodeEventResult: %v", err)
 	}
@@ -94,6 +95,7 @@ func newTemplateFlowPilotPipelineCoordinator(t *testing.T, db *sql.DB, bundle *r
 		t.Fatalf("LoadWorkflowNodes: %v", err)
 	}
 	workflowStore := NewWorkflowInstanceStore(db)
+	deliveryStore := newPipelineTestDeliveryOwnerForDB(t, db)
 	pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{
 			bundle:         bundle,
@@ -103,6 +105,7 @@ func newTemplateFlowPilotPipelineCoordinator(t *testing.T, db *sql.DB, bundle *r
 			actionRegistry: NewContractActionRegistry(source),
 		},
 		WorkflowStore: workflowStore,
+		DeliveryStore: deliveryStore,
 	})
 	return pc, workflowStore
 }
@@ -114,19 +117,7 @@ func seedTemplateFlowPilotPipelineEvent(t *testing.T, db *sql.DB, ctx context.Co
 
 func seedTemplateFlowPilotPipelineNodeDelivery(t *testing.T, db *sql.DB, ctx context.Context, eventID, nodeID string, target events.RouteIdentity) {
 	t.Helper()
-	targetRaw, err := json.Marshal(target.Normalized())
-	if err != nil {
-		t.Fatalf("marshal delivery target route: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, delivery_target_route, status, retry_count, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'node', $3, $4::jsonb, 'pending', 0, now()
-		)
-	`, testPipelineRunID, eventID, nodeID, string(targetRaw)); err != nil {
-		t.Fatalf("seed template-flow pilot node delivery: %v", err)
-	}
+	seedPipelineTestNodeDelivery(t, ctx, db, eventID, nodeID, target)
 }
 
 func assertTemplateFlowPilotPipelineDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, want string) {

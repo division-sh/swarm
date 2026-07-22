@@ -2,16 +2,16 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/lib/pq"
 )
 
 const (
@@ -234,178 +234,123 @@ func (s *SQLiteRuntimeStore) ensureSQLiteAgentDeliveryLifecycleAgentExists(ctx c
 }
 
 func (r *OperatorAgentConversationReadSurface) listAgentDeliveryLifecycleRows(ctx context.Context, agentID string, opts OperatorAgentDeliveryLifecycleOptions) ([]OperatorAgentDeliveryLifecycleRow, string, error) {
-	where := []string{"d.subscriber_type = 'agent'", "d.subscriber_id = $1"}
-	args := []any{agentID}
-	if opts.RunID != "" {
-		args = append(args, opts.RunID)
-		where = append(where, fmt.Sprintf("COALESCE(d.run_id::text, e.run_id::text, '') = $%d", len(args)))
+	reader, ok := r.owner.(interface {
+		deliverySnapshotsForAgent(context.Context, string, time.Time) ([]runtimedelivery.Snapshot, error)
+	})
+	if !ok {
+		return nil, "", fmt.Errorf("operator agent delivery lifecycle requires canonical delivery snapshots")
 	}
-	if len(opts.Statuses) > 0 {
-		args = append(args, pq.Array(opts.Statuses))
-		where = append(where, fmt.Sprintf("d.status = ANY($%d::text[])", len(args)))
-	}
-	if opts.Cursor != "" {
-		createdAt, deliveryID, err := decodeAgentDeliveryLifecycleCursorPosition(opts.Cursor)
-		if err != nil {
-			return nil, "", err
-		}
-		args = append(args, createdAt.UTC(), deliveryID)
-		where = append(where, fmt.Sprintf("(d.created_at < $%d OR (d.created_at = $%d AND d.delivery_id::text < $%d))", len(args)-1, len(args)-1, len(args)))
-	}
-	args = append(args, opts.Limit+1)
-	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT
-			d.delivery_id::text,
-			d.event_id::text,
-			COALESCE(e.event_name, ''),
-			COALESCE(d.run_id::text, e.run_id::text, ''),
-			COALESCE(e.entity_id::text, ''),
-			COALESCE(d.status, ''),
-			COALESCE(d.retry_count, 0),
-			COALESCE(d.reason_code, ''),
-			COALESCE(d.failure, 'null'::jsonb),
-			d.created_at,
-			d.started_at,
-			d.delivered_at
-		FROM event_deliveries d
-		INNER JOIN events e ON e.event_id = d.event_id
-		WHERE %s
-		ORDER BY d.created_at DESC, d.delivery_id::text DESC
-		LIMIT $%d
-	`, strings.Join(where, " AND "), len(args)), args...)
+	snapshots, err := reader.deliverySnapshotsForAgent(ctx, agentID, time.Unix(0, 0).UTC())
 	if err != nil {
 		return nil, "", fmt.Errorf("list agent delivery lifecycle rows: %w", err)
 	}
-	defer rows.Close()
-
-	out := []OperatorAgentDeliveryLifecycleRow{}
-	for rows.Next() {
-		var (
-			item        OperatorAgentDeliveryLifecycleRow
-			rawFailure  []byte
-			startedAt   sql.NullTime
-			deliveredAt sql.NullTime
-		)
-		if err := rows.Scan(
-			&item.DeliveryID,
-			&item.EventID,
-			&item.EventName,
-			&item.RunID,
-			&item.EntityID,
-			&item.Status,
-			&item.RetryCount,
-			&item.ReasonCode,
-			&rawFailure,
-			&item.DeliveryCreatedAt,
-			&startedAt,
-			&deliveredAt,
-		); err != nil {
-			return nil, "", fmt.Errorf("scan agent delivery lifecycle row: %w", err)
-		}
-		item.Failure, err = decodeStoredFailure(rawFailure)
+	return deliveryLifecycleRowsFromSnapshots(snapshots, opts, func(eventID string) (deliveryLifecycleEventMetadata, error) {
+		record, found, err := loadPostgresEventIdentity(ctx, r.db, eventID)
 		if err != nil {
-			return nil, "", fmt.Errorf("decode agent delivery lifecycle failure: %w", err)
+			return deliveryLifecycleEventMetadata{}, err
 		}
-		item.DeliveryStartedAt = nullableTimePtr(startedAt)
-		item.DeliveryDeliveredAt = nullableTimePtr(deliveredAt)
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, "", fmt.Errorf("read agent delivery lifecycle rows: %w", err)
-	}
-	return trimAgentDeliveryLifecyclePage(out, opts.Limit), agentDeliveryLifecycleNextCursor(out, opts.Limit), nil
+		if !found {
+			return deliveryLifecycleEventMetadata{}, fmt.Errorf("delivery event %s not found", eventID)
+		}
+		admitted, err := decodeEventRecord(record)
+		if err != nil {
+			return deliveryLifecycleEventMetadata{}, err
+		}
+		event := admitted.Event()
+		return deliveryLifecycleEventMetadata{EventName: string(event.Type()), RunID: event.RunID(), EntityID: event.EntityID()}, nil
+	})
 }
 
 func (s *SQLiteRuntimeStore) listSQLiteAgentDeliveryLifecycleRows(ctx context.Context, agentID string, opts OperatorAgentDeliveryLifecycleOptions) ([]OperatorAgentDeliveryLifecycleRow, string, error) {
-	where := []string{"d.subscriber_type = 'agent'", "d.subscriber_id = ?"}
-	args := []any{agentID}
-	if opts.RunID != "" {
-		where = append(where, "COALESCE(d.run_id, e.run_id, '') = ?")
-		args = append(args, opts.RunID)
-	}
-	if len(opts.Statuses) > 0 {
-		where = append(where, "d.status IN ("+sqlitePlaceholders(len(opts.Statuses))+")")
-		for _, status := range opts.Statuses {
-			args = append(args, status)
-		}
-	}
-	if opts.Cursor != "" {
-		createdAt, deliveryID, err := decodeAgentDeliveryLifecycleCursorPosition(opts.Cursor)
-		if err != nil {
-			return nil, "", err
-		}
-		where = append(where, "(d.created_at < ? OR (d.created_at = ? AND d.delivery_id < ?))")
-		args = append(args, createdAt.UTC(), createdAt.UTC(), deliveryID)
-	}
-	args = append(args, opts.Limit+1)
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT
-			d.delivery_id,
-			d.event_id,
-			COALESCE(e.event_name, ''),
-			COALESCE(d.run_id, e.run_id, ''),
-			COALESCE(e.entity_id, ''),
-			COALESCE(d.status, ''),
-			COALESCE(d.retry_count, 0),
-			COALESCE(d.reason_code, ''),
-			COALESCE(d.failure, 'null'),
-			d.created_at,
-			d.started_at,
-			d.delivered_at
-		FROM event_deliveries d
-		INNER JOIN events e ON e.event_id = d.event_id
-		WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY d.created_at DESC, d.delivery_id DESC
-		LIMIT ?
-	`, args...)
+	snapshots, err := s.deliverySnapshotsForAgent(ctx, agentID, time.Unix(0, 0).UTC())
 	if err != nil {
 		return nil, "", fmt.Errorf("list sqlite agent delivery lifecycle rows: %w", err)
 	}
-	defer rows.Close()
+	return deliveryLifecycleRowsFromSnapshots(snapshots, opts, func(eventID string) (deliveryLifecycleEventMetadata, error) {
+		record, found, err := loadSQLiteEventIdentity(ctx, s.DB, eventID)
+		if err != nil {
+			return deliveryLifecycleEventMetadata{}, err
+		}
+		if !found {
+			return deliveryLifecycleEventMetadata{}, fmt.Errorf("delivery event %s not found", eventID)
+		}
+		admitted, err := decodeEventRecord(record)
+		if err != nil {
+			return deliveryLifecycleEventMetadata{}, err
+		}
+		event := admitted.Event()
+		return deliveryLifecycleEventMetadata{EventName: string(event.Type()), RunID: event.RunID(), EntityID: event.EntityID()}, nil
+	})
+}
 
-	out := []OperatorAgentDeliveryLifecycleRow{}
-	for rows.Next() {
-		var (
-			item                                 OperatorAgentDeliveryLifecycleRow
-			rawFailure                           any
-			createdRaw, startedRaw, deliveredRaw any
-		)
-		if err := rows.Scan(
-			&item.DeliveryID,
-			&item.EventID,
-			&item.EventName,
-			&item.RunID,
-			&item.EntityID,
-			&item.Status,
-			&item.RetryCount,
-			&item.ReasonCode,
-			&rawFailure,
-			&createdRaw,
-			&startedRaw,
-			&deliveredRaw,
-		); err != nil {
-			return nil, "", fmt.Errorf("scan sqlite agent delivery lifecycle row: %w", err)
-		}
-		item.Failure, err = decodeStoredFailure(rawFailure)
-		if err != nil {
-			return nil, "", fmt.Errorf("decode sqlite agent delivery lifecycle failure: %w", err)
-		}
-		createdAt, ok, err := sqliteTimeValue(createdRaw)
-		if err != nil {
-			return nil, "", fmt.Errorf("scan sqlite agent delivery lifecycle created_at: %w", err)
-		}
-		if !ok {
-			return nil, "", fmt.Errorf("agent delivery lifecycle owner found delivery %s without created_at", item.DeliveryID)
-		}
-		item.DeliveryCreatedAt = createdAt
-		item.DeliveryStartedAt = sqliteTraceTimePtr(startedRaw)
-		item.DeliveryDeliveredAt = sqliteTraceTimePtr(deliveredRaw)
-		out = append(out, item)
+type deliveryLifecycleEventMetadata struct {
+	EventName string
+	RunID     string
+	EntityID  string
+}
+
+func deliveryLifecycleRowsFromSnapshots(
+	snapshots []runtimedelivery.Snapshot,
+	opts OperatorAgentDeliveryLifecycleOptions,
+	loadEvent func(string) (deliveryLifecycleEventMetadata, error),
+) ([]OperatorAgentDeliveryLifecycleRow, string, error) {
+	statuses := make(map[string]struct{}, len(opts.Statuses))
+	for _, status := range opts.Statuses {
+		statuses[status] = struct{}{}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, "", fmt.Errorf("read sqlite agent delivery lifecycle rows: %w", err)
+	var cursorAt time.Time
+	var cursorID string
+	if opts.Cursor != "" {
+		var err error
+		cursorAt, cursorID, err = decodeAgentDeliveryLifecycleCursorPosition(opts.Cursor)
+		if err != nil {
+			return nil, "", err
+		}
 	}
-	return trimAgentDeliveryLifecyclePage(out, opts.Limit), agentDeliveryLifecycleNextCursor(out, opts.Limit), nil
+	rows := make([]OperatorAgentDeliveryLifecycleRow, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		if opts.RunID != "" && snapshot.RunID != opts.RunID {
+			continue
+		}
+		if len(statuses) > 0 {
+			if _, ok := statuses[string(snapshot.Status)]; !ok {
+				continue
+			}
+		}
+		if !cursorAt.IsZero() && (snapshot.CreatedAt.After(cursorAt) || (snapshot.CreatedAt.Equal(cursorAt) && snapshot.DeliveryID >= cursorID)) {
+			continue
+		}
+		metadata, err := loadEvent(snapshot.EventID)
+		if err != nil {
+			return nil, "", err
+		}
+		runID := snapshot.RunID
+		if runID == "" {
+			runID = metadata.RunID
+		}
+		row := OperatorAgentDeliveryLifecycleRow{
+			DeliveryID: snapshot.DeliveryID, EventID: snapshot.EventID, EventName: metadata.EventName,
+			RunID: runID, EntityID: metadata.EntityID, Status: string(snapshot.Status),
+			RetryCount: snapshot.RetryCount, ReasonCode: snapshot.ReasonCode,
+			Failure: runtimefailures.CloneEnvelope(snapshot.Failure), DeliveryCreatedAt: snapshot.CreatedAt,
+		}
+		if !snapshot.StartedAt.IsZero() {
+			started := snapshot.StartedAt
+			row.DeliveryStartedAt = &started
+		}
+		if !snapshot.SettledAt.IsZero() {
+			settled := snapshot.SettledAt
+			row.DeliveryDeliveredAt = &settled
+		}
+		rows = append(rows, row)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if !rows[i].DeliveryCreatedAt.Equal(rows[j].DeliveryCreatedAt) {
+			return rows[i].DeliveryCreatedAt.After(rows[j].DeliveryCreatedAt)
+		}
+		return rows[i].DeliveryID > rows[j].DeliveryID
+	})
+	return trimAgentDeliveryLifecyclePage(rows, opts.Limit), agentDeliveryLifecycleNextCursor(rows, opts.Limit), nil
 }
 
 func trimAgentDeliveryLifecyclePage(rows []OperatorAgentDeliveryLifecycleRow, limit int) []OperatorAgentDeliveryLifecycleRow {

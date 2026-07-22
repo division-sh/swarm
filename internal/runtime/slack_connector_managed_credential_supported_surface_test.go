@@ -21,6 +21,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -50,6 +51,7 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 			ctx:           ctx,
 			db:            db,
 			eventStore:    pg,
+			deliveryStore: pg,
 			inboundStore:  pg,
 			workflowStore: workflowStore,
 			runID:         runID,
@@ -76,6 +78,7 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 			ctx:           ctx,
 			db:            sqliteStore.DB,
 			eventStore:    sqliteStore,
+			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
 			workflowStore: workflowStore,
 			runID:         runID,
@@ -91,6 +94,7 @@ type slackManagedConnectorBackend struct {
 	ctx           context.Context
 	db            *sql.DB
 	eventStore    runtimebus.EventStore
+	deliveryStore runtimedelivery.Store
 	inboundStore  runtimepkg.InboundPersistence
 	workflowStore *runtimepipeline.WorkflowInstanceStore
 	runID         string
@@ -490,23 +494,10 @@ func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackMana
 		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
 		Module:             module,
 		WorkflowStore:      backend.workflowStore,
+		DeliveryStore:      backend.deliveryStore,
 		ManagedCredentials: managedStore,
 	})
-	subscribed := make(chan struct{}, 1)
-	pc.SetTestSubscribeHook(func() {
-		select {
-		case subscribed <- struct{}{}:
-		default:
-		}
-	})
-	runCtx, cancel := context.WithCancel(backend.ctx)
-	t.Cleanup(cancel)
-	go pc.Run(runCtx)
-	select {
-	case <-subscribed:
-	case <-time.After(connectorSupportedSurfaceAsyncTimeout):
-		t.Fatal("pipeline coordinator did not subscribe")
-	}
+	startConfiguredChannelActivityNode(t, backend.ctx, pc, bus, backend.db)
 	return bus, pc
 }
 

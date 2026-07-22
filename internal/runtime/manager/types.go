@@ -12,7 +12,9 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -171,19 +173,8 @@ type AgentLifecycleDiagnosticPersistence interface {
 	MarkAgentLifecycleDiagnosticProjected(context.Context, string, time.Time) error
 }
 
-type ReceiptPersistence interface {
-	UpsertEventReceipt(ctx context.Context, eventID, agentID string, status ReceiptStatus, failure *runtimefailures.Envelope) error
-}
-
-type PendingEventPersistence interface {
-	ListPendingEventsForAgent(ctx context.Context, agentID string, since time.Time, limit int) ([]events.Event, error)
-	ListPendingSubscribedEvents(ctx context.Context, agentID string, subscriptions []events.EventType, since time.Time, limit int) ([]events.Event, error)
-}
-
 type ManagerPersistence interface {
 	AgentPersistence
-	ReceiptPersistence
-	PendingEventPersistence
 }
 
 type BudgetGuard interface {
@@ -199,6 +190,8 @@ type StrategicContext = json.RawMessage
 type AgentManagerOptions struct {
 	BaseContext                    context.Context
 	LifecycleStore                 AgentLifecyclePersistence
+	DeliveryStore                  runtimedelivery.Store
+	TestLifecycleProbe             runtimelifecycleprobe.Observer
 	Workspaces                     workspace.Lifecycle
 	Sessions                       sessions.Registry
 	SemanticSource                 semanticview.Source

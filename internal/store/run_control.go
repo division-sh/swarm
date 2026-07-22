@@ -8,7 +8,6 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
@@ -283,16 +282,13 @@ func rejectPostgresStandingRunStopTx(ctx context.Context, tx *sql.Tx, runID stri
 }
 
 func (s *PostgresStore) quiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx, runID, reason string, now time.Time) (int, error) {
-	deliveries, err := lockActiveRunQuiescenceDeliveriesTx(ctx, tx, []string{runID})
+	deliveries, err := s.terminalizeRunDeliveriesTx(ctx, tx, runID, "run_stopped")
 	if err != nil {
 		return 0, err
 	}
 	eventIDs := map[string]struct{}{}
 	for _, delivery := range deliveries {
-		if err := terminalizeActiveRunQuiescenceDeliveryTx(ctx, tx, delivery, "run_stopped", reason, now); err != nil {
-			return 0, err
-		}
-		eventIDs[delivery.EventID] = struct{}{}
+		eventIDs[delivery.Current.EventID] = struct{}{}
 	}
 	for eventID := range eventIDs {
 		if err := upsertActiveRunQuiescencePipelineReceiptTx(ctx, tx, eventID, "run_stopped", reason, now); err != nil {
@@ -306,158 +302,4 @@ func (s *PostgresStore) quiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx,
 		return 0, err
 	}
 	return len(deliveries), nil
-}
-
-func (s *PostgresStore) abandonPendingRunDeliveriesTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
-	rows, err := tx.QueryContext(ctx, `
-		SELECT d.delivery_id::text, d.event_id::text, d.subscriber_type, d.subscriber_id, COALESCE(d.retry_count, 0)
-		FROM event_deliveries d
-		WHERE d.run_id = $1::uuid
-		  AND d.status = 'pending'
-		ORDER BY d.event_id::text ASC, d.subscriber_type ASC, d.subscriber_id ASC, d.delivery_id::text ASC
-		FOR UPDATE
-	`, runID)
-	if err != nil {
-		return 0, fmt.Errorf("query pending run deliveries: %w", err)
-	}
-	defer rows.Close()
-	type target struct {
-		deliveryID     string
-		eventID        string
-		subscriberType string
-		subscriberID   string
-		retryCount     int
-	}
-	targets := []target{}
-	for rows.Next() {
-		var item target
-		if err := rows.Scan(&item.deliveryID, &item.eventID, &item.subscriberType, &item.subscriberID, &item.retryCount); err != nil {
-			return 0, fmt.Errorf("scan pending run delivery: %w", err)
-		}
-		item.deliveryID = strings.TrimSpace(item.deliveryID)
-		item.eventID = strings.TrimSpace(item.eventID)
-		item.subscriberType = strings.TrimSpace(item.subscriberType)
-		item.subscriberID = strings.TrimSpace(item.subscriberID)
-		if item.deliveryID != "" && item.eventID != "" && item.subscriberType != "" && item.subscriberID != "" {
-			targets = append(targets, item)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("read pending run deliveries: %w", err)
-	}
-	eventsTouched := map[string]struct{}{}
-	abandoned := 0
-	for _, item := range targets {
-		applied, err := s.abandonPendingRunDeliveryTx(ctx, tx, item.deliveryID, item.eventID, item.subscriberType, item.subscriberID, item.retryCount)
-		if err != nil {
-			return 0, err
-		}
-		if !applied {
-			continue
-		}
-		eventsTouched[item.eventID] = struct{}{}
-		abandoned++
-	}
-	for eventID := range eventsTouched {
-		var active bool
-		if err := tx.QueryRowContext(ctx, `
-				SELECT EXISTS (
-					SELECT 1
-					FROM event_deliveries
-					WHERE event_id = $1::uuid
-				  AND status IN ('pending', 'in_progress')
-			)
-		`, eventID).Scan(&active); err != nil {
-			return 0, fmt.Errorf("check stopped run event active deliveries: %w", err)
-		}
-		if !active {
-			var hasPipelineReceipt bool
-			if err := tx.QueryRowContext(ctx, `
-					SELECT EXISTS (
-						SELECT 1
-						FROM event_receipts
-						WHERE event_id = $1::uuid
-						  AND subscriber_type = 'platform'
-						  AND subscriber_id = 'pipeline'
-					)
-				`, eventID).Scan(&hasPipelineReceipt); err != nil {
-				return 0, fmt.Errorf("check stopped run pipeline receipt: %w", err)
-			}
-			if !hasPipelineReceipt {
-				if err := s.upsertPipelineReceiptSpec(ctx, tx, eventID, "dead_letter", nil); err != nil {
-					return 0, fmt.Errorf("mark stopped run pipeline receipt: %w", err)
-				}
-			}
-		}
-	}
-	return abandoned, nil
-}
-
-func (s *PostgresStore) abandonPendingRunDeliveryTx(ctx context.Context, tx *sql.Tx, deliveryID, eventID, subscriberType, subscriberID string, retryCount int) (bool, error) {
-	reasonCode := "run_stopped"
-	res, err := tx.ExecContext(ctx, `
-		UPDATE event_deliveries
-		SET status = 'dead_letter',
-		    retry_count = $2,
-		    reason_code = $3,
-		    failure = NULL,
-		    active_session_id = NULL,
-		    started_at = COALESCE(started_at, created_at),
-		    delivered_at = now()
-		WHERE delivery_id = $1::uuid
-		  AND status = 'pending'
-	`, deliveryID, retryCount, reasonCode)
-	if err != nil {
-		return false, fmt.Errorf("abandon stopped run delivery %s: %w", deliveryID, err)
-	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
-		return false, nil
-	}
-	switch subscriberType {
-	case "agent":
-		state := agentReceiptWriteState{
-			finalStatus:  runtimemanager.ReceiptStatusDeadLetter,
-			retryCount:   retryCount,
-			reasonCode:   reasonCode,
-			deliveryCode: "dead_letter",
-		}
-		if err := s.upsertAgentReceiptRowTx(ctx, tx, eventID, subscriberID, state); err != nil {
-			return false, fmt.Errorf("abandon stopped run agent receipt: %w", err)
-		}
-	case "node":
-		if err := s.upsertStoppedRunNodeReceiptTx(ctx, tx, eventID, subscriberID, reasonCode); err != nil {
-			return false, err
-		}
-	default:
-		return false, fmt.Errorf("unsupported stopped run delivery subscriber_type %q", subscriberType)
-	}
-	return true, nil
-}
-
-func (s *PostgresStore) upsertStoppedRunNodeReceiptTx(ctx context.Context, tx *sql.Tx, eventID, nodeID, reasonCode string) error {
-	res, err := tx.ExecContext(ctx, `
-		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, reason_code, side_effects, processed_at
-		)
-		SELECT
-			e.event_id, 'node', $2, e.entity_id, e.flow_instance,
-			'dead_letter', NULLIF($3, ''), '{}'::jsonb, now()
-		FROM events e
-		WHERE e.event_id = $1::uuid
-		ON CONFLICT (event_id, subscriber_type, subscriber_id) DO UPDATE SET
-			entity_id = EXCLUDED.entity_id,
-			flow_instance = EXCLUDED.flow_instance,
-			outcome = EXCLUDED.outcome,
-			reason_code = EXCLUDED.reason_code,
-			side_effects = EXCLUDED.side_effects,
-			processed_at = now()
-	`, eventID, nodeID, reasonCode)
-	if err != nil {
-		return fmt.Errorf("upsert stopped run node receipt: %w", err)
-	}
-	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
-		return fmt.Errorf("upsert stopped run node receipt: event %s not found", eventID)
-	}
-	return nil
 }

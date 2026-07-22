@@ -112,7 +112,7 @@ func testPersistedWorkflowStateTransitionContext(t *testing.T, store *WorkflowIn
 	return transitionCtx
 }
 
-func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Event, nodeID string) {
+func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Event, nodeID string) events.DeliveryRoute {
 	t.Helper()
 	if db == nil {
 		t.Fatal("seed pipeline node delivery authority requires db")
@@ -154,7 +154,8 @@ func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Even
 	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events WHERE event_id = $1::uuid)`, eventID).Scan(&exists); err != nil {
 		t.Fatalf("load pipeline node delivery authority event: %v", err)
 	}
-	if !exists {
+	deliveryEvent := evt
+	if !exists || strings.TrimSpace(evt.RunID()) != runID {
 		envelope := events.EventEnvelope{Scope: events.EventScopeGlobal}
 		if entityID != "" {
 			envelope = events.EnvelopeForEntityID(events.EventEnvelope{}, entityID)
@@ -165,16 +166,15 @@ func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Even
 		fixture := eventtest.PersistedProjectionForProducer(
 			eventID, evt.Type(), evt.Producer(), evt.TaskID(), evt.Payload(), evt.ChainDepth(), runID, evt.ParentEventID(), envelope, createdAt,
 		)
-		seedPipelineEventRecord(t, ctx, db, fixture)
+		deliveryEvent = fixture
+		if !exists {
+			seedPipelineEventRecord(t, ctx, db, fixture)
+		}
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'node', $3, 'pending', 'test_node_delivery_authority', now()
-		)
-		ON CONFLICT DO NOTHING
-	`, runID, eventID, nodeID); err != nil {
-		t.Fatalf("seed pipeline node delivery authority row: %v", err)
+	owner := newPipelineTestDeliveryOwnerForDB(t, db)
+	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID, Target: evt.TargetRoute()}
+	if err := owner.commitInitial(ctx, deliveryEvent, route); err != nil {
+		t.Fatalf("seed pipeline node delivery authority: %v", err)
 	}
+	return route
 }

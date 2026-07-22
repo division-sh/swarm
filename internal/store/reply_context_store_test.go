@@ -21,8 +21,6 @@ import (
 
 type replyContextStoreTestSurface interface {
 	runtimereplycontext.Store
-	InsertEventDeliveryRoutes(context.Context, string, []events.DeliveryRoute) error
-	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 }
 
 type replyContinuationStoreTestSurface interface {
@@ -245,23 +243,6 @@ func TestReplyContextStore_BackendParityAtomicClaimAndDeliveryReadback(t *testin
 				t.Fatalf("accepted replay = record:%#v outcome:%q err:%v", claimed, outcome, err)
 			}
 
-			deliveryContext := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}}
-			routes := []events.DeliveryRoute{{
-				SubscriberType: "node",
-				SubscriberID:   "provider-node",
-				Target:         events.RouteIdentity{FlowID: "provider", FlowInstance: "provider", EntityID: uuid.NewString()},
-				Context:        deliveryContext,
-			}}
-			if err := store.InsertEventDeliveryRoutes(ctx, requestEventID, routes); err != nil {
-				t.Fatalf("InsertEventDeliveryRoutes: %v", err)
-			}
-			gotRoutes, err := store.ListEventDeliveryRoutes(ctx, requestEventID)
-			if err != nil {
-				t.Fatalf("ListEventDeliveryRoutes: %v", err)
-			}
-			if len(gotRoutes) != 1 || gotRoutes[0].Context.ReplyContextID() != record.ID {
-				t.Fatalf("delivery context readback = %#v", gotRoutes)
-			}
 		})
 	}
 }

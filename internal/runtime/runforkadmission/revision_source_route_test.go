@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -21,7 +22,8 @@ import (
 
 func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverContext(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), "runfork-admission"))
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	runID := uuid.NewString()
 	pendingEventID := uuid.NewString()
 	completedEventID := uuid.NewString()
@@ -38,28 +40,19 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 		t.Fatalf("seed run: %v", err)
 	}
 	envelope := events.EnvelopeForTargetRoute(events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), targetRoute)
-	for eventID, createdAt := range map[string]time.Time{pendingEventID: at, completedEventID: at.Add(time.Second)} {
-		storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "producer/inst-1/scan.requested",
-			eventtest.Producer(events.EventProducerExternal, "producer-node"), []byte(`{}`), envelope, createdAt)
+	pendingEvent := eventtest.ExistingRunRootIngress(pendingEventID, "producer/inst-1/scan.requested", "producer-node", "", []byte(`{}`), 0, runID, envelope, at)
+	pendingRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "pending-source-node"}
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, pendingEvent, []events.DeliveryRoute{pendingRoute}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+
+	completedEvent := eventtest.ExistingRunRootIngress(completedEventID, "producer/inst-1/scan.requested", "producer-node", "", []byte(`{}`), 0, runID, envelope, at.Add(time.Second))
+	completedRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "completed-source-node"}
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, completedEvent, []events.DeliveryRoute{completedRoute}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	completedClaim, err := pg.ClaimNodeDelivery(ctx, completedEvent, completedRoute)
+	if err != nil {
+		t.Fatalf("claim completed delivery: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			delivery_id, run_id, event_id, subscriber_type, subscriber_id,
-			status, retry_count, reason_code, delivered_at, created_at
-		)
-		VALUES
-			($1::uuid, $2::uuid, $3::uuid, 'node', 'pending-source-node', 'pending', 0, 'matched_node_subscription', NULL, $5),
-			($4::uuid, $2::uuid, $6::uuid, 'node', 'completed-source-node', 'delivered', 0, 'ok', $7, $7)
-	`, uuid.NewString(), runID, pendingEventID, uuid.NewString(), at, completedEventID, at.Add(time.Second)); err != nil {
-		t.Fatalf("seed deliveries: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at
-		)
-		VALUES ($1::uuid, 'node', 'completed-source-node', 'success', 'ok', '{}'::jsonb, $2)
-	`, completedEventID, at.Add(time.Second)); err != nil {
-		t.Fatalf("seed completed receipt: %v", err)
+	if _, err := pg.SettleSuccess(ctx, completedClaim.Claim, nil, time.Second); err != nil {
+		t.Fatalf("settle completed delivery: %v", err)
 	}
 
 	tx, err := db.BeginTx(ctx, nil)
@@ -74,7 +67,7 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 		t.Fatalf("commit revision: %v", err)
 	}
 
-	plan, err := (storetest.AdmitPostgresRuntimeStore(t, db)).PlanRunFork(ctx, store.RunForkPlanRequest{
+	plan, err := pg.PlanRunFork(ctx, store.RunForkPlanRequest{
 		SourceRunID: runID,
 		At:          completedEventID,
 	})
@@ -113,7 +106,8 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 
 func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), "runfork-admission"))
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	type testCase struct {
 		name              string
 		eventName         string
@@ -218,32 +212,21 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 				captureRunForkRevision(t, ctx, db, runID)
 			}
 			eventEnvelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, tc.sourceRoute)
-			storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, events.EventType(tc.eventName),
-				eventtest.Producer(events.EventProducerExternal, "producer-node"), []byte(`{}`), eventEnvelope, at)
+			event := eventtest.ExistingRunRootIngress(eventID, events.EventType(tc.eventName), "producer-node", "", []byte(`{}`), 0, runID, eventEnvelope, at)
 			if tc.deliveryStatus != "" {
-				deliveryID := uuid.NewString()
-				status := "pending"
-				var deliveredAt any
+				route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "source-node"}
+				storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
 				if tc.deliveryStatus == "completed" {
-					status = "delivered"
-					deliveredAt = at
-				}
-				if _, err := db.ExecContext(ctx, `
-					INSERT INTO event_deliveries (
-						delivery_id, run_id, event_id, subscriber_type, subscriber_id,
-						status, retry_count, reason_code, delivered_at, created_at
-					) VALUES ($1::uuid, $2::uuid, $3::uuid, 'node', 'source-node', $4, 0, 'matched_node_subscription', $5, $6)
-				`, deliveryID, runID, eventID, status, deliveredAt, at); err != nil {
-					t.Fatalf("seed delivery: %v", err)
-				}
-				if tc.deliveryStatus == "completed" {
-					if _, err := db.ExecContext(ctx, `
-						INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at)
-						VALUES ($1::uuid, 'node', 'source-node', 'success', 'ok', '{}'::jsonb, $2)
-					`, eventID, at); err != nil {
-						t.Fatalf("seed receipt: %v", err)
+					claimed, err := pg.ClaimNodeDelivery(ctx, event, route)
+					if err != nil {
+						t.Fatalf("claim completed delivery: %v", err)
+					}
+					if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, time.Second); err != nil {
+						t.Fatalf("settle completed delivery: %v", err)
 					}
 				}
+			} else {
+				storetest.InsertCanonicalEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, event)
 			}
 			captureRunForkRevision(t, ctx, db, runID)
 
@@ -251,7 +234,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			if tc.explicitSelector {
 				selector = eventID
 			}
-			plan, err := (storetest.AdmitPostgresRuntimeStore(t, db)).PlanRunFork(ctx, store.RunForkPlanRequest{SourceRunID: runID, At: selector})
+			plan, err := pg.PlanRunFork(ctx, store.RunForkPlanRequest{SourceRunID: runID, At: selector})
 			if err != nil {
 				t.Fatalf("PlanRunFork: %v", err)
 			}

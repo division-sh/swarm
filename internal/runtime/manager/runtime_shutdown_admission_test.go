@@ -11,7 +11,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type shutdownAdmissionManagerStore struct {
@@ -28,20 +27,6 @@ func (*shutdownAdmissionManagerStore) LoadAgents(context.Context) ([]PersistedAg
 
 func (*shutdownAdmissionManagerStore) EnsureEntitySchema(context.Context, string) error {
 	return nil
-}
-
-func (*shutdownAdmissionManagerStore) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, *runtimefailures.Envelope) error {
-	return nil
-}
-
-func (s *shutdownAdmissionManagerStore) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
-	s.listPendingCalled.Store(true)
-	return nil, nil
-}
-
-func (s *shutdownAdmissionManagerStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
-	s.listPendingCalled.Store(true)
-	return nil, nil
 }
 
 func TestRun_UsesRuntimeShutdownAdmissionOwner(t *testing.T) {

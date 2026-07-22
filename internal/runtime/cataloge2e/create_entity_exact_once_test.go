@@ -55,23 +55,6 @@ func assertCatalogMutationCount(t *testing.T, h *runtimeHarness, eventID, field,
 	}
 }
 
-func assertCatalogReceiptCount(t *testing.T, h *runtimeHarness, eventID, nodeID string, want int) {
-	t.Helper()
-	var got int
-	if err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
-		SELECT COUNT(*)
-		FROM event_receipts
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = $2
-	`, eventID, nodeID).Scan(&got); err != nil {
-		t.Fatalf("count event_receipts: %v", err)
-	}
-	if got != want {
-		t.Fatalf("event receipt count = %d, want %d", got, want)
-	}
-}
-
 func assertCatalogDeliveryStatusCount(t *testing.T, h *runtimeHarness, eventID, nodeID, status string, want int) {
 	t.Helper()
 	var got int

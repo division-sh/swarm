@@ -9,7 +9,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -40,6 +39,14 @@ type BackgroundNode interface {
 	Run(context.Context)
 }
 
+type systemNodeRuntimeLogger interface {
+	LogRuntime(context.Context, RuntimeLogEntry) error
+}
+
+type systemNodeDeliveryRunCompletionConverger interface {
+	ConvergeDeliveryRunCompletion(context.Context, events.Event) error
+}
+
 type SubscriptionReadyBackgroundNode interface {
 	BackgroundNode
 	AddSubscriptionReadyHook(func())
@@ -62,28 +69,8 @@ type WorkflowInstancePersistence interface {
 	Delete(ctx context.Context, instanceID string) error
 }
 
-type SystemNodeReceiptPersistence interface {
-	SystemNodeDeliveryAuthorized(ctx context.Context, nodeID, eventID string, retryLimit int) (bool, error)
-	SystemNodeProcessed(ctx context.Context, nodeID, eventID string) (bool, error)
-	SystemNodeDeliveryQuiesced(ctx context.Context, nodeID, eventID string) (bool, error)
-	MarkSystemNodeDeliveryInProgress(ctx context.Context, nodeID, eventID string, retryLimit int) error
-	MarkSystemNodeDeliveryFailed(ctx context.Context, nodeID, eventID, reasonCode string, failure *runtimefailures.Envelope, retryCount, retryLimit int) error
-	MarkSystemNodeDeliveryDeadLetter(ctx context.Context, nodeID, eventID, reasonCode string, failure *runtimefailures.Envelope, retryCount int, sideEffects string) error
-	MarkSystemNodeProcessedAndSettleDelivery(ctx context.Context, nodeID, eventID, sideEffects string) error
-}
-
-type SystemNodeTargetReceiptPersistence interface {
-	SystemNodeDeliveryAuthorizedForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, retryLimit int) (bool, error)
-	SystemNodeProcessedForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity) (bool, error)
-	MarkSystemNodeDeliveryInProgressForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, retryLimit int) error
-	MarkSystemNodeDeliveryFailedForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, reasonCode string, failure *runtimefailures.Envelope, retryCount, retryLimit int) error
-	MarkSystemNodeDeliveryDeadLetterForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, reasonCode string, failure *runtimefailures.Envelope, retryCount int, sideEffects string) error
-	MarkSystemNodeProcessedAndSettleDeliveryForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, sideEffects string) error
-}
-
 type Store interface {
 	WorkflowInstancePersistence
-	SystemNodeReceiptPersistence
 	RunPipelineMutation(ctx context.Context, fn func(context.Context) error) error
 }
 

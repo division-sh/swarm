@@ -58,15 +58,6 @@ func (s *chatTestStore) LoadAgents(context.Context) ([]PersistedAgent, error) {
 	return nil, nil
 }
 func (s *chatTestStore) EnsureEntitySchema(context.Context, string) error { return nil }
-func (s *chatTestStore) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, *runtimefailures.Envelope) error {
-	return nil
-}
-func (s *chatTestStore) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
-	return nil, nil
-}
-func (s *chatTestStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
-	return nil, nil
-}
 
 type directiveTargetStore struct {
 	chatTestStore

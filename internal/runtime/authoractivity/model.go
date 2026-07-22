@@ -226,12 +226,12 @@ var kindContracts = map[Kind]kindContract{
 		Actions: map[string]string{"created": "created", "stage_changed": "stage changed"}, SubjectRenderer: renderEntitySubject, ActionRenderer: renderEntityAction,
 	},
 	KindDeliveryLifecycle: {
-		Transitions: set("in_progress", "delivered", "failed", "dead_letter"), SourceOwner: "event_deliveries", SourceIdentityRequired: true,
+		Transitions: set("in_progress", "delivered", "failed", "dead_letter", "terminalized"), SourceOwner: "event_deliveries", SourceIdentityRequired: true,
 		AllowedProjectionFields:  set("subject_type", "subject_id", "event_type", "subscriber_type", "subscriber_id", "retry_count", "reason_code"),
 		RequiredProjectionFields: set("subject_type", "subject_id"), FailureTransitions: set("failed", "dead_letter"),
 		SubjectStrategy: subjectTypedIdentity, SubjectTypes: set("agent", "node"),
-		ScopeByTransition: scopeAll(ScopeBundle, "in_progress", "delivered", "failed", "dead_letter"), HumanVisibleTransitions: set("delivered", "failed", "dead_letter"),
-		Actions: map[string]string{"in_progress": "in flight", "delivered": "✓ sent", "failed": "✗ failed", "dead_letter": "✗ failed"},
+		ScopeByTransition: scopeAll(ScopeBundle, "in_progress", "delivered", "failed", "dead_letter", "terminalized"), HumanVisibleTransitions: set("delivered", "failed", "dead_letter"),
+		Actions: map[string]string{"in_progress": "in flight", "delivered": "✓ sent", "failed": "✗ failed", "dead_letter": "✗ failed", "terminalized": "terminalized"},
 	},
 	KindDeadLetterRecorded: {
 		Transitions: set("recorded"), SourceOwner: "dead_letters", SourceIdentityRequired: true,
