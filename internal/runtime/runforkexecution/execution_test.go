@@ -1770,8 +1770,8 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 			ProviderCredentials: credentials, QuiescenceTimeout: selectedForkCapabilityProofQuiescenceTimeout,
 		},
 	})
-	if err != nil {
-		t.Fatalf("ExecuteSelectedContractRunFork should durably settle the agent failure: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "fork_selected_contract_agent_delivery_incomplete") {
+		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want failed activation after terminal selected-agent delivery", err)
 	}
 	if providerCalls.Load() != 1 {
 		t.Fatalf("provider failure dispatches = %d, want exactly 1", providerCalls.Load())

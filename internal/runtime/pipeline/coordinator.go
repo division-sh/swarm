@@ -466,6 +466,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	if claimed && (claim.SubscriberClass() != runtimedelivery.SubscriberNode || claim.SubscriberID() != nodeID) {
 		return false, fmt.Errorf("workflow node %s received a claim for %s/%s", nodeID, claim.SubscriberClass(), claim.SubscriberID())
 	}
+	recoveryClaim := claimed
 	for {
 		if !claimed {
 			owned, err := deliveryStore.ClaimNodeDelivery(ctx, evt, route)
@@ -541,6 +542,11 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 		if snapshot.Status == runtimedelivery.StatusDeadLetter {
 			pc.recordWorkflowHandlerFailure(attemptCtx, evt, nodeID, err)
 			pc.convergeWorkflowNodeNormalRunCompletion(attemptCtx, nodeID, evt)
+			if recoveryClaim {
+				// The recovered handler failure is now durable terminal evidence.
+				// Only claim or settlement failures make readiness unsafe.
+				return true, nil
+			}
 			return true, err
 		}
 		wait := time.Until(snapshot.NextEligibleAt)

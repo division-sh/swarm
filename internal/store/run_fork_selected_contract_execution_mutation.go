@@ -1144,6 +1144,16 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 	if err != nil {
 		return fmt.Errorf("check selected-contract fork delivery snapshots: %w", err)
 	}
+	for _, snapshot := range deliverySnapshots {
+		if snapshot.SubscriberClass != runtimedelivery.SubscriberAgent || snapshot.Status == runtimedelivery.StatusDelivered {
+			continue
+		}
+		return runForkReplayResumeError(
+			"fork_selected_contract_agent_delivery_incomplete",
+			RunForkReplayResumeFactForkReplayState,
+			fmt.Sprintf("fork activation blocked: fork_selected_contract_agent_delivery_incomplete: delivery %s for %s/%s is %s", snapshot.DeliveryID, snapshot.SubscriberClass, snapshot.SubscriberID, snapshot.Status),
+		)
+	}
 	selectedAgents := []string{}
 	for _, snapshot := range deliverySnapshots {
 		if snapshot.SubscriberClass != runtimedelivery.SubscriberAgent {

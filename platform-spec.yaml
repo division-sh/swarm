@@ -5431,7 +5431,9 @@ engine:
         same owner's eligible node backlog and executes each returned fenced claim before runtime readiness. After readiness,
         standing node recovery continues asking that owner for newly eligible or expired work; its cadence is only a wake-up
         trigger and does not interpret statuses, retry counts, eligibility timestamps, or claims. A coordinator-wide
-        subscription, event-ID replay list, or handler-local claim interpretation is forbidden.
+        subscription, event-ID replay list, or handler-local claim interpretation is forbidden. A recovered handler failure
+        that successfully commits a terminal dead-letter settlement is handled work and MUST NOT fail startup readiness;
+        claim, heartbeat, or settlement failure remains a hard recovery failure.
         Claims use database time, a random token, monotonic version, and persisted expiry. Every completion requires the
         current capability; reclaim occurs only after expiry and stale writers cannot mutate the obligation or any coupled
         outcome/activity/diagnostic fact. An executing agent or node handler renews its exact claim through the owner before,
@@ -5439,7 +5441,12 @@ engine:
         renewal failure cancels handler execution and forbids settlement through that stale capability. Backlog work is claimed
         one item at a time immediately before execution so queued local work cannot consume its lease before starting. Agent
         max_retries=1 means two total attempts; node max_retries=3 means four total attempts. Existing selected stores are
-        unsupported and no migration, fallback, or compatibility interpretation exists.
+        unsupported and no migration, fallback, or compatibility interpretation exists. Bounded selected-contract execution
+        MUST NOT transfer a retryable agent obligation to the store-wide normal-manager backlog: retryable selected-agent
+        failures terminalize under the selected execution owner, and selected-fork activation requires every fork-local agent
+        delivery obligation to be delivered. Pending, in-progress, failed, dead-lettered, or otherwise incomplete fork-local
+        agent delivery state blocks activation and is cleaned up by the selected execution failure path. Node obligations
+        retain their separately declared durable handoff into the activated runtime.
     - name: platform_pipeline_receipt_rows
       owner: runtimebus.CommitPublishOwner and named parent quiescence operations
       sqlite_owner: internal/store.SQLiteRuntimeStore private platform receipt adapter

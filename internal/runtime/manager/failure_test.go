@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -140,6 +141,57 @@ func TestProcessEventOutcomeUncertainTerminalDeliverySuppressesReplay(t *testing
 	}
 	if len(backlog) != 0 || agent.calls != 1 {
 		t.Fatalf("terminal delivery backlog=%#v calls=%d, want no replay", backlog, agent.calls)
+	}
+}
+
+func TestProcessEventSelectedForkTerminalizesRetryableFailureBeforeRuntimeRetirement(t *testing.T) {
+	deliveryStore := newManagerDeliveryTestStore(t)
+	am := newTestAgentManagerWithOptions(t, &recordingReceiptBus{}, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
+	agent := failureReturningAgent{
+		id:  "selected-agent",
+		err: runtimefailures.New(runtimefailures.ClassTimeout, "provider_request_timeout", "selected-agent", "call_provider", nil),
+	}
+	forkRunID := eventtest.UUID("selected-retry-run")
+	evt := eventtest.RunCreatingRootIngress(
+		eventtest.UUID("selected-retry-event"), events.EventType("work.requested"), "", "", nil, 0,
+		forkRunID, "", events.EventEnvelope{}, time.Time{},
+	)
+	admission, err := managedexecution.New(
+		managedexecution.KindSelectedContractFork,
+		eventtest.UUID("selected-retry-execution"),
+		1,
+		forkRunID,
+		"selected-retry-actors",
+		"selected-retry-bundle",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("managedexecution.New: %v", err)
+	}
+	ctx := managerAgentDeliveryContext(testAuthorActivityContext(context.Background()), agent.ID())
+	ctx = managedexecution.WithAdmission(ctx, admission)
+	result := am.processEventDetailed(ctx, agent, evt)
+	if result.err == nil {
+		t.Fatal("selected-fork retryable handler failure returned nil")
+	}
+
+	obligation, err := runtimedelivery.NewObligation(evt.ID(), evt.RunID(), managerAgentDeliveryRoute(agent.ID()))
+	if err != nil {
+		t.Fatalf("derive selected-fork delivery obligation: %v", err)
+	}
+	snapshot, err := deliveryStore.Snapshot(context.Background(), obligation.DeliveryID())
+	if err != nil {
+		t.Fatalf("load selected-fork delivery snapshot: %v", err)
+	}
+	if snapshot.Status != runtimedelivery.StatusDeadLetter || snapshot.ReasonCode != "terminal_failure" || snapshot.RetryCount != 0 {
+		t.Fatalf("selected-fork delivery = status:%s reason:%s retries:%d, want terminal dead letter without retry", snapshot.Status, snapshot.ReasonCode, snapshot.RetryCount)
+	}
+	backlog, err := deliveryStore.ClaimAgentBacklog(testAuthorActivityContext(context.Background()), agent.ID(), 1)
+	if err != nil {
+		t.Fatalf("claim normal-manager backlog after selected failure: %v", err)
+	}
+	if len(backlog) != 0 {
+		t.Fatalf("normal-manager backlog claimed selected-fork delivery: %#v", backlog)
 	}
 }
 
