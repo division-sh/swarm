@@ -666,6 +666,23 @@ func sqliteUpsertActiveRunQuiescenceRunControlTx(ctx context.Context, tx *sql.Tx
 	return nil
 }
 
+func (s *PostgresStore) ActiveRunDeliveryQuiesced(ctx context.Context, eventID, subscriberType, subscriberID string) (string, bool, error) {
+	if s == nil || s.DB == nil {
+		return "", false, fmt.Errorf("postgres store is required")
+	}
+	eventID = strings.TrimSpace(eventID)
+	subscriberType = strings.TrimSpace(subscriberType)
+	subscriberID = strings.TrimSpace(subscriberID)
+	if eventID == "" || subscriberType == "" || subscriberID == "" {
+		return "", false, nil
+	}
+	snapshots, err := s.deliverySnapshotsForEvent(ctx, eventID)
+	if err != nil {
+		return "", false, fmt.Errorf("check postgres active run delivery quiescence: %w", err)
+	}
+	return activeRunDeliveryQuiescenceReason(snapshots, subscriberType, subscriberID)
+}
+
 func (s *SQLiteRuntimeStore) ActiveRunDeliveryQuiesced(ctx context.Context, eventID, subscriberType, subscriberID string) (string, bool, error) {
 	if s == nil || s.DB == nil {
 		return "", false, fmt.Errorf("sqlite runtime store is required")
@@ -680,6 +697,10 @@ func (s *SQLiteRuntimeStore) ActiveRunDeliveryQuiesced(ctx context.Context, even
 	if err != nil {
 		return "", false, fmt.Errorf("check sqlite active run delivery quiescence: %w", err)
 	}
+	return activeRunDeliveryQuiescenceReason(snapshots, subscriberType, subscriberID)
+}
+
+func activeRunDeliveryQuiescenceReason(snapshots []runtimedelivery.Snapshot, subscriberType, subscriberID string) (string, bool, error) {
 	reasons := map[string]struct{}{}
 	for _, reason := range activeRunQuiescenceTerminalReasonCodes() {
 		reasons[reason] = struct{}{}

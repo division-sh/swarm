@@ -877,6 +877,29 @@ func TestProcessEvent_SkipsLateOutputAndReceiptAfterDestructiveResetQuiescence(t
 	}
 }
 
+func TestProcessEvent_SkipsHandlerForAlreadyQuiescedDelivery(t *testing.T) {
+	bus := &recordingReceiptBus{}
+	store := &deliveryLifecycleStoreStub{quiescedAfterChecks: 1}
+	deliveryStore := newManagerDeliveryTestStore(t)
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore}, store)
+	agent := &outputRecordingAgent{}
+	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("task.started"), "", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Time{})
+
+	result := am.processEventDetailed(managerAgentDeliveryContext(testAuthorActivityContext(context.Background()), agent.ID()), agent, evt)
+	if result.err != nil {
+		t.Fatalf("processEventDetailed error = %v", result.err)
+	}
+	if agent.calls != 0 {
+		t.Fatalf("agent calls = %d, want zero after pre-handler quiescence fence", agent.calls)
+	}
+	if len(bus.published) != 0 {
+		t.Fatalf("published events = %#v, want none", bus.published)
+	}
+	if result.record.Outcome != startupManagerReplayOutcomeSkipped || result.record.ReasonCode != "runtime_nuke_cancelled" {
+		t.Fatalf("quiesced result = %#v, want skipped/runtime_nuke_cancelled", result.record)
+	}
+}
+
 func TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions(t *testing.T) {
 	cases := []struct {
 		name          string
