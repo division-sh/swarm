@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -315,6 +316,9 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 						if err != nil {
 							t.Fatalf("settle %s diagnostic delivery: %v", class, err)
 						}
+						if settled.Failure == nil || settled.Failure.Class != settlement.Failure.Class || settled.Failure.Detail.Code != settlement.Failure.Detail.Code || settled.RetryCount != 0 {
+							t.Fatalf("direct terminal settlement changed original failure or retry count: %#v", settled)
+						}
 						assertExactDeliveryDeadLetter(t, ctx, backend, event, settled)
 					})
 				}
@@ -383,16 +387,20 @@ func assertDeliverySettlementRolledBack(t *testing.T, ctx context.Context, backe
 
 func assertExactDeliveryDeadLetter(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, event events.Event, settled runtimedelivery.Snapshot) {
 	t.Helper()
-	query := `SELECT delivery_id::text, claim_version, original_event, original_payload, retry_count, chain_depth, handler_node FROM dead_letters WHERE delivery_id=$1::uuid AND claim_version=$2`
+	query := `SELECT delivery_id::text, claim_version, original_event, original_payload, failure, retry_count, chain_depth, handler_node FROM dead_letters WHERE delivery_id=$1::uuid AND claim_version=$2`
 	if !backend.postgres {
-		query = `SELECT delivery_id, claim_version, original_event, original_payload, retry_count, chain_depth, handler_node FROM dead_letters WHERE delivery_id=? AND claim_version=?`
+		query = `SELECT delivery_id, claim_version, original_event, original_payload, failure, retry_count, chain_depth, handler_node FROM dead_letters WHERE delivery_id=? AND claim_version=?`
 	}
 	var deliveryID, eventType, handler string
 	var claimVersion int64
-	var payload []byte
+	var payload, failureRaw []byte
 	var retryCount, chainDepth int
-	if err := backend.db.QueryRowContext(ctx, query, settled.DeliveryID, settled.ClaimVersion).Scan(&deliveryID, &claimVersion, &eventType, &payload, &retryCount, &chainDepth, &handler); err != nil {
+	if err := backend.db.QueryRowContext(ctx, query, settled.DeliveryID, settled.ClaimVersion).Scan(&deliveryID, &claimVersion, &eventType, &payload, &failureRaw, &retryCount, &chainDepth, &handler); err != nil {
 		t.Fatalf("read exact terminal delivery diagnostic: %v", err)
+	}
+	deadLetterFailure, err := runtimefailures.UnmarshalEnvelope(failureRaw)
+	if err != nil {
+		t.Fatalf("decode exact terminal delivery failure: %v", err)
 	}
 	var gotPayload, wantPayload any
 	if err := json.Unmarshal(payload, &gotPayload); err != nil {
@@ -402,8 +410,30 @@ func assertExactDeliveryDeadLetter(t *testing.T, ctx context.Context, backend de
 		t.Fatal(err)
 	}
 	if deliveryID != settled.DeliveryID || claimVersion != settled.ClaimVersion || eventType != string(event.Type()) ||
-		!reflect.DeepEqual(gotPayload, wantPayload) || retryCount != settled.RetryCount || chainDepth != event.ChainDepth() || handler != settled.SubscriberID {
+		!reflect.DeepEqual(gotPayload, wantPayload) || settled.Failure == nil || !reflect.DeepEqual(deadLetterFailure, *settled.Failure) || retryCount != settled.RetryCount || chainDepth != event.ChainDepth() || handler != settled.SubscriberID {
 		t.Fatalf("terminal diagnostic = delivery:%s version:%d type:%s payload:%v retry:%d depth:%d handler:%s; want exact settled/event facts", deliveryID, claimVersion, eventType, gotPayload, retryCount, chainDepth, handler)
+	}
+	attemptQuery := `SELECT failure FROM event_delivery_attempts WHERE delivery_id=$1::uuid AND claim_version=$2`
+	activityQuery := `SELECT failure FROM author_activity_occurrences WHERE source_owner='event_deliveries' AND source_identity=$1 ORDER BY sequence DESC LIMIT 1`
+	if !backend.postgres {
+		attemptQuery = `SELECT failure FROM event_delivery_attempts WHERE delivery_id=? AND claim_version=?`
+		activityQuery = `SELECT failure FROM author_activity_occurrences WHERE source_owner='event_deliveries' AND source_identity=? ORDER BY sequence DESC LIMIT 1`
+	}
+	for owner, queryAndArgs := range map[string]struct {
+		query string
+		args  []any
+	}{
+		"attempt":         {query: attemptQuery, args: []any{settled.DeliveryID, settled.ClaimVersion}},
+		"author activity": {query: activityQuery, args: []any{settled.DeliveryID}},
+	} {
+		var raw []byte
+		if err := backend.db.QueryRowContext(ctx, queryAndArgs.query, queryAndArgs.args...).Scan(&raw); err != nil {
+			t.Fatalf("read exact terminal %s failure: %v", owner, err)
+		}
+		persisted, err := runtimefailures.UnmarshalEnvelope(raw)
+		if err != nil || !reflect.DeepEqual(persisted, *settled.Failure) {
+			t.Fatalf("terminal %s failure = %#v, err=%v; want %#v", owner, persisted, err, *settled.Failure)
+		}
 	}
 }
 
@@ -492,6 +522,7 @@ func assertDeliveryRetryBudget(t *testing.T, ctx context.Context, backend delive
 	if err != nil {
 		t.Fatal(err)
 	}
+	var exhausted runtimedelivery.Snapshot
 	for attempt := 1; attempt <= maxRetries+1; attempt++ {
 		var claimed runtimedelivery.ClaimedObligation
 		if class == runtimedelivery.SubscriberAgent {
@@ -516,8 +547,13 @@ func assertDeliveryRetryBudget(t *testing.T, ctx context.Context, backend delive
 				t.Fatalf("retry %d snapshot = %#v", attempt, settled)
 			}
 			makeDeliveryImmediatelyEligible(t, ctx, backend, proof.DeliveryID())
-		} else if settled.Status != runtimedelivery.StatusDeadLetter || settled.RetryCount != maxRetries || settled.ReasonCode != "retry_exhausted" {
-			t.Fatalf("exhausted snapshot = %#v", settled)
+		} else {
+			if settled.Status != runtimedelivery.StatusDeadLetter || settled.RetryCount != maxRetries || settled.ReasonCode != "retry_exhausted" {
+				t.Fatalf("exhausted snapshot = %#v", settled)
+			}
+			exhausted = settled
+			assertRetryExhaustedFailure(t, settled.Failure, maxRetries)
+			assertExactDeliveryDeadLetter(t, ctx, backend, event, settled)
 		}
 	}
 	outcomes, err := backend.store.Outcomes(ctx, proof.DeliveryID())
@@ -534,6 +570,42 @@ func assertDeliveryRetryBudget(t *testing.T, ctx context.Context, backend delive
 		}
 		if outcome.ClaimVersion != int64(index+1) || outcome.Outcome != want {
 			t.Fatalf("outcome %d = %#v, want version=%d outcome=%s", index, outcome, index+1, want)
+		}
+		if index < maxRetries {
+			if outcome.Failure == nil || outcome.Failure.Class != runtimefailures.ClassConnectorFailure || outcome.Failure.Detail.Code != "handler_failed" {
+				t.Fatalf("retry outcome %d failure = %#v, want original failure", index, outcome.Failure)
+			}
+		} else if exhausted.Failure == nil || outcome.Failure == nil || !reflect.DeepEqual(*outcome.Failure, *exhausted.Failure) {
+			t.Fatalf("terminal outcome failure = %#v, want synthesized exhausted failure %#v", outcome.Failure, exhausted.Failure)
+		}
+	}
+}
+
+func assertRetryExhaustedFailure(t *testing.T, failure *runtimefailures.Envelope, maxRetries int) {
+	t.Helper()
+	if failure == nil || failure.Class != runtimefailures.ClassRetryExhausted || failure.Detail.Code != "delivery_retry_exhausted" || failure.Retryable || !failure.Deterministic {
+		t.Fatalf("retry-exhausted failure = %#v", failure)
+	}
+	raw, err := json.Marshal(failure.Detail.Attributes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var evidence struct {
+		MaxRetries   int `json:"max_retries"`
+		RetryHistory []struct {
+			ClaimVersion int                      `json:"claim_version"`
+			Failure      runtimefailures.Envelope `json:"failure"`
+		} `json:"retry_history"`
+	}
+	if err := json.Unmarshal(raw, &evidence); err != nil {
+		t.Fatalf("decode retry-exhausted evidence: %v", err)
+	}
+	if evidence.MaxRetries != maxRetries || len(evidence.RetryHistory) != maxRetries+1 {
+		t.Fatalf("retry-exhausted evidence = %#v, want max=%d attempts=%d", evidence, maxRetries, maxRetries+1)
+	}
+	for index, attempt := range evidence.RetryHistory {
+		if attempt.ClaimVersion != index+1 || attempt.Failure.Class != runtimefailures.ClassConnectorFailure || attempt.Failure.Detail.Code != "handler_failed" {
+			t.Fatalf("retry history attempt %d = %#v", index, attempt)
 		}
 	}
 }

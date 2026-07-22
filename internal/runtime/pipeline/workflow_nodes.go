@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -767,37 +766,6 @@ func (pc *PipelineCoordinator) BackgroundNodes(bus systemNodeBus, _ *sql.DB) []B
 	out := make([]BackgroundNode, 0, 1)
 	out = append(out, newActivityBackgroundNode(pc, bus))
 	return out
-}
-
-func workflowHandlerRetryBase(source semanticview.Source) time.Duration {
-	if source == nil {
-		return time.Second
-	}
-	value, ok := semanticview.PolicyValueForFlow(source, "", "handler_retry_base_seconds")
-	if !ok {
-		return time.Second
-	}
-	switch typed := value.Value.(type) {
-	case int:
-		if typed > 0 {
-			return time.Duration(typed) * time.Second
-		}
-	case int64:
-		if typed > 0 {
-			return time.Duration(typed) * time.Second
-		}
-	case float64:
-		if typed > 0 {
-			return time.Duration(typed * float64(time.Second))
-		}
-	default:
-		if secs := strings.TrimSpace(asString(typed)); secs != "" {
-			if parsed, err := time.ParseDuration(secs + "s"); err == nil && parsed > 0 {
-				return parsed
-			}
-		}
-	}
-	return time.Second
 }
 
 func (pc *PipelineCoordinator) backgroundWorkflowExecutor(nodeID string) WorkflowNodeExecutor {

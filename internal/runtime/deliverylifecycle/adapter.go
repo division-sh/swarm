@@ -489,6 +489,7 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, claim Claim, settlemen
 	transition := "delivered"
 	outcome := "delivered"
 	reason := strings.TrimSpace(settlement.ReasonCode)
+	effectiveFailure := settlement.Failure
 	retryCount := record.RetryCount
 	var nextEligible any
 	if settlement.Disposition == FailureRetry {
@@ -508,13 +509,17 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, claim Claim, settlemen
 			transition = "dead_letter"
 			outcome = "dead_letter"
 			reason = "retry_exhausted"
+			effectiveFailure, err = a.retryExhaustedFailure(ctx, tx, record, claim, settlement.Failure)
+			if err != nil {
+				return Snapshot{}, err
+			}
 		}
 	} else if settlement.Disposition == FailureDeadLetter {
 		status = StatusDeadLetter
 		transition = "dead_letter"
 		outcome = "dead_letter"
 	}
-	failureRaw, err := encodeFailure(settlement.Failure)
+	failureRaw, err := encodeFailure(effectiveFailure)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -547,17 +552,61 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, claim Claim, settlemen
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return Snapshot{}, fmt.Errorf("%w: delivery settlement lost claim", ErrConflict)
 	}
-	if err := a.completeAttempt(ctx, tx, claim, outcome, reason, settlement.Failure, settlement.SideEffects, settlement.Duration, now); err != nil {
+	if err := a.completeAttempt(ctx, tx, claim, outcome, reason, effectiveFailure, settlement.SideEffects, settlement.Duration, now); err != nil {
 		return Snapshot{}, err
 	}
 	updated, err := a.loadByID(ctx, tx, claim.deliveryID, false)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if err := a.recordTransition(ctx, updated, transition, settlement.Failure, now); err != nil {
+	if err := a.recordTransition(ctx, updated, transition, effectiveFailure, now); err != nil {
 		return Snapshot{}, err
 	}
 	return updated.Snapshot, nil
+}
+
+func (a *Adapter) retryExhaustedFailure(ctx context.Context, tx *sql.Tx, record deliveryRecord, claim Claim, current *runtimefailures.Envelope) (*runtimefailures.Envelope, error) {
+	outcomes, err := a.Outcomes(ctx, tx, claim.deliveryID)
+	if err != nil {
+		return nil, fmt.Errorf("load delivery retry history: %w", err)
+	}
+	if len(outcomes) != record.RetryCount {
+		return nil, fmt.Errorf("%w: delivery retry history has %d outcomes for retry_count %d", ErrConflict, len(outcomes), record.RetryCount)
+	}
+	history := make([]map[string]any, 0, len(outcomes)+1)
+	appendFailure := func(version int64, failure *runtimefailures.Envelope) error {
+		if failure == nil {
+			return fmt.Errorf("%w: delivery retry history claim %d has no failure", ErrConflict, version)
+		}
+		value, err := runtimefailures.EnvelopeValue(*failure)
+		if err != nil {
+			return fmt.Errorf("validate delivery retry history claim %d: %w", version, err)
+		}
+		history = append(history, map[string]any{"claim_version": version, "failure": value})
+		return nil
+	}
+	for _, prior := range outcomes {
+		if prior.Outcome != "retry_scheduled" {
+			return nil, fmt.Errorf("%w: delivery retry history claim %d has outcome %q", ErrConflict, prior.ClaimVersion, prior.Outcome)
+		}
+		if err := appendFailure(prior.ClaimVersion, prior.Failure); err != nil {
+			return nil, err
+		}
+	}
+	if err := appendFailure(claim.version, current); err != nil {
+		return nil, err
+	}
+	failure, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(
+		runtimefailures.ClassRetryExhausted,
+		"delivery_retry_exhausted",
+		"delivery-lifecycle",
+		"settle_failure",
+		map[string]any{"max_retries": record.MaxRetries, "retry_history": history},
+	))
+	if !ok || failure.Class != runtimefailures.ClassRetryExhausted {
+		return nil, fmt.Errorf("construct canonical retry-exhausted failure")
+	}
+	return &failure, nil
 }
 
 func (a *Adapter) Snapshot(ctx context.Context, q queryer, deliveryID string) (Snapshot, error) {

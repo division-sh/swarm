@@ -178,6 +178,46 @@ func TestRunTerminalPersistenceUnconfirmedDetailIsClosed(t *testing.T) {
 	}
 }
 
+func TestDeliveryRetryExhaustedDetailIsClosed(t *testing.T) {
+	prior := Normalize(New(ClassConnectorFailure, "handler_failed", "test", "delivery", nil), "test", "delivery")
+	priorValue, err := EnvelopeValue(prior)
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := map[string]any{
+		"max_retries": 1,
+		"retry_history": []map[string]any{
+			{"claim_version": int64(1), "failure": priorValue},
+			{"claim_version": int64(3), "failure": priorValue},
+		},
+	}
+	failure, ok := EnvelopeFromError(New(ClassRetryExhausted, "delivery_retry_exhausted", "delivery-lifecycle", "settle_failure", valid))
+	if !ok || failure.Class != ClassRetryExhausted {
+		t.Fatalf("valid retry-exhausted failure = %#v, %t", failure, ok)
+	}
+	raw, err := MarshalEnvelope(failure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UnmarshalEnvelope(raw); err != nil {
+		t.Fatalf("canonical retry-exhausted envelope does not survive readback: %v", err)
+	}
+
+	invalid := []map[string]any{
+		nil,
+		{"max_retries": 1, "retry_history": []any{}},
+		{"max_retries": 1, "retry_history": []map[string]any{{"claim_version": 1, "failure": priorValue}}},
+		{"max_retries": 1, "retry_history": []map[string]any{{"claim_version": 2, "failure": priorValue}, {"claim_version": 1, "failure": priorValue}}},
+		{"max_retries": 1, "retry_history": []map[string]any{{"claim_version": 1, "failure": priorValue}, {"claim_version": 2, "failure": map[string]any{"class": "forged"}}}},
+	}
+	for _, attributes := range invalid {
+		constructed, ok := EnvelopeFromError(New(ClassRetryExhausted, "delivery_retry_exhausted", "delivery-lifecycle", "settle_failure", attributes))
+		if !ok || constructed.Class != ClassInternalFailure || constructed.Detail.Code != "invalid_failure_construction" {
+			t.Fatalf("invalid attributes %#v produced %#v, %t", attributes, constructed, ok)
+		}
+	}
+}
+
 func TestSemanticFingerprintExcludesPresentationAndIncludesTypedDetail(t *testing.T) {
 	failure, ok := EnvelopeFromError(New(ClassOutcomeUncertain, "run_terminal_persistence_unconfirmed", "builder.run_hub", "mark_run_terminal", map[string]any{"attempted_status": "failed"}))
 	if !ok {
