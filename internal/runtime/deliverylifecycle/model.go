@@ -283,6 +283,18 @@ type ClaimedObligation struct {
 	Claim    Claim
 }
 
+// ClaimCandidate is an opaque, read-only reference to one currently eligible
+// delivery. Selected-store composition locks every referenced run before the
+// adapter may lock and claim the delivery row.
+type ClaimCandidate struct {
+	deliveryID   string
+	runID        string
+	class        SubscriberClass
+	subscriberID string
+}
+
+func (c ClaimCandidate) RunID() string { return c.runID }
+
 // DurableHandoffProof proves that one exact route-level obligation exists in
 // the selected store. It deliberately carries no lifecycle mutation power.
 type DurableHandoffProof struct {
