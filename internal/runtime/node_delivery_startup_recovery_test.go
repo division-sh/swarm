@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -115,6 +116,135 @@ func TestPipelineCoordinatorRecoverNodeDeliveriesUsesCanonicalSelectedStoreOwner
 			}
 			assertRecoveredNodeDelivery(t, ctx, selected, eventID, route, 1)
 		})
+	}
+}
+
+func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *testing.T) {
+	for _, backend := range []struct {
+		name  string
+		setup func(*testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore)
+	}{
+		{
+			name: "postgres",
+			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				ctx := seedRuntimeTestRun(t, db)
+				return ctx, db, storetest.AdmitPostgresRuntimeStore(t, db)
+			},
+		},
+		{
+			name: "sqlite",
+			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
+				selected := storetest.StartSQLiteRuntimeStore(t)
+				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
+				if _, err := selected.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, templateInstanceDeliveryRunID); err != nil {
+					t.Fatalf("seed SQLite recovery run: %v", err)
+				}
+				return ctx, selected.DB, selected
+			},
+		},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			ctx, db, selected := backend.setup(t)
+			bundle := loadRuntimeTempBundle(t, artifactActionResultDeliveryFixtureFiles())
+			source := semanticview.Wrap(bundle)
+			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+			if backend.name == "sqlite" {
+				workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, selected)
+			}
+			if err := workflowStore.Upsert(ctx, artifactActionResultWorkflowInstance()); err != nil {
+				t.Fatalf("seed healthy workflow instance: %v", err)
+			}
+			pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+				WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
+				Module:        newRuntimeTestWorkflowModule(t, source),
+				WorkflowStore: workflowStore,
+				DeliveryStore: selected,
+			})
+
+			poisonEntityID := eventtest.UUID("node-recovery-poison-entity")
+			poisonTarget := events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold/poison", EntityID: poisonEntityID}
+			poisonInstance := artifactActionResultWorkflowInstance()
+			poisonInstance.InstanceID = poisonEntityID
+			poisonInstance.StorageRef = poisonEntityID
+			poisonInstance.Metadata = map[string]any{
+				"repo_id": "poison-repo", "namespace": "tenant-alpha", "partition_key": "poison",
+				"display_slug": "Poison", "source_record_id": "poison-record", "flow_path": poisonTarget.FlowInstance,
+			}
+			if err := workflowStore.Upsert(ctx, poisonInstance); err != nil {
+				t.Fatalf("seed poison workflow instance: %v", err)
+			}
+			installNodeRecoveryPoisonMutation(t, ctx, db, backend.name == "postgres", poisonEntityID)
+			poison := eventtest.RunCreatingRootIngress(
+				eventtest.UUID("node-recovery-poison-event"),
+				"repo-scaffold/poison/repo_scaffold.repo_commit_succeeded",
+				"test", "", []byte(`{}`), 0, templateInstanceDeliveryRunID, "",
+				events.EnvelopeForTargetRoute(events.EnvelopeForEntityID(events.EventEnvelope{}, poisonEntityID), poisonTarget),
+				time.Now().UTC().Add(-time.Minute),
+			)
+			poisonRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "repo-scaffold-node", Target: poisonTarget}
+			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, poison, []events.DeliveryRoute{poisonRoute}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+
+			healthyTarget := events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold/inst-1", EntityID: artifactActionResultEntityID}
+			healthy := eventtest.RunCreatingRootIngress(
+				eventtest.UUID("node-recovery-healthy-event"),
+				"repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded",
+				"test", "", []byte(`{}`), 0, templateInstanceDeliveryRunID, "",
+				events.EnvelopeForTargetRoute(events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID), healthyTarget),
+				time.Now().UTC(),
+			)
+			healthyRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "repo-scaffold-node", Target: healthyTarget}
+			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, healthy, []events.DeliveryRoute{healthyRoute}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+
+			if err := pc.RecoverNodeDeliveries(ctx); err != nil {
+				t.Fatalf("RecoverNodeDeliveries after terminal handler failure: %v", err)
+			}
+			poisonObligation, err := runtimedelivery.NewObligation(poison.ID(), poison.RunID(), poisonRoute)
+			if err != nil {
+				t.Fatalf("derive poison delivery obligation: %v", err)
+			}
+			poisonSnapshot, err := selected.Snapshot(ctx, poisonObligation.DeliveryID())
+			if err != nil {
+				t.Fatalf("load poison delivery snapshot: %v", err)
+			}
+			if poisonSnapshot.Status != runtimedelivery.StatusDeadLetter || poisonSnapshot.ReasonCode != "handler_terminal_failure" {
+				t.Fatalf("poison delivery = status:%s reason:%s, want committed terminal-handler dead letter", poisonSnapshot.Status, poisonSnapshot.ReasonCode)
+			}
+			assertRecoveredNodeDelivery(t, ctx, selected, healthy.ID(), healthyRoute, 1)
+		})
+	}
+}
+
+func installNodeRecoveryPoisonMutation(t *testing.T, ctx context.Context, db *sql.DB, postgres bool, entityID string) {
+	t.Helper()
+	statement := fmt.Sprintf(`
+		CREATE TRIGGER fail_node_recovery_poison_update
+		BEFORE UPDATE ON entity_state
+		WHEN OLD.entity_id = '%s'
+		BEGIN
+			SELECT RAISE(ABORT, 'injected node recovery poison mutation');
+		END`, entityID)
+	if postgres {
+		statement = fmt.Sprintf(`
+			CREATE FUNCTION fail_node_recovery_poison_update_fn() RETURNS trigger AS $$
+			BEGIN
+				IF OLD.entity_id = '%s'::uuid THEN
+					RAISE EXCEPTION 'injected node recovery poison mutation';
+				END IF;
+				RETURN NEW;
+			END;
+			$$ LANGUAGE plpgsql;
+			CREATE TRIGGER fail_node_recovery_poison_update
+			BEFORE UPDATE ON entity_state
+			FOR EACH ROW EXECUTE FUNCTION fail_node_recovery_poison_update_fn()`, entityID)
+	}
+	if _, err := db.ExecContext(ctx, statement); err != nil {
+		t.Fatalf("install node recovery poison mutation: %v", err)
 	}
 }
 

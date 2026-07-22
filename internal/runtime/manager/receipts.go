@@ -435,6 +435,12 @@ func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, agen
 	}
 	var snapshot runtimedelivery.Snapshot
 	writeCtx := heartbeat.Context()
+	if admission, ok := managedexecution.FromContext(writeCtx); ok && admission.Kind == managedexecution.KindSelectedContractFork && status == ReceiptStatusError {
+		// A bounded selected-fork runtime cannot hand retry ownership to the
+		// store-wide manager backlog after it retires. Preserve the failure as a
+		// terminal selected-execution outcome and let activation fail closed.
+		status = ReceiptStatusTerminal
+	}
 	switch status {
 	case ReceiptStatusProcessed:
 		snapshot, err = am.deliveryStore.SettleSuccess(writeCtx, claim, nil, 0)
