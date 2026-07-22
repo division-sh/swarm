@@ -728,8 +728,8 @@ func (s *PostgresStore) loadRunDebugFailureDeliveries(ctx context.Context, runID
 			}
 			event := admitted.Event()
 			return deliveryLifecycleEventMetadata{EventName: string(event.Type()), RunID: event.RunID(), EntityID: event.EntityID()}, nil
-		}, func(eventID string) ([]OperatorDeadLetterRecord, error) {
-			return s.operatorObservabilityReadSurface().loadOperatorEventDeadLetters(ctx, eventID)
+		}, func(deliveryID string, claimVersion int64) ([]OperatorDeadLetterRecord, error) {
+			return s.operatorObservabilityReadSurface().loadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
 		})
 }
 
@@ -764,7 +764,7 @@ func runDebugFailuresFromSnapshots(
 	snapshots []runtimedelivery.Snapshot,
 	limit int,
 	loadEvent func(string) (deliveryLifecycleEventMetadata, error),
-	loadDeadLetters func(string) ([]OperatorDeadLetterRecord, error),
+	loadDeliveryDeadLetters func(string, int64) ([]OperatorDeadLetterRecord, error),
 ) ([]RunDebugFailureDelivery, error) {
 	failed := make([]runtimedelivery.Snapshot, 0)
 	for _, snapshot := range snapshots {
@@ -809,7 +809,7 @@ func runDebugFailuresFromSnapshots(
 			item.FinishedAt = &at
 		}
 		if snapshot.Status == runtimedelivery.StatusDeadLetter {
-			item.DeadLetters, err = loadDeadLetters(snapshot.EventID)
+			item.DeadLetters, err = loadDeliveryDeadLetters(snapshot.DeliveryID, snapshot.ClaimVersion)
 			if err != nil {
 				return nil, err
 			}

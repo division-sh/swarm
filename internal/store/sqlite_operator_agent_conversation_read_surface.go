@@ -512,8 +512,8 @@ func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryDi
 			event := admitted.Event()
 			return deliveryLifecycleEventMetadata{EventName: string(event.Type()), RunID: event.RunID(), EntityID: event.EntityID()}, nil
 		},
-		func(eventID string) ([]OperatorDeadLetterRecord, error) {
-			return r.store.sqliteOperatorEventDeadLetters(ctx, eventID)
+		func(deliveryID string, claimVersion int64) ([]OperatorDeadLetterRecord, error) {
+			return r.store.sqliteOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
 		})
 }
 

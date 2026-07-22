@@ -308,7 +308,8 @@ func (s *SQLiteRuntimeStore) sqliteOperatorEventDeliveries(ctx context.Context, 
 
 func (s *SQLiteRuntimeStore) sqliteOperatorEventDeadLetters(ctx context.Context, eventID string) ([]OperatorDeadLetterRecord, error) {
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT dead_letter_id, failure, COALESCE(retry_count, 0), COALESCE(chain_depth, 0), COALESCE(handler_node, ''), created_at
+		SELECT dead_letter_id, COALESCE(delivery_id, ''), COALESCE(claim_version, 0), failure,
+		       COALESCE(retry_count, 0), COALESCE(chain_depth, 0), COALESCE(handler_node, ''), created_at
 		FROM dead_letters
 		WHERE original_event_id = ?
 		ORDER BY created_at ASC, dead_letter_id ASC
@@ -322,7 +323,7 @@ func (s *SQLiteRuntimeStore) sqliteOperatorEventDeadLetters(ctx context.Context,
 		var item OperatorDeadLetterRecord
 		var rawFailure any
 		var createdRaw any
-		if err := rows.Scan(&item.DeadLetterID, &rawFailure, &item.RetryCount, &item.ChainDepth, &item.HandlerNode, &createdRaw); err != nil {
+		if err := rows.Scan(&item.DeadLetterID, &item.DeliveryID, &item.ClaimVersion, &rawFailure, &item.RetryCount, &item.ChainDepth, &item.HandlerNode, &createdRaw); err != nil {
 			return nil, fmt.Errorf("scan sqlite operator event dead letter: %w", err)
 		}
 		failure, err := decodeStoredFailure(rawFailure)
@@ -339,6 +340,45 @@ func (s *SQLiteRuntimeStore) sqliteOperatorEventDeadLetters(ctx context.Context,
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read sqlite operator event dead letters: %w", err)
+	}
+	return out, nil
+}
+
+func (s *SQLiteRuntimeStore) sqliteOperatorDeliveryDeadLetters(ctx context.Context, deliveryID string, claimVersion int64) ([]OperatorDeadLetterRecord, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT dead_letter_id, delivery_id, claim_version, failure,
+		       COALESCE(retry_count, 0), COALESCE(chain_depth, 0), COALESCE(handler_node, ''), created_at
+		FROM dead_letters
+		WHERE delivery_id = ?
+		  AND claim_version = ?
+		ORDER BY claim_version ASC, created_at ASC, dead_letter_id ASC
+	`, strings.TrimSpace(deliveryID), claimVersion)
+	if err != nil {
+		return nil, fmt.Errorf("query sqlite operator delivery dead letters: %w", err)
+	}
+	defer rows.Close()
+	out := []OperatorDeadLetterRecord{}
+	for rows.Next() {
+		var item OperatorDeadLetterRecord
+		var rawFailure any
+		var createdRaw any
+		if err := rows.Scan(&item.DeadLetterID, &item.DeliveryID, &item.ClaimVersion, &rawFailure, &item.RetryCount, &item.ChainDepth, &item.HandlerNode, &createdRaw); err != nil {
+			return nil, fmt.Errorf("scan sqlite operator delivery dead letter: %w", err)
+		}
+		failure, err := decodeStoredFailure(rawFailure)
+		if err != nil || failure == nil {
+			return nil, fmt.Errorf("decode sqlite operator delivery dead-letter failure")
+		}
+		item.Failure = *failure
+		if at, ok, err := sqliteTimeValue(createdRaw); err != nil {
+			return nil, err
+		} else if ok {
+			item.CreatedAt = at
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read sqlite operator delivery dead letters: %w", err)
 	}
 	return out, nil
 }

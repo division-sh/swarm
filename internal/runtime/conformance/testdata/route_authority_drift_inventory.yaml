@@ -1073,6 +1073,7 @@ seam_families:
       - internal/runtime/pipeline/delivery_lifecycle_test_owner_test.go
       - internal/store/agent_lifecycle_read_surface_test.go
       - internal/store/author_activity_receipt_parity_test.go
+      - internal/store/operator_dead_letter_evidence_parity_test.go
       - internal/store/run_fork_selected_contract_execution_mutation_test.go
       - internal/store/selected_contract_runtime_execution_test.go
       - internal/store/delivery_lifecycle_fixture_test.go

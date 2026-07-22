@@ -9118,7 +9118,7 @@
         "additionalProperties": false,
         "properties": {
           "dead_letter_records": {
-            "description": "Event-scoped dead-letter records reconciled to this terminal agent delivery through the original event id. A terminal dead-letter delivery without at least one matching record is malformed owner data and fails closed.",
+            "description": "Dead-letter records reconciled to this terminal agent delivery through the exact delivery_id and claim_version pair. Sibling route records for the same event are excluded. A terminal dead-letter delivery without at least one exact matching record is malformed owner data and fails closed.",
             "items": {
               "$ref": "#/components/schemas/DeadLetterRecord"
             },
@@ -10962,11 +10962,20 @@
             "minimum": 0,
             "type": "integer"
           },
+          "claim_version": {
+            "description": "Exact claimed attempt paired with delivery_id. Omitted only for pre-delivery diagnostics.",
+            "minimum": 1,
+            "type": "integer"
+          },
           "created_at": {
             "$ref": "#/components/schemas/Timestamp"
           },
           "dead_letter_id": {
             "$ref": "#/components/schemas/OpaqueId"
+          },
+          "delivery_id": {
+            "$ref": "#/components/schemas/OpaqueId",
+            "description": "Exact executable delivery owner. Omitted only for pre-delivery diagnostics."
           },
           "failure": {
             "$ref": "#/components/schemas/FailureEnvelope"
@@ -11476,6 +11485,7 @@
             "$ref": "#/components/schemas/Timestamp"
           },
           "dead_letters": {
+            "description": "Terminal dead-letter records linked to this exact delivery_id and claim_version; sibling route evidence for the same event MUST NOT appear.",
             "items": {
               "$ref": "#/components/schemas/DeadLetterRecord"
             },
@@ -12560,13 +12570,13 @@
       },
       "RunDebugFailureDelivery": {
         "additionalProperties": false,
-        "description": "Concrete failed or terminal delivery evidence for run.diagnose. Source of truth is event_deliveries joined to the owning event; dead_letters is event-scoped terminal evidence when present. Consumers MUST NOT infer this shape from aggregate delivery counts.",
+        "description": "Concrete failed or terminal delivery evidence for run.diagnose. Source of truth is event_deliveries joined to the owning event; executable-delivery dead_letters evidence is matched by the exact delivery_id and claim_version when present. Consumers MUST NOT infer this shape from aggregate delivery counts.",
         "properties": {
           "created_at": {
             "$ref": "#/components/schemas/Timestamp"
           },
           "dead_letters": {
-            "description": "Event-scoped terminal dead-letter records linked to this failed or dead-letter delivery when present.",
+            "description": "Terminal dead-letter records linked to this exact delivery_id and claim_version when present; sibling route evidence for the same event MUST NOT appear.",
             "items": {
               "$ref": "#/components/schemas/DeadLetterRecord"
             },

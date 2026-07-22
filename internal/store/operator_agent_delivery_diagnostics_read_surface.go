@@ -135,8 +135,8 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryDiagnost
 			event := admitted.Event()
 			return deliveryLifecycleEventMetadata{EventName: string(event.Type()), RunID: event.RunID(), EntityID: event.EntityID()}, nil
 		},
-		func(eventID string) ([]OperatorDeadLetterRecord, error) {
-			return observability.loadOperatorEventDeadLetters(ctx, eventID)
+		func(deliveryID string, claimVersion int64) ([]OperatorDeadLetterRecord, error) {
+			return observability.loadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
 		})
 }
 
@@ -212,7 +212,7 @@ func buildAgentDeliveryDiagnostics(
 	snapshots []runtimedelivery.Snapshot,
 	opts OperatorAgentDeliveryDiagnosticsOptions,
 	loadEvent func(string) (deliveryLifecycleEventMetadata, error),
-	loadDeadLetters func(string) ([]OperatorDeadLetterRecord, error),
+	loadDeliveryDeadLetters func(string, int64) ([]OperatorDeadLetterRecord, error),
 ) (OperatorAgentDeliveryDiagnostics, error) {
 	result := OperatorAgentDeliveryDiagnostics{
 		AgentID: agentID, Failures: []OperatorAgentDeliveryFailure{}, DeadLetters: []OperatorAgentDeadLetterDelivery{},
@@ -268,7 +268,7 @@ func buildAgentDeliveryDiagnostics(
 			})
 			continue
 		}
-		records, err := loadDeadLetters(snapshot.EventID)
+		records, err := loadDeliveryDeadLetters(snapshot.DeliveryID, snapshot.ClaimVersion)
 		if err != nil {
 			return OperatorAgentDeliveryDiagnostics{}, err
 		}
