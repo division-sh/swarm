@@ -151,16 +151,32 @@ func (a *Adapter) ClaimExact(ctx context.Context, tx *sql.Tx, event events.Event
 }
 
 func (a *Adapter) ClaimPendingAgent(ctx context.Context, tx *sql.Tx, agentID string, limit int, leaseTTL time.Duration) ([]ClaimedObligation, error) {
-	return a.claimPending(ctx, tx, SubscriberAgent, agentID, limit, leaseTTL)
+	candidates, err := a.AgentClaimCandidates(ctx, tx, agentID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return a.ClaimCandidates(ctx, tx, candidates, leaseTTL)
 }
 
 func (a *Adapter) ClaimPendingNode(ctx context.Context, tx *sql.Tx, nodeID string, limit int, leaseTTL time.Duration) ([]ClaimedObligation, error) {
-	return a.claimPending(ctx, tx, SubscriberNode, nodeID, limit, leaseTTL)
+	candidates, err := a.NodeClaimCandidates(ctx, tx, nodeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return a.ClaimCandidates(ctx, tx, candidates, leaseTTL)
 }
 
-func (a *Adapter) claimPending(ctx context.Context, tx *sql.Tx, class SubscriberClass, subscriberID string, limit int, leaseTTL time.Duration) ([]ClaimedObligation, error) {
-	if tx == nil {
-		return nil, fmt.Errorf("delivery claim transaction is required")
+func (a *Adapter) AgentClaimCandidates(ctx context.Context, q queryer, agentID string, limit int) ([]ClaimCandidate, error) {
+	return a.claimCandidates(ctx, q, SubscriberAgent, agentID, limit)
+}
+
+func (a *Adapter) NodeClaimCandidates(ctx context.Context, q queryer, nodeID string, limit int) ([]ClaimCandidate, error) {
+	return a.claimCandidates(ctx, q, SubscriberNode, nodeID, limit)
+}
+
+func (a *Adapter) claimCandidates(ctx context.Context, q queryer, class SubscriberClass, subscriberID string, limit int) ([]ClaimCandidate, error) {
+	if q == nil {
+		return nil, fmt.Errorf("delivery claim candidate queryer is required")
 	}
 	if class != SubscriberAgent && class != SubscriberNode {
 		return nil, fmt.Errorf("delivery subscriber class %q cannot claim pending work", class)
@@ -172,12 +188,12 @@ func (a *Adapter) claimPending(ctx context.Context, tx *sql.Tx, class Subscriber
 	if limit <= 0 || limit > 500 {
 		return nil, fmt.Errorf("delivery claim limit must be between 1 and 500")
 	}
-	now, err := a.databaseNow(ctx, tx)
+	now, err := a.databaseNow(ctx, q)
 	if err != nil {
 		return nil, err
 	}
 	query := `
-		SELECT d.delivery_id::text
+		SELECT d.delivery_id::text, d.run_id::text
 		FROM event_deliveries d
 		LEFT JOIN event_delivery_attempts current_attempt
 		  ON current_attempt.delivery_id = d.delivery_id
@@ -193,12 +209,11 @@ func (a *Adapter) claimPending(ctx context.Context, tx *sql.Tx, class Subscriber
 			WHEN d.status = 'in_progress' THEN current_attempt.lease_expires_at
 			ELSE d.next_eligible_at
 		END ASC, d.created_at ASC, d.delivery_id ASC
-		FOR UPDATE OF d SKIP LOCKED
 		LIMIT $4`
 	args := []any{string(class), subscriberID, now, limit}
 	if a.dialect == DialectSQLite {
 		query = `
-			SELECT d.delivery_id
+			SELECT d.delivery_id, d.run_id
 			FROM event_deliveries d
 			LEFT JOIN event_delivery_attempts current_attempt
 			  ON current_attempt.delivery_id = d.delivery_id
@@ -217,18 +232,18 @@ func (a *Adapter) claimPending(ctx context.Context, tx *sql.Tx, class Subscriber
 			LIMIT ?`
 		args = []any{string(class), subscriberID, now, now, limit}
 	}
-	rows, err := tx.QueryContext(ctx, query, args...)
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("select claimable %s deliveries: %w", class, err)
 	}
-	ids := make([]string, 0, limit)
+	candidates := make([]ClaimCandidate, 0, limit)
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		candidate := ClaimCandidate{class: class, subscriberID: subscriberID}
+		if err := rows.Scan(&candidate.deliveryID, &candidate.runID); err != nil {
 			_ = rows.Close()
 			return nil, fmt.Errorf("scan claimable %s delivery: %w", class, err)
 		}
-		ids = append(ids, id)
+		candidates = append(candidates, candidate)
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
@@ -237,13 +252,30 @@ func (a *Adapter) claimPending(ctx context.Context, tx *sql.Tx, class Subscriber
 	if err := rows.Close(); err != nil {
 		return nil, fmt.Errorf("close claimable %s deliveries: %w", class, err)
 	}
-	out := make([]ClaimedObligation, 0, len(ids))
-	for _, id := range ids {
-		record, err := a.loadByID(ctx, tx, id, true)
+	return candidates, nil
+}
+
+func (a *Adapter) ClaimCandidates(ctx context.Context, tx *sql.Tx, candidates []ClaimCandidate, leaseTTL time.Duration) ([]ClaimedObligation, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("delivery claim transaction is required")
+	}
+	out := make([]ClaimedObligation, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.deliveryID == "" || candidate.runID == "" || candidate.subscriberID == "" ||
+			(candidate.class != SubscriberAgent && candidate.class != SubscriberNode) {
+			return nil, fmt.Errorf("delivery claim candidate is invalid")
+		}
+		record, err := a.loadByID(ctx, tx, candidate.deliveryID, true)
 		if err != nil {
 			return nil, err
 		}
+		if record.RunID != candidate.runID || record.SubscriberClass != candidate.class || record.SubscriberID != candidate.subscriberID {
+			return nil, fmt.Errorf("%w: delivery claim candidate identity changed", ErrConflict)
+		}
 		claimed, err := a.claimLocked(ctx, tx, record, leaseTTL)
+		if errors.Is(err, ErrIneligible) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}

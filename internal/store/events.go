@@ -1071,14 +1071,8 @@ func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status strin
 	var snap storerunlifecycle.Snapshot
 	err = s.runAuthorActivityMutation(ctx, "postgres mark run terminal", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		if _, err := postgresDeliveryAdapter.TerminalizeRun(txctx, tx, runID, "run_"+status); err != nil {
-			return err
-		}
-		snap, err = storerunlifecycle.MarkTerminal(txctx, tx, runID, status, failure, endedAt, runLifecycleOptions())
-		if err != nil {
-			return err
-		}
-		return supersedeDecisionCardsForRun(txctx, tx, runID, "run_"+status, endedAt, false, true)
+		snap, err = s.markRunTerminalTx(txctx, tx, runID, status, failure, endedAt)
+		return err
 	})
 	if err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err
@@ -1092,6 +1086,20 @@ func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status strin
 		StartedAt:   snap.StartedAt,
 		EndedAt:     snap.EndedAt,
 	}, nil
+}
+
+func (s *PostgresStore) markRunTerminalTx(ctx context.Context, tx *sql.Tx, runID, status string, failure *runtimefailures.Envelope, endedAt time.Time) (storerunlifecycle.Snapshot, error) {
+	snapshot, err := storerunlifecycle.MarkTerminal(ctx, tx, runID, status, failure, endedAt, runLifecycleOptions())
+	if err != nil {
+		return storerunlifecycle.Snapshot{}, err
+	}
+	if _, err := postgresDeliveryAdapter.TerminalizeRun(ctx, tx, runID, "run_"+status); err != nil {
+		return storerunlifecycle.Snapshot{}, err
+	}
+	if err := supersedeDecisionCardsForRun(ctx, tx, runID, "run_"+status, endedAt, false, true); err != nil {
+		return storerunlifecycle.Snapshot{}, err
+	}
+	return snapshot, nil
 }
 
 func (s *PostgresStore) ConvergeStandaloneRuntimePlatformRun(ctx context.Context, evt events.Event) error {

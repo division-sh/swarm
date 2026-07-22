@@ -12224,6 +12224,9 @@ platform_tables:
         and extends the one open attempt lease using database time. Heartbeat cadence derives from the lease returned by the
         selected-store owner. Renewal and settlement are mutually excluded for the exact claim. The delivery row points to
         that exact open attempt; claim token, lease, and session facts exist only on the attempt and cannot diverge.
+        A transaction that composes run terminalization with delivery terminalization MUST lock and mutate the run row
+        before locking any delivery row. Claim, settlement, and parent terminalization therefore share one run-then-delivery
+        lock order; inverse delivery-then-run acquisition is forbidden.
         Parent terminalization increments the fence and clears claim facts so late writers cannot resurrect work. It closes
         the current attempt when one exists; otherwise it records a closed terminalization attempt at the new fence version.
         In both cases it commits one exact terminalized outcome in the same transaction. Existing selected stores are
@@ -13095,7 +13098,8 @@ platform_tables:
         explicit_terminalization_operation: >
           MarkRunTerminal accepts only failed, cancelled, and forked transitions, with typed failure evidence where the
           status requires it, and returns the authoritative persisted snapshot from one store-owned transaction. It
-          rejects completed because generic terminalization does not own successful-completion eligibility.
+          rejects completed because generic terminalization does not own successful-completion eligibility. PostgreSQL
+          acquires the run row before delivery rows so concurrent claim/settlement and terminalization use one lock order.
         normal_completion_operation: >
           ConvergeNormalRunCompletion is the sole successful-completion writer. In one selected-store transaction it
           requires terminal workflow entities, successful pipeline receipts, settled deliveries, timers, and session
