@@ -550,7 +550,7 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 	if err := guardDestructiveResetSourceForkDependencies(ctx, tx, []string{forkRunID}); err != nil {
 		return fmt.Errorf("discard selected-contract fork with dependent lineage: %w", err)
 	}
-	if _, err := postgresDeliveryAdapter.TerminalizeRun(storyctx, tx, forkRunID, "fork_discarded"); err != nil {
+	if _, err := s.terminalizeRunDeliveriesTx(storyctx, tx, forkRunID, "fork_discarded"); err != nil {
 		return fmt.Errorf("terminalize selected-contract fork deliveries before discard: %w", err)
 	}
 	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {

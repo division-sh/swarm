@@ -5446,7 +5446,11 @@ engine:
         failures terminalize under the selected execution owner, and selected-fork activation requires every fork-local agent
         delivery obligation to be delivered. Pending, in-progress, failed, dead-lettered, or otherwise incomplete fork-local
         agent delivery state blocks activation and is cleaned up by the selected execution failure path. Node obligations
-        retain their separately declared durable handoff into the activated runtime.
+        retain their separately declared durable handoff into the activated runtime. Parent terminalization is one closed
+        named store operation: it records a typed lifecycle-conflict failure, advances the delivery fence, closes any prior
+        open attempt, commits the exact terminalization attempt/outcome at the new fence, and inserts the matching
+        dead_letters row before the transaction may commit. Every terminal dead-letter delivery therefore has exact
+        `{delivery_id, claim_version}` evidence; terminalization cannot leave lifecycle state visible without that evidence.
     - name: platform_pipeline_receipt_rows
       owner: runtimebus.CommitPublishOwner and named parent quiescence operations
       sqlite_owner: internal/store.SQLiteRuntimeStore private platform receipt adapter
@@ -12239,9 +12243,11 @@ platform_tables:
         before locking any delivery row. Claim, settlement, and parent terminalization therefore share one run-then-delivery
         lock order; inverse delivery-then-run acquisition is forbidden.
         Parent terminalization increments the fence and clears claim facts so late writers cannot resurrect work. It closes
-        the current attempt when one exists; otherwise it records a closed terminalization attempt at the new fence version.
-        In both cases it commits one exact terminalized outcome in the same transaction. Existing selected stores are
-        unsupported; there is no migration or compatibility interpretation.
+        the prior open attempt when one exists, then records one closed terminalization attempt and one exact terminalized
+        outcome at the new fence version. The delivery, terminalization attempt/outcome, typed
+        `delivery_parent_terminalized` lifecycle-conflict failure, and matching dead_letters row commit atomically; failure
+        of any required evidence writer rolls the whole operation back. Existing selected stores are unsupported; there is
+        no migration or compatibility interpretation.
       ddl: |
         CREATE TABLE event_deliveries (
             delivery_id       UUID PRIMARY KEY,
@@ -12269,7 +12275,7 @@ platform_tables:
             UNIQUE (event_id, route_identity),
             FOREIGN KEY (event_id, run_id) REFERENCES events(event_id, run_id),
             CHECK (retry_count <= max_retries),
-            CHECK ((status = 'pending' AND next_eligible_at IS NOT NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'in_progress' AND next_eligible_at IS NULL AND claim_version > 0 AND current_attempt_version = claim_version AND current_attempt_open = TRUE AND started_at IS NOT NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'failed' AND retry_count > 0 AND next_eligible_at IS NOT NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NULL AND failure IS NOT NULL) OR (status = 'delivered' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'dead_letter' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND NULLIF(TRIM(COALESCE(reason_code, '')), '') IS NOT NULL)),
+            CHECK ((status = 'pending' AND next_eligible_at IS NOT NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'in_progress' AND next_eligible_at IS NULL AND claim_version > 0 AND current_attempt_version = claim_version AND current_attempt_open = TRUE AND started_at IS NOT NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'failed' AND retry_count > 0 AND next_eligible_at IS NOT NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NULL AND failure IS NOT NULL) OR (status = 'delivered' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'dead_letter' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND failure IS NOT NULL AND NULLIF(TRIM(COALESCE(reason_code, '')), '') IS NOT NULL)),
             CHECK (updated_at >= created_at),
             INDEX idx_deliveries_run (run_id, status) WHERE run_id IS NOT NULL,
             INDEX idx_deliveries_eligibility (subscriber_type, subscriber_id, status, next_eligible_at),
@@ -13044,7 +13050,7 @@ platform_tables:
         flow_scoped: entity_id NULL, flow_instance NOT NULL, run_id set for runtime-owned flow timers. Tied to flow instance
           inside run_id. Cancelled when flow instance terminates.
     dead_letters:
-      description: Failed events after a terminal delivery disposition. The canonical failure envelope is preserved verbatim from the triggering runtime failure; lifecycle and retry counters remain dead-letter-owned facts. Claimed executable-delivery failures carry the exact delivery_id and claim_version pair and are structurally coupled to the committed delivery outcome. Pre-delivery diagnostics leave both fields null.
+      description: Failed events after a terminal delivery disposition. The canonical failure envelope is preserved verbatim from the triggering runtime failure; parent terminalization supplies its typed delivery_parent_terminalized lifecycle-conflict envelope. Lifecycle and retry counters remain dead-letter-owned facts. Every terminal executable delivery, including parent terminalization, carries the exact delivery_id and claim_version pair and is structurally coupled to the committed delivery outcome. Pre-delivery diagnostics leave both fields null.
       ddl: "CREATE TABLE dead_letters (\n    dead_letter_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    original_event_id\
         \ UUID REFERENCES events(event_id),\n    delivery_id       UUID,\n    claim_version     BIGINT,\n    original_event    TEXT NOT NULL,\n    original_payload  JSONB NOT NULL DEFAULT\
         \ '{}',\n    entity_id         UUID,\n    flow_instance     TEXT NOT NULL,\n    failure           JSONB NOT NULL,\n   \

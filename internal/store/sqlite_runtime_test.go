@@ -23,6 +23,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -283,9 +284,10 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	`, eventID).Scan(&deliveryStatus, &reasonCode, &stoppedFailure, &activeSession); err != nil {
 		t.Fatalf("load stopped sqlite delivery: %v", err)
 	}
-	if deliveryStatus != "dead_letter" || reasonCode != "run_stopped" || len(stoppedFailure) != 0 || activeSession != "" {
-		t.Fatalf("stopped sqlite delivery = %s/%s failure=%s active=%q, want dead_letter/run_stopped/no failure/no active session", deliveryStatus, reasonCode, stoppedFailure, activeSession)
+	if deliveryStatus != "dead_letter" || reasonCode != "run_stopped" || activeSession != "" {
+		t.Fatalf("stopped sqlite delivery = %s/%s failure=%s active=%q, want dead_letter/run_stopped/typed failure/no active session", deliveryStatus, reasonCode, stoppedFailure, activeSession)
 	}
+	assertParentTerminalizationFailure(t, stoppedFailure, "run_stopped")
 	if err := store.DB.QueryRowContext(ctx, `
 		SELECT status, COALESCE(reason_code, ''), failure, COALESCE(CAST(current_attempt_version AS TEXT), '')
 		FROM event_deliveries
@@ -295,9 +297,10 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	`, eventID).Scan(&deliveryStatus, &reasonCode, &stoppedFailure, &activeSession); err != nil {
 		t.Fatalf("load stopped sqlite node delivery: %v", err)
 	}
-	if deliveryStatus != "dead_letter" || reasonCode != "run_stopped" || len(stoppedFailure) != 0 || activeSession != "" {
-		t.Fatalf("stopped sqlite node delivery = %s/%s failure=%s active=%q, want dead_letter/run_stopped/no failure/no active session", deliveryStatus, reasonCode, stoppedFailure, activeSession)
+	if deliveryStatus != "dead_letter" || reasonCode != "run_stopped" || activeSession != "" {
+		t.Fatalf("stopped sqlite node delivery = %s/%s failure=%s active=%q, want dead_letter/run_stopped/typed failure/no active session", deliveryStatus, reasonCode, stoppedFailure, activeSession)
 	}
+	assertParentTerminalizationFailure(t, stoppedFailure, "run_stopped")
 
 	var agentOutcome, agentReason string
 	if err := store.DB.QueryRowContext(ctx, `
@@ -340,6 +343,17 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	}
 	if pipelineOutcome != "dead_letter" {
 		t.Fatalf("stopped sqlite pipeline receipt = %s, want dead_letter", pipelineOutcome)
+	}
+}
+
+func assertParentTerminalizationFailure(t *testing.T, raw []byte, reason string) {
+	t.Helper()
+	failure, err := runtimefailures.UnmarshalEnvelope(raw)
+	if err != nil {
+		t.Fatalf("decode parent terminalization failure: %v", err)
+	}
+	if failure.Class != runtimefailures.ClassLifecycleConflict || failure.Detail.Code != "delivery_parent_terminalized" || failure.Detail.Attributes["reason_code"] != reason {
+		t.Fatalf("parent terminalization failure = %#v, want lifecycle conflict for %s", failure, reason)
 	}
 }
 

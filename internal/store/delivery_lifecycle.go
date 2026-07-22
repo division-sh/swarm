@@ -494,12 +494,12 @@ func (s *PostgresStore) TerminalizeRun(ctx context.Context, runID, reason string
 		return nil, err
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return postgresDeliveryAdapter.TerminalizeRun(ctx, tx, runID, reason)
+		return s.terminalizeRunDeliveriesTx(ctx, tx, runID, reason)
 	}
 	var out []runtimedelivery.Terminalization
 	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = postgresDeliveryAdapter.TerminalizeRun(txctx, tx, runID, reason)
+		out, err = s.terminalizeRunDeliveriesTx(txctx, tx, runID, reason)
 		return err
 	})
 	return out, err
@@ -510,12 +510,12 @@ func (s *SQLiteRuntimeStore) TerminalizeRun(ctx context.Context, runID, reason s
 		return nil, err
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return sqliteDeliveryAdapter.TerminalizeRun(ctx, tx, runID, reason)
+		return s.terminalizeRunDeliveriesTx(ctx, tx, runID, reason)
 	}
 	var out []runtimedelivery.Terminalization
 	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = sqliteDeliveryAdapter.TerminalizeRun(txctx, tx, runID, reason)
+		out, err = s.terminalizeRunDeliveriesTx(txctx, tx, runID, reason)
 		return err
 	})
 	return out, err
@@ -546,11 +546,51 @@ func (s *SQLiteRuntimeStore) deliverySnapshotsForAgent(ctx context.Context, agen
 }
 
 func (s *PostgresStore) terminalizeRunDeliveriesTx(ctx context.Context, tx *sql.Tx, runID, reason string) ([]runtimedelivery.Terminalization, error) {
-	return postgresDeliveryAdapter.TerminalizeRun(ctx, tx, runID, reason)
+	terminalizations, err := postgresDeliveryAdapter.TerminalizeRun(ctx, tx, runID, reason)
+	if err != nil {
+		return nil, err
+	}
+	for _, terminalization := range terminalizations {
+		record, found, err := eventrecordpostgres.Load(ctx, tx, terminalization.Current.EventID)
+		if err != nil || !found {
+			if err == nil {
+				err = eventrecord.Missing(terminalization.Current.EventID)
+			}
+			return nil, err
+		}
+		diagnostic, err := deliveryDeadLetterRecord(record, terminalization.Current)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.recordTerminalizedDeliveryDeadLetterTx(ctx, tx, diagnostic); err != nil {
+			return nil, fmt.Errorf("commit terminalized delivery diagnostic: %w", err)
+		}
+	}
+	return terminalizations, nil
 }
 
 func (s *SQLiteRuntimeStore) terminalizeRunDeliveriesTx(ctx context.Context, tx *sql.Tx, runID, reason string) ([]runtimedelivery.Terminalization, error) {
-	return sqliteDeliveryAdapter.TerminalizeRun(ctx, tx, runID, reason)
+	terminalizations, err := sqliteDeliveryAdapter.TerminalizeRun(ctx, tx, runID, reason)
+	if err != nil {
+		return nil, err
+	}
+	for _, terminalization := range terminalizations {
+		record, found, err := eventrecordsqlite.Load(ctx, tx, terminalization.Current.EventID)
+		if err != nil || !found {
+			if err == nil {
+				err = eventrecord.Missing(terminalization.Current.EventID)
+			}
+			return nil, err
+		}
+		diagnostic, err := deliveryDeadLetterRecord(record, terminalization.Current)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.recordTerminalizedDeliveryDeadLetterTx(ctx, tx, diagnostic); err != nil {
+			return nil, fmt.Errorf("commit terminalized delivery diagnostic: %w", err)
+		}
+	}
+	return terminalizations, nil
 }
 
 func (s *PostgresStore) activeRunDeliverySnapshotsTx(ctx context.Context, tx *sql.Tx, runID string) ([]runtimedelivery.Snapshot, error) {
