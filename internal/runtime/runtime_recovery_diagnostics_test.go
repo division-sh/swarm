@@ -60,15 +60,6 @@ func (s startupRecoveryManagerStore) LoadAgents(context.Context) ([]runtimemanag
 }
 
 func (startupRecoveryManagerStore) EnsureEntitySchema(context.Context, string) error { return nil }
-func (startupRecoveryManagerStore) UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, *runtimefailures.Envelope) error {
-	return nil
-}
-func (startupRecoveryManagerStore) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
-	return nil, nil
-}
-func (startupRecoveryManagerStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
-	return nil, nil
-}
 
 type startupRecoveryFlakyManagerStore struct {
 	remainingFailures int
@@ -96,20 +87,9 @@ func (s *startupRecoveryFlakyManagerStore) LoadAgents(context.Context) ([]runtim
 func (*startupRecoveryFlakyManagerStore) EnsureEntitySchema(context.Context, string) error {
 	return nil
 }
-func (*startupRecoveryFlakyManagerStore) UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, *runtimefailures.Envelope) error {
-	return nil
-}
-func (*startupRecoveryFlakyManagerStore) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
-	return nil, nil
-}
-func (*startupRecoveryFlakyManagerStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
-	return nil, nil
-}
 
 type startupManagerReplayRuntimeStore struct {
-	agents   []runtimemanager.PersistedAgent
-	pending  map[string][]events.Event
-	receipts map[string]runtimemanager.EventReceipt
+	agents []runtimemanager.PersistedAgent
 }
 
 func (*startupManagerReplayRuntimeStore) CommitAgentLifecycleTransition(_ context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
@@ -126,28 +106,6 @@ func (s *startupManagerReplayRuntimeStore) LoadAgents(context.Context) ([]runtim
 
 func (*startupManagerReplayRuntimeStore) EnsureEntitySchema(context.Context, string) error {
 	return nil
-}
-func (s *startupManagerReplayRuntimeStore) UpsertEventReceipt(_ context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, failure *runtimefailures.Envelope) error {
-	if s.receipts == nil {
-		s.receipts = map[string]runtimemanager.EventReceipt{}
-	}
-	s.receipts[strings.TrimSpace(eventID)+"|"+strings.TrimSpace(agentID)] = runtimemanager.EventReceipt{
-		EventID: eventID,
-		AgentID: agentID,
-		Status:  status,
-		Failure: failure,
-	}
-	return nil
-}
-func (s *startupManagerReplayRuntimeStore) ListPendingEventsForAgent(_ context.Context, agentID string, _ time.Time, _ int) ([]events.Event, error) {
-	return append([]events.Event(nil), s.pending[strings.TrimSpace(agentID)]...), nil
-}
-func (*startupManagerReplayRuntimeStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
-	return nil, nil
-}
-func (s *startupManagerReplayRuntimeStore) GetEventReceipt(_ context.Context, eventID, agentID string) (runtimemanager.EventReceipt, bool, error) {
-	receipt, ok := s.receipts[strings.TrimSpace(eventID)+"|"+strings.TrimSpace(agentID)]
-	return receipt, ok, nil
 }
 
 type startupManagerReplayRuntimeAgent struct{ id string }
@@ -542,6 +500,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
+		DeliveryStore:   newRuntimeShutdownDeliveryStore(t),
 		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
 		EventStore:      startupRecoveryMinimalEventStore{},
 		ManagerStore:    &recoveryGuardManagerStore{},
@@ -631,6 +590,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
+		DeliveryStore:   newRuntimeShutdownDeliveryStore(t),
 		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
 		EventStore:      startupRecoveryMinimalEventStore{},
 		ManagerStore:    &recoveryGuardManagerStore{},
@@ -734,26 +694,25 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 			Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-a"},
 			StartedAt: time.Now().UTC(),
 		}},
-		pending: map[string][]events.Event{
-			"agent-a": {
-				eventtest.RunCreatingRootIngress("evt-replay", events.EventType("support.replay.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-4*time.Minute).UTC()),
-				eventtest.RunCreatingRootIngress("evt-skip", events.EventType("support.replay.skip"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC()),
-				eventtest.RunCreatingRootIngress("evt-leased", events.EventType("support.replay.leased"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
-				eventtest.RunCreatingRootIngress("evt-drop", events.EventType("support.replay.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
-			},
-		},
-		receipts: map[string]runtimemanager.EventReceipt{
-			"evt-skip|agent-a": {
-				EventID: "evt-skip",
-				AgentID: "agent-a",
-				Status:  runtimemanager.ReceiptStatusProcessed,
-			},
-		},
+	}
+	deliveryStore := newRuntimeShutdownDeliveryStore(t)
+	runID := eventtest.UUID("runtime-recovery-manager-run")
+	for index, eventType := range []string{
+		"support.replay.ok",
+		"support.replay.skip",
+		"support.replay.leased",
+		"support.replay.drop",
+	} {
+		deliveryStore.seedAgentDelivery(t, ctx,
+			eventtest.PersistedProjection(eventtest.UUID("runtime-recovery-manager-"+eventType), events.EventType(eventType), "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().Add(time.Duration(index-4)*time.Minute).UTC()),
+			"agent-a",
+		)
 	}
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
+		DeliveryStore:   deliveryStore,
 		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
 		EventStore:      startupRecoveryMinimalEventStore{},
 		ManagerStore:    managerStore,
@@ -775,6 +734,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 		SemanticSource:                 module.SemanticSource(),
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
 		WorkOwner:                      rt.WorkOccurrence(),
+		DeliveryStore:                  deliveryStore,
 	}, managerStore)
 
 	if err := rt.Start(ctx); err != nil {
@@ -797,11 +757,11 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 	if got := detailString(detail["decision_reason_code"]); got != string(startupRecoveryReasonRecoverFailed) {
 		t.Fatalf("decision_reason_code = %q, want %q", got, startupRecoveryReasonRecoverFailed)
 	}
-	if got := detailInt(detail["manager_replayed_count"]); got != 1 {
-		t.Fatalf("manager_replayed_count = %d, want 1", got)
+	if got := detailInt(detail["manager_replayed_count"]); got != 2 {
+		t.Fatalf("manager_replayed_count = %d, want 2", got)
 	}
-	if got := detailInt(detail["manager_skipped_count"]); got != 1 {
-		t.Fatalf("manager_skipped_count = %d, want 1", got)
+	if got := detailInt(detail["manager_skipped_count"]); got != 0 {
+		t.Fatalf("manager_skipped_count = %d, want 0", got)
 	}
 	if got := detailInt(detail["manager_dropped_count"]); got != 2 {
 		t.Fatalf("manager_dropped_count = %d, want 2", got)
@@ -825,9 +785,9 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 	if got := detailString(replayed.detail["decision_outcome"]); got != "replayed" {
 		t.Fatalf("replayed decision_outcome = %q, want replayed", got)
 	}
-	skippedReceipt := findByEventType("support.replay.skip")
-	if got := detailString(skippedReceipt.detail["decision_reason_code"]); got != "event_receipt_already_processed" {
-		t.Fatalf("receipt skip decision_reason_code = %q, want event_receipt_already_processed", got)
+	replayedSecond := findByEventType("support.replay.skip")
+	if got := detailString(replayedSecond.detail["decision_reason_code"]); got != "persisted_event_replayed" {
+		t.Fatalf("second replay decision_reason_code = %q, want persisted_event_replayed", got)
 	}
 	droppedLeased := findByEventType("support.replay.leased")
 	if got := detailString(droppedLeased.detail["decision_outcome"]); got != "dropped" {
@@ -859,6 +819,7 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
+		DeliveryStore:   newRuntimeShutdownDeliveryStore(t),
 		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
 		EventStore:      eventStore,
 		ManagerStore:    &recoveryGuardManagerStore{},
@@ -909,6 +870,7 @@ func TestRuntimeStart_RecoveryInspectionFailureDoesNotBlockRecoveryEnabledStartu
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
+		DeliveryStore:   newRuntimeShutdownDeliveryStore(t),
 		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
 		EventStore:      startupRecoveryMinimalEventStore{},
 		ManagerStore:    startupRecoveryManagerStore{loadErr: errors.New("load agents failed")},
@@ -985,6 +947,7 @@ func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndD
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
 		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
+		DeliveryStore:   newRuntimeShutdownDeliveryStore(t),
 		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
 		EventStore:      startupRecoveryMinimalEventStore{},
 		ManagerStore:    managerStore,

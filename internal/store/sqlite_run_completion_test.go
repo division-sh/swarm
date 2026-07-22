@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -196,12 +197,9 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryAc
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	fixture := seedSQLiteNormalRunCompletionFixture(t, store, "done")
-	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
-		)
-		VALUES (?, ?, ?, 'node', 'terminal-node', 'pending', 'matched_node_subscription', ?)
-	`, uuid.NewString(), fixture.RunID, fixture.EventID, time.Now().UTC()); err != nil {
+	event := loadSQLiteDeliveryFixtureEvent(t, ctx, store.DB, fixture.EventID)
+	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberNode), SubscriberID: "terminal-node"}
+	if err := commitDeliveryObligationFixture(ctx, store, event, route); err != nil {
 		t.Fatalf("seed sqlite active delivery: %v", err)
 	}
 	if err := store.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
@@ -212,15 +210,11 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryAc
 	}
 	assertSQLiteRunCompletionStatus(t, store.DB, fixture.RunID, "running", false)
 
-	if _, err := store.DB.ExecContext(ctx, `
-		UPDATE event_deliveries
-		SET status = 'delivered',
-		    reason_code = 'node_processed',
-		    delivered_at = ?
-		WHERE event_id = ?
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = 'terminal-node'
-	`, time.Now().UTC(), fixture.EventID); err != nil {
+	claimed, err := store.ClaimNodeDelivery(ctx, event, route)
+	if err != nil {
+		t.Fatalf("claim sqlite active delivery: %v", err)
+	}
+	if _, err := store.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
 		t.Fatalf("settle sqlite active delivery: %v", err)
 	}
 	if err := store.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, nil); err != nil {

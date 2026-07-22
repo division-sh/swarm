@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	"github.com/lib/pq"
 )
@@ -90,6 +92,11 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 			_ = tx.Rollback()
 		}
 	}()
+	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	if err != nil {
+		return preservationcleanup.Result{}, err
+	}
+	ctx = storyctx
 
 	runs, err := lockUnavailableBundlePreservationRunsTx(ctx, tx, runIDs)
 	if err != nil {
@@ -122,9 +129,13 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 		return out, nil
 	}
 
-	deliveries, err := lockUnavailableBundlePreservationDeliveriesTx(ctx, tx, activeRunIDs)
-	if err != nil {
-		return preservationcleanup.Result{}, err
+	deliveries := []runtimedelivery.Snapshot{}
+	for _, runID := range activeRunIDs {
+		snapshots, err := s.activeRunDeliverySnapshotsTx(ctx, tx, runID)
+		if err != nil {
+			return preservationcleanup.Result{}, err
+		}
+		deliveries = append(deliveries, snapshots...)
 	}
 	for _, delivery := range deliveries {
 		target := targetByRun[delivery.RunID]
@@ -132,14 +143,14 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 			DeliveryID:      delivery.DeliveryID,
 			RunID:           delivery.RunID,
 			EventID:         delivery.EventID,
-			SubscriberType:  delivery.SubscriberType,
+			SubscriberType:  string(delivery.SubscriberClass),
 			SubscriberID:    delivery.SubscriberID,
-			PreviousStatus:  delivery.Status,
+			PreviousStatus:  string(delivery.Status),
 			Status:          preservationcleanup.DeliveryOutcomeDeadLetter,
 			ReasonCode:      target.ReasonCode,
 			PreviousReason:  delivery.ReasonCode,
 			ActiveSessionID: delivery.ActiveSessionID,
-			Changed:         delivery.Status != preservationcleanup.DeliveryOutcomeDeadLetter || delivery.ReasonCode != target.ReasonCode,
+			Changed:         true,
 		})
 	}
 	sessions, err := lockUnavailableBundlePreservationSessionsTx(ctx, tx, activeRunIDs)
@@ -176,13 +187,16 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 	}
 
 	eventReasons := map[string]string{}
-	for _, delivery := range deliveries {
-		target := targetByRun[delivery.RunID]
-		if err := terminalizeActiveRunQuiescenceDeliveryTx(ctx, tx, delivery, target.ReasonCode, target.ReasonCode, now); err != nil {
+	for _, runID := range activeRunIDs {
+		target := targetByRun[runID]
+		transitions, err := s.terminalizeRunDeliveriesTx(ctx, tx, runID, target.ReasonCode)
+		if err != nil {
 			return preservationcleanup.Result{}, err
 		}
-		if delivery.EventID != "" {
-			eventReasons[delivery.EventID] = target.ReasonCode
+		for _, transition := range transitions {
+			if transition.Current.EventID != "" {
+				eventReasons[transition.Current.EventID] = target.ReasonCode
+			}
 		}
 	}
 	for eventID, reason := range eventReasons {
@@ -210,6 +224,9 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 		if err := upsertActiveRunQuiescenceRunControlTx(ctx, tx, run.RunID, target.ReasonCode, controlledBy, now); err != nil {
 			return preservationcleanup.Result{}, err
 		}
+	}
+	if err := runtimeauthoractivity.Finalize(ctx); err != nil {
+		return preservationcleanup.Result{}, err
 	}
 	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return preservationcleanup.Result{}, fmt.Errorf("commit preservation cleanup tx: %w", err)
@@ -244,50 +261,6 @@ func lockUnavailableBundlePreservationRunsTx(ctx context.Context, tx *sql.Tx, ru
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read unavailable bundle preservation runs: %w", err)
-	}
-	return out, nil
-}
-
-func lockUnavailableBundlePreservationDeliveriesTx(ctx context.Context, tx *sql.Tx, runIDs []string) ([]activeRunQuiescenceDeliveryTarget, error) {
-	rows, err := tx.QueryContext(ctx, `
-		SELECT
-			d.delivery_id::text,
-			d.run_id::text,
-			d.event_id::text,
-			COALESCE(d.subscriber_type, ''),
-			COALESCE(d.subscriber_id, ''),
-			COALESCE(d.status, ''),
-			COALESCE(d.reason_code, ''),
-			COALESCE(d.active_session_id::text, '')
-		FROM event_deliveries d
-		WHERE d.run_id = ANY($1::uuid[])
-		  AND d.subscriber_type IN ('agent', 'node')
-		  AND d.status IN ('pending', 'in_progress')
-		ORDER BY d.run_id::text, d.event_id::text, d.subscriber_type, d.subscriber_id
-		FOR UPDATE
-	`, pq.Array(runIDs))
-	if err != nil {
-		return nil, fmt.Errorf("lock unavailable bundle preservation deliveries: %w", err)
-	}
-	defer rows.Close()
-	var out []activeRunQuiescenceDeliveryTarget
-	for rows.Next() {
-		var item activeRunQuiescenceDeliveryTarget
-		if err := rows.Scan(&item.DeliveryID, &item.RunID, &item.EventID, &item.SubscriberType, &item.SubscriberID, &item.Status, &item.ReasonCode, &item.ActiveSessionID); err != nil {
-			return nil, fmt.Errorf("scan unavailable bundle preservation delivery: %w", err)
-		}
-		item.DeliveryID = strings.TrimSpace(item.DeliveryID)
-		item.RunID = strings.TrimSpace(item.RunID)
-		item.EventID = strings.TrimSpace(item.EventID)
-		item.SubscriberType = strings.TrimSpace(item.SubscriberType)
-		item.SubscriberID = strings.TrimSpace(item.SubscriberID)
-		item.Status = strings.TrimSpace(item.Status)
-		item.ReasonCode = strings.TrimSpace(item.ReasonCode)
-		item.ActiveSessionID = strings.TrimSpace(item.ActiveSessionID)
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read unavailable bundle preservation deliveries: %w", err)
 	}
 	return out, nil
 }

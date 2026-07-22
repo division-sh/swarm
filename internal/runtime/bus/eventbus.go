@@ -12,6 +12,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -306,18 +307,15 @@ func (eb *EventBus) MarkDeliveryInProgress(ctx context.Context, agentID, session
 	if eb == nil || eb.store == nil {
 		return false, nil
 	}
-	inbound, ok := runtimecorrelation.InboundEventFromContext(ctx)
-	if !ok || strings.TrimSpace(inbound.ID()) == "" || strings.TrimSpace(agentID) == "" {
-		return false, nil
+	claim, ok := runtimedelivery.ClaimFromContext(ctx)
+	if !ok || claim.SubscriberClass() != runtimedelivery.SubscriberAgent || claim.SubscriberID() != strings.TrimSpace(agentID) {
+		return false, fmt.Errorf("agent session binding requires the exact current delivery claim")
 	}
-	type deliveryProgressWriter interface {
-		MarkEventDeliveryInProgress(ctx context.Context, eventID, agentID, sessionID string) error
+	owner, ok := eb.store.(runtimedelivery.Store)
+	if !ok || owner == nil {
+		return false, fmt.Errorf("selected event store does not expose delivery lifecycle ownership")
 	}
-	writer, ok := eb.store.(deliveryProgressWriter)
-	if !ok || writer == nil {
-		return false, nil
-	}
-	if err := writer.MarkEventDeliveryInProgress(ctx, inbound.ID(), agentID, sessionID); err != nil {
+	if _, err := owner.BindAgentSession(ctx, claim, sessionID); err != nil {
 		return false, err
 	}
 	return true, nil

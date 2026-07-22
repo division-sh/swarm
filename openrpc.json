@@ -14,7 +14,7 @@
   "methods": [
     {
       "name": "agent.delivery_diagnostics",
-      "description": "Read the owner-backed per-agent delivery diagnostics slice for failed\ndeliveries and terminal dead-letter deliveries. This method is a\nseparate owner from agent.diagnose: AgentDiagnosis remains lean and must\nnot expose recent failures or dead letters. The API handler validates\nagent_id, list bounds, cursors, and unknown params, then consumes one\nnamed per-agent delivery diagnostics read owner. It must not locally\nreconstruct the shape from run.trace, run.diagnose, event.list,\nevent.get, event_receipts, dashboard helpers, CLI state, runtime memory,\nor EventBus data.\n\nFailed-delivery rows are sourced from canonical agent\nevent_deliveries rows with status failed. Dead-letter rows are sourced\nfrom canonical agent event_deliveries rows with status dead_letter and\nreconciled with event-scoped dead_letters records by original event id.\nA terminal dead-letter delivery without at least one matching\ndead_letters record is malformed owner data and must fail closed rather\nthan silently reporting a partial fact. Dead-letter records for events\nthat do not have a terminal delivery for this agent are not attributed to\nthis agent by this owner.\n\nDetail rows are ordered by the canonical delivery occurrence watermark\nDESC, then delivery_id DESC. The occurrence watermark is currently\nCOALESCE(event_deliveries.delivered_at, event_deliveries.created_at).\nfailure_cursor and dead_letter_cursor are independent opaque cursors\nover that ordering. failures_24h and dead_letters_24h are rolling\n24-hour counts over the same occurrence watermark. Detail lists return\nretained rows subject to store retention and explicit per-list limits.\nEmpty lists are represented as empty arrays.\n",
+      "description": "Read the owner-backed per-agent delivery diagnostics slice for failed\ndeliveries and terminal dead-letter deliveries. This method is a\nseparate owner from agent.diagnose: AgentDiagnosis remains lean and must\nnot expose recent failures or dead letters. The API handler validates\nagent_id, list bounds, cursors, and unknown params, then consumes one\nnamed per-agent delivery diagnostics read owner. It must not locally\nreconstruct the shape from run.trace, run.diagnose, event.list,\nevent.get, event_receipts, dashboard helpers, CLI state, runtime memory,\nor EventBus data.\n\nFailed-delivery rows are sourced from canonical agent\nevent_deliveries rows with status failed. Dead-letter rows are sourced\nfrom canonical agent event_deliveries rows with status dead_letter and\nreconciled with event-scoped dead_letters records by original event id.\nA terminal dead-letter delivery without at least one matching\ndead_letters record is malformed owner data and must fail closed rather\nthan silently reporting a partial fact. Dead-letter records for events\nthat do not have a terminal delivery for this agent are not attributed to\nthis agent by this owner.\n\nDetail rows are ordered by the canonical delivery occurrence watermark\nDESC, then delivery_id DESC. The occurrence watermark is currently\nCOALESCE(event_deliveries.settled_at, event_deliveries.updated_at, event_deliveries.created_at).\nfailure_cursor and dead_letter_cursor are independent opaque cursors\nover that ordering. failures_24h and dead_letters_24h are rolling\n24-hour counts over the same occurrence watermark. Detail lists return\nretained rows subject to store retention and explicit per-list limits.\nEmpty lists are represented as empty arrays.\n",
       "params": [
         {
           "name": "agent_id",
@@ -9142,7 +9142,7 @@
           },
           "occurred_at": {
             "$ref": "#/components/schemas/Timestamp",
-            "description": "Canonical delivery occurrence watermark, currently COALESCE(event_deliveries.delivered_at, event_deliveries.created_at)."
+            "description": "Canonical delivery occurrence watermark, currently COALESCE(event_deliveries.settled_at, event_deliveries.updated_at, event_deliveries.created_at)."
           },
           "reason_code": {
             "type": "string"
@@ -9250,7 +9250,7 @@
           },
           "occurred_at": {
             "$ref": "#/components/schemas/Timestamp",
-            "description": "Canonical delivery occurrence watermark, currently COALESCE(event_deliveries.delivered_at, event_deliveries.created_at)."
+            "description": "Canonical delivery occurrence watermark, currently COALESCE(event_deliveries.settled_at, event_deliveries.updated_at, event_deliveries.created_at)."
           },
           "reason_code": {
             "type": "string"
@@ -9329,7 +9329,7 @@
           },
           "delivery_delivered_at": {
             "$ref": "#/components/schemas/Timestamp",
-            "description": "Canonical event_deliveries.delivered_at when the delivery was settled."
+            "description": "Canonical event_deliveries.settled_at when the delivery reached a terminal state. The public field name is presentation vocabulary, not a second persisted owner."
           },
           "delivery_id": {
             "$ref": "#/components/schemas/OpaqueId"
@@ -12802,7 +12802,7 @@
         "description": "Canonical public test-quiescence projection for deterministic scenario assertions. Source of truth: persisted run completion inputs consumed by run_model.lifecycle.completion, exposed through run.diagnose so test runners do not infer readiness from partial trace rows or sleeps. `ready` is true exactly when all count fields are zero.\n",
         "properties": {
           "active_deliveries": {
-            "description": "Active delivery rows for the run, excluding committed replay-scope marker rows.",
+            "description": "Active executable delivery obligations for the run from the canonical delivery owner. Committed replay scope is a separate table and requires no exclusion.",
             "minimum": 0,
             "type": "integer"
           },
@@ -12913,7 +12913,8 @@
             "$ref": "#/components/schemas/Timestamp"
           },
           "delivery_delivered_at": {
-            "$ref": "#/components/schemas/Timestamp"
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Canonical event_deliveries.settled_at projected under the public presentation field name."
           },
           "delivery_failure": {
             "$ref": "#/components/schemas/FailureEnvelope"

@@ -727,8 +727,9 @@ opco.ceo_ready:
 		entityLocks:    map[string]*sync.Mutex{},
 		module:         staticSemanticWorkflowModule{source: source},
 	}
-	seedPipelineNodeDeliveryAuthority(t, db, evt, "lifecycle-orchestrator")
-	handled, err := pc.executeNodeHandlerPlanResult(testPipelineCoordinatorRunContext(t, pc), "lifecycle-orchestrator", evt)
+	configurePipelineTestDeliveryOwner(t, pc)
+	route := seedPipelineNodeDeliveryAuthority(t, db, evt, "lifecycle-orchestrator")
+	handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), "lifecycle-orchestrator", evt)
 	if err != nil {
 		t.Fatalf("executeNodeHandlerPlanResult: %v", err)
 	}
@@ -822,9 +823,10 @@ states: [initializing, ready]
 	}); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
-	seedPipelineNodeDeliveryAuthority(t, db, evt, "build-orchestrator")
+	configurePipelineTestDeliveryOwner(t, pc)
+	route := seedPipelineNodeDeliveryAuthority(t, db, evt, "build-orchestrator")
 
-	handled, err := pc.executeNodeHandlerPlanResult(ctx, "build-orchestrator", evt)
+	handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(ctx, route), "build-orchestrator", evt)
 	if err != nil {
 		t.Fatalf("executeNodeHandlerPlanResult: %v", err)
 	}

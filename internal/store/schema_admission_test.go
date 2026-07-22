@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/division-sh/swarm/internal/events"
 )
 
 const unacceptedAdmissionEventID = "11111111-1111-4111-8111-111111111111"
@@ -73,11 +72,13 @@ func TestUnacceptedSelectedStoreEventMutationBoundariesFailBeforeSQL(t *testing.
 							return nil
 						})
 					}},
-					{name: "insert_delivery_targets", call: func() error {
-						return store.InsertEventDeliveriesWithTargets(context.Background(), unacceptedAdmissionEventID, []string{"agent-a"}, nil)
+					{name: "delivery_snapshot", call: func() error {
+						_, err := store.Snapshot(context.Background(), unacceptedAdmissionEventID)
+						return err
 					}},
-					{name: "insert_delivery_routes", call: func() error {
-						return store.InsertEventDeliveryRoutes(context.Background(), unacceptedAdmissionEventID, unacceptedAdmissionRoutes())
+					{name: "delivery_summary", call: func() error {
+						_, err := store.SummarizeRun(context.Background(), unacceptedAdmissionEventID)
+						return err
 					}},
 				}
 			} else {
@@ -98,11 +99,13 @@ func TestUnacceptedSelectedStoreEventMutationBoundariesFailBeforeSQL(t *testing.
 							return nil
 						})
 					}},
-					{name: "insert_delivery_targets", call: func() error {
-						return store.InsertEventDeliveriesWithTargets(context.Background(), unacceptedAdmissionEventID, []string{"agent-a"}, nil)
+					{name: "delivery_snapshot", call: func() error {
+						_, err := store.Snapshot(context.Background(), unacceptedAdmissionEventID)
+						return err
 					}},
-					{name: "insert_delivery_routes", call: func() error {
-						return store.InsertEventDeliveryRoutes(context.Background(), unacceptedAdmissionEventID, unacceptedAdmissionRoutes())
+					{name: "delivery_summary", call: func() error {
+						_, err := store.SummarizeRun(context.Background(), unacceptedAdmissionEventID)
+						return err
 					}},
 				}
 			}
@@ -122,61 +125,6 @@ func TestUnacceptedSelectedStoreEventMutationBoundariesFailBeforeSQL(t *testing.
 			}
 		})
 	}
-}
-
-func TestUnacceptedSelectedStoreCallerSuppliedDeliveryTransactionsFailBeforeSQL(t *testing.T) {
-	for _, backend := range []string{"postgres", "sqlite"} {
-		for _, operation := range []string{"deliveries", "delivery_targets", "delivery_routes"} {
-			t.Run(backend+"/"+operation, func(t *testing.T) {
-				db, mock, err := sqlmock.New()
-				if err != nil {
-					t.Fatalf("sqlmock: %v", err)
-				}
-				defer db.Close()
-
-				mock.ExpectBegin()
-				tx, err := db.BeginTx(context.Background(), nil)
-				if err != nil {
-					t.Fatalf("begin caller-supplied transaction: %v", err)
-				}
-				mock.ExpectRollback()
-				defer tx.Rollback()
-
-				if backend == "postgres" {
-					store := &PostgresStore{DB: db}
-					switch operation {
-					case "deliveries":
-						err = store.InsertEventDeliveriesTx(context.Background(), tx, unacceptedAdmissionEventID, []string{"agent-a"})
-					case "delivery_targets":
-						err = store.InsertEventDeliveriesWithTargetsTx(context.Background(), tx, unacceptedAdmissionEventID, []string{"agent-a"}, nil)
-					case "delivery_routes":
-						err = store.InsertEventDeliveryRoutesTx(context.Background(), tx, unacceptedAdmissionEventID, unacceptedAdmissionRoutes())
-					}
-				} else {
-					store := &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: db}}
-					switch operation {
-					case "deliveries":
-						err = store.InsertEventDeliveriesTx(context.Background(), tx, unacceptedAdmissionEventID, []string{"agent-a"})
-					case "delivery_targets":
-						err = store.InsertEventDeliveriesWithTargetsTx(context.Background(), tx, unacceptedAdmissionEventID, []string{"agent-a"}, nil)
-					case "delivery_routes":
-						err = store.InsertEventDeliveryRoutesTx(context.Background(), tx, unacceptedAdmissionEventID, unacceptedAdmissionRoutes())
-					}
-				}
-				requireUnacceptedAdmissionFailure(t, err)
-				if err := tx.Rollback(); err != nil {
-					t.Fatalf("rollback caller-supplied transaction: %v", err)
-				}
-				if err := mock.ExpectationsWereMet(); err != nil {
-					t.Fatalf("unaccepted caller-supplied transaction issued SQL: %v", err)
-				}
-			})
-		}
-	}
-}
-
-func unacceptedAdmissionRoutes() []events.DeliveryRoute {
-	return []events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-a"}}
 }
 
 func requireUnacceptedAdmissionFailure(t *testing.T, err error) {

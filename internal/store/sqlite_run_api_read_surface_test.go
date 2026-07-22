@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -76,38 +77,60 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	}
 	seedSQLiteEntityStateRows(t, sqliteStore.DB, ctx, newer, newerEntityA, newerEntityB)
 	seedSQLiteEntityStateRows(t, sqliteStore.DB, ctx, older, olderEntity)
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-			INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, created_at)
-			VALUES (?, ?, ?, 'agent', 'agent-1', 'pending', ?)
-		`, uuid.NewString(), newer, newerEvent, now.Add(3*time.Second)); err != nil {
-		t.Fatalf("seed sqlite delivery: %v", err)
+	rootEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, newerEvent)
+	pendingDelivery := seedDeliveryStateFixture(t, ctx, sqliteStore, rootEvent, events.DeliveryRoute{
+		SubscriberType: string(runtimedelivery.SubscriberAgent),
+		SubscriberID:   "agent-1",
+	}, runtimedelivery.StateQueued, nil)
+	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, pendingDelivery, now.Add(3*time.Second), now.Add(3*time.Second))
+
+	middleEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, newerMiddleEvent)
+	agentFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "agent_failure", nil)
+	agentFailedDelivery := seedDeliveryStateFixture(t, ctx, sqliteStore, middleEvent, events.DeliveryRoute{
+		SubscriberType: string(runtimedelivery.SubscriberAgent),
+		SubscriberID:   "agent-failed",
+	}, runtimedelivery.StateRetrying, &agentFailure)
+	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, agentFailedDelivery, now.Add(4*time.Second), now.Add(5*time.Second))
+	agentFailedDeliveryID := agentFailedDelivery.DeliveryID
+
+	latestEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, newerLatestEvent)
+	deadRoute := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberNode), SubscriberID: "node-dead"}
+	if err := commitDeliveryObligationFixture(ctx, sqliteStore, latestEvent, deadRoute); err != nil {
+		t.Fatalf("commit sqlite exhausted delivery: %v", err)
 	}
-	agentFailedDeliveryID := uuid.NewString()
-	nodeDeadDeliveryID := uuid.NewString()
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-			INSERT INTO event_deliveries (
-				delivery_id, run_id, event_id, subscriber_type, subscriber_id, status,
-				retry_count, reason_code, failure, created_at, started_at, delivered_at
-			)
-			VALUES
-				(?, ?, ?, 'agent', 'agent-failed', 'failed', 1, 'handler_error', ?, ?, ?, NULL),
-				(?, ?, ?, 'node', 'node-dead', 'dead_letter', 2, 'retry_exhausted', ?, ?, ?, ?)
-	`, agentFailedDeliveryID, newer, newerMiddleEvent,
-		mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "agent_failure", nil)), now.Add(4*time.Second), now.Add(5*time.Second),
-		nodeDeadDeliveryID, newer, newerLatestEvent,
-		mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassRetryExhausted, "node_failure", nil)), now.Add(6*time.Second), now.Add(7*time.Second), now.Add(8*time.Second)); err != nil {
-		t.Fatalf("seed sqlite failed deliveries: %v", err)
+	nodeFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "node_failure", nil)
+	claimed, err := sqliteStore.ClaimNodeDelivery(ctx, latestEvent, deadRoute)
+	if err != nil {
+		t.Fatalf("claim sqlite exhausted delivery: %v", err)
 	}
-	successDeliveryID := uuid.NewString()
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-			INSERT INTO event_deliveries (
-				delivery_id, run_id, event_id, subscriber_type, subscriber_id, status,
-				retry_count, reason_code, created_at, started_at, delivered_at
-			)
-			VALUES (?, ?, ?, 'node', 'node-success', 'delivered', 0, 'node_processed', ?, ?, ?)
-		`, successDeliveryID, newer, newerMiddleEvent, now.Add(5*time.Second), now.Add(6*time.Second), now.Add(7*time.Second)); err != nil {
-		t.Fatalf("seed sqlite successful delivery: %v", err)
+	var nodeDeadDelivery runtimedelivery.Snapshot
+	for attempt := 0; attempt <= 3; attempt++ {
+		nodeDeadDelivery, err = sqliteStore.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
+			Disposition: runtimedelivery.FailureRetry,
+			Failure:     &nodeFailure,
+			RetryBase:   time.Second,
+		})
+		if err != nil {
+			t.Fatalf("settle sqlite exhausted delivery attempt %d: %v", attempt+1, err)
+		}
+		if attempt == 3 {
+			break
+		}
+		setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, nodeDeadDelivery, now.Add(6*time.Second), now.Add(6*time.Second))
+		claimed, err = sqliteStore.ClaimNodeDelivery(ctx, latestEvent, deadRoute)
+		if err != nil {
+			t.Fatalf("reclaim sqlite exhausted delivery attempt %d: %v", attempt+2, err)
+		}
 	}
+	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, nodeDeadDelivery, now.Add(6*time.Second), now.Add(8*time.Second))
+	nodeDeadDeliveryID := nodeDeadDelivery.DeliveryID
+
+	successfulDelivery := seedDeliveryStateFixture(t, ctx, sqliteStore, middleEvent, events.DeliveryRoute{
+		SubscriberType: string(runtimedelivery.SubscriberNode),
+		SubscriberID:   "node-success",
+	}, runtimedelivery.StateDelivered, nil)
+	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, successfulDelivery, now.Add(5*time.Second), now.Add(7*time.Second))
+	successDeliveryID := successfulDelivery.DeliveryID
 	deadLetterID := uuid.NewString()
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 			INSERT INTO dead_letters (
@@ -182,7 +205,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 			t.Fatalf("successful delivered/node_processed delivery appeared in FailedDeliveries: %#v", report.FailedDeliveries)
 		}
 	}
-	if got := report.FailedDeliveries[0]; got.DeliveryID != nodeDeadDeliveryID || got.SubscriberType != "node" || got.RetryCount != 2 || got.RetryEligible || !got.Terminal || len(got.DeadLetters) != 1 {
+	if got := report.FailedDeliveries[0]; got.DeliveryID != nodeDeadDeliveryID || got.SubscriberType != "node" || got.RetryCount != 3 || got.RetryEligible || !got.Terminal || len(got.DeadLetters) != 1 {
 		t.Fatalf("node failed delivery evidence = %#v", got)
 	}
 	if got := report.FailedDeliveries[1]; got.DeliveryID != agentFailedDeliveryID || got.SubscriberType != "agent" || got.RetryCount != 1 || !got.RetryEligible || got.Terminal || got.Failure == nil || got.Failure.Detail.Code != "agent_failure" {
@@ -269,17 +292,16 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 	if err := sqliteStore.UpsertPipelineReceipt(ctx, readyEventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt ready event: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
-		)
-		VALUES
-			(?, ?, ?, 'agent', 'agent-active', 'pending', 0, 'matched_agent_subscription', ?),
-			(?, ?, ?, 'agent', 'agent-done', 'delivered', 0, 'handled', ?)
-	`, uuid.NewString(), blockedRunID, activeEventID, now,
-		uuid.NewString(), readyRunID, readyEventID, now); err != nil {
-		t.Fatalf("seed sqlite deliveries: %v", err)
-	}
+	activeEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, activeEventID)
+	seedDeliveryStateFixture(t, ctx, sqliteStore, activeEvent, events.DeliveryRoute{
+		SubscriberType: string(runtimedelivery.SubscriberAgent),
+		SubscriberID:   "agent-active",
+	}, runtimedelivery.StateQueued, nil)
+	readyEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, readyEventID)
+	seedDeliveryStateFixture(t, ctx, sqliteStore, readyEvent, events.DeliveryRoute{
+		SubscriberType: string(runtimedelivery.SubscriberAgent),
+		SubscriberID:   "agent-done",
+	}, runtimedelivery.StateDelivered, nil)
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO timers (
 			timer_id, run_id, timer_name, fire_event, fire_payload,

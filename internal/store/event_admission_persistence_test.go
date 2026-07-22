@@ -620,7 +620,7 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 				if err != nil {
 					t.Fatalf("load exact duplicate state: %v", err)
 				}
-				if seedState.Status != status || seedState.RunEventCount != 1 || seedState.EventExists != 1 || seedState.DeliveryCount != 1 {
+				if seedState.Status != status || seedState.RunEventCount != 1 || seedState.EventExists != 1 || seedState.DeliveryCount != 0 {
 					t.Fatalf("state after exact duplicate atomic no-op = %+v", seedState)
 				}
 

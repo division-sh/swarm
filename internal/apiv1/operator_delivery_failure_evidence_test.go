@@ -18,6 +18,7 @@ func TestEventPublishDeliveriesExposeFailureEvidence(t *testing.T) {
 		ReasonCode:     "retry_exhausted",
 		Failure:        testFailure("retry_exhausted"),
 		RetryCount:     2,
+		Terminal:       true,
 		CreatedAt:      &at,
 		FinishedAt:     &at,
 		DeadLetters: []store.OperatorDeadLetterRecord{{
@@ -47,10 +48,11 @@ func TestEventReplayTargetsExposeOriginalFailureEvidence(t *testing.T) {
 			DeliveryID:     "delivery-1",
 			SubscriberType: "agent",
 			SubscriberID:   "agent-a",
-			Status:         "failed",
+			Status:         "dead_letter",
 			ReasonCode:     "handler_error",
 			Failure:        testFailure("handler_failed"),
 			RetryCount:     1,
+			Terminal:       true,
 			CreatedAt:      &at,
 		}},
 	}
@@ -62,7 +64,7 @@ func TestEventReplayTargetsExposeOriginalFailureEvidence(t *testing.T) {
 		t.Fatalf("targets subscribers=%#v deliveries=%#v", subscribers, deliveries)
 	}
 	got := deliveries[0]
-	if got.RetryCount != 1 || got.Attempt != 2 || !got.RetryEligible || got.Terminal || got.ReasonCode != "handler_error" || got.Failure == nil || got.Failure.Detail.Code != "handler_failed" {
+	if got.RetryCount != 1 || got.Attempt != 2 || got.RetryEligible || !got.Terminal || got.ReasonCode != "handler_error" || got.Failure == nil || got.Failure.Detail.Code != "handler_failed" {
 		t.Fatalf("replay delivery evidence = %#v", got)
 	}
 }

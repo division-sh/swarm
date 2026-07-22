@@ -99,9 +99,12 @@ func (s *SQLiteRuntimeStore) sqliteConvergeStandaloneRuntimePlatformRunByEventID
 	case "failed", "cancelled", "forked":
 		return fmt.Errorf("standalone runtime platform run %s already terminal with status %s", rec.RunID, strings.TrimSpace(rec.RunStatus))
 	}
-	active, err := sqliteHasActiveRunDeliveries(ctx, tx, rec.RunID)
-	if err != nil || active {
+	summary, err := sqliteDeliveryAdapter.SummarizeRun(ctx, tx, rec.RunID)
+	if err != nil {
 		return err
+	}
+	if !summary.Settled() {
+		return nil
 	}
 	_, err = s.sqliteMarkRunTerminalTx(ctx, tx, rec.RunID, "completed", nil, s.now())
 	return err
@@ -251,13 +254,17 @@ func (s *SQLiteRuntimeStore) sqliteMarkRunTerminalTx(ctx context.Context, tx *sq
 	if err := sqliteSyncRunCounts(ctx, tx, runID); err != nil {
 		return storerunlifecycle.Snapshot{}, err
 	}
-	if status == "completed" || status == "failed" {
-		active, err := sqliteHasActiveRunDeliveries(ctx, tx, runID)
+	if status == "completed" {
+		summary, err := sqliteDeliveryAdapter.SummarizeRun(ctx, tx, runID)
 		if err != nil {
 			return storerunlifecycle.Snapshot{}, err
 		}
-		if active {
+		if !summary.Settled() {
 			return storerunlifecycle.Snapshot{}, fmt.Errorf("run %s still has active deliveries", runID)
+		}
+	} else {
+		if _, err := sqliteDeliveryAdapter.TerminalizeRun(ctx, tx, runID, "run_"+status); err != nil {
+			return storerunlifecycle.Snapshot{}, err
 		}
 	}
 	result, err := tx.ExecContext(ctx, `
@@ -345,28 +352,6 @@ func sqliteSyncRunCounts(ctx context.Context, q execQueryer, runID string) error
 		return fmt.Errorf("sync sqlite run counters: %w", err)
 	}
 	return nil
-}
-
-func sqliteHasActiveRunDeliveries(ctx context.Context, q execQueryer, runID string) (bool, error) {
-	runID = nullUUIDString(runID)
-	if q == nil || runID == "" {
-		return false, nil
-	}
-	var active bool
-	if err := q.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM event_deliveries
-			WHERE run_id = ?
-			  AND (
-				status IN ('pending', 'in_progress')
-				OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
-			  )
-		)
-	`, runID).Scan(&active); err != nil {
-		return false, fmt.Errorf("load sqlite active deliveries: %w", err)
-	}
-	return active, nil
 }
 
 func sqliteNormalRunCompletionCandidateTx(ctx context.Context, tx *sql.Tx, eventID string) (normalRunCompletionCandidate, bool, error) {
@@ -539,11 +524,11 @@ func sqliteNormalRunCompletionPipelinesSettledTx(ctx context.Context, tx *sql.Tx
 }
 
 func sqliteNormalRunCompletionDeliveriesSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
-	active, err := sqliteHasActiveRunDeliveries(ctx, tx, runID)
+	summary, err := sqliteDeliveryAdapter.SummarizeRun(ctx, tx, runID)
 	if err != nil {
 		return false, err
 	}
-	return !active, nil
+	return summary.Settled(), nil
 }
 
 func sqliteNormalRunCompletionTimersSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {

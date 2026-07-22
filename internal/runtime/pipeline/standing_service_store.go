@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/google/uuid"
@@ -333,7 +334,7 @@ func (s *WorkflowInstanceStore) SuspendStandingService(ctx context.Context, oper
 			return nil
 		}
 		now := time.Now().UTC()
-		if err := s.quiesceStandingRunTx(txctx, tx, current.RunID, "standing_suspended", "cancelled", now); err != nil {
+		if err := s.quiesceStandingRunTx(txctx, tx, current.RunID, current.BundleHash, "standing_suspended", "cancelled", now); err != nil {
 			return err
 		}
 		if err := s.setStandingRunPausedTx(txctx, tx, current.RunID, operation.Reason, operation.Actor, now); err != nil {
@@ -424,7 +425,7 @@ func (s *WorkflowInstanceStore) ResetStandingService(ctx context.Context, operat
 		}
 		now := time.Now().UTC()
 		if current.RunStatus == "running" || current.RunStatus == "paused" {
-			if err := s.quiesceStandingRunTx(txctx, tx, current.RunID, "standing_reset", "cancelled", now); err != nil {
+			if err := s.quiesceStandingRunTx(txctx, tx, current.RunID, current.BundleHash, "standing_reset", "cancelled", now); err != nil {
 				return err
 			}
 			if err := s.setStandingRunCancelledTx(txctx, tx, current.RunID, "standing_reset", operation.Actor, now); err != nil {
@@ -911,7 +912,7 @@ func (s *WorkflowInstanceStore) orphanStandingServiceTx(ctx context.Context, tx 
 		return StandingServiceReconciliation{}, standingResetRequiredError(current, "removed declaration points at a terminal generation")
 	}
 	now := time.Now().UTC()
-	if err := s.quiesceStandingRunTx(ctx, tx, current.RunID, "standing_declaration_removed", "orphaned", now); err != nil {
+	if err := s.quiesceStandingRunTx(ctx, tx, current.RunID, current.BundleHash, "standing_declaration_removed", "orphaned", now); err != nil {
 		return StandingServiceReconciliation{}, err
 	}
 	if err := s.setStandingRunPausedTx(ctx, tx, current.RunID, "standing_declaration_removed", "runtime", now); err != nil {
@@ -937,19 +938,27 @@ func (s *WorkflowInstanceStore) orphanStandingServiceTx(ctx context.Context, tx 
 }
 
 func (s *WorkflowInstanceStore) standingRunHasLiveWorkTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
+	if s.deliveryStore == nil {
+		return false, fmt.Errorf("inspect standing run live work: delivery lifecycle store is required")
+	}
+	deliverySummary, err := s.deliveryStore.SummarizeRun(ctx, runID)
+	if err != nil {
+		return false, fmt.Errorf("inspect standing run delivery work: %w", err)
+	}
+	if !deliverySummary.Settled() {
+		return true, nil
+	}
 	query := `
 		SELECT EXISTS (
-			SELECT 1 FROM event_deliveries WHERE run_id = ? AND status IN ('pending', 'in_progress', 'failed')
-			UNION ALL SELECT 1 FROM agent_sessions WHERE run_id = ? AND status IN ('active', 'suspended')
+			SELECT 1 FROM agent_sessions WHERE run_id = ? AND status IN ('active', 'suspended')
 			UNION ALL SELECT 1 FROM timers WHERE run_id = ? AND status = 'active'
 		)
 	`
-	args := []any{runID, runID, runID}
+	args := []any{runID, runID}
 	if !s.isSQLite() {
 		query = `
 			SELECT EXISTS (
-				SELECT 1 FROM event_deliveries WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress', 'failed')
-				UNION ALL SELECT 1 FROM agent_sessions WHERE run_id = $1::uuid AND status IN ('active', 'suspended')
+				SELECT 1 FROM agent_sessions WHERE run_id = $1::uuid AND status IN ('active', 'suspended')
 				UNION ALL SELECT 1 FROM timers WHERE run_id = $1::uuid AND status = 'active'
 			)
 		`
@@ -962,19 +971,20 @@ func (s *WorkflowInstanceStore) standingRunHasLiveWorkTx(ctx context.Context, tx
 	return live, nil
 }
 
-func (s *WorkflowInstanceStore) quiesceStandingRunTx(ctx context.Context, tx *sql.Tx, runID, reason, sessionReason string, now time.Time) error {
+func (s *WorkflowInstanceStore) quiesceStandingRunTx(ctx context.Context, tx *sql.Tx, runID, bundleHash, reason, sessionReason string, now time.Time) error {
+	if s.deliveryStore == nil {
+		return fmt.Errorf("quiesce standing run: delivery lifecycle store is required")
+	}
+	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, bundleHash)
+	if err != nil {
+		return fmt.Errorf("quiesce standing run scope: %w", err)
+	}
+	ctx = runtimeauthoractivity.WithScope(ctx, scope)
+	if _, err := s.deliveryStore.TerminalizeRun(ctx, runID, reason); err != nil {
+		return fmt.Errorf("terminalize standing deliveries: %w", err)
+	}
 	diagnosticTypes := events.DiagnosticDirectEventTypes()
 	if s.isSQLite() {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, reason_code, processed_at)
-			SELECT event_id, subscriber_type, subscriber_id, 'dead_letter', ?, ?
-			FROM event_deliveries
-			WHERE run_id = ? AND status IN ('pending', 'in_progress', 'failed')
-			ON CONFLICT(event_id, subscriber_type, subscriber_id) DO UPDATE SET
-				outcome = 'dead_letter', reason_code = excluded.reason_code, failure = NULL, processed_at = excluded.processed_at
-		`, reason, now, runID); err != nil {
-			return fmt.Errorf("settle sqlite standing delivery receipts: %w", err)
-		}
 		diagnosticPlaceholders := strings.TrimRight(strings.Repeat("?,", len(diagnosticTypes)), ",")
 		pipelineArgs := []any{reason, now, runID}
 		for _, eventType := range diagnosticTypes {
@@ -996,9 +1006,6 @@ func (s *WorkflowInstanceStore) quiesceStandingRunTx(ctx context.Context, tx *sq
 		`, pipelineArgs...); err != nil {
 			return fmt.Errorf("settle sqlite standing pipeline receipts: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE event_deliveries SET status = 'dead_letter', reason_code = ?, failure = NULL, active_session_id = NULL, delivered_at = COALESCE(delivered_at, ?) WHERE run_id = ? AND status IN ('pending', 'in_progress', 'failed')`, reason, now, runID); err != nil {
-			return fmt.Errorf("terminalize sqlite standing deliveries: %w", err)
-		}
 		if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = 'terminated', termination_reason = ?, termination_detail = ?, terminated_at = COALESCE(terminated_at, ?), lease_holder = NULL, lease_expires_at = NULL, updated_at = ? WHERE run_id = ? AND status IN ('active', 'suspended')`, sessionReason, reason, now, now, runID); err != nil {
 			return fmt.Errorf("terminate sqlite standing sessions: %w", err)
 		}
@@ -1006,16 +1013,6 @@ func (s *WorkflowInstanceStore) quiesceStandingRunTx(ctx context.Context, tx *sq
 			return fmt.Errorf("cancel sqlite standing timers: %w", err)
 		}
 		return nil
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, reason_code, processed_at)
-		SELECT event_id, subscriber_type, subscriber_id, 'dead_letter', $2, $3::timestamptz
-		FROM event_deliveries
-		WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress', 'failed')
-		ON CONFLICT(event_id, subscriber_type, subscriber_id) DO UPDATE SET
-			outcome = 'dead_letter', reason_code = EXCLUDED.reason_code, failure = NULL, processed_at = EXCLUDED.processed_at
-	`, runID, reason, now); err != nil {
-		return fmt.Errorf("settle standing delivery receipts: %w", err)
 	}
 	diagnosticPlaceholders := make([]string, 0, len(diagnosticTypes))
 	pipelineArgs := []any{runID, reason, now}
@@ -1038,9 +1035,6 @@ func (s *WorkflowInstanceStore) quiesceStandingRunTx(ctx context.Context, tx *sq
 			outcome = 'dead_letter', reason_code = EXCLUDED.reason_code, failure = NULL, processed_at = EXCLUDED.processed_at
 	`, pipelineArgs...); err != nil {
 		return fmt.Errorf("settle standing pipeline receipts: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE event_deliveries SET status = 'dead_letter', reason_code = $2, failure = NULL, active_session_id = NULL, delivered_at = COALESCE(delivered_at, $3) WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress', 'failed')`, runID, reason, now); err != nil {
-		return fmt.Errorf("terminalize standing deliveries: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = 'terminated', termination_reason = $2, termination_detail = $3, terminated_at = COALESCE(terminated_at, $4), lease_holder = NULL, lease_expires_at = NULL, updated_at = $4 WHERE run_id = $1::uuid AND status IN ('active', 'suspended')`, runID, sessionReason, reason, now); err != nil {
 		return fmt.Errorf("terminate standing sessions: %w", err)

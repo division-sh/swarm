@@ -2,6 +2,8 @@ package events
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -416,6 +418,71 @@ type DeliveryRoute struct {
 	Target            RouteIdentity             `json:"delivery_target_route,omitempty"`
 	Context           DeliveryContext           `json:"delivery_context,omitempty"`
 	PayloadProjection DeliveryPayloadProjection `json:"delivery_payload_projection,omitempty"`
+}
+
+// DeliveryRouteIdentity is the opaque, canonical identity of one normalized
+// delivery route. Persistence stores the string form, while this package alone
+// derives identity from route semantics.
+type DeliveryRouteIdentity struct {
+	value string
+}
+
+const deliveryRouteIdentityPrefix = "delivery-route-v1:sha256:"
+
+func (i DeliveryRouteIdentity) String() string { return i.value }
+
+func (i DeliveryRouteIdentity) Valid() bool {
+	if !strings.HasPrefix(i.value, deliveryRouteIdentityPrefix) {
+		return false
+	}
+	raw := strings.TrimPrefix(i.value, deliveryRouteIdentityPrefix)
+	if len(raw) != sha256.Size*2 || raw != strings.ToLower(raw) {
+		return false
+	}
+	_, err := hex.DecodeString(raw)
+	return err == nil
+}
+
+// ParseDeliveryRouteIdentity validates a durable route identity during
+// readback. It never derives or repairs route facts.
+func ParseDeliveryRouteIdentity(raw string) (DeliveryRouteIdentity, error) {
+	identity := DeliveryRouteIdentity{value: strings.TrimSpace(raw)}
+	if !identity.Valid() {
+		return DeliveryRouteIdentity{}, fmt.Errorf("delivery route identity is invalid")
+	}
+	return identity, nil
+}
+
+// Identity derives the canonical opaque identity from every semantically
+// relevant route fact. The normalized route remains persisted for exact
+// duplicate comparison and hydration.
+func (r DeliveryRoute) Identity() (DeliveryRouteIdentity, error) {
+	r = r.Normalized()
+	if r.SubscriberType == "" || r.SubscriberID == "" {
+		return DeliveryRouteIdentity{}, fmt.Errorf("delivery route subscriber type and id are required")
+	}
+	projection, err := r.PayloadProjection.Canonical()
+	if err != nil {
+		return DeliveryRouteIdentity{}, fmt.Errorf("delivery route payload projection: %w", err)
+	}
+	canonical, err := json.Marshal(struct {
+		SubscriberType string            `json:"subscriber_type"`
+		SubscriberID   string            `json:"subscriber_id"`
+		Target         RouteIdentity     `json:"target"`
+		Context        DeliveryContext   `json:"context"`
+		Projection     map[string]string `json:"projection"`
+	}{
+		SubscriberType: r.SubscriberType,
+		SubscriberID:   r.SubscriberID,
+		Target:         r.Target,
+		Context:        r.Context,
+		Projection:     projection.Fields(),
+	})
+	if err != nil {
+		return DeliveryRouteIdentity{}, fmt.Errorf("encode delivery route identity: %w", err)
+	}
+	sum := sha256.Sum256(canonical)
+	return DeliveryRouteIdentity{value: deliveryRouteIdentityPrefix + hex.EncodeToString(sum[:])}, nil
 }
 
 type Event struct {
@@ -1272,7 +1339,11 @@ func NormalizeDeliveryRoutes(in []DeliveryRoute) []DeliveryRoute {
 		if route.SubscriberType == "" || route.SubscriberID == "" {
 			continue
 		}
-		key := deliveryRouteIdentityKey(route)
+		identity, err := route.Identity()
+		if err != nil {
+			continue
+		}
+		key := identity.String()
 		if _, ok := seen[key]; ok {
 			continue
 		}
@@ -1282,30 +1353,17 @@ func NormalizeDeliveryRoutes(in []DeliveryRoute) []DeliveryRoute {
 	return out
 }
 
-// SameDeliveryRouteIdentity reports whether two routes collapse to one durable
-// event-delivery row. Receiver-local pin identity is deliberately not part of
-// that model.
+// SameDeliveryRouteIdentity reports whether two routes identify one exact
+// durable executable-delivery obligation.
 func SameDeliveryRouteIdentity(left, right DeliveryRoute) bool {
 	left = left.Normalized()
 	right = right.Normalized()
 	if left.SubscriberType == "" || left.SubscriberID == "" || right.SubscriberType == "" || right.SubscriberID == "" {
 		return false
 	}
-	return deliveryRouteIdentityKey(left) == deliveryRouteIdentityKey(right)
-}
-
-func deliveryRouteIdentityKey(route DeliveryRoute) string {
-	route = route.Normalized()
-	target := route.Target
-	return strings.Join([]string{
-		route.SubscriberType,
-		route.SubscriberID,
-		target.FlowID,
-		target.FlowInstance,
-		target.EntityID,
-		route.Context.ReplyContextID(),
-		route.PayloadProjection.Fingerprint(),
-	}, "\x00")
+	leftIdentity, leftErr := left.Identity()
+	rightIdentity, rightErr := right.Identity()
+	return leftErr == nil && rightErr == nil && leftIdentity == rightIdentity
 }
 
 func ValidateDeliveryRouteProjections(in []DeliveryRoute) error {

@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -81,7 +82,7 @@ type claudeAttemptProofStore interface {
 	runtimeeffects.CompletionHeartbeatStore
 	runtimeeffects.RecoveryStore
 	runtimellm.ConversationPersistence
-	GetEventReceipt(context.Context, string, string) (runtimemanager.EventReceipt, bool, error)
+	runtimedelivery.Store
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 }
 
@@ -209,10 +210,10 @@ func TestClaudeAttemptStartRejectionRetriesThroughSelectedStore(t *testing.T) {
 func makeClaudeAttemptProofDeliveryRetryEligible(t *testing.T, backend claudeAttemptProofBackend, eventID string) {
 	t.Helper()
 	eligibleAt := time.Now().UTC().Add(-2 * time.Minute)
-	query := `UPDATE event_deliveries SET delivered_at = ? WHERE event_id = ? AND subscriber_type = 'agent' AND subscriber_id = ?`
+	query := `UPDATE event_deliveries SET next_eligible_at = ? WHERE event_id = ? AND subscriber_type = 'agent' AND subscriber_id = ?`
 	args := []any{eligibleAt, eventID, claudeAttemptProofAgentConfig().ID}
 	if backend.name == "postgres" {
-		query = `UPDATE event_deliveries SET delivered_at = $1 WHERE event_id = $2 AND subscriber_type = 'agent' AND subscriber_id = $3`
+		query = `UPDATE event_deliveries SET next_eligible_at = $1 WHERE event_id = $2 AND subscriber_type = 'agent' AND subscriber_id = $3`
 	}
 	result, err := backend.db.ExecContext(claudeAttemptProofContext(), query, args...)
 	if err != nil {
@@ -422,7 +423,7 @@ func TestAgentManagerDirectDeadLetterPersistsCanonicalEnvelopeSelectedStores(t *
 			eventBus, workOwner := newClaudeAttemptProofEventBus(t, backend)
 			manager := runtimemanager.NewAgentManagerWithOptions(eventBus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 				return claudeAttemptProofChainDepthAgent{id: cfg.ID}, nil
-			}, runtimemanager.AgentManagerOptions{BaseContext: claudeAttemptProofContext(), LifecycleStore: backend.store, Sessions: backend.sessions, WorkOwner: workOwner}, backend.store)
+			}, runtimemanager.AgentManagerOptions{BaseContext: claudeAttemptProofContext(), LifecycleStore: backend.store, DeliveryStore: backend.store, Sessions: backend.sessions, WorkOwner: workOwner}, backend.store)
 			if err := manager.SpawnAgent(claudeAttemptProofAgentConfig()); err != nil {
 				t.Fatalf("spawn chain-depth proof agent: %v", err)
 			}
@@ -495,7 +496,7 @@ func newClaudeAttemptProofManager(t *testing.T, backend claudeAttemptProofBacken
 	)
 	manager := runtimemanager.NewAgentManagerWithOptions(eventBus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return &claudeAttemptProofAgent{runtime: runtime, config: cfg, calls: calls}, nil
-	}, runtimemanager.AgentManagerOptions{BaseContext: claudeAttemptProofContext(), LifecycleStore: backend.store, Sessions: backend.sessions, WorkOwner: workOwner}, backend.store)
+	}, runtimemanager.AgentManagerOptions{BaseContext: claudeAttemptProofContext(), LifecycleStore: backend.store, DeliveryStore: backend.store, Sessions: backend.sessions, WorkOwner: workOwner}, backend.store)
 	return manager, eventBus
 }
 
@@ -572,22 +573,32 @@ func publishClaudeAttemptProofEvent(t *testing.T, eventBus *runtimebus.EventBus,
 	return eventID
 }
 
-func waitClaudeAttemptProofReceipt(t *testing.T, backend claudeAttemptProofBackend, eventID string, want runtimemanager.ReceiptStatus, calls *atomic.Int32) runtimemanager.EventReceipt {
+func waitClaudeAttemptProofReceipt(t *testing.T, backend claudeAttemptProofBackend, eventID string, want runtimemanager.ReceiptStatus, calls *atomic.Int32) runtimedelivery.Snapshot {
 	t.Helper()
+	wantStatus := runtimedelivery.StatusPending
+	switch want {
+	case runtimemanager.ReceiptStatusError:
+		wantStatus = runtimedelivery.StatusFailed
+	case runtimemanager.ReceiptStatusProcessed:
+		wantStatus = runtimedelivery.StatusDelivered
+	case runtimemanager.ReceiptStatusDeadLetter, runtimemanager.ReceiptStatusTerminal:
+		wantStatus = runtimedelivery.StatusDeadLetter
+	default:
+		t.Fatalf("unsupported receipt-to-delivery test status %q", want)
+	}
+	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: claudeAttemptProofAgentConfig().ID}
+	proof, err := backend.store.ProveHandoff(claudeAttemptProofContext(), eventID, route)
+	if err != nil {
+		t.Fatalf("prove Claude delivery handoff: %v", err)
+	}
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		receipt, found, err := backend.store.GetEventReceipt(claudeAttemptProofContext(), eventID, claudeAttemptProofAgentConfig().ID)
-		if err == nil && found && receipt.Status == want {
-			return receipt
+		snapshot, snapshotErr := backend.store.Snapshot(claudeAttemptProofContext(), proof.DeliveryID())
+		if snapshotErr == nil && snapshot.Status == wantStatus {
+			return snapshot
 		}
 		if time.Now().After(deadline) {
-			var deliveryStatus string
-			query := `SELECT COALESCE(status, '') FROM event_deliveries WHERE event_id=? AND subscriber_id=?`
-			if backend.name == "postgres" {
-				query = `SELECT COALESCE(status, '') FROM event_deliveries WHERE event_id=$1::uuid AND subscriber_id=$2`
-			}
-			deliveryErr := backend.db.QueryRowContext(claudeAttemptProofContext(), query, eventID, claudeAttemptProofAgentConfig().ID).Scan(&deliveryStatus)
-			t.Fatalf("receipt %s did not reach %s: found=%v receipt=%#v failure=%+v err=%v delivery=%q delivery_err=%v agent_calls=%d", eventID, want, found, receipt, receipt.Failure, err, deliveryStatus, deliveryErr, calls.Load())
+			t.Fatalf("delivery %s did not reach %s: snapshot=%#v failure=%+v err=%v agent_calls=%d", eventID, wantStatus, snapshot, snapshot.Failure, snapshotErr, calls.Load())
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

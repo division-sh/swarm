@@ -2,492 +2,441 @@ package conformance
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
-	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
-	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
-func TestDeliveryLifecycleConformance(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+type deliveryLifecycleConformanceBackend struct {
+	name     string
+	store    runtimedelivery.Store
+	restart  runtimedelivery.Store
+	selected any
+	db       *sql.DB
+	postgres bool
+}
 
-	cases := []struct {
-		name   string
-		seed   func(t *testing.T, ctx context.Context, fx *deliveryLifecycleFixture) string
-		expect deliveryLifecycleExpectation
-	}{
-		{
-			name: "pending_after_direct_publish",
-			seed: func(t *testing.T, ctx context.Context, fx *deliveryLifecycleFixture) string {
-				t.Helper()
-				return fx.publishDirectEvent(t, ctx)
-			},
-			expect: deliveryLifecycleExpectation{
-				deliveryStatus:     "pending",
-				deliveryRetryCount: 0,
-				directPending:      true,
-				subscribedPending:  true,
-				receiptFound:       false,
-				recoveryReplays:    true,
-			},
-		},
-		{
-			name: "retryable_failed_delivery_after_backoff",
-			seed: func(t *testing.T, ctx context.Context, fx *deliveryLifecycleFixture) string {
-				t.Helper()
-				eventID := fx.publishDirectEvent(t, ctx)
-				if err := fx.pg.UpsertEventReceipt(ctx, eventID, fx.agentID, runtimemanager.ReceiptStatusError, testFailure("handler_failed")); err != nil {
-					t.Fatalf("UpsertEventReceipt(retryable error): %v", err)
+func TestExecutableDeliveryLifecycleParity(t *testing.T) {
+	for _, backend := range deliveryLifecycleConformanceBackends(t) {
+		backend := backend
+		t.Run(backend.name, func(t *testing.T) {
+			ctx := testAuthorActivityContext(context.Background())
+			t.Run("exact_route_claim_settlement_and_outcome", func(t *testing.T) {
+				event := deliveryLifecycleEvent("exact-" + backend.name)
+				agent := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+				sibling := events.DeliveryRoute{
+					SubscriberType: "agent",
+					SubscriberID:   "agent-a",
+					Target:         events.RouteIdentity{FlowID: "flow-a"},
 				}
-				fx.rewindDeliveryAttempt(t, ctx, eventID, time.Now().Add(-2*time.Minute))
-				return eventID
-			},
-			expect: deliveryLifecycleExpectation{
-				deliveryStatus:     "failed",
-				deliveryRetryCount: 1,
-				directPending:      true,
-				subscribedPending:  true,
-				receiptFound:       true,
-				receiptStatus:      runtimemanager.ReceiptStatusError,
-				receiptRetryCount:  1,
-				recoveryReplays:    true,
-			},
-		},
-		{
-			name: "dead_letter_is_terminal_everywhere",
-			seed: func(t *testing.T, ctx context.Context, fx *deliveryLifecycleFixture) string {
-				t.Helper()
-				eventID := fx.publishDirectEvent(t, ctx)
-				if err := fx.pg.UpsertEventReceipt(ctx, eventID, fx.agentID, runtimemanager.ReceiptStatusError, testFailure("handler_failed")); err != nil {
-					t.Fatalf("UpsertEventReceipt(first error): %v", err)
-				}
-				if err := fx.pg.UpsertEventReceipt(ctx, eventID, fx.agentID, runtimemanager.ReceiptStatusError, testFailure("handler_failed")); err != nil {
-					t.Fatalf("UpsertEventReceipt(second error): %v", err)
-				}
-				return eventID
-			},
-			expect: deliveryLifecycleExpectation{
-				deliveryStatus:     "dead_letter",
-				deliveryRetryCount: 2,
-				directPending:      false,
-				subscribedPending:  false,
-				receiptFound:       true,
-				receiptStatus:      runtimemanager.ReceiptStatusDeadLetter,
-				receiptRetryCount:  2,
-				recoveryReplays:    false,
-			},
-		},
-		{
-			name: "stranded_in_progress_without_receipt_remains_replay_eligible",
-			seed: func(t *testing.T, ctx context.Context, fx *deliveryLifecycleFixture) string {
-				t.Helper()
-				eventID := fx.publishDirectEvent(t, ctx)
-				if err := fx.pg.MarkEventDeliveryInProgress(ctx, eventID, fx.agentID, ""); err != nil {
-					t.Fatalf("MarkEventDeliveryInProgress: %v", err)
-				}
-				return eventID
-			},
-			expect: deliveryLifecycleExpectation{
-				deliveryStatus:     "in_progress",
-				deliveryRetryCount: 0,
-				directPending:      true,
-				subscribedPending:  true,
-				receiptFound:       false,
-				recoveryReplays:    true,
-			},
-		},
-		{
-			name: "delivery_dead_letter_overrides_retryable_receipt_drift",
-			seed: func(t *testing.T, ctx context.Context, fx *deliveryLifecycleFixture) string {
-				t.Helper()
-				eventID := fx.publishDirectEvent(t, ctx)
-				if err := fx.pg.UpsertEventReceipt(ctx, eventID, fx.agentID, runtimemanager.ReceiptStatusError, testFailure("handler_failed")); err != nil {
-					t.Fatalf("UpsertEventReceipt(first error): %v", err)
-				}
-				if err := fx.pg.UpsertEventReceipt(ctx, eventID, fx.agentID, runtimemanager.ReceiptStatusError, testFailure("handler_failed")); err != nil {
-					t.Fatalf("UpsertEventReceipt(second error): %v", err)
-				}
-				fx.forceReceiptState(t, ctx, eventID, runtimemanager.ReceiptStatusError, 1, time.Now().Add(-2*time.Minute), "stale-retry")
-				return eventID
-			},
-			expect: deliveryLifecycleExpectation{
-				deliveryStatus:     "dead_letter",
-				deliveryRetryCount: 2,
-				directPending:      false,
-				subscribedPending:  false,
-				receiptFound:       true,
-				receiptStatus:      runtimemanager.ReceiptStatusDeadLetter,
-				receiptRetryCount:  2,
-				recoveryReplays:    false,
-			},
-		},
-		{
-			name: "retryable_delivery_overrides_dead_letter_receipt_drift",
-			seed: func(t *testing.T, ctx context.Context, fx *deliveryLifecycleFixture) string {
-				t.Helper()
-				eventID := fx.publishDirectEvent(t, ctx)
-				if err := fx.pg.UpsertEventReceipt(ctx, eventID, fx.agentID, runtimemanager.ReceiptStatusError, testFailure("handler_failed")); err != nil {
-					t.Fatalf("UpsertEventReceipt(retryable error): %v", err)
-				}
-				fx.rewindDeliveryAttempt(t, ctx, eventID, time.Now().Add(-2*time.Minute))
-				fx.forceReceiptState(t, ctx, eventID, runtimemanager.ReceiptStatusDeadLetter, 2, time.Now().Add(-2*time.Minute), "stale-dead-letter")
-				return eventID
-			},
-			expect: deliveryLifecycleExpectation{
-				deliveryStatus:     "failed",
-				deliveryRetryCount: 1,
-				directPending:      true,
-				subscribedPending:  true,
-				receiptFound:       true,
-				receiptStatus:      runtimemanager.ReceiptStatusError,
-				receiptRetryCount:  1,
-				recoveryReplays:    true,
-			},
-		},
-	}
+				node := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-a"}
+				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{agent, sibling, node}, runtimereplayclaim.CommittedReplayScopeSubscribed)
 
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			fx := newDeliveryLifecycleFixture(t, ctx)
-			eventID := tc.seed(t, ctx, fx)
-			got := fx.snapshot(t, ctx, eventID)
-			assertDeliveryLifecycleExpectation(t, got, tc.expect, eventID)
+				agentProof, err := backend.store.ProveHandoff(ctx, event.ID(), agent)
+				if err != nil {
+					t.Fatalf("prove agent handoff: %v", err)
+				}
+				siblingProof, err := backend.store.ProveHandoff(ctx, event.ID(), sibling)
+				if err != nil {
+					t.Fatalf("prove sibling handoff: %v", err)
+				}
+				if agentProof.DeliveryID() == siblingProof.DeliveryID() {
+					t.Fatal("distinct exact routes collapsed to one delivery obligation")
+				}
+
+				claimed, err := backend.store.ClaimAgentDelivery(ctx, event, agent)
+				if err != nil {
+					t.Fatalf("claim agent delivery: %v", err)
+				}
+				if claimed.Snapshot.Status != runtimedelivery.StatusInProgress || claimed.Snapshot.MaxRetries != runtimedelivery.AgentMaxRetries {
+					t.Fatalf("claimed agent snapshot = %#v", claimed.Snapshot)
+				}
+				if _, err := backend.store.ClaimAgentDelivery(ctx, event, agent); !errors.Is(err, runtimedelivery.ErrIneligible) {
+					t.Fatalf("second live claim error = %v, want ErrIneligible", err)
+				}
+				sessionID := uuid.NewString()
+				bound, err := backend.store.BindAgentSession(ctx, claimed.Claim, sessionID)
+				if err != nil {
+					t.Fatalf("bind agent session: %v", err)
+				}
+				if bound.ActiveSessionID != sessionID {
+					t.Fatalf("bound session = %q, want %q", bound.ActiveSessionID, sessionID)
+				}
+				settled, err := backend.store.SettleSuccess(ctx, claimed.Claim, []string{"message.sent"}, 25*time.Millisecond)
+				if err != nil {
+					t.Fatalf("settle agent success: %v", err)
+				}
+				if settled.Status != runtimedelivery.StatusDelivered || !settled.Terminal() {
+					t.Fatalf("settled status = %q", settled.Status)
+				}
+				if _, err := backend.store.SettleSuccess(ctx, claimed.Claim, nil, 0); !errors.Is(err, runtimedelivery.ErrConflict) {
+					t.Fatalf("stale settlement error = %v, want ErrConflict", err)
+				}
+				outcomes, err := backend.store.Outcomes(ctx, agentProof.DeliveryID())
+				if err != nil {
+					t.Fatalf("read exact outcomes: %v", err)
+				}
+				if len(outcomes) != 1 || outcomes[0].Outcome != "delivered" || outcomes[0].ClaimVersion != claimed.Claim.Version() || len(outcomes[0].SideEffects) != 1 || outcomes[0].SideEffects[0] != "message.sent" {
+					t.Fatalf("agent outcomes = %#v", outcomes)
+				}
+
+				// Exact duplicate event admission cannot mint, replace, or reset obligations.
+				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{agent, sibling, node}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+				afterDuplicate, err := backend.store.Snapshot(ctx, agentProof.DeliveryID())
+				if err != nil {
+					t.Fatalf("snapshot after exact duplicate: %v", err)
+				}
+				if afterDuplicate.Status != runtimedelivery.StatusDelivered || afterDuplicate.ClaimVersion != claimed.Claim.Version() {
+					t.Fatalf("exact duplicate changed lifecycle: %#v", afterDuplicate)
+				}
+			})
+
+			t.Run("class_retry_budgets_are_structural", func(t *testing.T) {
+				assertDeliveryRetryBudget(t, ctx, backend, runtimedelivery.SubscriberAgent, "retry-agent", runtimedelivery.AgentMaxRetries)
+				assertDeliveryRetryBudget(t, ctx, backend, runtimedelivery.SubscriberNode, "retry-node", runtimedelivery.NodeMaxRetries)
+			})
+
+			t.Run("claim_renewal_fences_reclaim_and_preserves_settlement", func(t *testing.T) {
+				event := deliveryLifecycleEvent("claim-renewal-" + backend.name)
+				route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "renewal-agent"}
+				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+				claimed, err := backend.store.ClaimAgentDelivery(ctx, event, route)
+				if err != nil {
+					t.Fatalf("claim delivery: %v", err)
+				}
+				renewed, err := backend.store.RenewClaim(ctx, claimed.Claim)
+				if err != nil {
+					t.Fatalf("renew claim: %v", err)
+				}
+				if renewed.ClaimVersion != claimed.Claim.Version() || renewed.Status != runtimedelivery.StatusInProgress || renewed.ClaimExpiresAt.Before(claimed.Snapshot.ClaimExpiresAt) {
+					t.Fatalf("renewed claim = %#v, original = %#v", renewed, claimed.Snapshot)
+				}
+				assertDeliveryAttemptLeaseMatchesObligation(t, ctx, backend, renewed.DeliveryID, renewed.ClaimVersion)
+				if _, err := backend.restart.ClaimAgentDelivery(ctx, event, route); !errors.Is(err, runtimedelivery.ErrIneligible) {
+					t.Fatalf("claim before renewed expiry = %v, want ErrIneligible", err)
+				}
+
+				expireDeliveryClaimForConformance(t, ctx, backend, renewed.DeliveryID)
+				if _, err := backend.store.RenewClaim(ctx, claimed.Claim); !errors.Is(err, runtimedelivery.ErrConflict) {
+					t.Fatalf("expired claim renewal = %v, want ErrConflict", err)
+				}
+				reclaimed, err := backend.restart.ClaimAgentDelivery(ctx, event, route)
+				if err != nil {
+					t.Fatalf("reclaim after renewed lease expiry: %v", err)
+				}
+				if reclaimed.Claim.Version() != claimed.Claim.Version()+1 {
+					t.Fatalf("reclaimed version = %d, want %d", reclaimed.Claim.Version(), claimed.Claim.Version()+1)
+				}
+				if _, err := backend.store.RenewClaim(ctx, claimed.Claim); !errors.Is(err, runtimedelivery.ErrConflict) {
+					t.Fatalf("superseded claim renewal = %v, want ErrConflict", err)
+				}
+				settled, err := backend.restart.SettleSuccess(ctx, reclaimed.Claim, []string{"renewal.proven"}, time.Millisecond)
+				if err != nil || settled.Status != runtimedelivery.StatusDelivered {
+					t.Fatalf("settle renewed lifecycle = %#v, err=%v", settled, err)
+				}
+				assertDeliveryAttemptHistory(t, ctx, backend, settled.DeliveryID)
+			})
+
+			t.Run("parent_terminalization_fences_late_writer", func(t *testing.T) {
+				event := deliveryLifecycleEvent("terminalize-" + backend.name)
+				route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "terminal-agent"}
+				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+				claimed, err := backend.store.ClaimAgentDelivery(ctx, event, route)
+				if err != nil {
+					t.Fatal(err)
+				}
+				transitions, err := backend.store.TerminalizeRun(ctx, event.RunID(), "run_terminal")
+				if err != nil {
+					t.Fatalf("terminalize run: %v", err)
+				}
+				if len(transitions) != 1 || transitions[0].Current.Status != runtimedelivery.StatusDeadLetter {
+					t.Fatalf("terminalizations = %#v", transitions)
+				}
+				if _, err := backend.store.SettleSuccess(ctx, claimed.Claim, nil, 0); !errors.Is(err, runtimedelivery.ErrConflict) {
+					t.Fatalf("late settlement error = %v, want ErrConflict", err)
+				}
+				outcomes, err := backend.store.Outcomes(ctx, transitions[0].Current.DeliveryID)
+				if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != "terminalized" {
+					t.Fatalf("terminalization outcomes = %#v, err=%v", outcomes, err)
+				}
+			})
+
+			t.Run("concurrent_claim_and_restart_reclaim_are_fenced", func(t *testing.T) {
+				event := deliveryLifecycleEvent("claim-race-" + backend.name)
+				route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "race-agent"}
+				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+
+				type claimResult struct {
+					claimed runtimedelivery.ClaimedObligation
+					err     error
+				}
+				const contenders = 8
+				start := make(chan struct{})
+				results := make(chan claimResult, contenders)
+				for index := 0; index < contenders; index++ {
+					claimStore := backend.store
+					if index%2 == 1 {
+						claimStore = backend.restart
+					}
+					go func() {
+						<-start
+						claimed, err := claimStore.ClaimAgentDelivery(ctx, event, route)
+						results <- claimResult{claimed: claimed, err: err}
+					}()
+				}
+				close(start)
+
+				var winner runtimedelivery.ClaimedObligation
+				wins := 0
+				for index := 0; index < contenders; index++ {
+					result := <-results
+					if result.err == nil {
+						winner = result.claimed
+						wins++
+						continue
+					}
+					if !errors.Is(result.err, runtimedelivery.ErrIneligible) && !errors.Is(result.err, runtimedelivery.ErrConflict) {
+						t.Fatalf("claim race loser error = %v, want typed ineligible/conflict", result.err)
+					}
+				}
+				if wins != 1 {
+					t.Fatalf("claim race winners = %d, want exactly one", wins)
+				}
+				if winner.Claim.Version() != 1 || winner.Snapshot.Status != runtimedelivery.StatusInProgress {
+					t.Fatalf("initial winning claim = %#v", winner)
+				}
+
+				if _, err := backend.restart.ClaimAgentDelivery(ctx, event, route); !errors.Is(err, runtimedelivery.ErrIneligible) {
+					t.Fatalf("pre-expiry reconstructed-store claim error = %v, want ErrIneligible", err)
+				}
+				expireDeliveryClaimForConformance(t, ctx, backend, winner.Snapshot.DeliveryID)
+				reclaimed, err := backend.restart.ClaimAgentDelivery(ctx, event, route)
+				if err != nil {
+					t.Fatalf("post-expiry reconstructed-store reclaim: %v", err)
+				}
+				if reclaimed.Claim.Version() != winner.Claim.Version()+1 || reclaimed.Snapshot.DeliveryID != winner.Snapshot.DeliveryID {
+					t.Fatalf("reclaimed delivery = %#v, first = %#v", reclaimed, winner)
+				}
+				if _, err := backend.store.SettleSuccess(ctx, winner.Claim, nil, 0); !errors.Is(err, runtimedelivery.ErrConflict) {
+					t.Fatalf("expired claimant settlement error = %v, want ErrConflict", err)
+				}
+				settled, err := backend.restart.SettleSuccess(ctx, reclaimed.Claim, []string{"race.proven"}, time.Millisecond)
+				if err != nil || settled.Status != runtimedelivery.StatusDelivered {
+					t.Fatalf("current claimant settlement = %#v, err=%v", settled, err)
+				}
+				assertDeliveryAttemptHistory(t, ctx, backend, settled.DeliveryID)
+			})
 		})
 	}
 }
 
-type deliveryLifecycleExpectation struct {
-	deliveryStatus     string
-	deliveryRetryCount int
-	directPending      bool
-	subscribedPending  bool
-	receiptFound       bool
-	receiptStatus      runtimemanager.ReceiptStatus
-	receiptRetryCount  int
-	recoveryReplays    bool
-}
-
-type deliveryLifecycleSnapshot struct {
-	deliveryStatus     string
-	deliveryRetryCount int
-	directPendingIDs   []string
-	subscribedPending  []string
-	receipt            runtimemanager.EventReceipt
-	receiptFound       bool
-	recoveredEventIDs  []string
-}
-
-type deliveryLifecycleFixture struct {
-	pg           *store.PostgresStore
-	bus          *runtimebus.EventBus
-	workOwner    *worklifetime.RuntimeOccurrence
-	agentID      string
-	subscription events.EventType
-}
-
-func newDeliveryLifecycleFixture(t *testing.T, ctx context.Context) *deliveryLifecycleFixture {
+func assertDeliveryRetryBudget(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, class runtimedelivery.SubscriberClass, subscriberID string, maxRetries int) {
 	t.Helper()
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	requireCanonicalDeliveryLifecycleSurface(t, ctx, pg)
-
-	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash)
-	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{WorkOwner: workOwner}, "review.requested")
+	event := deliveryLifecycleEvent(fmt.Sprintf("retry-%s-%s", backend.name, class))
+	route := events.DeliveryRoute{SubscriberType: string(class), SubscriberID: subscriberID}
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	proof, err := backend.store.ProveHandoff(ctx, event.ID(), route)
 	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
+		t.Fatal(err)
 	}
-
-	agentID := "delivery-conformance-agent"
-	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			ID:            agentID,
-			Role:          "tester",
-			Type:          "stub",
-			FlowID:        "global",
-			Model:         "regular",
-			ExecutionMode: "live",
-			Subscriptions: []string{"review.*"},
-			Config:        []byte(`{"system_prompt":"x"}`),
-		},
-		Status:    "active",
-		HiredBy:   "delivery-conformance",
-		StartedAt: time.Now().Add(-24 * time.Hour).UTC(),
-	}); err != nil {
-		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
+	for attempt := 1; attempt <= maxRetries+1; attempt++ {
+		var claimed runtimedelivery.ClaimedObligation
+		if class == runtimedelivery.SubscriberAgent {
+			claimed, err = backend.store.ClaimAgentDelivery(ctx, event, route)
+		} else {
+			claimed, err = backend.store.ClaimNodeDelivery(ctx, event, route)
+		}
+		if err != nil {
+			t.Fatalf("claim %s attempt %d: %v", class, attempt, err)
+		}
+		settled, settleErr := backend.store.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
+			Disposition: runtimedelivery.FailureRetry,
+			Failure:     testFailure("handler_failed"),
+			Duration:    time.Duration(attempt) * time.Millisecond,
+			RetryBase:   time.Nanosecond,
+		})
+		if settleErr != nil {
+			t.Fatalf("settle %s attempt %d: %v", class, attempt, settleErr)
+		}
+		if attempt <= maxRetries {
+			if settled.Status != runtimedelivery.StatusFailed || settled.RetryCount != attempt {
+				t.Fatalf("retry %d snapshot = %#v", attempt, settled)
+			}
+			makeDeliveryImmediatelyEligible(t, ctx, backend, proof.DeliveryID())
+		} else if settled.Status != runtimedelivery.StatusDeadLetter || settled.RetryCount != maxRetries || settled.ReasonCode != "retry_exhausted" {
+			t.Fatalf("exhausted snapshot = %#v", settled)
+		}
 	}
+	outcomes, err := backend.store.Outcomes(ctx, proof.DeliveryID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outcomes) != maxRetries+1 {
+		t.Fatalf("outcome count = %d, want %d", len(outcomes), maxRetries+1)
+	}
+	for index, outcome := range outcomes {
+		want := "retry_scheduled"
+		if index == maxRetries {
+			want = "dead_letter"
+		}
+		if outcome.ClaimVersion != int64(index+1) || outcome.Outcome != want {
+			t.Fatalf("outcome %d = %#v, want version=%d outcome=%s", index, outcome, index+1, want)
+		}
+	}
+}
 
-	return &deliveryLifecycleFixture{
-		pg:           pg,
-		bus:          bus,
-		workOwner:    workOwner,
-		agentID:      agentID,
-		subscription: events.EventType("review.*"),
+func makeDeliveryImmediatelyEligible(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string) {
+	t.Helper()
+	query := `UPDATE event_deliveries SET next_eligible_at = $1 WHERE delivery_id = $2::uuid AND status = 'failed'`
+	if !backend.postgres {
+		query = `UPDATE event_deliveries SET next_eligible_at = ? WHERE delivery_id = ? AND status = 'failed'`
+	}
+	result, err := backend.db.ExecContext(ctx, query, time.Now().Add(-time.Hour).UTC(), deliveryID)
+	if err != nil {
+		t.Fatalf("make retry eligible: %v", err)
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+		t.Fatalf("make retry eligible affected %d rows, err=%v", rows, err)
+	}
+}
+
+func expireDeliveryClaimForConformance(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string) {
+	t.Helper()
+	startedAt := time.Now().Add(-2 * time.Hour).UTC()
+	expiresAt := time.Now().Add(-time.Hour).UTC()
+	transaction, err := backend.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin claim-expiry proof: %v", err)
+	}
+	defer func() { _ = transaction.Rollback() }()
+	deliveryQuery := `UPDATE event_deliveries SET created_at = $1, started_at = $1, updated_at = $2, claim_expires_at = $2 WHERE delivery_id = $3::uuid AND status = 'in_progress'`
+	attemptQuery := `UPDATE event_delivery_attempts SET started_at = $1, lease_expires_at = $2 WHERE delivery_id = $3::uuid AND outcome IS NULL`
+	if !backend.postgres {
+		deliveryQuery = `UPDATE event_deliveries SET created_at = ?, started_at = ?, updated_at = ?, claim_expires_at = ? WHERE delivery_id = ? AND status = 'in_progress'`
+		attemptQuery = `UPDATE event_delivery_attempts SET started_at = ?, lease_expires_at = ? WHERE delivery_id = ? AND outcome IS NULL`
+	}
+	var deliveryResult sql.Result
+	if backend.postgres {
+		deliveryResult, err = transaction.ExecContext(ctx, deliveryQuery, startedAt, expiresAt, deliveryID)
+	} else {
+		deliveryResult, err = transaction.ExecContext(ctx, deliveryQuery, startedAt, startedAt, expiresAt, expiresAt, deliveryID)
+	}
+	if err != nil {
+		t.Fatalf("expire delivery claim: %v", err)
+	}
+	if rows, rowsErr := deliveryResult.RowsAffected(); rowsErr != nil || rows != 1 {
+		t.Fatalf("expire delivery claim affected %d rows, err=%v", rows, rowsErr)
+	}
+	if result, execErr := transaction.ExecContext(ctx, attemptQuery, startedAt, expiresAt, deliveryID); execErr != nil {
+		t.Fatalf("expire delivery attempt: %v", execErr)
+	} else if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
+		t.Fatalf("expire delivery attempt affected %d rows, err=%v", rows, rowsErr)
+	}
+	if err := transaction.Commit(); err != nil {
+		t.Fatalf("commit claim-expiry proof: %v", err)
+	}
+}
+
+func assertDeliveryAttemptHistory(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string) {
+	t.Helper()
+	query := `SELECT claim_version, outcome FROM event_delivery_attempts WHERE delivery_id = $1::uuid ORDER BY claim_version`
+	if !backend.postgres {
+		query = `SELECT claim_version, outcome FROM event_delivery_attempts WHERE delivery_id = ? ORDER BY claim_version`
+	}
+	rows, err := backend.db.QueryContext(ctx, query, deliveryID)
+	if err != nil {
+		t.Fatalf("load delivery attempt history: %v", err)
+	}
+	defer rows.Close()
+	type attempt struct {
+		version int64
+		outcome string
+	}
+	var attempts []attempt
+	for rows.Next() {
+		var current attempt
+		if err := rows.Scan(&current.version, &current.outcome); err != nil {
+			t.Fatalf("scan delivery attempt history: %v", err)
+		}
+		attempts = append(attempts, current)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read delivery attempt history: %v", err)
+	}
+	if len(attempts) != 2 || attempts[0] != (attempt{version: 1, outcome: "lease_expired"}) || attempts[1] != (attempt{version: 2, outcome: "delivered"}) {
+		t.Fatalf("delivery attempt history = %#v", attempts)
+	}
+}
+
+func assertDeliveryAttemptLeaseMatchesObligation(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string, version int64) {
+	t.Helper()
+	query := `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id = a.delivery_id WHERE a.delivery_id = $1::uuid AND a.claim_version = $2 AND a.outcome IS NULL AND a.lease_expires_at = d.claim_expires_at`
+	if !backend.postgres {
+		query = `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id = a.delivery_id WHERE a.delivery_id = ? AND a.claim_version = ? AND a.outcome IS NULL AND a.lease_expires_at = d.claim_expires_at`
+	}
+	var matches int
+	if err := backend.db.QueryRowContext(ctx, query, deliveryID, version).Scan(&matches); err != nil {
+		t.Fatalf("compare renewed delivery attempt lease: %v", err)
+	}
+	if matches != 1 {
+		t.Fatalf("matching renewed attempt and obligation leases = %d, want 1", matches)
+	}
+}
+
+func deliveryLifecycleEvent(label string) events.Event {
+	return eventtest.RunCreatingRootIngress(
+		eventtest.UUID(label),
+		events.EventType("delivery.conformance"),
+		"conformance-ingress",
+		"",
+		json.RawMessage(`{"ok":true}`),
+		0,
+		eventtest.UUID(label+"-run"),
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(label+"-entity")),
+		time.Now().UTC(),
+	)
+}
+
+func deliveryLifecycleConformanceBackends(t *testing.T) []deliveryLifecycleConformanceBackend {
+	t.Helper()
+	sqlite, sqliteRestart := storetest.StartSQLiteRuntimeStorePair(t)
+	_, postgresDB, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	postgres := storetest.AdmitPostgresRuntimeStore(t, postgresDB)
+	postgresRestart := storetest.AdmitPostgresRuntimeStore(t, postgresDB)
+	return []deliveryLifecycleConformanceBackend{
+		{name: "sqlite", store: sqlite, restart: sqliteRestart, selected: sqlite, db: sqlite.DB},
+		{name: "postgres", store: postgres, restart: postgresRestart, selected: postgres, db: postgres.DB, postgres: true},
 	}
 }
 
 func requireCanonicalDeliveryLifecycleSurface(t *testing.T, ctx context.Context, pg *store.PostgresStore) {
 	t.Helper()
 	storetest.BootstrapPostgresRuntimeStore(t, pg)
-	requireTableColumns(t, ctx, pg.DB, "event_deliveries", "delivery_id", "event_id", "subscriber_type", "subscriber_id", "status", "retry_count", "created_at", "delivered_at")
-	requireTableColumns(t, ctx, pg.DB, "event_receipts", "event_id", "subscriber_type", "subscriber_id", "outcome", "side_effects", "processed_at")
+	requireTableColumns(t, ctx, pg.DB, "event_deliveries",
+		"delivery_id", "event_id", "route_identity", "subscriber_type", "subscriber_id",
+		"status", "retry_count", "max_retries", "claim_token", "claim_version",
+		"claim_expires_at", "settled_at")
+	requireTableColumns(t, ctx, pg.DB, "event_delivery_attempts",
+		"delivery_id", "claim_version", "claim_token", "started_at", "lease_expires_at", "outcome")
+	requireTableColumns(t, ctx, pg.DB, "event_delivery_outcomes",
+		"delivery_id", "claim_version", "outcome", "side_effects", "duration_ms", "settled_at")
 }
 
-func (fx *deliveryLifecycleFixture) publishDirectEvent(t *testing.T, ctx context.Context) string {
-	t.Helper()
-	eventID := uuid.NewString()
-	ch := runtimebustest.Subscribe(t, fx.bus, fx.agentID)
-	defer runtimebustest.Unsubscribe(fx.bus, fx.agentID)
-
-	evt := eventtest.RunCreatingRootIngress(
-		eventID,
-		events.EventType("review.requested"),
-		"runtime",
-		"",
-		[]byte(`{"ok":true}`),
-		0,
-		"",
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()),
-		time.Now().Add(-2*time.Hour).UTC(),
-	)
-
-	if err := fx.bus.PublishDirect(ctx, evt, []string{fx.agentID}); err != nil {
-		t.Fatalf("PublishDirect: %v", err)
-	}
-	select {
-	case delivered := <-ch:
-		if delivered.ID() != eventID {
-			t.Fatalf("delivered event id = %q, want %q", delivered.ID(), eventID)
-		}
-		if err := delivered.Complete(); err != nil {
-			t.Fatalf("complete local delivery ownership: %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("expected direct publish to fan out to live subscriber")
-	}
-	return eventID
-}
-
-func (fx *deliveryLifecycleFixture) rewindDeliveryAttempt(t *testing.T, ctx context.Context, eventID string, when time.Time) {
-	t.Helper()
-	if _, err := fx.pg.DB.ExecContext(ctx, `
-		UPDATE event_deliveries
-		SET delivered_at = $3
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = $2
-	`, eventID, fx.agentID, when.UTC()); err != nil {
-		t.Fatalf("rewind event_deliveries.delivered_at: %v", err)
-	}
-	if _, err := fx.pg.DB.ExecContext(ctx, `
-		UPDATE event_receipts
-		SET processed_at = $3
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = $2
-	`, eventID, fx.agentID, when.UTC()); err != nil {
-		t.Fatalf("rewind event_receipts.processed_at: %v", err)
-	}
-}
-
-func (fx *deliveryLifecycleFixture) forceReceiptState(
-	t *testing.T,
-	ctx context.Context,
-	eventID string,
-	status runtimemanager.ReceiptStatus,
-	retryCount int,
-	processedAt time.Time,
-	errText string,
-) {
-	t.Helper()
-	sideEffects, err := json.Marshal(map[string]any{
-		"manager_status": strings.TrimSpace(string(status)),
-		"retry_count":    retryCount,
-		"error":          strings.TrimSpace(errText),
-	})
-	if err != nil {
-		t.Fatalf("marshal receipt side effects: %v", err)
-	}
-	if _, err := fx.pg.DB.ExecContext(ctx, `
-		UPDATE event_receipts
-		SET outcome = $3,
-			side_effects = $4::jsonb,
-			processed_at = $5
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = $2
-	`, eventID, fx.agentID, managerReceiptOutcome(status), string(sideEffects), processedAt.UTC()); err != nil {
-		t.Fatalf("force receipt state: %v", err)
-	}
-}
-
-func managerReceiptOutcome(status runtimemanager.ReceiptStatus) string {
-	switch status {
-	case runtimemanager.ReceiptStatusError, runtimemanager.ReceiptStatusDeadLetter:
-		return "dead_letter"
-	default:
-		return "success"
-	}
-}
-
-func (fx *deliveryLifecycleFixture) snapshot(t *testing.T, ctx context.Context, eventID string) deliveryLifecycleSnapshot {
-	t.Helper()
-
-	var got deliveryLifecycleSnapshot
-	if err := fx.pg.DB.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), COALESCE(retry_count, 0)
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = $2
-	`, eventID, fx.agentID).Scan(&got.deliveryStatus, &got.deliveryRetryCount); err != nil {
-		t.Fatalf("load event_deliveries state: %v", err)
-	}
-
-	direct, err := fx.pg.ListPendingEventsForAgent(ctx, fx.agentID, time.Now().Add(-24*time.Hour), 20)
-	if err != nil {
-		t.Fatalf("ListPendingEventsForAgent: %v", err)
-	}
-	for _, evt := range direct {
-		got.directPendingIDs = append(got.directPendingIDs, evt.ID())
-	}
-
-	subscribed, err := fx.pg.ListPendingSubscribedEvents(ctx, fx.agentID, []events.EventType{fx.subscription}, time.Now().Add(-24*time.Hour), 20)
-	if err != nil {
-		t.Fatalf("ListPendingSubscribedEvents: %v", err)
-	}
-	for _, evt := range subscribed {
-		got.subscribedPending = append(got.subscribedPending, evt.ID())
-	}
-
-	got.receipt, got.receiptFound, err = fx.pg.GetEventReceipt(ctx, eventID, fx.agentID)
-	if err != nil {
-		t.Fatalf("GetEventReceipt: %v", err)
-	}
-
-	got.recoveredEventIDs = fx.recoverSeenEventIDs(t, ctx)
-	return got
-}
-
-func (fx *deliveryLifecycleFixture) recoverSeenEventIDs(t *testing.T, ctx context.Context) []string {
-	t.Helper()
-	ctx = managedConformanceExecutionContext(t, ctx, "delivery-lifecycle-conformance")
-	var (
-		mu   sync.Mutex
-		seen []string
-	)
-	am := runtimemanager.NewAgentManagerWithOptions(fx.bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
-		subscriptions := make([]events.EventType, 0, len(cfg.Subscriptions))
-		for _, raw := range cfg.Subscriptions {
-			raw = strings.TrimSpace(raw)
-			if raw != "" {
-				subscriptions = append(subscriptions, events.EventType(raw))
-			}
-		}
-		return &deliveryLifecycleRecordingAgent{
-			id:            cfg.ID,
-			subscriptions: subscriptions,
-			record: func(evt events.Event) {
-				mu.Lock()
-				seen = append(seen, evt.ID())
-				mu.Unlock()
-			},
-		}, nil
-	}, runtimemanager.AgentManagerOptions{WorkOwner: fx.workOwner}, fx.pg)
-	if err := am.Recover(ctx); err != nil {
-		t.Fatalf("Recover: %v", err)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	return append([]string(nil), seen...)
-}
-
-type deliveryLifecycleRecordingAgent struct {
-	id            string
-	subscriptions []events.EventType
-	record        func(events.Event)
-}
-
-func (a *deliveryLifecycleRecordingAgent) ID() string { return a.id }
-
-func (*deliveryLifecycleRecordingAgent) Type() string { return "stub" }
-
-func (a *deliveryLifecycleRecordingAgent) Subscriptions() []events.EventType {
-	return append([]events.EventType(nil), a.subscriptions...)
-}
-
-func (a *deliveryLifecycleRecordingAgent) OnEvent(_ context.Context, evt events.Event) ([]events.Event, error) {
-	if a.record != nil {
-		a.record(evt)
-	}
-	return nil, errors.New("session currently leased")
-}
-
-func assertDeliveryLifecycleExpectation(t *testing.T, got deliveryLifecycleSnapshot, want deliveryLifecycleExpectation, eventID string) {
-	t.Helper()
-
-	if got.deliveryStatus != want.deliveryStatus || got.deliveryRetryCount != want.deliveryRetryCount {
-		t.Fatalf("delivery state = status:%q retry:%d, want status:%q retry:%d", got.deliveryStatus, got.deliveryRetryCount, want.deliveryStatus, want.deliveryRetryCount)
-	}
-
-	assertPendingContainsEvent(t, "direct pending", got.directPendingIDs, eventID, want.directPending)
-	assertPendingContainsEvent(t, "subscribed pending", got.subscribedPending, eventID, want.subscribedPending)
-
-	if got.receiptFound != want.receiptFound {
-		t.Fatalf("receiptFound = %v, want %v (receipt=%+v)", got.receiptFound, want.receiptFound, got.receipt)
-	}
-	if want.receiptFound {
-		if got.receipt.Status != want.receiptStatus {
-			t.Fatalf("receipt status = %q, want %q", got.receipt.Status, want.receiptStatus)
-		}
-		if got.receipt.RetryCount != want.receiptRetryCount {
-			t.Fatalf("receipt retry_count = %d, want %d", got.receipt.RetryCount, want.receiptRetryCount)
-		}
-	}
-
-	assertPendingContainsEvent(t, "recovered events", got.recoveredEventIDs, eventID, want.recoveryReplays)
-}
-
-func assertPendingContainsEvent(t *testing.T, label string, ids []string, eventID string, want bool) {
-	t.Helper()
-	has := slices.Contains(ids, eventID)
-	if has != want {
-		t.Fatalf("%s contains %s = %v, want %v (ids=%v)", label, eventID, has, want, ids)
-	}
-	if want && countMatches(ids, eventID) != 1 {
-		t.Fatalf("%s contains %s %d times, want 1 (ids=%v)", label, eventID, countMatches(ids, eventID), ids)
-	}
-}
-
-func countMatches(ids []string, want string) int {
-	count := 0
-	for _, id := range ids {
-		if strings.TrimSpace(id) == strings.TrimSpace(want) {
-			count++
-		}
-	}
-	return count
-}
-
-func (fx *deliveryLifecycleFixture) String() string {
-	return fmt.Sprintf("agent=%s subscription=%s", fx.agentID, fx.subscription)
-}
+var (
+	_ runtimedelivery.Store = (*store.PostgresStore)(nil)
+	_ runtimedelivery.Store = (*store.SQLiteRuntimeStore)(nil)
+)

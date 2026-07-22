@@ -3,13 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
-	"fmt"
-	"strings"
 	"time"
 
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-
-	"github.com/lib/pq"
 )
 
 type AgentDeliveryLifecycleFacts struct {
@@ -52,40 +48,25 @@ func (s *PostgresStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, age
 }
 
 func (s *PostgresStore) listAgentLifecycleRecordsSpec(ctx context.Context, agentIDs []string) ([]agentLifecycleDeliveryRecord, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT
-			d.subscriber_id,
-			COALESCE(d.status, ''),
-			COALESCE(d.active_session_id::text, ''),
-			d.created_at,
-			d.delivered_at
-		FROM event_deliveries d
-		WHERE d.subscriber_type = 'agent'
-		  AND d.subscriber_id = ANY($1)
-		  AND COALESCE(d.status, '') IN ('pending', 'in_progress', 'failed', 'dead_letter')
-	`, pq.Array(agentIDs))
-	if err != nil {
-		return nil, fmt.Errorf("query agent lifecycle records: %w", err)
-	}
-	defer rows.Close()
-
 	out := make([]agentLifecycleDeliveryRecord, 0)
-	for rows.Next() {
-		var record agentLifecycleDeliveryRecord
-		if err := rows.Scan(
-			&record.AgentID,
-			&record.Status,
-			&record.ActiveSessionID,
-			&record.CreatedAt,
-			&record.DeliveredAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan agent lifecycle record: %w", err)
+	for _, agentID := range agentIDs {
+		snapshots, err := s.deliverySnapshotsForAgent(ctx, agentID, time.Unix(0, 0).UTC())
+		if err != nil {
+			return nil, err
 		}
-		record.AgentID = strings.TrimSpace(record.AgentID)
-		out = append(out, record)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read agent lifecycle rows: %w", err)
+		for _, snapshot := range snapshots {
+			if snapshot.Status == runtimedelivery.StatusDelivered {
+				continue
+			}
+			record := agentLifecycleDeliveryRecord{
+				AgentID: snapshot.SubscriberID, Status: string(snapshot.Status),
+				ActiveSessionID: snapshot.ActiveSessionID, CreatedAt: snapshot.CreatedAt,
+			}
+			if !snapshot.SettledAt.IsZero() {
+				record.DeliveredAt = sql.NullTime{Time: snapshot.SettledAt, Valid: true}
+			}
+			out = append(out, record)
+		}
 	}
 	return out, nil
 }

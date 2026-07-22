@@ -17,6 +17,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -24,7 +25,6 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -177,25 +177,13 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 	}
 	seedPostgresStoreEvent(t, ctx, pg, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", time.Now().UTC())
 	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'agent', 'agent-1', 'pending', now()
-		)
-	`, runID, eventID); err != nil {
-		t.Fatalf("seed delivery: %v", err)
-	}
+	event := commitPostgresDeliveryFixture(t, ctx, db, eventID, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"})
 	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err != nil {
 		t.Fatalf("seed pipeline receipt: %v", err)
 	}
 
 	if _, err := pg.MarkRunTerminal(ctx, runID, "completed", nil, time.Now().UTC()); err == nil || !strings.Contains(err.Error(), "normal run completion convergence") {
 		t.Fatalf("MarkRunTerminal(completed) error = %v, want canonical convergence refusal", err)
-	}
-	failure := testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_quiescence_failed", nil)
-	if _, err := pg.MarkRunTerminal(ctx, runID, "failed", &failure, time.Now().UTC()); err == nil || !strings.Contains(err.Error(), "active deliveries") {
-		t.Fatalf("MarkRunTerminal(failed active delivery) error = %v, want active delivery rejection", err)
 	}
 	if err := pg.ConvergeNormalRunCompletion(ctx, eventID, []string{"ready"}, map[string][]string{"test-flow": {"ready"}}); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion(active delivery): %v", err)
@@ -205,11 +193,11 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 		t.Fatalf("active-delivery run status = %q, %v, want running", activeStatus, err)
 	}
 
-	if _, err := db.ExecContext(ctx, `
-		UPDATE event_deliveries
-		SET status = 'delivered', delivered_at = now()
-		WHERE run_id = $1::uuid
-	`, runID); err != nil {
+	claimed, err := pg.ClaimAgentDelivery(ctx, event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"})
+	if err != nil {
+		t.Fatalf("claim delivery: %v", err)
+	}
+	if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
 		t.Fatalf("deliver completion: %v", err)
 	}
 
@@ -877,158 +865,6 @@ func currentPlatformPayloadValidatorForStoreTest(t testing.TB) EventPayloadValid
 	}
 }
 
-func TestPostgresStore_GetEventReceipt_FallsBackToPersistedReceiptForNonTerminalDelivery(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-
-	entityID := uuid.NewString()
-	seedSpecAgent(t, ctx, pg, "a1", "", "*")
-	eventID := uuid.NewString()
-	if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(eventID, "system.started", "runtime", "", []byte(`{}`), 0, eventtest.UUID("persisted-projection-run"), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now())); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
-	if err := pg.InsertEventDeliveries(ctx, eventID, []string{"a1"}); err != nil {
-		t.Fatalf("seed delivery: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		UPDATE event_deliveries
-		SET
-			status = 'in_progress',
-			reason_code = 'agent_processing',
-			active_session_id = $2::uuid
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = 'a1'
-	`, eventID, uuid.NewString()); err != nil {
-		t.Fatalf("set in_progress delivery: %v", err)
-	}
-
-	sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects(runtimemanager.ReceiptStatusDeadLetter, "retry_exhausted", 2))
-	if err != nil {
-		t.Fatalf("marshal side effects: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, reason_code, side_effects, processed_at
-		)
-		SELECT
-			e.event_id, 'agent', 'a1', e.entity_id, e.flow_instance,
-			'dead_letter', 'retry_exhausted', $2::jsonb, now()
-		FROM events e
-		WHERE e.event_id = $1::uuid
-	`, eventID, string(sideEffects)); err != nil {
-		t.Fatalf("insert receipt: %v", err)
-	}
-
-	receipt, ok, err := pg.GetEventReceipt(ctx, eventID, "a1")
-	if err != nil {
-		t.Fatalf("GetEventReceipt(in_progress delivery): %v", err)
-	}
-	if !ok {
-		t.Fatal("expected receipt to be found")
-	}
-	if receipt.Status != runtimemanager.ReceiptStatusDeadLetter || receipt.RetryCount != 2 || receipt.Failure != nil {
-		t.Fatalf("receipt = %+v, want dead_letter retry_count=2 without failure", receipt)
-	}
-}
-
-func TestPostgresStore_EventReceiptsTypedIdentitySeparatesReceiptWriters(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-
-	runID := uuid.NewString()
-	eventID := uuid.NewString()
-	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
-	seedPostgresStoreEvent(t, ctx, pg, eventID, runID, "test.receipts.typed_identity", events.EventProducerPlatform, "test", entityID, "flow-1", time.Now().UTC())
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'agent', 'pipeline', 'in_progress', now()
-		)
-	`, runID, eventID); err != nil {
-		t.Fatalf("seed agent delivery: %v", err)
-	}
-	var nodeDeliveryID string
-	if err := db.QueryRowContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'node', 'pipeline', 'in_progress', now()
-		)
-		RETURNING delivery_id::text
-	`, runID, eventID).Scan(&nodeDeliveryID); err != nil {
-		t.Fatalf("seed node delivery: %v", err)
-	}
-
-	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err != nil {
-		t.Fatalf("UpsertPipelineReceipt: %v", err)
-	}
-	if err := pg.UpsertEventReceipt(ctx, eventID, "pipeline", runtimemanager.ReceiptStatusProcessed, nil); err != nil {
-		t.Fatalf("UpsertEventReceipt: %v", err)
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin active quiescence tx: %v", err)
-	}
-	if err := terminalizeActiveRunQuiescenceDeliveryTx(ctx, tx, activeRunQuiescenceDeliveryTarget{
-		DeliveryID:     nodeDeliveryID,
-		RunID:          runID,
-		EventID:        eventID,
-		SubscriberType: "node",
-		SubscriberID:   "pipeline",
-		Status:         "in_progress",
-	}, "serve_abandon", "operator shutdown", time.Now().UTC()); err != nil {
-		_ = tx.Rollback()
-		t.Fatalf("terminalizeActiveRunQuiescenceDeliveryTx: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit active quiescence tx: %v", err)
-	}
-
-	rows, err := db.QueryContext(ctx, `
-		SELECT subscriber_type, subscriber_id, outcome
-		FROM event_receipts
-		WHERE event_id = $1::uuid
-		  AND subscriber_id = 'pipeline'
-		ORDER BY subscriber_type
-	`, eventID)
-	if err != nil {
-		t.Fatalf("query typed receipts: %v", err)
-	}
-	defer rows.Close()
-	got := map[string]string{}
-	for rows.Next() {
-		var subscriberType, subscriberID, outcome string
-		if err := rows.Scan(&subscriberType, &subscriberID, &outcome); err != nil {
-			t.Fatalf("scan typed receipt: %v", err)
-		}
-		got[subscriberType+"|"+subscriberID] = outcome
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("read typed receipts: %v", err)
-	}
-	want := map[string]string{
-		"agent|pipeline":    "success",
-		"node|pipeline":     "dead_letter",
-		"platform|pipeline": "success",
-	}
-	if len(got) != len(want) {
-		t.Fatalf("typed receipt rows = %#v, want %#v", got, want)
-	}
-	for key, wantOutcome := range want {
-		if got[key] != wantOutcome {
-			t.Fatalf("receipt %s outcome = %q, want %q (all rows %#v)", key, got[key], wantOutcome, got)
-		}
-	}
-}
-
 func TestPostgresStore_RunTerminalOwnersPersistCanonicalLifecycle(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
@@ -1109,139 +945,6 @@ func TestPostgresStore_RunTerminalOwnersPersistCanonicalLifecycle(t *testing.T) 
 	}
 }
 
-func TestPostgresStore_ListPendingEventsForAgent_PreservesRunID(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-
-	stmts := []string{
-		`CREATE TABLE IF NOT EXISTS runs (
-			run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			status TEXT NOT NULL DEFAULT 'running'
-		)`,
-		`CREATE TABLE IF NOT EXISTS events (
-			event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			run_id UUID REFERENCES runs(run_id),
-			event_name TEXT NOT NULL,
-			entity_id UUID,
-			flow_instance TEXT,
-			scope TEXT NOT NULL DEFAULT 'entity',
-			payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-			chain_depth INTEGER NOT NULL DEFAULT 0,
-			produced_by TEXT,
-			produced_by_type TEXT NOT NULL DEFAULT 'agent',
-			source_event_id UUID,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)`,
-		`CREATE TABLE IF NOT EXISTS event_deliveries (
-			delivery_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			run_id UUID REFERENCES runs(run_id),
-			event_id UUID NOT NULL REFERENCES events(event_id),
-			subscriber_type TEXT NOT NULL,
-			subscriber_id TEXT NOT NULL,
-			status TEXT NOT NULL DEFAULT 'pending',
-			retry_count INTEGER NOT NULL DEFAULT 0,
-			reason_code TEXT,
-			failure JSONB,
-			active_session_id UUID,
-			started_at TIMESTAMPTZ,
-			delivered_at TIMESTAMPTZ,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)`,
-		`CREATE TABLE IF NOT EXISTS event_receipts (
-			receipt_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			event_id UUID NOT NULL,
-			subscriber_type TEXT NOT NULL,
-			subscriber_id TEXT NOT NULL,
-			outcome TEXT NOT NULL DEFAULT 'success',
-			side_effects JSONB NOT NULL DEFAULT '{}'::jsonb,
-			failure JSONB,
-			processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)`,
-	}
-	for _, stmt := range stmts {
-		if _, err := db.ExecContext(ctx, stmt); err != nil {
-			t.Fatalf("exec schema stmt: %v", err)
-		}
-	}
-
-	runID := uuid.NewString()
-	eventID := uuid.NewString()
-	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
-	seedPostgresStoreEvent(t, ctx, pg, eventID, runID, "scoring/scoring.requested", events.EventProducerAgent, "runtime", entityID, "", time.Now().UTC())
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, created_at)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'analysis-agent', 'pending', now())
-	`, runID, eventID); err != nil {
-		t.Fatalf("seed delivery: %v", err)
-	}
-
-	got, err := pg.ListPendingEventsForAgent(ctx, "analysis-agent", time.Now().Add(-time.Hour), 10)
-	if err != nil {
-		t.Fatalf("ListPendingEventsForAgent: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("pending events = %d, want 1", len(got))
-	}
-	if got[0].RunID() != runID {
-		t.Fatalf("pending event run_id = %q, want %q", got[0].RunID(), runID)
-	}
-}
-
-func TestPostgresStore_ListPendingEventsForAgent_UsesTypedEnvelopeMetadata(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-
-	entityID := uuid.NewString()
-	const flowInstance = "review/inst-1"
-	seedSpecAgent(t, ctx, pg, "analysis-agent", "", "scoring.requested")
-
-	eventID := uuid.NewString()
-	evt := eventtest.RunCreatingRootIngress(
-		eventID,
-		events.EventType("scoring.requested"),
-		"runtime",
-		"",
-		[]byte(`{"entity_id":"payload-ent","flow_instance":"payload-flow"}`),
-		0,
-		eventtest.UUID("persisted-projection-run"),
-		"",
-		events.EventEnvelope{
-			EntityID:     entityID,
-			FlowInstance: flowInstance,
-		},
-		time.Now().UTC(),
-	)
-
-	if err := commitSemanticEventFixture(ctx, pg, evt); err != nil {
-		t.Fatalf("AppendEvent: %v", err)
-	}
-	if err := pg.InsertEventDeliveries(ctx, eventID, []string{"analysis-agent"}); err != nil {
-		t.Fatalf("InsertEventDeliveries: %v", err)
-	}
-
-	got, err := pg.ListPendingEventsForAgent(ctx, "analysis-agent", time.Now().Add(-time.Hour), 10)
-	if err != nil {
-		t.Fatalf("ListPendingEventsForAgent: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("pending events = %d, want 1", len(got))
-	}
-	if got := got[0].EntityID(); got != entityID {
-		t.Fatalf("pending event entity_id = %q, want %q", got, entityID)
-	}
-	if got := got[0].FlowInstance(); got != flowInstance {
-		t.Fatalf("pending event flow_instance = %q, want %q", got, flowInstance)
-	}
-	if got := got[0].Scope(); got != events.EventScopeEntity {
-		t.Fatalf("pending event scope = %q, want %q", got, events.EventScopeEntity)
-	}
-}
-
 func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
@@ -1300,37 +1003,6 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	}
 }
 
-func TestPostgresStore_RunEventTransaction_AppendAndDeliveriesTx(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-
-	eventID := uuid.NewString()
-	evt := eventtest.RunCreatingRootIngress(eventID,
-		events.EventType("system.started"),
-		"runtime", "", []byte(`{"ok":true}`), 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now().UTC())
-
-	if err := pg.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if err := commitSemanticEventFixtureTx(txctx, pg, tx, evt); err != nil {
-			return err
-		}
-		return pg.InsertEventDeliveriesTx(txctx, tx, eventID, []string{"control-plane", "reviewer"})
-	}); err != nil {
-		t.Fatalf("RunEventTransaction: %v", err)
-	}
-
-	var nEvents, nDeliveries int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, eventID).Scan(&nEvents); err != nil {
-		t.Fatalf("count events: %v", err)
-	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid AND NOT (subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__')`, eventID).Scan(&nDeliveries); err != nil {
-		t.Fatalf("count event_deliveries: %v", err)
-	}
-	if nEvents != 1 || nDeliveries != 2 {
-		t.Fatalf("expected event+2 deliveries persisted, got events=%d deliveries=%d", nEvents, nDeliveries)
-	}
-}
-
 func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
@@ -1349,7 +1021,7 @@ func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t 
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, eventID).Scan(&nEvents); err != nil {
 		t.Fatalf("count events success: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid AND NOT (subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__')`, eventID).Scan(&nDeliveries); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid`, eventID).Scan(&nDeliveries); err != nil {
 		t.Fatalf("count deliveries success: %v", err)
 	}
 	if nEvents != 1 || nDeliveries != 1 {
@@ -2313,292 +1985,6 @@ func TestSchedules_CompleteScheduleFireExactReleasesClaimForRecreatedOnceTimer(t
 	}
 	if !claimed {
 		t.Fatal("expected successor to claim recreated once timer after canonical fire helper released ownership")
-	}
-}
-
-func TestEventReceipts_RetryToDeadLetter_AndPendingQueries(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-
-	entityID := uuid.NewString()
-	seedSpecAgent(t, ctx, pg, "a1", "", "inbound.*")
-	eventID := uuid.NewString()
-	if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(eventID, "inbound.test", "inbound", "", []byte(`{}`), 0, eventtest.UUID("persisted-projection-run"), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now())); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
-	if err := pg.InsertEventDeliveries(ctx, eventID, []string{"a1"}); err != nil {
-		t.Fatalf("seed delivery: %v", err)
-	}
-
-	pending, err := pg.ListPendingEventsForAgent(ctx, "a1", time.Now().Add(-1*time.Hour), 10)
-	if err != nil {
-		t.Fatalf("ListPendingEventsForAgent: %v", err)
-	}
-	if len(pending) != 1 {
-		t.Fatalf("expected 1 pending, got %d", len(pending))
-	}
-
-	for i := 0; i < 4; i++ {
-		if err := pg.UpsertEventReceipt(ctx, eventID, "a1", "error", testRetryableFailure()); err != nil {
-			t.Fatalf("upsert receipt: %v", err)
-		}
-	}
-	r, ok, err := pg.GetEventReceipt(ctx, eventID, "a1")
-	if err != nil || !ok {
-		t.Fatalf("GetEventReceipt ok=%v err=%v", ok, err)
-	}
-	if strings.TrimSpace(string(r.Status)) != "dead_letter" {
-		t.Fatalf("expected dead_letter, got %q retry=%d", r.Status, r.RetryCount)
-	}
-
-	subscribed, err := pg.ListPendingSubscribedEvents(ctx, "a1", []events.EventType{"inbound.*"}, time.Now().Add(-1*time.Hour), 10)
-	if err != nil {
-		t.Fatalf("ListPendingSubscribedEvents: %v", err)
-	}
-	if len(subscribed) != 0 {
-		t.Fatalf("expected no subscribed pending events after dead_letter, got %d", len(subscribed))
-	}
-
-	if err := pg.UpsertEventReceipt(ctx, eventID, "a1", "processed", nil); err != nil {
-		t.Fatalf("upsert processed: %v", err)
-	}
-	subscribed, err = pg.ListPendingSubscribedEvents(ctx, "a1", []events.EventType{"inbound.*"}, time.Now().Add(-1*time.Hour), 10)
-	if err != nil {
-		t.Fatalf("ListPendingSubscribedEvents processed: %v", err)
-	}
-	if len(subscribed) != 0 {
-		t.Fatalf("expected no pending after processed, got %d", len(subscribed))
-	}
-}
-
-func TestListPendingSubscribedEvents_RespectsDirectDeliveryScope(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-
-	broadcastID := uuid.NewString()
-	directOtherID := uuid.NewString()
-	directSelfID := uuid.NewString()
-	noDeliveryID := uuid.NewString()
-	for idx, id := range []string{broadcastID, directOtherID, directSelfID, noDeliveryID} {
-		if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(id,
-			"inbound.alert",
-			"runtime", "", []byte(`{}`), 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now().Add(time.Duration(-3+idx)*time.Minute))); err != nil {
-			t.Fatalf("seed events: %v", err)
-		}
-	}
-
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, created_at)
-		VALUES
-			($1::uuid, 'agent', 'a1', now()),
-			($2::uuid, 'agent', 'a2', now()),
-			($3::uuid, 'agent', 'a1', now())
-	`, broadcastID, directOtherID, directSelfID); err != nil {
-		t.Fatalf("seed deliveries: %v", err)
-	}
-
-	got, err := pg.ListPendingSubscribedEvents(
-		ctx,
-		"a1",
-		[]events.EventType{"inbound.*"},
-		time.Now().Add(-1*time.Hour),
-		20,
-	)
-	if err != nil {
-		t.Fatalf("ListPendingSubscribedEvents: %v", err)
-	}
-	gotSet := map[string]struct{}{}
-	for _, evt := range got {
-		gotSet[strings.TrimSpace(evt.ID())] = struct{}{}
-	}
-	if _, ok := gotSet[broadcastID]; !ok {
-		t.Fatalf("expected broadcast event %s in subscribed backlog, got=%v", broadcastID, gotSet)
-	}
-	if _, ok := gotSet[directSelfID]; !ok {
-		t.Fatalf("expected direct-self event %s in subscribed backlog, got=%v", directSelfID, gotSet)
-	}
-	if _, ok := gotSet[directOtherID]; ok {
-		t.Fatalf("did not expect direct-other event %s in subscribed backlog, got=%v", directOtherID, gotSet)
-	}
-	if _, ok := gotSet[noDeliveryID]; ok {
-		t.Fatalf("did not expect delivery-less event %s in subscribed backlog, got=%v", noDeliveryID, gotSet)
-	}
-}
-
-func TestPendingSubscribedRecoveryUsesAdmittedSameScopeSubscriptionsPostgres(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-		AgentID:       "reviewer",
-		FlowPath:      "review/inst-1",
-		Subscriptions: []string{"task.ready", "task.*"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	subscriptions := make([]events.EventType, 0, len(admission.RoutePatterns()))
-	for _, pattern := range admission.RoutePatterns() {
-		subscriptions = append(subscriptions, events.EventType(pattern))
-	}
-	now := time.Now().UTC()
-	localID, foreignID := uuid.NewString(), uuid.NewString()
-	for _, row := range []struct {
-		id        string
-		eventType events.EventType
-	}{{localID, "review/inst-1/task.ready"}, {foreignID, "foreign/task.ready"}} {
-		if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(row.id, row.eventType, "runtime", "", json.RawMessage(`{}`), 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, now)); err != nil {
-			t.Fatalf("AppendEvent(%s): %v", row.eventType, err)
-		}
-		if err := pg.InsertEventDeliveries(ctx, row.id, []string{"reviewer"}); err != nil {
-			t.Fatalf("InsertEventDeliveries(%s): %v", row.eventType, err)
-		}
-	}
-
-	got, err := pg.ListPendingSubscribedEvents(ctx, "reviewer", subscriptions, now.Add(-time.Minute), 10)
-	if err != nil {
-		t.Fatalf("ListPendingSubscribedEvents: %v", err)
-	}
-	if len(got) != 1 || got[0].ID() != localID {
-		t.Fatalf("pending events = %#v, want only admitted local event %s", got, localID)
-	}
-}
-
-func TestPendingEventQueries_PreserveParentCorrelation(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-
-	seedSpecAgent(t, ctx, pg, "a1", "", "inbound.*")
-
-	runID := uuid.NewString()
-	parentID := uuid.NewString()
-	if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(parentID,
-		"inbound.root",
-		"runtime", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute))); err != nil {
-		t.Fatalf("AppendEvent(parent): %v", err)
-	}
-
-	childID := uuid.NewString()
-	if err := commitSemanticEventFixture(ctx, pg, eventtest.ChildWithLineage(childID,
-		"inbound.child",
-		"runtime", "", []byte(`{}`), 0, events.EventLineage{RunID: runID, ParentEventID: parentID, ExecutionMode: runtimeeffects.ExecutionModeLive}, events.EventEnvelope{}, time.Now().Add(-1*time.Minute))); err != nil {
-		t.Fatalf("AppendEvent(child): %v", err)
-	}
-	if err := pg.InsertEventDeliveries(ctx, childID, []string{"a1"}); err != nil {
-		t.Fatalf("InsertEventDeliveries: %v", err)
-	}
-
-	direct, err := pg.ListPendingEventsForAgent(ctx, "a1", time.Now().Add(-1*time.Hour), 10)
-	if err != nil {
-		t.Fatalf("ListPendingEventsForAgent: %v", err)
-	}
-	if len(direct) != 1 {
-		t.Fatalf("expected 1 direct pending event, got %d", len(direct))
-	}
-	if got := strings.TrimSpace(direct[0].ParentEventID()); got != parentID {
-		t.Fatalf("direct pending parent_event_id = %q, want %q", got, parentID)
-	}
-
-	subscribed, err := pg.ListPendingSubscribedEvents(ctx, "a1", []events.EventType{"inbound.*"}, time.Now().Add(-1*time.Hour), 10)
-	if err != nil {
-		t.Fatalf("ListPendingSubscribedEvents: %v", err)
-	}
-	var child events.Event
-	found := false
-	for _, evt := range subscribed {
-		if strings.TrimSpace(evt.ID()) == childID {
-			child = evt
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected child event %s in subscribed pending set", childID)
-	}
-	if got := strings.TrimSpace(child.ParentEventID()); got != parentID {
-		t.Fatalf("subscribed pending parent_event_id = %q, want %q", got, parentID)
-	}
-}
-
-func TestManagerStore_EventReceiptBranches(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-
-	entityID := uuid.NewString()
-	seedSpecAgent(t, ctx, pg, "a1", "", "*")
-	eventID := uuid.NewString()
-	if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(eventID, "system.started", "runtime", "", []byte(`{}`), 0, eventtest.UUID("persisted-projection-run"), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now())); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
-
-	if err := pg.UpsertEventReceipt(ctx, "", "a1", "processed", nil); err == nil {
-		t.Fatal("expected UpsertEventReceipt empty event to fail")
-	}
-
-	if err := pg.UpsertEventReceipt(ctx, eventID, "a1", "", nil); err == nil {
-		t.Fatal("expected UpsertEventReceipt empty status to fail")
-	}
-	if _, ok, err := pg.GetEventReceipt(ctx, eventID, "a1"); err != nil || ok {
-		t.Fatalf("expected no receipt after invalid write ok=%v err=%v", ok, err)
-	}
-
-	if _, _, err := pg.GetEventReceipt(ctx, "", "a1"); err == nil {
-		t.Fatalf("expected required args error")
-	}
-	if _, _, err := pg.GetEventReceipt(ctx, eventID, ""); err == nil {
-		t.Fatalf("expected required args error")
-	}
-
-	if _, ok, err := pg.GetEventReceipt(ctx, uuid.NewString(), "a1"); err != nil || ok {
-		t.Fatalf("expected not found ok=false err=%v", err)
-	}
-}
-
-func TestManagerStore_GetEventReceipt_FailsClosedOnMalformedSideEffects(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-
-	entityID := uuid.NewString()
-	seedSpecAgent(t, ctx, pg, "a1", "", "*")
-	eventID := uuid.NewString()
-	if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(eventID, "system.started", "runtime", "", []byte(`{}`), 0, eventtest.UUID("persisted-projection-run"), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now())); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
-
-	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, side_effects, processed_at
-		)
-		SELECT
-			e.event_id, 'agent', 'a1', e.entity_id, e.flow_instance,
-			'dead_letter', '{"retry_count":"bad"}'::jsonb, now()
-		FROM events e
-		WHERE e.event_id = $1::uuid
-	`, eventID); err != nil {
-		t.Fatalf("insert malformed receipt: %v", err)
-	}
-
-	if _, ok, err := pg.GetEventReceipt(ctx, eventID, "a1"); err == nil || ok {
-		t.Fatalf("expected malformed side effects error, got ok=%v err=%v", ok, err)
-	}
-}
-
-func TestManagerStore_MarkEventDeliveryInProgress_RequiresIDs(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-
-	if err := pg.MarkEventDeliveryInProgress(ctx, "", "a1", ""); err == nil {
-		t.Fatal("expected empty eventID to fail")
-	}
-	if err := pg.MarkEventDeliveryInProgress(ctx, uuid.NewString(), "", ""); err == nil {
-		t.Fatal("expected empty agentID to fail")
 	}
 }
 
@@ -4156,27 +3542,25 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		time.Now().Add(-2*time.Hour),
 	)
 
-	if err := commitSemanticEventFixture(ctx, pg, evt); err != nil {
-		t.Fatalf("AppendEvent: %v", err)
+	if err := commitSemanticEventFixtureWithAgents(ctx, pg, evt, []string{ceoID}); err != nil {
+		t.Fatalf("AppendEvent with exact delivery: %v", err)
 	}
-	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{ceoID}); err != nil {
-		t.Fatalf("InsertEventDeliveries: %v", err)
+	pending, err := pg.ListPendingAgentDeliveryDetails(ctx, PendingAgentDeliveryListOptions{AgentID: ceoID, Since: time.Now().Add(-24 * time.Hour), Limit: 10})
+	if err != nil || len(pending.PendingDeliveries) != 1 || pending.PendingDeliveries[0].EventID != evt.ID() {
+		t.Fatalf("ListPendingAgentDeliveryDetails err=%v page=%#v", err, pending)
 	}
-	pending, err := pg.ListPendingEventsForAgent(ctx, ceoID, time.Now().Add(-24*time.Hour), 10)
-	if err != nil || len(pending) == 0 {
-		t.Fatalf("ListPendingEventsForAgent err=%v len=%d", err, len(pending))
+	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: ceoID}
+	claimed, err := pg.ClaimAgentDelivery(ctx, evt, route)
+	if err != nil {
+		t.Fatalf("ClaimAgentDelivery: %v", err)
 	}
-
-	subPending, err := pg.ListPendingSubscribedEvents(ctx, ceoID, []events.EventType{"review.*"}, time.Now().Add(-24*time.Hour), 10)
-	if err != nil || len(subPending) == 0 {
-		t.Fatalf("ListPendingSubscribedEvents err=%v len=%d", err, len(subPending))
-	}
-
-	if err := pg.UpsertEventReceipt(ctx, evt.ID(), ceoID, "error", testRetryableFailure()); err != nil {
-		t.Fatalf("UpsertEventReceipt: %v", err)
-	}
-	if rec, ok, err := pg.GetEventReceipt(ctx, evt.ID(), ceoID); err != nil || !ok || rec.Status == "" {
-		t.Fatalf("GetEventReceipt ok=%v err=%v rec=%+v", ok, err, rec)
+	retrying, err := pg.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
+		Disposition: runtimedelivery.FailureRetry,
+		Failure:     testRetryableFailure(),
+		RetryBase:   time.Second,
+	})
+	if err != nil || retrying.Status != runtimedelivery.StatusFailed || retrying.RetryEligible {
+		t.Fatalf("SettleFailure retry snapshot=%#v err=%v", retrying, err)
 	}
 
 	identity := specMemoryIdentity(ceoID, "operating/global")

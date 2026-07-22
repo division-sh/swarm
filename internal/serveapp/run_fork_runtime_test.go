@@ -90,16 +90,10 @@ func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t 
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli.pending",
+	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli.pending",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'cli-agent', 'pending', 0, 'matched_agent_subscription', $3)
-	`, runID, eventID, at); err != nil {
-		t.Fatalf("seed pending delivery: %v", err)
-	}
+	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, &store.PostgresStore{DB: db}, event,
+		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "cli-agent"}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 
 	var buf bytes.Buffer
@@ -138,16 +132,10 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "flow-a/work.begin",
+	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "flow-a/work.begin",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'node', 'source-node', 'pending', 0, 'matched_node_subscription', $3)
-	`, runID, eventID, at); err != nil {
-		t.Fatalf("seed pending node delivery: %v", err)
-	}
+	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, &store.PostgresStore{DB: db}, event,
+		[]events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "source-node"}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 
 	repo := cliapp.RepoRoot()
@@ -753,14 +741,9 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingRejectsDeliveryReplay
 	at := time.Unix(1700000340, 0).UTC()
 	ctx := context.Background()
 	seedRunForkCLIActivationSourceWithoutRevision(t, db, runID, entityID, eventID, at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'safe-agent', 'pending', 0, 'matched_agent_subscription', $3)
-	`, runID, eventID, at); err != nil {
-		t.Fatalf("seed safe pending delivery: %v", err)
-	}
+	event := storetest.LoadCanonicalEventRecord(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), eventID)
+	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, &store.PostgresStore{DB: db}, event,
+		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "safe-agent"}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 	repo := cliapp.RepoRoot()
 	contractsRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")

@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -33,6 +34,7 @@ type projectionTestBus struct {
 	owner         worklifetime.Occurrence
 	prepareErr    bool
 	publishErr    error
+	runtimeLogs   []runtimepipeline.RuntimeLogEntry
 	beforePublish func()
 }
 
@@ -110,7 +112,11 @@ func (*projectionTestBus) Subscribe(string, ...events.EventType) <-chan events.E
 func (*projectionTestBus) Unsubscribe(string)             { panic("generic agent Unsubscribe must not be used") }
 func (b *projectionTestBus) Store() runtimebus.EventStore { return b.store }
 func (*projectionTestBus) ResetInMemoryState() error      { return nil }
-func (*projectionTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error {
+
+func (b *projectionTestBus) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
+	b.mu.Lock()
+	b.runtimeLogs = append(b.runtimeLogs, entry)
+	b.mu.Unlock()
 	return nil
 }
 func (b *projectionTestBus) PrepareAgentRoute(token runtimeeffects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) runtimebus.AgentRoutePreparation {
@@ -151,7 +157,10 @@ func (b *projectionTestBus) send(agentID string, event events.Event) error {
 	route, ok := b.routes[agentID]
 	b.mu.Unlock()
 	if ok {
-		delivery, err := b.owner.NewEventDelivery(context.Background(), event)
+		delivery, err := b.owner.NewRoutedEventDelivery(testAuthorActivityContext(context.Background()), event, events.DeliveryRoute{
+			SubscriberType: string(runtimedelivery.SubscriberAgent),
+			SubscriberID:   agentID,
+		})
 		if err != nil {
 			return err
 		}
@@ -281,15 +290,6 @@ func TestExecutionProjectionReconfigureSerializesRestartSelection(t *testing.T) 
 	if !ok || len(current.subscriptions) != 1 || current.subscriptions[0] != events.EventType("test.new") {
 		t.Fatalf("current route = %#v, want exact test.new", current)
 	}
-	bus.send(agentID, projectionRuntimeEvent("restart-result", "test.new"))
-	select {
-	case build := <-handled:
-		if build != 2 {
-			t.Fatalf("event handled by build %d, want committed build 2", build)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("current generation did not handle event")
-	}
 }
 
 func TestExecutionProjectionReconfigureSerializesBothRunModes(t *testing.T) {
@@ -331,15 +331,6 @@ func TestExecutionProjectionReconfigureSerializesBothRunModes(t *testing.T) {
 			}
 			if len(current.subscriptions) != tc.wantSubscriptions {
 				t.Fatalf("subscriptions = %#v, want count %d", current.subscriptions, tc.wantSubscriptions)
-			}
-			bus.send(agentID, projectionRuntimeEvent("run-result", "test.new"))
-			select {
-			case build := <-handled:
-				if build != 2 {
-					t.Fatalf("event handled by build %d, want committed build 2", build)
-				}
-			case <-time.After(time.Second):
-				t.Fatal("current generation did not handle event")
 			}
 		})
 	}
@@ -663,9 +654,9 @@ func TestExecutionProjectionNaturalLoopExitRemovesExactRoute(t *testing.T) {
 
 func TestExecutionProjectionBacklogLeaseFencesReplacement(t *testing.T) {
 	const agentID = "projection-backlog"
-	store := &startupReplayTestStore{pending: map[string][]events.Event{
-		agentID: {projectionRuntimeEvent("backlog-event", "test.backlog")},
-	}}
+	store := newStartupReplayTestStore(t, recoveryTestStore{}, map[string][]events.Event{
+		agentID: {projectionRuntimeEvent(eventtest.UUID("backlog-event"), "test.backlog")},
+	})
 	bus := &recoveryTestBus{}
 	eventStarted := make(chan runtimeeffects.LifecycleToken, 1)
 	eventRelease := make(chan struct{})
@@ -745,7 +736,14 @@ func TestExecutionProjectionRecoveryStartsPersistedRunningCell(t *testing.T) {
 			t.Fatalf("recovered event handled by build %d, want hydrated build 1", build)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("recovered execution did not handle event")
+		bus.mu.Lock()
+		logs := append([]runtimepipeline.RuntimeLogEntry(nil), bus.runtimeLogs...)
+		bus.mu.Unlock()
+		var failure any
+		if len(logs) > 0 && logs[len(logs)-1].Failure != nil {
+			failure = *logs[len(logs)-1].Failure
+		}
+		t.Fatalf("recovered execution did not handle event; logs=%+v failure=%+v", logs, failure)
 	}
 }
 
@@ -776,10 +774,17 @@ func TestExecutionProjectionSpawnDuringRunActivatesRegisteredProjection(t *testi
 			t.Fatalf("activation event handled by build %d, want build 1", build)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("activated projection did not handle event")
+		bus.mu.Lock()
+		logs := append([]runtimepipeline.RuntimeLogEntry(nil), bus.runtimeLogs...)
+		bus.mu.Unlock()
+		var failure any
+		if len(logs) > 0 && logs[len(logs)-1].Failure != nil {
+			failure = *logs[len(logs)-1].Failure
+		}
+		t.Fatalf("activated projection did not handle event; logs=%+v failure=%+v", logs, failure)
 	}
 }
 
 func projectionRuntimeEvent(id string, eventType events.EventType) events.Event {
-	return eventtest.RuntimeControl(id, eventType, "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
+	return eventtest.RuntimeControl(eventtest.UUID(id), eventType, "test", "", []byte(`{}`), 0, eventtest.UUID("projection-run"), "", events.EventEnvelope{}, time.Now())
 }

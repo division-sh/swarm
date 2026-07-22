@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
@@ -18,24 +17,16 @@ import (
 	"github.com/google/uuid"
 )
 
-type eventReceiptReader interface {
-	GetEventReceipt(ctx context.Context, eventID, agentID string) (EventReceipt, bool, error)
-}
-
 type deadLetterRecorder interface {
 	RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error
-}
-
-type deliveryProgressWriter interface {
-	MarkEventDeliveryInProgress(ctx context.Context, eventID, agentID, sessionID string) error
 }
 
 type activeRunDeliveryQuiescenceReader interface {
 	ActiveRunDeliveryQuiesced(ctx context.Context, eventID, subscriberType, subscriberID string) (string, bool, error)
 }
 
-type normalRunCompletionConverger interface {
-	ConvergeNormalRunCompletionForEvent(ctx context.Context, eventID string) error
+type deliveryRunCompletionConverger interface {
+	ConvergeDeliveryRunCompletion(ctx context.Context, evt events.Event) error
 }
 
 func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt events.Event) error {
@@ -74,17 +65,6 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 			}
 		}
 	}
-	if !am.claimActiveEvent(agent.ID(), evt.ID()) {
-		record.Outcome = startupManagerReplayOutcomeSkipped
-		record.ReasonCode = startupManagerReplayReasonDuplicateInFlight
-		return eventProcessResult{record: record}
-	}
-	defer am.releaseActiveEvent(agent.ID(), evt.ID())
-	if skip, reason := am.shouldSkipEventDetailed(agent.ID(), evt.ID()); skip {
-		record.Outcome = startupManagerReplayOutcomeSkipped
-		record.ReasonCode = reason
-		return eventProcessResult{record: record}
-	}
 	if suppress, _ := am.shouldSuppressForBudget(agent.ID(), evt); suppress {
 		budgetFailure := runtimefailures.FromError(runtimefailures.New(runtimefailures.ClassBudgetExhausted, "spend_budget_emergency", "agent-manager", "delivery_budget_admission", map[string]any{
 			"budget_kind": "spend", "agent_id": agent.ID(), "entity_id": evt.EntityID(),
@@ -98,8 +78,46 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 		}
 		record.Outcome = startupManagerReplayOutcomeSkipped
 		record.ReasonCode = startupManagerReplayReasonBudgetSuppressed
+		if _, claimed := runtimedelivery.ClaimFromContext(ctx); claimed {
+			am.writeReceipt(ctx, evt, agent.ID(), ReceiptStatusError, &budgetFailure.Failure)
+		}
 		return eventProcessResult{record: record}
 	}
+	claim, claimed := runtimedelivery.ClaimFromContext(ctx)
+	if !claimed {
+		if am.deliveryStore == nil {
+			err := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "delivery_lifecycle_owner_missing", "agent-manager", "claim_delivery", map[string]any{"agent_id": agent.ID(), "event_id": evt.ID()})
+			record.Outcome = startupManagerReplayOutcomeDropped
+			record.ReasonCode = startupManagerReplayReasonDeliveryStartFailed
+			record.Failure = failureEnvelope(err, "agent-manager", "claim_delivery")
+			return eventProcessResult{record: record, err: err}
+		}
+		route, ok := runtimedelivery.RouteFromContext(ctx)
+		if !ok {
+			err := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "delivery_route_missing", "agent-manager", "claim_delivery", map[string]any{"agent_id": agent.ID(), "event_id": evt.ID()})
+			record.Outcome = startupManagerReplayOutcomeDropped
+			record.ReasonCode = startupManagerReplayReasonDeliveryStartFailed
+			record.Failure = failureEnvelope(err, "agent-manager", "claim_delivery")
+			return eventProcessResult{record: record, err: err}
+		}
+		claimedDelivery, err := am.deliveryStore.ClaimAgentDelivery(ctx, evt, route)
+		if err != nil {
+			record.Outcome = startupManagerReplayOutcomeDropped
+			record.ReasonCode = startupManagerReplayReasonDeliveryStartFailed
+			record.Failure = failureEnvelope(err, "agent-manager", "claim_delivery")
+			return eventProcessResult{record: record, err: err}
+		}
+		claim = claimedDelivery.Claim
+		ctx = runtimedelivery.WithClaim(ctx, claim)
+	}
+	if claim.SubscriberClass() != runtimedelivery.SubscriberAgent || claim.SubscriberID() != agent.ID() {
+		err := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "delivery_claim_subscriber_mismatch", "agent-manager", "process_event", map[string]any{"agent_id": agent.ID(), "delivery_id": claim.DeliveryID()})
+		record.Outcome = startupManagerReplayOutcomeDropped
+		record.ReasonCode = startupManagerReplayReasonDeliveryStartFailed
+		record.Failure = failureEnvelope(err, "agent-manager", "process_event")
+		return eventProcessResult{record: record, err: err}
+	}
+	am.notifyTestDeliveryStatus(ctx, evt, agent.ID(), runtimedelivery.StatusInProgress)
 	if am.shouldInterceptDirective(agent.ID(), evt) {
 		am.writeReceipt(ctx, evt, agent.ID(), ReceiptStatusProcessed, nil)
 		record.Outcome = startupManagerReplayOutcomeSkipped
@@ -109,50 +127,19 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
 	ctx = events.WithDeliveryContext(ctx, evt.DeliveryContext())
-	if writer, ok := am.store.(deliveryProgressWriter); ok && writer != nil {
-		if err := writer.MarkEventDeliveryInProgress(ctx, evt.ID(), agent.ID(), ""); err != nil {
-			if am.bus != nil {
-				am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
-					Level:     "error",
-					Component: "agent-manager",
-					Action:    "mark_delivery_in_progress_failed",
-					EventID:   strings.TrimSpace(evt.ID()),
-					EventType: strings.TrimSpace(string(evt.Type())),
-					AgentID:   agent.ID(),
-					EntityID:  strings.TrimSpace(evt.EntityID()),
-					Failure:   failureEnvelope(err, "agent-manager", "mark_delivery_in_progress"),
-				})
-			}
-			record.Outcome = startupManagerReplayOutcomeDropped
-			record.ReasonCode = startupManagerReplayReasonDeliveryStartFailed
-			record.Failure = failureEnvelope(err, "agent-manager", "mark_delivery_in_progress")
-			return eventProcessResult{record: record, err: err}
-		} else if am.bus != nil {
-			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
-				Level:     "debug",
-				Component: "agent-manager",
-				Action:    "delivery_lifecycle_transition",
-				EventID:   strings.TrimSpace(evt.ID()),
-				EventType: strings.TrimSpace(string(evt.Type())),
-				AgentID:   agent.ID(),
-				EntityID:  strings.TrimSpace(evt.EntityID()),
-				Detail: map[string]any{
-					"delivery_state":          string(runtimedelivery.StateLaunching),
-					"delivery_transition":     string(runtimedelivery.StateLaunching),
-					"delivery_previous_state": string(runtimedelivery.StateQueued),
-					"delivery_reason":         "agent_processing",
-					"subscriber_type":         "agent",
-					"subscriber_id":           agent.ID(),
-				},
-			})
-		}
-	}
 	if reason, ok := am.activeRunDeliveryQuiesced(ctx, evt.ID(), agent.ID()); ok {
 		record.Outcome = startupManagerReplayOutcomeSkipped
 		record.ReasonCode = reason
 		return eventProcessResult{record: record}
 	}
-	out, err := agent.OnEvent(ctx, evt)
+	out, err, heartbeatErr := am.executeAgentDeliveryHandler(ctx, claim, agent, evt)
+	if heartbeatErr != nil {
+		claimFailure := runtimefailures.FromError(heartbeatErr, "agent-manager", "renew_delivery_claim")
+		record.Outcome = startupManagerReplayOutcomeDropped
+		record.ReasonCode = startupManagerReplayReasonProcessFailed
+		record.Failure = runtimefailures.CloneEnvelope(&claimFailure.Failure)
+		return eventProcessResult{record: record, err: claimFailure}
+	}
 	if reason, ok := am.activeRunDeliveryQuiesced(ctx, evt.ID(), agent.ID()); ok {
 		record.Outcome = startupManagerReplayOutcomeSkipped
 		record.ReasonCode = reason
@@ -203,6 +190,16 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 	record.Outcome = startupManagerReplayOutcomeReplayed
 	record.ReasonCode = startupManagerReplayReasonReplayed
 	return eventProcessResult{record: record}
+}
+
+func (am *AgentManager) executeAgentDeliveryHandler(ctx context.Context, claim runtimedelivery.Claim, agent Agent, evt events.Event) (out []events.Event, handlerErr error, heartbeatErr error) {
+	heartbeat, err := runtimedelivery.StartClaimHeartbeat(ctx, am.workOwner, am.deliveryStore, claim)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { heartbeatErr = heartbeat.Stop() }()
+	out, handlerErr = agent.OnEvent(heartbeat.Context(), evt)
+	return out, handlerErr, nil
 }
 
 func receiptStatusForAgentFailure(err error) ReceiptStatus {
@@ -275,64 +272,6 @@ func (am *AgentManager) shouldSuppressForBudget(agentID string, evt events.Event
 		}
 	}
 	return false, ""
-}
-
-func (am *AgentManager) claimActiveEvent(agentID, eventID string) bool {
-	agentID = strings.TrimSpace(agentID)
-	eventID = strings.TrimSpace(eventID)
-	if agentID == "" || eventID == "" {
-		return true
-	}
-	key := agentID + "|" + eventID
-	am.activeEventMu.Lock()
-	defer am.activeEventMu.Unlock()
-	if _, exists := am.activeEventKeys[key]; exists {
-		return false
-	}
-	am.activeEventKeys[key] = struct{}{}
-	return true
-}
-
-func (am *AgentManager) releaseActiveEvent(agentID, eventID string) {
-	agentID = strings.TrimSpace(agentID)
-	eventID = strings.TrimSpace(eventID)
-	if agentID == "" || eventID == "" {
-		return
-	}
-	key := agentID + "|" + eventID
-	am.activeEventMu.Lock()
-	delete(am.activeEventKeys, key)
-	am.activeEventMu.Unlock()
-}
-
-func (am *AgentManager) shouldSkipEvent(agentID, eventID string) bool {
-	skip, _ := am.shouldSkipEventDetailed(agentID, eventID)
-	return skip
-}
-
-func (am *AgentManager) shouldSkipEventDetailed(agentID, eventID string) (bool, startupManagerReplayReasonCode) {
-	reader, ok := am.store.(eventReceiptReader)
-	if !ok || reader == nil {
-		return false, ""
-	}
-	eventID = strings.TrimSpace(eventID)
-	agentID = strings.TrimSpace(agentID)
-	if eventID == "" || agentID == "" {
-		return false, ""
-	}
-	receipt, found, err := reader.GetEventReceipt(am.runtimeContext(), eventID, agentID)
-	if err != nil || !found {
-		return false, ""
-	}
-	status := ReceiptStatus(strings.TrimSpace(string(receipt.Status)))
-	switch status {
-	case ReceiptStatusProcessed:
-		return true, startupManagerReplayReasonReceiptProcessed
-	case ReceiptStatusDeadLetter:
-		return true, startupManagerReplayReasonReceiptDeadLettered
-	default:
-		return false, ""
-	}
 }
 
 func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID string, evt events.Event, failure runtimefailures.Envelope) {
@@ -449,41 +388,53 @@ func (am *AgentManager) isAuthBreakerTripped() bool {
 
 func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, agentID string, status ReceiptStatus, failure *runtimefailures.Envelope) {
 	eventID := strings.TrimSpace(evt.ID())
-	if am.store == nil || eventID == "" || agentID == "" {
+	if am.deliveryStore == nil || eventID == "" || agentID == "" {
+		return
+	}
+	claim, ok := runtimedelivery.ClaimFromContext(ctx)
+	if !ok || claim.SubscriberClass() != runtimedelivery.SubscriberAgent || claim.SubscriberID() != strings.TrimSpace(agentID) {
+		if am.bus != nil {
+			_ = am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+				Level: "error", Component: "agent-manager", Action: "delivery_settlement_claim_missing",
+				EventID: eventID, AgentID: strings.TrimSpace(agentID),
+			})
+		}
 		return
 	}
 	writeCtx := ctx
 	if writeCtx == nil {
 		writeCtx = context.Background()
 	}
-	receiptCtx := writeCtx
-	var receiptCancel context.CancelFunc
-	err := am.store.UpsertEventReceipt(writeCtx, eventID, agentID, status, failure)
-	if err != nil {
-		// Agent loop contexts are canceled aggressively during teardown; receipts
-		// must still persist so pending deliveries do not get stuck indefinitely.
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			retryCtx, cancel := context.WithTimeout(context.WithoutCancel(writeCtx), receiptWriteTimeout)
-			retryErr := am.store.UpsertEventReceipt(retryCtx, eventID, agentID, status, failure)
-			if retryErr == nil {
-				receiptCtx = retryCtx
-				receiptCancel = cancel
-				err = nil
-			} else {
-				cancel()
-				err = retryErr
-			}
-		}
+	var snapshot runtimedelivery.Snapshot
+	var err error
+	switch status {
+	case ReceiptStatusProcessed:
+		snapshot, err = am.deliveryStore.SettleSuccess(writeCtx, claim, nil, 0)
+	case ReceiptStatusError:
+		snapshot, err = am.deliveryStore.SettleFailure(writeCtx, claim, runtimedelivery.Settlement{
+			Disposition: runtimedelivery.FailureRetry, ReasonCode: "handler_failure",
+			Failure: failure, RetryBase: time.Minute,
+		})
+	case ReceiptStatusDeadLetter:
+		snapshot, err = am.deliveryStore.SettleFailure(writeCtx, claim, runtimedelivery.Settlement{
+			Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: "dead_letter", Failure: failure,
+		})
+	case ReceiptStatusTerminal:
+		snapshot, err = am.deliveryStore.SettleFailure(writeCtx, claim, runtimedelivery.Settlement{
+			Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: "terminal_failure", Failure: failure,
+		})
+	default:
+		return
 	}
 	if err != nil {
 		if am.bus != nil {
 			am.bus.LogRuntime(writeCtx, runtimepipeline.RuntimeLogEntry{
 				Level:     "error",
 				Component: "agent-manager",
-				Action:    "receipt_write_failed",
+				Action:    "delivery_settlement_failed",
 				EventID:   strings.TrimSpace(eventID),
 				AgentID:   strings.TrimSpace(agentID),
-				Failure:   failureEnvelope(err, "agent-manager", "write_receipt"),
+				Failure:   failureEnvelope(err, "agent-manager", "settle_delivery"),
 				Detail: map[string]any{
 					"status": strings.TrimSpace(string(status)),
 				},
@@ -491,83 +442,71 @@ func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, agen
 		}
 		return
 	}
-	if receiptCancel != nil {
-		defer receiptCancel()
-	}
-	am.logDeliveryLifecycle(receiptCtx, eventID, agentID, status, failure)
-	if converger, ok := am.bus.(normalRunCompletionConverger); ok && converger != nil {
-		if err := converger.ConvergeNormalRunCompletionForEvent(receiptCtx, eventID); err != nil && am.bus != nil {
-			am.bus.LogRuntime(receiptCtx, runtimepipeline.RuntimeLogEntry{
-				Level:     "error",
-				Component: "agent-manager",
-				Action:    "normal_run_completion_failed",
-				EventID:   strings.TrimSpace(eventID),
-				AgentID:   strings.TrimSpace(agentID),
-				Failure:   failureEnvelope(err, "agent-manager", "converge_run_completion"),
-			})
-		}
-	}
+	am.logDeliveryLifecycle(writeCtx, snapshot)
+	am.notifyTestDeliveryStatus(writeCtx, evt, agentID, snapshot.Status)
+	am.convergeDeliveryRunCompletion(writeCtx, evt, agentID)
 
-	// Spec v2.0: dead-letter events are escalated to the agent's manager. The manager
-	// decides whether to retry, skip, or escalate further.
-	if status != ReceiptStatusProcessed {
-		escalateCtx := ctx
-		if receiptCancel != nil {
-			escalateCtx = context.WithoutCancel(writeCtx)
-		}
-		am.maybeEscalateDeadLetter(escalateCtx, evt, agentID)
+	if snapshot.Status == runtimedelivery.StatusDeadLetter {
+		am.maybeEscalateDeadLetter(writeCtx, evt, agentID, snapshot)
 	}
 }
 
-func (am *AgentManager) logDeliveryLifecycle(ctx context.Context, eventID, agentID string, requestedStatus ReceiptStatus, failure *runtimefailures.Envelope) {
-	if am == nil || am.bus == nil || am.store == nil {
+func (am *AgentManager) convergeDeliveryRunCompletion(ctx context.Context, evt events.Event, agentID string) {
+	if am == nil {
 		return
 	}
-	reader, ok := am.store.(eventReceiptReader)
-	if !ok || reader == nil {
-		return
+	if converger, ok := am.bus.(deliveryRunCompletionConverger); ok && converger != nil {
+		if err := converger.ConvergeDeliveryRunCompletion(ctx, evt); err != nil && am.bus != nil {
+			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+				Level:     "error",
+				Component: "agent-manager",
+				Action:    "delivery_run_completion_failed",
+				EventID:   strings.TrimSpace(evt.ID()),
+				AgentID:   strings.TrimSpace(agentID),
+				Failure:   failureEnvelope(err, "agent-manager", "converge_delivery_run_completion"),
+			})
+		}
 	}
-	receipt, found, err := reader.GetEventReceipt(ctx, eventID, agentID)
-	if err != nil || !found {
+}
+
+func (am *AgentManager) logDeliveryLifecycle(ctx context.Context, snapshot runtimedelivery.Snapshot) {
+	if am == nil || am.bus == nil {
 		return
 	}
 	detail := map[string]any{
-		"subscriber_type": "agent",
-		"subscriber_id":   strings.TrimSpace(agentID),
-		"retry_count":     receipt.RetryCount,
+		"delivery_id":     snapshot.DeliveryID,
+		"subscriber_type": string(snapshot.SubscriberClass),
+		"subscriber_id":   snapshot.SubscriberID,
+		"retry_count":     snapshot.RetryCount,
 	}
 	entry := runtimepipeline.RuntimeLogEntry{
 		Level:     "debug",
 		Component: "agent-manager",
 		Action:    "delivery_lifecycle_transition",
-		EventID:   strings.TrimSpace(eventID),
-		AgentID:   strings.TrimSpace(agentID),
+		EventID:   snapshot.EventID,
+		AgentID:   snapshot.SubscriberID,
 		Detail:    detail,
 	}
-	status := receipt.Status
-	if requestedStatus == ReceiptStatusTerminal {
-		status = ReceiptStatusTerminal
-	}
-	switch status {
-	case ReceiptStatusProcessed:
+	switch snapshot.Status {
+	case runtimedelivery.StatusDelivered:
 		detail["delivery_state"] = string(runtimedelivery.StateDelivered)
 		detail["delivery_transition"] = string(runtimedelivery.StateDelivered)
 		detail["delivery_previous_state"] = string(runtimedelivery.StateActive)
 		detail["delivery_reason"] = "agent_processed"
 		entry.Message = "Delivery entered delivered state"
-	case ReceiptStatusError:
+	case runtimedelivery.StatusFailed:
 		detail["delivery_state"] = string(runtimedelivery.StateRetrying)
 		detail["delivery_transition"] = string(runtimedelivery.StateRetrying)
 		detail["delivery_previous_state"] = string(runtimedelivery.StateActive)
 		detail["delivery_reason"] = "handler_failure"
 		entry.Message = "Delivery entered retrying state"
-		if receipt.Failure != nil {
-			detail["failure"] = *receipt.Failure
+		if snapshot.Failure != nil {
+			detail["failure"] = *snapshot.Failure
 		}
-	case ReceiptStatusDeadLetter:
+	case runtimedelivery.StatusDeadLetter:
 		detail["delivery_state"] = string(runtimedelivery.StateExhausted)
 		detail["delivery_transition"] = string(runtimedelivery.StateExhausted)
-		if requestedStatus == ReceiptStatusDeadLetter {
+		if snapshot.ReasonCode != "retry_exhausted" {
 			detail["delivery_previous_state"] = string(runtimedelivery.StateActive)
 			detail["delivery_reason"] = "dead_letter"
 			detail["delivery_terminal_outcome"] = "dead_letter"
@@ -578,39 +517,17 @@ func (am *AgentManager) logDeliveryLifecycle(ctx context.Context, eventID, agent
 			detail["delivery_terminal_outcome"] = "retry_exhausted"
 			entry.Message = "Delivery entered exhausted state"
 		}
-		if receipt.Failure != nil {
-			detail["failure"] = *receipt.Failure
-		}
-	case ReceiptStatusTerminal:
-		detail["delivery_state"] = string(runtimedelivery.StateExhausted)
-		detail["delivery_transition"] = string(runtimedelivery.StateExhausted)
-		detail["delivery_previous_state"] = string(runtimedelivery.StateActive)
-		detail["delivery_reason"] = "terminal_failure"
-		detail["delivery_terminal_outcome"] = "terminal_failure"
-		entry.Message = "Delivery entered terminal state"
-		if receipt.Failure != nil {
-			detail["failure"] = *receipt.Failure
+		if snapshot.Failure != nil {
+			detail["failure"] = *snapshot.Failure
 		}
 	default:
 		return
 	}
-	_ = failure
 	_ = am.bus.LogRuntime(ctx, entry)
 }
 
-func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, evt events.Event, agentID string) {
+func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, evt events.Event, agentID string, snapshot runtimedelivery.Snapshot) {
 	eventID := strings.TrimSpace(evt.ID())
-	reader, ok := am.store.(eventReceiptReader)
-	if !ok || reader == nil {
-		return
-	}
-	receipt, found, err := reader.GetEventReceipt(ctx, eventID, agentID)
-	if err != nil || !found {
-		return
-	}
-	if ReceiptStatus(strings.TrimSpace(string(receipt.Status))) != ReceiptStatusDeadLetter {
-		return
-	}
 	execution, cfgOK := am.lifecycle.executionSnapshot(agentID)
 	cfg := execution.Config
 	entityID := ""
@@ -620,13 +537,13 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, evt events.
 		flowInstance = flowPathFromAgentConfig(cfg)
 	}
 	if recorder, ok := am.store.(deadLetterRecorder); ok && recorder != nil {
-		if receipt.Failure == nil {
+		if snapshot.Failure == nil {
 			return
 		}
 		if err := recorder.RecordDeadLetter(ctx, runtimedeadletters.Record{
 			OriginalEventID: eventID,
-			Failure:         *receipt.Failure,
-			RetryCount:      receipt.RetryCount,
+			Failure:         *snapshot.Failure,
+			RetryCount:      snapshot.RetryCount,
 			HandlerNode:     agentID,
 		}); err != nil {
 			if am.bus != nil {
@@ -647,8 +564,8 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, evt events.
 		eventID:    strings.TrimSpace(eventID),
 		agentID:    strings.TrimSpace(agentID),
 		entityID:   entityID,
-		retryCount: receipt.RetryCount,
-		failure:    runtimefailures.CloneEnvelope(receipt.Failure),
+		retryCount: snapshot.RetryCount,
+		failure:    runtimefailures.CloneEnvelope(snapshot.Failure),
 	})
 	if !shouldEmit {
 		return

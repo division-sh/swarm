@@ -352,7 +352,7 @@ func validateSQLiteInboundPublicationIntegrityTx(ctx context.Context, db inbound
 	for index := range record.Events {
 		child := &record.Events[index]
 		var scopeCount int
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ? AND subscriber_type = ? AND subscriber_id = ?`, child.EventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID).Scan(&scopeCount); err != nil {
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM committed_replay_scopes WHERE event_id = ?`, child.EventID).Scan(&scopeCount); err != nil {
 			return fmt.Errorf("validate sqlite inbound publication child replay scope: %w", err)
 		}
 		if scopeCount != 1 {
@@ -371,28 +371,13 @@ func validateSQLiteInboundPublicationIntegrityTx(ctx context.Context, db inbound
 }
 
 func loadSQLiteInboundPublicationRoutes(ctx context.Context, db inboundPublicationQueryer, eventID string) ([]events.DeliveryRoute, error) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT subscriber_type, subscriber_id, COALESCE(delivery_target_route, '{}'), COALESCE(delivery_context, '{}')
-		FROM event_deliveries WHERE event_id = ? AND NOT (subscriber_type = ? AND subscriber_id = ?)
-		ORDER BY created_at ASC, delivery_id ASC
-	`, eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID)
+	snapshots, err := sqliteDeliveryAdapter.SnapshotsForEvent(ctx, db, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("list sqlite inbound publication child routes: %w", err)
 	}
-	defer rows.Close()
-	routes := make([]events.DeliveryRoute, 0)
-	for rows.Next() {
-		var route events.DeliveryRoute
-		var targetValue, contextValue any
-		if err := rows.Scan(&route.SubscriberType, &route.SubscriberID, &targetValue, &contextValue); err != nil {
-			return nil, fmt.Errorf("scan sqlite inbound publication child route: %w", err)
-		}
-		route.Target = decodeRouteIdentityJSON(jsonRawMessageValue(targetValue))
-		route.Context = decodeDeliveryContextJSON(jsonRawMessageValue(contextValue))
-		routes = append(routes, route)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read sqlite inbound publication child routes: %w", err)
+	routes := make([]events.DeliveryRoute, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		routes = append(routes, snapshot.Route)
 	}
 	return events.NormalizeDeliveryRoutes(routes), nil
 }

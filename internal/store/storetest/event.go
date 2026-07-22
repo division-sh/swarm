@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
@@ -21,7 +22,6 @@ import (
 )
 
 type semanticFixtureTarget interface {
-	InsertEventDeliveryRoutesTx(context.Context, *sql.Tx, string, []events.DeliveryRoute) error
 	UpsertCommittedReplayScopeTx(context.Context, *sql.Tx, string, runtimereplayclaim.CommittedReplayScope) error
 	UpsertPipelineReceiptTx(context.Context, *sql.Tx, string, string, *runtimefailures.Envelope) error
 }
@@ -80,6 +80,51 @@ func InsertCanonicalEventRecord(
 		t.Fatalf("canonical event record fixture %s conflicts with its persisted record", record.EventID)
 	}
 	return runtimebus.EventAppendExactDuplicate
+}
+
+// CommitDeliveryObligationsForPersistedEvent seeds exact executable routes for
+// an event that was already inserted as a fixture precondition. Delivery SQL
+// stays behind the canonical adapter even in tests.
+func CommitDeliveryObligationsForPersistedEvent(
+	t testing.TB,
+	ctx context.Context,
+	selectedStore any,
+	event events.Event,
+	routes []events.DeliveryRoute,
+) {
+	t.Helper()
+	var (
+		db      *sql.DB
+		adapter *runtimedelivery.Adapter
+		err     error
+	)
+	switch selected := selectedStore.(type) {
+	case *store.PostgresStore:
+		db = selected.DB
+		adapter, err = runtimedelivery.NewAdapter(runtimedelivery.DialectPostgres)
+	case *store.SQLiteRuntimeStore:
+		db = selected.DB
+		adapter, err = runtimedelivery.NewAdapter(runtimedelivery.DialectSQLite)
+	default:
+		t.Fatalf("persisted event delivery fixture store %T is unsupported", selectedStore)
+	}
+	if err != nil {
+		t.Fatalf("construct persisted event delivery fixture adapter: %v", err)
+	}
+	if db == nil || adapter == nil {
+		t.Fatalf("persisted event delivery fixture store %T is not initialized", selectedStore)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin persisted event delivery fixture: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := adapter.CommitInitial(ctx, tx, event.ID(), event.RunID(), events.NormalizeDeliveryRoutes(routes)); err != nil {
+		t.Fatalf("commit persisted event delivery fixture: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit persisted event delivery fixture transaction: %v", err)
+	}
 }
 
 // LoadCanonicalEventRecord exercises the same complete-record decoder used by
@@ -264,14 +309,16 @@ func commitSemanticEventWithInitialFacts(
 	}
 
 	var (
-		db     *sql.DB
-		target semanticFixtureTarget
-		insert func(context.Context, *sql.Tx, eventrecord.Record) (bool, error)
-		load   func(context.Context, *sql.Tx, string) (eventrecord.Record, bool, error)
+		db              *sql.DB
+		target          semanticFixtureTarget
+		deliveryAdapter *runtimedelivery.Adapter
+		insert          func(context.Context, *sql.Tx, eventrecord.Record) (bool, error)
+		load            func(context.Context, *sql.Tx, string) (eventrecord.Record, bool, error)
 	)
 	switch selected := selectedStore.(type) {
 	case *store.PostgresStore:
 		db, target = selected.DB, selected
+		deliveryAdapter, err = runtimedelivery.NewAdapter(runtimedelivery.DialectPostgres)
 		insert = func(ctx context.Context, tx *sql.Tx, record eventrecord.Record) (bool, error) {
 			return eventrecordpostgres.Insert(ctx, tx, record)
 		}
@@ -280,6 +327,7 @@ func commitSemanticEventWithInitialFacts(
 		}
 	case *store.SQLiteRuntimeStore:
 		db, target = selected.DB, selected
+		deliveryAdapter, err = runtimedelivery.NewAdapter(runtimedelivery.DialectSQLite)
 		insert = func(ctx context.Context, tx *sql.Tx, record eventrecord.Record) (bool, error) {
 			return eventrecordsqlite.Insert(ctx, tx, record)
 		}
@@ -289,7 +337,10 @@ func commitSemanticEventWithInitialFacts(
 	default:
 		t.Fatalf("semantic event fixture store %T is unsupported", selectedStore)
 	}
-	if db == nil || target == nil {
+	if err != nil {
+		t.Fatalf("construct semantic delivery fixture adapter: %v", err)
+	}
+	if db == nil || target == nil || deliveryAdapter == nil {
 		t.Fatalf("semantic event fixture store %T is not initialized", selectedStore)
 	}
 
@@ -315,7 +366,7 @@ func commitSemanticEventWithInitialFacts(
 		}
 		return runtimebus.EventAppendExactDuplicate
 	}
-	if err := target.InsertEventDeliveryRoutesTx(ctx, tx, record.EventID, events.NormalizeDeliveryRoutes(routes)); err != nil {
+	if _, err := deliveryAdapter.CommitInitial(ctx, tx, record.EventID, record.RunID, events.NormalizeDeliveryRoutes(routes)); err != nil {
 		t.Fatalf("commit semantic event fixture routes: %v", err)
 	}
 	if err := target.UpsertCommittedReplayScopeTx(ctx, tx, record.EventID, scope); err != nil {
@@ -336,6 +387,7 @@ func commitSemanticEventWithInitialFacts(
 			record.RunID,
 			runforkrevision.FamilyEvents,
 			runforkrevision.FamilyEventDeliveries,
+			runforkrevision.FamilyCommittedReplayScopes,
 			runforkrevision.FamilyEventReceipts,
 		); err != nil {
 			t.Fatalf("capture semantic fork frontier fixture: %v", err)

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
 const (
@@ -284,10 +286,9 @@ func RunForkPendingWorkReplayableForHistoricalReplay(item RunForkPendingWork) bo
 	if strings.TrimSpace(item.SubscriberType) != "agent" {
 		return false
 	}
-	if strings.TrimSpace(item.Status) != "pending" || item.RetryCount != 0 {
-		return false
-	}
-	return strings.TrimSpace(item.ActiveSessionID) == "" &&
+	return strings.TrimSpace(item.Status) == string(runtimedelivery.StatusPending) &&
+		item.RetryCount == 0 &&
+		strings.TrimSpace(item.ActiveSessionID) == "" &&
 		item.StartedAt == nil &&
 		item.DeliveredAt == nil &&
 		item.ReceiptAt == nil

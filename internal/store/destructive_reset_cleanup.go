@@ -502,6 +502,11 @@ func destructiveResetCleanupQuery(table, mode string, runIDs []string, includeBu
 			return `SELECT COUNT(*) FROM event_receipts r WHERE EXISTS (SELECT 1 FROM events e WHERE e.event_id = r.event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
 		}
 		return `DELETE FROM event_receipts r USING events e WHERE r.event_id = e.event_id AND e.run_id = ANY($1::uuid[])`, args, nil
+	case "event_delivery_attempts", "event_delivery_outcomes":
+		if mode == "count" {
+			return fmt.Sprintf(`SELECT COUNT(*) FROM %s child WHERE EXISTS (SELECT 1 FROM event_deliveries d LEFT JOIN events e ON e.event_id = d.event_id WHERE d.delivery_id = child.delivery_id AND (d.run_id = ANY($1::uuid[]) OR e.run_id = ANY($1::uuid[])))`, quoteIdent(table)), args, nil
+		}
+		return fmt.Sprintf(`DELETE FROM %s child WHERE EXISTS (SELECT 1 FROM event_deliveries d LEFT JOIN events e ON e.event_id = d.event_id WHERE d.delivery_id = child.delivery_id AND (d.run_id = ANY($1::uuid[]) OR e.run_id = ANY($1::uuid[])))`, quoteIdent(table)), args, nil
 	case "dead_letters":
 		if mode == "count" {
 			return `SELECT COUNT(*) FROM dead_letters d WHERE EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.original_event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
@@ -512,6 +517,11 @@ func destructiveResetCleanupQuery(table, mode string, runIDs []string, includeBu
 			return `SELECT COUNT(*) FROM event_deliveries d WHERE d.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
 		}
 		return `DELETE FROM event_deliveries d WHERE d.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
+	case "committed_replay_scopes":
+		if mode == "count" {
+			return `SELECT COUNT(*) FROM committed_replay_scopes s WHERE s.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = s.event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
+		}
+		return `DELETE FROM committed_replay_scopes s WHERE s.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = s.event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
 	case "author_activity_occurrences", "run_fork_fact_revisions", "run_fork_revisions", "run_fork_revision_heads", "activity_attempts", "agent_turns", "agent_conversation_audits", "agent_sessions", "decision_card_route_obligations", "decision_card_changes", "decision_card_input_drafts", "proposed_effect_continuations", "human_task_continuations", "decision_cards", "entity_mutations", "entity_state", "run_control_state", "reply_contexts", "events", "runs":
 		if mode == "count" {
 			return fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE run_id = ANY($1::uuid[])`, quoteIdent(table)), args, nil

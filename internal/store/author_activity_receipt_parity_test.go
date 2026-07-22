@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,15 +12,14 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 type authorActivityReceiptStore interface {
 	semanticEventFixtureStore
-	UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, *runtimefailures.Envelope) error
+	runtimedelivery.Store
 }
 
 type authorActivityReceiptFixture struct {
@@ -53,13 +53,20 @@ func TestAuthorActivityDuplicateTerminalReceiptIsNoOpParity(t *testing.T) {
 			if err := commitSemanticEventFixtureWithAgents(ctx, fixture.store, event, []string{agentID}); err != nil {
 				t.Fatalf("PersistEventWithDeliveries: %v", err)
 			}
-			if err := fixture.store.UpsertEventReceipt(ctx, eventID, agentID, runtimemanager.ReceiptStatusProcessed, nil); err != nil {
-				t.Fatalf("first UpsertEventReceipt: %v", err)
+			route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agentID}
+			claimed, err := fixture.store.ClaimAgentDelivery(ctx, event, route)
+			if err != nil {
+				t.Fatalf("ClaimAgentDelivery: %v", err)
+			}
+			if _, err := fixture.store.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
+				t.Fatalf("first SettleSuccess: %v", err)
 			}
 
 			before := listAuthorActivityForReceiptParity(t, fixture, ctx)
-			if len(before) != 2 || before[0].Kind != runtimeauthoractivity.KindEventEmitted || before[1].Kind != runtimeauthoractivity.KindDeliveryLifecycle || before[1].Transition != "delivered" {
-				t.Fatalf("first receipt occurrences = %#v, want emitted and delivered occurrences", before)
+			if len(before) != 3 || before[0].Kind != runtimeauthoractivity.KindEventEmitted ||
+				before[1].Kind != runtimeauthoractivity.KindDeliveryLifecycle || before[1].Transition != "in_progress" ||
+				before[2].Kind != runtimeauthoractivity.KindDeliveryLifecycle || before[2].Transition != "delivered" {
+				t.Fatalf("first receipt occurrences = %#v, want emitted, in-progress, and delivered occurrences", before)
 			}
 			for _, occurrence := range before {
 				if occurrence.AuthorSafeSummary != "how are you" {
@@ -72,8 +79,8 @@ func TestAuthorActivityDuplicateTerminalReceiptIsNoOpParity(t *testing.T) {
 			beforeStamp := fixture.stamp(ctx, eventID, agentID)
 			fixture.advance()
 
-			if err := fixture.store.UpsertEventReceipt(ctx, eventID, agentID, runtimemanager.ReceiptStatusProcessed, nil); err != nil {
-				t.Fatalf("duplicate UpsertEventReceipt: %v", err)
+			if _, err := fixture.store.SettleSuccess(ctx, claimed.Claim, nil, 0); !errors.Is(err, runtimedelivery.ErrConflict) {
+				t.Fatalf("duplicate SettleSuccess error = %v, want conflict", err)
 			}
 			after := listAuthorActivityForReceiptParity(t, fixture, ctx)
 			if !reflect.DeepEqual(after, before) {
@@ -175,10 +182,9 @@ func openSQLiteAuthorActivityReceiptFixture(t *testing.T) authorActivityReceiptF
 		store: store, db: store.DB, dialect: runtimeauthoractivity.DialectSQLite,
 		stamp: func(ctx context.Context, eventID, agentID string) [2]string {
 			return readAuthorActivityReceiptStamps(t, ctx, store.DB, `
-				SELECT CAST(d.delivered_at AS TEXT), CAST(r.processed_at AS TEXT)
+				SELECT CAST(d.settled_at AS TEXT), CAST(o.settled_at AS TEXT)
 				FROM event_deliveries d
-				JOIN event_receipts r
-				  ON r.event_id = d.event_id AND r.subscriber_type = d.subscriber_type AND r.subscriber_id = d.subscriber_id
+				JOIN event_delivery_outcomes o ON o.delivery_id = d.delivery_id
 				WHERE d.event_id = ? AND d.subscriber_type = 'agent' AND d.subscriber_id = ?
 			`, eventID, agentID)
 		},
@@ -196,10 +202,9 @@ func openPostgresAuthorActivityReceiptFixture(t *testing.T) authorActivityReceip
 		store: store, db: db, dialect: runtimeauthoractivity.DialectPostgres,
 		stamp: func(ctx context.Context, eventID, agentID string) [2]string {
 			return readAuthorActivityReceiptStamps(t, ctx, db, `
-				SELECT d.delivered_at::text, r.processed_at::text
+				SELECT d.settled_at::text, o.settled_at::text
 				FROM event_deliveries d
-				JOIN event_receipts r
-				  ON r.event_id = d.event_id AND r.subscriber_type = d.subscriber_type AND r.subscriber_id = d.subscriber_id
+				JOIN event_delivery_outcomes o ON o.delivery_id = d.delivery_id
 				WHERE d.event_id = $1::uuid AND d.subscriber_type = 'agent' AND d.subscriber_id = $2
 			`, eventID, agentID)
 		},

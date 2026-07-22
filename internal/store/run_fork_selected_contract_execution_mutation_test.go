@@ -10,7 +10,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -191,15 +195,27 @@ func TestLoadRunForkSelectedContractSourceEventsRestoresPersistedChronology(t *t
 	earlierAt := time.Unix(1700002406, 0).UTC()
 	laterAt := earlierAt.Add(time.Second)
 	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, earlierEventID, earlierAt)
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, laterEventID, sourceRunID, "item.received",
-		events.EventProducerPlatform, "test", entityID, "", laterAt)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'node', 'test-node', 'pending', $3)
-	`, sourceRunID, laterEventID, laterAt); err != nil {
-		t.Fatalf("seed later delivery: %v", err)
+	laterEvent := semanticEventRecordFixture(
+		laterEventID, sourceRunID, "item.received", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`),
+		semanticEventRecordFixtureEnvelope(entityID, ""), laterAt,
+	)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin later event transaction: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	if err != nil {
+		t.Fatalf("begin later event story: %v", err)
+	}
+	if err := commitSemanticEventFixtureWithRoutesTx(storyctx, pg, tx, laterEvent, []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "test-node"}}); err != nil {
+		t.Fatalf("seed later event and delivery: %v", err)
+	}
+	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
+		t.Fatalf("finalize later event story: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit later event transaction: %v", err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 
@@ -292,7 +308,7 @@ func TestSelectedContractExecutionMaterializationTreatsSourceConversationHistory
 	assertNoCopiedConversationRows(t, db, materialized.ForkRunID, sessionID, auditID, turnID)
 }
 
-func TestSelectedContractExecutionMaterializationTreatsSourceReplayScopeMarkersAsLineage(t *testing.T) {
+func TestSelectedContractExecutionMaterializationKeepsCanonicalReplayScopesSourceLocal(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		reasonCode string
@@ -308,16 +324,27 @@ func TestSelectedContractExecutionMaterializationTreatsSourceReplayScopeMarkersA
 			entityID := uuid.NewString()
 			eventID := uuid.NewString()
 			at := time.Unix(1700002415, 0).UTC()
-			seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
-			seedSelectedContractSourceReplayScopeMarker(t, db, sourceRunID, eventID, tc.reasonCode, at)
+			if tc.reasonCode == replayScopeReasonDirect {
+				seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, eventID, at)
+			} else {
+				seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
+			}
 			captureRunForkTestRevision(t, db, sourceRunID)
+			var sourceScope string
+			if err := db.QueryRowContext(ctx, `SELECT scope FROM committed_replay_scopes WHERE event_id = $1::uuid`, eventID).Scan(&sourceScope); err != nil {
+				t.Fatalf("load source replay scope: %v", err)
+			}
+			wantScope, _ := committedReplayScopeFromReasonCode(tc.reasonCode)
+			if sourceScope != string(wantScope) {
+				t.Fatalf("source replay scope = %q, want %q", sourceScope, wantScope)
+			}
 
 			plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
 			if err != nil {
 				t.Fatalf("PlanRunFork: %v", err)
 			}
-			if !runForkTestHasPlanBlocker(plan, RunForkBlockerCommittedReplayScopeReplayUnsupported) {
-				t.Fatalf("plan blockers = %#v, want committed replay-scope blocker", plan.UnsupportedBlockers)
+			if runForkTestHasPlanBlocker(plan, RunForkBlockerCommittedReplayScopeReplayUnsupported) {
+				t.Fatalf("plan blockers = %#v, canonical replay scope is an admitted initial fact", plan.UnsupportedBlockers)
 			}
 
 			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
@@ -339,9 +366,6 @@ func TestSelectedContractExecutionMaterializationTreatsSourceReplayScopeMarkersA
 			if runForkTestHasMaterializationBlocker(materialized, RunForkBlockerCommittedReplayScopeReplayUnsupported) {
 				t.Fatalf("selected-contract materialization kept committed replay-scope blocker: %#v", materialized.UnsupportedBlockers)
 			}
-			if !runForkTestHasLineageDispositionOwner(materialized.ReplayResumeAdmission, RunForkReplayResumeFactCommittedReplayScope, RunForkSelectedContractCommittedReplayScopeMarkerPolicyOwner) {
-				t.Fatalf("admission missing committed replay-scope marker lineage owner: %#v", materialized.ReplayResumeAdmission)
-			}
 			assertNoCopiedReplayScopeMarkers(t, db, materialized.ForkRunID)
 		})
 	}
@@ -356,13 +380,13 @@ func TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCoupl
 	eventID := uuid.NewString()
 	at := time.Unix(1700002420, 0).UTC()
 	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, started_at, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'active-agent', 'in_progress', $4::uuid, $3, $3)
-	`, sourceRunID, eventID, at, uuid.NewString()); err != nil {
-		t.Fatalf("seed active delivery coupling: %v", err)
+	sessionID := uuid.NewString()
+	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, eventID, sessionID, uuid.NewString(), uuid.NewString(), at)
+	activeRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	event := commitPostgresDeliveryFixture(t, ctx, db, eventID, activeRoute)
+	claimed := claimPostgresDeliveryFixture(t, ctx, db, event, activeRoute)
+	if _, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
+		t.Fatalf("bind active delivery session: %v", err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 
@@ -404,14 +428,9 @@ func TestSelectedContractExecutionMaterializationAdmitsSameSourceDeliveryForkPoi
 	forkAt := at.Add(30 * time.Second)
 	seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, sourceEventID, sessionID, auditID, turnID, at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, started_at, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'validation-coordinator', 'in_progress', $3, $3)
-	`, sourceRunID, sourceEventID, at.Add(5*time.Second)); err != nil {
-		t.Fatalf("seed in-progress source delivery: %v", err)
-	}
+	sourceRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "validation-coordinator"}
+	sourceEvent := commitPostgresDeliveryFixture(t, ctx, db, sourceEventID, sourceRoute)
+	claimPostgresDeliveryFixture(t, ctx, db, sourceEvent, sourceRoute)
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, sourceEventID,
 		"validation/vertical.ready_for_review", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
@@ -480,14 +499,9 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, sourceEventID, sessionID, auditID, turnID, at)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "unrelated.started",
 		events.EventProducerPlatform, "source-runtime", entityID, "", at.Add(10*time.Second))
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, started_at, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'validation-coordinator', 'in_progress', $3, $3)
-	`, sourceRunID, unrelatedEventID, at.Add(11*time.Second)); err != nil {
-		t.Fatalf("seed unrelated in-progress delivery: %v", err)
-	}
+	unrelatedRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "validation-coordinator"}
+	unrelatedEvent := commitPostgresDeliveryFixture(t, ctx, db, unrelatedEventID, unrelatedRoute)
+	claimPostgresDeliveryFixture(t, ctx, db, unrelatedEvent, unrelatedRoute)
 	captureRunForkTestRevision(t, db, sourceRunID)
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, sourceEventID,
 		"validation/vertical.ready_for_review", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
@@ -530,14 +544,9 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "unrelated.started",
 		events.EventProducerPlatform, "source-runtime", entityID, "", at.Add(10*time.Second))
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, started_at, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'unrelated-agent', 'in_progress', $3, $3)
-	`, sourceRunID, unrelatedEventID, at.Add(11*time.Second)); err != nil {
-		t.Fatalf("seed unrelated in-progress delivery: %v", err)
-	}
+	unrelatedRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "unrelated-agent"}
+	unrelatedEvent := commitPostgresDeliveryFixture(t, ctx, db, unrelatedEventID, unrelatedRoute)
+	claimPostgresDeliveryFixture(t, ctx, db, unrelatedEvent, unrelatedRoute)
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, sourceEventID,
 		"validation/vertical.ready_for_review", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
@@ -577,24 +586,16 @@ func TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsA
 	at := time.Unix(1700002430, 0).UTC()
 	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count,
-			started_at, delivered_at, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'terminal-agent', 'failed', 2, $3, $3, $3)
-	`, sourceRunID, eventID, at); err != nil {
-		t.Fatalf("seed terminal delivery: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, reason_code, side_effects, processed_at
-		)
-		VALUES ($1::uuid, 'agent', 'terminal-agent', $2::uuid, 'flow-a/1',
-			'reject', 'terminal_source_delivery', '{}'::jsonb, $3)
-	`, eventID, entityID, at); err != nil {
-		t.Fatalf("seed terminal delivery receipt: %v", err)
+	terminalRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "terminal-agent"}
+	terminalEvent := commitPostgresDeliveryFixture(t, ctx, db, eventID, terminalRoute)
+	terminalClaim := claimPostgresDeliveryFixture(t, ctx, db, terminalEvent, terminalRoute)
+	failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "terminal_source_delivery", nil)
+	if _, err := pg.SettleFailure(ctx, terminalClaim.Claim, runtimedelivery.Settlement{
+		Disposition: runtimedelivery.FailureDeadLetter,
+		ReasonCode:  "terminal_source_delivery",
+		Failure:     &failure,
+	}); err != nil {
+		t.Fatalf("settle terminal delivery: %v", err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 
@@ -657,14 +658,9 @@ func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailC
 
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "unrelated.started",
 		events.EventProducerPlatform, "source-runtime", entityID, "flow-a/1", at.Add(10*time.Second))
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, started_at, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'unrelated-agent', 'in_progress', $3, $3)
-	`, sourceRunID, unrelatedEventID, at.Add(11*time.Second)); err != nil {
-		t.Fatalf("seed unrelated in-progress delivery: %v", err)
-	}
+	unrelatedRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "unrelated-agent"}
+	unrelatedEvent := commitPostgresDeliveryFixture(t, ctx, db, unrelatedEventID, unrelatedRoute)
+	claimPostgresDeliveryFixture(t, ctx, db, unrelatedEvent, unrelatedRoute)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
@@ -1418,14 +1414,9 @@ func TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsB
 	forkAt := at.Add(30 * time.Second)
 	seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, sourceEventID, sessionID, auditID, turnID, at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, started_at, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'validation-coordinator', 'in_progress', $3, $3)
-	`, sourceRunID, sourceEventID, at.Add(5*time.Second)); err != nil {
-		t.Fatalf("seed in-progress source delivery: %v", err)
-	}
+	sourceRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "validation-coordinator"}
+	sourceEvent := commitPostgresDeliveryFixture(t, ctx, db, sourceEventID, sourceRoute)
+	claimPostgresDeliveryFixture(t, ctx, db, sourceEvent, sourceRoute)
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, sourceEventID,
 		"validation/vertical.ready_for_review", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
@@ -1509,7 +1500,7 @@ func TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed(t
 	}
 }
 
-func TestSelectedContractActivationRejectsPostRevisionSameEventReplayScopeMarker(t *testing.T) {
+func TestCommittedReplayScopeRejectsPostCommitChange(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
@@ -1518,38 +1509,20 @@ func TestSelectedContractActivationRejectsPostRevisionSameEventReplayScopeMarker
 	eventID := uuid.NewString()
 	at := time.Unix(1700003625, 0).UTC()
 	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
-
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
-		},
-	})
-	if err != nil {
-		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	direct, ok := committedReplayScopeFromReasonCode(replayScopeReasonDirect)
+	if !ok {
+		t.Fatal("direct replay scope contract is unavailable")
 	}
-	if materialized.ForkRunID == "" {
-		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
+	if err := pg.UpsertCommittedReplayScope(ctx, eventID, direct); err == nil {
+		t.Fatal("post-commit replay scope change succeeded")
 	}
-	forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
-	seedSelectedContractSourceReplayScopeMarker(t, db, sourceRunID, eventID, replayScopeReasonDirect, at.Add(time.Minute))
-	captureRunForkTestRevision(t, db, sourceRunID)
-
-	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
-		ForkRunID:             materialized.ForkRunID,
-		AllowedSourceEventIDs: []string{eventID},
-	})
-	if err == nil || !strings.Contains(err.Error(), "source_committed_replay_scope_advanced_after_fork_point") {
-		t.Fatalf("activation error = %v, want post-revision same-event replay-scope blocker", err)
+	var got string
+	if err := db.QueryRowContext(ctx, `SELECT scope FROM committed_replay_scopes WHERE event_id = $1::uuid`, eventID).Scan(&got); err != nil {
+		t.Fatalf("load immutable replay scope: %v", err)
 	}
-	if activation.Activated || activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
-		t.Fatalf("activation = %#v, want blocked before branch divergence", activation)
+	if got != string(runtimereplayclaim.CommittedReplayScopeSubscribed) {
+		t.Fatalf("replay scope = %q, want subscribed", got)
 	}
-	assertOnlySelectedForkReplayScopeMarker(t, db, materialized.ForkRunID, forkEventID)
 }
 
 func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T) {
@@ -1584,13 +1557,11 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 	`, at); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'agent-a', 'delivered', $3)
-	`, materialized.ForkRunID, forkEventID, at.Add(2*time.Second)); err != nil {
-		t.Fatalf("seed selected agent delivery: %v", err)
+	forkRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	forkEvent := commitPostgresDeliveryFixture(t, ctx, db, forkEventID, forkRoute)
+	forkClaim := claimPostgresDeliveryFixture(t, ctx, db, forkEvent, forkRoute)
+	if _, err := pg.SettleSuccess(ctx, forkClaim.Claim, nil, time.Second); err != nil {
+		t.Fatalf("settle selected agent delivery: %v", err)
 	}
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, uuid.NewString(), materialized.ForkRunID, "agent.follow_up",
 		events.EventProducerAgent, "agent-a", entityID, "flow-a/1", at.Add(4*time.Second))
@@ -1672,13 +1643,11 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEv
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'agent-a', 'delivered', $3)
-	`, materialized.ForkRunID, forkEventID, at.Add(2*time.Second)); err != nil {
-		t.Fatalf("seed selected agent delivery: %v", err)
+	forkRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	forkEvent := commitPostgresDeliveryFixture(t, ctx, db, forkEventID, forkRoute)
+	forkClaim := claimPostgresDeliveryFixture(t, ctx, db, forkEvent, forkRoute)
+	if _, err := pg.SettleSuccess(ctx, forkClaim.Claim, nil, time.Second); err != nil {
+		t.Fatalf("settle selected agent delivery: %v", err)
 	}
 	seedPostgresChildEventRecordFixture(t, ctx, db, uuid.NewString(), materialized.ForkRunID, forkEventID,
 		"platform.auth_required", events.EventProducerPlatform, "runtime", entityID, "flow-a/1", []byte(`{}`), at.Add(3*time.Second))
@@ -1995,25 +1964,19 @@ func seedSelectedContractExecutionStoreSource(t *testing.T, db *sql.DB, sourceRu
 
 func seedSelectedContractExecutionStoreSourceUnpublished(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
 	t.Helper()
-	seedSelectedContractExecutionStoreSourceRaw(t, db, sourceRunID, entityID, eventID, at)
-	ctx := testAuthorActivityContext()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'node', 'test-node', 'pending', $3)
-	`, sourceRunID, eventID, at); err != nil {
-		t.Fatalf("seed delivery: %v", err)
-	}
+	seedSelectedContractExecutionStoreSourceRaw(t, db, sourceRunID, entityID, eventID, at, []events.DeliveryRoute{{
+		SubscriberType: "node",
+		SubscriberID:   "test-node",
+	}})
 }
 
 func seedSelectedContractExecutionStoreSourceWithoutDelivery(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
 	t.Helper()
-	seedSelectedContractExecutionStoreSourceRaw(t, db, sourceRunID, entityID, eventID, at)
+	seedSelectedContractExecutionStoreSourceRaw(t, db, sourceRunID, entityID, eventID, at, nil)
 	captureRunForkTestRevision(t, db, sourceRunID)
 }
 
-func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
+func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time, routes []events.DeliveryRoute) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
 	if _, err := db.ExecContext(ctx, `
@@ -2022,9 +1985,25 @@ func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourc
 	`, sourceRunID, authorActivityTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "item.received",
-		events.EventProducerPlatform, "test", entityID, "", at)
-	if _, err := db.ExecContext(ctx, `
+	selected := &PostgresStore{DB: db}
+	selected.schemaAdmission.markCurrent()
+	event := semanticEventRecordFixture(
+		eventID, sourceRunID, "item.received", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`),
+		semanticEventRecordFixtureEnvelope(entityID, ""), at,
+	)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin source fact transaction: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	if err != nil {
+		t.Fatalf("begin source story transaction: %v", err)
+	}
+	if err := commitSemanticEventFixtureWithRoutesTx(storyctx, selected, tx, event, routes); err != nil {
+		t.Fatalf("seed source event and delivery obligations: %v", err)
+	}
+	if _, err := tx.ExecContext(storyctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
@@ -2034,7 +2013,7 @@ func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourc
 	`, sourceRunID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed mutations: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
+	if _, err := tx.ExecContext(storyctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, name,
 			current_state, gates, fields, accumulator, revision,
@@ -2047,6 +2026,12 @@ func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourc
 		)
 	`, sourceRunID, entityID, at); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
+	}
+	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
+		t.Fatalf("finalize source story transaction: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit source facts: %v", err)
 	}
 }
 
@@ -2095,17 +2080,15 @@ func seedSelectedContractSourceConversationHistory(t *testing.T, db *sql.DB, sou
 
 func seedSelectedContractSourceReplayScopeMarker(t *testing.T, db execContextDB, sourceRunID, eventID, reasonCode string, at time.Time) {
 	t.Helper()
+	scope, ok := committedReplayScopeFromReasonCode(reasonCode)
+	if !ok {
+		t.Fatalf("invalid replay scope reason %q", reasonCode)
+	}
 	if _, err := db.ExecContext(testAuthorActivityContext(), `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status,
-			retry_count, reason_code, delivered_at, created_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, $3, $4, 'delivered',
-			0, $5, $6, $6
-		)
-	`, sourceRunID, eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, reasonCode, at); err != nil {
-		t.Fatalf("seed source replay-scope marker: %v", err)
+		INSERT INTO committed_replay_scopes (event_id, run_id, scope, created_at, updated_at)
+		VALUES ($1::uuid, $2::uuid, $3, $4, $4)
+	`, eventID, sourceRunID, string(scope), at); err != nil {
+		t.Fatalf("seed source committed replay scope: %v", err)
 	}
 }
 
@@ -2135,15 +2118,11 @@ func seedPostTActiveConversationCoupling(t *testing.T, db *sql.DB, sourceRunID, 
 	`, sessionID, sourceRunID, at.Add(time.Minute)); err != nil {
 		t.Fatalf("seed post-T active source session: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status,
-			active_session_id, started_at, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'active-agent', 'in_progress',
-			$3::uuid, $4, $4)
-	`, sourceRunID, eventID, sessionID, at.Add(time.Minute)); err != nil {
-		t.Fatalf("seed post-T active source delivery: %v", err)
+	activeRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "active-agent"}
+	event := commitPostgresDeliveryFixture(t, ctx, db, eventID, activeRoute)
+	claimed := claimPostgresDeliveryFixture(t, ctx, db, event, activeRoute)
+	if _, err := postgresDeliveryFixtureStore(db).BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
+		t.Fatalf("bind post-T active source delivery: %v", err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 }
@@ -2203,13 +2182,10 @@ func assertNoCopiedReplayScopeMarkers(t *testing.T, db *sql.DB, forkRunID string
 	var copied int
 	if err := db.QueryRowContext(testAuthorActivityContext(), `
 		SELECT COUNT(*)
-		FROM event_deliveries
+		FROM committed_replay_scopes
 		WHERE run_id = $1::uuid
-		  AND subscriber_type = $2
-		  AND subscriber_id = $3
-		  AND reason_code IN ($4, $5)
-	`, forkRunID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, replayScopeReasonDirect, replayScopeReasonSubscribed).Scan(&copied); err != nil {
-		t.Fatalf("count copied replay-scope markers: %v", err)
+	`, forkRunID).Scan(&copied); err != nil {
+		t.Fatalf("count copied committed replay scopes: %v", err)
 	}
 	if copied != 0 {
 		t.Fatalf("fork replay-scope marker rows = %d, want 0 copied source markers", copied)
@@ -2221,15 +2197,12 @@ func assertOnlySelectedForkReplayScopeMarker(t *testing.T, db *sql.DB, forkRunID
 	var exact, copied int
 	if err := db.QueryRowContext(testAuthorActivityContext(), `
 		SELECT
-			COUNT(*) FILTER (WHERE event_id = $2::uuid AND reason_code = $5),
+			COUNT(*) FILTER (WHERE event_id = $2::uuid AND scope = 'direct'),
 			COUNT(*) FILTER (WHERE event_id <> $2::uuid)
-		FROM event_deliveries
+		FROM committed_replay_scopes
 		WHERE run_id = $1::uuid
-		  AND subscriber_type = $3
-		  AND subscriber_id = $4
-		  AND reason_code IN ($5, $6)
-	`, forkRunID, forkEventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, replayScopeReasonDirect, replayScopeReasonSubscribed).Scan(&exact, &copied); err != nil {
-		t.Fatalf("count selected-fork replay-scope markers: %v", err)
+	`, forkRunID, forkEventID).Scan(&exact, &copied); err != nil {
+		t.Fatalf("count selected-fork committed replay scopes: %v", err)
 	}
 	if exact != 1 || copied != 0 {
 		t.Fatalf("selected-fork replay-scope markers exact=%d copied=%d, want exact=1 copied=0", exact, copied)

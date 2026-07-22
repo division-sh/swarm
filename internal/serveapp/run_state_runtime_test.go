@@ -219,7 +219,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 			t.Fatalf("unexpected agent id: %q", cfg.ID)
 		}
 		return testAgent, nil
-	}, runtimemanager.AgentManagerOptions{WorkOwner: workOwner}, pg)
+	}, runtimemanager.AgentManagerOptions{DeliveryStore: pg, WorkOwner: workOwner}, pg)
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            testAgent.id,
@@ -337,7 +337,7 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 			t.Fatalf("unexpected agent id: %q", cfg.ID)
 		}
 		return testAgent, nil
-	}, runtimemanager.AgentManagerOptions{WorkOwner: workOwner}, pg)
+	}, runtimemanager.AgentManagerOptions{DeliveryStore: pg, WorkOwner: workOwner}, pg)
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            testAgent.id,

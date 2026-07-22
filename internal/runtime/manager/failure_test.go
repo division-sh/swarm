@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
@@ -77,13 +78,14 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &receiptReaderStub{}
+			deliveryStore := newManagerDeliveryTestStore(t)
 			bus := &recordingReceiptBus{}
-			am := newTestAgentManager(t, bus, nil, store)
+			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
 			err := tt.newFailure()
 			expected := runtimeengine.NormalizeFailure(err, "agent-manager", "process_event.on_event").Failure
-			evt := eventtest.RunCreatingRootIngress("evt-"+tt.name, events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
-			result := am.processEventDetailed(testAuthorActivityContext(context.Background()), failureReturningAgent{id: "agent-a", err: err}, evt)
+			evt := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-"+tt.name), events.EventType("work.requested"), "", "", nil, 0, eventtest.UUID("failure-run-"+tt.name), "", events.EventEnvelope{}, time.Time{})
+			agent := failureReturningAgent{id: "agent-a", err: err}
+			result := am.processEventDetailed(managerAgentDeliveryContext(testAuthorActivityContext(context.Background()), agent.ID()), agent, evt)
 
 			if result.err == nil {
 				t.Fatal("processEventDetailed error = nil")
@@ -92,11 +94,23 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 				t.Fatal("startup replay record failure = nil")
 			}
 			wantStatus := receiptStatusForAgentFailure(err)
-			if store.lastStatus != wantStatus || store.lastFailure == nil {
-				t.Fatalf("receipt = status:%q failure:%#v, want status %q with typed failure", store.lastStatus, store.lastFailure, wantStatus)
+			obligation, obligationErr := runtimedelivery.NewObligation(evt.ID(), evt.RunID(), managerAgentDeliveryRoute(agent.ID()))
+			if obligationErr != nil {
+				t.Fatalf("derive failure delivery obligation: %v", obligationErr)
+			}
+			snapshot, snapshotErr := deliveryStore.Snapshot(context.Background(), obligation.DeliveryID())
+			if snapshotErr != nil {
+				t.Fatalf("load failure delivery snapshot: %v", snapshotErr)
+			}
+			wantDeliveryStatus := runtimedelivery.StatusDeadLetter
+			if wantStatus == ReceiptStatusError {
+				wantDeliveryStatus = runtimedelivery.StatusFailed
+			}
+			if snapshot.Status != wantDeliveryStatus || snapshot.Failure == nil {
+				t.Fatalf("delivery = status:%q failure:%#v, want status %q with typed failure", snapshot.Status, snapshot.Failure, wantDeliveryStatus)
 			}
 			assertManagerFailureEqual(t, *result.record.Failure, expected)
-			assertManagerFailureEqual(t, *store.lastFailure, expected)
+			assertManagerFailureEqual(t, *snapshot.Failure, expected)
 			returned, ok := runtimefailures.EnvelopeFromError(result.err)
 			if !ok {
 				t.Fatalf("returned error = %v, want canonical failure", result.err)
@@ -106,21 +120,26 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 	}
 }
 
-func TestProcessEventOutcomeUncertainTerminalReceiptSuppressesReplay(t *testing.T) {
-	store := &receiptReaderStub{}
+func TestProcessEventOutcomeUncertainTerminalDeliverySuppressesReplay(t *testing.T) {
+	deliveryStore := newManagerDeliveryTestStore(t)
+	store := &startupReplayTestStore{recoveryTestStore: recoveryTestStore{}, managerDeliveryTestStore: deliveryStore}
 	am := newTestAgentManager(t, &recordingReceiptBus{}, nil, store)
 	err := runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "claude_cli_attempt_outcome_unconfirmed", "claude-cli-adapter", "wait", nil)
 	agent := &countingFailureAgent{failureReturningAgent: failureReturningAgent{id: "agent-a", err: err}}
-	evt := eventtest.RunCreatingRootIngress("evt-uncertain", events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
-	first := am.processEventDetailed(testAuthorActivityContext(context.Background()), agent, evt)
-	if first.err == nil || agent.calls != 1 || store.lastStatus != ReceiptStatusTerminal || store.lastFailure == nil {
-		t.Fatalf("first result err=%v calls=%d status=%s failure=%#v", first.err, agent.calls, store.lastStatus, store.lastFailure)
+	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-uncertain"), events.EventType("work.requested"), "", "", nil, 0, eventtest.UUID("uncertain-run"), "", events.EventEnvelope{}, time.Time{})
+	deliveryStore.seedAgentDeliveries(t, agent.ID(), []events.Event{evt})
+	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agent.ID()}
+	ctx := runtimedelivery.WithRoute(testAuthorActivityContext(context.Background()), route)
+	first := am.processEventDetailed(ctx, agent, evt)
+	if first.err == nil || agent.calls != 1 {
+		t.Fatalf("first result err=%v calls=%d, want one terminal failure", first.err, agent.calls)
 	}
-	store.receipt = EventReceipt{EventID: evt.ID(), AgentID: agent.ID(), Status: ReceiptStatusDeadLetter, RetryCount: 0, Failure: runtimefailures.CloneEnvelope(store.lastFailure)}
-	store.found = true
-	second := am.processEventDetailed(testAuthorActivityContext(context.Background()), agent, evt)
-	if second.err != nil || agent.calls != 1 || second.record.ReasonCode != startupManagerReplayReasonReceiptDeadLettered {
-		t.Fatalf("replay result err=%v calls=%d record=%#v", second.err, agent.calls, second.record)
+	backlog, err := deliveryStore.ClaimAgentBacklog(testAuthorActivityContext(context.Background()), agent.ID(), 10)
+	if err != nil {
+		t.Fatalf("claim terminal delivery backlog: %v", err)
+	}
+	if len(backlog) != 0 || agent.calls != 1 {
+		t.Fatalf("terminal delivery backlog=%#v calls=%d, want no replay", backlog, agent.calls)
 	}
 }
 

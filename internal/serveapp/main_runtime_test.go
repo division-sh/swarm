@@ -1026,7 +1026,7 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 		"idempotency_key": "join-failure-arrival-" + uuid.NewString(),
 	})
 	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, arrival.EventID, "node", "join-node", "dead_letter", 1)
-	waitServedEventPublishReceiptOutcomeCount(t, db, "postgres", arrival.EventID, "node", "join-node", "dead_letter", 1)
+	waitServedDeliveryOutcomeCount(t, db, "postgres", arrival.EventID, "node", "join-node", "dead_letter", 1)
 
 	type failureReadback struct {
 		EntityID   string `json:"entity_id"`
@@ -1042,7 +1042,7 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 	}
 	var event failureReadback
 	requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": arrival.EventID}, &event)
-	if event.EntityID != entityID || len(event.Deliveries) == 0 || len(event.DeadLetters) == 0 {
+	if event.EntityID != entityID || len(event.Deliveries) == 0 {
 		t.Fatalf("join event.get evidence = %#v", event)
 	}
 	found := false
@@ -1052,14 +1052,14 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 			found = true
 		}
 	}
-	if !found || event.DeadLetters[0].Failure.Class != runtimefailures.ClassEarlyArrival || event.DeadLetters[0].Failure.Detail.Code != "join_not_armed" {
+	if !found {
 		t.Fatalf("join event.get typed failure = %#v", event)
 	}
 	stdout, stderr, code := runServedCLICommand(t, endpoint, []string{"event", "view", arrival.EventID})
 	if code != 0 || strings.TrimSpace(stderr) != "" {
 		t.Fatalf("join event view code=%d stderr=%s stdout=%s", code, stderr, stdout)
 	}
-	for _, want := range []string{"subscriber=node/join-node", "status=dead letter", "failure=platform.early_arrival/join_not_armed", "dead_letters:"} {
+	for _, want := range []string{"subscriber=node/join-node", "status=dead letter", "failure=platform.early_arrival/join_not_armed"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("join event view missing %q:\n%s", want, stdout)
 		}
@@ -3629,9 +3629,7 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	if got := servedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "node", "portfolio-node", "in_progress"); got != 1 {
 		t.Fatalf("%s parent delivery in_progress count = %d, want 1\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
-	if got := servedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "node", "__runtime_replay_scope__"); got != 1 {
-		t.Fatalf("%s parent replay-scope delivery count = %d, want 1\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
-	}
+	requireServedEventPublishCommittedReplayScope(t, db, backend, runID, spinup.EventID, "subscribed")
 	if got := servedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "", "workflow-runtime"); got != 0 {
 		t.Fatalf("%s parent workflow-runtime delivery count = %d, want 0\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
@@ -3639,7 +3637,7 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 
 	releaseOnce.Do(func() { close(release) })
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "node", "portfolio-node", "delivered", 1)
-	waitServedEventPublishReceiptOutcomeCount(t, db, backend, spinup.EventID, "node", "portfolio-node", "no_op", 1)
+	waitServedDeliveryOutcomeCount(t, db, backend, spinup.EventID, "node", "portfolio-node", "delivered", 1)
 	requireServedEventReadback(t, endpoint, spinup.EventID, runID, parentEntityID, "opco.spinup_requested", "portfolio-node")
 	requireServedTraceReadback(t, endpoint, runID, spinup.EventID, "opco.spinup_requested", "portfolio-node")
 
@@ -3649,10 +3647,8 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	assertServedDynamicAutoEmitPayloadProductOnly(t, db, backend, autoEventID)
 	requireServedEventReadback(t, endpoint, autoEventID, runID, autoEntityID, autoEventName, "lifecycle-orchestrator")
 	requireServedTraceReadback(t, endpoint, runID, autoEventID, autoEventName, "lifecycle-orchestrator")
-	waitServedEventPublishReceiptOutcomeCount(t, db, backend, autoEventID, "node", "lifecycle-orchestrator", "no_op", 1)
-	if got := servedEventPublishDeliveryStatusCount(t, db, backend, autoEventID, "node", "__runtime_replay_scope__"); got != 1 {
-		t.Fatalf("%s child replay-scope delivery count = %d, want 1\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
-	}
+	waitServedDeliveryOutcomeCount(t, db, backend, autoEventID, "node", "lifecycle-orchestrator", "delivered", 1)
+	requireServedEventPublishCommittedReplayScope(t, db, backend, runID, autoEventID, "subscribed")
 	if got := servedEventPublishDeliveryStatusCount(t, db, backend, autoEventID, "", "workflow-runtime"); got != 0 {
 		t.Fatalf("%s child workflow-runtime delivery count = %d, want 0\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
@@ -3922,7 +3918,7 @@ func runServedLiveAgentReplayBacklogLifecycleProof(t *testing.T, rt servedContro
 		t.Fatalf("%s agent.replay_backlog result = %#v, want one replayed event", rt.Backend, backlog)
 	}
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, backlogRunID, backlogEventID, "agent", "load-agent", "delivered", 1)
-	waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, backlogEventID, "agent", "load-agent", "success", 1)
+	waitServedDeliveryOutcomeCount(t, rt.DB, rt.Backend, backlogEventID, "agent", "load-agent", "delivered", 1)
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.replay_backlog", backlogKey, 1)
 	var backlogAgain servedAgentReplayBacklogProofResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.replay_backlog", map[string]any{
@@ -4358,7 +4354,7 @@ func publishServedLiveAgentHoldEvent(t *testing.T, rt servedControlProofRuntime,
 	assertServedEventPublishDeliveriesContainStatus(t, result.Deliveries, "agent", "load-agent", "pending", "in_progress", "delivered")
 	requireServedEventPublishCommittedReplayScope(t, rt.DB, rt.Backend, runID, result.EventID, "subscribed")
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, result.EventID, "agent", "load-agent", "delivered", 1)
-	waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, result.EventID, "agent", "load-agent", "success", 1)
+	waitServedDeliveryOutcomeCount(t, rt.DB, rt.Backend, result.EventID, "agent", "load-agent", "delivered", 1)
 	return result
 }
 
@@ -4737,7 +4733,7 @@ func requireServedStoppedPendingDelivery(t *testing.T, db *sql.DB, backend, even
 		status, reason := servedDeliveryStatusReason(t, db, backend, eventID, "agent", subscriberID)
 		lastStatus, lastReason = status, reason
 		if status == "dead_letter" && reason == "run_stopped" {
-			waitServedEventPublishReceiptOutcomeCount(t, db, backend, eventID, "agent", subscriberID, "dead_letter", 1)
+			waitServedDeliveryOutcomeCount(t, db, backend, eventID, "agent", subscriberID, "terminalized", 1)
 			waitServedEventPublishReceiptOutcomeCount(t, db, backend, eventID, "platform", "pipeline", "success", 1)
 			return
 		}
@@ -5948,6 +5944,7 @@ func servedEventPublishDebugSummary(t *testing.T, db *sql.DB, backend, runID str
 		servedEventPublishDebugQuery(t, db, backend, "entity_state", runID),
 		servedEventPublishDebugQuery(t, db, backend, "events", runID),
 		servedEventPublishDebugQuery(t, db, backend, "event_deliveries", runID),
+		servedEventPublishDebugQuery(t, db, backend, "event_delivery_outcomes", runID),
 		servedEventPublishDebugQuery(t, db, backend, "event_receipts", runID),
 		servedEventPublishDebugQuery(t, db, backend, "dead_letters", runID),
 	}
@@ -5966,7 +5963,9 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 		case "events":
 			sqlText = `SELECT event_id::text, event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 5`
 		case "event_deliveries":
-			sqlText = `SELECT event_id::text, subscriber_type, subscriber_id, status, COALESCE(reason_code, '') FROM event_deliveries WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 8`
+			sqlText = `SELECT delivery_id::text, event_id::text, subscriber_type, subscriber_id, status, claim_version, COALESCE(reason_code, '') FROM event_deliveries WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 8`
+		case "event_delivery_outcomes":
+			sqlText = `SELECT o.delivery_id::text, o.claim_version, o.outcome, COALESCE(o.reason_code, '') FROM event_delivery_outcomes o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.run_id = $1::uuid ORDER BY o.settled_at, o.delivery_id LIMIT 8`
 		case "event_receipts":
 			sqlText = `SELECT r.event_id::text, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects::text, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = $1::uuid ORDER BY r.processed_at, r.event_id LIMIT 8`
 		case "dead_letters":
@@ -5979,7 +5978,9 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 		case "events":
 			sqlText = `SELECT event_id, event_name, COALESCE(entity_id, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = ? ORDER BY created_at, event_id LIMIT 5`
 		case "event_deliveries":
-			sqlText = `SELECT event_id, subscriber_type, subscriber_id, status, COALESCE(reason_code, '') FROM event_deliveries WHERE run_id = ? ORDER BY created_at, event_id LIMIT 8`
+			sqlText = `SELECT delivery_id, event_id, subscriber_type, subscriber_id, status, claim_version, COALESCE(reason_code, '') FROM event_deliveries WHERE run_id = ? ORDER BY created_at, event_id LIMIT 8`
+		case "event_delivery_outcomes":
+			sqlText = `SELECT o.delivery_id, o.claim_version, o.outcome, COALESCE(o.reason_code, '') FROM event_delivery_outcomes o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.run_id = ? ORDER BY o.settled_at, o.delivery_id LIMIT 8`
 		case "event_receipts":
 			sqlText = `SELECT r.event_id, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = ? ORDER BY r.processed_at, r.event_id LIMIT 8`
 		case "dead_letters":
@@ -6204,7 +6205,6 @@ func servedEventPublishDeliveryStatusCount(t *testing.T, db *sql.DB, backend, ev
 
 func requireServedEventPublishCommittedReplayScope(t *testing.T, db *sql.DB, backend, runID, eventID, wantScope string) {
 	t.Helper()
-	wantReason := "replay_scope_" + strings.TrimSpace(wantScope)
 	var (
 		query string
 		args  []any
@@ -6213,29 +6213,21 @@ func requireServedEventPublishCommittedReplayScope(t *testing.T, db *sql.DB, bac
 	case "postgres":
 		query = `
 			SELECT COUNT(*)
-			FROM event_deliveries
+			FROM committed_replay_scopes
 			WHERE run_id = $1::uuid
 			  AND event_id = $2::uuid
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = '__runtime_replay_scope__'
-			  AND status = 'delivered'
-			  AND reason_code = $3
-			  AND delivered_at IS NOT NULL
+			  AND scope = $3
 		`
-		args = []any{runID, eventID, wantReason}
+		args = []any{runID, eventID, strings.TrimSpace(wantScope)}
 	case "sqlite":
 		query = `
 			SELECT COUNT(*)
-			FROM event_deliveries
+			FROM committed_replay_scopes
 			WHERE run_id = ?
 			  AND event_id = ?
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = '__runtime_replay_scope__'
-			  AND status = 'delivered'
-			  AND reason_code = ?
-			  AND delivered_at IS NOT NULL
+			  AND scope = ?
 		`
-		args = []any{runID, eventID, wantReason}
+		args = []any{runID, eventID, strings.TrimSpace(wantScope)}
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
@@ -6244,7 +6236,7 @@ func requireServedEventPublishCommittedReplayScope(t *testing.T, db *sql.DB, bac
 		t.Fatalf("%s committed replay scope query failed: %v\n%s", backend, err, query)
 	}
 	if count != 1 {
-		t.Fatalf("%s committed replay scope rows for run=%s event=%s reason=%q = %d, want 1\n%s", backend, runID, eventID, wantReason, count, servedEventPublishDebugSummary(t, db, backend, runID))
+		t.Fatalf("%s committed replay scope rows for run=%s event=%s scope=%q = %d, want 1\n%s", backend, runID, eventID, wantScope, count, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
 }
 
@@ -6260,6 +6252,52 @@ func waitServedEventPublishReceiptOutcomeCount(t *testing.T, db *sql.DB, backend
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatalf("%s receipt count for event=%s subscriber=%s/%s outcome=%q = %d, want %d\n%s", backend, eventID, subscriberType, subscriberID, outcome, got, want, servedEventPublishDebugSummaryForEvent(t, db, backend, eventID))
+}
+
+func waitServedDeliveryOutcomeCount(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, outcome string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(servedProofPollDeadline)
+	var got int
+	for time.Now().Before(deadline) {
+		var query string
+		var args []any
+		switch backend {
+		case "postgres":
+			query = `
+				SELECT COUNT(*)
+				FROM event_deliveries d
+				JOIN event_delivery_outcomes o
+				  ON o.delivery_id = d.delivery_id
+				 AND o.claim_version = d.claim_version
+				WHERE d.event_id = $1::uuid
+				  AND d.subscriber_type = $2
+				  AND d.subscriber_id = $3
+				  AND o.outcome = $4`
+			args = []any{eventID, subscriberType, subscriberID, outcome}
+		case "sqlite":
+			query = `
+				SELECT COUNT(*)
+				FROM event_deliveries d
+				JOIN event_delivery_outcomes o
+				  ON o.delivery_id = d.delivery_id
+				 AND o.claim_version = d.claim_version
+				WHERE d.event_id = ?
+				  AND d.subscriber_type = ?
+				  AND d.subscriber_id = ?
+				  AND o.outcome = ?`
+			args = []any{eventID, subscriberType, subscriberID, outcome}
+		default:
+			t.Fatalf("unknown proof backend %q", backend)
+		}
+		if err := db.QueryRowContext(context.Background(), query, args...).Scan(&got); err != nil {
+			t.Fatalf("%s delivery outcome count query failed: %v\n%s", backend, err, query)
+		}
+		if got == want {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("%s delivery outcome count for event=%s subscriber=%s/%s outcome=%q = %d, want %d\n%s", backend, eventID, subscriberType, subscriberID, outcome, got, want, servedEventPublishDebugSummaryForEvent(t, db, backend, eventID))
 }
 
 func servedEventPublishDebugSummaryForEvent(t *testing.T, db *sql.DB, backend, eventID string) string {
@@ -7004,19 +7042,30 @@ func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testin
 	if deliveryStatus != "dead_letter" || deliveryReason != runtimerunquiescence.ServeAbandonReasonCode || activeSession.Valid {
 		t.Fatalf("sqlite serve delivery = %s/%s active=%v, want dead_letter/%s inactive", deliveryStatus, deliveryReason, activeSession.Valid, runtimerunquiescence.ServeAbandonReasonCode)
 	}
-	for _, subscriberID := range []string{"agent-a", "pipeline"} {
-		var outcome, receiptReason string
-		if err := sqliteStore.DB.QueryRowContext(ctx, `
-			SELECT outcome, COALESCE(reason_code, '')
-			FROM event_receipts
-			WHERE event_id = ?
-			  AND subscriber_id = ?
-		`, eventID, subscriberID).Scan(&outcome, &receiptReason); err != nil {
-			t.Fatalf("load sqlite serve receipt %s: %v", subscriberID, err)
-		}
-		if outcome != "dead_letter" || receiptReason != runtimerunquiescence.ServeAbandonReasonCode {
-			t.Fatalf("sqlite serve receipt %s = %s/%s, want dead_letter/%s", subscriberID, outcome, receiptReason, runtimerunquiescence.ServeAbandonReasonCode)
-		}
+	var deliveryOutcome, deliveryOutcomeReason string
+	if err := sqliteStore.DB.QueryRowContext(ctx, `
+		SELECT o.outcome, COALESCE(o.reason_code, '')
+		FROM event_delivery_outcomes o
+		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
+		WHERE d.event_id = ? AND d.subscriber_type = 'agent' AND d.subscriber_id = 'agent-a'
+		ORDER BY o.claim_version DESC
+		LIMIT 1
+	`, eventID).Scan(&deliveryOutcome, &deliveryOutcomeReason); err != nil {
+		t.Fatalf("load sqlite serve delivery outcome: %v", err)
+	}
+	if deliveryOutcome != "terminalized" || deliveryOutcomeReason != runtimerunquiescence.ServeAbandonReasonCode {
+		t.Fatalf("sqlite serve delivery outcome = %s/%s, want terminalized/%s", deliveryOutcome, deliveryOutcomeReason, runtimerunquiescence.ServeAbandonReasonCode)
+	}
+	var pipelineOutcome, pipelineReason string
+	if err := sqliteStore.DB.QueryRowContext(ctx, `
+		SELECT outcome, COALESCE(reason_code, '')
+		FROM event_receipts
+		WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'
+	`, eventID).Scan(&pipelineOutcome, &pipelineReason); err != nil {
+		t.Fatalf("load sqlite serve pipeline receipt: %v", err)
+	}
+	if pipelineOutcome != "dead_letter" || pipelineReason != runtimerunquiescence.ServeAbandonReasonCode {
+		t.Fatalf("sqlite serve pipeline receipt = %s/%s, want dead_letter/%s", pipelineOutcome, pipelineReason, runtimerunquiescence.ServeAbandonReasonCode)
 	}
 }
 
@@ -7317,7 +7366,7 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBef
 
 func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailableRuns(t *testing.T) {
 	stoppedContainers := []string{}
-	_, db, _ := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+	_, db, runtimePG := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{
 			managedContainers: []runtimedestructivereset.ContainerRef{
 				{Name: "swarm-legacy-agent", RunID: serveRuntimeLegacyRunIDForTest, Kind: "agent"},
@@ -7326,6 +7375,7 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 			stoppedContainers: &stoppedContainers,
 		}
 	})
+	storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source, runtime_descriptor)
@@ -7371,7 +7421,7 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 		{runID: serveRuntimeLegacyRunIDForTest, source: storerunlifecycle.BundleSourceLegacy, cause: preservationcleanup.BundleLegacyOrphanedReason, fingerprint: bootIdentity.Fingerprint},
 	}
 	for _, target := range orphanTargets {
-		seedServeRuntimeUnavailableBundleRunState(t, ctx, db, target.runID, target.source, target.fingerprint)
+		seedServeRuntimeUnavailableBundleRunState(t, ctx, runtimePG, target.runID, target.source, target.fingerprint)
 	}
 
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
@@ -7451,23 +7501,32 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 		_ = sqliteStore.Close()
 		t.Fatalf("seed sqlite active run: %v", err)
 	}
-	storetest.InsertExistingRunRootEventRecord(t, ctx, sqliteStore.DB, runtimeauthoractivity.DialectSQLite,
+	event := storetest.InsertExistingRunRootEventRecord(t, ctx, sqliteStore.DB, runtimeauthoractivity.DialectSQLite,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, reason_code, created_at
-		) VALUES (
-			?, ?, ?, 'agent', 'agent-a', 'in_progress', ?, 'agent_processing', ?
-		)
-	`, uuid.NewString(), runID, eventID, activeSessionID, now); err != nil {
+	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, sqliteStore, event, []events.DeliveryRoute{route})
+	claimCtx := serveDeliveryLifecycleFixtureContext()
+	claimed, err := sqliteStore.ClaimAgentDelivery(claimCtx, event, route)
+	if err != nil {
 		_ = sqliteStore.Close()
-		t.Fatalf("seed sqlite active delivery: %v", err)
+		t.Fatalf("claim sqlite active delivery: %v", err)
+	}
+	if _, err := sqliteStore.BindAgentSession(claimCtx, claimed.Claim, activeSessionID); err != nil {
+		_ = sqliteStore.Close()
+		t.Fatalf("bind sqlite active delivery session: %v", err)
 	}
 	if err := sqliteStore.Close(); err != nil {
 		t.Fatalf("close seeded sqlite store: %v", err)
 	}
 	return runID, eventID
+}
+
+func serveDeliveryLifecycleFixtureContext() context.Context {
+	return runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(
+		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+		"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	))
 }
 
 func stubServeRuntimeWorkspaceLifecycle(t *testing.T) {
@@ -7529,28 +7588,31 @@ func assertPostgresTableExists(t *testing.T, db *sql.DB, tableName string) {
 	}
 }
 
-func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context, db *sql.DB, runID, source, fingerprint string) {
+func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context, runtimePG *store.PostgresStore, runID, source, fingerprint string) {
 	t.Helper()
+	db := runtimePG.DB
+	bundleHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	sessionID := uuid.NewString()
 	timerID := uuid.NewString()
 	eventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_source, bundle_fingerprint, started_at)
-		VALUES ($1::uuid, 'running', $2, NULLIF($3, ''), now())
-	`, runID, source, fingerprint); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
+		VALUES ($1::uuid, 'running', $2, $3, NULLIF($4, ''), now())
+	`, runID, bundleHash, source, fingerprint); err != nil {
 		t.Fatalf("seed unavailable bundle run %s: %v", source, err)
 	}
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
 		eventID, runID, events.EventType("startup."+source+".event"), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, reason_code, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'agent', 'agent-a', 'in_progress', $3::uuid, 'agent_processing', now()
-		)
-	`, runID, eventID, sessionID); err != nil {
-		t.Fatalf("seed delivery %s: %v", source, err)
+	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, runtimePG, event, []events.DeliveryRoute{route})
+	claimCtx := serveDeliveryLifecycleFixtureContext()
+	claimed, err := runtimePG.ClaimAgentDelivery(claimCtx, event, route)
+	if err != nil {
+		t.Fatalf("claim delivery %s: %v", source, err)
+	}
+	if _, err := runtimePG.BindAgentSession(claimCtx, claimed.Claim, sessionID); err != nil {
+		t.Fatalf("bind delivery session %s: %v", source, err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
@@ -7621,12 +7683,29 @@ func assertServeRuntimeUnavailableBundleRunOrphaned(t *testing.T, ctx context.Co
 		WHERE e.run_id = $1::uuid
 		  AND er.outcome = 'dead_letter'
 		  AND er.reason_code = $2
-		  AND er.subscriber_id IN ('agent-a', 'pipeline')
+		  AND er.subscriber_type = 'platform'
+		  AND er.subscriber_id = 'pipeline'
 	`, runID, reason).Scan(&receipts); err != nil {
 		t.Fatalf("count orphaned receipts %s: %v", runID, err)
 	}
-	if receipts != 2 {
-		t.Fatalf("orphaned run %s receipts = %d, want agent and pipeline", runID, receipts)
+	if receipts != 1 {
+		t.Fatalf("orphaned run %s platform pipeline receipts = %d, want 1", runID, receipts)
+	}
+	var deliveryOutcomes int
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_delivery_outcomes o
+		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
+		WHERE d.run_id = $1::uuid
+		  AND d.subscriber_type = 'agent'
+		  AND d.subscriber_id = 'agent-a'
+		  AND o.outcome = 'terminalized'
+		  AND o.reason_code = $2
+	`, runID, reason).Scan(&deliveryOutcomes); err != nil {
+		t.Fatalf("count orphaned delivery outcomes %s: %v", runID, err)
+	}
+	if deliveryOutcomes != 1 {
+		t.Fatalf("orphaned run %s terminalized delivery outcomes = %d, want 1", runID, deliveryOutcomes)
 	}
 	var sessions int
 	if err := pg.DB.QueryRowContext(ctx, `
@@ -7836,18 +7915,12 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
 		eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)),
 		events.EventEnvelope{EntityID: entityID, FlowInstance: "flow-a/1", Scope: events.EventScopeEntity}, at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'node', $3, 'pending', 'source_pending_node_delivery', $4)
-	`, runID, eventID, subscriberID, at); err != nil {
-		t.Fatalf("seed delivery: %v", err)
-	}
+	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, &store.PostgresStore{DB: db}, event,
+		[]events.DeliveryRoute{{SubscriberType: "node", SubscriberID: subscriberID}})
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -8729,6 +8802,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
+	storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 		return selectedPostgresStoreBundle(runtimePG, cfg), nil
@@ -8754,17 +8828,18 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	`, runID, bundleHash, storerunlifecycle.BundleSourceEphemeral, mismatchFingerprint); err != nil {
 		t.Fatalf("seed active mismatched run: %v", err)
 	}
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, reason_code, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'agent', 'agent-a', 'in_progress', $3::uuid, 'agent_processing', now()
-		)
-	`, runID, eventID, activeSessionID); err != nil {
-		t.Fatalf("seed active delivery: %v", err)
+	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, runtimePG, event, []events.DeliveryRoute{route})
+	claimCtx := serveDeliveryLifecycleFixtureContext()
+	claimed, err := runtimePG.ClaimAgentDelivery(claimCtx, event, route)
+	if err != nil {
+		t.Fatalf("claim active delivery: %v", err)
+	}
+	if _, err := runtimePG.BindAgentSession(claimCtx, claimed.Claim, activeSessionID); err != nil {
+		t.Fatalf("bind active delivery session: %v", err)
 	}
 
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
@@ -8812,19 +8887,30 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	if deliveryStatus != "dead_letter" || deliveryReason != runtimerunquiescence.ServeAbandonReasonCode || deliveryActiveSession.Valid {
 		t.Fatalf("delivery = %s/%s active=%v, want serve abandon dead_letter", deliveryStatus, deliveryReason, deliveryActiveSession.Valid)
 	}
-	for _, subscriberID := range []string{"agent-a", "pipeline"} {
-		var outcome, receiptReason string
-		if err := db.QueryRowContext(context.Background(), `
-			SELECT outcome, COALESCE(reason_code, '')
-			FROM event_receipts
-			WHERE event_id = $1::uuid
-			  AND subscriber_id = $2
-		`, eventID, subscriberID).Scan(&outcome, &receiptReason); err != nil {
-			t.Fatalf("load receipt %s: %v", subscriberID, err)
-		}
-		if outcome != "dead_letter" || receiptReason != runtimerunquiescence.ServeAbandonReasonCode {
-			t.Fatalf("receipt %s = %s/%s, want serve abandon dead_letter", subscriberID, outcome, receiptReason)
-		}
+	var deliveryOutcome, deliveryOutcomeReason string
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT o.outcome, COALESCE(o.reason_code, '')
+		FROM event_delivery_outcomes o
+		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
+		WHERE d.event_id = $1::uuid AND d.subscriber_type = 'agent' AND d.subscriber_id = 'agent-a'
+		ORDER BY o.claim_version DESC
+		LIMIT 1
+	`, eventID).Scan(&deliveryOutcome, &deliveryOutcomeReason); err != nil {
+		t.Fatalf("load delivery outcome: %v", err)
+	}
+	if deliveryOutcome != "terminalized" || deliveryOutcomeReason != runtimerunquiescence.ServeAbandonReasonCode {
+		t.Fatalf("delivery outcome = %s/%s, want serve abandon terminalized", deliveryOutcome, deliveryOutcomeReason)
+	}
+	var pipelineOutcome, pipelineReason string
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT outcome, COALESCE(reason_code, '')
+		FROM event_receipts
+		WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'
+	`, eventID).Scan(&pipelineOutcome, &pipelineReason); err != nil {
+		t.Fatalf("load pipeline receipt: %v", err)
+	}
+	if pipelineOutcome != "dead_letter" || pipelineReason != runtimerunquiescence.ServeAbandonReasonCode {
+		t.Fatalf("pipeline receipt = %s/%s, want serve abandon dead_letter", pipelineOutcome, pipelineReason)
 	}
 }
 

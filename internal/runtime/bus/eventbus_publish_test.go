@@ -22,6 +22,7 @@ import (
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
@@ -211,7 +212,7 @@ type eventBusExactDuplicateState struct {
 	RunEventCount int
 	EventRows     int
 	DeliveryRows  int
-	ReceiptRows   int
+	OutcomeRows   int
 }
 
 func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
@@ -226,7 +227,8 @@ func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 	evt := exactDuplicateEventBusEvent(runID)
-	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, evt, []events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-original"}}, runtimereplayclaim.CommittedReplayScopeDirect)
+	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-original"}
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, evt, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeDirect)
 	assertEventBusExactDuplicateIsOperationNoOp(t, pg, evt, func() (eventBusExactDuplicateState, error) {
 		var state eventBusExactDuplicateState
 		if err := db.QueryRowContext(ctx, `SELECT COALESCE(status, ''), COALESCE(event_count, 0) FROM runs WHERE run_id = $1::uuid`, runID).Scan(&state.Status, &state.RunEventCount); err != nil {
@@ -238,19 +240,24 @@ func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid`, evt.ID()).Scan(&state.DeliveryRows); err != nil {
 			return state, err
 		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid`, evt.ID()).Scan(&state.ReceiptRows); err != nil {
+		if err := db.QueryRowContext(ctx, `
+			SELECT COUNT(*)
+			FROM event_delivery_outcomes o
+			JOIN event_deliveries d ON d.delivery_id = o.delivery_id
+			WHERE d.event_id = $1::uuid
+		`, evt.ID()).Scan(&state.OutcomeRows); err != nil {
 			return state, err
 		}
 		return state, nil
 	}, func() error {
-		if _, err := db.ExecContext(ctx, `
-			UPDATE event_deliveries
-			SET status = 'delivered', delivered_at = now()
-			WHERE event_id = $1::uuid
-		`, evt.ID()); err != nil {
+		claimed, err := pg.ClaimAgentDelivery(ctx, evt, route)
+		if err != nil {
 			return err
 		}
-		_, err := pg.MarkRunTerminal(ctx, runID, "cancelled", nil, time.Now().UTC())
+		if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond); err != nil {
+			return err
+		}
+		_, err = pg.MarkRunTerminal(ctx, runID, "cancelled", nil, time.Now().UTC())
 		return err
 	})
 }
@@ -266,7 +273,8 @@ func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 	evt := exactDuplicateEventBusEvent(runID)
-	storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-original"}}, runtimereplayclaim.CommittedReplayScopeDirect)
+	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-original"}
+	storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeDirect)
 	assertEventBusExactDuplicateIsOperationNoOp(t, sqliteStore, evt, func() (eventBusExactDuplicateState, error) {
 		var state eventBusExactDuplicateState
 		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COALESCE(status, ''), COALESCE(event_count, 0) FROM runs WHERE run_id = ?`, runID).Scan(&state.Status, &state.RunEventCount); err != nil {
@@ -278,19 +286,24 @@ func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, evt.ID()).Scan(&state.DeliveryRows); err != nil {
 			return state, err
 		}
-		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = ?`, evt.ID()).Scan(&state.ReceiptRows); err != nil {
+		if err := sqliteStore.DB.QueryRowContext(ctx, `
+			SELECT COUNT(*)
+			FROM event_delivery_outcomes o
+			JOIN event_deliveries d ON d.delivery_id = o.delivery_id
+			WHERE d.event_id = ?
+		`, evt.ID()).Scan(&state.OutcomeRows); err != nil {
 			return state, err
 		}
 		return state, nil
 	}, func() error {
-		if _, err := sqliteStore.DB.ExecContext(ctx, `
-			UPDATE event_deliveries
-			SET status = 'delivered', delivered_at = ?
-			WHERE event_id = ?
-		`, time.Now().UTC(), evt.ID()); err != nil {
+		claimed, err := sqliteStore.ClaimAgentDelivery(ctx, evt, route)
+		if err != nil {
 			return err
 		}
-		_, err := sqliteStore.MarkRunTerminal(ctx, runID, "cancelled", nil, time.Now().UTC())
+		if _, err := sqliteStore.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond); err != nil {
+			return err
+		}
+		_, err = sqliteStore.MarkRunTerminal(ctx, runID, "cancelled", nil, time.Now().UTC())
 		return err
 	})
 }
@@ -561,7 +574,8 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module: module,
+		Module:        module,
+		DeliveryStore: pg,
 	})
 	if pc == nil {
 		t.Fatal("expected pipeline coordinator")
@@ -3008,8 +3022,16 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 				t.Fatalf("pre-receipt state for %s = delivery:%q run:%q, want pending/running", tc.eventType, deliveryStatus, runStatus)
 			}
 
-			if err := pg.UpsertEventReceipt(ctx, tc.eventID, agentID, runtimemanager.ReceiptStatusProcessed, nil); err != nil {
-				t.Fatalf("UpsertEventReceipt(%s): %v", tc.eventType, err)
+			route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agentID}
+			claimed, err := pg.ClaimAgentDelivery(ctx, got, route)
+			if err != nil {
+				t.Fatalf("ClaimAgentDelivery(%s): %v", tc.eventType, err)
+			}
+			if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
+				t.Fatalf("SettleSuccess(%s): %v", tc.eventType, err)
+			}
+			if err := eb.ConvergeDeliveryRunCompletion(ctx, got); err != nil {
+				t.Fatalf("ConvergeDeliveryRunCompletion(%s): %v", tc.eventType, err)
 			}
 
 			deliveryStatus, runStatus := loadAgentDeliveryForEvent(t, ctx, db, tc.eventID, agentID)
@@ -3218,7 +3240,8 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module: module,
+		Module:        module,
+		DeliveryStore: pg,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -3375,7 +3398,8 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module: module,
+		Module:        module,
+		DeliveryStore: pg,
 	})
 	if _, ok := any(pc).(runtimebus.DeliveryRouteInterceptor); !ok {
 		t.Fatal("PipelineCoordinator does not implement DeliveryRouteInterceptor")
@@ -3621,7 +3645,8 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module: module,
+		Module:        module,
+		DeliveryStore: pg,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -3862,7 +3887,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	}
 }
 
-func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
+func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-gates-in-child-flow")
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -3889,7 +3914,8 @@ func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module: module,
+		Module:        module,
+		DeliveryStore: pg,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -3911,7 +3937,7 @@ func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
 		t.Fatalf("seed root instance: %v", err)
 	}
 
-	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
+	err = eb.Publish(ctx, eventtest.RunCreatingRootIngress(
 		"11111111-2222-3333-4444-555555555555",
 		events.EventType("validate.requested"),
 		"cataloge2e",
@@ -3922,11 +3948,27 @@ func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID),
 		time.Now().UTC(),
-	)); err != nil {
-		t.Fatalf("Publish: %v", err)
+	))
+	if err == nil || !strings.Contains(err.Error(), "no such key: child/g_validated") {
+		t.Fatalf("Publish error = %v, want missing child-scoped gate failure", err)
 	}
 	if err := eb.WaitForQuiescence(ctx); err != nil {
 		t.Fatalf("WaitForQuiescence: %v", err)
+	}
+	var deadLettered int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries d
+		JOIN events e ON e.event_id = d.event_id
+		WHERE e.event_name = 'child/validation.done'
+		  AND d.subscriber_type = 'node'
+		  AND d.subscriber_id = 'router'
+		  AND d.status = 'dead_letter'
+	`).Scan(&deadLettered); err != nil {
+		t.Fatalf("count dead-lettered exact delivery: %v", err)
+	}
+	if deadLettered != 1 {
+		t.Fatalf("dead-lettered exact deliveries = %d, want 1", deadLettered)
 	}
 
 	root, found, err := workflowStore.Load(ctx, rootEntityID)

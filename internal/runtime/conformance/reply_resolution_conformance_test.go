@@ -22,6 +22,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
@@ -718,7 +719,7 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 		guards: runtimepipeline.NewContractGuardRegistry(source), actions: runtimepipeline.NewContractActionRegistry(source),
 	}
 	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module: module, WorkflowStore: workflowStore, DecisionCards: cards,
+		Module: module, WorkflowStore: workflowStore, DeliveryStore: backend, DecisionCards: cards,
 	})
 	eb.SetInterceptors(coordinator)
 	eb.RegisterRuntimeActiveAgentDescriptor(bus.ActiveAgentDescriptor{AgentID: "provider-agent"})
@@ -766,6 +767,7 @@ func receiveReplyConformanceHumanTaskOutcome(t *testing.T, outcomes <-chan *bus.
 
 type durableReplyConformanceStore interface {
 	bus.EventStore
+	runtimedelivery.Store
 	bus.FlowInstanceRoutePersistence
 	runtimereplycontext.Store
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)

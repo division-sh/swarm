@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 func TestSQLiteRunDebugTracePagePaginationWindowAndFilterParity(t *testing.T) {
@@ -127,6 +130,7 @@ func TestSQLiteRunDebugTracePageDeterministicDeliveryAndTurnTiePaging(t *testing
 		fixture.tieDeliveryAID + "/" + fixture.tieTurnA2ID,
 		fixture.tieDeliveryBID + "/" + fixture.tieTurnBID,
 	}
+	sort.Strings(want)
 	if !sameStrings(got, want) {
 		t.Fatalf("tie paging rows = %#v, want %#v", got, want)
 	}
@@ -178,7 +182,6 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 	base := time.Unix(1700003200, 0).UTC()
 	runID := "00000000-0000-0000-0000-000000001430"
 	eventID := "00000000-0000-0000-0000-000000001431"
-	deliveryID := "00000000-0000-0000-0000-000000001432"
 	sessionID := "00000000-0000-0000-0000-000000001433"
 	turnID := "00000000-0000-0000-0000-000000001434"
 	agentID := "agent-task"
@@ -192,6 +195,7 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 	)); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
+	event := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, eventID)
 	seedSQLiteTraceAgent(t, ctx, sqliteStore, agentID, base)
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
@@ -204,15 +208,11 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 	`, sessionID, runID, agentID, base.Add(time.Second), base.Add(5*time.Second)); err != nil {
 		t.Fatalf("seed task audit: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at, started_at, delivered_at
-		) VALUES (
-			?, ?, ?, 'agent', ?, 'delivered', 'ok', ?, ?, ?
-		)
-	`, deliveryID, runID, eventID, agentID, base.Add(time.Second), base.Add(time.Second), base.Add(2*time.Second)); err != nil {
-		t.Fatalf("seed delivery: %v", err)
-	}
+	delivered := seedDeliveryStateFixture(t, ctx, sqliteStore, event, events.DeliveryRoute{
+		SubscriberType: string(runtimedelivery.SubscriberAgent),
+		SubscriberID:   agentID,
+	}, runtimedelivery.StateDelivered, nil)
+	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, delivered, base.Add(time.Second), base.Add(2*time.Second))
 	insertSQLiteTraceTurnWithMemory(t, ctx, sqliteStore, turnID, runID, agentID, sessionID, eventID, "trace.task_audit", false, base.Add(2*time.Second))
 
 	rows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10})
@@ -271,8 +271,6 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 		lateDeliveredID:   "00000000-0000-0000-0000-000000000002",
 		failedID:          "00000000-0000-0000-0000-000000000003",
 		secondDeliveredID: "00000000-0000-0000-0000-000000000004",
-		tieDeliveryAID:    "00000000-0000-0000-0000-000000000101",
-		tieDeliveryBID:    "00000000-0000-0000-0000-000000000102",
 		tieTurnA1ID:       "00000000-0000-0000-0000-000000000201",
 		tieTurnA2ID:       "00000000-0000-0000-0000-000000000202",
 		tieTurnBID:        "00000000-0000-0000-0000-000000000203",
@@ -309,22 +307,48 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 	insertSQLiteTraceSession(t, ctx, sqliteStore, "00000000-0000-0000-0000-000000000304", fixture.runID, "agent-a", base.Add(11*time.Second))
 	insertSQLiteTraceSession(t, ctx, sqliteStore, "00000000-0000-0000-0000-000000000305", fixture.runID, "agent-b", base.Add(11*time.Second))
 
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, reason_code, active_session_id, created_at, started_at, delivered_at
-		) VALUES
-			('00000000-0000-0000-0000-000000000011', ?, ?, 'agent', 'agent-late', 'delivered', 'ok', '00000000-0000-0000-0000-000000000301', ?, ?, ?),
-			('00000000-0000-0000-0000-000000000012', ?, ?, 'agent', 'agent-failed', 'failed', 'handler_error', '00000000-0000-0000-0000-000000000302', ?, ?, NULL),
-			('00000000-0000-0000-0000-000000000013', ?, ?, 'agent', 'agent-second', 'delivered', 'ok', '00000000-0000-0000-0000-000000000303', ?, ?, ?),
-			(?, ?, '00000000-0000-0000-0000-000000000005', 'agent', 'agent-a', 'delivered', 'ok', '00000000-0000-0000-0000-000000000304', ?, ?, ?),
-			(?, ?, '00000000-0000-0000-0000-000000000005', 'agent', 'agent-b', 'delivered', 'ok', '00000000-0000-0000-0000-000000000305', ?, ?, ?)
-	`, fixture.runID, fixture.lateDeliveredID, base.Add(time.Second), base.Add(2*time.Second), base.Add(3*time.Second),
-		fixture.runID, fixture.failedID, base.Add(1500*time.Millisecond), base.Add(2*time.Second),
-		fixture.runID, fixture.secondDeliveredID, base.Add(3*time.Second), base.Add(4*time.Second), base.Add(5*time.Second),
-		fixture.tieDeliveryAID, fixture.runID, base.Add(10*time.Second), base.Add(10*time.Second), base.Add(10*time.Second),
-		fixture.tieDeliveryBID, fixture.runID, base.Add(10*time.Second), base.Add(10*time.Second), base.Add(10*time.Second)); err != nil {
-		t.Fatalf("seed deliveries: %v", err)
+	seedDelivery := func(eventID, agentID, sessionID string, state runtimedelivery.State, createdAt, transitionAt time.Time) runtimedelivery.Snapshot {
+		t.Helper()
+		event := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, eventID)
+		route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agentID}
+		if err := commitDeliveryObligationFixture(ctx, sqliteStore, event, route); err != nil {
+			t.Fatalf("commit trace delivery %s/%s: %v", eventID, agentID, err)
+		}
+		claimed, err := sqliteStore.ClaimAgentDelivery(ctx, event, route)
+		if err != nil {
+			t.Fatalf("claim trace delivery %s/%s: %v", eventID, agentID, err)
+		}
+		if _, err := sqliteStore.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
+			t.Fatalf("bind trace delivery %s/%s: %v", eventID, agentID, err)
+		}
+		var snapshot runtimedelivery.Snapshot
+		switch state {
+		case runtimedelivery.StateDelivered:
+			snapshot, err = sqliteStore.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond)
+		case runtimedelivery.StateRetrying:
+			failure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "trace_failure", nil)
+			snapshot, err = sqliteStore.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
+				Disposition: runtimedelivery.FailureRetry,
+				ReasonCode:  "handler_error",
+				Failure:     &failure,
+				RetryBase:   time.Hour,
+			})
+		default:
+			t.Fatalf("trace fixture state %q is unsupported", state)
+		}
+		if err != nil {
+			t.Fatalf("settle trace delivery %s/%s: %v", eventID, agentID, err)
+		}
+		setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, snapshot, createdAt, transitionAt)
+		return snapshot
 	}
+	seedDelivery(fixture.lateDeliveredID, "agent-late", "00000000-0000-0000-0000-000000000301", runtimedelivery.StateDelivered, base.Add(time.Second), base.Add(3*time.Second))
+	seedDelivery(fixture.failedID, "agent-failed", "00000000-0000-0000-0000-000000000302", runtimedelivery.StateRetrying, base.Add(1500*time.Millisecond), base.Add(2*time.Second))
+	seedDelivery(fixture.secondDeliveredID, "agent-second", "00000000-0000-0000-0000-000000000303", runtimedelivery.StateDelivered, base.Add(3*time.Second), base.Add(5*time.Second))
+	tieA := seedDelivery("00000000-0000-0000-0000-000000000005", "agent-a", "00000000-0000-0000-0000-000000000304", runtimedelivery.StateDelivered, base.Add(10*time.Second), base.Add(10*time.Second))
+	tieB := seedDelivery("00000000-0000-0000-0000-000000000005", "agent-b", "00000000-0000-0000-0000-000000000305", runtimedelivery.StateDelivered, base.Add(10*time.Second), base.Add(10*time.Second))
+	fixture.tieDeliveryAID = tieA.DeliveryID
+	fixture.tieDeliveryBID = tieB.DeliveryID
 	insertSQLiteTraceTurn(t, ctx, sqliteStore, "00000000-0000-0000-0000-000000000401", fixture.runID, "agent-late", "00000000-0000-0000-0000-000000000301", fixture.lateDeliveredID, "trace.late_delivered", base.Add(5*time.Second))
 	insertSQLiteTraceTurn(t, ctx, sqliteStore, "00000000-0000-0000-0000-000000000402", fixture.runID, "agent-failed", "00000000-0000-0000-0000-000000000302", fixture.failedID, "trace.failed", base.Add(3*time.Second))
 	insertSQLiteTraceTurn(t, ctx, sqliteStore, "00000000-0000-0000-0000-000000000403", fixture.runID, "agent-second", "00000000-0000-0000-0000-000000000303", fixture.secondDeliveredID, "trace.second_delivered", base.Add(6*time.Second))

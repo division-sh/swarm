@@ -13,6 +13,7 @@ trigger:
       receipt_failure_detail: flow_instance_already_exists
       receipt_failure_attributes:
         flow_instance: worker-flow/worker-dup
+      error_contains: flow_instance_already_exists
 
 expected:
 

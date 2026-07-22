@@ -21,13 +21,12 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
@@ -47,11 +46,8 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 		events.EventType("test.started"),
 		"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 
-	if err := commitSemanticEventFixture(ctx, store, evt); err != nil {
-		t.Fatalf("AppendEvent: %v", err)
-	}
-	if err := store.InsertEventDeliveries(ctx, evtID, []string{"agent-1"}); err != nil {
-		t.Fatalf("InsertEventDeliveries: %v", err)
+	if err := commitSemanticEventFixtureWithAgents(ctx, store, evt, []string{"agent-1"}); err != nil {
+		t.Fatalf("AppendEvent with exact delivery: %v", err)
 	}
 	recipients, err := store.ListEventDeliveryRecipients(ctx, evtID)
 	if err != nil {
@@ -245,32 +241,23 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	agentDeliveryID := uuid.NewString()
-	nodeDeliveryID := uuid.NewString()
 	now := time.Now().UTC()
 	if _, err := store.DB.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, bundle_source, started_at)
-		VALUES (?, 'running', 'legacy', ?)
+		VALUES (?, 'running', 'ephemeral', ?)
 	`, runID, now); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
-	if err := commitSemanticEventFixture(ctx, store, eventtest.PersistedProjection(
+	event := eventtest.PersistedProjection(
 		eventID, events.EventType("custom.stop"), "test", "", json.RawMessage(`{}`), 0,
 		runID, "", events.EventEnvelope{}, now,
-	)); err != nil {
+	)
+	routes := []events.DeliveryRoute{
+		{SubscriberType: "agent", SubscriberID: "agent-pending"},
+		{SubscriberType: "node", SubscriberID: "node-pending"},
+	}
+	if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, routes); err != nil {
 		t.Fatalf("seed sqlite event: %v", err)
-	}
-	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, created_at)
-		VALUES (?, ?, ?, 'agent', 'agent-pending', 'pending', ?, ?)
-	`, agentDeliveryID, runID, eventID, uuid.NewString(), now); err != nil {
-		t.Fatalf("seed sqlite pending agent delivery: %v", err)
-	}
-	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, created_at)
-		VALUES (?, ?, ?, 'node', 'node-pending', 'pending', ?, ?)
-	`, nodeDeliveryID, runID, eventID, uuid.NewString(), now); err != nil {
-		t.Fatalf("seed sqlite pending node delivery: %v", err)
 	}
 
 	state, err := store.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{
@@ -314,29 +301,31 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 
 	var agentOutcome, agentReason string
 	if err := store.DB.QueryRowContext(ctx, `
-		SELECT outcome, COALESCE(reason_code, '')
-		FROM event_receipts
-		WHERE event_id = ?
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = 'agent-pending'
+		SELECT o.outcome, COALESCE(o.reason_code, '')
+		FROM event_delivery_outcomes o
+		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
+		WHERE d.event_id = ?
+		  AND d.subscriber_type = 'agent'
+		  AND d.subscriber_id = 'agent-pending'
 	`, eventID).Scan(&agentOutcome, &agentReason); err != nil {
 		t.Fatalf("load stopped sqlite agent receipt: %v", err)
 	}
-	if agentOutcome != "dead_letter" || agentReason != "run_stopped" {
-		t.Fatalf("stopped sqlite agent receipt = %s/%s, want dead_letter/run_stopped", agentOutcome, agentReason)
+	if agentOutcome != "terminalized" || agentReason != "run_stopped" {
+		t.Fatalf("stopped sqlite agent outcome = %s/%s, want terminalized/run_stopped", agentOutcome, agentReason)
 	}
 	var nodeOutcome, nodeReason string
 	if err := store.DB.QueryRowContext(ctx, `
-		SELECT outcome, COALESCE(reason_code, '')
-		FROM event_receipts
-		WHERE event_id = ?
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = 'node-pending'
+		SELECT o.outcome, COALESCE(o.reason_code, '')
+		FROM event_delivery_outcomes o
+		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
+		WHERE d.event_id = ?
+		  AND d.subscriber_type = 'node'
+		  AND d.subscriber_id = 'node-pending'
 	`, eventID).Scan(&nodeOutcome, &nodeReason); err != nil {
 		t.Fatalf("load stopped sqlite node receipt: %v", err)
 	}
-	if nodeOutcome != "dead_letter" || nodeReason != "run_stopped" {
-		t.Fatalf("stopped sqlite node receipt = %s/%s, want dead_letter/run_stopped", nodeOutcome, nodeReason)
+	if nodeOutcome != "terminalized" || nodeReason != "run_stopped" {
+		t.Fatalf("stopped sqlite node outcome = %s/%s, want terminalized/run_stopped", nodeOutcome, nodeReason)
 	}
 
 	var pipelineOutcome string
@@ -1045,458 +1034,6 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	}
 }
 
-func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerSettlesDelivery(t *testing.T) {
-	ctx := testAuthorActivityContext()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	runID := uuid.NewString()
-	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	eventID := uuid.NewString()
-	evt := eventtest.RunCreatingRootIngress(eventID,
-
-		events.EventType("company.scanned"),
-		"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-
-	if err := commitSemanticEventFixture(ctx, store, evt); err != nil {
-		t.Fatalf("AppendEvent: %v", err)
-	}
-	if err := store.InsertEventDeliveryRoutes(ctx, eventID, []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "background-node"}}); err != nil {
-		t.Fatalf("InsertEventDeliveryRoutes: %v", err)
-	}
-	owner := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
-	if processed, err := owner.SystemNodeProcessed(ctx, "background-node", eventID); err != nil || processed {
-		t.Fatalf("SystemNodeProcessed before mark = %v err=%v, want false nil", processed, err)
-	}
-	if err := owner.MarkSystemNodeDeliveryInProgress(ctx, "background-node", eventID, runtimepipeline.DefaultSystemNodeRetryLimit); err != nil {
-		t.Fatalf("MarkSystemNodeDeliveryInProgress: %v", err)
-	}
-	var inProgressStatus, inProgressReason string
-	if err := store.DB.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), COALESCE(reason_code, '')
-		FROM event_deliveries
-		WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'background-node'
-	`, eventID).Scan(&inProgressStatus, &inProgressReason); err != nil {
-		t.Fatalf("load sqlite node delivery after start: %v", err)
-	}
-	if inProgressStatus != "in_progress" || inProgressReason != "node_processing" {
-		t.Fatalf("node delivery after start = %s/%s, want in_progress/node_processing", inProgressStatus, inProgressReason)
-	}
-	if err := owner.MarkSystemNodeProcessedAndSettleDelivery(ctx, "background-node", eventID, `{"idempotency_key":"test"}`); err != nil {
-		t.Fatalf("MarkSystemNodeProcessedAndSettleDelivery: %v", err)
-	}
-	if processed, err := owner.SystemNodeProcessed(ctx, "background-node", eventID); err != nil || !processed {
-		t.Fatalf("SystemNodeProcessed after mark = %v err=%v, want true nil", processed, err)
-	}
-	var deliveryStatus, receiptOutcome string
-	if err := store.DB.QueryRowContext(ctx, `
-		SELECT status
-		FROM event_deliveries
-		WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'background-node'
-	`, eventID).Scan(&deliveryStatus); err != nil {
-		t.Fatalf("load sqlite node delivery: %v", err)
-	}
-	if deliveryStatus != "delivered" {
-		t.Fatalf("node delivery status = %q, want delivered", deliveryStatus)
-	}
-	if err := store.DB.QueryRowContext(ctx, `
-		SELECT outcome
-		FROM event_receipts
-		WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'background-node'
-	`, eventID).Scan(&receiptOutcome); err != nil {
-		t.Fatalf("load sqlite node receipt: %v", err)
-	}
-	if receiptOutcome != "no_op" {
-		t.Fatalf("node receipt outcome = %q, want no_op", receiptOutcome)
-	}
-}
-
-func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerDeadLettersDelivery(t *testing.T) {
-	ctx := testAuthorActivityContext()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	runID := uuid.NewString()
-	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	eventID := uuid.NewString()
-	evt := eventtest.RunCreatingRootIngress(eventID,
-		events.EventType("company.scanned"),
-		"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-
-	if err := commitSemanticEventFixture(ctx, store, evt); err != nil {
-		t.Fatalf("AppendEvent: %v", err)
-	}
-	if err := store.InsertEventDeliveryRoutes(ctx, eventID, []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "background-node"}}); err != nil {
-		t.Fatalf("InsertEventDeliveryRoutes: %v", err)
-	}
-	owner := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
-	if err := owner.MarkSystemNodeDeliveryInProgress(ctx, "background-node", eventID, runtimepipeline.DefaultSystemNodeRetryLimit); err != nil {
-		t.Fatalf("MarkSystemNodeDeliveryInProgress: %v", err)
-	}
-	failure := testRetryableFailure()
-	if err := owner.MarkSystemNodeDeliveryDeadLetter(ctx, "background-node", eventID, "retry_exhausted", failure, 2, `{"idempotency_key":"test"}`); err != nil {
-		t.Fatalf("MarkSystemNodeDeliveryDeadLetter: %v", err)
-	}
-	if processed, err := owner.SystemNodeProcessed(ctx, "background-node", eventID); err != nil || !processed {
-		t.Fatalf("SystemNodeProcessed after dead-letter = %v err=%v, want true nil", processed, err)
-	}
-	var deliveryStatus, deliveryReason, receiptOutcome string
-	var deliveryFailureRaw []byte
-	var retryCount int
-	if err := store.DB.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), failure, COALESCE(retry_count, 0)
-		FROM event_deliveries
-		WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'background-node'
-	`, eventID).Scan(&deliveryStatus, &deliveryReason, &deliveryFailureRaw, &retryCount); err != nil {
-		t.Fatalf("load sqlite node delivery: %v", err)
-	}
-	if deliveryStatus != "dead_letter" || deliveryReason != "retry_exhausted" || retryCount != 2 {
-		t.Fatalf("sqlite node delivery = %s/%s retry=%d failure=%s, want dead_letter/retry_exhausted retry=2", deliveryStatus, deliveryReason, retryCount, deliveryFailureRaw)
-	}
-	decodedFailure, err := runtimefailures.UnmarshalEnvelope(deliveryFailureRaw)
-	if err != nil || decodedFailure.Detail.Code != "test_connector_failure" {
-		t.Fatalf("sqlite node delivery failure = %#v err=%v", decodedFailure, err)
-	}
-	if err := store.DB.QueryRowContext(ctx, `
-		SELECT COALESCE(outcome, '')
-		FROM event_receipts
-		WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'background-node'
-	`, eventID).Scan(&receiptOutcome); err != nil {
-		t.Fatalf("load sqlite node receipt: %v", err)
-	}
-	if receiptOutcome != "dead_letter" {
-		t.Fatalf("node receipt outcome = %q, want dead_letter", receiptOutcome)
-	}
-}
-
-func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithoutDeliveryAuthority(t *testing.T) {
-	ctx := testAuthorActivityContext()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	runID := uuid.NewString()
-	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	eventID := uuid.NewString()
-	evt := eventtest.RunCreatingRootIngress(eventID,
-
-		events.EventType("company.scanned"),
-		"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-
-	if err := commitSemanticEventFixture(ctx, store, evt); err != nil {
-		t.Fatalf("AppendEvent: %v", err)
-	}
-	owner := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
-	err := owner.MarkSystemNodeProcessedAndSettleDelivery(ctx, "background-node", eventID, `{"idempotency_key":"test"}`)
-	if !errors.Is(err, runtimepipeline.ErrSystemNodeDeliveryAuthorityMissing) {
-		t.Fatalf("MarkSystemNodeProcessedAndSettleDelivery error = %v, want ErrSystemNodeDeliveryAuthorityMissing", err)
-	}
-	var deliveries, receipts int
-	if err := store.DB.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_deliveries
-		WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'background-node'
-	`, eventID).Scan(&deliveries); err != nil {
-		t.Fatalf("count sqlite node deliveries: %v", err)
-	}
-	if deliveries != 0 {
-		t.Fatalf("sqlite node deliveries = %d, want 0", deliveries)
-	}
-	if err := store.DB.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_receipts
-		WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'background-node'
-	`, eventID).Scan(&receipts); err != nil {
-		t.Fatalf("count sqlite node receipts: %v", err)
-	}
-	if receipts != 0 {
-		t.Fatalf("sqlite node receipts = %d, want 0", receipts)
-	}
-}
-
-func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithTerminalDeliveryAuthority(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		status     string
-		retryCount int
-	}{
-		{name: "dead_letter", status: "dead_letter", retryCount: 2},
-		{name: "retry_exhausted_failed", status: "failed", retryCount: runtimepipeline.DefaultSystemNodeRetryLimit},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
-			store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-			runID := uuid.NewString()
-			ctx = runtimecorrelation.WithRunID(ctx, runID)
-			eventID := uuid.NewString()
-			evt := eventtest.RunCreatingRootIngress(eventID,
-
-				events.EventType("company.scanned"),
-				"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-
-			if err := commitSemanticEventFixture(ctx, store, evt); err != nil {
-				t.Fatalf("AppendEvent: %v", err)
-			}
-			if _, err := store.DB.ExecContext(ctx, `
-				INSERT INTO event_deliveries (
-					delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
-				) VALUES (
-					?, ?, ?, 'node', 'background-node', ?, ?, 'terminal_test', ?
-				)
-			`, uuid.NewString(), runID, eventID, tc.status, tc.retryCount, time.Now().UTC()); err != nil {
-				t.Fatalf("seed sqlite terminal node delivery: %v", err)
-			}
-			owner := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
-			err := owner.MarkSystemNodeProcessedAndSettleDelivery(ctx, "background-node", eventID, `{"idempotency_key":"test"}`)
-			if !errors.Is(err, runtimepipeline.ErrSystemNodeDeliveryAuthorityMissing) {
-				t.Fatalf("MarkSystemNodeProcessedAndSettleDelivery error = %v, want ErrSystemNodeDeliveryAuthorityMissing", err)
-			}
-			var status string
-			var retryCount int
-			if err := store.DB.QueryRowContext(ctx, `
-				SELECT COALESCE(status, ''), COALESCE(retry_count, 0)
-				FROM event_deliveries
-				WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'background-node'
-			`, eventID).Scan(&status, &retryCount); err != nil {
-				t.Fatalf("load sqlite terminal delivery: %v", err)
-			}
-			if status != tc.status || retryCount != tc.retryCount {
-				t.Fatalf("sqlite terminal delivery = %s/%d, want %s/%d", status, retryCount, tc.status, tc.retryCount)
-			}
-			var receipts int
-			if err := store.DB.QueryRowContext(ctx, `
-				SELECT COUNT(*)
-				FROM event_receipts
-				WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'background-node'
-			`, eventID).Scan(&receipts); err != nil {
-				t.Fatalf("count sqlite node receipts: %v", err)
-			}
-			if receipts != 0 {
-				t.Fatalf("sqlite node receipts = %d, want 0", receipts)
-			}
-		})
-	}
-}
-
-func TestSQLiteRuntimeStoreDeliveryReplayAndReceiptSemantics(t *testing.T) {
-	ctx := testAuthorActivityContext()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	runID := uuid.NewString()
-	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	now := time.Now().UTC()
-	store.SetNowFnForTest(func() time.Time { return now })
-
-	eventID := uuid.NewString()
-	evt := eventtest.RunCreatingRootIngress(eventID,
-
-		events.EventType("test.delivery_requested"),
-		"runtime", "", json.RawMessage(`{"delivery":true}`), 0, runID, "", events.EventEnvelope{}, now)
-
-	if err := commitSemanticEventFixtureWithAgents(ctx, store, evt, []string{"agent-1"}); err != nil {
-		t.Fatalf("PersistEventWithDeliveriesAndScope: %v", err)
-	}
-
-	scope, err := store.LoadCommittedReplayScope(ctx, eventID)
-	if err != nil {
-		t.Fatalf("LoadCommittedReplayScope: %v", err)
-	}
-	if scope != runtimereplayclaim.CommittedReplayScopeSubscribed {
-		t.Fatalf("committed replay scope = %q, want subscribed", scope)
-	}
-
-	pending, err := store.ListPendingEventsForAgent(ctx, "agent-1", now.Add(-time.Minute), 10)
-	if err != nil {
-		t.Fatalf("ListPendingEventsForAgent: %v", err)
-	}
-	if len(pending) != 1 || pending[0].ID() != eventID {
-		t.Fatalf("pending events = %#v, want %s", pending, eventID)
-	}
-	if err := store.MarkEventDeliveryInProgress(ctx, eventID, "agent-1", uuid.NewString()); err != nil {
-		t.Fatalf("MarkEventDeliveryInProgress: %v", err)
-	}
-	if err := store.UpsertEventReceipt(ctx, eventID, "agent-1", runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
-		t.Fatalf("UpsertEventReceipt retryable error: %v", err)
-	}
-	receipt, ok, err := store.GetEventReceipt(ctx, eventID, "agent-1")
-	if err != nil {
-		t.Fatalf("GetEventReceipt retryable error: %v", err)
-	}
-	if !ok || receipt.Status != runtimemanager.ReceiptStatusError || receipt.RetryCount != 1 || receipt.Failure == nil || receipt.Failure.Detail.Code != "test_connector_failure" {
-		t.Fatalf("retryable receipt = %+v ok=%v, want error retry_count=1 canonical failure", receipt, ok)
-	}
-	if err := store.UpsertEventReceipt(ctx, eventID, "agent-1", runtimemanager.ReceiptStatusProcessed, nil); err != nil {
-		t.Fatalf("UpsertEventReceipt: %v", err)
-	}
-	receipt, ok, err = store.GetEventReceipt(ctx, eventID, "agent-1")
-	if err != nil {
-		t.Fatalf("GetEventReceipt: %v", err)
-	}
-	if !ok || receipt.Status != runtimemanager.ReceiptStatusProcessed {
-		t.Fatalf("receipt = %+v ok=%v, want processed", receipt, ok)
-	}
-	pending, err = store.ListPendingEventsForAgent(ctx, "agent-1", now.Add(-time.Minute), 10)
-	if err != nil {
-		t.Fatalf("ListPendingEventsForAgent after receipt: %v", err)
-	}
-	if len(pending) != 0 {
-		t.Fatalf("pending events after receipt = %#v, want none", pending)
-	}
-
-	missing, err := store.ListEventsMissingPipelineReceiptForRun(ctx, runID, now.Add(-time.Minute), 10)
-	if err != nil {
-		t.Fatalf("ListEventsMissingPipelineReceiptForRun: %v", err)
-	}
-	if len(missing) != 1 || missing[0].Event.ID() != eventID {
-		t.Fatalf("missing pipeline receipts = %#v, want %s", missing, eventID)
-	}
-	lease, claimed, err := store.ClaimPipelineReplay(ctx, eventID)
-	if err != nil {
-		t.Fatalf("ClaimPipelineReplay: %v", err)
-	}
-	if !claimed || lease == nil {
-		t.Fatalf("ClaimPipelineReplay claimed=%v lease=%#v, want claim", claimed, lease)
-	}
-	if _, claimedAgain, err := store.ClaimPipelineReplay(ctx, eventID); err != nil || claimedAgain {
-		t.Fatalf("second ClaimPipelineReplay claimed=%v err=%v, want busy/no claim", claimedAgain, err)
-	}
-	if err := lease.Release(ctx); err != nil {
-		t.Fatalf("release replay claim: %v", err)
-	}
-	if err := store.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err != nil {
-		t.Fatalf("UpsertPipelineReceipt: %v", err)
-	}
-	missing, err = store.ListEventsMissingPipelineReceiptForRun(ctx, runID, now.Add(-time.Minute), 10)
-	if err != nil {
-		t.Fatalf("ListEventsMissingPipelineReceiptForRun after receipt: %v", err)
-	}
-	if len(missing) != 0 {
-		t.Fatalf("missing pipeline receipts after receipt = %#v, want none", missing)
-	}
-
-	subSelfID := uuid.NewString()
-	subOtherID := uuid.NewString()
-	subNoDeliveryID := uuid.NewString()
-	subEvt := func(id string, offset time.Duration) events.Event {
-		return eventtest.PersistedProjection(id,
-
-			events.EventType("subscription.visible"),
-			"runtime", "", json.RawMessage(`{"subscription":true}`), 0, runID, "", events.EventEnvelope{}, now.Add(offset))
-
-	}
-	if err := commitSemanticEventFixture(ctx, store, subEvt(subSelfID, time.Second)); err != nil {
-		t.Fatalf("AppendEvent subscription self: %v", err)
-	}
-	if err := store.InsertEventDeliveries(ctx, subSelfID, []string{"agent-2"}); err != nil {
-		t.Fatalf("InsertEventDeliveries subscription self: %v", err)
-	}
-	if err := commitSemanticEventFixture(ctx, store, subEvt(subOtherID, 2*time.Second)); err != nil {
-		t.Fatalf("AppendEvent subscription other: %v", err)
-	}
-	if err := store.InsertEventDeliveries(ctx, subOtherID, []string{"agent-1"}); err != nil {
-		t.Fatalf("InsertEventDeliveries subscription other: %v", err)
-	}
-	if err := commitSemanticEventFixture(ctx, store, subEvt(subNoDeliveryID, 3*time.Second)); err != nil {
-		t.Fatalf("AppendEvent subscription no delivery: %v", err)
-	}
-	subscribed, err := store.ListPendingSubscribedEvents(ctx, "agent-2", []events.EventType{"subscription.*"}, now.Add(-time.Minute), 10)
-	if err != nil {
-		t.Fatalf("ListPendingSubscribedEvents: %v", err)
-	}
-	if len(subscribed) != 1 || subscribed[0].ID() != subSelfID {
-		t.Fatalf("subscribed pending events = %#v, want only direct self %s", subscribed, subSelfID)
-	}
-}
-
-func TestSQLiteRuntimeStoreImmediateTerminalReceiptPreservesOriginalFailure(t *testing.T) {
-	ctx := testAuthorActivityContext()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	runID := uuid.NewString()
-	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	now := time.Now().UTC()
-	eventID := uuid.NewString()
-	evt := eventtest.RunCreatingRootIngress(eventID, events.EventType("test.terminal_delivery"), "runtime", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, now)
-	if err := commitSemanticEventFixtureWithAgents(ctx, store, evt, []string{"agent-1"}); err != nil {
-		t.Fatalf("persist terminal delivery: %v", err)
-	}
-	if err := store.MarkEventDeliveryInProgress(ctx, eventID, "agent-1", ""); err != nil {
-		t.Fatalf("mark terminal delivery active: %v", err)
-	}
-	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "claude_cli_attempt_outcome_unconfirmed", "claude-cli-adapter", "wait", nil), "claude-cli-adapter", "wait")
-	if err := store.UpsertEventReceipt(ctx, eventID, "agent-1", runtimemanager.ReceiptStatusTerminal, &failure); err != nil {
-		t.Fatalf("write immediate terminal receipt: %v", err)
-	}
-	receipt, ok, err := store.GetEventReceipt(ctx, eventID, "agent-1")
-	if err != nil || !ok {
-		t.Fatalf("load terminal receipt: ok=%v err=%v", ok, err)
-	}
-	if receipt.Status != runtimemanager.ReceiptStatusDeadLetter || receipt.RetryCount != 0 || receipt.Failure == nil || receipt.Failure.Detail.Code != failure.Detail.Code {
-		t.Fatalf("terminal receipt = %#v, want dead letter with original failure and zero retries", receipt)
-	}
-	var status, reason string
-	var retryCount int
-	if err := store.DB.QueryRowContext(ctx, `SELECT status, reason_code, retry_count FROM event_deliveries WHERE event_id=? AND subscriber_id='agent-1'`, eventID).Scan(&status, &reason, &retryCount); err != nil {
-		t.Fatalf("load terminal delivery: %v", err)
-	}
-	if status != "dead_letter" || reason != "terminal_failure" || retryCount != 0 {
-		t.Fatalf("terminal delivery status=%s reason=%s retries=%d", status, reason, retryCount)
-	}
-}
-
-func TestPendingSubscribedRecoveryUsesAdmittedSameScopeSubscriptionsSQLite(t *testing.T) {
-	ctx := testAuthorActivityContext()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-		AgentID:       "reviewer",
-		FlowPath:      "review/inst-1",
-		Subscriptions: []string{"task.ready", "task.*"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	subscriptions := make([]events.EventType, 0, len(admission.RoutePatterns()))
-	for _, pattern := range admission.RoutePatterns() {
-		subscriptions = append(subscriptions, events.EventType(pattern))
-	}
-	now := time.Now().UTC()
-	localID, foreignID := uuid.NewString(), uuid.NewString()
-	for _, row := range []struct {
-		id        string
-		eventType events.EventType
-	}{{localID, "review/inst-1/task.ready"}, {foreignID, "foreign/task.ready"}} {
-		if err := commitSemanticEventFixture(ctx, store, eventtest.RunCreatingRootIngress(row.id, row.eventType, "runtime", "", json.RawMessage(`{}`), 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, now)); err != nil {
-			t.Fatalf("AppendEvent(%s): %v", row.eventType, err)
-		}
-		if err := store.InsertEventDeliveries(ctx, row.id, []string{"reviewer"}); err != nil {
-			t.Fatalf("InsertEventDeliveries(%s): %v", row.eventType, err)
-		}
-	}
-
-	got, err := store.ListPendingSubscribedEvents(ctx, "reviewer", subscriptions, now.Add(-time.Minute), 10)
-	if err != nil {
-		t.Fatalf("ListPendingSubscribedEvents: %v", err)
-	}
-	if len(got) != 1 || got[0].ID() != localID {
-		t.Fatalf("pending events = %#v, want only admitted local event %s", got, localID)
-	}
-}
-
-func TestSQLiteRuntimeStoreDirectDeadLetterIsNotRetryExhaustion(t *testing.T) {
-	ctx := testAuthorActivityContext()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	runID := uuid.NewString()
-	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	eventID := uuid.NewString()
-	evt := eventtest.RunCreatingRootIngress(eventID, events.EventType("test.direct_dead_letter"), "runtime", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-	if err := commitSemanticEventFixtureWithAgents(ctx, store, evt, []string{"agent-1"}); err != nil {
-		t.Fatalf("persist direct dead-letter delivery: %v", err)
-	}
-	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassChainDepthExceeded, "chain_depth_exceeded", "agent-manager", "process_event", nil), "agent-manager", "process_event")
-	if err := store.UpsertEventReceipt(ctx, eventID, "agent-1", runtimemanager.ReceiptStatusDeadLetter, &failure); err != nil {
-		t.Fatalf("write direct dead-letter receipt: %v", err)
-	}
-	var status, reason, failureCode string
-	var retryCount int
-	if err := store.DB.QueryRowContext(ctx, `SELECT status, reason_code, retry_count, json_extract(failure, '$.detail.code') FROM event_deliveries WHERE event_id=? AND subscriber_id='agent-1'`, eventID).Scan(&status, &reason, &retryCount, &failureCode); err != nil {
-		t.Fatalf("load direct dead-letter delivery: %v", err)
-	}
-	if status != "dead_letter" || reason != "dead_letter" || retryCount != 0 || failureCode != failure.Detail.Code {
-		t.Fatalf("direct dead-letter status=%s reason=%s retries=%d failure=%s", status, reason, retryCount, failureCode)
-	}
-}
-
 func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testing.T) {
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
@@ -1582,16 +1119,21 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	}
 
 	eventID := uuid.NewString()
-	if err := commitSemanticEventFixtureWithAgents(ctx, store, eventtest.PersistedProjection(eventID,
+	event := eventtest.PersistedProjection(eventID,
 
 		events.EventType("trace.visible"),
-		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now),
+		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now)
 
-		[]string{"agent-1"}); err != nil {
+	if err := commitSemanticEventFixtureWithAgents(ctx, store, event, []string{"agent-1"}); err != nil {
 		t.Fatalf("PersistEventWithDeliveries trace event: %v", err)
 	}
-	if err := store.MarkEventDeliveryInProgress(ctx, eventID, "agent-1", lease.SessionID); err != nil {
-		t.Fatalf("MarkEventDeliveryInProgress trace event: %v", err)
+	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "agent-1"}
+	claimed, err := store.ClaimAgentDelivery(ctx, event, route)
+	if err != nil {
+		t.Fatalf("ClaimAgentDelivery trace event: %v", err)
+	}
+	if _, err := store.BindAgentSession(ctx, claimed.Claim, lease.SessionID); err != nil {
+		t.Fatalf("BindAgentSession trace event: %v", err)
 	}
 	if err := store.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
 		AgentID:          "agent-1",

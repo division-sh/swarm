@@ -370,6 +370,7 @@ func selectedContractPipelineCoordinatorOptions(
 		WorkOwner:              agentRuntime.AgentManagerOptions.WorkOwner,
 		Module:                 loaded.Module,
 		WorkflowStore:          workflowStore,
+		DeliveryStore:          store,
 		InstanceActivator:      instanceActivator,
 		MailboxMaterializer:    store,
 		DecisionCards:          store,

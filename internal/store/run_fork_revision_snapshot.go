@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/google/uuid"
 )
@@ -59,20 +60,16 @@ type runForkRevisionEntityMetadata struct {
 
 type runForkRevisionDelivery struct {
 	runForkRevisionedFact
-	DeliveryID                string          `json:"delivery_id"`
-	EventID                   string          `json:"event_id"`
-	SubscriberType            string          `json:"subscriber_type"`
-	SubscriberID              string          `json:"subscriber_id"`
-	DeliveryTargetRoute       json.RawMessage `json:"delivery_target_route"`
-	DeliveryContext           json.RawMessage `json:"delivery_context"`
-	DeliveryPayloadProjection json.RawMessage `json:"delivery_payload_projection"`
-	Status                    string          `json:"status"`
-	RetryCount                int             `json:"retry_count"`
-	ReasonCode                string          `json:"reason_code"`
-	ActiveSessionID           string          `json:"active_session_id"`
-	StartedAt                 *time.Time      `json:"started_at"`
-	DeliveredAt               *time.Time      `json:"delivered_at"`
-	CreatedAt                 time.Time       `json:"created_at"`
+	Snapshot runtimedelivery.Snapshot
+}
+
+type runForkRevisionCommittedReplayScope struct {
+	runForkRevisionedFact
+	EventID   string    `json:"event_id"`
+	RunID     string    `json:"run_id"`
+	Scope     string    `json:"scope"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type runForkRevisionReceipt struct {
@@ -148,19 +145,20 @@ type runForkRevisionReplyContext struct {
 }
 
 type runForkRevisionSnapshot struct {
-	RunID              string
-	Revision           int64
-	Events             []runForkRevisionEvent
-	EntityMutations    []runForkRevisionEntityMutation
-	EntityMetadata     []runForkRevisionEntityMetadata
-	Deliveries         []runForkRevisionDelivery
-	Receipts           []runForkRevisionReceipt
-	DeadLetters        []runForkRevisionDeadLetter
-	Timers             []runForkRevisionTimer
-	Sessions           []runForkRevisionSession
-	Turns              []runForkRevisionTurn
-	ConversationAudits []runForkRevisionConversationAudit
-	ReplyContexts      []runForkRevisionReplyContext
+	RunID                 string
+	Revision              int64
+	Events                []runForkRevisionEvent
+	EntityMutations       []runForkRevisionEntityMutation
+	EntityMetadata        []runForkRevisionEntityMetadata
+	Deliveries            []runForkRevisionDelivery
+	CommittedReplayScopes []runForkRevisionCommittedReplayScope
+	Receipts              []runForkRevisionReceipt
+	DeadLetters           []runForkRevisionDeadLetter
+	Timers                []runForkRevisionTimer
+	Sessions              []runForkRevisionSession
+	Turns                 []runForkRevisionTurn
+	ConversationAudits    []runForkRevisionConversationAudit
+	ReplyContexts         []runForkRevisionReplyContext
 }
 
 func resolveRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID, at string) (runForkEventCursor, error) {
@@ -286,12 +284,20 @@ func appendRunForkRevisionFact(snapshot *runForkRevisionSnapshot, family runfork
 		fact.runForkRevisionedFact = stamp
 		snapshot.EntityMetadata = append(snapshot.EntityMetadata, fact)
 	case runforkrevision.FamilyEventDeliveries:
-		var fact runForkRevisionDelivery
+		delivery, err := runtimedelivery.DecodeHistoricalSnapshot(raw)
+		if err != nil {
+			return err
+		}
+		fact := runForkRevisionDelivery{Snapshot: delivery}
+		fact.runForkRevisionedFact = stamp
+		snapshot.Deliveries = append(snapshot.Deliveries, fact)
+	case runforkrevision.FamilyCommittedReplayScopes:
+		var fact runForkRevisionCommittedReplayScope
 		if err := decode(&fact); err != nil {
 			return err
 		}
 		fact.runForkRevisionedFact = stamp
-		snapshot.Deliveries = append(snapshot.Deliveries, fact)
+		snapshot.CommittedReplayScopes = append(snapshot.CommittedReplayScopes, fact)
 	case runforkrevision.FamilyEventReceipts:
 		var fact runForkRevisionReceipt
 		if err := decode(&fact); err != nil {
@@ -355,7 +361,10 @@ func (s *runForkRevisionSnapshot) sort() {
 		return revisionFactLess(s.EntityMutations[i].FirstRevision, s.EntityMutations[i].MutationID, s.EntityMutations[j].FirstRevision, s.EntityMutations[j].MutationID)
 	})
 	sort.Slice(s.Deliveries, func(i, j int) bool {
-		return revisionFactLess(s.Deliveries[i].FirstRevision, s.Deliveries[i].DeliveryID, s.Deliveries[j].FirstRevision, s.Deliveries[j].DeliveryID)
+		return revisionFactLess(s.Deliveries[i].FirstRevision, s.Deliveries[i].Snapshot.DeliveryID, s.Deliveries[j].FirstRevision, s.Deliveries[j].Snapshot.DeliveryID)
+	})
+	sort.Slice(s.CommittedReplayScopes, func(i, j int) bool {
+		return revisionFactLess(s.CommittedReplayScopes[i].FirstRevision, s.CommittedReplayScopes[i].EventID, s.CommittedReplayScopes[j].FirstRevision, s.CommittedReplayScopes[j].EventID)
 	})
 }
 

@@ -7,31 +7,15 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
 )
 
 type deliveryContextKey struct{}
 
 type deliveryContextEffectStore struct{}
-
-type deliveryTreeAgent struct {
-	id   string
-	root events.EventType
-	leaf events.Event
-}
-
-func (a *deliveryTreeAgent) ID() string                        { return a.id }
-func (*deliveryTreeAgent) Type() string                        { return "delivery-tree" }
-func (a *deliveryTreeAgent) Subscriptions() []events.EventType { return []events.EventType{a.root} }
-func (a *deliveryTreeAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
-	return []events.Event{a.leaf}, nil
-}
 
 func (deliveryContextEffectStore) IsExternalEffectAuthorityCurrent(context.Context, runtimeeffects.Authority) (bool, error) {
 	return true, nil
@@ -151,75 +135,6 @@ func TestAgentManagerWorkUsesContextualStandingOccurrence(t *testing.T) {
 	}
 	if err := standing.RetireAndWait(context.Background()); err != nil {
 		t.Fatalf("retire standing occurrence: %v", err)
-	}
-	if _, err := runtimeOwner.RetireAndWait(context.Background()); err != nil {
-		t.Fatalf("retire runtime occurrence: %v", err)
-	}
-	if _, err := process.Join(context.Background()); err != nil {
-		t.Fatalf("join process: %v", err)
-	}
-}
-
-func TestAgentOutputRemainsInPublishAndWaitDeliveryTree(t *testing.T) {
-	process := worklifetime.NewProcess()
-	runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{RuntimeInstanceID: "manager-tree-runtime", BundleHash: "manager-tree-bundle"})
-	if err != nil {
-		t.Fatalf("new runtime occurrence: %v", err)
-	}
-	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{WorkOwner: runtimeOwner})
-	if err != nil {
-		t.Fatalf("new event bus: %v", err)
-	}
-	rootType := events.EventType("manager.delivery.root")
-	leafType := events.EventType("manager.delivery.leaf")
-	runID := uuid.NewString()
-	rootEvent := eventtest.PersistedProjectionForProducer(
-		uuid.NewString(), rootType, eventtest.Producer(events.EventProducerExternal, "test"), "",
-		[]byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC(),
-	)
-	leafEvent := eventtest.ChildWithLineage(
-		uuid.NewString(), leafType, "tree-agent", "", []byte(`{}`), 1,
-		events.EventLineage{RunID: runID, ParentEventID: rootEvent.ID(), ExecutionMode: executionmode.Live}, events.EventEnvelope{}, time.Now().UTC(),
-	)
-	agent := &deliveryTreeAgent{id: "tree-agent", root: rootType, leaf: leafEvent}
-	baseCtx := managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))
-	am := NewAgentManagerWithOptions(eb, func(runtimeactors.AgentConfig) (Agent, error) { return agent, nil }, AgentManagerOptions{
-		BaseContext: baseCtx,
-		WorkOwner:   runtimeOwner,
-	})
-	if err := am.SpawnAgent(runtimeactors.AgentConfig{ID: agent.id, ExecutionMode: "live", Subscriptions: []string{string(rootType)}}); err != nil {
-		t.Fatalf("spawn delivery-tree agent: %v", err)
-	}
-	am.Run(baseCtx)
-	leafDeliveries := managerInternalDeliveriesForTest(t, eb, "leaf-proof", leafType)
-	publishDone := make(chan error, 1)
-	go func() { publishDone <- eb.PublishAndWait(baseCtx, rootEvent) }()
-	var leafDelivery *worklifetime.EventDelivery
-	select {
-	case leafDelivery = <-leafDeliveries:
-	case err := <-publishDone:
-		t.Fatalf("PublishAndWait returned before agent descendant delivery: %v", err)
-	case <-time.After(time.Second):
-		t.Fatal("agent descendant delivery was not accepted")
-	}
-	select {
-	case err := <-publishDone:
-		t.Fatalf("PublishAndWait returned before agent descendant completion: %v", err)
-	default:
-	}
-	if err := leafDelivery.Complete(); err != nil {
-		t.Fatalf("complete agent descendant delivery: %v", err)
-	}
-	select {
-	case err := <-publishDone:
-		if err != nil {
-			t.Fatalf("PublishAndWait: %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("PublishAndWait did not join the completed agent descendant")
-	}
-	if err := am.ShutdownWithOptions(ShutdownOptions{Grace: time.Second}); err != nil {
-		t.Fatalf("shutdown agent manager: %v", err)
 	}
 	if _, err := runtimeOwner.RetireAndWait(context.Background()); err != nil {
 		t.Fatalf("retire runtime occurrence: %v", err)

@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -59,31 +62,23 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		`, runID, source, testBootBundleFingerprint); err != nil {
 			t.Fatalf("seed run %s: %v", source, err)
 		}
-		eventID := seedDestructiveResetEvent(t, ctx, pg, runID, "startup."+source+".pending")
-		untouchedID := seedDestructiveResetEvent(t, ctx, pg, runID, "startup."+source+".failed")
-		if _, err := pg.DB.ExecContext(ctx, `
-			INSERT INTO event_deliveries (
-				run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, reason_code, created_at
-			) VALUES (
-				$1::uuid, $2::uuid, 'agent', 'agent-a', 'in_progress', $3::uuid, 'agent_processing', now()
-			)
-		`, runID, eventID, sessionID); err != nil {
-			t.Fatalf("seed active delivery %s: %v", source, err)
-		}
-		if _, err := pg.DB.ExecContext(ctx, `
-			INSERT INTO event_deliveries (
-				run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at, delivered_at
-			) VALUES (
-				$1::uuid, $2::uuid, 'agent', 'agent-a', 'failed', 1, 'agent_retryable_error', now(), now()
-			)
-		`, runID, untouchedID); err != nil {
-			t.Fatalf("seed retryable failed delivery %s: %v", source, err)
-		}
 		if _, err := pg.DB.ExecContext(ctx, `
 			INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
 			VALUES ($1::uuid, $2::uuid, 'agent-a', 'preservation', TRUE, 'authored', 'active')
 		`, sessionID, runID); err != nil {
 			t.Fatalf("seed session %s: %v", source, err)
+		}
+		eventID, activeClaim := seedPreservationClaimedDelivery(t, ctx, pg, runID, "startup."+source+".active")
+		if _, err := pg.BindAgentSession(ctx, activeClaim, sessionID); err != nil {
+			t.Fatalf("bind active delivery %s: %v", source, err)
+		}
+		untouchedID, retryClaim := seedPreservationClaimedDelivery(t, ctx, pg, runID, "startup."+source+".retry")
+		if snapshot, err := pg.SettleFailure(ctx, retryClaim, runtimedelivery.Settlement{
+			Disposition: runtimedelivery.FailureRetry,
+			Failure:     testRetryableFailure(),
+			RetryBase:   time.Hour,
+		}); err != nil || snapshot.Status != runtimedelivery.StatusFailed {
+			t.Fatalf("seed retryable delivery %s: snapshot=%#v err=%v", source, snapshot, err)
 		}
 		if _, err := pg.DB.ExecContext(ctx, `
 			INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status)
@@ -110,8 +105,8 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 	if err != nil {
 		t.Fatalf("ApplyUnavailableBundleStartupPreservationCleanup: %v", err)
 	}
-	if len(result.Runs) != 3 || len(result.Deliveries) != 3 || len(result.Sessions) != 3 || len(result.Timers) != 3 || result.PipelineReceiptCount != 3 {
-		t.Fatalf("cleanup result = runs:%d deliveries:%d sessions:%d timers:%d pipeline:%d, want 3 each", len(result.Runs), len(result.Deliveries), len(result.Sessions), len(result.Timers), result.PipelineReceiptCount)
+	if len(result.Runs) != 3 || len(result.Deliveries) != 6 || len(result.Sessions) != 3 || len(result.Timers) != 3 || result.PipelineReceiptCount != 6 {
+		t.Fatalf("cleanup result = runs:%d deliveries:%d sessions:%d timers:%d pipeline:%d, want 3/6/3/3/6", len(result.Runs), len(result.Deliveries), len(result.Sessions), len(result.Timers), result.PipelineReceiptCount)
 	}
 
 	for source, item := range seeded {
@@ -120,9 +115,11 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		assertUnavailableBundlePreservationDelivery(t, ctx, pg, item.eventID, target.ReasonCode)
 		assertUnavailableBundlePreservationReceipt(t, ctx, pg, item.eventID, "agent-a", target.ReasonCode)
 		assertUnavailableBundlePreservationReceipt(t, ctx, pg, item.eventID, activeRunQuiescencePipelineSubscriberID, target.ReasonCode)
+		assertUnavailableBundlePreservationDelivery(t, ctx, pg, item.untouchedID, target.ReasonCode)
+		assertUnavailableBundlePreservationReceipt(t, ctx, pg, item.untouchedID, "agent-a", target.ReasonCode)
+		assertUnavailableBundlePreservationReceipt(t, ctx, pg, item.untouchedID, activeRunQuiescencePipelineSubscriberID, target.ReasonCode)
 		assertUnavailableBundlePreservationSession(t, ctx, pg, item.sessionID, target.ReasonCode)
 		assertUnavailableBundlePreservationTimer(t, ctx, pg, item.timerID)
-		assertUnavailableBundlePreservationFailedDeliveryUntouched(t, ctx, pg, item.untouchedID)
 	}
 	var eventCount int
 	if err := pg.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&eventCount); err != nil {
@@ -182,16 +179,24 @@ func assertUnavailableBundlePreservationDelivery(t *testing.T, ctx context.Conte
 func assertUnavailableBundlePreservationReceipt(t *testing.T, ctx context.Context, pg *PostgresStore, eventID, subscriberID, wantReason string) {
 	t.Helper()
 	var outcome, reason string
-	if err := pg.DB.QueryRowContext(ctx, `
-		SELECT outcome, COALESCE(reason_code, '')
-		FROM event_receipts
-		WHERE event_id = $1::uuid
-		  AND subscriber_id = $2
-	`, eventID, subscriberID).Scan(&outcome, &reason); err != nil {
+	query := `
+		SELECT o.outcome, COALESCE(o.reason_code, '')
+		FROM event_delivery_outcomes o
+		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
+		WHERE d.event_id = $1::uuid AND d.subscriber_id = $2
+		ORDER BY o.claim_version DESC
+		LIMIT 1
+	`
+	wantOutcome := "terminalized"
+	if subscriberID == activeRunQuiescencePipelineSubscriberID {
+		query = `SELECT outcome, COALESCE(reason_code, '') FROM event_receipts WHERE event_id = $1::uuid AND subscriber_id = $2`
+		wantOutcome = "dead_letter"
+	}
+	if err := pg.DB.QueryRowContext(ctx, query, eventID, subscriberID).Scan(&outcome, &reason); err != nil {
 		t.Fatalf("load receipt %s/%s: %v", eventID, subscriberID, err)
 	}
-	if outcome != "dead_letter" || reason != wantReason {
-		t.Fatalf("receipt %s/%s = %s/%s, want dead_letter/%s", eventID, subscriberID, outcome, reason, wantReason)
+	if outcome != wantOutcome || reason != wantReason {
+		t.Fatalf("receipt %s/%s = %s/%s, want %s/%s", eventID, subscriberID, outcome, reason, wantOutcome, wantReason)
 	}
 }
 
@@ -222,19 +227,19 @@ func assertUnavailableBundlePreservationTimer(t *testing.T, ctx context.Context,
 	}
 }
 
-func assertUnavailableBundlePreservationFailedDeliveryUntouched(t *testing.T, ctx context.Context, pg *PostgresStore, eventID string) {
+func seedPreservationClaimedDelivery(t *testing.T, ctx context.Context, pg *PostgresStore, runID, eventName string) (string, runtimedelivery.Claim) {
 	t.Helper()
-	var status, reason string
-	if err := pg.DB.QueryRowContext(ctx, `
-		SELECT status, COALESCE(reason_code, '')
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = 'agent-a'
-	`, eventID).Scan(&status, &reason); err != nil {
-		t.Fatalf("load untouched delivery %s: %v", eventID, err)
+	event := eventtest.RunCreatingRootIngress(
+		uuid.NewString(), events.EventType(eventName), "test", "", []byte(`{}`), 0,
+		runID, "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	if err := commitSemanticEventFixtureWithAgents(ctx, pg, event, []string{"agent-a"}); err != nil {
+		t.Fatalf("commit preservation delivery %s: %v", eventName, err)
 	}
-	if status != "failed" || reason != "agent_retryable_error" {
-		t.Fatalf("untouched delivery %s = %s/%s, want failed/agent_retryable_error", eventID, status, reason)
+	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "agent-a"}
+	claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
+	if err != nil {
+		t.Fatalf("claim preservation delivery %s: %v", eventName, err)
 	}
+	return event.ID(), claimed.Claim
 }

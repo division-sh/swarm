@@ -880,6 +880,22 @@ func sqliteActiveTxHelper(site runtimeWriterCallSite) bool {
 func runtimeWriterRules() []runtimeWriterRule {
 	return []runtimeWriterRule{
 		{
+			name:           "canonical executable delivery adapter",
+			path:           rx(`^internal/runtime/deliverylifecycle/adapter\.go$`),
+			function:       rx(`^(insertExactObligation|claimLocked|BindAgentSession|RenewClaim|settle|TerminalizeRun|insertAttempt|expireAttempt|completeAttempt|insertOutcome)$`),
+			kinds:          kinds(primitiveRead, primitiveWrite),
+			classification: classActiveTxHelper,
+			reason:         "private executable-delivery lifecycle operations consume the named selected-store event transaction",
+		},
+		{
+			name:           "delivery heartbeat work admission",
+			path:           rx(`^internal/runtime/deliverylifecycle/heartbeat\.go$`),
+			function:       rx(`^startClaimHeartbeat$`),
+			kinds:          kinds(primitiveBegin),
+			classification: classDifferentConcept,
+			reason:         "typed runtime work-occurrence admission is process-local ownership, not a database transaction",
+		},
+		{
 			name:           "sealed event publication test transaction",
 			path:           rx(`^internal/runtime/bus/bustest/publish\.go$`),
 			function:       rx(`^BeginPreparedPublish$`),
@@ -894,6 +910,14 @@ func runtimeWriterRules() []runtimeWriterRule {
 			kinds:          kinds(primitiveBegin),
 			classification: classActiveTxHelper,
 			reason:         "test-only semantic event fixture commits an admitted record and its declared initial facts atomically",
+		},
+		{
+			name:           "canonical persisted event delivery fixture transaction",
+			path:           rx(`^internal/store/storetest/event\.go$`),
+			function:       rx(`^CommitDeliveryObligationsForPersistedEvent$`),
+			kinds:          kinds(primitiveBegin),
+			classification: classActiveTxHelper,
+			reason:         "test-only delivery fixture commits exact obligations for an already admitted event through the canonical lifecycle adapter",
 		},
 		{
 			name:           "declared event corruption fixture",

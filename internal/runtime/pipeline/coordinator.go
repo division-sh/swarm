@@ -19,6 +19,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -55,12 +56,14 @@ type PipelineCoordinator struct {
 	bundleHash             string
 	decisionCardCadence    decisioncard.CadencePolicy
 
-	testSubscribeHook                func()
 	testEntityStateHook              func(entityID, state string)
 	testWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
 	testLifecycleProbe               runtimelifecycleprobe.Observer
 	testEngineEmitNow                func() time.Time
 	workOwner                        worklifetime.Occurrence
+	nodeRecoveryReady                chan struct{}
+	nodeRecoveryReadyOnce            sync.Once
+	testMaintenanceInterval          time.Duration
 }
 
 type WorkflowNodeHandlerStartHook func(context.Context, string, events.Event) error
@@ -69,6 +72,7 @@ type PipelineCoordinatorOptions struct {
 	ShardPlanner                     any
 	Module                           WorkflowModule
 	WorkflowStore                    *WorkflowInstanceStore
+	DeliveryStore                    runtimedelivery.Store
 	InstanceActivator                FlowInstanceActivator
 	InstanceDeactivator              FlowInstanceDeactivator
 	TimerScheduler                   *Scheduler
@@ -123,6 +127,9 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 	if provider, ok := bus.(runtimeMutationRunnerProvider); ok {
 		workflowStore.ConfigureRuntimeMutationRunner(provider.RuntimeMutationRunner())
 	}
+	if opts.DeliveryStore != nil {
+		workflowStore.ConfigureDeliveryLifecycleStore(opts.DeliveryStore)
+	}
 	if publisher, ok := bus.(workflowGateMutationPublisher); ok {
 		workflowStore.ConfigureDecisionCardLifecycle(opts.DecisionCards, publisher)
 	} else {
@@ -156,23 +163,24 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		testLifecycleProbe:               opts.TestLifecycleProbe,
 		testEngineEmitNow:                opts.TestEngineEmitNow,
 		workOwner:                        opts.WorkOwner,
+		nodeRecoveryReady:                make(chan struct{}),
 		entityLocks:                      make(map[string]*sync.Mutex),
 	}
 	coordinator.workflowTimers = newWorkflowTimerLifecycle(coordinator)
 	return coordinator
 }
 
-func NewPipelineCoordinator(bus Bus, db *sql.DB) *PipelineCoordinator {
-	panic("pipeline: workflow module is required")
-}
-
-func (pc *PipelineCoordinator) SetTestSubscribeHook(fn func()) {
+func (pc *PipelineCoordinator) SetTestMaintenanceInterval(interval time.Duration) {
 	if pc == nil {
 		return
 	}
 	pc.mu.Lock()
-	pc.testSubscribeHook = fn
+	pc.testMaintenanceInterval = interval
 	pc.mu.Unlock()
+}
+
+func NewPipelineCoordinator(bus Bus, db *sql.DB) *PipelineCoordinator {
+	panic("pipeline: workflow module is required")
 }
 
 func (pc *PipelineCoordinator) SetTestEntityStateHook(fn func(entityID, state string)) {
@@ -202,52 +210,47 @@ func (pc *PipelineCoordinator) SetTestLifecycleProbe(probe runtimelifecycleprobe
 	pc.mu.Unlock()
 }
 
-func (pc *PipelineCoordinator) Run(ctx context.Context) {
-	if pc == nil || pc.bus == nil {
-		return
+// RecoverNodeDeliveries performs the required startup pass, then authorizes
+// the standing maintenance loop to recover obligations as they become eligible.
+func (pc *PipelineCoordinator) RecoverNodeDeliveries(ctx context.Context) error {
+	if pc == nil || pc.workflowStore == nil {
+		return nil
 	}
-	for {
-		subscription, err := pc.subscribe(ctx)
-		if err != nil {
-			return
+	if err := pc.recoverNodeDeliveriesOnce(ctx); err != nil {
+		return err
+	}
+	pc.nodeRecoveryReadyOnce.Do(func() { close(pc.nodeRecoveryReady) })
+	return nil
+}
+
+func (pc *PipelineCoordinator) recoverNodeDeliveriesOnce(ctx context.Context) error {
+	owner := pc.workflowStore.DeliveryLifecycleStore()
+	if owner == nil {
+		return fmt.Errorf("workflow node delivery lifecycle owner is required")
+	}
+	for _, node := range pc.WorkflowNodes() {
+		nodeID := strings.TrimSpace(node.ID)
+		if nodeID == "" || strings.TrimSpace(node.ExecutionType) != runtimecontracts.SystemNodeExecutionType {
+			continue
 		}
-		subscription.MarkReady()
-		pc.notifyTestSubscribed()
 		for {
-			select {
-			case <-ctx.Done():
-				_ = subscription.Complete(false)
-				return
-			case <-subscription.Retiring():
-				restart := ctx.Err() == nil
-				_ = subscription.Complete(restart)
-				if !restart {
-					return
+			executions, err := owner.ClaimNodeBacklog(ctx, nodeID, 1)
+			if err != nil {
+				return fmt.Errorf("claim pending deliveries for node %s: %w", nodeID, err)
+			}
+			for _, execution := range executions {
+				executionCtx := withWorkflowNodeDeliveryRoute(ctx, execution.Snapshot.Route)
+				executionCtx = runtimedelivery.WithClaim(executionCtx, execution.Claim)
+				if _, err := pc.executeNodeHandlerPlanResult(executionCtx, nodeID, execution.Event); err != nil {
+					return fmt.Errorf("recover delivery %s for node %s: %w", execution.Snapshot.DeliveryID, nodeID, err)
 				}
-				goto resubscribe
-			case delivery := <-subscription.Deliveries():
-				if delivery == nil {
-					continue
-				}
-				evt := delivery.Event()
-				deliveryCtx := delivery.Context()
-				if _, err := pc.handleEventResult(deliveryCtx, evt); err != nil && pc.bus != nil {
-					pc.bus.LogRuntime(deliveryCtx, RuntimeLogEntry{
-						Level:     "error",
-						Message:   "Workflow handler execution failed",
-						Component: runtimeWorkflowID,
-						Action:    "handler_error",
-						EventID:   strings.TrimSpace(evt.ID()),
-						EventType: strings.TrimSpace(string(evt.Type())),
-						EntityID:  workflowEventEntityID(evt),
-						Failure:   pipelineRuntimeFailure(err, runtimeWorkflowID, "handle_event"),
-					})
-				}
-				_ = delivery.Complete()
+			}
+			if len(executions) == 0 {
+				break
 			}
 		}
-	resubscribe:
 	}
+	return nil
 }
 
 func (pc *PipelineCoordinator) RunMaintenance(ctx context.Context) {
@@ -257,7 +260,7 @@ func (pc *PipelineCoordinator) RunMaintenance(ctx context.Context) {
 	humanTaskExpiry, hasHumanTaskExpiry := pc.decisionCards.(interface {
 		ExpireHumanTaskCardsInMutation(context.Context, time.Time, int) ([]events.Event, error)
 	})
-	if (!hasDraftExpiry || draftExpiry == nil) && (!hasHumanTaskExpiry || humanTaskExpiry == nil) {
+	if (!hasDraftExpiry || draftExpiry == nil) && (!hasHumanTaskExpiry || humanTaskExpiry == nil) && pc.workflowStore == nil {
 		return
 	}
 	run := func() {
@@ -272,9 +275,22 @@ func (pc *PipelineCoordinator) RunMaintenance(ctx context.Context) {
 				pc.logRuntimeWarn(ctx, runtimeWorkflowID, "expire_human_task_cards", "", "", runtimeWorkflowID, "", nil, err)
 			}
 		}
+		select {
+		case <-pc.nodeRecoveryReady:
+			if err := pc.recoverNodeDeliveriesOnce(ctx); err != nil {
+				pc.logRuntimeWarn(ctx, runtimeWorkflowID, "recover_node_deliveries", "", "", runtimeWorkflowID, "", nil, err)
+			}
+		default:
+		}
 	}
 	run()
-	ticker := time.NewTicker(time.Minute)
+	interval := time.Minute
+	pc.mu.Lock()
+	if pc.testMaintenanceInterval > 0 {
+		interval = pc.testMaintenanceInterval
+	}
+	pc.mu.Unlock()
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -311,6 +327,10 @@ func (pc *PipelineCoordinator) expireHumanTaskCards(ctx context.Context, expiry 
 }
 
 func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
+	return pc.intercept(ctx, evt, false)
+}
+
+func (pc *PipelineCoordinator) intercept(ctx context.Context, evt events.Event, exactDeliveryBoundary bool) (bool, []events.Event, error) {
 	if pc == nil {
 		return true, nil, nil
 	}
@@ -351,6 +371,9 @@ func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) 
 		return false, emitted, err
 	}
 	if err != nil {
+		if exactDeliveryBoundary {
+			return false, emitted, err
+		}
 		if consume {
 			return false, emitted, nil
 		}
@@ -371,7 +394,8 @@ func (pc *PipelineCoordinator) InterceptDeliveryRoute(ctx context.Context, deliv
 	if route.Target.Normalized() != evt.TargetRoute().Normalized() {
 		return true, nil, fmt.Errorf("workflow node delivery route target mismatch for %s: route=%#v event=%#v", route.SubscriberID, route.Target.Normalized(), evt.TargetRoute().Normalized())
 	}
-	return pc.Intercept(withWorkflowNodeDeliveryRoute(ctx, route), evt)
+	ctx = runtimedelivery.WithoutClaim(ctx)
+	return pc.intercept(withWorkflowNodeDeliveryRoute(ctx, route), evt, true)
 }
 
 func (pc *PipelineCoordinator) interceptPolicy(ctx context.Context, eventType string, evt events.Event) (consume bool, handled bool, err error) {
@@ -379,15 +403,6 @@ func (pc *PipelineCoordinator) interceptPolicy(ctx context.Context, eventType st
 		return false, false, nil
 	}
 	return pc.workflowNodeInterceptPolicy(ctx, eventType, evt)
-}
-
-func (pc *PipelineCoordinator) subscribe(ctx context.Context) (worklifetime.InternalSubscription, error) {
-	bus, ok := pc.bus.(ownedInternalSubscriptionBus)
-	if !ok {
-		return nil, errors.New("pipeline bus does not expose owned internal subscriptions")
-	}
-	subscriptions := workflowRuntimeSubscriptions(pc.WorkflowNodes())
-	return bus.SubscribeInternal(ctx, runtimeWorkflowID, subscriptions...)
 }
 
 func (pc *PipelineCoordinator) handleEvent(ctx context.Context, evt events.Event) bool {
@@ -439,46 +454,118 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	if !ok {
 		return false, nil
 	}
-	if pc.workflowNodeEventProcessed(ctx, nodeID, evt) {
-		return true, nil
+	deliveryStore := pc.workflowStore.DeliveryLifecycleStore()
+	if deliveryStore == nil {
+		return false, fmt.Errorf("workflow node delivery lifecycle owner is required")
 	}
-	if !pc.workflowNodeDeliveryAuthorized(ctx, nodeID, evt) {
-		return false, nil
+	route, routeOK := runtimedelivery.RouteFromContext(ctx)
+	if !routeOK || route.SubscriberType != string(runtimedelivery.SubscriberNode) || strings.TrimSpace(route.SubscriberID) != nodeID {
+		return false, fmt.Errorf("workflow node %s requires its exact admitted delivery route", nodeID)
 	}
-	if !pc.markWorkflowNodeDeliveryInProgress(ctx, nodeID, evt) {
-		return false, nil
+	claim, claimed := runtimedelivery.ClaimFromContext(ctx)
+	if claimed && (claim.SubscriberClass() != runtimedelivery.SubscriberNode || claim.SubscriberID() != nodeID) {
+		return false, fmt.Errorf("workflow node %s received a claim for %s/%s", nodeID, claim.SubscriberClass(), claim.SubscriberID())
 	}
-	ctx = withPipelineFlowScope(ctx, workflowNodeFlowID(source, nodeID))
-	if err := pc.notifyTestWorkflowNodeHandlerStarting(ctx, nodeID, evt); err != nil {
-		return false, err
-	}
-	pc.notifyTestLifecycleHandlerStarted(ctx, nodeID, evt)
-	result, err := pc.executeNodeContractHandler(ctx, nodeID, handler, workflowTriggerContext{
-		Event:           evt,
-		HandlerEventKey: handlerEventKey,
-		State:           pc.currentWorkflowState(ctx, workflowEventEntityID(evt)),
-	}, false)
-	if err != nil {
-		pc.notifyTestLifecycleHandlerCompleted(ctx, nodeID, evt, "failed")
-		failure := runtimefailures.FromError(err, runtimeWorkflowID, "execute_handler")
-		if errors.Is(err, runtimeengine.ErrChainDepthExceeded) {
-			_ = recordPipelineDeadLetter(ctx, pc.db, runtimedeadletters.Record{
-				OriginalEventID: strings.TrimSpace(evt.ID()),
-				Failure:         failure.Failure,
-				ChainDepth:      evt.ChainDepth(),
-				HandlerNode:     nodeID,
-			})
-			setPipelineReceiptOverride(ctx, "dead_letter", &failure.Failure)
-			pc.markWorkflowNodeDeliveryDeadLetter(ctx, nodeID, evt, "chain_depth_exceeded", &failure.Failure, 0)
-			return true, nil
+	for {
+		if !claimed {
+			owned, err := deliveryStore.ClaimNodeDelivery(ctx, evt, route)
+			if errors.Is(err, runtimedelivery.ErrIneligible) {
+				return true, nil
+			}
+			if err != nil {
+				return false, fmt.Errorf("claim workflow node delivery: %w", err)
+			}
+			claim = owned.Claim
 		}
-		pc.recordWorkflowHandlerFailure(ctx, evt, nodeID, err)
-		pc.markWorkflowNodeDeliveryDeadLetter(ctx, nodeID, evt, "handler_terminal_failure", &failure.Failure, 0)
-		return true, err
+		attemptCtx := runtimedelivery.WithClaim(ctx, claim)
+		pc.notifyTestLifecycleDeliveryStatus(attemptCtx, nodeID, evt, string(runtimedelivery.StatusInProgress))
+		attemptCtx = withPipelineFlowScope(attemptCtx, workflowNodeFlowID(source, nodeID))
+		if err := pc.notifyTestWorkflowNodeHandlerStarting(attemptCtx, nodeID, evt); err != nil {
+			return false, err
+		}
+		pc.notifyTestLifecycleHandlerStarted(attemptCtx, nodeID, evt)
+		started := time.Now()
+		result, err, heartbeatErr := pc.executeClaimedNodeHandler(attemptCtx, claim, deliveryStore, nodeID, handler, workflowTriggerContext{
+			Event:           evt,
+			HandlerEventKey: handlerEventKey,
+			State:           pc.currentWorkflowState(attemptCtx, workflowEventEntityID(evt)),
+		})
+		if heartbeatErr != nil {
+			return false, fmt.Errorf("renew workflow node delivery claim: %w", heartbeatErr)
+		}
+		if err == nil {
+			pc.notifyTestLifecycleHandlerCompleted(attemptCtx, nodeID, evt, "completed")
+			pc.recordInterceptedEmitDeadLetters(attemptCtx, evt, nodeID, result.Outcome)
+			sideEffects := []string{"handler_completed"}
+			if _, settleErr := deliveryStore.SettleSuccess(attemptCtx, claim, sideEffects, time.Since(started)); settleErr != nil {
+				return false, fmt.Errorf("settle workflow node delivery: %w", settleErr)
+			}
+			pc.convergeWorkflowNodeNormalRunCompletion(attemptCtx, nodeID, evt)
+			pc.notifyTestLifecycleDeliveryStatus(attemptCtx, nodeID, evt, "delivered")
+			return result.Handled, nil
+		}
+		pc.notifyTestLifecycleHandlerCompleted(attemptCtx, nodeID, evt, "failed")
+		failure := runtimefailures.FromError(err, runtimeWorkflowID, "execute_handler")
+		disposition := runtimedelivery.FailureRetry
+		reason := "handler_failure"
+		if errors.Is(err, runtimeengine.ErrChainDepthExceeded) || runtimeengine.FailureDispositionFor(failure) != runtimeengine.FailureDispositionRetry {
+			disposition = runtimedelivery.FailureDeadLetter
+			reason = "handler_terminal_failure"
+			if errors.Is(err, runtimeengine.ErrChainDepthExceeded) {
+				reason = "chain_depth_exceeded"
+			}
+		}
+		snapshot, settleErr := deliveryStore.SettleFailure(attemptCtx, claim, runtimedelivery.Settlement{
+			Disposition: disposition, ReasonCode: reason, Failure: &failure.Failure,
+			Duration: time.Since(started), RetryBase: workflowHandlerRetryBase(source),
+		})
+		if settleErr != nil {
+			return false, fmt.Errorf("settle failed workflow node delivery: %w", settleErr)
+		}
+		pc.notifyTestLifecycleDeliveryStatus(attemptCtx, nodeID, evt, string(snapshot.Status))
+		if snapshot.Status == runtimedelivery.StatusDeadLetter {
+			deadLetterErr := recordPipelineDeadLetter(attemptCtx, pc.db, runtimedeadletters.Record{
+				OriginalEventID: strings.TrimSpace(evt.ID()), Failure: failure.Failure,
+				RetryCount: snapshot.RetryCount, ChainDepth: evt.ChainDepth(), HandlerNode: nodeID,
+			})
+			pc.recordWorkflowHandlerFailure(attemptCtx, evt, nodeID, err)
+			pc.convergeWorkflowNodeNormalRunCompletion(attemptCtx, nodeID, evt)
+			return true, errors.Join(err, deadLetterErr)
+		}
+		wait := time.Until(snapshot.NextEligibleAt)
+		if wait < 0 {
+			wait = 0
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-attemptCtx.Done():
+			timer.Stop()
+			return true, attemptCtx.Err()
+		case <-timer.C:
+		}
+		claimed = false
 	}
-	pc.notifyTestLifecycleHandlerCompleted(ctx, nodeID, evt, "completed")
-	pc.recordInterceptedEmitDeadLetters(ctx, evt, nodeID, result.Outcome)
-	return result.Handled, nil
+}
+
+func (pc *PipelineCoordinator) executeClaimedNodeHandler(
+	ctx context.Context,
+	claim runtimedelivery.Claim,
+	deliveryStore runtimedelivery.Store,
+	nodeID string,
+	handler runtimecontracts.SystemNodeEventHandler,
+	triggerCtx workflowTriggerContext,
+) (
+	result contractHandlerExecutionResult,
+	handlerErr error,
+	heartbeatErr error,
+) {
+	heartbeat, err := runtimedelivery.StartClaimHeartbeat(ctx, pc.workOwner, deliveryStore, claim)
+	if err != nil {
+		return contractHandlerExecutionResult{}, nil, err
+	}
+	defer func() { heartbeatErr = heartbeat.Stop() }()
+	result, handlerErr = pc.executeNodeContractHandler(heartbeat.Context(), nodeID, handler, triggerCtx, false)
+	return result, handlerErr, nil
 }
 
 func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context, evt events.Event, nodeID string, err error) {
@@ -608,18 +695,6 @@ func errText(err error) string {
 		return ""
 	}
 	return err.Error()
-}
-
-func (pc *PipelineCoordinator) notifyTestSubscribed() {
-	if pc == nil {
-		return
-	}
-	pc.mu.Lock()
-	hook := pc.testSubscribeHook
-	pc.mu.Unlock()
-	if hook != nil {
-		hook()
-	}
 }
 
 func (pc *PipelineCoordinator) notifyTestEntityStateUpdated(entityID, state string) {

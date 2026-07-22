@@ -84,7 +84,7 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 				if err != nil || outcome != runtimebus.EventAppendInserted {
 					t.Fatalf("initial outcome=%v err=%v", outcome, err)
 				}
-				want := selectedForkOperationCounts{event: 1, lineage: 1, deliveries: 2, stories: 1}
+				want := selectedForkOperationCounts{event: 1, lineage: 1, deliveries: 1, stories: 1}
 				assertSelectedForkOperationCounts(t, ctx, fixture, req.Commit.Event.ID(), want)
 
 				duplicate := req
@@ -158,7 +158,7 @@ func TestCommitSelectedForkEventHostileRepeatPostgres(t *testing.T) {
 	if inserted != 1 || duplicates != attempts-1 {
 		t.Fatalf("inserted=%d duplicates=%d, want 1/%d", inserted, duplicates, attempts-1)
 	}
-	assertSelectedForkOperationCounts(t, ctx, fixture, req.Commit.Event.ID(), selectedForkOperationCounts{event: 1, lineage: 1, deliveries: 2, stories: 1})
+	assertSelectedForkOperationCounts(t, ctx, fixture, req.Commit.Event.ID(), selectedForkOperationCounts{event: 1, lineage: 1, deliveries: 1, stories: 1})
 }
 
 func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, store eventRecordContractStore, persistSource bool) CommitSelectedForkEventRequest {

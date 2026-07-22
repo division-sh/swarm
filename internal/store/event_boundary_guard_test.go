@@ -33,11 +33,14 @@ var admittedEventCallsites = map[eventBoundaryCallsite]int{
 }
 
 var eventRecordImportFiles = map[string]struct{}{
+	"internal/store/delivery_lifecycle.go":                            {},
 	"internal/store/event_persistence_identity.go":                    {},
 	"internal/store/event_reference_integrity.go":                     {},
 	"internal/store/eventfixture/event.go":                            {},
 	"internal/store/events.go":                                        {},
+	"internal/store/pending_delivery_read_surface.go":                 {},
 	"internal/store/run_fork_selected_contract_execution_mutation.go": {},
+	"internal/store/sqlite_runtime_delivery_replay.go":                {},
 	"internal/store/sqlite_runtime.go":                                {},
 	"internal/store/storetest/event.go":                               {},
 }

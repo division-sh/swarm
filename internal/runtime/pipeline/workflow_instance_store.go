@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
@@ -90,6 +92,7 @@ type WorkflowInstanceStore struct {
 	db              *sql.DB
 	dialect         workflowStoreDialect
 	runtimeMutation RuntimeMutationRunner
+	deliveryStore   runtimedelivery.Store
 	decisionCards   decisioncard.Store
 	gateEvents      workflowGateMutationPublisher
 }
@@ -152,6 +155,19 @@ func (s *WorkflowInstanceStore) ConfigureRuntimeMutationRunner(runner RuntimeMut
 	if s != nil {
 		s.runtimeMutation = runner
 	}
+}
+
+func (s *WorkflowInstanceStore) ConfigureDeliveryLifecycleStore(store runtimedelivery.Store) {
+	if s != nil {
+		s.deliveryStore = store
+	}
+}
+
+func (s *WorkflowInstanceStore) DeliveryLifecycleStore() runtimedelivery.Store {
+	if s == nil {
+		return nil
+	}
+	return s.deliveryStore
 }
 
 func (s *WorkflowInstanceStore) ConfigureDecisionCardLifecycle(cards decisioncard.Store, publishers ...workflowGateMutationPublisher) {

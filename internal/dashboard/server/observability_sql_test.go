@@ -13,7 +13,9 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -49,8 +51,9 @@ func canonicalRuntimeLogTestPayload(t *testing.T, component, action, code, messa
 
 func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	reader := NewSQLObservabilityReader(db, storetest.AdmitPostgresRuntimeStore(t, db))
-	ctx := context.Background()
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	reader := NewSQLObservabilityReader(db, pg)
+	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), "dashboard-observability"))
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -58,40 +61,58 @@ func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *tes
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
-		eventID, runID, "task.completed", eventtest.Producer(events.EventProducerExternal, "runtime"),
-		[]byte(`{"entity_id":"`+entityID+`"}`), events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, time.Unix(1700000000, 0).UTC())
-
-	seedDelivery := func(subscriberID, status string, retryCount int, failureCode string, createdAt time.Time) {
-		t.Helper()
-		failureJSON := ""
-		if failureCode != "" {
-			failureJSON = mustMarshalFailure(t, testFailure(failureCode))
-		}
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO event_deliveries (
-				run_id, event_id, subscriber_type, subscriber_id, status, retry_count, failure, created_at
-			) VALUES (
-				$1::uuid, $2::uuid, 'agent', $3, $4, $5, NULLIF($6, '')::jsonb, $7
-			)
-		`, runID, eventID, subscriberID, status, retryCount, failureJSON, createdAt); err != nil {
-			t.Fatalf("seed delivery %s: %v", subscriberID, err)
-		}
-	}
-
 	now := time.Unix(1700000000, 0).UTC()
-	seedDelivery("agent-pending", "pending", 0, "", now)
-	seedDelivery("agent-progress", "in_progress", 0, "", now.Add(time.Second))
-	seedDelivery("agent-delivered", "delivered", 0, "", now.Add(2*time.Second))
-	seedDelivery("agent-failed", "failed", 1, "delivery-failed", now.Add(3*time.Second))
-	seedDelivery("agent-dead", "dead_letter", 2, "delivery-dead", now.Add(4*time.Second))
+	event := eventtest.ExistingRunRootIngress(eventID, "task.completed", "runtime", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, runID,
+		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, now)
+	routes := []events.DeliveryRoute{
+		{SubscriberType: "agent", SubscriberID: "agent-pending"},
+		{SubscriberType: "agent", SubscriberID: "agent-progress"},
+		{SubscriberType: "agent", SubscriberID: "agent-delivered"},
+		{SubscriberType: "agent", SubscriberID: "agent-failed"},
+		{SubscriberType: "agent", SubscriberID: "agent-dead"},
+	}
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, routes, runtimereplayclaim.CommittedReplayScopeSubscribed)
+
+	progress, err := pg.ClaimAgentDelivery(ctx, event, routes[1])
+	if err != nil {
+		t.Fatalf("claim in-progress delivery: %v", err)
+	}
+	delivered, err := pg.ClaimAgentDelivery(ctx, event, routes[2])
+	if err != nil {
+		t.Fatalf("claim delivered delivery: %v", err)
+	}
+	if _, err := pg.SettleSuccess(ctx, delivered.Claim, nil, time.Second); err != nil {
+		t.Fatalf("settle delivered delivery: %v", err)
+	}
+	failed, err := pg.ClaimAgentDelivery(ctx, event, routes[3])
+	if err != nil {
+		t.Fatalf("claim failed delivery: %v", err)
+	}
+	if _, err := pg.SettleFailure(ctx, failed.Claim, runtimedelivery.Settlement{
+		Disposition: runtimedelivery.FailureRetry,
+		Failure:     testFailure("delivery-failed"),
+	}); err != nil {
+		t.Fatalf("settle retryable delivery: %v", err)
+	}
+	dead, err := pg.ClaimAgentDelivery(ctx, event, routes[4])
+	if err != nil {
+		t.Fatalf("claim dead-letter delivery: %v", err)
+	}
+	if _, err := pg.SettleFailure(ctx, dead.Claim, runtimedelivery.Settlement{
+		Disposition: runtimedelivery.FailureDeadLetter,
+		ReasonCode:  "delivery-dead",
+		Failure:     testFailure("delivery-dead"),
+	}); err != nil {
+		t.Fatalf("settle dead-letter delivery: %v", err)
+	}
+	_ = progress
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, outcome, side_effects, failure, processed_at
 		) VALUES
-			($1::uuid, 'agent', 'agent-pending', 'dead_letter', '{"retry_count":9}'::jsonb, $2::jsonb, now()),
-			($1::uuid, 'agent', 'agent-failed', 'success', '{"retry_count":0}'::jsonb, NULL, now())
+			($1::uuid, 'platform', 'agent-pending', 'dead_letter', '{"retry_count":9}'::jsonb, $2::jsonb, now()),
+			($1::uuid, 'platform', 'agent-failed', 'success', '{"retry_count":0}'::jsonb, NULL, now())
 	`, eventID, mustMarshalFailure(t, testFailure("receipt_should_not_win"))); err != nil {
 		t.Fatalf("seed conflicting receipts: %v", err)
 	}
@@ -122,8 +143,9 @@ func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *tes
 
 func TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	reader := NewSQLObservabilityReader(db, storetest.AdmitPostgresRuntimeStore(t, db))
-	ctx := context.Background()
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	reader := NewSQLObservabilityReader(db, pg)
+	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), "dashboard-observability"))
 
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
@@ -137,20 +159,13 @@ func TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity(t *tes
 	seedEvent := func(eventName string, at time.Time, deliveries ...deliverySeed) string {
 		t.Helper()
 		eventID := uuid.NewString()
-		storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
-			eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerExternal, "runtime"),
-			[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at.UTC())
+		event := eventtest.ExistingRunRootIngress(eventID, events.EventType(eventName), "runtime", "", []byte(`{}`), 0, runID,
+			events.EventEnvelope{Scope: events.EventScopeGlobal}, at.UTC())
+		routes := make([]events.DeliveryRoute, 0, len(deliveries))
 		for _, delivery := range deliveries {
-			if _, err := db.ExecContext(ctx, `
-				INSERT INTO event_deliveries (
-					run_id, event_id, subscriber_type, subscriber_id, status, created_at
-				) VALUES (
-					$1::uuid, $2::uuid, $3, $4, 'pending', $5
-				)
-			`, runID, eventID, delivery.subscriberType, delivery.subscriberID, at.UTC()); err != nil {
-				t.Fatalf("seed delivery %s/%s: %v", delivery.subscriberType, delivery.subscriberID, err)
-			}
+			routes = append(routes, events.DeliveryRoute{SubscriberType: delivery.subscriberType, SubscriberID: delivery.subscriberID})
 		}
+		storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, routes, runtimereplayclaim.CommittedReplayScopeSubscribed)
 		return eventID
 	}
 
@@ -180,31 +195,34 @@ func TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity(t *tes
 
 func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	reader := NewSQLObservabilityReader(db, storetest.AdmitPostgresRuntimeStore(t, db))
-	ctx := context.Background()
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	reader := NewSQLObservabilityReader(db, pg)
+	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), "dashboard-observability"))
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
-		eventID, runID, "task.completed", eventtest.Producer(events.EventProducerExternal, "runtime"),
-		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, failure, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'agent', 'agent-a', 'pending', 1, $3::jsonb, now()
-		)
-	`, runID, eventID, mustMarshalFailure(t, testFailure("delivery_wins"))); err != nil {
-		t.Fatalf("seed delivery: %v", err)
+	event := eventtest.ExistingRunRootIngress(eventID, "task.completed", "runtime", "", []byte(`{}`), 0, runID,
+		events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
+	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
+	if err != nil {
+		t.Fatalf("claim delivery: %v", err)
+	}
+	if _, err := pg.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
+		Disposition: runtimedelivery.FailureRetry,
+		Failure:     testFailure("delivery_wins"),
+	}); err != nil {
+		t.Fatalf("settle delivery retry: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, outcome, side_effects, processed_at
 		) VALUES (
-			$1::uuid, 'agent', 'agent-a', 'dead_letter', '{"retry_count":7,"error":"receipt-loses"}'::jsonb, now()
+			$1::uuid, 'platform', 'agent-a', 'dead_letter', '{"retry_count":7,"error":"receipt-loses"}'::jsonb, now()
 		)
 	`, eventID); err != nil {
 		t.Fatalf("seed conflicting receipt: %v", err)
@@ -217,13 +235,13 @@ func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T)
 	if !ok {
 		t.Fatal("expected event to exist")
 	}
-	if got.DeliveryLifecycle.Pending != 1 || got.DeliveryLifecycle.DeadLetter != 0 {
+	if got.DeliveryLifecycle.Failed != 1 || got.DeliveryLifecycle.DeadLetter != 0 {
 		t.Fatalf("delivery lifecycle = %#v", got.DeliveryLifecycle)
 	}
 	if len(got.Deliveries) != 1 {
 		t.Fatalf("deliveries len = %d, want 1", len(got.Deliveries))
 	}
-	if item := got.Deliveries[0]; strings.TrimSpace(item.DeliveryID) == "" || item.SubscriberType != "agent" || item.SubscriberID != "agent-a" || item.Status != "pending" || item.RetryCount != 1 || item.Failure == nil || item.Failure.Detail.Code != "delivery_wins" {
+	if item := got.Deliveries[0]; strings.TrimSpace(item.DeliveryID) == "" || item.SubscriberType != "agent" || item.SubscriberID != "agent-a" || item.Status != "failed" || item.RetryCount != 1 || item.Failure == nil || item.Failure.Detail.Code != "delivery_wins" {
 		t.Fatalf("delivery = %#v", item)
 	}
 }

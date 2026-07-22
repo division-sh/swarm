@@ -192,6 +192,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 		SQLDB:               db,
 		PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(db),
 		EventStore:          pg,
+		DeliveryStore:       pg,
 		RuntimeLogStore:     pg,
 		SessionRegistry:     pg,
 		ManagerStore:        pg,
@@ -311,6 +312,7 @@ func (h *runtimeHarness) publishAndWait(step catalogTriggerStep, timeout time.Du
 		if !strings.Contains(err.Error(), wantErr) {
 			h.t.Fatalf("Publish(%s) error = %v, want substring %q", eventType, err, wantErr)
 		}
+		h.assertTriggerReceipt(step)
 		return
 	}
 	h.publishRuntimeEvent(eventType, "cataloge2e", payload, timeout, true, true)

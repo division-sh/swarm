@@ -342,7 +342,9 @@ func (r *recordingRuntimeMutationRunner) RunRuntimeMutationContext(ctx context.C
 
 func newSQLiteWorkflowInstanceStoreForTest(t *testing.T, db *sql.DB) *WorkflowInstanceStore {
 	t.Helper()
-	return NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, &recordingRuntimeMutationRunner{db: db})
+	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, &recordingRuntimeMutationRunner{db: db})
+	store.ConfigureDeliveryLifecycleStore(newPipelineTestDeliveryOwner(t, db, true))
+	return store
 }
 
 func newSQLiteWorkflowInstanceStoreTestDB(t *testing.T) *sql.DB {
@@ -476,18 +478,53 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 		`CREATE TABLE event_deliveries (
 			delivery_id TEXT PRIMARY KEY,
 			run_id TEXT,
-			event_id TEXT,
-			subscriber_type TEXT,
-			subscriber_id TEXT,
-			delivery_target_route TEXT,
-			status TEXT,
-			retry_count INTEGER,
+			event_id TEXT NOT NULL,
+			route_identity TEXT NOT NULL,
+			subscriber_type TEXT NOT NULL,
+			subscriber_id TEXT NOT NULL,
+			delivery_target_route TEXT NOT NULL,
+			delivery_context TEXT NOT NULL,
+			delivery_payload_projection TEXT NOT NULL,
+			status TEXT NOT NULL,
+			retry_count INTEGER NOT NULL,
+			max_retries INTEGER NOT NULL,
+			next_eligible_at TIMESTAMP,
+			claim_token TEXT,
+			claim_version INTEGER NOT NULL,
+			claim_expires_at TIMESTAMP,
 			reason_code TEXT,
 			failure TEXT,
 			active_session_id TEXT,
 			started_at TIMESTAMP,
-			delivered_at TIMESTAMP,
-			created_at TIMESTAMP
+			settled_at TIMESTAMP,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			UNIQUE(event_id, route_identity)
+		)`,
+		`CREATE TABLE event_delivery_attempts (
+			delivery_id TEXT NOT NULL,
+			claim_version INTEGER NOT NULL,
+			claim_token TEXT NOT NULL UNIQUE,
+			started_at TIMESTAMP NOT NULL,
+			lease_expires_at TIMESTAMP NOT NULL,
+			outcome TEXT,
+			reason_code TEXT,
+			failure TEXT,
+			side_effects TEXT NOT NULL DEFAULT '[]',
+			duration_ms INTEGER,
+			completed_at TIMESTAMP,
+			PRIMARY KEY(delivery_id, claim_version)
+		)`,
+		`CREATE TABLE event_delivery_outcomes (
+			delivery_id TEXT NOT NULL,
+			claim_version INTEGER NOT NULL,
+			outcome TEXT NOT NULL,
+			reason_code TEXT,
+			failure TEXT,
+			side_effects TEXT NOT NULL DEFAULT '[]',
+			duration_ms INTEGER NOT NULL,
+			settled_at TIMESTAMP NOT NULL,
+			PRIMARY KEY(delivery_id, claim_version)
 		)`,
 		`CREATE TABLE run_fork_selected_contract_executions (
 			execution_id TEXT PRIMARY KEY,

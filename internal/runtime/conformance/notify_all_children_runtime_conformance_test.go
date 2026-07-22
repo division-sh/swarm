@@ -15,9 +15,11 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/internal/store"
@@ -28,6 +30,7 @@ import (
 
 type notifyAllChildrenStore interface {
 	runtimebus.EventStore
+	runtimedelivery.Store
 	ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error)
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 	ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error)
@@ -187,8 +190,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			})
 
 			originalA := items["acct-a"]
-			deleteNotifyAllChildrenReceipts(t, ctx, backend, db, originalA)
-			eventCountBefore := countNotifyAllChildrenItemEvents(t, ctx, backend, db, runID)
+			deleteNotifyAllChildrenPipelineReceipt(t, ctx, backend, db, originalA)
 			missing, err := backend.ListEventsMissingPipelineReceipt(ctx, fixedEngineNow.Add(-24*time.Hour), 20)
 			if err != nil {
 				t.Fatalf("ListEventsMissingPipelineReceipt: %v", err)
@@ -203,8 +205,18 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			if replay.ID() == "" {
 				t.Fatalf("original A item %s missing from persisted replay rows %#v", originalA, missing)
 			}
+			routes, err := backend.ListEventDeliveryRoutes(ctx, originalA)
+			if err != nil || len(routes) != 1 {
+				t.Fatalf("original A persisted routes = %#v err=%v, want one exact route", routes, err)
+			}
+			recoveryEvent := eventtest.RuntimeControl(
+				uuid.NewString(), replay.Type(), "workflow-runtime", "", replay.Payload(), replay.ChainDepth()+1,
+				runID, replay.ID(), replay.Envelope(), fixedEngineNow.Add(time.Second),
+			)
+			storetest.CommitSemanticEventWithRoutes(t, ctx, backend, recoveryEvent, routes, runtimereplayclaim.CommittedReplayScopeSubscribed)
+			eventCountBefore := countNotifyAllChildrenItemEvents(t, ctx, backend, db, runID)
 			restarted := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow })
-			if err := restarted.bus.ReleasePendingPersistedDeliveriesForEvent(ctx, replay); err != nil {
+			if err := restarted.bus.ReleasePendingPersistedDeliveriesForEvent(ctx, recoveryEvent); err != nil {
 				t.Fatalf("ReleasePendingPersistedDeliveriesForEvent: %v", err)
 			}
 			waitNotifyAllChildrenBus(t, restarted.bus)
@@ -212,9 +224,9 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			if got := countNotifyAllChildrenItemEvents(t, ctx, backend, db, runID); got != eventCountBefore {
 				t.Fatalf("item event count after replay = %d, want %d; replay must not re-expand current membership", got, eventCountBefore)
 			}
-			routes, err := backend.ListEventDeliveryRoutes(ctx, originalA)
+			routes, err = backend.ListEventDeliveryRoutes(ctx, recoveryEvent.ID())
 			if err != nil || len(routes) != 1 || routes[0].Target.FlowInstance != descriptors["acct-a"].FlowInstance {
-				t.Fatalf("replayed persisted A route = %#v err=%v", routes, err)
+				t.Fatalf("recovered persisted A route = %#v err=%v", routes, err)
 			}
 		})
 	}
@@ -262,6 +274,7 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{
 		WorkflowInstances: workflowStore,
 		WorkOwner:         workOwner,
+		DeliveryStore:     backend,
 	}))
 	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
 	if err != nil {
@@ -283,7 +296,9 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 		Module:            module,
 		InstanceActivator: manager.ActivateFlowInstance,
 		WorkflowStore:     workflowStore,
+		DeliveryStore:     backend,
 		TestEngineEmitNow: engineNow,
+		WorkOwner:         workOwner,
 	})
 	return notifyAllChildrenRuntime{bus: eventBus, diagnostics: diagnosticBus, manager: manager}
 }
@@ -512,21 +527,14 @@ func assertNotifyAllChildrenFlowInstanceCount(t *testing.T, ctx context.Context,
 	}
 }
 
-func deleteNotifyAllChildrenReceipts(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, eventID string) {
+func deleteNotifyAllChildrenPipelineReceipt(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, eventID string) {
 	t.Helper()
-	query := `DELETE FROM event_receipts WHERE event_id = $1::uuid AND ((subscriber_type = 'platform' AND subscriber_id = 'pipeline') OR subscriber_type = 'node')`
+	query := `DELETE FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
 	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `DELETE FROM event_receipts WHERE event_id = ? AND ((subscriber_type = 'platform' AND subscriber_id = 'pipeline') OR subscriber_type = 'node')`
+		query = `DELETE FROM event_receipts WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
 	}
 	if _, err := db.ExecContext(ctx, query, eventID); err != nil {
 		t.Fatalf("delete replay receipts: %v", err)
-	}
-	deliveryQuery := `UPDATE event_deliveries SET status = 'pending', reason_code = 'matched_node_subscription', delivered_at = NULL WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id <> '__runtime_replay_scope__'`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		deliveryQuery = `UPDATE event_deliveries SET status = 'pending', reason_code = 'matched_node_subscription', delivered_at = NULL WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id <> '__runtime_replay_scope__'`
-	}
-	if _, err := db.ExecContext(ctx, deliveryQuery, eventID); err != nil {
-		t.Fatalf("reset replay delivery: %v", err)
 	}
 }
 

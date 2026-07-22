@@ -2234,8 +2234,9 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 		time.Time{},
 	)
 
-	seedPipelineNodeDeliveryAuthority(t, db, evt, "root-collector")
-	handled, err := pc.dispatchWorkflowNodeEventResult(testWorkflowStoreRunContext(t, store), evt)
+	configurePipelineTestDeliveryOwner(t, pc)
+	route := seedPipelineNodeDeliveryAuthority(t, db, evt, "root-collector")
+	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(testWorkflowStoreRunContext(t, store), route), evt)
 	if err != nil {
 		t.Fatalf("executeNodeHandlerPlanResult: %v", err)
 	}

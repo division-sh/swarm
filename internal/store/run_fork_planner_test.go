@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -178,7 +179,6 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	sessionID := uuid.NewString()
 	at := time.Unix(1700000200, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, started_at)
@@ -186,29 +186,21 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "review/inst-1", at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, active_session_id, started_at, delivered_at, created_at
-		)
-		VALUES
-			($1::uuid, $2::uuid, 'agent', 'done-agent', 'delivered', 0, 'ok', NULL, NULL, $3, $3),
-			($1::uuid, $2::uuid, 'agent', 'pending-agent', 'pending', 0, 'matched_agent_subscription', NULL, NULL, NULL, $3),
-			($1::uuid, $2::uuid, 'agent', 'progress-agent', 'in_progress', 0, 'agent_processing', $4::uuid, $3, NULL, $3),
-			($1::uuid, $2::uuid, 'agent', 'retry-agent', 'failed', 1, 'retryable_error', NULL, $3, $3, $3),
-			($1::uuid, $2::uuid, 'agent', 'terminal-agent', 'failed', 2, 'max_retries', NULL, $3, $3, $3),
-			($1::uuid, $2::uuid, 'agent', 'dead-agent', 'dead_letter', 3, 'dead_letter', NULL, $3, $3, $3),
-			($1::uuid, $2::uuid, 'node', '__runtime_replay_scope__', 'delivered', 0, 'replay_scope_direct', NULL, NULL, $3, $3)
-	`, runID, eventID, at, sessionID); err != nil {
-		t.Fatalf("seed deliveries: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at
-		)
-		VALUES ($1::uuid, 'agent', 'done-agent', 'success', 'ok', '{}'::jsonb, $2)
-	`, eventID, at); err != nil {
-		t.Fatalf("seed receipt: %v", err)
+	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "review/inst-1", at)
+	retryFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "retryable_error", nil)
+	deadFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "dead_letter", nil)
+	for _, fixture := range []struct {
+		subscriber string
+		state      runtimedelivery.State
+		failure    *runtimefailures.Envelope
+	}{
+		{subscriber: "done-agent", state: runtimedelivery.StateDelivered},
+		{subscriber: "pending-agent", state: runtimedelivery.StateQueued},
+		{subscriber: "progress-agent", state: runtimedelivery.StateLaunching},
+		{subscriber: "retry-agent", state: runtimedelivery.StateRetrying, failure: &retryFailure},
+		{subscriber: "dead-agent", state: runtimedelivery.StateExhausted, failure: &deadFailure},
+	} {
+		seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: fixture.subscriber}, fixture.state, fixture.failure)
 	}
 
 	captureRunForkTestRevision(t, db, runID)
@@ -224,13 +216,11 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 		}
 	}
 	want := map[string]string{
-		"done-agent":               RunForkPendingClassificationDeliveredCompleted,
-		"pending-agent":            RunForkPendingClassificationPending,
-		"progress-agent":           RunForkPendingClassificationInProgress,
-		"retry-agent":              RunForkPendingClassificationFailedRetryable,
-		"terminal-agent":           RunForkPendingClassificationFailedTerminal,
-		"dead-agent":               RunForkPendingClassificationDeadLetter,
-		"__runtime_replay_scope__": RunForkPendingClassificationCommittedReplay,
+		"done-agent":     RunForkPendingClassificationDeliveredCompleted,
+		"pending-agent":  RunForkPendingClassificationPending,
+		"progress-agent": RunForkPendingClassificationInProgress,
+		"retry-agent":    RunForkPendingClassificationFailedRetryable,
+		"dead-agent":     RunForkPendingClassificationDeadLetter,
 	}
 	for subscriber, classification := range want {
 		if got[subscriber] != classification {
@@ -255,10 +245,7 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	}
 	for _, code := range []string{
 		"delivery_history_unproven",
-		RunForkBlockerCommittedReplayScopeReplayUnsupported,
 		RunForkBlockerFlowRouteHistoryUnproven,
-		"session_history_unproven",
-		"active_turn_history_unproven",
 	} {
 		if !blockers[code] {
 			t.Fatalf("missing blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
@@ -275,7 +262,6 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 		RunForkReplayResumeFactDeliveryInProgressHistory,
 		RunForkReplayResumeFactDeliveryFailedHistory,
 		RunForkReplayResumeFactDeliveryDeadLetterHistory,
-		RunForkReplayResumeFactCommittedReplayScope,
 	} {
 		if !runForkTestHasDisposition(plan.ReplayResumeAdmission, fact) {
 			t.Fatalf("missing taxonomy disposition for %s; admission=%#v", fact, plan.ReplayResumeAdmission)
@@ -297,15 +283,8 @@ func TestRunForkPlanner_PendingUnstartedDeliveryIsDeliveryEventReplayReady(t *te
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.safe_pending", events.EventProducerPlatform, "test", "", "", at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'safe-agent', 'pending', 0, 'matched_agent_subscription', $3)
-	`, runID, eventID, at); err != nil {
-		t.Fatalf("seed safe pending delivery: %v", err)
-	}
+	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.safe_pending", events.EventProducerPlatform, "test", "", "", at)
+	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "safe-agent"}, runtimedelivery.StateQueued, nil)
 
 	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
@@ -346,15 +325,8 @@ func TestRunForkPlanner_NodePendingDeliveryRemainsBlocked(t *testing.T) {
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.node_pending", events.EventProducerPlatform, "test", "", "", at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'node', 'node-handler', 'pending', 0, 'matched_node_subscription', $3)
-	`, runID, eventID, at); err != nil {
-		t.Fatalf("seed node pending delivery: %v", err)
-	}
+	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.node_pending", events.EventProducerPlatform, "test", "", "", at)
+	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-handler"}, runtimedelivery.StateQueued, nil)
 
 	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
@@ -374,47 +346,39 @@ func TestRunForkPlanner_NodePendingDeliveryRemainsBlocked(t *testing.T) {
 
 func TestRunForkPlanner_NonAgentDeliveryStatesRemainNamedBlockers(t *testing.T) {
 	for _, tc := range []struct {
-		name          string
-		status        string
-		retryCount    int
-		reasonCode    string
-		activeSession bool
-		delivered     bool
-		wantFact      string
-		wantClass     string
+		name      string
+		state     runtimedelivery.State
+		failure   *runtimefailures.Envelope
+		wantFact  string
+		wantClass string
 	}{
 		{
-			name:       "pending node",
-			status:     "pending",
-			reasonCode: "matched_node_subscription",
-			wantFact:   RunForkReplayResumeFactDeliveryPendingHistory,
-			wantClass:  RunForkPendingClassificationPending,
+			name:      "pending node",
+			state:     runtimedelivery.StateQueued,
+			wantFact:  RunForkReplayResumeFactDeliveryPendingHistory,
+			wantClass: RunForkPendingClassificationPending,
 		},
 		{
-			name:          "in progress node",
-			status:        "in_progress",
-			reasonCode:    "node_processing",
-			activeSession: true,
-			wantFact:      RunForkReplayResumeFactDeliveryInProgressHistory,
-			wantClass:     RunForkPendingClassificationInProgress,
+			name:      "in progress node",
+			state:     runtimedelivery.StateLaunching,
+			wantFact:  RunForkReplayResumeFactDeliveryInProgressHistory,
+			wantClass: RunForkPendingClassificationInProgress,
 		},
 		{
-			name:       "failed node",
-			status:     "failed",
-			retryCount: 1,
-			reasonCode: "retryable_node_error",
-			delivered:  true,
-			wantFact:   RunForkReplayResumeFactDeliveryFailedHistory,
-			wantClass:  RunForkPendingClassificationFailedRetryable,
+			name: "failed node", state: runtimedelivery.StateRetrying,
+			failure: func() *runtimefailures.Envelope {
+				failure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "retryable_node_error", nil)
+				return &failure
+			}(),
+			wantFact: RunForkReplayResumeFactDeliveryFailedHistory, wantClass: RunForkPendingClassificationFailedRetryable,
 		},
 		{
-			name:       "dead letter node",
-			status:     "dead_letter",
-			retryCount: 3,
-			reasonCode: "dead_letter",
-			delivered:  true,
-			wantFact:   RunForkReplayResumeFactDeliveryDeadLetterHistory,
-			wantClass:  RunForkPendingClassificationDeadLetter,
+			name: "dead letter node", state: runtimedelivery.StateExhausted,
+			failure: func() *runtimefailures.Envelope {
+				failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "dead_letter", nil)
+				return &failure
+			}(),
+			wantFact: RunForkReplayResumeFactDeliveryDeadLetterHistory, wantClass: RunForkPendingClassificationDeadLetter,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -431,25 +395,8 @@ func TestRunForkPlanner_NonAgentDeliveryStatesRemainNamedBlockers(t *testing.T) 
 			`, runID, at.Add(-time.Minute)); err != nil {
 				t.Fatalf("seed run: %v", err)
 			}
-			seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.non_agent", events.EventProducerPlatform, "test", "", "", at)
-			var activeSessionID any
-			var startedAt any
-			var deliveredAt any
-			if tc.activeSession {
-				activeSessionID = uuid.NewString()
-				startedAt = at
-			}
-			if tc.delivered {
-				deliveredAt = at
-			}
-			if _, err := db.ExecContext(ctx, `
-				INSERT INTO event_deliveries (
-					run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, active_session_id, started_at, delivered_at, created_at
-				)
-				VALUES ($1::uuid, $2::uuid, 'node', 'node-handler', $3, $4, $5, $6::uuid, $7, $8, $9)
-			`, runID, eventID, tc.status, tc.retryCount, tc.reasonCode, activeSessionID, startedAt, deliveredAt, at); err != nil {
-				t.Fatalf("seed node delivery: %v", err)
-			}
+			event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.non_agent", events.EventProducerPlatform, "test", "", "", at)
+			seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-handler"}, tc.state, tc.failure)
 
 			captureRunForkTestRevision(t, db, runID)
 			plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
@@ -475,7 +422,7 @@ func TestRunForkPlanner_NonAgentDeliveryStatesRemainNamedBlockers(t *testing.T) 
 	}
 }
 
-func TestRunForkPlanner_ReplayScopeMarkerRemainsCommittedReplayBlocker(t *testing.T) {
+func TestRunForkPlanner_CommittedReplayScopeDoesNotMasqueradeAsExecutableDelivery(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
@@ -491,12 +438,10 @@ func TestRunForkPlanner_ReplayScopeMarkerRemainsCommittedReplayBlocker(t *testin
 	}
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.replay_scope", events.EventProducerPlatform, "test", "", "", at)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, delivered_at, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, 'delivered', 0, $5, $6, $6)
-	`, runID, eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, replayScopeReasonDirect, at); err != nil {
-		t.Fatalf("seed replay-scope marker: %v", err)
+		INSERT INTO committed_replay_scopes (event_id, run_id, scope, created_at, updated_at)
+		VALUES ($1::uuid, $2::uuid, 'direct', $3, $3)
+	`, eventID, runID, at); err != nil {
+		t.Fatalf("seed committed replay scope: %v", err)
 	}
 
 	captureRunForkTestRevision(t, db, runID)
@@ -504,22 +449,17 @@ func TestRunForkPlanner_ReplayScopeMarkerRemainsCommittedReplayBlocker(t *testin
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
-	if plan.ExecutionReady || plan.ReplayResumeAdmission.DeliveryEventReplayReady {
-		t.Fatalf("replay-scope marker became replay-ready: %#v", plan.ReplayResumeAdmission)
+	if !plan.ExecutionReady || plan.ReplayResumeAdmission.DeliveryEventReplayReady {
+		t.Fatalf("separate replay scope changed executable-delivery admission: %#v", plan.ReplayResumeAdmission)
 	}
-	if !runForkTestHasBlocker(plan, RunForkBlockerCommittedReplayScopeReplayUnsupported) {
-		t.Fatalf("blockers = %#v, want committed replay-scope blocker", plan.UnsupportedBlockers)
-	}
-	if !runForkTestHasDispositionBlocker(plan.ReplayResumeAdmission, RunForkReplayResumeFactCommittedReplayScope, RunForkBlockerCommittedReplayScopeReplayUnsupported) {
-		t.Fatalf("admission = %#v, want committed replay-scope blocker disposition", plan.ReplayResumeAdmission)
-	}
-	if len(plan.PendingWork) != 1 || plan.PendingWork[0].Classification != RunForkPendingClassificationCommittedReplay {
-		t.Fatalf("pending work = %#v, want committed replay-scope marker classification", plan.PendingWork)
+	if len(plan.PendingWork) != 0 {
+		t.Fatalf("pending work = %#v, want no synthetic executable delivery", plan.PendingWork)
 	}
 }
 
 func TestRunForkPlanner_SystemDeliveryRowsAreNotCanonicalEventDeliveries(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
 	runID := uuid.NewString()
@@ -531,18 +471,13 @@ func TestRunForkPlanner_SystemDeliveryRowsAreNotCanonicalEventDeliveries(t *test
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.system_delivery", events.EventProducerPlatform, "test", "", "", at)
-	_, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'system', 'system-handler', 'pending', 0, 'matched_system_subscription', $3)
-	`, runID, eventID, at)
+	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.system_delivery", events.EventProducerPlatform, "test", "", "", at)
+	err := commitDeliveryObligationFixture(ctx, pg, event, events.DeliveryRoute{SubscriberType: "system", SubscriberID: "system-handler"})
 	if err == nil {
 		t.Fatal("seed system delivery succeeded, want canonical event_deliveries subscriber_type check to reject system rows")
 	}
-	if !strings.Contains(err.Error(), "subscriber_type") {
-		t.Fatalf("system delivery error = %v, want subscriber_type constraint proof", err)
+	if !strings.Contains(err.Error(), "subscriber class") {
+		t.Fatalf("system delivery error = %v, want typed subscriber-class refusal", err)
 	}
 }
 
@@ -734,28 +669,11 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, started_at, delivered_at, created_at
-		)
-		VALUES
-			($1::uuid, $2::uuid, 'node', 'node-dead', 'failed', 1, 'retryable_error', $3, NULL, $3),
-			($1::uuid, $2::uuid, 'node', 'node-ok', 'delivered', 0, 'ok', NULL, $3, $3),
-			($1::uuid, $2::uuid, 'agent', 'agent-ok', 'delivered', 0, 'ok', NULL, $3, $3)
-	`, runID, eventID, at); err != nil {
-		t.Fatalf("seed deliveries: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at
-		)
-		VALUES
-			($1::uuid, 'node', 'node-ok', 'success', 'ok', '{}'::jsonb, $2),
-			($1::uuid, 'agent', 'agent-ok', 'success', 'ok', '{}'::jsonb, $2)
-	`, eventID, at); err != nil {
-		t.Fatalf("seed receipts: %v", err)
-	}
+	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
+	retryFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "retryable_error", nil)
+	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-dead"}, runtimedelivery.StateRetrying, &retryFailure)
+	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-ok"}, runtimedelivery.StateDelivered, nil)
+	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-ok"}, runtimedelivery.StateDelivered, nil)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO dead_letters (
 			original_event_id, original_event, original_payload, flow_instance,
@@ -811,25 +729,29 @@ func TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork(t *test
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, started_at, delivered_at, created_at
-		)
-		VALUES
-			($1::uuid, $2::uuid, 'agent', 'completed-after-fork', 'in_progress', 0, '', $3, NULL, $3),
-			($1::uuid, $2::uuid, 'agent', 'started-after-fork', 'pending', 0, '', NULL, NULL, $3)
-	`, runID, eventID, at); err != nil {
-		t.Fatalf("seed selected-revision deliveries: %v", err)
+	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
+	completedRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "completed-after-fork"}
+	pendingRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "started-after-fork"}
+	if err := commitDeliveryObligationFixture(ctx, pg, event, completedRoute); err != nil {
+		t.Fatalf("seed selected-revision completed route: %v", err)
+	}
+	completedClaim, err := pg.ClaimAgentDelivery(ctx, event, completedRoute)
+	if err != nil {
+		t.Fatalf("claim selected-revision delivery: %v", err)
+	}
+	if err := commitDeliveryObligationFixture(ctx, pg, event, pendingRoute); err != nil {
+		t.Fatalf("seed selected-revision pending route: %v", err)
 	}
 	captureRunForkTestRevision(t, db, runID)
-	if _, err := db.ExecContext(ctx, `
-		UPDATE event_deliveries
-		SET status = 'delivered', reason_code = 'ok',
-		    started_at = COALESCE(started_at, $3), delivered_at = $3
-		WHERE run_id = $1::uuid AND event_id = $2::uuid
-	`, runID, eventID, at); err != nil {
-		t.Fatalf("complete deliveries after selected revision: %v", err)
+	if _, err := pg.SettleSuccess(ctx, completedClaim.Claim, nil, 0); err != nil {
+		t.Fatalf("complete claimed delivery after selected revision: %v", err)
+	}
+	pendingClaim, err := pg.ClaimAgentDelivery(ctx, event, pendingRoute)
+	if err != nil {
+		t.Fatalf("claim pending delivery after selected revision: %v", err)
+	}
+	if _, err := pg.SettleSuccess(ctx, pendingClaim.Claim, nil, 0); err != nil {
+		t.Fatalf("complete pending delivery after selected revision: %v", err)
 	}
 	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
@@ -876,25 +798,31 @@ func TestRunForkPlanner_SuppressesPostForkTerminalMetadata(t *testing.T) {
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, started_at, delivered_at, created_at
-		)
-		VALUES
-			($1::uuid, $2::uuid, 'agent', 'failed-after-fork', 'in_progress', 0, '', $3, NULL, $3),
-			($1::uuid, $2::uuid, 'agent', 'pending-then-failed-after-fork', 'pending', 0, '', NULL, NULL, $3)
-	`, runID, eventID, at); err != nil {
-		t.Fatalf("seed selected-revision deliveries: %v", err)
+	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
+	failedRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "failed-after-fork"}
+	pendingRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "pending-then-failed-after-fork"}
+	if err := commitDeliveryObligationFixture(ctx, pg, event, failedRoute); err != nil {
+		t.Fatalf("seed selected-revision failed route: %v", err)
+	}
+	failedClaim, err := pg.ClaimAgentDelivery(ctx, event, failedRoute)
+	if err != nil {
+		t.Fatalf("claim selected-revision delivery: %v", err)
+	}
+	if err := commitDeliveryObligationFixture(ctx, pg, event, pendingRoute); err != nil {
+		t.Fatalf("seed selected-revision pending route: %v", err)
 	}
 	captureRunForkTestRevision(t, db, runID)
-	if _, err := db.ExecContext(ctx, `
-		UPDATE event_deliveries
-		SET status = 'failed', retry_count = 2, reason_code = 'retry_exhausted',
-		    started_at = COALESCE(started_at, $3), delivered_at = $3
-		WHERE run_id = $1::uuid AND event_id = $2::uuid
-	`, runID, eventID, at); err != nil {
-		t.Fatalf("fail deliveries after selected revision: %v", err)
+	failure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "retry_after_fork", nil)
+	settlement := runtimedelivery.Settlement{Disposition: runtimedelivery.FailureRetry, Failure: &failure, RetryBase: time.Hour}
+	if _, err := pg.SettleFailure(ctx, failedClaim.Claim, settlement); err != nil {
+		t.Fatalf("fail claimed delivery after selected revision: %v", err)
+	}
+	pendingClaim, err := pg.ClaimAgentDelivery(ctx, event, pendingRoute)
+	if err != nil {
+		t.Fatalf("claim pending delivery after selected revision: %v", err)
+	}
+	if _, err := pg.SettleFailure(ctx, pendingClaim.Claim, settlement); err != nil {
+		t.Fatalf("fail pending delivery after selected revision: %v", err)
 	}
 	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
@@ -921,7 +849,7 @@ func TestRunForkPlanner_SuppressesPostForkTerminalMetadata(t *testing.T) {
 	}
 }
 
-func TestRunForkPlanner_AccountsForReceiptOnlyPlatformAndNodeProcessing(t *testing.T) {
+func TestRunForkPlanner_AccountsForPlatformReceiptAndExactDeliveryOutcomes(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
@@ -935,33 +863,17 @@ func TestRunForkPlanner_AccountsForReceiptOnlyPlatformAndNodeProcessing(t *testi
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
+	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at
 		)
-		VALUES
-			($1::uuid, 'platform', 'pipeline', 'success', 'pipeline_processed', '{}'::jsonb, $2),
-			($1::uuid, 'node', 'node-a', 'no_op', 'idempotent_no_op', '{}'::jsonb, $2)
+		VALUES ($1::uuid, 'platform', 'pipeline', 'success', 'pipeline_processed', '{}'::jsonb, $2)
 	`, eventID, at); err != nil {
-		t.Fatalf("seed receipt-only processing facts: %v", err)
+		t.Fatalf("seed platform processing fact: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, started_at, delivered_at, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'agent-done', 'delivered', 0, 'ok', $3, $3, $3)
-	`, runID, eventID, at); err != nil {
-		t.Fatalf("seed delivered processing fact: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at
-		)
-		VALUES ($1::uuid, 'agent', 'agent-done', 'success', 'ok', '{}'::jsonb, $2)
-	`, eventID, at); err != nil {
-		t.Fatalf("seed delivered receipt: %v", err)
-	}
+	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-a"}, runtimedelivery.StateDelivered, nil)
+	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-done"}, runtimedelivery.StateDelivered, nil)
 
 	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
@@ -977,21 +889,24 @@ func TestRunForkPlanner_AccountsForReceiptOnlyPlatformAndNodeProcessing(t *testi
 	}
 	for key, wantOutcome := range map[string]string{
 		"platform/pipeline": "success",
-		"node/node-a":       "no_op",
-		"agent/agent-done":  "success",
+		"node/node-a":       "",
+		"agent/agent-done":  "",
 	} {
 		item, ok := got[key]
 		if !ok {
 			t.Fatalf("missing completed processing fact %s; all=%#v", key, got)
 		}
-		if key != "agent/agent-done" && item.DeliveryID != "" {
-			t.Fatalf("%s delivery_id = %q, want empty for receipt-only row", key, item.DeliveryID)
+		if key == "platform/pipeline" && item.DeliveryID != "" {
+			t.Fatalf("%s delivery_id = %q, want event-level receipt", key, item.DeliveryID)
+		}
+		if key != "platform/pipeline" && item.DeliveryID == "" {
+			t.Fatalf("%s delivery_id is empty, want exact executable obligation", key)
 		}
 		if item.Classification != RunForkPendingClassificationDeliveredCompleted {
 			t.Fatalf("%s classification = %q, want %q; item=%#v", key, item.Classification, RunForkPendingClassificationDeliveredCompleted, item)
 		}
-		if item.ReceiptOutcome != wantOutcome || item.ReceiptAt == nil {
-			t.Fatalf("%s receipt = outcome %q at %v, want outcome %q with timestamp", key, item.ReceiptOutcome, item.ReceiptAt, wantOutcome)
+		if item.ReceiptOutcome != wantOutcome || (key == "platform/pipeline") != (item.ReceiptAt != nil) {
+			t.Fatalf("%s event-level receipt = outcome %q at %v, want outcome %q", key, item.ReceiptOutcome, item.ReceiptAt, wantOutcome)
 		}
 	}
 	if !plan.ExecutionReady {

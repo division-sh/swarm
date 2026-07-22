@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -31,16 +32,11 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 	}
 	seedOperatorObservabilityEvent(t, ctx, pg, olderEventID, runID, "task.failed", events.EventProducerAgent, "agent-a", json.RawMessage(`{"entity_id":"`+entityID+`","n":1}`), entityID, base)
 	seedOperatorObservabilityEvent(t, ctx, pg, newerEventID, runID, "task.completed", events.EventProducerAgent, "agent-b", json.RawMessage(`{"entity_id":"`+entityID+`","n":2}`), entityID, base.Add(time.Minute))
-	if _, err := db.ExecContext(ctx, `
-			INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, failure, created_at)
-			VALUES
-				($1::uuid, $2::uuid, 'agent', 'agent-a', 'dead_letter', 3, 'retry_exhausted', $3::jsonb, $4),
-				($1::uuid, $2::uuid, 'node', 'node-a', 'failed', 1, 'handler_error', $5::jsonb, $6)
-		`, runID, olderEventID,
-		mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassRetryExhausted, "retry_exhausted", nil)), base.Add(time.Second),
-		mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "node_failed", nil)), base.Add(1500*time.Millisecond)); err != nil {
-		t.Fatalf("seed delivery: %v", err)
-	}
+	olderEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, olderEventID)
+	agentFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "retry_exhausted", nil)
+	nodeFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "node_failed", nil)
+	seedDeliveryStateFixture(t, ctx, pg, olderEvent, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}, runtimedelivery.StateExhausted, &agentFailure)
+	seedDeliveryStateFixture(t, ctx, pg, olderEvent, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-a"}, runtimedelivery.StateRetrying, &nodeFailure)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO dead_letters (
 			original_event_id, original_event, original_payload, entity_id, flow_instance,
@@ -77,11 +73,11 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 		t.Fatalf("deliveries len = %d, want 2", len(got.Deliveries))
 	}
 	agentDelivery := got.Deliveries[0]
-	if agentDelivery.SubscriberType != "agent" || agentDelivery.RetryCount != 3 || agentDelivery.RetryEligible || !agentDelivery.Terminal || len(agentDelivery.DeadLetters) != 1 {
+	if agentDelivery.SubscriberType != "agent" || agentDelivery.RetryCount != 0 || agentDelivery.RetryEligible || !agentDelivery.Terminal || len(agentDelivery.DeadLetters) != 1 {
 		t.Fatalf("agent delivery evidence = %#v", agentDelivery)
 	}
 	nodeDelivery := got.Deliveries[1]
-	if nodeDelivery.SubscriberType != "node" || nodeDelivery.RetryCount != 1 || !nodeDelivery.RetryEligible || nodeDelivery.Terminal || nodeDelivery.Failure == nil || nodeDelivery.Failure.Detail.Code != "node_failed" {
+	if nodeDelivery.SubscriberType != "node" || nodeDelivery.RetryCount != 1 || nodeDelivery.RetryEligible || nodeDelivery.Terminal || nodeDelivery.Failure == nil || nodeDelivery.Failure.Detail.Code != "node_failed" {
 		t.Fatalf("node delivery evidence = %#v", nodeDelivery)
 	}
 
@@ -662,8 +658,6 @@ func TestRunDebugTracePageTypedFilters(t *testing.T) {
 	entityTwo := uuid.NewString()
 	firstEvent := uuid.NewString()
 	secondEvent := uuid.NewString()
-	firstDelivery := uuid.NewString()
-	secondDelivery := uuid.NewString()
 	base := time.Unix(1700000400, 0).UTC()
 	until := base
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
@@ -671,14 +665,11 @@ func TestRunDebugTracePageTypedFilters(t *testing.T) {
 	}
 	seedOperatorObservabilityEvent(t, ctx, pg, firstEvent, runID, "first.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), entityOne, base)
 	seedOperatorObservabilityEvent(t, ctx, pg, secondEvent, runID, "second.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), entityTwo, base.Add(time.Second))
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at)
-		VALUES
-			($1::uuid, $2::uuid, $3::uuid, 'node', 'node-1', 'pending', '', $4),
-			($5::uuid, $2::uuid, $6::uuid, 'agent', 'agent-2', 'dead_letter', 'handler_error', $7)
-	`, firstDelivery, runID, firstEvent, base, secondDelivery, secondEvent, base.Add(time.Second)); err != nil {
-		t.Fatalf("seed trace deliveries: %v", err)
-	}
+	firstSnapshot := seedDeliveryStateFixture(t, ctx, pg, loadPostgresDeliveryFixtureEvent(t, ctx, db, firstEvent), events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-1"}, runtimedelivery.StateQueued, nil)
+	setPostgresDeliveryFixtureTimes(t, ctx, db, firstSnapshot, base, base)
+	filterFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "handler_error", nil)
+	secondSnapshot := seedDeliveryStateFixture(t, ctx, pg, loadPostgresDeliveryFixtureEvent(t, ctx, db, secondEvent), events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-2"}, runtimedelivery.StateExhausted, &filterFailure)
+	setPostgresDeliveryFixtureTimes(t, ctx, db, secondSnapshot, base.Add(time.Second), base.Add(time.Second))
 
 	for _, tc := range []struct {
 		name string

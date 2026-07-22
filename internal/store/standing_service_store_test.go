@@ -20,6 +20,7 @@ func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
+	workflowStore.ConfigureDeliveryLifecycleStore(store)
 	packageKey := "project"
 	flowID := "ingress"
 	serviceID := runtimeflowidentity.StandingServiceID(packageKey, flowID)
@@ -88,6 +89,7 @@ func TestSQLiteStandingServiceReconcileRejectsUnknownTerminalityWithCommand(t *t
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
+	workflowStore.ConfigureDeliveryLifecycleStore(store)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
@@ -111,6 +113,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
+	workflowStore.ConfigureDeliveryLifecycleStore(store)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
@@ -129,11 +132,13 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	agentID := "standing-agent"
 	sessionID := uuid.NewString()
 	timerID := uuid.NewString()
-	fixtureCtx := testAuthorActivityContext()
-	if err := commitSemanticEventFixture(fixtureCtx, store, eventtest.PersistedProjection(
+	fixtureCtx := testAuthorActivityContextForBundle(candidate.Source.BundleHash)
+	workEvent := eventtest.PersistedProjection(
 		eventID, events.EventType("standing.work"), "test", "", json.RawMessage(`{}`), 0,
 		created.RunID, "", events.EventEnvelope{}, time.Now().UTC(),
-	)); err != nil {
+	)
+	workRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: agentID}
+	if err := commitSemanticEventFixtureWithRoutes(fixtureCtx, store, workEvent, []events.DeliveryRoute{workRoute}); err != nil {
 		t.Fatal(err)
 	}
 	if err := commitSemanticEventFixture(fixtureCtx, store, eventtest.PersistedProjection(
@@ -142,13 +147,17 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status) VALUES (?, ?, ?, 'agent', ?, 'in_progress')`, uuid.NewString(), created.RunID, eventID, agentID); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := store.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, memory_enabled, memory_source) VALUES (?, 'worker', 'test', 1, 'authored')`, agentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.DB.ExecContext(ctx, `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, conversation, runtime_state, status) VALUES (?, ?, ?, 'standing/ingress', 1, 'authored', '[]', '{}', 'active')`, sessionID, created.RunID, agentID); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimAgentDelivery(fixtureCtx, workEvent, workRoute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.BindAgentSession(fixtureCtx, claimed.Claim, sessionID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.DB.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status) VALUES (?, ?, ?, 'timer.fire', ?, 'active')`, timerID, aggregateWorkflowTimerTaskID(timerID), created.RunID, time.Now().UTC().Add(time.Hour)); err != nil {
@@ -224,6 +233,7 @@ func TestSQLiteStandingServiceSetOrphansRemovedDeclaration(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
+	workflowStore.ConfigureDeliveryLifecycleStore(store)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
@@ -256,13 +266,18 @@ func TestSQLiteStandingServiceSetOrphansRemovedDeclaration(t *testing.T) {
 
 func TestSQLiteStandingServiceReplacementIsScopedAndAtomic(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	testStandingServiceReplacementIsScopedAndAtomic(t, runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store))
+	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
+	workflowStore.ConfigureDeliveryLifecycleStore(store)
+	testStandingServiceReplacementIsScopedAndAtomic(t, workflowStore)
 }
 
 func TestPostgresStandingServiceReplacementIsScopedAndAtomic(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	testStandingServiceReplacementIsScopedAndAtomic(t, runtimepipeline.NewWorkflowInstanceStore(db))
+	selected := admitTestPostgresStore(t, db)
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workflowStore.ConfigureDeliveryLifecycleStore(selected)
+	testStandingServiceReplacementIsScopedAndAtomic(t, workflowStore)
 }
 
 func testStandingServiceReplacementIsScopedAndAtomic(t *testing.T, workflowStore *runtimepipeline.WorkflowInstanceStore) {
@@ -338,12 +353,15 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	selected := admitTestPostgresStore(t, db)
+	workflowStore.ConfigureDeliveryLifecycleStore(selected)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
 		Source: runtimecorrelation.BundleSourceFact{BundleHash: "bundle-v1:sha256:" + strings.Repeat("6", 64), BundleSource: "persisted"},
 	}
+	fixtureCtx := testAuthorActivityContextForBundle(candidate.Source.BundleHash)
 	created, err := workflowStore.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{candidate})
 	if err != nil || len(created) != 1 {
 		t.Fatalf("ReconcileStandingServiceSet = %#v, %v", created, err)
@@ -352,6 +370,7 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	unsettledEventID := uuid.NewString()
 	agentID := "standing-agent"
 	timerID := uuid.NewString()
+	var workEvent events.Event
 	for _, fixture := range []struct {
 		id        string
 		eventType events.EventType
@@ -359,18 +378,29 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 		{id: eventID, eventType: "standing.work"},
 		{id: unsettledEventID, eventType: "standing.unsettled"},
 	} {
-		seedPostgresSemanticEventRecordFixture(
-			t, ctx, db, fixture.id, created[0].RunID, fixture.eventType,
-			events.EventProducerPlatform, "test", "", "", time.Now().UTC(),
+		event := eventtest.PersistedProjection(
+			fixture.id, fixture.eventType, "test", "", json.RawMessage(`{}`), 0,
+			created[0].RunID, "", events.EventEnvelope{}, time.Now().UTC(),
 		)
+		if fixture.id == eventID {
+			workEvent = event
+			continue
+		}
+		if err := commitSemanticEventFixture(fixtureCtx, selected, event); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status) VALUES ($1::uuid, $2::uuid, $3::uuid, 'agent', $4, 'in_progress')`, uuid.NewString(), created[0].RunID, eventID, agentID); err != nil {
+	workRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: agentID}
+	if err := commitSemanticEventFixtureWithRoutes(fixtureCtx, selected, workEvent, []events.DeliveryRoute{workRoute}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, memory_enabled, memory_source) VALUES ($1, 'worker', 'test', TRUE, 'authored')`, agentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, conversation, runtime_state, status) VALUES ($1::uuid, $2::uuid, $3, 'standing/ingress', TRUE, 'authored', '[]', '{}', 'active')`, uuid.NewString(), created[0].RunID, agentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := selected.ClaimAgentDelivery(fixtureCtx, workEvent, workRoute); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status) VALUES ($1::uuid, $2, $3::uuid, 'timer.fire', $4, 'active')`, timerID, aggregateWorkflowTimerTaskID(timerID), created[0].RunID, time.Now().UTC().Add(time.Hour)); err != nil {
@@ -422,6 +452,7 @@ func TestSQLiteRunStopRefusesCurrentStandingGenerationWithTeachingCommand(t *tes
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
+	workflowStore.ConfigureDeliveryLifecycleStore(store)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	created, err := workflowStore.ReconcileStandingService(ctx, runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress", InstanceID: uuid.NewString(), EntityID: uuid.NewString(),

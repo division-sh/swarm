@@ -16,6 +16,8 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -29,6 +31,7 @@ import (
 
 type completeEventDispatchStore interface {
 	runtimebus.EventStore
+	runtimedelivery.Store
 	runtimemanager.ManagerPersistence
 	UpsertPipelineReceipt(context.Context, string, string, *runtimefailures.Envelope) error
 }
@@ -220,17 +223,17 @@ func (f completeEventDispatchFixture) assertNoDispatchMutation(t *testing.T) {
 
 func (f completeEventDispatchFixture) assertNoAgentDispatchMutation(t *testing.T) {
 	t.Helper()
-	var receipts int
-	query := `SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_type = 'agent' AND subscriber_id = ?`
+	var outcomes int
+	query := `SELECT COUNT(*) FROM event_delivery_outcomes o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.event_id = ? AND d.subscriber_type = 'agent' AND d.subscriber_id = ?`
 	args := []any{f.event.ID(), f.agentID}
 	if f.dialect == "postgres" {
-		query = `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'agent' AND subscriber_id = $2`
+		query = `SELECT COUNT(*) FROM event_delivery_outcomes o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.event_id = $1::uuid AND d.subscriber_type = 'agent' AND d.subscriber_id = $2`
 	}
-	if err := f.db.QueryRowContext(f.ctx, query, args...).Scan(&receipts); err != nil {
-		t.Fatalf("count agent receipts: %v", err)
+	if err := f.db.QueryRowContext(f.ctx, query, args...).Scan(&outcomes); err != nil {
+		t.Fatalf("count agent delivery outcomes: %v", err)
 	}
-	if receipts != 0 {
-		t.Fatalf("agent receipts after corrupt readback = %d, want 0", receipts)
+	if outcomes != 0 {
+		t.Fatalf("agent delivery outcomes after corrupt readback = %d, want 0", outcomes)
 	}
 }
 
@@ -314,9 +317,26 @@ func (f completeEventDispatchFixture) managedContext(t *testing.T) context.Conte
 
 func (f completeEventDispatchFixture) newRecordingManager(t *testing.T, seen chan<- events.Event) *runtimemanager.AgentManager {
 	t.Helper()
-	return runtimemanager.NewAgentManager(f.bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+	process := worklifetime.NewProcess()
+	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: "complete-event-dispatch-runtime",
+		BundleHash:        "complete-event-dispatch-bundle",
+	})
+	if err != nil {
+		t.Fatalf("create complete-event work owner: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := owner.RetireAndWait(context.Background()); err != nil {
+			t.Errorf("retire complete-event work owner: %v", err)
+		}
+		process.Retire()
+		if _, err := process.Join(context.Background()); err != nil {
+			t.Errorf("join complete-event process owner: %v", err)
+		}
+	})
+	return runtimemanager.NewAgentManagerWithOptions(f.bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return &completeEventRecordingAgent{id: cfg.ID, subscriptions: []events.EventType{f.event.Type()}, seen: seen}, nil
-	}, f.store)
+	}, runtimemanager.AgentManagerOptions{DeliveryStore: f.store, WorkOwner: owner}, f.store)
 }
 
 type completeEventRecordingAgent struct {

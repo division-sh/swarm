@@ -3,7 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -11,7 +11,6 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 func runPostgresAuthorActivityMutation(ctx context.Context, db *sql.DB, label string, fn func(context.Context, *sql.Tx) error) error {
@@ -59,81 +58,6 @@ func runPostgresAuthorActivityMutation(ctx context.Context, db *sql.DB, label st
 	}
 	committed = true
 	return nil
-}
-
-type systemNodeDeliveryStorySource struct {
-	DeliveryID string
-	RunID      string
-	EventType  string
-	EntityID   string
-	FlowID     string
-	RetryCount int
-}
-
-func loadSystemNodeDeliveryStorySource(ctx context.Context, tx *sql.Tx, nodeID, eventID, targetJSON string, postgres bool) (systemNodeDeliveryStorySource, error) {
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return systemNodeDeliveryStorySource{}, err
-	}
-	query := `
-		SELECT CAST(d.delivery_id AS TEXT), COALESCE(CAST(d.run_id AS TEXT), ''), COALESCE(e.event_name, ''),
-		       COALESCE(CAST(e.entity_id AS TEXT), ''), COALESCE(e.flow_instance, ''), COALESCE(d.retry_count, 0)
-		FROM event_deliveries d
-		JOIN events e ON e.event_id = d.event_id
-		WHERE d.event_id = ? AND d.subscriber_type = 'node' AND d.subscriber_id = ?
-		  AND COALESCE(d.delivery_target_route, '{}') = ?
-	`
-	args := []any{eventID, nodeID, targetJSON}
-	if postgres {
-		query = `
-			SELECT d.delivery_id::text, COALESCE(d.run_id::text, ''), COALESCE(e.event_name, ''),
-			       COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(d.retry_count, 0)
-			FROM event_deliveries d
-			JOIN events e ON e.event_id = d.event_id
-			WHERE d.event_id = $1::uuid AND d.subscriber_type = 'node' AND d.subscriber_id = $2
-			  AND COALESCE(d.delivery_target_route, '{}'::jsonb) = $3::jsonb
-			FOR UPDATE OF d
-		`
-	}
-	var source systemNodeDeliveryStorySource
-	if err := tx.QueryRowContext(ctx, query, args...).Scan(&source.DeliveryID, &source.RunID, &source.EventType, &source.EntityID, &source.FlowID, &source.RetryCount); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return systemNodeDeliveryStorySource{}, fmt.Errorf("%w: node %s event %s", ErrSystemNodeDeliveryAuthorityMissing, nodeID, eventID)
-		}
-		return systemNodeDeliveryStorySource{}, err
-	}
-	if source.RunID != "" {
-		dialect := storerunlifecycle.DialectSQLite
-		if postgres {
-			dialect = storerunlifecycle.DialectPostgres
-		}
-		if err := storerunlifecycle.RequireActive(ctx, tx, source.RunID, dialect); err != nil {
-			return systemNodeDeliveryStorySource{}, fmt.Errorf("admit system node delivery mutation: %w", err)
-		}
-	}
-	return source, nil
-}
-
-func recordSystemNodeDeliveryStory(ctx context.Context, source systemNodeDeliveryStorySource, nodeID, transition, reasonCode string, retryCount int, failure *runtimefailures.Envelope, occurredAt time.Time) error {
-	dedupKey := fmt.Sprintf("delivery:%s:%s:%d", source.DeliveryID, transition, retryCount)
-	persistedAt, found, err := runtimeauthoractivity.PersistedOccurredAt(ctx, dedupKey)
-	if err != nil {
-		return err
-	}
-	if found {
-		occurredAt = persistedAt
-	}
-	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
-		Kind: runtimeauthoractivity.KindDeliveryLifecycle, Transition: transition,
-		SourceOwner: "event_deliveries", SourceIdentity: source.DeliveryID,
-		DedupKey:   dedupKey,
-		OccurredAt: occurredAt, RunID: source.RunID, EntityID: source.EntityID, FlowID: source.FlowID,
-		Projection: runtimeauthoractivity.Projection{
-			SubjectType: "node", SubjectID: strings.TrimSpace(nodeID), EventType: source.EventType,
-			SubscriberType: "node", SubscriberID: strings.TrimSpace(nodeID), RetryCount: intPointer(retryCount),
-			ReasonCode: strings.TrimSpace(reasonCode),
-		},
-		Failure: failure,
-	})
 }
 
 func recordActivityAttemptStory(ctx context.Context, rec ActivityAttemptRecord, transition string) error {
@@ -185,11 +109,8 @@ func recordPipelineDeadLetter(ctx context.Context, db *sql.DB, rec runtimedeadle
 			return fmt.Errorf("load pipeline dead letter source event: %w", err)
 		}
 		result, err := runtimedeadletters.InsertTxWithResult(txctx, tx, rec)
-		if err != nil {
+		if err != nil || !result.Inserted {
 			return err
-		}
-		if !result.Inserted {
-			return nil
 		}
 		identity := result.DeadLetterID
 		retry := rec.RetryCount
@@ -211,4 +132,15 @@ func pipelineDeadLetterOccurredAt(raw string) time.Time {
 		return parsed.UTC()
 	}
 	return time.Now().UTC()
+}
+
+func pipelineFailureJSON(failure *runtimefailures.Envelope) (string, error) {
+	if failure == nil {
+		return "", nil
+	}
+	encoded, err := json.Marshal(failure)
+	if err != nil {
+		return "", fmt.Errorf("marshal pipeline failure: %w", err)
+	}
+	return string(encoded), nil
 }

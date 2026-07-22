@@ -46,16 +46,7 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 	seedBundleDeleteRun(t, ctx, pg, activeRunID, "running", bundleDeleteTestHash)
 	seedBundleDeleteRun(t, ctx, pg, completedRunID, "completed", bundleDeleteTestHash)
 	seedBundleDeleteRun(t, ctx, pg, otherRunID, "running", bundleDeleteOtherHash)
-	eventID := seedDestructiveResetEvent(t, ctx, pg, activeRunID, "bundle.delete.pending")
-	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, reason_code, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'agent', 'agent-a', 'pending', $3::uuid, 'ready', now()
-		)
-	`, activeRunID, eventID, sessionID); err != nil {
-		t.Fatalf("seed delivery: %v", err)
-	}
+	eventID := seedBundleDeleteDelivery(t, ctx, pg, activeRunID, "agent-a")
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
 		VALUES ($1::uuid, $2::uuid, 'agent-a', 'bundle-delete', TRUE, 'authored', 'active')
@@ -311,6 +302,19 @@ func seedBundleDeleteBundle(t *testing.T, ctx context.Context, pg *PostgresStore
 	`, bundleHash); err != nil {
 		t.Fatalf("seed bundle %s: %v", bundleHash, err)
 	}
+}
+
+func seedBundleDeleteDelivery(t *testing.T, ctx context.Context, pg *PostgresStore, runID, agentID string) string {
+	t.Helper()
+	eventID := uuid.NewString()
+	event := eventtest.RunCreatingRootIngress(
+		eventID, events.EventType("bundle.delete.pending"), "test", "", []byte(`{}`), 0,
+		runID, "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	if err := commitSemanticEventFixtureWithAgents(ctx, pg, event, []string{agentID}); err != nil {
+		t.Fatalf("seed bundle delete delivery: %v", err)
+	}
+	return eventID
 }
 
 func seedBundleDeleteRun(t *testing.T, ctx context.Context, pg *PostgresStore, runID, status, bundleHash string) {

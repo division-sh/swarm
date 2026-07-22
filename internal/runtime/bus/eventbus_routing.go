@@ -12,6 +12,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -299,14 +300,16 @@ func settleBufferedLocalDelivery(ctx context.Context, store EventStore, delivery
 	if store == nil {
 		return errors.New("selected event store is required for buffered delivery handoff")
 	}
-	prover, ok := store.(interface {
-		ProveLocalDeliveryHandoff(context.Context, string, events.DeliveryRoute) error
-	})
+	prover, ok := store.(runtimedelivery.Store)
 	if !ok {
 		return errors.New("selected event store does not expose exact durable delivery handoff proof")
 	}
-	if err := prover.ProveLocalDeliveryHandoff(ctx, delivery.ID(), delivery.HandoffRoute()); err != nil {
+	proof, err := prover.ProveHandoff(ctx, delivery.ID(), delivery.HandoffRoute())
+	if err != nil {
 		return fmt.Errorf("prove exact durable handoff for buffered event %s: %w", delivery.ID(), err)
+	}
+	if strings.TrimSpace(proof.DeliveryID()) == "" {
+		return fmt.Errorf("prove exact durable handoff for buffered event %s: empty proof", delivery.ID())
 	}
 	return delivery.Complete()
 }

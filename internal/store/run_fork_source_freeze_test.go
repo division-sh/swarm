@@ -14,6 +14,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -274,24 +275,15 @@ func TestRunForkSourceFreezeBlocksOnlyLiveExecutionAuthority(t *testing.T) {
 func seedRunForkFreezeDeliveryAuthority(t *testing.T, ctx context.Context, db *sql.DB, lineage runForkActivationLineage, now time.Time, live bool) {
 	t.Helper()
 	eventID := uuid.NewString()
-	seedPostgresSemanticEventRecordFixture(
+	event := seedPostgresSemanticEventRecordFixture(
 		t, ctx, db, eventID, lineage.SourceRunID, events.EventType("freeze.delivery"),
 		events.EventProducerPlatform, "test", "", "", now,
 	)
-	status := "pending"
-	activeSession := any(nil)
-	startedAt := any(nil)
+	state := runtimedelivery.StateQueued
 	if live {
-		status = "in_progress"
-		activeSession = uuid.NewString()
-		startedAt = now
+		state = runtimedelivery.StateLaunching
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, started_at, created_at)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'freeze-agent', $3, $4::uuid, $5, $6)
-	`, lineage.SourceRunID, eventID, status, activeSession, startedAt, now); err != nil {
-		t.Fatal(err)
-	}
+	seedDeliveryStateFixture(t, ctx, postgresDeliveryFixtureStore(db), event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "freeze-agent"}, state, nil)
 }
 
 func seedRunForkFreezeSessionAuthority(t *testing.T, ctx context.Context, db *sql.DB, lineage runForkActivationLineage, now time.Time, live bool) {

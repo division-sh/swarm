@@ -5140,7 +5140,8 @@ engine:
         promoted_by: '#1403'
         promoted_first_slice_by: '#1414'
         typed_entrypoint_owners:
-        - runtimebus.EventMutationRunner and runtimebus.EventMutation for selected event publish, PublishInMutation, mailbox decision publish, and outbox atomic mutation groups
+        - runtimebus.CommitPublishOwner with sealed CommitPublish plans and named event operations for selected event publication and declared initial facts
+        - internal/runtime/deliverylifecycle.Store for executable delivery admission, fenced claims, settlement, terminalization, and typed readback
         - runtimepipeline.Store.RunPipelineMutation for selected workflow pipeline mutation groups
         - internal/store.SQLiteRuntimeStore.RunRuntimeMutation for selected SQLite runtime row-family mutations
         - internal/store.PostgresStore normal transaction methods for selected Postgres runtime row-family mutations
@@ -5184,8 +5185,8 @@ engine:
         classification: segregated selected capabilities backed by one shared semantic owner; read availability does not imply lifecycle mutation, while Postgres and local/dev SQLite explicitly wire both roles
       - dependency: selected-contract run.fork PostgresStore internals
         classification: optional product capability with current concrete escape; migrate under #1401/#1403 or a run-fork child
-      - dependency: RunRuntimeMutation, RunEventMutation, RunPipelineMutation, and backend-local direct transaction helpers
-        classification: mutation/unit-of-work owner class under #1403/#1405; producers consume the typed entrypoints while raw helpers stay below store implementations
+      - dependency: RunRuntimeMutation, RunPipelineMutation, sealed CommitPublish transactions, and backend-local direct transaction helpers
+        classification: mutation/unit-of-work owner class under #1403/#1405; producers consume closed named operations while raw helpers stay below store implementations
       - dependency: route planning, event admission/defaulting, delivery authority, startup readiness
         classification: different semantic concepts; explicitly split unless a later gate widens
       rules:
@@ -5221,21 +5222,22 @@ engine:
       - Active pipeline transactions are already inside the selected mutation boundary and must be reused rather than nested.
       - Schema/bootstrap, bundle catalog, destructive reset, preservation cleanup, fork-specific mutation/recovery, and read-only projections remain separate concepts unless independently gated.
       consumers:
-      - runtimebus transactional publish through EventMutationRunner
+      - runtimebus transactional publish through sealed CommitPublish plans
       - runtimepipeline.WorkflowInstanceStore production SQLite construction through NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner and RunPipelineMutation
       - SQLiteRuntimeStore selected runtime mutation methods for the named row families
     - name: event_append_and_run_lifecycle_rows
-      owner: runtimebus.EventStore
-      sqlite_owner: internal/store.SQLiteRuntimeStore.AppendEvent
-      postgres_owner: internal/store.PostgresStore.AppendEvent
+      owner: events.AdmittedEvent plus runtimebus.CommitPublishOwner and named selected-fork/runtime-log event operations
+      sqlite_owner: internal/store.SQLiteRuntimeStore sealed event commit operations
+      postgres_owner: internal/store.PostgresStore sealed event commit operations
       excludes:
-      - event delivery claim/retry/replay semantics owned by #1087
+      - executable delivery obligation semantics owned by '#2105'
+      - committed replay-scope semantics owned by '#2106'
     - name: manager_agent_and_entity_schema_rows
       owner: runtimemanager.ManagerPersistence
       sqlite_owner: internal/store.SQLiteRuntimeStore agent/entity schema methods
       postgres_owner: internal/store.PostgresStore manager methods
       excludes:
-      - pending delivery replay and receipt settlement semantics owned by #1087
+      - executable delivery claim, recovery, and settlement semantics owned by '#2105'
     - name: schedule_timer_rows
       owner: runtimepipeline.SchedulePersistence
       sqlite_owner: internal/store.SQLiteRuntimeStore schedule methods
@@ -5361,7 +5363,7 @@ engine:
       scope: >
         The selected runtime store owns serve-startup active-run abandon quiescence for its backend. Both SQLite local/dev
         and Postgres production/external backends apply the same `server_restart_abandon` semantics over active runs,
-        same-run recoverable agent/node deliveries, agent/node event receipts, and platform pipeline receipts before
+        same-run recoverable agent/node deliveries, exact delivery outcomes, and platform pipeline receipts before
         runtime startup can reclaim work. `swarm serve` consumes this typed selected-store owner and must not infer
         support from raw Postgres handles or skip the operation on SQLite.
       excludes:
@@ -5408,18 +5410,44 @@ engine:
         retained until exact finalization succeeds. Finalization failure keeps readiness and runtime selection unavailable;
         retry consumes the same handoff and cannot reacquire, infer, roll forward through metadata-only publication, or
         expose the candidate before the typed authority transition is final.
-    - name: event_delivery_receipt_and_replay_rows
-      owner: runtimebus.EventStore, runtimebus.EventMutationRunner/EventMutation, backend store implementations, runtimemanager.ManagerPersistence, and runtimereplayclaim committed replay contracts
-      sqlite_owner: internal/store.SQLiteRuntimeStore delivery, receipt, pipeline receipt, committed replay scope, and replay-claim methods
-      postgres_owner: internal/store.PostgresStore delivery, receipt, pipeline receipt, committed replay scope, and replay-claim methods
+    - name: executable_event_delivery_obligation_rows
+      owner: internal/runtime/deliverylifecycle.Store
+      sqlite_owner: internal/runtime/deliverylifecycle SQLite private adapter behind SQLiteRuntimeStore
+      postgres_owner: internal/runtime/deliverylifecycle PostgreSQL private adapter behind PostgresStore
       scope: >
-        SQLite supports local-dev delivery, receipt settlement, pending/backlog replay, and process-local replay claims over
-        persisted rows. Before persistence, every live EventBus publication acquires the same event-identity claim consumed
-        by pipeline replay and holds it through pipeline-receipt settlement. SQLite owns this exclusion in the selected
-        store process; Postgres owns it with the shared advisory-lock key, so sibling EventBus instances and separate runtime
-        processes cannot replay a persisted-but-unsettled foreground event. The claim transfers through acknowledged
-        post-commit dispatch and is released after synchronous or asynchronous settlement, leaving unrelated recovery work
-        eligible. Postgres remains the production owner for cross-runtime claim and fencing semantics.
+        One exact obligation exists per admitted event and complete opaque DeliveryRoute identity. The owner alone constructs
+        obligations, selects eligible work, mints persisted lease-fenced claims, binds execution, schedules retries, records
+        exact outcomes, terminalizes parent-owned work, and decodes snapshots and run summaries. Agent and node consumers
+        cannot reconstruct lifecycle behavior from status strings, retry counters, receipts, timestamps, or raw SQL.
+        Live workflow-node execution consumes only the exact admitted DeliveryRoute interceptor. Startup recovery pages the
+        same owner's eligible node backlog and executes each returned fenced claim before runtime readiness. After readiness,
+        standing node recovery continues asking that owner for newly eligible or expired work; its cadence is only a wake-up
+        trigger and does not interpret statuses, retry counts, eligibility timestamps, or claims. A coordinator-wide
+        subscription, event-ID replay list, or handler-local claim interpretation is forbidden.
+        Claims use database time, a random token, monotonic version, and persisted expiry. Every completion requires the
+        current capability; reclaim occurs only after expiry and stale writers cannot mutate the obligation or any coupled
+        outcome/activity/diagnostic fact. An executing agent or node handler renews its exact claim through the owner before,
+        during, and after execution. Renewal atomically extends the obligation and its one open attempt using database time;
+        renewal failure cancels handler execution and forbids settlement through that stale capability. Backlog work is claimed
+        one item at a time immediately before execution so queued local work cannot consume its lease before starting. Agent
+        max_retries=1 means two total attempts; node max_retries=3 means four total attempts. Existing selected stores are
+        unsupported and no migration, fallback, or compatibility interpretation exists.
+    - name: platform_pipeline_receipt_rows
+      owner: runtimebus.CommitPublishOwner and named parent quiescence operations
+      sqlite_owner: internal/store.SQLiteRuntimeStore private platform receipt adapter
+      postgres_owner: internal/store.PostgresStore private platform receipt adapter
+      scope: >
+        event_receipts records platform pipeline acknowledgement only. It never represents an executable agent/node claim,
+        retry, settlement, idempotency key, or terminality decision. Ordinary writes require an active run; parent
+        quiescence writes its terminal platform receipt inside the parent transaction.
+    - name: committed_replay_scope_rows
+      owner: runtimereplayclaim committed replay contracts under '#2106'
+      sqlite_owner: internal/store.SQLiteRuntimeStore committed replay scope and replay-claim methods
+      postgres_owner: internal/store.PostgresStore committed replay scope and replay-claim methods
+      scope: >
+        committed_replay_scopes is event-level replay participation truth. It is separate from executable delivery rows;
+        no synthetic subscriber, marker delivery, discriminator, or legacy interpretation is permitted. Process-local and
+        cross-process replay exclusion remain selected-store concerns behind the named replay-claim contract.
     - name: llm_conversation_and_turn_rows
       owner: internal/runtime/llm TurnPersistence and ConversationPersistence
       sqlite_owner: internal/store.SQLiteRuntimeStore conversation and agent turn methods
@@ -11443,7 +11471,10 @@ platform_tables:
       retain_directive_authority:
         - agent_directive_operations
       delete_mixed_row_policy:
+        - event_delivery_outcomes
+        - event_delivery_attempts
         - event_deliveries
+        - committed_replay_scopes
         - agent_conversation_audits
         - conversation_fork_snapshots
         - conversation_fork_turn_completions
@@ -11531,6 +11562,10 @@ platform_tables:
         allowed and required projection fields, failure-bearing transitions, author-facing subject strategy, and any typed
         subject vocabulary, exact scope policy, human visibility, and rendered action. Producers and renderers MUST consume
         that same row; parallel source, field, scope, visibility, action, or subject registries are forbidden.
+      delivery_lifecycle_contract: >-
+        delivery.lifecycle/v2 admits in_progress, delivered, failed, dead_letter, and terminalized. failed and dead_letter
+        are failure-bearing author-visible transitions. terminalized records a parent-owned lifecycle fence without a
+        failure envelope and is not author-visible; it MUST NOT be rendered or reclassified as handler failure.
       event_descriptor_projection: >-
         The selected store holds one process-local immutable projection keyed by exact (runtime_instance_id, bundle_hash).
         Every descriptor carries event_type, authored|different disposition, and optional author_summary_field from the
@@ -11787,14 +11822,14 @@ platform_tables:
         );
     run_fork_fact_revisions:
       description: >-
-        Append-only, closed-registry projection of the eleven source fact families consumed by supported
+        Append-only, closed-registry projection of the twelve source fact families consumed by supported
         PostgreSQL fork planning. This table is not a general temporal database and has no trigger,
         migration, compatibility, or arbitrary-history API.
       ddl: |
         CREATE TABLE run_fork_fact_revisions (
             run_id    UUID NOT NULL,
             revision  BIGINT NOT NULL,
-            family    TEXT NOT NULL CHECK (family IN ('events', 'entity_mutations', 'entity_metadata', 'event_deliveries', 'event_receipts', 'dead_letters', 'timers', 'agent_sessions', 'agent_turns', 'agent_conversation_audits', 'reply_contexts')),
+            family    TEXT NOT NULL CHECK (family IN ('events', 'entity_mutations', 'entity_metadata', 'event_deliveries', 'committed_replay_scopes', 'event_receipts', 'dead_letters', 'timers', 'agent_sessions', 'agent_turns', 'agent_conversation_audits', 'reply_contexts')),
             fact_key  TEXT NOT NULL CHECK (fact_key <> ''),
             fact      JSONB NOT NULL,
             present   BOOLEAN NOT NULL DEFAULT TRUE,
@@ -12169,27 +12204,110 @@ platform_tables:
       ddl: "CREATE TABLE run_fork_selected_contract_route_recoveries (\n    recovery_id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    fork_run_id                    UUID NOT NULL REFERENCES runs(run_id),\n    source_run_id                  UUID NOT NULL REFERENCES runs(run_id),\n    fork_event_id                  UUID NOT NULL REFERENCES events(event_id),\n    owner                          TEXT NOT NULL,\n    runtime_recovery_owner         TEXT NOT NULL,\n    mode                           TEXT NOT NULL CHECK (mode IN ('selected_contracts', 'bundle_hash')),\n    contracts_root                 TEXT,\n    bundle_hash                    TEXT CHECK (bundle_hash IS NULL OR bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),\n    workflow_name                  TEXT NOT NULL,\n    workflow_version               TEXT NOT NULL,\n    route_topology_owner           TEXT NOT NULL,\n    dynamic_topology_owner         TEXT,\n    recipient_planning_owner       TEXT NOT NULL,\n    frontier_evidence_fingerprint  TEXT NOT NULL,\n    route_topology_fingerprint     TEXT NOT NULL,\n    recipient_planning_fingerprint TEXT NOT NULL,\n    static_route_event_count       INTEGER NOT NULL DEFAULT 0,\n    dynamic_topology_proof_count   INTEGER NOT NULL DEFAULT 0,\n    recipient_plan_event_count     INTEGER NOT NULL DEFAULT 0,\n    route_topology                 JSONB NOT NULL,\n    recipient_planning             JSONB NOT NULL,\n    created_at                     TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((mode = 'selected_contracts' AND NULLIF(TRIM(COALESCE(contracts_root, '')), '') IS NOT NULL AND NULLIF(TRIM(COALESCE(bundle_hash, '')), '') IS NULL) OR (mode = 'bundle_hash' AND NULLIF(TRIM(COALESCE(contracts_root, '')), '') IS NULL AND bundle_hash IS NOT NULL)),\n    UNIQUE (fork_run_id),\n    INDEX idx_run_fork_selected_contract_route_recoveries_source (source_run_id, fork_event_id),\n    INDEX idx_run_fork_selected_contract_route_recoveries_owner (owner, runtime_recovery_owner)\n);"
     event_deliveries:
       description: >-
-        Tracks delivery of events to subscribers (nodes and agents). One row per event x subscriber. run_id inherited
-        from the parent event for run-scoped queries. delivery_target_route stores the concrete target_set member assigned
-        to this subscriber when fan-out routing materializes multiple target identities. delivery_context stores opaque
-        platform-only route-scoped continuation references and is never part of the business event envelope.
-        delivery_payload_projection stores receiver-owned synthetic instance-key carries for exactly one concrete route;
-        it never duplicates payload-owned carries or mutates the journal event payload. status is the canonical lifecycle
-        owner for both agent and node deliveries: pending means queued/not started; in_progress means the delivery has been
-        claimed or handler execution has started; delivered means successfully settled; failed means a retry-visible
-        handler/dispatch failure; dead_letter means terminal failure. Agent and system-node execution paths must mark
-        in_progress before handler execution, must not execute from missing delivery authority, and must not settle handler
-        failure as delivered.
-      ddl: "CREATE TABLE event_deliveries (\n    delivery_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id\
-        \            UUID REFERENCES runs(run_id),\n    event_id          UUID NOT NULL REFERENCES events(event_id),\n\
-        \    subscriber_type   TEXT NOT NULL CHECK (subscriber_type IN ('node', 'agent')),\n    subscriber_id     TEXT NOT\
-        \ NULL,\n    delivery_target_route JSONB NOT NULL DEFAULT '{}',\n    delivery_context JSONB NOT NULL DEFAULT '{}',\n    delivery_payload_projection JSONB NOT NULL DEFAULT '{}',\n    status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'delivered',\
-        \ 'failed', 'dead_letter')),\n    retry_count       INTEGER NOT NULL DEFAULT 0,\n    reason_code       TEXT,\n\
-        \    failure           JSONB,\n    active_session_id UUID,\n    started_at        TIMESTAMPTZ,\n    delivered_at\
-        \      TIMESTAMPTZ,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_deliveries_run (run_id,\
-        \ status) WHERE run_id IS NOT NULL,\n    INDEX idx_deliveries_status (status, created_at),\n    INDEX idx_deliveries_event\
-        \ (event_id),\n    INDEX idx_deliveries_active_session (active_session_id) WHERE active_session_id IS NOT NULL\n\
-        );"
+        Canonical executable event-delivery obligation for agents and system nodes. One row exists per immutable event
+        and complete normalized DeliveryRoute identity, including subscriber, target, reply context, and payload projection.
+        route_identity is produced only by events.DeliveryRoute and is unique per event. max_retries is structural: agent
+        obligations permit one retry and node obligations permit three retries. next_eligible_at is persisted selection
+        truth. in_progress always carries one random claim token, monotonic claim version, and lease expiry; every mutation
+        after claim requires that exact opaque capability. While an agent or node handler executes, the owner renews that
+        exact token/version and atomically extends both claim_expires_at and its open attempt lease using database time.
+        Parent terminalization increments the fence and clears claim
+        facts so late writers cannot resurrect work. Existing selected stores are unsupported; there is no migration or
+        compatibility interpretation.
+      ddl: |
+        CREATE TABLE event_deliveries (
+            delivery_id       UUID PRIMARY KEY,
+            run_id            UUID REFERENCES runs(run_id),
+            event_id          UUID NOT NULL REFERENCES events(event_id),
+            route_identity    TEXT NOT NULL CHECK (route_identity ~ '^delivery-route-v1:sha256:[0-9a-f]{64}$'),
+            subscriber_type   TEXT NOT NULL CHECK (subscriber_type IN ('node', 'agent')),
+            subscriber_id     TEXT NOT NULL CHECK (NULLIF(TRIM(subscriber_id), '') IS NOT NULL),
+            delivery_target_route JSONB NOT NULL,
+            delivery_context JSONB NOT NULL,
+            delivery_payload_projection JSONB NOT NULL,
+            status            TEXT NOT NULL CHECK (status IN ('pending', 'in_progress', 'delivered', 'failed', 'dead_letter')),
+            retry_count       INTEGER NOT NULL CHECK (retry_count >= 0),
+            max_retries       INTEGER NOT NULL CHECK ((subscriber_type = 'agent' AND max_retries = 1) OR (subscriber_type = 'node' AND max_retries = 3)),
+            next_eligible_at  TIMESTAMPTZ,
+            claim_token       UUID,
+            claim_version     BIGINT NOT NULL CHECK (claim_version >= 0),
+            claim_expires_at  TIMESTAMPTZ,
+            active_session_id UUID,
+            reason_code       TEXT,
+            failure           JSONB,
+            started_at        TIMESTAMPTZ,
+            settled_at        TIMESTAMPTZ,
+            created_at        TIMESTAMPTZ NOT NULL,
+            updated_at        TIMESTAMPTZ NOT NULL,
+            UNIQUE (event_id, route_identity),
+            CHECK (retry_count <= max_retries),
+            CHECK ((status = 'pending' AND next_eligible_at IS NOT NULL AND claim_token IS NULL AND claim_expires_at IS NULL AND active_session_id IS NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'in_progress' AND next_eligible_at IS NULL AND claim_token IS NOT NULL AND claim_version > 0 AND claim_expires_at IS NOT NULL AND started_at IS NOT NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'failed' AND retry_count > 0 AND next_eligible_at IS NOT NULL AND claim_token IS NULL AND claim_expires_at IS NULL AND active_session_id IS NULL AND settled_at IS NULL AND failure IS NOT NULL) OR (status = 'delivered' AND next_eligible_at IS NULL AND claim_token IS NULL AND claim_expires_at IS NULL AND active_session_id IS NULL AND settled_at IS NOT NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'dead_letter' AND next_eligible_at IS NULL AND claim_token IS NULL AND claim_expires_at IS NULL AND active_session_id IS NULL AND settled_at IS NOT NULL AND NULLIF(TRIM(COALESCE(reason_code, '')), '') IS NOT NULL)),
+            CHECK (active_session_id IS NULL OR (status = 'in_progress' AND subscriber_type = 'agent')),
+            CHECK (claim_expires_at IS NULL OR claim_expires_at > started_at),
+            CHECK (updated_at >= created_at),
+            INDEX idx_deliveries_run (run_id, status) WHERE run_id IS NOT NULL,
+            INDEX idx_deliveries_eligibility (subscriber_type, subscriber_id, status, next_eligible_at),
+            INDEX idx_deliveries_claim_expiry (claim_expires_at) WHERE status = 'in_progress',
+            INDEX idx_deliveries_event (event_id)
+        );
+    event_delivery_attempts:
+      description: >-
+        Immutable-fence execution attempt ledger for exact executable deliveries. Each claim version has one random token
+        and bounded lease. outcome remains null only while the claim is current; exact claim renewal extends this row and its
+        obligation atomically, and reclaim records lease_expired before a new version is minted. Attempt rows are evidence and
+        never independently select or mutate delivery work.
+      ddl: |
+        CREATE TABLE event_delivery_attempts (
+            delivery_id      UUID NOT NULL REFERENCES event_deliveries(delivery_id),
+            claim_version    BIGINT NOT NULL CHECK (claim_version > 0),
+            claim_token      UUID NOT NULL UNIQUE,
+            started_at       TIMESTAMPTZ NOT NULL,
+            lease_expires_at TIMESTAMPTZ NOT NULL,
+            outcome          TEXT CHECK (outcome IS NULL OR outcome IN ('delivered', 'retry_scheduled', 'dead_letter', 'lease_expired', 'terminalized')),
+            reason_code      TEXT,
+            failure          JSONB,
+            side_effects     JSONB NOT NULL DEFAULT '[]',
+            duration_ms      BIGINT CHECK (duration_ms IS NULL OR duration_ms >= 0),
+            completed_at     TIMESTAMPTZ,
+            PRIMARY KEY (delivery_id, claim_version),
+            CHECK (lease_expires_at > started_at),
+            CHECK ((outcome IS NULL AND completed_at IS NULL) OR (outcome IS NOT NULL AND completed_at IS NOT NULL)),
+            CHECK (completed_at IS NULL OR completed_at >= started_at),
+            INDEX idx_delivery_attempts_open (lease_expires_at) WHERE outcome IS NULL
+        );
+    event_delivery_outcomes:
+      description: >-
+        Exact delivery-linked settlement evidence. Unlike platform pipeline receipts, these rows are keyed by delivery_id
+        and claim_version, so route siblings for one event/subscriber retain independent outcomes. The lifecycle owner writes
+        the delivery transition, attempt completion, outcome, author activity, and required diagnostics atomically.
+      ddl: |
+        CREATE TABLE event_delivery_outcomes (
+            delivery_id   UUID NOT NULL,
+            claim_version BIGINT NOT NULL,
+            outcome       TEXT NOT NULL CHECK (outcome IN ('delivered', 'retry_scheduled', 'dead_letter', 'terminalized')),
+            reason_code   TEXT,
+            failure       JSONB,
+            side_effects  JSONB NOT NULL DEFAULT '[]',
+            duration_ms   BIGINT NOT NULL CHECK (duration_ms >= 0),
+            settled_at    TIMESTAMPTZ NOT NULL,
+            PRIMARY KEY (delivery_id, claim_version),
+            FOREIGN KEY (delivery_id) REFERENCES event_deliveries(delivery_id),
+            INDEX idx_delivery_outcomes_delivery (delivery_id, settled_at)
+        );
+    committed_replay_scopes:
+      description: >-
+        Event-level committed replay participation fact owned by #2106. It is deliberately separate from executable
+        event_deliveries; no marker subscriber, discriminator, or legacy delivery interpretation exists.
+      ddl: |
+        CREATE TABLE committed_replay_scopes (
+            event_id   UUID PRIMARY KEY REFERENCES events(event_id),
+            run_id     UUID REFERENCES runs(run_id),
+            scope      TEXT NOT NULL CHECK (scope IN ('direct', 'subscribed', 'direct_and_subscribed')),
+            created_at TIMESTAMPTZ NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL,
+            CHECK (updated_at >= created_at),
+            INDEX idx_committed_replay_scopes_run (run_id, event_id) WHERE run_id IS NOT NULL
+        );
     run_fork_delivery_event_replays:
       description: Source-to-fork lineage table for the supported fixed-event fork delivery/event replay primitive. The fork
         run gets fresh fork-local event_id and delivery_id values; this table records which source event/delivery facts
@@ -12214,14 +12332,12 @@ platform_tables:
             INDEX idx_run_fork_replays_source (source_run_id, source_event_id)
         );
     event_receipts:
-      description: Handler completion acknowledgement. One receipt per event × subscriber. Replaces both pipeline_receipts
-        and system_node_ledger. entity_id nullable for global events. subscriber_type + subscriber_id identify the handler
-        generically (node, agent, or platform subsystem). idempotency_key used by system_node_runner for replay dedup — if
-        a receipt exists for this key, the handler skips re-execution. duration_ms tracks handler execution time for observability.
-        side_effects records emitted events and state changes for flight recorder.
+      description: Event-level platform pipeline acknowledgement only. Executable agent/node settlement belongs exclusively
+        to event_delivery_outcomes and cannot be represented here. This table is not a delivery eligibility, claim, retry,
+        terminality, or idempotency owner.
       ddl: "CREATE TABLE event_receipts (\n    receipt_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    event_id\
         \          UUID NOT NULL REFERENCES events(event_id),\n    subscriber_type   TEXT NOT NULL CHECK (subscriber_type\
-        \ IN ('node', 'agent', 'platform')),\n    subscriber_id     TEXT NOT NULL,\n    entity_id         UUID,\n    flow_instance\
+        \ = 'platform'),\n    subscriber_id     TEXT NOT NULL,\n    entity_id         UUID,\n    flow_instance\
         \     TEXT,\n    outcome           TEXT NOT NULL CHECK (outcome IN ('success', 'reject', 'discard', 'kill', 'escalate',\
         \ 'dead_letter', 'terminal_reject', 'waiting', 'fanned_out', 'no_op')),\n    reason_code       TEXT,\n    state_before      TEXT,\n    state_after       TEXT,\n    failure           JSONB,\n    side_effects      JSONB\
         \ NOT NULL DEFAULT '{}',\n    duration_ms       INTEGER,\n    idempotency_key   TEXT,\n    processed_at      TIMESTAMPTZ\
@@ -13322,11 +13438,11 @@ run_model:
       delivery_event_replay_ready. Activation/store MUST consume owner-authorized executable work from
       runtime.run_fork.historical_replay_execution and MUST NOT reselect replayable source deliveries directly from
       RunForkPlan or store.run_fork.replay_resume_admission. The store delivery-event replay primitive uses fresh fork
-      event IDs, a direct committed replay-scope marker, and run_fork_delivery_event_replays lineage rows. It fails closed with no partial mutation if the source run advanced
+      event IDs, a direct committed replay-scope row, and run_fork_delivery_event_replays lineage rows. It fails closed with no partial mutation if the source run advanced
       after the materialized source revision, if the fork already has events, deliveries, sessions, or turns, or if node, in-progress,
       failed, dead-letter, timer, route, session, active-turn, replay, or contract-swap facts
-      would require unsupported historical replay. Source committed replay-scope marker facts remain fail-closed unless
-      an approved selected-contract marker policy classifies markers present in the selected revision as lineage/no-action evidence only.
+      would require unsupported historical replay. Source committed replay-scope facts remain fail-closed unless
+      an approved selected-contract scope policy classifies facts present in the selected revision as lineage/no-action evidence only.
       Activation does not copy source event IDs, replay delivered/completed
       or receipt-only facts, reconstruct timer, route, session, turn, or contract rows, or recompute recipients from
       current subscriptions.'
@@ -13414,7 +13530,7 @@ run_model:
       historical source-run facts as reconstruct, lineage-only, fail-closed blockers, split siblings, or
       no-historical-action. It also identifies the first supported delivery_event_replay_ready subset: pending
       unstarted source agent deliveries whose fork-local event/delivery rows can be created under the fork run_id with
-      explicit source lineage and a direct committed replay-scope marker for the existing persisted delivery/recovery
+      explicit source lineage and a direct committed replay-scope row for the existing persisted delivery/recovery
       consumer. It does not authorize source event_id copying, node delivery replay, delivered/completed redelivery,
       receipt-only redelivery, session/turn/timer/route reconstruction, contract swap execution, or runtime-wide replay
       mutation. There is no separately promised arbitrary source-run resume lane: unsupported fact families remain
@@ -13490,7 +13606,7 @@ run_model:
       to classify exactly one narrow selected-revision active delivery/session coupling case as lineage/no-action and branch-divergence
       evidence: the delivery fact present in the selected revision is in progress for the source event referenced by the selected event
       source_event_id, the selected event was produced by the same agent subscriber, and that revision has no
-      active_session_id, receipt, receipt outcome, or delivered_at. The policy does not
+      active_session_id, receipt, receipt outcome, or settled_at. The policy does not
       authorize copying source delivery rows, sessions, turns, audits, provider session IDs, transcripts, receipts,
       outcomes, or conversation audits into the fork and does not let a later source terminal outcome suppress or decide
       selected fork execution. Unrelated in-flight deliveries, active_session_id coupling, partial receipt/outcome state,
@@ -13523,17 +13639,17 @@ run_model:
       truth, or used as selected-fork suppressors. Fork-local conversation rows before the selected execution owner
       creates them remain fail-closed. Post-revision source session, turn, and conversation-audit facts are outside this
       selected-revision lineage owner and may be classified only by the selected-contract source-advanced conversation-history
-      policy. Committed replay-scope marker policy is a split sibling.'
-    selected_contract_committed_replay_scope_marker_policy: 'Mutating selected-contract fixed-event execution may
+      policy. Committed replay-scope policy is a split sibling.'
+    selected_contract_committed_replay_scope_policy: 'Mutating selected-contract fixed-event execution may
       consume runtime.run_fork.historical_replay_execution.selected_contract_committed_replay_scope_marker_policy to
-      classify source committed replay-scope marker delivery facts present in the selected revision as lineage/no-action evidence only. This policy
+      classify source committed replay-scope facts present in the selected revision as lineage/no-action evidence only. This policy
       is selected-contract execution only and is not same-run replay recovery, fork-local delivery-event replay recovery,
-      or generic historical replay. The delivery fact and its source event lineage must be committed in the selected
-      revision projection. A marker delivery committed after that revision is source advancement and MUST NOT be admitted
-      by the underlying event''s occurrence timestamp or position. Source marker rows MUST NOT be copied into the fork, reused as
+      or generic historical replay. The scope fact and its source event lineage must be committed in the selected
+      revision projection. A scope row committed after that revision is source advancement and MUST NOT be admitted
+      by the underlying event''s occurrence timestamp or position. Source scope rows MUST NOT be copied into the fork, reused as
       fork-local recovery proof, treated as executable fork work, or used as selected-fork suppressors. Fork-local
       committed replay-scope truth must be freshly written under the fork run_id by selected-contract execution or
-      approved fork-local delivery-event replay owners. Source marker facts absent from the selected revision
+      approved fork-local delivery-event replay owners. Source scope facts absent from the selected revision
       remain fail-closed unless a separate approved source-advanced/reconstruction owner changes that policy.'
     selected_contract_diagnostic_platform_outcome_policy: 'Mutating selected-contract fixed-event execution may consume
       runtime.run_fork.contract_frontier_admission.selected_contract_diagnostic_platform_outcome_policy to classify
@@ -13725,9 +13841,9 @@ run_model:
       changing PlanRunFork membership or readiness. Source events are
       payload/lineage inputs only;
       source event_deliveries, recipients, receipts, dead letters, retry/idempotency state, and post-fork outcomes MUST
-      NOT become executable fork work or fork suppressors. Source committed replay-scope marker rows present in the selected revision may be
-      consumed only as lineage/no-action evidence by the selected-contract marker policy; fork-local recovery must use
-      fresh fork-run marker rows. Source outcome facts present in the selected revision for spec-declared diagnostic/non-routed platform
+      NOT become executable fork work or fork suppressors. Source committed replay-scope rows present in the selected revision may be
+      consumed only as lineage/no-action evidence by the selected-contract scope policy; fork-local recovery must use
+      fresh fork-run scope rows. Source outcome facts present in the selected revision for spec-declared diagnostic/non-routed platform
       events may be consumed only as lineage/no-action evidence by the selected-contract diagnostic platform outcome
       policy. Route persistence, timer reconstruction, session/turn/audit
       reconstruction, non-agent delivery replay, runtime restart recovery, contract-swap boot/resume beyond selected
@@ -13807,7 +13923,7 @@ run_model:
     historical_replay_delivery_event_replay_execution: 'The first mutating historical replay execution child is owned by
       runtime.run_fork.historical_replay_execution and is limited to the already-admitted
       delivery_event_replay_ready primitive. It consumes runtime.run_fork.historical_replay_execution_admission before
-      any source freeze, fork activation, event row creation, delivery row creation, committed replay-scope marker, or
+      any source freeze, fork activation, event row creation, delivery row creation, committed replay-scope row, or
       lineage write. It validates the complete historical fact matrix, keeps unsupported families as explicit blockers
       or split siblings, and emits owner-authorized delivery_event_replay_ready work identities. It may delegate physical
       fork-local row writes to store.run_fork.delivery_event_replay, but that store primitive is not the semantic
@@ -13823,7 +13939,7 @@ run_model:
     historical_replay_delivery_event_replay_recovery: 'Restart and sweeper recovery for the admitted
       delivery_event_replay_ready primitive is owned by
       runtime.run_fork.historical_replay_execution.delivery_event_replay_ready_recovery. It consumes the fresh
-      fork-local event rows, fork-local event_deliveries rows, direct committed replay-scope marker rows, and
+      fork-local event rows, fork-local event_deliveries rows, direct committed replay-scope rows, and
       run_fork_delivery_event_replays lineage produced by runtime.run_fork.historical_replay_execution for the fork
       run_id. Startup RecoveryManager and EventBus.SweepUndispatched MUST consume the existing persisted replay owner:
       ListEventsMissingPipelineReceipt, ClaimPipelineReplay, ListEventDeliveryRecipients, LoadCommittedReplayScope,
@@ -13857,7 +13973,7 @@ run_model:
       3b_activate_materialized_fork: 'For an activation fork, consume a previously materialized fork run.
         Revalidate the original selected revision against current source-run facts, require no source advancement and
         no unsupported replay/timer/route/session/turn/contract-swap facts, optionally create fork-local event/delivery
-        rows and direct committed replay-scope markers for the delivery_event_replay_ready subset only through
+        rows and direct committed replay-scope rows for the delivery_event_replay_ready subset only through
         runtime.run_fork.historical_replay_execution consuming historical replay execution admission and owner-authorized
         executable delivery work, then atomically mark the source run forked and the fork run running. Activation/store
         does not authorize replay directly from replay_resume_admission or RunForkPlan pending rows. Future runtime work uses the fork
@@ -13991,9 +14107,9 @@ run_model:
         parents or siblings. Source session/turn/audit facts present in the selected revision may be admitted only as lineage/no-action
         evidence by the separate selected-contract session/turn/audit lineage policy. Post-revision source session/turn/audit
         facts may be admitted only as source-advanced branch-divergence lineage/no-action evidence by the separate
-        selected-contract source-advanced conversation-history policy. Source committed replay-scope marker facts present in the selected revision
+        selected-contract source-advanced conversation-history policy. Source committed replay-scope facts present in the selected revision
         rows may be admitted only as lineage/no-action evidence by the separate selected-contract committed replay-scope
-        marker policy. Same-source in-progress source delivery coupling at the selected-event emission boundary may be
+        scope policy. Same-source in-progress source delivery coupling at the selected-event emission boundary may be
         admitted only by the separate selected-contract active source delivery conversation-coupling policy.'
       3h1_selected_contract_session_turn_audit_lineage_policy: 'For selected-contract fixed-event execution,
         runtime.run_fork.historical_replay_execution.selected_contract_session_turn_audit_lineage_policy consumes the
@@ -14006,18 +14122,18 @@ run_model:
         turns, and audits may appear only through normal selected fork runtime execution under the fork run_id. Post-revision
         source conversation facts are outside this selected-revision owner and may be admitted only by
         runtime.run_fork.selected_contract_execution.source_advanced_conversation_history_policy. This owner does not
-        close full session reconstruction, committed replay-scope marker policy, timers, routes, non-agent replay,
+        close full session reconstruction, committed replay-scope policy, timers, routes, non-agent replay,
         restart recovery, contract-swap boot/resume, or operator surfaces.'
-      3h2_selected_contract_committed_replay_scope_marker_policy: 'For selected-contract fixed-event execution,
+      3h2_selected_contract_committed_replay_scope_policy: 'For selected-contract fixed-event execution,
         runtime.run_fork.historical_replay_execution.selected_contract_committed_replay_scope_marker_policy consumes the
         canonical replay_resume_admission committed_replay_scope fact and may demote source committed
-        replay-scope marker rows from fail-closed blockers to lineage/no-action evidence only. Source marker rows are
+        replay-scope facts from fail-closed blockers to lineage/no-action evidence only. Source committed_replay_scopes rows are
         same-run proof only: they are not executable fork work, not fork-local recovery truth, not copied into the fork,
-        and not selected-fork suppressors. The marker delivery fact must itself be present in the selected revision;
-        a later marker write is source advancement and cannot inherit the underlying event''s earlier revision or
+        and not selected-fork suppressors. The committed replay-scope fact must itself be present in the selected revision;
+        a later scope write is source advancement and cannot inherit the underlying event''s earlier revision or
         occurrence time. Fork-local replay/recovery
         proof must be newly written under the fork run_id by selected-contract execution or approved fork-local
-        delivery-event replay owners. Source committed replay-scope marker facts absent from the selected revision
+        delivery-event replay owners. Source committed replay-scope facts absent from the selected revision
         remain fail-closed unless a separate approved owner changes that policy. This owner does not close same-run
         recovery, fork-local delivery-event replay recovery, sessions, turns, audits, timers, routes, non-agent replay,
         restart recovery, contract-swap boot/resume, or operator surfaces.'
@@ -14028,7 +14144,7 @@ run_model:
         part of selected-contract frontier admission before route topology, recipient planning, and selected execution.
         Diagnostic platform source facts are not executable fork work, route truth, selected recipients, copied source
         rows, source outcome suppressors, or operator-surface truth. Non-diagnostic platform/node/system outcome facts,
-        generic non-agent replay, delivery-event replay, committed replay-scope marker policy, sessions, turns, audits,
+        generic non-agent replay, delivery-event replay, committed replay-scope policy, sessions, turns, audits,
         timers, routes, retry/idempotency, follow-up policy, restart recovery, contract-swap boot/resume, and operator
         surfaces remain separate fail-closed or split siblings unless independently approved.'
       3h4_selected_contract_active_source_delivery_conversation_coupling_policy: 'For selected-contract fixed-event
@@ -14036,7 +14152,7 @@ run_model:
         consumes replay_resume_admission delivery_in_progress_history evidence and selected-event source-event causality to
         admit only the same-source delivery selected-event emission case: the source delivery is in progress in the selected revision, belongs to
         the selected event source_event_id, and its agent subscriber produced the selected event, with no
-        active_session_id, receipt, receipt outcome, or delivered_at in that revision. This owner may demote that delivery fact from a
+        active_session_id, receipt, receipt outcome, or settled_at in that revision. This owner may demote that delivery fact from a
         generic delivery_history_unproven blocker to lineage/no-action evidence and may allow the session/turn/audit
         lineage policy to classify source conversation rows present in the selected revision. It records the admitted case as selected-contract
         branch-divergence evidence. It must not copy source delivery/session/turn/audit rows, use source terminal outcomes
@@ -14085,7 +14201,7 @@ run_model:
         recovery and sweeper recovery consume the fork-local rows created by
         runtime.run_fork.historical_replay_execution through the existing persisted replay owner. The recovery queue is
         the fork event missing its platform pipeline receipt, serialized by ClaimPipelineReplay; recipients come from
-        fork-local event_deliveries; direct replay scope comes from the fork-local committed replay-scope marker. Source
+        fork-local event_deliveries; direct replay scope comes from the fork-local committed_replay_scopes row. Source
         rows and source outcomes are lineage/proof only and never suppress fork-local recovery. This is a restart
         durability child only; timers, routes, sessions, turns, audits, non-agent replay, contract-swap boot/resume,
         runtime-wide restart recovery, and API/UI/dashboard surfaces remain split under #564/#549/#618.'
@@ -14239,7 +14355,7 @@ agent_identity_model:
     historical_immutable_records:
       - agent_turns.agent_id
       - agent_conversation_audits.agent_id
-      - event_deliveries and event_receipts subscriber_id rows already written
+      - event_deliveries subscriber_id rows already written
       - spend_ledger.agent_id
       - mailbox from_agent and provenance fields
       - runtime logs, dead letters, source_agent_id, and audit payload identity fields
@@ -15021,7 +15137,6 @@ platform_events:
         produced_by_type: platform
         locations:
         - internal/runtime/pipeline/coordinator.go#publish
-        - internal/runtime/pipeline/node_system_runner.go
       routing_class: event_loop_routable
       note: Full payload schema defined in engine.error_model. Not duplicated here.
     platform.runtime_log:
@@ -21559,8 +21674,9 @@ cli_specification:
           means the delivery is still eligible for normal runtime retry under the delivery retry policy. Delivered, exhausted,
           unrelated, or terminal-run deliveries remain untouched.
         receipt_scope: >
-          The owner writes matching agent/node event receipts and platform pipeline receipts with `outcome=dead_letter` and
-          `reason_code=server_restart_abandon` so missing-pipeline-receipt recovery cannot resurrect abandoned work.
+          The owner writes exact delivery terminalization outcomes through the executable-delivery owner and matching platform
+          pipeline receipts with `outcome=dead_letter` and `reason_code=server_restart_abandon` so neither delivery reclaim nor
+          missing-pipeline-receipt recovery can resurrect abandoned work. Agent/node outcomes never enter `event_receipts`.
         late_writer_rule: >
           EventBus, AgentManager, node pipeline, and pipeline-receipt writers MUST treat `server_restart_abandon` as a terminal
           active-run quiescence reason. They MUST NOT overwrite the delivery/receipt reason, reclaim the delivery, or requeue
@@ -24616,7 +24732,7 @@ api_specification:
           active_deliveries:
             type: integer
             minimum: 0
-            description: Active delivery rows for the run, excluding committed replay-scope marker rows.
+            description: Active executable delivery obligations for the run from the canonical delivery owner. Committed replay scope is a separate table and requires no exclusion.
           unsettled_pipeline_events:
             type: integer
             minimum: 0
@@ -25796,7 +25912,7 @@ api_specification:
             description: Canonical event_deliveries.started_at when handler execution has started.
           delivery_delivered_at:
             $ref: '#/components/schemas/Timestamp'
-            description: Canonical event_deliveries.delivered_at when the delivery was settled.
+            description: Canonical event_deliveries.settled_at when the delivery reached a terminal state. The public field name is presentation vocabulary, not a second persisted owner.
       AgentDeliveryLifecycleList:
         type: object
         additionalProperties: false
@@ -26142,7 +26258,7 @@ api_specification:
             minimum: 0
           occurred_at:
             $ref: '#/components/schemas/Timestamp'
-            description: Canonical delivery occurrence watermark, currently COALESCE(event_deliveries.delivered_at, event_deliveries.created_at).
+            description: Canonical delivery occurrence watermark, currently COALESCE(event_deliveries.settled_at, event_deliveries.updated_at, event_deliveries.created_at).
       AgentDeadLetterDelivery:
         type: object
         additionalProperties: false
@@ -26179,7 +26295,7 @@ api_specification:
             minimum: 0
           occurred_at:
             $ref: '#/components/schemas/Timestamp'
-            description: Canonical delivery occurrence watermark, currently COALESCE(event_deliveries.delivered_at, event_deliveries.created_at).
+            description: Canonical delivery occurrence watermark, currently COALESCE(event_deliveries.settled_at, event_deliveries.updated_at, event_deliveries.created_at).
           dead_letter_records:
             type: array
             description: Event-scoped dead-letter records reconciled to this terminal agent delivery through the original event id. A terminal dead-letter delivery without at least one matching record is malformed owner data and fails closed.
@@ -26843,6 +26959,7 @@ api_specification:
             $ref: '#/components/schemas/Timestamp'
           delivery_delivered_at:
             $ref: '#/components/schemas/Timestamp'
+            description: Canonical event_deliveries.settled_at projected under the public presentation field name.
           session_id:
             $ref: '#/components/schemas/OpaqueId'
           session_kind:
@@ -29395,7 +29512,7 @@ api_specification:
 
         Detail rows are ordered by the canonical delivery occurrence watermark
         DESC, then delivery_id DESC. The occurrence watermark is currently
-        COALESCE(event_deliveries.delivered_at, event_deliveries.created_at).
+        COALESCE(event_deliveries.settled_at, event_deliveries.updated_at, event_deliveries.created_at).
         failure_cursor and dead_letter_cursor are independent opaque cursors
         over that ordering. failures_24h and dead_letters_24h are rolling
         24-hour counts over the same occurrence watermark. Detail lists return

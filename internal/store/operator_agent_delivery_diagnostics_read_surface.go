@@ -2,14 +2,15 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -107,36 +108,36 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryDiagnost
 	}
 
 	opts = defaultOperatorAgentDeliveryDiagnosticsOptions(opts)
-	summary, err := r.loadAgentDeliveryDiagnosticsSummary(ctx, agentID)
+	reader, ok := r.owner.(interface {
+		deliverySnapshotsForAgent(context.Context, string, time.Time) ([]runtimedelivery.Snapshot, error)
+	})
+	if !ok {
+		return OperatorAgentDeliveryDiagnostics{}, fmt.Errorf("operator agent delivery diagnostics requires canonical delivery snapshots")
+	}
+	snapshots, err := reader.deliverySnapshotsForAgent(ctx, agentID, time.Unix(0, 0).UTC())
 	if err != nil {
 		return OperatorAgentDeliveryDiagnostics{}, err
 	}
-	failures, failuresNext, err := r.listAgentDeliveryFailures(ctx, agentID, opts.FailureLimit, opts.FailureCursor)
-	if err != nil {
-		return OperatorAgentDeliveryDiagnostics{}, err
-	}
-	if err := r.assertAgentDeadLetterDeliveriesHaveRecords(ctx, agentID); err != nil {
-		return OperatorAgentDeliveryDiagnostics{}, err
-	}
-	deadLetters, deadLettersNext, err := r.listAgentDeadLetterDeliveries(ctx, agentID, opts.DeadLetterLimit, opts.DeadLetterCursor)
-	if err != nil {
-		return OperatorAgentDeliveryDiagnostics{}, err
-	}
-	result := OperatorAgentDeliveryDiagnostics{
-		AgentID:               agentID,
-		Summary:               summary,
-		Failures:              failures,
-		FailuresNextCursor:    failuresNext,
-		DeadLetters:           deadLetters,
-		DeadLettersNextCursor: deadLettersNext,
-	}
-	if result.Failures == nil {
-		result.Failures = []OperatorAgentDeliveryFailure{}
-	}
-	if result.DeadLetters == nil {
-		result.DeadLetters = []OperatorAgentDeadLetterDelivery{}
-	}
-	return result, nil
+	observability := NewOperatorObservabilityReadSurface(r.db, r.owner)
+	return buildAgentDeliveryDiagnostics(agentID, snapshots, opts,
+		func(eventID string) (deliveryLifecycleEventMetadata, error) {
+			record, found, err := loadPostgresEventIdentity(ctx, r.db, eventID)
+			if err != nil {
+				return deliveryLifecycleEventMetadata{}, err
+			}
+			if !found {
+				return deliveryLifecycleEventMetadata{}, fmt.Errorf("delivery event %s not found", eventID)
+			}
+			admitted, err := decodeEventRecord(record)
+			if err != nil {
+				return deliveryLifecycleEventMetadata{}, err
+			}
+			event := admitted.Event()
+			return deliveryLifecycleEventMetadata{EventName: string(event.Type()), RunID: event.RunID(), EntityID: event.EntityID()}, nil
+		},
+		func(eventID string) ([]OperatorDeadLetterRecord, error) {
+			return observability.loadOperatorEventDeadLetters(ctx, eventID)
+		})
 }
 
 func defaultOperatorAgentDeliveryDiagnosticsOptions(opts OperatorAgentDeliveryDiagnosticsOptions) OperatorAgentDeliveryDiagnosticsOptions {
@@ -182,217 +183,6 @@ func (r *OperatorAgentConversationReadSurface) ensureAgentDeliveryDiagnosticsAge
 	return nil
 }
 
-func (r *OperatorAgentConversationReadSurface) loadAgentDeliveryDiagnosticsSummary(ctx context.Context, agentID string) (OperatorAgentDeliveryDiagnosticsSummary, error) {
-	var summary OperatorAgentDeliveryDiagnosticsSummary
-	if err := r.db.QueryRowContext(ctx, `
-		SELECT
-			COUNT(*) FILTER (WHERE status = 'failed')::int,
-			COUNT(*) FILTER (WHERE status = 'dead_letter')::int
-		FROM event_deliveries
-		WHERE subscriber_type = 'agent'
-		  AND subscriber_id = $1
-		  AND COALESCE(delivered_at, created_at) >= now() - interval '24 hours'
-	`, agentID).Scan(&summary.Failures24h, &summary.DeadLetters24h); err != nil {
-		return OperatorAgentDeliveryDiagnosticsSummary{}, fmt.Errorf("load agent delivery diagnostics summary: %w", err)
-	}
-	return summary, nil
-}
-
-func (r *OperatorAgentConversationReadSurface) listAgentDeliveryFailures(ctx context.Context, agentID string, limit int, cursorRaw string) ([]OperatorAgentDeliveryFailure, string, error) {
-	cursorClause, args, err := agentDeliveryDiagnosticsCursorClause(agentID, cursorRaw, "agent.delivery_diagnostics.failures", "failure_cursor")
-	if err != nil {
-		return nil, "", err
-	}
-	args = append(args, limit+1)
-	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT
-			d.delivery_id::text,
-			d.event_id::text,
-			COALESCE(e.event_name, ''),
-			COALESCE(e.run_id::text, ''),
-			COALESCE(e.entity_id::text, ''),
-			COALESCE(d.reason_code, ''),
-			COALESCE(d.failure, 'null'::jsonb),
-			COALESCE(d.retry_count, 0),
-			COALESCE(d.delivered_at, d.created_at) AS occurred_at
-		FROM event_deliveries d
-		INNER JOIN events e ON e.event_id = d.event_id
-		WHERE d.subscriber_type = 'agent'
-		  AND d.subscriber_id = $1
-		  AND d.status = 'failed'
-		  %s
-		ORDER BY occurred_at DESC, d.delivery_id::text DESC
-		LIMIT $%d
-	`, cursorClause, len(args)), args...)
-	if err != nil {
-		return nil, "", fmt.Errorf("list agent delivery failures: %w", err)
-	}
-	defer rows.Close()
-
-	out := []OperatorAgentDeliveryFailure{}
-	for rows.Next() {
-		var item OperatorAgentDeliveryFailure
-		var rawFailure []byte
-		if err := rows.Scan(
-			&item.DeliveryID,
-			&item.EventID,
-			&item.EventName,
-			&item.RunID,
-			&item.EntityID,
-			&item.ReasonCode,
-			&rawFailure,
-			&item.RetryCount,
-			&item.OccurredAt,
-		); err != nil {
-			return nil, "", fmt.Errorf("scan agent delivery failure: %w", err)
-		}
-		item.Failure, err = decodeStoredFailure(rawFailure)
-		if err != nil {
-			return nil, "", fmt.Errorf("decode agent delivery failure: %w", err)
-		}
-		item.Status = "failed"
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, "", fmt.Errorf("read agent delivery failures: %w", err)
-	}
-	nextCursor := ""
-	if len(out) > limit {
-		nextCursor = encodeAgentDeliveryDiagnosticsCursor("agent.delivery_diagnostics.failures", out[limit-1].OccurredAt, out[limit-1].DeliveryID)
-		out = out[:limit]
-	}
-	return out, nextCursor, nil
-}
-
-func (r *OperatorAgentConversationReadSurface) assertAgentDeadLetterDeliveriesHaveRecords(ctx context.Context, agentID string) error {
-	var deliveryID string
-	err := r.db.QueryRowContext(ctx, `
-		SELECT d.delivery_id::text
-		FROM event_deliveries d
-		WHERE d.subscriber_type = 'agent'
-		  AND d.subscriber_id = $1
-		  AND d.status = 'dead_letter'
-		  AND NOT EXISTS (
-		  	SELECT 1
-		  	FROM dead_letters dl
-		  	WHERE dl.original_event_id = d.event_id
-		  )
-		ORDER BY COALESCE(d.delivered_at, d.created_at) DESC, d.delivery_id::text DESC
-		LIMIT 1
-	`, agentID).Scan(&deliveryID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("check agent dead-letter delivery reconciliation: %w", err)
-	}
-	return fmt.Errorf("agent delivery diagnostics owner found dead_letter delivery %s without a dead_letters record", deliveryID)
-}
-
-func (r *OperatorAgentConversationReadSurface) listAgentDeadLetterDeliveries(ctx context.Context, agentID string, limit int, cursorRaw string) ([]OperatorAgentDeadLetterDelivery, string, error) {
-	cursorClause, args, err := agentDeliveryDiagnosticsCursorClause(agentID, cursorRaw, "agent.delivery_diagnostics.dead_letters", "dead_letter_cursor")
-	if err != nil {
-		return nil, "", err
-	}
-	args = append(args, limit+1)
-	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT
-			d.delivery_id::text,
-			d.event_id::text,
-			COALESCE(e.event_name, ''),
-			COALESCE(e.run_id::text, ''),
-			COALESCE(e.entity_id::text, ''),
-			COALESCE(d.reason_code, ''),
-			COALESCE(d.failure, 'null'::jsonb),
-			COALESCE(d.retry_count, 0),
-			COALESCE(d.delivered_at, d.created_at) AS occurred_at,
-			COALESCE(jsonb_agg(jsonb_build_object(
-				'dead_letter_id', dl.dead_letter_id::text,
-				'failure', dl.failure,
-				'retry_count', COALESCE(dl.retry_count, 0),
-				'chain_depth', COALESCE(dl.chain_depth, 0),
-				'handler_node', COALESCE(dl.handler_node, ''),
-				'created_at', dl.created_at
-			) ORDER BY dl.created_at ASC, dl.dead_letter_id::text ASC) FILTER (WHERE dl.dead_letter_id IS NOT NULL), '[]'::jsonb)
-		FROM event_deliveries d
-		INNER JOIN events e ON e.event_id = d.event_id
-		LEFT JOIN dead_letters dl ON dl.original_event_id = d.event_id
-		WHERE d.subscriber_type = 'agent'
-		  AND d.subscriber_id = $1
-		  AND d.status = 'dead_letter'
-		  %s
-		GROUP BY d.delivery_id, d.event_id, e.event_name, e.run_id, e.entity_id, d.reason_code, d.failure, d.retry_count, d.delivered_at, d.created_at
-		ORDER BY occurred_at DESC, d.delivery_id::text DESC
-		LIMIT $%d
-	`, cursorClause, len(args)), args...)
-	if err != nil {
-		return nil, "", fmt.Errorf("list agent dead-letter deliveries: %w", err)
-	}
-	defer rows.Close()
-
-	out := []OperatorAgentDeadLetterDelivery{}
-	for rows.Next() {
-		var (
-			item       OperatorAgentDeadLetterDelivery
-			rawFailure []byte
-			recordsRaw []byte
-		)
-		if err := rows.Scan(
-			&item.DeliveryID,
-			&item.EventID,
-			&item.EventName,
-			&item.RunID,
-			&item.EntityID,
-			&item.ReasonCode,
-			&rawFailure,
-			&item.RetryCount,
-			&item.OccurredAt,
-			&recordsRaw,
-		); err != nil {
-			return nil, "", fmt.Errorf("scan agent dead-letter delivery: %w", err)
-		}
-		item.Failure, err = decodeStoredFailure(rawFailure)
-		if err != nil {
-			return nil, "", fmt.Errorf("decode agent dead-letter delivery failure: %w", err)
-		}
-		item.Status = "dead_letter"
-		if err := json.Unmarshal(recordsRaw, &item.DeadLetterRecords); err != nil {
-			return nil, "", fmt.Errorf("decode agent dead-letter records: %w", err)
-		}
-		if len(item.DeadLetterRecords) == 0 {
-			return nil, "", fmt.Errorf("agent delivery diagnostics owner returned dead_letter delivery %s without a dead_letters record", item.DeliveryID)
-		}
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, "", fmt.Errorf("read agent dead-letter deliveries: %w", err)
-	}
-	nextCursor := ""
-	if len(out) > limit {
-		nextCursor = encodeAgentDeliveryDiagnosticsCursor("agent.delivery_diagnostics.dead_letters", out[limit-1].OccurredAt, out[limit-1].DeliveryID)
-		out = out[:limit]
-	}
-	return out, nextCursor, nil
-}
-
-func agentDeliveryDiagnosticsCursorClause(agentID, rawCursor, kind, field string) (string, []any, error) {
-	args := []any{agentID}
-	rawCursor = strings.TrimSpace(rawCursor)
-	if rawCursor == "" {
-		return "", args, nil
-	}
-	cursor, err := decodeAgentDeliveryDiagnosticsCursor(rawCursor, kind, field)
-	if err != nil {
-		return "", nil, err
-	}
-	occurredAt, err := time.Parse(time.RFC3339Nano, cursor.OccurredAt)
-	if err != nil || strings.TrimSpace(cursor.DeliveryID) == "" {
-		return "", nil, AgentDeliveryDiagnosticsCursorError{Field: field}
-	}
-	args = append(args, occurredAt.UTC(), strings.TrimSpace(cursor.DeliveryID))
-	return fmt.Sprintf("AND (COALESCE(d.delivered_at, d.created_at) < $%d OR (COALESCE(d.delivered_at, d.created_at) = $%d AND d.delivery_id::text < $%d))", len(args)-1, len(args)-1, len(args)), args, nil
-}
-
 func encodeAgentDeliveryDiagnosticsCursor(kind string, occurredAt time.Time, deliveryID string) string {
 	raw, _ := json.Marshal(agentDeliveryDiagnosticsCursor{
 		Kind:       strings.TrimSpace(kind),
@@ -415,4 +205,133 @@ func decodeAgentDeliveryDiagnosticsCursor(raw, kind, field string) (agentDeliver
 		return agentDeliveryDiagnosticsCursor{}, AgentDeliveryDiagnosticsCursorError{Field: field}
 	}
 	return cursor, nil
+}
+
+func buildAgentDeliveryDiagnostics(
+	agentID string,
+	snapshots []runtimedelivery.Snapshot,
+	opts OperatorAgentDeliveryDiagnosticsOptions,
+	loadEvent func(string) (deliveryLifecycleEventMetadata, error),
+	loadDeadLetters func(string) ([]OperatorDeadLetterRecord, error),
+) (OperatorAgentDeliveryDiagnostics, error) {
+	result := OperatorAgentDeliveryDiagnostics{
+		AgentID: agentID, Failures: []OperatorAgentDeliveryFailure{}, DeadLetters: []OperatorAgentDeadLetterDelivery{},
+	}
+	cutoff := time.Now().UTC().Add(-24 * time.Hour)
+	for _, snapshot := range snapshots {
+		occurredAt := deliveryDiagnosticOccurredAt(snapshot)
+		switch snapshot.Status {
+		case runtimedelivery.StatusFailed:
+			if !occurredAt.Before(cutoff) {
+				result.Summary.Failures24h++
+			}
+		case runtimedelivery.StatusDeadLetter:
+			if !occurredAt.Before(cutoff) {
+				result.Summary.DeadLetters24h++
+			}
+		}
+	}
+
+	failureCursorAt, failureCursorID, err := decodeDeliveryDiagnosticsPosition(opts.FailureCursor, "agent.delivery_diagnostics.failures", "failure_cursor")
+	if err != nil {
+		return OperatorAgentDeliveryDiagnostics{}, err
+	}
+	deadCursorAt, deadCursorID, err := decodeDeliveryDiagnosticsPosition(opts.DeadLetterCursor, "agent.delivery_diagnostics.dead_letters", "dead_letter_cursor")
+	if err != nil {
+		return OperatorAgentDeliveryDiagnostics{}, err
+	}
+	for _, snapshot := range snapshots {
+		if snapshot.Status != runtimedelivery.StatusFailed && snapshot.Status != runtimedelivery.StatusDeadLetter {
+			continue
+		}
+		occurredAt := deliveryDiagnosticOccurredAt(snapshot)
+		if snapshot.Status == runtimedelivery.StatusFailed && !deliveryDiagnosticsAfterCursor(occurredAt, snapshot.DeliveryID, failureCursorAt, failureCursorID) {
+			continue
+		}
+		if snapshot.Status == runtimedelivery.StatusDeadLetter && !deliveryDiagnosticsAfterCursor(occurredAt, snapshot.DeliveryID, deadCursorAt, deadCursorID) {
+			continue
+		}
+		metadata, err := loadEvent(snapshot.EventID)
+		if err != nil {
+			return OperatorAgentDeliveryDiagnostics{}, err
+		}
+		runID := snapshot.RunID
+		if runID == "" {
+			runID = metadata.RunID
+		}
+		if snapshot.Status == runtimedelivery.StatusFailed {
+			result.Failures = append(result.Failures, OperatorAgentDeliveryFailure{
+				DeliveryID: snapshot.DeliveryID, EventID: snapshot.EventID, EventName: metadata.EventName,
+				RunID: runID, EntityID: metadata.EntityID, Status: string(snapshot.Status),
+				ReasonCode: snapshot.ReasonCode, Failure: runtimefailures.CloneEnvelope(snapshot.Failure),
+				RetryCount: snapshot.RetryCount, OccurredAt: occurredAt,
+			})
+			continue
+		}
+		records, err := loadDeadLetters(snapshot.EventID)
+		if err != nil {
+			return OperatorAgentDeliveryDiagnostics{}, err
+		}
+		result.DeadLetters = append(result.DeadLetters, OperatorAgentDeadLetterDelivery{
+			DeliveryID: snapshot.DeliveryID, EventID: snapshot.EventID, EventName: metadata.EventName,
+			RunID: runID, EntityID: metadata.EntityID, Status: string(snapshot.Status),
+			ReasonCode: snapshot.ReasonCode, Failure: runtimefailures.CloneEnvelope(snapshot.Failure),
+			RetryCount: snapshot.RetryCount, OccurredAt: occurredAt, DeadLetterRecords: records,
+		})
+	}
+	sort.Slice(result.Failures, func(i, j int) bool {
+		if !result.Failures[i].OccurredAt.Equal(result.Failures[j].OccurredAt) {
+			return result.Failures[i].OccurredAt.After(result.Failures[j].OccurredAt)
+		}
+		return result.Failures[i].DeliveryID > result.Failures[j].DeliveryID
+	})
+	sort.Slice(result.DeadLetters, func(i, j int) bool {
+		if !result.DeadLetters[i].OccurredAt.Equal(result.DeadLetters[j].OccurredAt) {
+			return result.DeadLetters[i].OccurredAt.After(result.DeadLetters[j].OccurredAt)
+		}
+		return result.DeadLetters[i].DeliveryID > result.DeadLetters[j].DeliveryID
+	})
+	if len(result.Failures) > opts.FailureLimit {
+		last := result.Failures[opts.FailureLimit-1]
+		result.FailuresNextCursor = encodeAgentDeliveryDiagnosticsCursor("agent.delivery_diagnostics.failures", last.OccurredAt, last.DeliveryID)
+		result.Failures = result.Failures[:opts.FailureLimit]
+	}
+	if len(result.DeadLetters) > opts.DeadLetterLimit {
+		last := result.DeadLetters[opts.DeadLetterLimit-1]
+		result.DeadLettersNextCursor = encodeAgentDeliveryDiagnosticsCursor("agent.delivery_diagnostics.dead_letters", last.OccurredAt, last.DeliveryID)
+		result.DeadLetters = result.DeadLetters[:opts.DeadLetterLimit]
+	}
+	return result, nil
+}
+
+func deliveryDiagnosticOccurredAt(snapshot runtimedelivery.Snapshot) time.Time {
+	if !snapshot.SettledAt.IsZero() {
+		return snapshot.SettledAt
+	}
+	if !snapshot.UpdatedAt.IsZero() {
+		return snapshot.UpdatedAt
+	}
+	return snapshot.CreatedAt
+}
+
+func decodeDeliveryDiagnosticsPosition(raw, kind, field string) (time.Time, string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return time.Time{}, "", nil
+	}
+	cursor, err := decodeAgentDeliveryDiagnosticsCursor(raw, kind, field)
+	if err != nil {
+		return time.Time{}, "", err
+	}
+	occurredAt, err := time.Parse(time.RFC3339Nano, cursor.OccurredAt)
+	if err != nil || strings.TrimSpace(cursor.DeliveryID) == "" {
+		return time.Time{}, "", AgentDeliveryDiagnosticsCursorError{Field: field}
+	}
+	return occurredAt.UTC(), strings.TrimSpace(cursor.DeliveryID), nil
+}
+
+func deliveryDiagnosticsAfterCursor(occurredAt time.Time, deliveryID string, cursorAt time.Time, cursorID string) bool {
+	if cursorAt.IsZero() {
+		return true
+	}
+	return occurredAt.Before(cursorAt) || (occurredAt.Equal(cursorAt) && deliveryID < cursorID)
 }

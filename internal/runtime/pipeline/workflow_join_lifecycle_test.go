@@ -772,7 +772,7 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 	}
 }
 
-func TestWorkflowJoinFailurePersistsCanonicalReceiptAndRuntimeLog(t *testing.T) {
+func TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	ctx := sqliteExactOnceRunContext(t, db)
@@ -789,12 +789,14 @@ func TestWorkflowJoinFailurePersistsCanonicalReceiptAndRuntimeLog(t *testing.T) 
 	}
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
 	seedExactOnceEventDelivery(t, store, ctx, evt, "join-node")
+	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "join-node"}
 	if resolved := workflowNodeEventHandlerResolutionForDelivery(pc.SemanticSource(), "join-node", evt); !resolved.Matched {
 		t.Fatalf("join handler did not resolve: %#v", resolved)
 	}
-	if !pc.workflowNodeDeliveryAuthorized(ctx, "join-node", evt) {
-		t.Fatal("seeded join delivery was not authorized")
+	if _, err := store.DeliveryLifecycleStore().ProveHandoff(ctx, evt.ID(), route); err != nil {
+		t.Fatalf("seeded join delivery was not authorized: %v", err)
 	}
+	ctx = withWorkflowNodeDeliveryRoute(ctx, route)
 	handled, err := pc.executeNodeHandlerPlanResult(ctx, "join-node", evt)
 	if !handled {
 		t.Fatal("join failure was not handled")
@@ -803,21 +805,21 @@ func TestWorkflowJoinFailurePersistsCanonicalReceiptAndRuntimeLog(t *testing.T) 
 	if !ok || envelope.Class != runtimefailures.ClassEarlyArrival {
 		t.Fatalf("execution failure = %v, envelope=%#v", err, envelope)
 	}
-	var status, failureRaw, receiptOutcome string
+	var status, failureRaw, deliveryOutcome string
 	if err := db.QueryRowContext(ctx, `
-		SELECT d.status, COALESCE(d.failure, ''), COALESCE(r.outcome, '')
+		SELECT d.status, COALESCE(d.failure, ''), COALESCE(o.outcome, '')
 		FROM event_deliveries d
-		LEFT JOIN event_receipts r ON r.event_id = d.event_id AND r.subscriber_type = d.subscriber_type AND r.subscriber_id = d.subscriber_id
+		LEFT JOIN event_delivery_outcomes o ON o.delivery_id = d.delivery_id
 		WHERE d.event_id = ? AND d.subscriber_type = 'node' AND d.subscriber_id = 'join-node'
-	`, evt.ID()).Scan(&status, &failureRaw, &receiptOutcome); err != nil {
+	`, evt.ID()).Scan(&status, &failureRaw, &deliveryOutcome); err != nil {
 		t.Fatal(err)
 	}
 	var persisted runtimefailures.Envelope
 	if err := json.Unmarshal([]byte(failureRaw), &persisted); err != nil {
 		t.Fatalf("decode persisted failure %q: %v", failureRaw, err)
 	}
-	if status != "dead_letter" || receiptOutcome != "dead_letter" || persisted.Class != runtimefailures.ClassEarlyArrival {
-		t.Fatalf("persisted failure = status:%s receipt:%s failure:%#v", status, receiptOutcome, persisted)
+	if status != "dead_letter" || deliveryOutcome != "dead_letter" || persisted.Class != runtimefailures.ClassEarlyArrival {
+		t.Fatalf("persisted failure = status:%s outcome:%s failure:%#v", status, deliveryOutcome, persisted)
 	}
 	logs := bus.runtimeLogEntries()
 	if len(logs) == 0 || logs[len(logs)-1].Failure == nil || logs[len(logs)-1].Failure.Class != runtimefailures.ClassEarlyArrival {

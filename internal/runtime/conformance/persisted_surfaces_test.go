@@ -30,6 +30,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimediaglog "github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -314,6 +315,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	}
 	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash)
 
+	claims := map[string]runtimedelivery.Claim{}
 	newTurnContext := func(evt events.Event) context.Context {
 		base := runtimeeffects.WithLifecycleToken(testAuthorActivityContext(context.Background()), lifecycleToken)
 		base = worklifetime.WithOccurrence(base, workOwner)
@@ -321,6 +323,9 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		base = agentmemory.WithExecution(base, agentmemory.Authored(true), agentmemory.Identity{RunID: runID, AgentID: "agent-1", FlowInstance: "support/inst-1"})
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
+		if claim, ok := claims[evt.ID()]; ok {
+			base = runtimedelivery.WithClaim(base, claim)
+		}
 		return runtimeactors.WithActor(base, runtimeactors.AgentConfig{
 			ExecutionMode: "live",
 			ID:            "agent-1",
@@ -333,17 +338,25 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 
 	conversation := runtimellm.NewConversation("agent-1", "", "system", nil, agentmemory.Authored(true), 10, runtime)
 	conversation.SetToolExecutor(conformanceToolExecutor{})
+	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"}
+	firstClaim, err := pg.ClaimAgentDelivery(ctx, event1, route)
+	if err != nil {
+		t.Fatalf("claim first delivery: %v", err)
+	}
+	claims[event1.ID()] = firstClaim.Claim
 	if _, err := conversation.Step(newTurnContext(event1), "first"); err != nil {
 		t.Fatalf("ContinueSession(first): %v", err)
 	}
 	session := conversation.Session
-	if err := pg.UpsertEventReceipt(newTurnContext(event1), event1.ID(), "agent-1", runtimemanager.ReceiptStatusProcessed, nil); err != nil {
-		t.Fatalf("UpsertEventReceipt(first): %v", err)
+	if _, err := pg.SettleSuccess(newTurnContext(event1), firstClaim.Claim, nil, 0); err != nil {
+		t.Fatalf("settle first delivery: %v", err)
 	}
 
-	if err := pg.MarkEventDeliveryInProgress(newTurnContext(event2), event2.ID(), "agent-1", ""); err != nil {
-		t.Fatalf("MarkEventDeliveryInProgress(second prelaunch): %v", err)
+	secondClaim, err := pg.ClaimAgentDelivery(ctx, event2, route)
+	if err != nil {
+		t.Fatalf("claim second delivery: %v", err)
 	}
+	claims[event2.ID()] = secondClaim.Claim
 	if _, err := conversation.Step(newTurnContext(event2), "second"); err != nil {
 		t.Fatalf("ContinueSession(second): %v", err)
 	}
@@ -498,6 +511,7 @@ printf '{"result":"ok"}'
 	}
 	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash)
 
+	var deliveryClaim runtimedelivery.Claim
 	newTurnContext := func(evt events.Event) context.Context {
 		base := runtimeeffects.WithLifecycleToken(testAuthorActivityContext(context.Background()), lifecycleToken)
 		base = worklifetime.WithOccurrence(base, workOwner)
@@ -505,6 +519,9 @@ printf '{"result":"ok"}'
 		base = agentmemory.WithExecution(base, agentmemory.Authored(true), agentmemory.Identity{RunID: runID, AgentID: "agent-1", FlowInstance: "support/inst-1"})
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
+		if deliveryClaim.DeliveryID() != "" {
+			base = runtimedelivery.WithClaim(base, deliveryClaim)
+		}
 		return runtimeactors.WithActor(base, runtimeactors.AgentConfig{
 			ExecutionMode: "live",
 			ID:            "agent-1",
@@ -522,9 +539,11 @@ printf '{"result":"ok"}'
 	conversation := runtimellm.NewConversation("agent-1", "", "system", nil, agentmemory.Authored(true), 10, runtime)
 	conversation.Session = session
 	conversation.SetToolExecutor(conformanceToolExecutor{})
-	if err := pg.MarkEventDeliveryInProgress(newTurnContext(evt), evt.ID(), "agent-1", ""); err != nil {
-		t.Fatalf("MarkEventDeliveryInProgress(prelaunch): %v", err)
+	claimed, err := pg.ClaimAgentDelivery(ctx, evt, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"})
+	if err != nil {
+		t.Fatalf("claim delivery before provider launch: %v", err)
 	}
+	deliveryClaim = claimed.Claim
 	_, err = conversation.Step(newTurnContext(evt), "do not classify stderr")
 	if conversation.Session == nil {
 		t.Fatal("conversation did not retain the acquired session after provider failure")
@@ -931,9 +950,7 @@ func (s conformanceRecoveryFailureEventStore) ClaimPipelinePublication(ctx conte
 func (conformanceRecoveryFailureEventStore) SupportsPersistedReplay() bool { return true }
 
 type conformanceManagerReplayStore struct {
-	agents   []runtimemanager.PersistedAgent
-	pending  map[string][]events.Event
-	receipts map[string]runtimemanager.EventReceipt
+	agents []runtimemanager.PersistedAgent
 }
 
 func (*conformanceManagerReplayStore) CommitAgentLifecycleTransition(_ context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
@@ -956,28 +973,6 @@ func (s *conformanceManagerReplayStore) LoadAgents(context.Context) ([]runtimema
 
 func (*conformanceManagerReplayStore) MarkAgentTerminated(context.Context, string) error { return nil }
 func (*conformanceManagerReplayStore) EnsureEntitySchema(context.Context, string) error  { return nil }
-func (s *conformanceManagerReplayStore) UpsertEventReceipt(_ context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, failure *runtimefailures.Envelope) error {
-	if s.receipts == nil {
-		s.receipts = map[string]runtimemanager.EventReceipt{}
-	}
-	s.receipts[strings.TrimSpace(eventID)+"|"+strings.TrimSpace(agentID)] = runtimemanager.EventReceipt{
-		EventID: eventID,
-		AgentID: agentID,
-		Status:  status,
-		Failure: failure,
-	}
-	return nil
-}
-func (s *conformanceManagerReplayStore) ListPendingEventsForAgent(_ context.Context, agentID string, _ time.Time, _ int) ([]events.Event, error) {
-	return append([]events.Event(nil), s.pending[strings.TrimSpace(agentID)]...), nil
-}
-func (*conformanceManagerReplayStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
-	return nil, nil
-}
-func (s *conformanceManagerReplayStore) GetEventReceipt(_ context.Context, eventID, agentID string) (runtimemanager.EventReceipt, bool, error) {
-	receipt, ok := s.receipts[strings.TrimSpace(eventID)+"|"+strings.TrimSpace(agentID)]
-	return receipt, ok, nil
-}
 
 type conformanceManagerReplayAgent struct{ id string }
 
@@ -1150,6 +1145,7 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 		EventStore:      eventStore,
 		RuntimeLogStore: pg,
 		ManagerStore:    &conformanceManagerReplayStore{},
+		DeliveryStore:   pg,
 	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
 		SelfCheck:         false,
 		WorkflowModule:    module,
@@ -1258,6 +1254,7 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 		EventStore:      conformanceTimerRecoveryEventStore{store: pg},
 		RuntimeLogStore: pg,
 		ManagerStore:    pg,
+		DeliveryStore:   pg,
 		ScheduleStore:   scheduleStore,
 	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
 		SelfCheck:         false,
@@ -1508,21 +1505,25 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 			Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-a"},
 			StartedAt: time.Now().UTC(),
 		}},
-		pending: map[string][]events.Event{
-			"agent-a": {
-				eventtest.PersistedProjection("evt-replay", events.EventType("support.replay.ok"), "", "", nil, 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now().Add(-4*time.Minute).UTC()),
-				eventtest.PersistedProjection("evt-skip", events.EventType("support.replay.skip"), "", "", nil, 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC()),
-				eventtest.PersistedProjection("evt-leased", events.EventType("support.replay.leased"), "", "", nil, 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
-				eventtest.PersistedProjection("evt-drop", events.EventType("support.replay.drop"), "", "", nil, 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
-			},
-		},
-		receipts: map[string]runtimemanager.EventReceipt{
-			"evt-skip|agent-a": {
-				EventID: "evt-skip",
-				AgentID: "agent-a",
-				Status:  runtimemanager.ReceiptStatusProcessed,
-			},
-		},
+	}
+	runID := uuid.NewString()
+	eventIDs := map[string]string{
+		"support.replay.ok":     uuid.NewString(),
+		"support.replay.skip":   uuid.NewString(),
+		"support.replay.leased": uuid.NewString(),
+		"support.replay.drop":   uuid.NewString(),
+	}
+	for index, eventType := range []string{
+		"support.replay.ok",
+		"support.replay.skip",
+		"support.replay.leased",
+		"support.replay.drop",
+	} {
+		storetest.CommitSemanticEventWithRoutes(t, ctx, pg,
+			eventtest.PersistedProjection(eventIDs[eventType], events.EventType(eventType), "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().Add(time.Duration(index-4)*time.Minute).UTC()),
+			[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-a"}},
+			runtimereplayclaim.CommittedReplayScopeSubscribed,
+		)
 	}
 
 	rt, err := runtimepkg.NewRuntime(ctx, runtimepkg.RuntimeDeps{Config: &config.Config{
@@ -1538,6 +1539,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		EventStore:      conformanceTimerRecoveryEventStore{store: pg},
 		RuntimeLogStore: pg,
 		ManagerStore:    managerStore,
+		DeliveryStore:   pg,
 	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
 		SelfCheck:         false,
 		WorkflowModule:    module,
@@ -1554,7 +1556,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 	}
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return conformanceManagerReplayAgent{id: cfg.ID}, nil
-	}, runtimemanager.AgentManagerOptions{WorkOwner: rt.WorkOccurrence()}, managerStore)
+	}, runtimemanager.AgentManagerOptions{WorkOwner: rt.WorkOccurrence(), DeliveryStore: pg}, managerStore)
 
 	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -1590,7 +1592,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		return -1
 	}
 
-	replayed := logs[findByEventID("evt-replay")]
+	replayed := logs[findByEventID(eventIDs["support.replay.ok"])]
 	replayedDetail, _ := replayed.Detail.(map[string]any)
 	if got := readString(replayedDetail["decision_outcome"]); got != "replayed" {
 		t.Fatalf("replayed detail.decision_outcome = %q, want replayed", got)
@@ -1599,16 +1601,16 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		t.Fatalf("replayed detail.decision_reason_code = %q, want persisted_event_replayed", got)
 	}
 
-	skippedReceipt := logs[findByEventID("evt-skip")]
-	skippedReceiptDetail, _ := skippedReceipt.Detail.(map[string]any)
-	if got := readString(skippedReceiptDetail["decision_outcome"]); got != "skipped" {
-		t.Fatalf("receipt skip detail.decision_outcome = %q, want skipped", got)
+	replayedSecond := logs[findByEventID(eventIDs["support.replay.skip"])]
+	replayedSecondDetail, _ := replayedSecond.Detail.(map[string]any)
+	if got := readString(replayedSecondDetail["decision_outcome"]); got != "replayed" {
+		t.Fatalf("second replay detail.decision_outcome = %q, want replayed", got)
 	}
-	if got := readString(skippedReceiptDetail["decision_reason_code"]); got != "event_receipt_already_processed" {
-		t.Fatalf("receipt skip detail.decision_reason_code = %q, want event_receipt_already_processed", got)
+	if got := readString(replayedSecondDetail["decision_reason_code"]); got != "persisted_event_replayed" {
+		t.Fatalf("second replay detail.decision_reason_code = %q, want persisted_event_replayed", got)
 	}
 
-	droppedLeased := logs[findByEventID("evt-leased")]
+	droppedLeased := logs[findByEventID(eventIDs["support.replay.leased"])]
 	droppedLeasedDetail, _ := droppedLeased.Detail.(map[string]any)
 	if got := readString(droppedLeasedDetail["decision_outcome"]); got != "dropped" {
 		t.Fatalf("leased detail.decision_outcome = %q, want dropped without prose classification", got)
@@ -1620,7 +1622,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		t.Fatalf("leased failure = %#v, want generic internal failure", droppedLeased.Failure)
 	}
 
-	dropped := logs[findByEventID("evt-drop")]
+	dropped := logs[findByEventID(eventIDs["support.replay.drop"])]
 	droppedDetail, _ := dropped.Detail.(map[string]any)
 	if got := readString(droppedDetail["decision_outcome"]); got != "dropped" {
 		t.Fatalf("dropped detail.decision_outcome = %q, want dropped", got)

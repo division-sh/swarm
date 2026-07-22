@@ -15,8 +15,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
@@ -30,6 +32,7 @@ func TestRunForkRevisionRegistryIsClosed(t *testing.T) {
 		runforkrevision.FamilyAgentConversationAudits,
 		runforkrevision.FamilyAgentSessions,
 		runforkrevision.FamilyAgentTurns,
+		runforkrevision.FamilyCommittedReplayScopes,
 		runforkrevision.FamilyDeadLetters,
 		runforkrevision.FamilyEntityMetadata,
 		runforkrevision.FamilyEntityMutations,
@@ -42,7 +45,7 @@ func TestRunForkRevisionRegistryIsClosed(t *testing.T) {
 	got := runforkrevision.AllFamilies()
 	sort.Slice(got, func(i, j int) bool { return got[i] < got[j] })
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("run-fork revision registry = %q, want exact 11-family registry %q", got, want)
+		t.Fatalf("run-fork revision registry = %q, want exact 12-family registry %q", got, want)
 	}
 }
 
@@ -222,22 +225,17 @@ func TestRunForkRevisionCaptureSerializesSameRunCommitVisibility(t *testing.T) {
 
 func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
 	defer cancel()
 	runID := uuid.NewString()
 	seedEventID := uuid.NewString()
 	publishedEventID := uuid.NewString()
-	deliveryID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, seedEventID, runID, "revision.delivery.seed", events.EventProducerPlatform, "revision-test", "", "", time.Now().UTC())
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (delivery_id,run_id,event_id,subscriber_type,subscriber_id,status,created_at)
-		VALUES ($1::uuid,$2::uuid,$3::uuid,'agent','revision-agent','pending',NOW())
-	`, deliveryID, runID, seedEventID); err != nil {
-		t.Fatalf("seed delivery: %v", err)
-	}
+	seedEvent := seedPostgresSemanticEventRecordFixture(t, ctx, db, seedEventID, runID, "revision.delivery.seed", events.EventProducerPlatform, "revision-test", "", "", time.Now().UTC())
+	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "revision-agent"}
+	deliveryID := seedDeliveryStateFixture(t, ctx, postgresDeliveryFixtureStore(db), seedEvent, route, runtimedelivery.StateQueued, nil).DeliveryID
 
 	publishTx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -255,7 +253,11 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 		t.Fatalf("begin delivery start: %v", err)
 	}
 	defer func() { _ = deliveryTx.Rollback() }()
-	if _, err := deliveryTx.ExecContext(ctx, `UPDATE event_deliveries SET status='in_progress', started_at=NOW() WHERE delivery_id=$1::uuid`, deliveryID); err != nil {
+	deliveryTxCtx, err := runtimeauthoractivity.Begin(ctx, deliveryTx, runtimeauthoractivity.DialectPostgres)
+	if err != nil {
+		t.Fatalf("begin delivery author activity: %v", err)
+	}
+	if _, err := postgresDeliveryAdapter.ClaimExact(deliveryTxCtx, deliveryTx, seedEvent, route, runtimedelivery.DefaultLeaseTTL); err != nil {
 		t.Fatalf("stage delivery start: %v", err)
 	}
 	var deliveryBackendPID int
@@ -268,7 +270,7 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 	}
 	deliveryCapture := make(chan captureResult, 1)
 	go func() {
-		revision, err := runforkrevision.CaptureForEvent(ctx, deliveryTx, seedEventID, runforkrevision.FamilyEventDeliveries)
+		revision, err := runforkrevision.CaptureForEvent(deliveryTxCtx, deliveryTx, seedEventID, runforkrevision.FamilyEventDeliveries)
 		deliveryCapture <- captureResult{revision: revision, err: err}
 	}()
 	waitForPostgresBackendLock(t, ctx, db, deliveryBackendPID)
@@ -292,11 +294,11 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 	if err := deliveryTx.Commit(); err != nil {
 		t.Fatalf("commit delivery start: %v", err)
 	}
-	if publishRevision != 1 || delivered.revision != 2 {
-		t.Fatalf("concurrent revisions = publish:%d delivery:%d, want 1 then 2", publishRevision, delivered.revision)
+	if publishRevision != 2 || delivered.revision != 3 {
+		t.Fatalf("concurrent revisions = publish:%d delivery:%d, want 2 then 3 after initial obligation admission", publishRevision, delivered.revision)
 	}
 
-	for revision, wantStatus := range map[int64]string{1: "pending", 2: "in_progress"} {
+	for revision, wantStatus := range map[int64]string{1: "pending", 3: "in_progress"} {
 		var gotStatus string
 		if err := db.QueryRowContext(ctx, `
 			SELECT fact->>'status'
@@ -310,14 +312,14 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 		}
 	}
 	var publishedFacts, ledgerRows int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND revision=1 AND family='events' AND present`, runID).Scan(&publishedFacts); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND revision=2 AND family='events' AND present`, runID).Scan(&publishedFacts); err != nil {
 		t.Fatalf("count published event facts: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1::uuid`, runID).Scan(&ledgerRows); err != nil {
 		t.Fatalf("count revision ledger: %v", err)
 	}
-	if publishedFacts != 2 || ledgerRows != 2 {
-		t.Fatalf("revision evidence = events:%d ledger:%d, want 2/2", publishedFacts, ledgerRows)
+	if publishedFacts != 2 || ledgerRows != 3 {
+		t.Fatalf("revision evidence = events:%d ledger:%d, want 2/3", publishedFacts, ledgerRows)
 	}
 }
 

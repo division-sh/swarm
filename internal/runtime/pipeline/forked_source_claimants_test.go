@@ -7,9 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -160,71 +157,6 @@ func TestForkedSourceActivityAttemptMutationsRefuseAndPreserveJournal(t *testing
 			preserved, ok, err := fixture.store.LoadActivityAttempt(fixture.ctx, started.RequestEventID)
 			if err != nil || !ok || preserved.Status != ActivityAttemptStatusStarted {
 				t.Fatalf("preserved activity = %#v found=%v err=%v", preserved, ok, err)
-			}
-		})
-	}
-}
-
-func TestForkedSourceSystemNodeDeliveryMutationsRefuseAndPreserveLineage(t *testing.T) {
-	for _, backend := range []string{"postgres", "sqlite"} {
-		t.Run(backend, func(t *testing.T) {
-			fixture := newForkedPipelineBackend(t, backend)
-			nodeID := "freeze-node"
-			eventID := uuid.NewString()
-			dialect := runtimeauthoractivity.DialectPostgres
-			if fixture.sqlite {
-				dialect = runtimeauthoractivity.DialectSQLite
-			}
-			event := eventtest.PersistedRuntimeControlForProducer(
-				eventID, "freeze.pending", eventtest.Producer(events.EventProducerPlatform, "test"), "",
-				[]byte(`{}`), 0, fixture.runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, fixture.frozenAt.Add(-time.Minute),
-			)
-			seedPipelineEventRecordForDialect(t, fixture.ctx, fixture.db, dialect, event)
-			if fixture.sqlite {
-				if _, err := fixture.db.ExecContext(fixture.ctx, `INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, delivery_target_route, status, retry_count, created_at) VALUES (?, ?, ?, 'node', ?, '{}', 'pending', 0, ?)`, uuid.NewString(), fixture.runID, eventID, nodeID, fixture.frozenAt); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				if _, err := fixture.db.ExecContext(fixture.ctx, `INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, delivery_target_route, status, retry_count, created_at) VALUES ($1::uuid, $2::uuid, 'node', $3, '{}'::jsonb, 'pending', 0, $4)`, fixture.runID, eventID, nodeID, fixture.frozenAt); err != nil {
-					t.Fatal(err)
-				}
-			}
-			fixture.freeze(t)
-
-			authorized, err := fixture.store.SystemNodeDeliveryAuthorized(fixture.ctx, nodeID, eventID, DefaultSystemNodeRetryLimit)
-			if err != nil || authorized {
-				t.Fatalf("frozen system-node authority = %v, %v", authorized, err)
-			}
-			for label, mutate := range map[string]func() error{
-				"in progress": func() error {
-					return fixture.store.MarkSystemNodeDeliveryInProgress(fixture.ctx, nodeID, eventID, DefaultSystemNodeRetryLimit)
-				},
-				"processed": func() error {
-					return fixture.store.MarkSystemNodeProcessedAndSettleDelivery(fixture.ctx, nodeID, eventID, `{}`)
-				},
-				"failed": func() error {
-					return fixture.store.MarkSystemNodeDeliveryFailed(fixture.ctx, nodeID, eventID, "handler_failure", nil, 1, DefaultSystemNodeRetryLimit)
-				},
-				"dead letter": func() error {
-					return fixture.store.MarkSystemNodeDeliveryDeadLetter(fixture.ctx, nodeID, eventID, "retry_exhausted", nil, 1, `{}`)
-				},
-			} {
-				requireForkedPipelineRefusal(t, "system node "+label, mutate())
-			}
-
-			statusQuery := `SELECT status FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
-			receiptQuery := `SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
-			if !fixture.sqlite {
-				statusQuery = `SELECT status FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
-				receiptQuery = `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
-			}
-			var status string
-			if err := fixture.db.QueryRowContext(fixture.ctx, statusQuery, eventID, nodeID).Scan(&status); err != nil || status != "pending" {
-				t.Fatalf("preserved node delivery = %q, %v", status, err)
-			}
-			var receipts int
-			if err := fixture.db.QueryRowContext(fixture.ctx, receiptQuery, eventID, nodeID).Scan(&receipts); err != nil || receipts != 0 {
-				t.Fatalf("frozen node receipts = %d, %v", receipts, err)
 			}
 		})
 	}

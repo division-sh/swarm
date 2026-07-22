@@ -182,6 +182,7 @@ func (f selectedRuntimeStoreFacade) runtimeStores() runtime.Stores {
 		SessionRegistry:     s.SessionRegistry,
 		ConversationStore:   s.ConversationStore,
 		ManagerStore:        s.ManagerStore,
+		DeliveryStore:       s.DeliveryStore,
 		ScheduleStore:       s.ScheduleStore,
 		MailboxMaterializer: s.MailboxMaterializer,
 		DecisionCards:       s.DecisionCards,

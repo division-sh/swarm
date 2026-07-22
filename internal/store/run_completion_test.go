@@ -7,7 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -145,15 +145,24 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileDeliveryActiv
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	fixture := seedNormalRunCompletionFixture(t, db, "done", "", "")
-	sessionID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'agent', 'agent-1', 'in_progress', $3::uuid, now()
-		)
-	`, fixture.RunID, fixture.EventID, sessionID); err != nil {
+	deliveryEvent := eventtest.PersistedChildForProducer(
+		uuid.NewString(), events.EventType("completion.agent.delivery"), eventtest.Producer(events.EventProducerPlatform, "test"), "", []byte(`{}`), 0,
+		fixture.RunID, fixture.EventID, events.EventEnvelope{}, time.Now().UTC(),
+	)
+	if err := commitSemanticEventFixtureWithAgents(ctx, pg, deliveryEvent, []string{"agent-1"}); err != nil {
 		t.Fatalf("seed active delivery: %v", err)
+	}
+	if err := pg.UpsertPipelineReceipt(ctx, deliveryEvent.ID(), "processed", nil); err != nil {
+		t.Fatalf("seed delivery-event pipeline receipt: %v", err)
+	}
+	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "agent-1"}
+	claimed, err := pg.ClaimAgentDelivery(ctx, deliveryEvent, route)
+	if err != nil {
+		t.Fatalf("claim active delivery: %v", err)
+	}
+	sessionID := uuid.NewString()
+	if _, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
+		t.Fatalf("bind active delivery: %v", err)
 	}
 	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
@@ -163,8 +172,8 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileDeliveryActiv
 	}
 	assertRunCompletionStatus(t, db, fixture.RunID, "running", false)
 
-	if err := pg.UpsertEventReceipt(ctx, fixture.EventID, "agent-1", runtimemanager.ReceiptStatusProcessed, nil); err != nil {
-		t.Fatalf("UpsertEventReceipt: %v", err)
+	if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
+		t.Fatalf("SettleSuccess: %v", err)
 	}
 	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion settled: %v", err)
@@ -177,14 +186,20 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedUntilNodeDeliveryS
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	fixture := seedNormalRunCompletionFixture(t, db, "done", "", "")
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'node', 'terminal-node', 'pending', 'matched_node_subscription', now()
-		)
-	`, fixture.RunID, fixture.EventID); err != nil {
+	deliveryEvent := eventtest.PersistedChildForProducer(
+		uuid.NewString(), events.EventType("completion.node.delivery"), eventtest.Producer(events.EventProducerPlatform, "test"), "", []byte(`{}`), 0,
+		fixture.RunID, fixture.EventID, events.EventEnvelope{}, time.Now().UTC(),
+	)
+	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberNode), SubscriberID: "terminal-node"}
+	if err := commitSemanticEventFixtureWithRoutes(ctx, pg, deliveryEvent, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("seed active node delivery: %v", err)
+	}
+	if err := pg.UpsertPipelineReceipt(ctx, deliveryEvent.ID(), "processed", nil); err != nil {
+		t.Fatalf("seed delivery-event pipeline receipt: %v", err)
+	}
+	claimed, err := pg.ClaimNodeDelivery(ctx, deliveryEvent, route)
+	if err != nil {
+		t.Fatalf("claim active node delivery: %v", err)
 	}
 	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
@@ -194,15 +209,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedUntilNodeDeliveryS
 	}
 	assertRunCompletionStatus(t, db, fixture.RunID, "running", false)
 
-	if _, err := db.ExecContext(ctx, `
-		UPDATE event_deliveries
-		SET status = 'delivered',
-		    reason_code = 'node_processed',
-		    delivered_at = now()
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = 'terminal-node'
-	`, fixture.EventID); err != nil {
+	if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
 		t.Fatalf("settle node delivery: %v", err)
 	}
 	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {

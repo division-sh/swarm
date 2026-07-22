@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
 func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]RunForkPendingWork, error) {
@@ -14,10 +15,6 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]Ru
 	events := make(map[string]runForkRevisionEvent, len(snapshot.Events))
 	for _, event := range snapshot.Events {
 		events[strings.TrimSpace(event.EventID)] = event
-	}
-	receipts := make(map[string]runForkRevisionReceipt, len(snapshot.Receipts))
-	for _, receipt := range snapshot.Receipts {
-		receipts[runForkRevisionSubscriberKey(receipt.EventID, receipt.SubscriberType, receipt.SubscriberID)] = receipt
 	}
 	deadLetters := make(map[string]map[string]struct{})
 	for _, deadLetter := range snapshot.DeadLetters {
@@ -30,36 +27,31 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]Ru
 	deliveryKeys := make(map[string]struct{}, len(snapshot.Deliveries))
 	out := make([]RunForkPendingWork, 0, len(snapshot.Deliveries)+len(snapshot.Receipts))
 	for _, delivery := range snapshot.Deliveries {
-		event, ok := events[strings.TrimSpace(delivery.EventID)]
+		durable := delivery.Snapshot
+		event, ok := events[strings.TrimSpace(durable.EventID)]
 		if !ok {
-			return nil, runForkRevisionLineageError("event_deliveries", delivery.DeliveryID, delivery.EventID)
+			return nil, runForkRevisionLineageError("event_deliveries", durable.DeliveryID, durable.EventID)
 		}
-		key := runForkRevisionSubscriberKey(delivery.EventID, delivery.SubscriberType, delivery.SubscriberID)
+		key := runForkRevisionSubscriberKey(durable.EventID, string(durable.SubscriberClass), durable.SubscriberID)
 		deliveryKeys[key] = struct{}{}
-		receipt := receipts[key]
 		item := RunForkPendingWork{
-			EventID:         strings.TrimSpace(delivery.EventID),
+			EventID:         strings.TrimSpace(durable.EventID),
 			EventName:       strings.TrimSpace(event.EventName),
 			FlowInstance:    strings.TrimSpace(event.FlowInstance),
 			SourceRoute:     event.SourceRoute.Normalized(),
-			DeliveryID:      strings.TrimSpace(delivery.DeliveryID),
-			SubscriberType:  strings.TrimSpace(delivery.SubscriberType),
-			SubscriberID:    strings.TrimSpace(delivery.SubscriberID),
-			Status:          strings.TrimSpace(delivery.Status),
-			RetryCount:      delivery.RetryCount,
-			ReasonCode:      strings.TrimSpace(delivery.ReasonCode),
-			ActiveSessionID: strings.TrimSpace(delivery.ActiveSessionID),
-			CreatedAt:       delivery.CreatedAt,
-			StartedAt:       delivery.StartedAt,
-			DeliveredAt:     delivery.DeliveredAt,
-			ReceiptOutcome:  strings.TrimSpace(receipt.Outcome),
-		}
-		if !receipt.ProcessedAt.IsZero() {
-			receiptAt := receipt.ProcessedAt
-			item.ReceiptAt = &receiptAt
+			DeliveryID:      strings.TrimSpace(durable.DeliveryID),
+			SubscriberType:  string(durable.SubscriberClass),
+			SubscriberID:    strings.TrimSpace(durable.SubscriberID),
+			Status:          string(durable.Status),
+			RetryCount:      durable.RetryCount,
+			ReasonCode:      strings.TrimSpace(durable.ReasonCode),
+			ActiveSessionID: strings.TrimSpace(durable.ActiveSessionID),
+			CreatedAt:       durable.CreatedAt,
+			StartedAt:       traceTimePtr(durable.StartedAt),
+			DeliveredAt:     traceTimePtr(durable.SettledAt),
 		}
 		_, deadLetter := deadLetters[item.EventID][item.SubscriberID]
-		item.Classification = classifyRunForkPendingWork(item, deadLetter)
+		item.Classification = classifyRunForkDeliverySnapshot(durable, deadLetter)
 		out = append(out, item)
 	}
 	for _, receipt := range snapshot.Receipts {
@@ -67,7 +59,7 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]Ru
 		if _, ok := deliveryKeys[key]; ok {
 			continue
 		}
-		if receipt.SubscriberType != "platform" && receipt.SubscriberType != "node" {
+		if receipt.SubscriberType != "platform" {
 			continue
 		}
 		event, ok := events[strings.TrimSpace(receipt.EventID)]
@@ -88,7 +80,11 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]Ru
 			ReceiptOutcome: strings.TrimSpace(receipt.Outcome),
 			ReceiptAt:      &receiptAt,
 		}
-		item.Classification = classifyRunForkPendingWork(item, false)
+		if item.ReceiptOutcome == "dead_letter" {
+			item.Classification = RunForkPendingClassificationDeadLetter
+		} else {
+			item.Classification = RunForkPendingClassificationDeliveredCompleted
+		}
 		out = append(out, item)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -97,6 +93,24 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]Ru
 		return left < right
 	})
 	return out, nil
+}
+
+func classifyRunForkDeliverySnapshot(snapshot runtimedelivery.Snapshot, deadLetter bool) string {
+	if deadLetter || snapshot.Status == runtimedelivery.StatusDeadLetter {
+		return RunForkPendingClassificationDeadLetter
+	}
+	switch snapshot.Status {
+	case runtimedelivery.StatusPending:
+		return RunForkPendingClassificationPending
+	case runtimedelivery.StatusInProgress:
+		return RunForkPendingClassificationInProgress
+	case runtimedelivery.StatusFailed:
+		return RunForkPendingClassificationFailedRetryable
+	case runtimedelivery.StatusDelivered:
+		return RunForkPendingClassificationDeliveredCompleted
+	default:
+		return ""
+	}
 }
 
 func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot, entities []RunForkEntityState, pending []RunForkPendingWork) (runForkAdmissionEvidence, error) {

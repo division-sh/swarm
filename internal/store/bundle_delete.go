@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -191,36 +192,41 @@ func (s *PostgresStore) ApplyBundleDeleteFinalMutation(ctx context.Context, req 
 }
 
 func (s *PostgresStore) planBundleDeleteDeliveries(ctx context.Context, runIDs []string) ([]bundledelete.DeliveryRef, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT
-			d.delivery_id::text,
-			d.run_id::text,
-			d.event_id::text,
-			COALESCE(d.subscriber_type, ''),
-			COALESCE(d.subscriber_id, ''),
-			COALESCE(d.status, '')
-		FROM event_deliveries d
-		WHERE d.run_id = ANY($1::uuid[])
-		  AND d.subscriber_type IN ('agent', 'node')
-		  AND d.status IN ('pending', 'in_progress')
-		ORDER BY d.run_id::text, d.event_id::text, d.subscriber_type, d.subscriber_id
-	`, pq.Array(runIDs))
-	if err != nil {
-		return nil, fmt.Errorf("plan bundle delete deliveries: %w", err)
-	}
-	defer rows.Close()
 	out := []bundledelete.DeliveryRef{}
-	for rows.Next() {
-		var item bundledelete.DeliveryRef
-		if err := rows.Scan(&item.DeliveryID, &item.RunID, &item.EventID, &item.SubscriberType, &item.SubscriberID, &item.Status); err != nil {
-			return nil, fmt.Errorf("scan bundle delete delivery: %w", err)
+	for _, runID := range runIDs {
+		snapshots, err := s.deliverySnapshotsForRun(ctx, runID)
+		if err != nil {
+			return nil, fmt.Errorf("plan bundle delete deliveries: %w", err)
 		}
-		normalizeBundleDeleteDeliveryRef(&item)
-		out = append(out, item)
+		for _, snapshot := range snapshots {
+			if snapshot.Terminal() {
+				continue
+			}
+			item := bundledelete.DeliveryRef{
+				DeliveryID: snapshot.DeliveryID, RunID: snapshot.RunID, EventID: snapshot.EventID,
+				SubscriberType: string(snapshot.SubscriberClass), SubscriberID: snapshot.SubscriberID,
+				Status: string(snapshot.Status),
+			}
+			normalizeBundleDeleteDeliveryRef(&item)
+			out = append(out, item)
+		}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read bundle delete deliveries: %w", err)
-	}
+	sort.Slice(out, func(i, j int) bool {
+		left, right := out[i], out[j]
+		if left.RunID != right.RunID {
+			return left.RunID < right.RunID
+		}
+		if left.EventID != right.EventID {
+			return left.EventID < right.EventID
+		}
+		if left.SubscriberType != right.SubscriberType {
+			return left.SubscriberType < right.SubscriberType
+		}
+		if left.SubscriberID != right.SubscriberID {
+			return left.SubscriberID < right.SubscriberID
+		}
+		return left.DeliveryID < right.DeliveryID
+	})
 	return out, nil
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
@@ -44,6 +45,11 @@ func commitSemanticEventFixtureWithAgents(ctx context.Context, store any, event 
 		scope = runtimereplayclaim.CommittedReplayScopeSubscribed
 	}
 	_, err := commitSemanticEventFixtureOutcome(ctx, store, event, routes, scope)
+	return err
+}
+
+func commitSemanticEventFixtureWithRoutes(ctx context.Context, store any, event events.Event, routes []events.DeliveryRoute) error {
+	_, err := commitSemanticEventFixtureOutcome(ctx, store, event, routes, runtimereplayclaim.CommittedReplayScopeSubscribed)
 	return err
 }
 
@@ -173,8 +179,16 @@ func commitDeliveryReplayEventFixture(
 		if outcome != runtimebus.EventAppendInserted {
 			return fmt.Errorf("delivery-replay fixture append outcome = %d, want inserted", outcome)
 		}
-		if err := insertRunForkReplayScopeMarker(txctx, tx, forkRunID, forkEventID, now); err != nil {
+		if err := store.upsertCommittedReplayScopeSpec(txctx, tx, forkEventID, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
 			return err
+		}
+		route := events.DeliveryRoute{SubscriberType: subscriberType, SubscriberID: subscriberID}
+		obligation, err := runtimedelivery.NewObligation(forkEventID, forkRunID, route)
+		if err != nil {
+			return err
+		}
+		if forkDeliveryID != "" && forkDeliveryID != obligation.DeliveryID() {
+			return fmt.Errorf("delivery-replay fixture delivery id %s does not match canonical id %s", forkDeliveryID, obligation.DeliveryID())
 		}
 		inserted, err := insertRunForkReplayDelivery(txctx, tx, runForkActivationLineage{
 			SourceRunID: source.RunID(),
@@ -186,7 +200,7 @@ func commitDeliveryReplayEventFixture(
 			SubscriberType:   subscriberType,
 			SubscriberID:     subscriberID,
 			ReasonCode:       "semantic_fixture",
-		}, source.ID(), forkEventID, forkDeliveryID, now)
+		}, source.ID(), forkEventID, obligation, now)
 		if err != nil {
 			return err
 		}
@@ -251,6 +265,10 @@ func commitAdmittedSemanticEventFixtureOutcome(
 }
 
 func commitSemanticEventFixtureTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, event events.Event) error {
+	return commitSemanticEventFixtureWithRoutesTx(ctx, store, tx, event, nil)
+}
+
+func commitSemanticEventFixtureWithRoutesTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, event events.Event, routes []events.DeliveryRoute) error {
 	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return err
@@ -267,8 +285,12 @@ func commitSemanticEventFixtureTx(ctx context.Context, store eventCommitTxStore,
 	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
 		return err
 	}
+	scope := runtimereplayclaim.CommittedReplayScopeDirect
+	if len(routes) > 0 {
+		scope = runtimereplayclaim.CommittedReplayScopeSubscribed
+	}
 	return (sqlPublishCommitter{tx: tx, store: store}).commitInitialSideEffects(ctx, runtimebus.CommitPublishRequest{
-		Event: admitted, ReplayScope: runtimereplayclaim.CommittedReplayScopeDirect,
+		Event: admitted, DeliveryRoutes: events.NormalizeDeliveryRoutes(routes), ReplayScope: scope,
 	})
 }
 

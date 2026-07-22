@@ -57,6 +57,7 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
+		DeliveryStore:     pg,
 	}))
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
@@ -64,6 +65,7 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		Module:            module,
 		InstanceActivator: manager.ActivateFlowInstance,
 		WorkflowStore:     workflowStore,
+		DeliveryStore:     pg,
 	})
 
 	evt := eventtest.RunCreatingRootIngress(
@@ -101,13 +103,7 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		}
 		dumpFinalFlowInstanceAuthoringRuntimeProofState(t, ctx, db, evt.ID())
 	})
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_receipts
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = $2
-		  AND outcome = 'no_op'
-	`, 1, evt.ID(), finalflowinstanceauthoring.TemplateNodeID)
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, evt.ID(), finalflowinstanceauthoring.TemplateNodeID)
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM entity_state
 		WHERE flow_instance LIKE 'account/%'

@@ -46,7 +46,9 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 		assertGates(t, h.workflow, entityID, expected.Expected.Gates)
 		assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, expected.Expected.EmittedEvents, flowPrefix, semanticview.Wrap(h.bundle))
 		assertCausalEvents(t, h, expected.Expected.CausalEvents, flowPrefix)
-		assertDeadLetter(t, h.db, h.startedAt, entityID, expected.Expected.DeadLetter)
+		if !expected.Expected.ChainDepthExceeded {
+			assertPublishedEventDeadLetter(t, h.db, h.publishedIDs, expected.Expected.DeadLetter)
+		}
 		assertChainDepthExceeded(t, h.db, h.startedAt, entityID, expected.Expected.ChainDepthExceeded)
 	}
 	assertAgentReceived(t, h.db, h.startedAt, expected.Expected.AgentReceived)
@@ -55,6 +57,25 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 	}
 	if expected.Expected.TemplateInstances != nil {
 		assertFlowInstanceCount(t, h.db, h.startedAt, *expected.Expected.TemplateInstances)
+	}
+}
+
+func assertPublishedEventDeadLetter(t testing.TB, db *sql.DB, publishedEventIDs map[string]struct{}, want bool) {
+	t.Helper()
+	count := 0
+	for eventID := range publishedEventIDs {
+		var eventCount int
+		if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+			SELECT COUNT(*)
+			FROM dead_letters
+			WHERE original_event_id = $1::uuid
+		`, strings.TrimSpace(eventID)).Scan(&eventCount); err != nil {
+			t.Fatalf("query published-event dead letters for %s: %v", eventID, err)
+		}
+		count += eventCount
+	}
+	if got := count > 0; got != want {
+		t.Fatalf("published-event dead_letter = %v, want %v", got, want)
 	}
 }
 
@@ -701,7 +722,23 @@ func assertDeadLetter(t testing.TB, db *sql.DB, since time.Time, entityID string
 	}
 	got := count > 0
 	if got != want {
-		t.Fatalf("dead_letter = %v, want %v", got, want)
+		rows, _ := db.QueryContext(testAuthorActivityContext(context.Background()), `
+			SELECT dl.original_event_id::text, COALESCE(dl.entity_id::text, ''),
+			       COALESCE(dl.original_payload->>'entity_id', ''), COALESCE(dl.handler_node, '')
+			FROM dead_letters dl
+			ORDER BY dl.created_at, dl.dead_letter_id
+		`)
+		var evidence []string
+		if rows != nil {
+			for rows.Next() {
+				var eventID, storedEntityID, payloadEntityID, nodeID string
+				if err := rows.Scan(&eventID, &storedEntityID, &payloadEntityID, &nodeID); err == nil {
+					evidence = append(evidence, fmt.Sprintf("event=%s stored_entity=%q payload_entity=%q node=%q", eventID, storedEntityID, payloadEntityID, nodeID))
+				}
+			}
+			_ = rows.Close()
+		}
+		t.Fatalf("dead_letter = %v, want %v for entity %q; evidence=%v", got, want, entityID, evidence)
 	}
 }
 
